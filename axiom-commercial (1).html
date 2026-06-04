@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AXIOM</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#060810;--s1:#0c0f1a;--s2:#111627;--s3:#161c30;
+  --b1:#1e2540;--b2:#2a3360;
+  --c1:#00e5ff;--c2:#ff3b5c;--c3:#ffd600;--c4:#00ff9d;--c5:#a855f7;
+  --tx:#e8ecf8;--tx2:#8892b0;--tx3:#4a5580;
+  --alp:#e53935;--lnp:#5ba3f5;--grn:#43a047;--ind:#ffd600;--one:#ff6f00;
+  --reddit:#ff4500;--hn:#ff6600;--guardian:#00a882;--smh:#0066cc;
+  --abc:#ff8c00;--sbs:#d32f2f;--whirl:#1565c0;--conv:#2196f3;
+  --crikey:#8e24aa;--bigfooty:#c0392b;--hotcopper:#e67e22;
+  --ozpolitic:#27ae60;--ozpoliticrss:#16a085;
+  --nav-h:64px;--head-h:52px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{font-family:"IBM Plex Sans",sans-serif;background:var(--bg);color:var(--tx);position:fixed;inset:0;display:flex;flex-direction:column;}
+body::before{content:"";position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,0.015) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.015) 1px,transparent 1px);background-size:32px 32px;pointer-events:none;z-index:0;}
+
+/* HEADER */
+.hdr{height:var(--head-h);flex-shrink:0;background:rgba(6,8,16,0.97);border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:100;position:relative;}
+.hdr-brand{display:flex;align-items:center;gap:10px;}
+.hdr-hex{width:28px;height:28px;background:var(--c1);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:11px;color:var(--bg);animation:hexPulse 3s ease-in-out infinite;flex-shrink:0;}
+@keyframes hexPulse{0%,100%{filter:drop-shadow(0 0 3px var(--c1))}50%{filter:drop-shadow(0 0 10px var(--c1))}}
+.hdr-title{font-family:"Bebas Neue",sans-serif;font-size:20px;letter-spacing:4px;color:var(--c1);}
+.hdr-sub{font-family:"IBM Plex Mono",monospace;font-size:7.5px;color:var(--tx3);letter-spacing:2px;text-transform:uppercase;margin-top:-2px;}
+.hdr-right{display:flex;align-items:center;gap:8px;}
+.live-pill{display:flex;align-items:center;gap:5px;background:rgba(0,255,157,0.08);border:1px solid rgba(0,255,157,0.2);border-radius:20px;padding:3px 9px;font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--c4);letter-spacing:1.5px;}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--c4);animation:blink 1.5s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+.hdr-time{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx3);}
+.hdr-export-btn{background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.25);border-radius:5px;padding:4px 10px;font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--c1);cursor:pointer;letter-spacing:1px;}
+
+/* TICKER */
+.ticker{height:28px;flex-shrink:0;background:var(--s2);border-bottom:1px solid var(--b1);display:flex;align-items:center;overflow:hidden;position:relative;z-index:99;}
+.ticker-lbl{font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:2px;color:var(--bg);background:var(--c2);padding:0 10px;white-space:nowrap;flex-shrink:0;height:100%;display:flex;align-items:center;}
+.ticker-track{display:flex;animation:tickerScroll 55s linear infinite;white-space:nowrap;}
+.ticker-item{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx2);padding:0 24px;display:flex;align-items:center;gap:6px;}
+.t-tag{font-size:7px;padding:1px 5px;border-radius:2px;font-weight:600;}
+.t-alp{background:rgba(229,57,53,0.2);color:var(--alp);}
+.t-lnp{background:rgba(91,163,245,0.2);color:var(--lnp);}
+.t-grn{background:rgba(67,160,71,0.2);color:var(--grn);}
+.t-hot{background:rgba(255,59,92,0.2);color:var(--c2);}
+.t-news{background:rgba(0,229,255,0.1);color:var(--c1);}
+@keyframes tickerScroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* SCROLL + PAGES */
+.scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;position:relative;z-index:1;padding-bottom:calc(var(--nav-h) + 12px);}
+.scroll-area::-webkit-scrollbar{display:none;}
+.page{display:none;padding:14px 14px 0;}
+.page.active{display:block;}
+
+/* STAT CARDS */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.stat-card{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:14px 12px;position:relative;overflow:hidden;}
+.stat-card::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;}
+.stat-card.c1::before{background:var(--c1);}.stat-card.c2::before{background:var(--c2);}
+.stat-card.c3::before{background:var(--c3);}.stat-card.c4::before{background:var(--c4);}
+.sc-label{font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);margin-bottom:6px;}
+.sc-value{font-family:"Bebas Neue",sans-serif;font-size:30px;letter-spacing:1px;line-height:1;}
+.stat-card.c1 .sc-value{color:var(--c1);}.stat-card.c2 .sc-value{color:var(--c2);}
+.stat-card.c3 .sc-value{color:var(--c3);}.stat-card.c4 .sc-value{color:var(--c4);}
+.sc-delta{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);margin-top:3px;}
+.d-up{color:var(--c4);}.d-dn{color:var(--c2);}
+
+/* SECTION BLOCK */
+.section{background:var(--s1);border:1px solid var(--b1);border-radius:8px;margin-bottom:14px;overflow:hidden;}
+.section-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--s2);border-bottom:1px solid var(--b1);cursor:pointer;user-select:none;}
+.section-hdr-left{display:flex;align-items:center;gap:8px;}
+.section-title{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx2);}
+.section-badge{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:2px 7px;border-radius:3px;background:var(--s3);color:var(--c1);border:1px solid var(--b1);}
+.section-arrow{font-size:10px;color:var(--tx3);transition:transform 0.2s;}
+.section-arrow.open{transform:rotate(180deg);}
+.section-body{padding:14px;}
+.section-body.collapsed{display:none;}
+
+/* CHARTS */
+.chart-wrap{width:100%;height:120px;position:relative;margin-bottom:10px;}
+.chart-wrap svg{width:100%;height:100%;overflow:visible;}
+.chart-ctrl{display:flex;gap:6px;flex-wrap:wrap;}
+.chart-btn{font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:1px;padding:4px 10px;border:1px solid var(--b1);background:none;color:var(--tx3);cursor:pointer;border-radius:3px;}
+.chart-btn.active{border-color:var(--c1);color:var(--c1);}
+
+/* GAUGES */
+.gauge-item{margin-bottom:12px;}
+.gauge-item:last-child{margin-bottom:0;}
+.gauge-label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;}
+.gauge-label{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);letter-spacing:1px;text-transform:uppercase;}
+.gauge-val{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx);}
+.gauge-track{height:7px;background:var(--b1);border-radius:4px;overflow:hidden;}
+.gauge-fill{height:100%;border-radius:4px;transition:width 1.2s ease;}
+
+/* PARTY ROWS */
+.party-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--b1);}
+.party-row:last-child{border-bottom:none;}
+.party-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.party-name{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx2);flex:1;}
+.party-bar{flex:1;height:5px;background:var(--b1);border-radius:3px;overflow:hidden;}
+.party-bar-fill{height:100%;border-radius:3px;transition:width 1.2s ease;}
+.party-score{font-family:"IBM Plex Mono",monospace;font-size:11px;min-width:32px;text-align:right;}
+
+/* FEED */
+.feed-item{padding:12px 14px;border-bottom:1px solid var(--b1);display:flex;gap:10px;animation:slideUp 0.3s ease both;}
+.feed-item:last-child{border-bottom:none;}
+@keyframes slideUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.feed-icon{width:28px;height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;}
+.feed-body{flex:1;min-width:0;}
+.feed-title{font-size:12px;font-weight:500;color:var(--tx);line-height:1.4;margin-bottom:4px;}
+.feed-meta-row{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.feed-meta{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);}
+.feed-sent{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:2px 5px;border-radius:2px;}
+.s-pos{background:rgba(0,255,157,0.12);color:var(--c4);}
+.s-neg{background:rgba(255,59,92,0.12);color:var(--c2);}
+.s-neu{background:rgba(255,214,0,0.1);color:var(--c3);}
+.feed-tags{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;}
+.f-tag{font-family:"IBM Plex Mono",monospace;font-size:7px;padding:1px 5px;border:1px solid;border-radius:2px;}
+
+/* POLLS */
+.poll-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;gap:1px;margin-top:6px;}
+.poll-seg{height:100%;display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:8px;font-weight:600;}
+.poll-name{font-size:11px;font-weight:500;color:var(--tx2);margin-top:10px;margin-bottom:2px;}
+
+/* STATE GRID */
+.state-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.state-cell{aspect-ratio:1;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1px solid transparent;cursor:pointer;}
+.state-abbr{font-family:"Bebas Neue",sans-serif;font-size:13px;letter-spacing:1px;}
+.state-score{font-family:"IBM Plex Mono",monospace;font-size:7px;color:rgba(255,255,255,0.5);}
+
+/* WORD CLOUD */
+.word-cloud{display:flex;flex-wrap:wrap;gap:7px;align-items:center;justify-content:center;padding:4px 0;}
+.wc-word{cursor:pointer;font-weight:500;}
+
+/* TOPIC CARDS */
+.topic-list{display:flex;flex-direction:column;gap:8px;}
+.topic-card{background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;}
+.topic-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;}
+.topic-card.hot::before{background:var(--c2);}.topic-card.rising::before{background:var(--c3);}
+.topic-card.stable::before{background:var(--c4);}
+.topic-card:active{background:var(--s3);}
+.tc-main{flex:1;min-width:0;}
+.tc-name{font-family:"IBM Plex Sans",sans-serif;font-size:13px;font-weight:600;color:var(--tx);margin-bottom:2px;}
+.tc-meta{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);}
+.tc-bar{width:50px;height:4px;background:var(--b1);border-radius:2px;overflow:hidden;flex-shrink:0;}
+.tc-fill{height:100%;border-radius:2px;}
+.hot .tc-fill{background:var(--c2);}.rising .tc-fill{background:var(--c3);}.stable .tc-fill{background:var(--c4);}
+.tc-arrow{color:var(--tx3);font-size:12px;flex-shrink:0;}
+
+/* ALERTS */
+.alert-card{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:14px;margin-bottom:10px;display:flex;gap:12px;animation:slideUp 0.3s ease both;}
+.alert-card.high{border-left:3px solid var(--c2);}
+.alert-card.med{border-left:3px solid var(--c3);}
+.alert-icon-wrap{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}
+.high .alert-icon-wrap{background:rgba(255,59,92,0.12);}
+.med .alert-icon-wrap{background:rgba(255,214,0,0.08);}
+.alert-title{font-size:12px;font-weight:600;color:var(--tx);margin-bottom:4px;}
+.alert-body{font-size:11px;color:var(--tx2);line-height:1.5;margin-bottom:5px;}
+.alert-meta{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);}
+
+/* SENTIMENT PAGE */
+.sent-bar-row{padding:10px 0;border-bottom:1px solid var(--b1);}
+.sent-bar-row:last-child{border-bottom:none;}
+.sent-bar-labels{display:flex;justify-content:space-between;font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);margin-bottom:5px;}
+.sent-bar-track{height:6px;background:var(--b1);border-radius:3px;overflow:hidden;}
+.sent-bar-fill{height:100%;border-radius:3px;transition:width 1.2s cubic-bezier(0.16,1,0.3,1);}
+
+/* PLATFORM BARS */
+.platform-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.platform-row:last-child{margin-bottom:0;}
+.platform-name{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx2);width:80px;flex-shrink:0;}
+.platform-bar{flex:1;height:14px;display:flex;border-radius:2px;overflow:hidden;gap:1px;}
+.pb-seg{height:100%;display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:7px;}
+.platform-vol{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);width:36px;text-align:right;flex-shrink:0;}
+
+/* ==============================
+   WORKER CONFIG
+   ============================== */
+.worker-panel{background:var(--s1);border:1px solid rgba(0,229,255,0.2);border-radius:8px;margin-bottom:14px;overflow:hidden;}
+.worker-panel-hdr{display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(0,229,255,0.04);border-bottom:1px solid var(--b1);cursor:pointer;}
+.worker-panel-title{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:1.5px;color:var(--c1);}
+.worker-input-row{display:flex;gap:8px;padding:12px 14px;border-bottom:1px solid var(--b1);}
+.worker-input{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx);outline:none;}
+.worker-input:focus{border-color:var(--c1);}
+.worker-input::placeholder{color:var(--tx3);}
+.worker-save-btn{background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.3);border-radius:6px;color:var(--c1);font-family:"IBM Plex Mono",monospace;font-size:9px;padding:8px 12px;cursor:pointer;white-space:nowrap;}
+.worker-status{padding:10px 14px;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx3);}
+.w-ok{color:var(--c4);}.w-err{color:var(--c2);}.w-warn{color:var(--c3);}
+
+/* ==============================
+   COMMENT INTEL
+   ============================== */
+.ci-search-wrap{position:relative;margin-bottom:10px;}
+.ci-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--tx3);font-size:16px;}
+.ci-search-input{width:100%;background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:13px 56px 13px 38px;font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--tx);outline:none;-webkit-appearance:none;}
+.ci-search-input:focus{border-color:var(--c1);}
+.ci-search-input::placeholder{color:var(--tx3);}
+.ci-search-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:var(--c1);color:var(--bg);border:none;border-radius:6px;padding:7px 14px;font-family:"Bebas Neue",sans-serif;font-size:13px;letter-spacing:1.5px;cursor:pointer;}
+.ci-sources{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.ci-src-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--b1);border-radius:4px;background:var(--s1);cursor:pointer;font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:1px;color:var(--tx3);user-select:none;}
+.ci-src-btn.on{border-color:var(--c1);color:var(--c1);background:rgba(0,229,255,0.05);}
+.ci-src-btn.needs-worker{border-style:dashed;}
+.ci-src-btn.needs-worker.on{border-color:var(--c3);color:var(--c3);background:rgba(255,214,0,0.04);}
+.ci-src-dot{width:6px;height:6px;border-radius:50%;}
+.ci-src-grp-label{font-family:"IBM Plex Mono",monospace;font-size:7px;letter-spacing:1px;color:var(--tx3);text-transform:uppercase;width:100%;margin-bottom:2px;}
+.ci-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.ci-pill{font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:1px;padding:4px 10px;border:1px solid var(--b1);border-radius:20px;color:var(--tx3);cursor:pointer;}
+.ci-pill:active{border-color:var(--c1);color:var(--c1);}
+.ci-stats-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
+.ci-stat{background:var(--s1);border:1px solid var(--b1);border-radius:6px;padding:10px;text-align:center;}
+.ci-stat-val{font-family:"Bebas Neue",sans-serif;font-size:22px;line-height:1;}
+.ci-stat-lbl{font-family:"IBM Plex Mono",monospace;font-size:7px;color:var(--tx3);letter-spacing:1px;margin-top:2px;}
+.sent-strip{display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px;margin-bottom:8px;}
+.sent-strip-seg{height:100%;transition:width 1.2s ease;}
+.src-breakdown{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px;border-top:1px solid var(--b1);}
+.src-chip{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:3px 8px;border-radius:3px;display:flex;align-items:center;gap:5px;}
+.src-chip-dot{width:5px;height:5px;border-radius:50%;}
+.src-chip-count{opacity:0.7;}
+
+/* AI CHAT */
+.ai-messages{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;max-height:300px;overflow-y:auto;}
+.ai-messages::-webkit-scrollbar{display:none;}
+.ai-msg{display:flex;gap:8px;}
+.ai-msg.user{flex-direction:row-reverse;}
+.ai-bubble{max-width:82%;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.5;}
+.ai-msg.bot .ai-bubble{background:var(--s2);border:1px solid var(--b1);color:var(--tx);}
+.ai-msg.user .ai-bubble{background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.2);color:var(--c1);font-family:"IBM Plex Mono",monospace;font-size:11px;}
+.ai-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--c1),#0088ff);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:9px;color:var(--bg);flex-shrink:0;margin-top:2px;}
+.ai-input-row{display:flex;gap:8px;}
+.ai-input{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:11px 14px;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--tx);outline:none;-webkit-appearance:none;}
+.ai-input:focus{border-color:var(--c1);}
+.ai-input::placeholder{color:var(--tx3);}
+.ai-send-btn{width:44px;height:44px;background:var(--c1);border:none;border-radius:8px;color:var(--bg);font-size:16px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+
+/* CI AI BOX */
+.ci-ai-box{background:var(--s1);border:1px solid var(--b1);border-radius:8px;overflow:hidden;margin-bottom:12px;}
+.ci-ai-hdr{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--s2);border-bottom:1px solid var(--b1);}
+.ci-ai-orb{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,var(--c1),var(--c5));display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:8px;color:white;flex-shrink:0;}
+.ci-ai-label{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--c1);letter-spacing:1.5px;}
+.ci-ai-body{padding:12px;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.8;color:var(--tx2);min-height:60px;}
+.ci-ai-bounce{display:flex;gap:4px;align-items:center;}
+.ci-ai-dot{width:5px;height:5px;border-radius:50%;background:var(--c1);animation:typBounce 1.2s ease infinite;}
+.ci-ai-dot:nth-child(2){animation-delay:.15s}.ci-ai-dot:nth-child(3){animation-delay:.3s}
+@keyframes typBounce{0%,60%,100%{transform:translateY(0);opacity:0.4}30%{transform:translateY(-5px);opacity:1}}
+.ci-analyse-all{width:calc(100% - 24px);margin:0 12px 12px;padding:11px;background:rgba(0,229,255,0.07);border:1px solid rgba(0,229,255,0.18);border-radius:6px;color:var(--c1);font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.5px;cursor:pointer;}
+.ci-analyse-all:disabled{opacity:0.3;cursor:not-allowed;}
+.ci-controls{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.ci-count-badge{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--c1);background:var(--s2);border:1px solid var(--b1);padding:3px 9px;border-radius:3px;}
+.ci-sort-row{display:flex;gap:5px;}
+.ci-sort-btn{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:4px 8px;border:1px solid var(--b1);border-radius:3px;background:none;color:var(--tx3);cursor:pointer;}
+.ci-sort-btn.active{border-color:var(--c1);color:var(--c1);}
+
+/* COMMENT CARDS */
+.comment-card{background:var(--s1);border:1px solid var(--b1);border-radius:8px;margin-bottom:10px;overflow:hidden;animation:slideUp 0.3s ease both;}
+.cc-hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border-bottom:1px solid var(--b1);}
+.cc-badge{display:flex;align-items:center;gap:4px;padding:2px 7px;border-radius:3px;font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:1px;font-weight:600;flex-shrink:0;}
+.cc-art{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cc-sent{font-family:"IBM Plex Mono",monospace;font-size:7.5px;letter-spacing:0.5px;padding:2px 6px;border-radius:2px;flex-shrink:0;}
+.cp{background:rgba(0,255,157,0.12);color:var(--c4);border:1px solid rgba(0,255,157,0.2);}
+.cn{background:rgba(255,59,92,0.12);color:var(--c2);border:1px solid rgba(255,59,92,0.2);}
+.cnu{background:rgba(255,214,0,0.1);color:var(--c3);border:1px solid rgba(255,214,0,0.2);}
+.cm{background:rgba(168,85,247,0.1);color:var(--c5);border:1px solid rgba(168,85,247,0.2);}
+.cc-body{padding:10px 12px;}
+.cc-text{font-size:12px;line-height:1.6;color:var(--tx);margin-bottom:8px;}
+.cc-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cc-meta-item{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);}
+.cc-upvote{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--c3);}
+.cc-footer{padding:7px 12px;border-top:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;}
+.cc-tags{display:flex;gap:4px;flex-wrap:wrap;}
+.cc-tag{font-family:"IBM Plex Mono",monospace;font-size:7px;padding:1px 5px;border:1px solid var(--b2);border-radius:2px;color:var(--tx3);}
+.cc-ai-btn{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:4px 10px;border:1px solid rgba(0,229,255,0.25);border-radius:3px;background:rgba(0,229,255,0.05);color:var(--c1);cursor:pointer;}
+.cc-link{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:4px 10px;border:1px solid var(--b1);border-radius:3px;background:none;color:var(--tx3);cursor:pointer;text-decoration:none;}
+.cc-save-btn{font-family:"IBM Plex Mono",monospace;font-size:8px;padding:4px 10px;border:1px solid rgba(168,85,247,0.3);border-radius:3px;background:rgba(168,85,247,0.06);color:var(--c5);cursor:pointer;}
+.cc-save-btn.saved{background:rgba(168,85,247,0.15);border-color:var(--c5);}
+
+/* ==============================
+   SAVED ITEMS PAGE
+   ============================== */
+.saved-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 20px;gap:12px;text-align:center;color:var(--tx3);}
+.saved-empty-icon{font-size:36px;opacity:0.3;}
+.saved-empty-title{font-family:"Bebas Neue",sans-serif;font-size:16px;letter-spacing:2px;color:var(--tx2);}
+.saved-empty-sub{font-family:"IBM Plex Mono",monospace;font-size:9px;line-height:1.8;max-width:260px;}
+.saved-toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+.saved-action-btn{font-family:"IBM Plex Mono",monospace;font-size:9px;padding:7px 14px;border:1px solid var(--b1);border-radius:5px;background:var(--s1);color:var(--tx2);cursor:pointer;letter-spacing:1px;}
+.saved-action-btn.primary{background:rgba(0,229,255,0.1);border-color:rgba(0,229,255,0.3);color:var(--c1);}
+.saved-action-btn.danger{background:rgba(255,59,92,0.08);border-color:rgba(255,59,92,0.2);color:var(--c2);}
+
+/* ==============================
+   REPORT BUILDER PAGE
+   ============================== */
+.report-builder{display:flex;flex-direction:column;gap:12px;}
+.rb-section{background:var(--s1);border:1px solid var(--b1);border-radius:8px;overflow:hidden;}
+.rb-hdr{padding:12px 14px;background:var(--s2);border-bottom:1px solid var(--b1);}
+.rb-title{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx2);}
+.rb-body{padding:14px;}
+.rb-option{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--b1);}
+.rb-option:last-child{border-bottom:none;}
+.rb-option-label{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx2);}
+.rb-option-sub{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);margin-top:2px;}
+.toggle-wrap{display:flex;align-items:center;gap:8px;}
+/* TOGGLE SWITCH */
+.toggle{width:36px;height:20px;border-radius:10px;background:var(--b2);cursor:pointer;position:relative;transition:background 0.2s;flex-shrink:0;}
+.toggle.on{background:var(--c1);}
+.toggle::after{content:"";position:absolute;width:14px;height:14px;border-radius:50%;background:white;top:3px;left:3px;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.4);}
+.toggle.on::after{left:19px;}
+.rb-generate-btn{width:100%;padding:14px;background:linear-gradient(135deg,rgba(0,229,255,0.15),rgba(168,85,247,0.15));border:1px solid rgba(0,229,255,0.3);border-radius:8px;color:var(--c1);font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:2px;cursor:pointer;margin-top:4px;}
+.rb-generate-btn:active{transform:scale(0.98);}
+.rb-preview{background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:14px;margin-top:12px;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.8;color:var(--tx2);min-height:80px;}
+.rb-preview-placeholder{color:var(--tx3);font-style:italic;}
+.rb-export-row{display:flex;gap:8px;margin-top:10px;}
+.rb-export-btn{flex:1;padding:10px;border-radius:6px;font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:1.5px;cursor:pointer;text-align:center;}
+.rb-export-btn.pdf{background:rgba(255,59,92,0.1);border:1px solid rgba(255,59,92,0.25);color:var(--c2);}
+.rb-export-btn.csv{background:rgba(0,255,157,0.08);border:1px solid rgba(0,255,157,0.2);color:var(--c4);}
+.rb-export-btn.copy{background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.2);color:var(--c5);}
+
+/* ==============================
+   SETTINGS PAGE
+   ============================== */
+.settings-section{background:var(--s1);border:1px solid var(--b1);border-radius:8px;overflow:hidden;margin-bottom:14px;}
+.settings-hdr{padding:12px 14px;background:var(--s2);border-bottom:1px solid var(--b1);}
+.settings-title{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx2);}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--b1);}
+.settings-row:last-child{border-bottom:none;}
+.settings-label{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--tx);}
+.settings-sub{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);margin-top:2px;}
+.settings-input{flex:1;margin-left:12px;background:var(--s2);border:1px solid var(--b1);border-radius:5px;padding:7px 10px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx);outline:none;max-width:200px;}
+.settings-input:focus{border-color:var(--c1);}
+.settings-input::placeholder{color:var(--tx3);}
+.settings-save-btn{background:rgba(0,229,255,0.1);border:1px solid rgba(0,229,255,0.3);border-radius:5px;padding:6px 12px;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--c1);cursor:pointer;white-space:nowrap;}
+.branding-preview{padding:14px;background:linear-gradient(135deg,rgba(0,229,255,0.04),rgba(168,85,247,0.04));border-top:1px solid var(--b1);}
+.bp-title{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);letter-spacing:1px;margin-bottom:8px;text-transform:uppercase;}
+.bp-card{background:var(--s1);border:1px solid var(--b1);border-radius:6px;padding:10px 12px;display:flex;align-items:center;gap:10px;}
+.bp-icon{width:28px;height:28px;border-radius:6px;background:var(--c1);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:14px;color:var(--bg);flex-shrink:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);}
+.bp-name{font-family:"Bebas Neue",sans-serif;font-size:16px;letter-spacing:3px;color:var(--c1);}
+.bp-tagline{font-family:"IBM Plex Mono",monospace;font-size:8px;color:var(--tx3);}
+
+/* ==============================
+   SKELETON / EMPTY / PROGRESS
+   ============================== */
+.skeleton{background:var(--s1);border:1px solid var(--b1);border-radius:8px;overflow:hidden;margin-bottom:10px;}
+.skel-line{height:9px;background:linear-gradient(90deg,var(--s2) 25%,var(--s3) 50%,var(--s2) 75%);background-size:200% 100%;animation:shimmer 1.5s ease infinite;border-radius:3px;}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 20px;gap:12px;text-align:center;color:var(--tx3);}
+.empty-icon{font-size:36px;opacity:0.3;}
+.empty-title{font-family:"Bebas Neue",sans-serif;font-size:16px;letter-spacing:2px;color:var(--tx2);}
+.empty-sub{font-family:"IBM Plex Mono",monospace;font-size:9px;line-height:1.8;max-width:280px;}
+.cloud-tag{font-family:"IBM Plex Mono",monospace;font-size:9px;padding:3px 7px;border-radius:3px;cursor:pointer;}
+.sr-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--b1);cursor:pointer;}
+.sr-item:last-child{border-bottom:none;}
+.sr-item.selected{padding-left:8px;border-left:2px solid var(--reddit);margin-left:-8px;}
+.sr-name{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx2);}
+.sr-count{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx3);}
+.typing-ind{display:flex;gap:4px;padding:10px 12px;background:var(--s2);border:1px solid var(--b1);border-radius:8px;width:fit-content;}
+.typ-dot{width:5px;height:5px;border-radius:50%;background:var(--c1);animation:typBounce 1.2s ease-in-out infinite;}
+.typ-dot:nth-child(2){animation-delay:0.2s}.typ-dot:nth-child(3){animation-delay:0.4s}
+.fetch-progress{height:2px;background:var(--b1);border-radius:1px;overflow:hidden;margin-bottom:10px;display:none;}
+.fetch-progress.active{display:block;}
+.fetch-progress-fill{height:100%;background:linear-gradient(90deg,var(--c1),var(--c4));animation:progressAnim 1.5s ease-in-out infinite;}
+@keyframes progressAnim{0%{width:0%;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0%;margin-left:100%}}
+.src-legend{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;}
+.src-legend-item{font-family:"IBM Plex Mono",monospace;font-size:7px;padding:2px 7px;border-radius:2px;display:flex;align-items:center;gap:4px;}
+.src-legend-dot{width:5px;height:5px;border-radius:50%;}
+
+/* BOTTOM NAV */
+.bottom-nav{height:var(--nav-h);flex-shrink:0;background:rgba(6,8,16,0.97);border-top:1px solid var(--b1);display:flex;align-items:stretch;position:relative;z-index:100;padding-bottom:env(safe-area-inset-bottom,0px);}
+.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;border:none;background:none;color:var(--tx3);padding-top:4px;position:relative;}
+.nav-btn.active{color:var(--c1);}
+.nav-btn .nav-icon{font-size:19px;line-height:1;}
+.nav-btn .nav-label{font-family:"IBM Plex Mono",monospace;font-size:7px;letter-spacing:1px;text-transform:uppercase;}
+.nav-dot{position:absolute;top:8px;right:calc(50% - 14px);width:6px;height:6px;border-radius:50%;background:var(--c2);border:1px solid var(--bg);}
+
+/* TOAST */
+.toast{position:fixed;bottom:calc(var(--nav-h) + 12px);left:14px;right:14px;background:var(--s2);border:1px solid var(--b1);border-left:3px solid var(--c1);border-radius:8px;padding:11px 14px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--tx2);z-index:999;animation:slideUp 0.3s ease both;}
+
+/* MODAL OVERLAY */
+.modal-overlay{position:fixed;inset:0;background:rgba(6,8,16,0.85);backdrop-filter:blur(8px);z-index:500;display:flex;align-items:flex-end;justify-content:center;}
+.modal-overlay.hidden{display:none;}
+.modal-sheet{background:var(--s1);border:1px solid var(--b1);border-radius:16px 16px 0 0;width:100%;max-height:85vh;overflow-y:auto;padding:20px 20px 32px;}
+.modal-sheet::-webkit-scrollbar{display:none;}
+.modal-handle{width:36px;height:4px;border-radius:2px;background:var(--b2);margin:0 auto 16px;}
+.modal-title{font-family:"Bebas Neue",sans-serif;font-size:20px;letter-spacing:3px;color:var(--c1);margin-bottom:4px;}
+.modal-sub{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx3);letter-spacing:1px;margin-bottom:20px;}
+.modal-close{position:absolute;top:20px;right:20px;background:var(--s2);border:1px solid var(--b1);border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;color:var(--tx2);}
+
+/* WATCHLIST */
+.watchlist-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--b1);}
+.watchlist-item:last-child{border-bottom:none;}
+.wl-keyword{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--tx);}
+.wl-count{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--tx3);}
+.wl-alert-badge{font-family:"IBM Plex Mono",monospace;font-size:7px;padding:2px 6px;border-radius:3px;background:rgba(255,59,92,0.12);color:var(--c2);}
+.wl-remove{width:22px;height:22px;border-radius:50%;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.15);color:var(--c2);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-left:auto;}
+.wl-add-row{display:flex;gap:8px;margin-top:12px;}
+.wl-add-input{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:9px 12px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--tx);outline:none;}
+.wl-add-input:focus{border-color:var(--c1);}
+.wl-add-input::placeholder{color:var(--tx3);}
+.wl-add-btn{background:var(--c1);border:none;border-radius:6px;padding:9px 16px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--bg);cursor:pointer;letter-spacing:1px;}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════
+     HEADER
+════════════════════════════════════════ -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="hdr-hex" id="brand-icon">AX</div>
+    <div>
+      <div class="hdr-title" id="brand-name">AXIOM</div>
+      <div class="hdr-sub" id="brand-tagline">Political Intelligence v3</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="live-pill"><div class="live-dot"></div>LIVE</div>
+    <div class="hdr-time" id="clock"></div>
+    <button class="hdr-export-btn" onclick="openReportBuilder()">PDF</button>
+  </div>
+</div>
+
+<!-- TICKER -->
+<div class="ticker">
+  <div class="ticker-lbl">BREAK</div>
+  <div style="overflow:hidden;flex:1">
+    <div class="ticker-track" id="ticker-track">
+      <span class="ticker-item"><span class="t-tag t-alp">ALP</span>Albanese $4.2B housing package — QLD sentiment +12pts</span>
+      <span class="ticker-item"><span class="t-tag t-hot">HOT</span>Climate debate surges — 84k mentions in 6hrs</span>
+      <span class="ticker-item"><span class="t-tag t-lnp">LNP</span>Dutton cost-of-living — approval -3pts nationally</span>
+      <span class="ticker-item"><span class="t-tag t-grn">GRN</span>Nuclear opposition trending VIC, TAS feeds</span>
+      <span class="ticker-item"><span class="t-tag t-news">POLL</span>Newspoll: ALP 52 / LNP 48 TPP — ALP +1</span>
+      <span class="ticker-item"><span class="t-tag t-alp">ALP</span>Medicare reform dominates ABC, Guardian coverage</span>
+      <span class="ticker-item"><span class="t-tag t-hot">SURGE</span>Voice discussion 340% above 30-day avg in SA</span>
+      <span class="ticker-item"><span class="t-tag t-alp">ALP</span>Albanese $4.2B housing package — QLD sentiment +12pts</span>
+      <span class="ticker-item"><span class="t-tag t-hot">HOT</span>Climate debate surges — 84k mentions in 6hrs</span>
+      <span class="ticker-item"><span class="t-tag t-lnp">LNP</span>Dutton cost-of-living — approval -3pts nationally</span>
+      <span class="ticker-item"><span class="t-tag t-grn">GRN</span>Nuclear opposition trending VIC, TAS feeds</span>
+      <span class="ticker-item"><span class="t-tag t-news">POLL</span>Newspoll: ALP 52 / LNP 48 TPP — ALP +1</span>
+    </div>
+  </div>
+</div>
+
+<!-- SCROLL AREA -->
+<div class="scroll-area" id="scroll-area">
+
+  <!-- ═══ OVERVIEW PAGE ═══ -->
+  <div class="page active" id="page-overview">
+    <div class="stat-grid">
+      <div class="stat-card c1"><div class="sc-label">Mentions Today</div><div class="sc-value" id="stat-mentions">0</div><div class="sc-delta"><span class="d-up">↑14.2%</span> vs yesterday</div></div>
+      <div class="stat-card c2"><div class="sc-label">Neg. Signals</div><div class="sc-value">31.4%</div><div class="sc-delta"><span class="d-dn">↑3.1%</span> spike</div></div>
+      <div class="stat-card c3"><div class="sc-label">Topics</div><div class="sc-value">247</div><div class="sc-delta"><span class="d-up">↑18</span> today</div></div>
+      <div class="stat-card c4"><div class="sc-label">Sent. Score</div><div class="sc-value">+0.31</div><div class="sc-delta"><span class="d-up">↑0.04</span> 7d avg</div></div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Sentiment Timeline</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="chart-wrap"><svg id="sentiment-chart" viewBox="0 0 400 120" preserveAspectRatio="none"></svg></div>
+        <div class="chart-ctrl">
+          <button class="chart-btn active" onclick="setRange(this,'24h')">24H</button>
+          <button class="chart-btn" onclick="setRange(this,'7d')">7D</button>
+          <button class="chart-btn" onclick="setRange(this,'30d')">30D</button>
+          <button class="chart-btn" onclick="setRange(this,'90d')">90D</button>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">National Sentiment</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="gauge-item"><div class="gauge-label-row"><span class="gauge-label">Gov Approval</span><span class="gauge-val" style="color:var(--alp)">54%</span></div><div class="gauge-track"><div class="gauge-fill" style="width:54%;background:linear-gradient(90deg,var(--alp),#ff6b9d)"></div></div></div>
+        <div class="gauge-item"><div class="gauge-label-row"><span class="gauge-label">Public Optimism</span><span class="gauge-val" style="color:var(--c3)">41</span></div><div class="gauge-track"><div class="gauge-fill" style="width:41%;background:linear-gradient(90deg,var(--c3),var(--c4))"></div></div></div>
+        <div class="gauge-item"><div class="gauge-label-row"><span class="gauge-label">Political Tension</span><span class="gauge-val" style="color:var(--c2)">67</span></div><div class="gauge-track"><div class="gauge-fill" style="width:67%;background:linear-gradient(90deg,#ff6f00,var(--c2))"></div></div></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Party Sentiment</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="party-row"><div class="party-dot" style="background:var(--alp)"></div><div class="party-name">ALP</div><div class="party-bar"><div class="party-bar-fill" style="width:68%;background:var(--alp)"></div></div><div class="party-score" style="color:var(--alp)">+68</div></div>
+        <div class="party-row"><div class="party-dot" style="background:var(--lnp)"></div><div class="party-name">LNP</div><div class="party-bar"><div class="party-bar-fill" style="width:47%;background:var(--lnp)"></div></div><div class="party-score" style="color:var(--lnp)">+47</div></div>
+        <div class="party-row"><div class="party-dot" style="background:var(--grn)"></div><div class="party-name">GREENS</div><div class="party-bar"><div class="party-bar-fill" style="width:58%;background:var(--grn)"></div></div><div class="party-score" style="color:var(--grn)">+58</div></div>
+        <div class="party-row"><div class="party-dot" style="background:var(--ind)"></div><div class="party-name">TEALS</div><div class="party-bar"><div class="party-bar-fill" style="width:54%;background:var(--ind)"></div></div><div class="party-score" style="color:var(--ind)">+54</div></div>
+        <div class="party-row"><div class="party-dot" style="background:var(--one)"></div><div class="party-name">ONE NATION</div><div class="party-bar"><div class="party-bar-fill" style="width:22%;background:var(--one)"></div></div><div class="party-score" style="color:var(--one)">+22</div></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Trending Topics</div><div class="section-badge" id="topics-live-badge">6 LIVE</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="topic-list">
+          <div class="topic-card hot" onclick="quickSearchComment('housing crisis Australia')"><div class="tc-main"><div class="tc-name">Housing Crisis</div><div class="tc-meta">91,204 mentions · 🔥 tap to fetch comments</div></div><div class="tc-bar"><div class="tc-fill" style="width:91%"></div></div><div class="tc-arrow">›</div></div>
+          <div class="topic-card hot" onclick="quickSearchComment('cost of living Australia')"><div class="tc-main"><div class="tc-name">Cost of Living</div><div class="tc-meta">88,441 mentions · 🔥 tap to fetch comments</div></div><div class="tc-bar"><div class="tc-fill" style="width:88%"></div></div><div class="tc-arrow">›</div></div>
+          <div class="topic-card rising" onclick="quickSearchComment('Australian Greens climate policy')"><div class="tc-main"><div class="tc-name">Climate Policy</div><div class="tc-meta">74,210 mentions · ↑ rising</div></div><div class="tc-bar"><div class="tc-fill" style="width:74%"></div></div><div class="tc-arrow">›</div></div>
+          <div class="topic-card rising" onclick="quickSearchComment('Medicare reform Australia')"><div class="tc-main"><div class="tc-name">Medicare Reform</div><div class="tc-meta">62,005 mentions · ↑ rising</div></div><div class="tc-bar"><div class="tc-fill" style="width:62%"></div></div><div class="tc-arrow">›</div></div>
+          <div class="topic-card stable" onclick="quickSearchComment('immigration Australia')"><div class="tc-main"><div class="tc-name">Immigration</div><div class="tc-meta">49,882 mentions · → stable</div></div><div class="tc-bar"><div class="tc-fill" style="width:49%"></div></div><div class="tc-arrow">›</div></div>
+          <div class="topic-card stable" onclick="quickSearchComment('AUKUS submarines defence')"><div class="tc-main"><div class="tc-name">AUKUS / Defence</div><div class="tc-meta">38,114 mentions · → stable</div></div><div class="tc-bar"><div class="tc-fill" style="width:38%"></div></div><div class="tc-arrow">›</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Keywords (24h)</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body"><div class="word-cloud" id="word-cloud"></div></div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Latest Polls</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="poll-name">Federal TPP (Newspoll Jun 2026)</div>
+        <div class="poll-bar"><div class="poll-seg" style="width:52%;background:var(--alp);color:white">ALP 52%</div><div class="poll-seg" style="width:48%;background:#1565c0;color:white">LNP 48%</div></div>
+        <div class="poll-name">Albanese Approval</div>
+        <div class="poll-bar"><div class="poll-seg" style="width:42%;background:var(--c4);color:var(--bg)">+42</div><div class="poll-seg" style="width:38%;background:var(--c2);color:white">-38</div><div class="poll-seg" style="width:20%;background:var(--b2);color:var(--tx2)">20</div></div>
+        <div class="poll-name">Dutton Approval</div>
+        <div class="poll-bar"><div class="poll-seg" style="width:33%;background:var(--c4);color:var(--bg)">+33</div><div class="poll-seg" style="width:44%;background:var(--c2);color:white">-44</div><div class="poll-seg" style="width:23%;background:var(--b2);color:var(--tx2)">23</div></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">State Heatmap</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body"><div class="state-grid" id="state-grid"></div></div>
+    </div>
+  </div>
+
+  <!-- ═══ FEED PAGE ═══ -->
+  <div class="page" id="page-feed">
+    <div class="section">
+      <div class="section-hdr" style="cursor:default">
+        <div class="section-title">Live Signal Feed</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--c4)">● STREAMING</div>
+      </div>
+      <div id="feed-list"></div>
+    </div>
+  </div>
+
+  <!-- ═══ COMMENT INTEL PAGE ═══ -->
+  <div class="page" id="page-comments">
+    <div class="worker-panel">
+      <div class="worker-panel-hdr" onclick="toggleWorkerPanel(this)" style="cursor:pointer">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--c3);flex-shrink:0;" id="worker-status-dot"></div>
+        <div class="worker-panel-title">CLOUDFLARE WORKER</div>
+        <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--tx3)" id="worker-toggle-lbl">▼ SETUP</div>
+      </div>
+      <div id="worker-config-body">
+        <div class="worker-input-row">
+          <input class="worker-input" id="worker-url-input" placeholder="https://axiom-proxy.your-name.workers.dev">
+          <button class="worker-save-btn" onclick="saveWorkerUrl()">SAVE</button>
+        </div>
+        <div class="worker-status" id="worker-status-msg">
+          <span class="w-warn">⚠ No Worker URL set.</span> HackerNews works now without one. Add your Worker URL to unlock Reddit, Guardian, RSS feeds, Whirlpool, BigFooty, HotCopper and OzPolitic.
+        </div>
+      </div>
+    </div>
+    <div class="ci-search-wrap">
+      <span class="ci-search-icon">⌕</span>
+      <input class="ci-search-input" id="ci-search-input" placeholder="Search topic or paste URL..." onkeydown="if(event.key==='Enter')fetchComments()">
+      <button class="ci-search-btn" id="ci-fetch-btn" onclick="fetchComments()">GO</button>
+    </div>
+    <div class="ci-sources" id="ci-sources-wrap">
+      <div class="ci-src-grp-label">🟢 Live (no key needed)</div>
+      <div class="ci-src-btn on" data-src="hn" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--hn)"></div>HACKER NEWS</div>
+      <div class="ci-src-btn on needs-worker" data-src="reddit" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--reddit)"></div>REDDIT ⚡</div>
+      <div class="ci-src-grp-label" style="margin-top:6px">🟡 Needs Worker URL</div>
+      <div class="ci-src-btn on needs-worker" data-src="guardian" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--guardian)"></div>GUARDIAN ⚡</div>
+      <div class="ci-src-btn on needs-worker" data-src="abc_rss" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="smh_rss" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--smh)"></div>SMH RSS ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="sbs_rss" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--sbs)"></div>SBS RSS ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="crikey" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--crikey)"></div>CRIKEY ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="conversation" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--conv)"></div>CONVERSATION ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="whirlpool" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--whirl)"></div>WHIRLPOOL ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="bigfooty" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--bigfooty)"></div>BIGFOOTY ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="hotcopper" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--hotcopper)"></div>HOTCOPPER ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="ozpolitic" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--ozpolitic)"></div>OZPOLITIC ⚡</div>
+      <div class="ci-src-btn needs-worker" data-src="ozpolitic_rss" onclick="toggleCISrc(this)"><div class="ci-src-dot" style="background:var(--ozpoliticrss)"></div>OZP RSS ⚡</div>
+    </div>
+    <div class="src-legend">
+      <div class="src-legend-item" style="background:rgba(0,255,157,0.06);color:var(--c4)"><div class="src-legend-dot" style="background:var(--c4)"></div>Live</div>
+      <div class="src-legend-item" style="background:rgba(255,214,0,0.06);color:var(--c3)"><div class="src-legend-dot" style="background:var(--c3)"></div>⚡ Needs Worker</div>
+    </div>
+    <div class="ci-pills">
+      <span class="ci-pill" onclick="ciSetPill(this)">housing crisis</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">cost of living</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">Albanese</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">Dutton LNP</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">Greens climate</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">Medicare</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">AUKUS</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">immigration</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">nuclear energy</span>
+      <span class="ci-pill" onclick="ciSetPill(this)">RBA rates</span>
+    </div>
+    <div class="fetch-progress" id="fetch-progress"><div class="fetch-progress-fill"></div></div>
+    <div class="ci-stats-strip" id="ci-stats-strip" style="display:none">
+      <div class="ci-stat"><div class="ci-stat-val" id="ci-total" style="color:var(--c1)">0</div><div class="ci-stat-lbl">ITEMS</div></div>
+      <div class="ci-stat"><div class="ci-stat-val" id="ci-neg-pct" style="color:var(--c2)">—</div><div class="ci-stat-lbl">NEG%</div></div>
+      <div class="ci-stat"><div class="ci-stat-val" id="ci-pos-pct" style="color:var(--c4)">—</div><div class="ci-stat-lbl">POS%</div></div>
+      <div class="ci-stat"><div class="ci-stat-val" id="ci-src-count" style="color:var(--c3)">—</div><div class="ci-stat-lbl">SOURCES</div></div>
+    </div>
+    <div class="sent-strip" id="sent-strip" style="display:none">
+      <div class="sent-strip-seg" id="ss-pos" style="background:var(--c4)"></div>
+      <div class="sent-strip-seg" id="ss-neg" style="background:var(--c2)"></div>
+      <div class="sent-strip-seg" id="ss-neu" style="background:var(--c3)"></div>
+      <div class="sent-strip-seg" id="ss-mix" style="background:var(--c5)"></div>
+    </div>
+    <div class="src-breakdown" id="src-breakdown" style="display:none"></div>
+    <div class="ci-ai-box">
+      <div class="ci-ai-hdr">
+        <div class="ci-ai-orb">AI</div>
+        <div class="ci-ai-label">AXIOM ANALYST</div>
+        <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--tx3)" id="ci-src-tally"></div>
+      </div>
+      <div class="ci-ai-body" id="ci-ai-body"><span style="color:var(--tx3);font-style:italic">Fetch comments then tap Analyse All for an AI intelligence brief.</span></div>
+      <button class="ci-analyse-all" id="ci-analyse-btn" onclick="ciAnalyseAll()" disabled>⚡ ANALYSE ALL SOURCES</button>
+    </div>
+    <div class="ci-controls">
+      <div class="ci-count-badge">RESULTS: <span id="ci-result-count">0</span></div>
+      <div class="ci-sort-row">
+        <button class="ci-sort-btn active" onclick="ciSortBy(this,'top')">TOP</button>
+        <button class="ci-sort-btn" onclick="ciSortBy(this,'new')">NEW</button>
+        <button class="ci-sort-btn" onclick="ciSortBy(this,'neg')">NEG</button>
+        <button class="ci-sort-btn" onclick="ciSortBy(this,'pos')">POS</button>
+        <button class="ci-sort-btn" onclick="ciSortBy(this,'src')">SRC</button>
+      </div>
+    </div>
+    <div id="ci-results"><div class="empty-state"><div class="empty-icon">🗂</div><div class="empty-title">NO DATA YET</div><div class="empty-sub">Tap a topic pill or type a search. HackerNews works immediately. Add a Worker URL above for 12+ sources.</div></div></div>
+    <div class="section" id="sr-section" style="display:none">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Source Breakdown</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body">
+        <div class="sr-item selected" onclick="ciFilterSRC(this,'all')"><div class="sr-name">All sources</div><div class="sr-count" id="sri-all">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'reddit')"><div class="sr-name">Reddit</div><div class="sr-count" id="sri-reddit">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'hn')"><div class="sr-name">Hacker News</div><div class="sr-count" id="sri-hn">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'guardian')"><div class="sr-name">Guardian AU</div><div class="sr-count" id="sri-guardian">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'abc_rss')"><div class="sr-name">ABC News RSS</div><div class="sr-count" id="sri-abc_rss">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'smh_rss')"><div class="sr-name">SMH RSS</div><div class="sr-count" id="sri-smh_rss">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'sbs_rss')"><div class="sr-name">SBS RSS</div><div class="sr-count" id="sri-sbs_rss">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'whirlpool')"><div class="sr-name">Whirlpool</div><div class="sr-count" id="sri-whirlpool">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'bigfooty')"><div class="sr-name">BigFooty Politics</div><div class="sr-count" id="sri-bigfooty">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'hotcopper')"><div class="sr-name">HotCopper Politics</div><div class="sr-count" id="sri-hotcopper">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'ozpolitic')"><div class="sr-name">OzPolitic Forum</div><div class="sr-count" id="sri-ozpolitic">—</div></div>
+        <div class="sr-item" onclick="ciFilterSRC(this,'ozpolitic_rss')"><div class="sr-name">OzPolitic RSS</div><div class="sr-count" id="sri-ozpolitic_rss">—</div></div>
+      </div>
+    </div>
+    <div class="section" id="ci-cloud-section" style="display:none">
+      <div class="section-hdr" onclick="toggleSection(this)">
+        <div class="section-hdr-left"><div class="section-title">Keywords Extracted</div></div>
+        <div class="section-arrow open">▼</div>
+      </div>
+      <div class="section-body"><div class="word-cloud" id="ci-cloud"></div></div>
+    </div>
+  </div>
+
+  <!-- ═══ SAVED ITEMS PAGE ═══ -->
+  <div class="page" id="page-saved">
+    <div class="saved-toolbar">
+      <button class="saved-action-btn primary" onclick="generateSavedReport()">⚡ AI BRIEF</button>
+      <button class="saved-action-btn" onclick="exportSavedCSV()">↓ CSV</button>
+      <button class="saved-action-btn" onclick="copyAllSaved()">⎘ COPY ALL</button>
+      <button class="saved-action-btn danger" onclick="clearAllSaved()">✕ CLEAR</button>
+    </div>
+    <div id="saved-ai-brief" style="display:none" class="ci-ai-box" style="margin-bottom:12px">
+      <div class="ci-ai-hdr"><div class="ci-ai-orb">AI</div><div class="ci-ai-label">SAVED ITEMS BRIEF</div></div>
+      <div class="ci-ai-body" id="saved-ai-body"></div>
+    </div>
+    <div id="saved-list"><div class="saved-empty"><div class="saved-empty-icon">📌</div><div class="saved-empty-title">NO SAVED ITEMS</div><div class="saved-empty-sub">Tap the save button on any comment card to pin it here for reporting and analysis.</div></div></div>
+  </div>
+
+  <!-- ═══ REPORT BUILDER PAGE ═══ -->
+  <div class="page" id="page-report">
+    <div class="report-builder">
+      <div class="rb-section">
+        <div class="rb-hdr"><div class="rb-title">Report Configuration</div></div>
+        <div class="rb-body">
+          <div class="rb-option">
+            <div><div class="rb-option-label">Executive Summary</div><div class="rb-option-sub">AI-generated 2-paragraph overview</div></div>
+            <div class="toggle on" id="rpt-executive" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Sentiment Analysis</div><div class="rb-option-sub">Positive/negative breakdown + trend</div></div>
+            <div class="toggle on" id="rpt-sentiment" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Party Intelligence</div><div class="rb-option-sub">ALP / LNP / Greens / Teals narrative</div></div>
+            <div class="toggle on" id="rpt-parties" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Source Breakdown</div><div class="rb-option-sub">Per-platform comment volume and tone</div></div>
+            <div class="toggle on" id="rpt-sources" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Top Comment Quotes</div><div class="rb-option-sub">Include top 5 verbatim quotes</div></div>
+            <div class="toggle on" id="rpt-quotes" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Keyword Cloud Data</div><div class="rb-option-sub">Top 20 extracted keywords + frequency</div></div>
+            <div class="toggle" id="rpt-keywords" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Alert Summary</div><div class="rb-option-sub">Include active intelligence alerts</div></div>
+            <div class="toggle on" id="rpt-alerts" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="rb-option">
+            <div><div class="rb-option-label">Include Saved Items</div><div class="rb-option-sub">Attach pinned comments as appendix</div></div>
+            <div class="toggle" id="rpt-saved" onclick="this.classList.toggle('on')"></div>
+          </div>
+        </div>
+      </div>
+      <div class="rb-section">
+        <div class="rb-hdr"><div class="rb-title">Report Subject / Query</div></div>
+        <div class="rb-body">
+          <input class="worker-input" id="rpt-query-input" placeholder="e.g. housing crisis, Albanese policy, AUKUS..." style="width:100%">
+        </div>
+      </div>
+      <button class="rb-generate-btn" onclick="generateReport()">⚡ GENERATE AI INTELLIGENCE REPORT</button>
+      <div class="rb-preview" id="rb-preview"><div class="rb-preview-placeholder">Report will appear here after generation...</div></div>
+      <div class="rb-export-row" id="rb-export-row" style="display:none">
+        <button class="rb-export-btn pdf" onclick="exportReportPDF()">↓ PRINT/PDF</button>
+        <button class="rb-export-btn csv" onclick="exportReportCSV()">↓ CSV DATA</button>
+        <button class="rb-export-btn copy" onclick="copyReport()">⎘ COPY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SENTIMENT PAGE ═══ -->
+  <div class="page" id="page-sentiment">
+    <div class="stat-grid">
+      <div class="stat-card c4"><div class="sc-label">Positive</div><div class="sc-value" style="font-size:24px">42,884</div><div class="sc-delta"><span class="d-up">50.9%</span> of total</div></div>
+      <div class="stat-card c2"><div class="sc-label">Negative</div><div class="sc-value" style="font-size:24px">26,448</div><div class="sc-delta"><span class="d-dn">31.4%</span> of total</div></div>
+    </div>
+    <div class="section"><div class="section-hdr" onclick="toggleSection(this)"><div class="section-hdr-left"><div class="section-title">By Platform</div></div><div class="section-arrow open">▼</div></div><div class="section-body" id="platform-bars"></div></div>
+    <div class="section"><div class="section-hdr" onclick="toggleSection(this)"><div class="section-hdr-left"><div class="section-title">Breakdown</div></div><div class="section-arrow open">▼</div></div>
+      <div class="section-body">
+        <div class="sent-bar-row"><div class="sent-bar-labels"><span>🟢 POSITIVE</span><span style="color:var(--c4)">50.9%</span></div><div class="sent-bar-track"><div class="sent-bar-fill" style="width:50.9%;background:var(--c4)"></div></div></div>
+        <div class="sent-bar-row"><div class="sent-bar-labels"><span>🔴 NEGATIVE</span><span style="color:var(--c2)">31.4%</span></div><div class="sent-bar-track"><div class="sent-bar-fill" style="width:31.4%;background:var(--c2)"></div></div></div>
+        <div class="sent-bar-row"><div class="sent-bar-labels"><span>🟡 NEUTRAL</span><span style="color:var(--c3)">17.7%</span></div><div class="sent-bar-track"><div class="sent-bar-fill" style="width:17.7%;background:var(--c3)"></div></div></div>
+      </div>
+    </div>
+    <div class="section"><div class="section-hdr" onclick="toggleSection(this)"><div class="section-hdr-left"><div class="section-title">Two-Party Preferred</div></div><div class="section-arrow open">▼</div></div><div class="section-body"><div class="chart-wrap"><svg id="tpp-chart" viewBox="0 0 400 120" preserveAspectRatio="none"></svg></div></div></div>
+  </div>
+
+  <!-- ═══ ALERTS PAGE ═══ -->
+  <div class="page" id="page-alerts"><div id="alerts-list"></div></div>
+
+  <!-- ═══ AI CHAT PAGE ═══ -->
+  <div class="page" id="page-ai">
+    <div class="section">
+      <div class="section-hdr" style="cursor:default">
+        <div class="section-hdr-left"><div class="ai-avatar" style="width:22px;height:22px;font-size:8px;margin:0">AI</div><div class="section-title">AXIOM ANALYST</div></div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--c4)">ONLINE</div>
+      </div>
+      <div class="section-body">
+        <div class="ai-messages" id="ai-messages">
+          <div class="ai-msg bot">
+            <div class="ai-avatar">AI</div>
+            <div class="ai-bubble"><strong>G'day.</strong> I'm monitoring 13+ Australian sources — Reddit, Hacker News, Guardian AU, ABC, SBS, Whirlpool, BigFooty, HotCopper, OzPolitic and more.<br><br>Use <strong>Comment Intel</strong> to pull live reactions, save key items to <strong>Saved</strong>, then use <strong>Report</strong> to generate a client-ready brief.<br><br><span style="color:var(--tx3);font-size:11px">Try: "How is housing tracking?" or "What narratives are LNP running?"</span></div>
+          </div>
+        </div>
+        <div class="ai-input-row">
+          <input class="ai-input" id="ai-input" placeholder="Ask about political intelligence..." onkeydown="if(event.key==='Enter')sendMessage()">
+          <button class="ai-send-btn" onclick="sendMessage()">→</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SETTINGS PAGE ═══ -->
+  <div class="page" id="page-settings">
+
+    <!-- WORKER URL -->
+    <div class="settings-section">
+      <div class="settings-hdr"><div class="settings-title">Cloudflare Worker</div></div>
+      <div class="settings-row">
+        <div><div class="settings-label">Worker URL</div><div class="settings-sub">Unlocks Reddit, RSS, forums</div></div>
+        <input class="settings-input" id="settings-worker-url" placeholder="https://...workers.dev">
+        <button class="settings-save-btn" onclick="saveFromSettings()">SAVE</button>
+      </div>
+    </div>
+
+    <!-- WHITE-LABEL BRANDING -->
+    <div class="settings-section">
+      <div class="settings-hdr"><div class="settings-title">White-Label Branding</div></div>
+      <div class="settings-row">
+        <div><div class="settings-label">Platform Name</div><div class="settings-sub">Shown in header and reports</div></div>
+        <input class="settings-input" id="settings-brand-name" placeholder="AXIOM" maxlength="20">
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">Tagline</div><div class="settings-sub">Subtitle under platform name</div></div>
+        <input class="settings-input" id="settings-brand-tagline" placeholder="Political Intelligence v3" maxlength="40">
+      </div>
+      <div class="settings-row" style="border-bottom:none">
+        <button class="settings-save-btn" style="width:100%;padding:10px" onclick="applyBranding()">APPLY BRANDING</button>
+      </div>
+      <div class="branding-preview">
+        <div class="bp-title">Preview</div>
+        <div class="bp-card">
+          <div class="bp-icon" id="preview-icon">AX</div>
+          <div><div class="bp-name" id="preview-name">AXIOM</div><div class="bp-tagline" id="preview-tagline">Political Intelligence v3</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WATCHLIST KEYWORDS -->
+    <div class="settings-section">
+      <div class="settings-hdr"><div class="settings-title">Watchlist Keywords</div></div>
+      <div class="section-body" style="padding:14px">
+        <div id="watchlist-items"></div>
+        <div class="wl-add-row">
+          <input class="wl-add-input" id="wl-input" placeholder="Add keyword to watch..." onkeydown="if(event.key==='Enter')addWatchlistItem()">
+          <button class="wl-add-btn" onclick="addWatchlistItem()">+ ADD</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCENT COLOUR PICKER -->
+    <div class="settings-section">
+      <div class="settings-hdr"><div class="settings-title">Accent Colour</div></div>
+      <div class="section-body" style="display:flex;flex-wrap:wrap;gap:10px">
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#00e5ff;cursor:pointer;border:2px solid white" onclick="setAccent('#00e5ff')"></div>
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#00ff9d;cursor:pointer;border:2px solid transparent" onclick="setAccent('#00ff9d')"></div>
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#a855f7;cursor:pointer;border:2px solid transparent" onclick="setAccent('#a855f7')"></div>
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#ffd600;cursor:pointer;border:2px solid transparent" onclick="setAccent('#ffd600')"></div>
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#ff3b5c;cursor:pointer;border:2px solid transparent" onclick="setAccent('#ff3b5c')"></div>
+        <div class="color-swatch" style="width:32px;height:32px;border-radius:50%;background:#ff9800;cursor:pointer;border:2px solid transparent" onclick="setAccent('#ff9800')"></div>
+      </div>
+    </div>
+
+    <!-- APP INFO -->
+    <div class="settings-section">
+      <div class="settings-hdr"><div class="settings-title">About</div></div>
+      <div class="settings-row"><div class="settings-label">Version</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx3)">v3.0 Commercial</div></div>
+      <div class="settings-row"><div class="settings-label">Sources</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx3)">13 live</div></div>
+      <div class="settings-row" style="border-bottom:none"><div class="settings-label">Data</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx3)">Local device only</div></div>
+    </div>
+
+  </div><!-- end page-settings -->
+
+</div><!-- end scroll-area -->
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav">
+  <button class="nav-btn active" id="nav-overview" onclick="switchPage('overview',this)"><div class="nav-icon">📊</div><div class="nav-label">Overview</div></button>
+  <button class="nav-btn" id="nav-comments" onclick="switchPage('comments',this)"><div class="nav-icon">💬</div><div class="nav-label">Intel</div><div class="nav-dot" id="ci-nav-dot" style="display:none"></div></button>
+  <button class="nav-btn" id="nav-saved" onclick="switchPage('saved',this)"><div class="nav-icon">📌</div><div class="nav-label">Saved</div><div class="nav-dot" id="saved-nav-dot" style="display:none"></div></button>
+  <button class="nav-btn" id="nav-report" onclick="switchPage('report',this)"><div class="nav-icon">📄</div><div class="nav-label">Report</div></button>
+  <button class="nav-btn" id="nav-alerts" onclick="switchPage('alerts',this)"><div class="nav-icon">🚨</div><div class="nav-label">Alerts</div><div class="nav-dot"></div></button>
+  <button class="nav-btn" id="nav-ai" onclick="switchPage('ai',this)"><div class="nav-icon">🤖</div><div class="nav-label">AI</div></button>
+  <button class="nav-btn" id="nav-settings" onclick="switchPage('settings',this)"><div class="nav-icon">⚙️</div><div class="nav-label">Settings</div></button>
+</div>
+
+<script>
+// ════════════ CONFIG ════════════
+let WORKER_URL = localStorage.getItem('axiom_worker_url') || '';
+const HN_API = 'https://hn.algolia.com/api/v1';
+
+const SRC_META = {
+  reddit:{n:'Reddit',c:'var(--reddit)',icon:'r/'},
+  hn:{n:'Hacker News',c:'var(--hn)',icon:'HN'},
+  guardian:{n:'Guardian AU',c:'var(--guardian)',icon:'GU'},
+  abc_rss:{n:'ABC News',c:'var(--abc)',icon:'ABC'},
+  smh_rss:{n:'SMH',c:'var(--smh)',icon:'SMH'},
+  sbs_rss:{n:'SBS',c:'var(--sbs)',icon:'SBS'},
+  crikey:{n:'Crikey',c:'var(--crikey)',icon:'CK'},
+  conversation:{n:'The Conversation',c:'var(--conv)',icon:'TC'},
+  whirlpool:{n:'Whirlpool',c:'var(--whirl)',icon:'WP'},
+  bigfooty:{n:'BigFooty',c:'var(--bigfooty)',icon:'BF'},
+  hotcopper:{n:'HotCopper',c:'var(--hotcopper)',icon:'HC'},
+  ozpolitic:{n:'OzPolitic',c:'var(--ozpolitic)',icon:'OZ'},
+  ozpolitic_rss:{n:'OzPolitic RSS',c:'var(--ozpoliticrss)',icon:'OZR'},
+};
+
+// ════════════ WORKER CONFIG ════════════
+document.getElementById('worker-url-input').value = WORKER_URL;
+document.getElementById('settings-worker-url').value = WORKER_URL;
+updateWorkerStatusUI();
+
+function saveWorkerUrl(){
+  const val=document.getElementById('worker-url-input').value.trim().replace(/\/$/,'');
+  WORKER_URL=val;
+  localStorage.setItem('axiom_worker_url',val);
+  document.getElementById('settings-worker-url').value=val;
+  updateWorkerStatusUI();
+  showToast(val?'Worker URL saved ✓':'Worker URL cleared');
+}
+
+function saveFromSettings(){
+  const val=document.getElementById('settings-worker-url').value.trim().replace(/\/$/,'');
+  WORKER_URL=val;
+  localStorage.setItem('axiom_worker_url',val);
+  document.getElementById('worker-url-input').value=val;
+  updateWorkerStatusUI();
+  showToast(val?'Worker URL saved ✓':'Cleared');
+}
+
+function updateWorkerStatusUI(){
+  const dot=document.getElementById('worker-status-dot');
+  const msg=document.getElementById('worker-status-msg');
+  const lbl=document.getElementById('worker-toggle-lbl');
+  if(WORKER_URL){
+    dot.style.background='var(--c4)';
+    msg.innerHTML=`<span class="w-ok">✓ Worker connected:</span> <span style="color:var(--tx2)">${WORKER_URL}</span><br><br><span style="color:var(--tx3)">All 13 sources unlocked.</span>`;
+    lbl.textContent='▼ CONNECTED';
+    document.querySelectorAll('.ci-src-btn.needs-worker').forEach(b=>b.style.opacity='1');
+  } else {
+    dot.style.background='var(--c3)';
+    msg.innerHTML=`<span class="w-warn">⚠ No Worker URL set.</span> HackerNews works now. Add Worker URL to unlock Reddit, Guardian, RSS feeds, Whirlpool, BigFooty, HotCopper, OzPolitic.`;
+    lbl.textContent='▼ SETUP';
+    document.querySelectorAll('.ci-src-btn.needs-worker').forEach(b=>b.style.opacity='0.5');
+  }
+}
+
+function toggleWorkerPanel(hdr){
+  const body=document.getElementById('worker-config-body');
+  const lbl=document.getElementById('worker-toggle-lbl');
+  const vis=body.style.display!=='none';
+  body.style.display=vis?'none':'block';
+  lbl.textContent=vis?(WORKER_URL?'▶ CONNECTED':'▶ SETUP'):(WORKER_URL?'▼ CONNECTED':'▼ SETUP');
+}
+
+// ════════════ CLOCK ════════════
+function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleString('en-AU',{timeZone:'Australia/Sydney',hour:'2-digit',minute:'2-digit'});}
+setInterval(updateClock,1000);updateClock();
+
+// ════════════ PAGE NAV ════════════
+function switchPage(name,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  btn.classList.add('active');
+  document.getElementById('scroll-area').scrollTop=0;
+  if(name==='sentiment')drawTPPChart();
+  if(name==='saved')renderSaved();
+}
+
+function toggleSection(hdr){
+  const body=hdr.nextElementSibling;
+  const arrow=hdr.querySelector('.section-arrow');
+  const collapsed=body.classList.toggle('collapsed');
+  arrow.classList.toggle('open',!collapsed);
+}
+
+// ════════════ CHARTS ════════════
+function setRange(btn,range){document.querySelectorAll('.chart-ctrl .chart-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');drawSentimentChart(range);}
+function genData(pts){const pos=[],neg=[],neu=[],vol=[];let p=55,n=30,v=50;for(let i=0;i<pts;i++){p+=(Math.random()-0.48)*5;p=Math.max(30,Math.min(75,p));n+=(Math.random()-0.52)*4;n=Math.max(15,Math.min(45,n));v+=(Math.random()-0.5)*12;v=Math.max(20,Math.min(90,v));pos.push(p);neg.push(n);neu.push(100-p-n);vol.push(v);}return{pos,neg,neu,vol};}
+function pathFrom(d,w,h,mn,mx){return'M'+d.map((v,i)=>{const x=(i/(d.length-1))*w;const y=h-((v-mn)/(mx-mn))*h;return`${x},${y}`;}).join(' L');}
+function areaFrom(d,w,h,mn,mx){const pts=d.map((v,i)=>{const x=(i/(d.length-1))*w;const y=h-((v-mn)/(mx-mn))*h;return`${x},${y}`;});return`M0,${h} L`+pts.join(' L')+` L${w},${h} Z`;}
+function drawSentimentChart(range='24h'){
+  const svg=document.getElementById('sentiment-chart');if(!svg)return;
+  const pts=range==='24h'?48:range==='7d'?84:range==='30d'?120:180;
+  const d=genData(pts);const W=400,H=120;
+  const grid=[0,30,60,90,120].map(y=>`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="rgba(30,37,64,0.8)" stroke-width="1"/>`).join('');
+  svg.innerHTML=`<defs><linearGradient id="posG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--c4)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--c4)" stop-opacity="0"/></linearGradient><linearGradient id="volG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--c1)" stop-opacity="0.08"/><stop offset="100%" stop-color="var(--c1)" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${areaFrom(d.vol,W,H,0,100)}" fill="url(#volG)"/><path d="${areaFrom(d.pos,W,H,20,80)}" fill="url(#posG)"/><path d="${pathFrom(d.pos,W,H,20,80)}" fill="none" stroke="var(--c4)" stroke-width="1.5"/><path d="${pathFrom(d.neg,W,H,10,60)}" fill="none" stroke="var(--c2)" stroke-width="1.5"/><path d="${pathFrom(d.neu,W,H,10,50)}" fill="none" stroke="var(--c3)" stroke-width="1" stroke-dasharray="4,4"/>`;
+}
+drawSentimentChart();
+
+function drawTPPChart(){
+  const svg=document.getElementById('tpp-chart');if(!svg)return;
+  const W=400,H=120,pts=60;let alp=52;const aD=[],lD=[];
+  for(let i=0;i<pts;i++){alp+=(Math.random()-0.49)*1.5;alp=Math.max(46,Math.min(58,alp));aD.push(alp);lD.push(100-alp);}
+  const grid=[0,30,60,90,120].map(y=>`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="rgba(30,37,64,0.8)" stroke-width="1"/>`).join('');
+  const mid=`<line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="6,4"/>`;
+  svg.innerHTML=`<defs><linearGradient id="alpG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--alp)" stop-opacity="0.25"/><stop offset="100%" stop-color="var(--alp)" stop-opacity="0"/></linearGradient></defs>${grid}${mid}<path d="${areaFrom(aD,W,H,44,60)}" fill="url(#alpG)"/><path d="${pathFrom(aD,W,H,44,60)}" fill="none" stroke="var(--alp)" stroke-width="2"/><path d="${pathFrom(lD,W,H,40,56)}" fill="none" stroke="var(--lnp)" stroke-width="2"/><text x="8" y="16" fill="var(--alp)" font-family="IBM Plex Mono" font-size="9">ALP</text><text x="8" y="30" fill="var(--lnp)" font-family="IBM Plex Mono" font-size="9">LNP</text>`;
+}
+
+// ════════════ WORD CLOUD ════════════
+const wordData=[{t:'Housing',w:9,c:'var(--c2)'},{t:'Albanese',w:8,c:'var(--alp)'},{t:'cost-of-living',w:8,c:'var(--c3)'},{t:'Dutton',w:7,c:'var(--lnp)'},{t:'climate',w:7,c:'var(--grn)'},{t:'Medicare',w:6,c:'var(--c4)'},{t:'interest rates',w:6,c:'var(--c1)'},{t:'nuclear',w:5,c:'var(--one)'},{t:'immigration',w:5,c:'var(--tx2)'},{t:'AUKUS',w:4,c:'var(--c1)'},{t:'inflation',w:4,c:'var(--c3)'},{t:'RBA',w:3,c:'var(--tx2)'},{t:'election',w:5,c:'var(--c2)'},{t:'Greens',w:3,c:'var(--grn)'},{t:'Teals',w:3,c:'var(--ind)'},{t:'NDIS',w:3,c:'var(--c4)'}];
+const wc=document.getElementById('word-cloud');
+wordData.sort(()=>Math.random()-0.5).forEach(w=>{const s=document.createElement('span');s.className='wc-word';s.textContent=w.t;s.style.fontSize=(9+w.w*2.5)+'px';s.style.color=w.c;s.onclick=()=>quickSearchComment(w.t);wc.appendChild(s);});
+
+// ════════════ STATE HEATMAP ════════════
+const states=[{a:'NSW',s:58},{a:'VIC',s:62},{a:'QLD',s:44},{a:'SA',s:55},{a:'WA',s:61},{a:'TAS',s:67},{a:'NT',s:38},{a:'ACT',s:72}];
+const sg=document.getElementById('state-grid');
+states.forEach(st=>{const hue=st.s>50?`rgba(0,255,157,${0.25+(st.s/100)*0.5})`:`rgba(255,59,92,${0.25+(st.s/100)*0.5})`;sg.innerHTML+=`<div class="state-cell" style="background:${hue}"><div class="state-abbr" style="color:${st.s>50?'var(--c4)':'var(--c2)'}">${st.a}</div><div class="state-score">${st.s}</div></div>`;});
+
+// ════════════ PLATFORM BARS ════════════
+const platforms=[{name:'Hacker News',pos:52,neg:28,neu:20,vol:'1.2k/h'},{name:'Reddit',pos:36,neg:42,neu:22,vol:'3.1k/h'},{name:'Guardian',pos:62,neg:22,neu:16,vol:'48/h'},{name:'ABC News',pos:60,neg:24,neu:16,vol:'35/h'},{name:'SMH/Age',pos:55,neg:28,neu:17,vol:'27/h'},{name:'Whirlpool',pos:41,neg:38,neu:21,vol:'18/h'}];
+const pb=document.getElementById('platform-bars');
+if(pb)platforms.forEach(p=>{pb.innerHTML+=`<div class="platform-row"><div class="platform-name">${p.name}</div><div class="platform-bar"><div class="pb-seg" style="width:${p.pos}%;background:rgba(0,255,157,0.6);color:var(--bg)">${p.pos}%</div><div class="pb-seg" style="width:${p.neg}%;background:rgba(255,59,92,0.6);color:white">${p.neg}%</div><div class="pb-seg" style="width:${p.neu}%;background:rgba(255,214,0,0.4);color:var(--bg)">${p.neu}%</div></div><div class="platform-vol">${p.vol}</div></div>`;});
+
+// ════════════ FEED ════════════
+const feedItems=[
+  {source:'HN',icon:'HN',bg:'#1a1208',title:'Ask HN: Is Australian housing policy beyond saving? — 340 comments',sentiment:'negative',time:'3m',tags:['Housing']},
+  {source:'ABC',icon:'ABC',bg:'#1a2040',title:'Interest rate hold welcomed but economists warn prolonged pressure',sentiment:'neutral',time:'5m',tags:['RBA']},
+  {source:'Reddit',icon:'r/',bg:'#1a1228',title:"r/AusFinance: \"Labor's housing policy is too little too late\" — 1,200 upvotes",sentiment:'negative',time:'8m',tags:['Housing','ALP']},
+  {source:'Guardian',icon:'GU',bg:'#0d2218',title:'Greens call for accelerated renewables following LNP nuclear announcement',sentiment:'neutral',time:'11m',tags:['Greens','Climate']},
+  {source:'Whirlpool',icon:'WP',bg:'#0d1828',title:'Thread: RBA rates vs. housing affordability — 94 replies this week',sentiment:'negative',time:'18m',tags:['RBA','Housing']},
+  {source:'SMH',icon:'SMH',bg:'#1a2040',title:'Government approves 12,000 new social housing dwellings QLD and VIC',sentiment:'positive',time:'24m',tags:['Housing','ALP']},
+  {source:'ABC',icon:'ABC',bg:'#1a2040',title:"Labor's Medicare bulk billing sees 78% approval in new YouGov poll",sentiment:'positive',time:'40m',tags:['ALP','Medicare']},
+];
+const fl=document.getElementById('feed-list');
+feedItems.forEach((item,i)=>{
+  const sc=item.sentiment==='positive'?'s-pos':item.sentiment==='negative'?'s-neg':'s-neu';
+  const sl=item.sentiment==='positive'?'▲ POS':item.sentiment==='negative'?'▼ NEG':'◆ NEU';
+  const tags=item.tags.map(t=>{let tc='t-news';if(t==='ALP')tc='t-alp';else if(t==='LNP')tc='t-lnp';else if(t==='Greens')tc='t-grn';return`<span class="f-tag ${tc}">${t}</span>`;}).join('');
+  fl.innerHTML+=`<div class="feed-item" style="animation-delay:${i*60}ms"><div class="feed-icon" style="background:${item.bg};color:var(--tx2)">${item.icon}</div><div class="feed-body"><div class="feed-title">${item.title}</div><div class="feed-meta-row"><span class="feed-meta">${item.source} · ${item.time} ago</span><span class="feed-sent ${sc}">${sl}</span></div><div class="feed-tags">${tags}</div></div></div>`;
+});
+
+// ════════════ ALERTS ════════════
+const alertsData=[
+  {level:'high',icon:'🚨',title:'Viral Spike — Housing',body:'90,000 mentions in 6 hours — 340% above baseline. NSW, QLD suburban. Negative ratio: 64%.',time:'12 min ago',source:'Reddit + HN + Guardian'},
+  {level:'high',icon:'⚠️',title:'Coordinated Messaging',body:'"Nuclear power" narrative across 140+ accounts in QLD. Likely coordinated. Flagged.',time:'38 min ago',source:'Cross-platform analysis'},
+  {level:'med',icon:'📊',title:'LNP Approval Drop — WA',body:'Perth North and Curtin down 4.2pts in 48h. Correlated with AUKUS cost blowout.',time:'1h 12m ago',source:'Whirlpool + Reddit WA'},
+  {level:'med',icon:'📈',title:'Greens Surge Under-35',body:'Greens mentions among 18-34 up 48% this week. Inner-city electorates highest.',time:'2h 05m ago',source:'Cross-platform'},
+];
+const al=document.getElementById('alerts-list');
+alertsData.forEach((a,i)=>{al.innerHTML+=`<div class="alert-card ${a.level}" style="animation-delay:${i*60}ms"><div class="alert-icon-wrap">${a.icon}</div><div><div class="alert-title">${a.title}</div><div class="alert-body">${a.body}</div><div class="alert-meta">${a.time} · ${a.source}</div></div></div>`;});
+
+// ════════════ COUNTER ANIM ════════════
+function animateCount(el,target,dur=1500){const step=ts=>{if(!el._t)el._t=ts;const p=Math.min((ts-el._t)/dur,1);el.textContent=Math.floor(p*target).toLocaleString();if(p<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
+setTimeout(()=>{const el=document.getElementById('stat-mentions');if(el)animateCount(el,84219);},300);
+
+// ════════════ AI CHAT ════════════
+const SYS=`You are AXIOM Analyst — a political intelligence analyst for Australian politics monitoring Reddit, Hacker News, Guardian AU, ABC News, SMH, SBS, Whirlpool, BigFooty, HotCopper, OzPolitic and more.
+
+DATA SNAPSHOT (June 2026):
+- Total mentions: 84,219 (+14.2%). Negative: 31.4% spike. Sentiment: +0.31
+- Top: Housing 91k, Cost of Living 88k, Climate 74k, Medicare 62k, Immigration 49k
+- Party: ALP +68, LNP +47, Greens +58, Teals +54, One Nation +22
+- TPP: ALP 52% / LNP 48%. Albanese: +42/-38. Dutton: +33/-44
+- Alerts: Housing spike 64% negative; Coordinated nuclear messaging QLD
+
+Be concise, analytical, direct. Short paragraphs for mobile reading.`;
+
+async function sendMessage(){
+  const input=document.getElementById('ai-input');
+  const msgs=document.getElementById('ai-messages');
+  const text=input.value.trim();if(!text)return;
+  msgs.innerHTML+=`<div class="ai-msg user"><div class="ai-avatar" style="background:var(--b2);color:var(--tx2)">U</div><div class="ai-bubble">${esc(text)}</div></div>`;
+  input.value='';msgs.scrollTop=msgs.scrollHeight;
+  const tid='t'+Date.now();
+  msgs.innerHTML+=`<div class="ai-msg bot" id="${tid}"><div class="ai-avatar">AI</div><div class="typing-ind"><div class="typ-dot"></div><div class="typ-dot"></div><div class="typ-dot"></div></div></div>`;
+  msgs.scrollTop=msgs.scrollHeight;
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:SYS,messages:[{role:'user',content:text}]})});
+    const data=await res.json();
+    const reply=data.content?.[0]?.text||'Unable to generate.';
+    document.getElementById(tid).outerHTML=`<div class="ai-msg bot"><div class="ai-avatar">AI</div><div class="ai-bubble">${reply.replace(/\n/g,'<br>')}</div></div>`;
+  }catch(e){document.getElementById(tid).outerHTML=`<div class="ai-msg bot"><div class="ai-avatar">AI</div><div class="ai-bubble" style="color:var(--c2)">Analysis engine offline.</div></div>`;}
+  msgs.scrollTop=msgs.scrollHeight;
+}
+
+// ════════════ COMMENT INTEL ════════════
+let ciComments=[];
+let ciSort='top';
+let ciQuery='';
+let ciSrcs=new Set(['hn','reddit','guardian','abc_rss']);
+let ciActiveSrcs=new Set();
+
+function toggleCISrc(el){
+  const s=el.dataset.src;
+  const needsWorker=el.classList.contains('needs-worker');
+  if(needsWorker&&!WORKER_URL){showToast('⚡ Add Worker URL in Settings to enable '+s);return;}
+  if(ciSrcs.has(s)){ciSrcs.delete(s);el.classList.remove('on');}else{ciSrcs.add(s);el.classList.add('on');}
+}
+
+function ciSetPill(el){document.getElementById('ci-search-input').value=el.textContent;fetchComments();}
+
+function quickSearchComment(topic){
+  document.getElementById('ci-search-input').value=topic;
+  switchPage('comments',document.getElementById('nav-comments'));
+  setTimeout(fetchComments,120);
+}
+
+function openReportBuilder(){switchPage('report',document.getElementById('nav-report'));}
+
+function ciSortBy(btn,mode){document.querySelectorAll('.ci-sort-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');ciSort=mode;ciRender();}
+
+async function fetchComments(){
+  const q=document.getElementById('ci-search-input').value.trim();
+  if(!q){showToast('Enter a topic to search');return;}
+  ciQuery=q;
+  const btn=document.getElementById('ci-fetch-btn');
+  btn.disabled=true;btn.textContent='...';
+  document.getElementById('fetch-progress').classList.add('active');
+  ciShowSkeleton();ciComments=[];ciActiveSrcs=new Set();
+
+  const tasks=[];
+  if(ciSrcs.has('hn'))tasks.push(fetchHN(q));
+  if(ciSrcs.has('reddit'))['AustralianPolitics','australia','AusFinance','melbourne','sydney','Labor'].forEach(sr=>tasks.push(fetchReddit(sr,q)));
+  if(WORKER_URL){
+    if(ciSrcs.has('guardian'))tasks.push(fetchGuardian(q));
+    if(ciSrcs.has('abc_rss'))tasks.push(fetchRSS('abc_rss','abc',q));
+    if(ciSrcs.has('smh_rss'))tasks.push(fetchRSS('smh_rss','smh',q));
+    if(ciSrcs.has('sbs_rss'))tasks.push(fetchRSS('sbs_rss','sbs',q));
+    if(ciSrcs.has('crikey'))tasks.push(fetchRSS('crikey','crikey',q));
+    if(ciSrcs.has('conversation'))tasks.push(fetchRSS('conversation','conversation',q));
+    if(ciSrcs.has('whirlpool'))tasks.push(fetchForum('whirlpool',q));
+    if(ciSrcs.has('bigfooty'))tasks.push(fetchForum('bigfooty',q));
+    if(ciSrcs.has('hotcopper'))tasks.push(fetchForum('hotcopper',q));
+    if(ciSrcs.has('ozpolitic'))tasks.push(fetchForum('ozpolitic',q));
+    if(ciSrcs.has('ozpolitic_rss'))tasks.push(fetchOzRSS(q));
+  }
+
+  await Promise.allSettled(tasks);
+  btn.disabled=false;btn.textContent='GO';
+  document.getElementById('fetch-progress').classList.remove('active');
+  ciUpdateStats();ciRender();ciUpdateCloud();ciUpdateSourceBreakdown();
+  document.getElementById('ci-analyse-btn').disabled=ciComments.length===0;
+  document.getElementById('ci-nav-dot').style.display=ciComments.length?'block':'none';
+  document.getElementById('ci-src-tally').textContent=ciActiveSrcs.size+' sources';
+  showToast('Collected '+ciComments.length+' items from '+ciActiveSrcs.size+' sources');
+}
+
+async function fetchHN(query){
+  try{
+    const sRes=await fetch(`${HN_API}/search?query=${encodeURIComponent(query)}+australia&tags=story&hitsPerPage=8`);
+    if(!sRes.ok)throw new Error();
+    const sData=await sRes.json();
+    let cnt=0;
+    for(const hit of (sData.hits||[])){
+      if(!hit.title)continue;
+      const text=hit.title+(hit.story_text?' — '+hit.story_text.slice(0,200):'');
+      ciComments.push({id:'hn_'+hit.objectID,src:'hn',sr:null,type:'post',text,author:hit.author||'anon',score:hit.points||0,replies:hit.num_comments||0,url:hit.url||`https://news.ycombinator.com/item?id=${hit.objectID}`,created:new Date(hit.created_at),sent:ciSent(text),kw:ciKW(text),art:hit.title.slice(0,55)+'…',srcMeta:SRC_META.hn});cnt++;
+    }
+    const cRes=await fetch(`${HN_API}/search?query=${encodeURIComponent(query)}+australia&tags=comment&hitsPerPage=12`);
+    if(cRes.ok){const cData=await cRes.json();for(const hit of (cData.hits||[]).slice(0,10)){if(!hit.comment_text||hit.comment_text.length<30)continue;ciComments.push({id:'hnc_'+hit.objectID,src:'hn',sr:null,type:'comment',text:hit.comment_text.replace(/<[^>]*>/g,'').slice(0,400),author:hit.author||'anon',score:hit.points||0,replies:0,url:`https://news.ycombinator.com/item?id=${hit.objectID}`,created:new Date(hit.created_at),sent:ciSent(hit.comment_text),kw:ciKW(hit.comment_text),art:'HN Discussion',srcMeta:SRC_META.hn});}}
+    if(ciComments.filter(c=>c.src==='hn').length>0)ciActiveSrcs.add('hn');
+    const el=document.getElementById('sri-hn');if(el)el.textContent=ciComments.filter(c=>c.src==='hn').length;
+  }catch(e){console.warn('HN fail',e);}
+}
+
+async function fetchReddit(sr,query){
+  try{
+    let url,opts={headers:{'User-Agent':'AXIOM-Mobile/3.0'}};
+    if(WORKER_URL){url=`${WORKER_URL}/reddit?q=${encodeURIComponent(query)}&sr=${sr}`;opts={};}
+    else{url=`https://www.reddit.com/r/${sr}/search.json?q=${encodeURIComponent(query)}&sort=top&limit=10&restrict_sr=on&t=month`;}
+    const res=await fetch(url,opts);if(!res.ok)throw new Error();
+    const data=await res.json();
+    const posts=(data?.data?.children||[]).slice(0,5);
+    let cnt=0;
+    for(const post of posts){
+      const p=post.data;if(!p.title)continue;
+      ciComments.push({id:p.id,src:'reddit',sr,type:'post',text:p.title+(p.selftext?' — '+p.selftext.slice(0,260):''),author:p.author,score:p.score,replies:p.num_comments,url:'https://reddit.com'+p.permalink,created:new Date(p.created_utc*1000),sent:ciSent(p.title+' '+(p.selftext||'')),kw:ciKW(p.title+' '+(p.selftext||'')),art:'r/'+sr,srcMeta:SRC_META.reddit});cnt++;
+      try{
+        let cUrl,cOpts={headers:{'User-Agent':'AXIOM-Mobile/3.0'}};
+        if(WORKER_URL){cUrl=`${WORKER_URL}/reddit-comments?p=${encodeURIComponent(p.permalink)}`;cOpts={};}
+        else{cUrl=`https://www.reddit.com${p.permalink}.json?limit=4&depth=1`;}
+        const cr=await fetch(cUrl,cOpts);
+        if(cr.ok){const cd=await cr.json();(cd?.[1]?.data?.children||[]).slice(0,3).forEach(c=>{if(c.data?.body&&c.data.body!=='[deleted]'&&c.data.body!=='[removed]'){ciComments.push({id:c.data.id,src:'reddit',sr,type:'comment',text:c.data.body.slice(0,360),author:c.data.author,score:c.data.score,replies:0,url:'https://reddit.com'+p.permalink,created:new Date(c.data.created_utc*1000),sent:ciSent(c.data.body),kw:ciKW(c.data.body),art:p.title.slice(0,55)+'…',srcMeta:SRC_META.reddit});}});}
+      }catch(e){}
+    }
+    if(cnt>0)ciActiveSrcs.add('reddit');
+    const el=document.getElementById('sri-reddit');if(el)el.textContent=ciComments.filter(c=>c.src==='reddit').length;
+  }catch(e){console.warn('Reddit fail',sr);}
+}
+
+async function fetchGuardian(query){
+  if(!WORKER_URL)return;
+  try{
+    const res=await fetch(`${WORKER_URL}/guardian?q=${encodeURIComponent(query)}`);
+    if(!res.ok)throw new Error();
+    const data=await res.json();
+    const results=data?.response?.results||[];
+    results.slice(0,8).forEach(r=>{
+      const text=r.fields?.bodyText?r.fields.bodyText.replace(/<[^>]*>/g,'').slice(0,300):r.webTitle;
+      ciComments.push({id:'gu_'+r.id,src:'guardian',sr:null,type:'article',text:r.webTitle+' — '+text,author:'Guardian AU',score:0,replies:r.fields?.commentCount||0,url:r.webUrl,created:new Date(r.webPublicationDate),sent:ciSent(r.webTitle+' '+text),kw:ciKW(r.webTitle+' '+text),art:r.webTitle.slice(0,55)+'…',srcMeta:SRC_META.guardian});
+    });
+    if(results.length>0){ciActiveSrcs.add('guardian');const el=document.getElementById('sri-guardian');if(el)el.textContent=results.slice(0,8).length;}
+  }catch(e){console.warn('Guardian fail',e);}
+}
+
+async function fetchRSS(srcKey,feedKey,query){
+  if(!WORKER_URL)return;
+  try{
+    const res=await fetch(`${WORKER_URL}/rss?feed=${feedKey}`);if(!res.ok)throw new Error();
+    const data=await res.json();
+    const items=(data.items||[]).filter(item=>{if(!item.title)return false;const t=item.title.toLowerCase();return query.toLowerCase().split(' ').some(term=>term.length>3&&t.includes(term));}).slice(0,10);
+    const meta=SRC_META[srcKey]||SRC_META.abc_rss;
+    items.forEach((item,i)=>{ciComments.push({id:srcKey+'_'+i+'_'+Date.now(),src:srcKey,sr:null,type:'article',text:item.title,author:meta.n,score:0,replies:0,url:item.link||'#',created:item.date?new Date(item.date):new Date(),sent:ciSent(item.title),kw:ciKW(item.title),art:meta.n+' RSS',srcMeta:meta});});
+    if(items.length>0){ciActiveSrcs.add(srcKey);const el=document.getElementById('sri-'+srcKey);if(el)el.textContent=items.length;}
+  }catch(e){console.warn('RSS fail',srcKey);}
+}
+
+async function fetchForum(route,query){
+  if(!WORKER_URL)return;
+  try{
+    const res=await fetch(`${WORKER_URL}/${route}?q=${encodeURIComponent(query)}`);if(!res.ok)throw new Error();
+    const data=await res.json();
+    const threads=data.threads||[];
+    const meta=SRC_META[route]||SRC_META.whirlpool;
+    threads.forEach((t,i)=>{ciComments.push({id:route+'_'+i+'_'+Date.now(),src:route,sr:null,type:'thread',text:t.text||'Forum thread',author:meta.n+' user',score:0,replies:0,url:t.url||'#',created:new Date(),sent:ciSent(t.text||''),kw:ciKW(t.text||''),art:meta.n,srcMeta:meta});});
+    if(threads.length>0){ciActiveSrcs.add(route);const el=document.getElementById('sri-'+route);if(el)el.textContent=threads.length;}
+  }catch(e){console.warn('Forum fail',route);}
+}
+
+async function fetchOzRSS(query){
+  if(!WORKER_URL)return;
+  try{
+    const res=await fetch(`${WORKER_URL}/ozpolitic-rss`);if(!res.ok)throw new Error();
+    const data=await res.json();
+    const items=(data.items||[]).filter(item=>{if(!item.title)return false;const combined=(item.title+' '+(item.description||'')).toLowerCase();return query.toLowerCase().split(' ').some(term=>term.length>3&&combined.includes(term));}).slice(0,10);
+    items.forEach((item,i)=>{const text=item.title+(item.description?' — '+item.description:'');ciComments.push({id:'ozrss_'+i+'_'+Date.now(),src:'ozpolitic_rss',sr:null,type:'thread',text,author:item.author||'OzPolitic user',score:0,replies:0,url:item.link||'#',created:item.date?new Date(item.date):new Date(),sent:ciSent(text),kw:ciKW(text),art:'OzPolitic RSS',srcMeta:SRC_META.ozpolitic_rss});});
+    if(items.length>0){ciActiveSrcs.add('ozpolitic_rss');const el=document.getElementById('sri-ozpolitic_rss');if(el)el.textContent=items.length;}
+  }catch(e){console.warn('OzRSS fail');}
+}
+
+// SENTIMENT + KEYWORDS
+function ciSent(text){const t=text.toLowerCase();const pos=['good','great','welcome','support','agree','hope','better','right','needed','progress','glad','relief','pleased','excellent','approve','improve'];const neg=['bad','terrible','fail','wrong','disagree','hate','angry','frustrated','useless','disgrace','broken','disaster','corrupt','lies','tired','ignored','nothing','failed','sick','awful','worse','worsen'];let ps=0,ns=0;pos.forEach(w=>{if(t.includes(w))ps++;});neg.forEach(w=>{if(t.includes(w))ns++;});if(ps>ns+1)return'positive';if(ns>ps+1)return'negative';if(ps>0&&ns>0)return'mixed';return'neutral';}
+function ciKW(text){const stop=new Set(['the','a','an','is','are','was','were','be','have','has','had','do','does','did','will','would','could','should','this','that','they','our','your','their','of','in','on','at','to','for','with','by','from','and','or','but','not','more','also','just','very','so','even','only','now','all','any','some','most','new','get','say','go','one','two','here','there']);const words=text.toLowerCase().replace(/[^a-z\s]/g,' ').split(/\s+/);const freq={};words.forEach(w=>{if(w.length>3&&!stop.has(w))freq[w]=(freq[w]||0)+1;});return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,4).map(e=>e[0]);}
+function ciTimeAgo(date){const diff=Date.now()-new Date(date);const m=Math.floor(diff/60000);if(m<1)return'just now';if(m<60)return m+'m ago';const h=Math.floor(m/60);if(h<24)return h+'h ago';return Math.floor(h/24)+'d ago';}
+
+// UPDATE STATS
+function ciUpdateStats(){
+  const counts={positive:0,negative:0,neutral:0,mixed:0};
+  ciComments.forEach(c=>counts[c.sent]=(counts[c.sent]||0)+1);
+  const total=ciComments.length||1;
+  const negPct=Math.round(counts.negative/total*100);
+  const posPct=Math.round(counts.positive/total*100);
+  document.getElementById('ci-total').textContent=ciComments.length;
+  document.getElementById('ci-neg-pct').textContent=negPct+'%';
+  document.getElementById('ci-pos-pct').textContent=posPct+'%';
+  document.getElementById('ci-src-count').textContent=ciActiveSrcs.size;
+  document.getElementById('ci-result-count').textContent=ciComments.length;
+  document.getElementById('ci-stats-strip').style.display='grid';
+  document.getElementById('sent-strip').style.display='flex';
+  setTimeout(()=>{document.getElementById('ss-pos').style.width=posPct+'%';document.getElementById('ss-neg').style.width=negPct+'%';document.getElementById('ss-neu').style.width=Math.round(counts.neutral/total*100)+'%';document.getElementById('ss-mix').style.width=Math.round(counts.mixed/total*100)+'%';},100);
+  document.getElementById('sr-section').style.display='block';
+  document.getElementById('ci-cloud-section').style.display='block';
+}
+
+// RENDER COMMENTS
+function ciRender(){
+  const area=document.getElementById('ci-results');
+  if(!ciComments.length){area.innerHTML='<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">NO RESULTS</div><div class="empty-sub">Try a broader search term or enable more sources.</div></div>';return;}
+  let sorted=[...ciComments];
+  if(ciSort==='top')sorted.sort((a,b)=>(b.score||0)-(a.score||0));
+  else if(ciSort==='new')sorted.sort((a,b)=>new Date(b.created)-new Date(a.created));
+  else if(ciSort==='neg')sorted=[...sorted.filter(c=>c.sent==='negative'),...sorted.filter(c=>c.sent!=='negative')];
+  else if(ciSort==='pos')sorted=[...sorted.filter(c=>c.sent==='positive'),...sorted.filter(c=>c.sent!=='positive')];
+  else if(ciSort==='src')sorted.sort((a,b)=>a.src.localeCompare(b.src));
+  document.getElementById('ci-result-count').textContent=sorted.length;
+  area.innerHTML=sorted.map((c,i)=>renderCC(c,i)).join('');
+}
+
+function renderCC(c,i){
+  const sc={'positive':'cp','negative':'cn','neutral':'cnu','mixed':'cm'}[c.sent]||'cnu';
+  const sl={'positive':'▲ POS','negative':'▼ NEG','neutral':'◆ NEU','mixed':'◈ MIX'}[c.sent]||'◆ NEU';
+  const m=c.srcMeta||SRC_META[c.src]||{n:c.src,c:'#888'};
+  const badge=`<span class="cc-badge" style="background:${m.c}15;color:${m.c}">● ${c.src==='reddit'?'r/'+(c.sr||'reddit'):m.n}</span>`;
+  const art=(c.art||'').slice(0,50)+((c.art||'').length>50?'…':'');
+  const tags=(c.kw||[]).slice(0,3).map(k=>`<span class="cc-tag">${k}</span>`).join('');
+  const typeIcon=c.type==='comment'?'💬':c.type==='article'?'📰':c.type==='thread'?'🧵':'📝';
+  const linkBtn=c.url&&c.url!=='#'?`<a class="cc-link" href="${esc(c.url)}" target="_blank">↗</a>`:'';
+  const saved=savedItems.some(s=>s.id===c.id);
+  return`<div class="comment-card" style="animation-delay:${Math.min(i,15)*25}ms"><div class="cc-hdr">${badge}<div class="cc-art">${typeIcon} ${esc(art)}</div><span class="cc-sent ${sc}">${sl}</span></div><div class="cc-body"><div class="cc-text">${esc(c.text)}</div><div class="cc-meta"><span class="cc-meta-item">👤 ${esc(c.author||'anon')}</span><span class="cc-meta-item">🕐 ${ciTimeAgo(c.created)}</span>${(c.score||0)>0?`<span class="cc-upvote">▲ ${c.score}</span>`:''}${(c.replies||0)>0?`<span class="cc-meta-item">💬 ${c.replies}</span>`:''}</div></div><div class="cc-footer"><div class="cc-tags">${tags}</div><div style="display:flex;gap:5px">${linkBtn}<button class="cc-save-btn${saved?' saved':''}" data-id="${esc(c.id)}" onclick="toggleSave(this,${JSON.stringify(c).replace(/'/g,'&#39;')})">${saved?'★ SAVED':'☆ SAVE'}</button><button class="cc-ai-btn" data-text="${esc(c.text)}" onclick="ciAnalyseSingle(this)">AI ›</button></div></div></div>`;
+}
+
+// CLOUD + SOURCE BREAKDOWN
+function ciUpdateCloud(){const freq={};ciComments.forEach(c=>(c.kw||[]).forEach(k=>freq[k]=(freq[k]||0)+1));const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,20);const max=sorted[0]?.[1]||1;const colors=['var(--c1)','var(--c4)','var(--c3)','var(--c2)','var(--c5)','var(--guardian)','#ff8c00'];const cloud=document.getElementById('ci-cloud');cloud.innerHTML=sorted.map(([word,count])=>{const size=9+Math.round((count/max)*12);const color=colors[Math.floor(Math.random()*colors.length)];return`<span class="cloud-tag" style="font-size:${size}px;color:${color};opacity:${0.5+(count/max)*0.5};border:1px solid ${color}22;background:${color}08" onclick="quickSearchComment('${word}')">${word}</span>`;}).join('');}
+function ciUpdateSourceBreakdown(){const bd=document.getElementById('src-breakdown');if(!ciComments.length){bd.style.display='none';return;}const counts={};ciComments.forEach(c=>{counts[c.src]=(counts[c.src]||0)+1;});bd.innerHTML=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([src,n])=>{const m=SRC_META[src]||{n:src,c:'var(--tx3)'};return`<div class="src-chip" style="background:${m.c}18;border:1px solid ${m.c}33"><div class="src-chip-dot" style="background:${m.c}"></div><span style="color:${m.c}">${m.n}</span><span class="src-chip-count" style="color:${m.c}"> ${n}</span></div>`;}).join('');bd.style.display='flex';}
+function ciFilterSRC(el,src){document.querySelectorAll('.sr-item').forEach(i=>i.classList.remove('selected'));el.classList.add('selected');if(!ciComments.length)return;const filtered=src==='all'?ciComments:ciComments.filter(c=>c.src===src);document.getElementById('ci-result-count').textContent=filtered.length||'0';document.getElementById('ci-results').innerHTML=filtered.length?filtered.map((c,i)=>renderCC(c,i)).join(''):`<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">NO RESULTS FOR ${src.toUpperCase()}</div></div>`;}
+function ciShowSkeleton(){document.getElementById('ci-results').innerHTML=Array.from({length:4}).map((_,i)=>`<div class="skeleton" style="animation-delay:${i*50}ms"><div style="padding:8px 12px;background:var(--s2);border-bottom:1px solid var(--b1)"><div class="skel-line" style="width:${80+i*25}px"></div></div><div style="padding:12px"><div class="skel-line" style="width:100%;margin-bottom:7px"></div><div class="skel-line" style="width:80%;margin-bottom:7px"></div><div class="skel-line" style="width:55%"></div></div></div>`).join('');}
+
+// ════════════ SAVED ITEMS ════════════
+let savedItems = JSON.parse(localStorage.getItem('axiom_saved')||'[]');
+
+function toggleSave(btn,item){
+  const exists=savedItems.findIndex(s=>s.id===item.id);
+  if(exists>=0){
+    savedItems.splice(exists,1);
+    btn.textContent='☆ SAVE';btn.classList.remove('saved');
+    showToast('Removed from saved');
+  } else {
+    savedItems.push(item);
+    btn.textContent='★ SAVED';btn.classList.add('saved');
+    showToast('Saved ✓');
+  }
+  localStorage.setItem('axiom_saved',JSON.stringify(savedItems));
+  document.getElementById('saved-nav-dot').style.display=savedItems.length?'block':'none';
+}
+
+function renderSaved(){
+  const list=document.getElementById('saved-list');
+  if(!savedItems.length){
+    list.innerHTML='<div class="saved-empty"><div class="saved-empty-icon">📌</div><div class="saved-empty-title">NO SAVED ITEMS</div><div class="saved-empty-sub">Tap the save button on any comment card to pin it here for reporting.</div></div>';
+    return;
+  }
+  list.innerHTML=savedItems.map((c,i)=>renderCC(c,i)).join('');
+}
+
+function clearAllSaved(){savedItems=[];localStorage.removeItem('axiom_saved');renderSaved();document.getElementById('saved-nav-dot').style.display='none';showToast('Saved items cleared');}
+
+function exportSavedCSV(){
+  if(!savedItems.length){showToast('No saved items to export');return;}
+  const rows=[['Source','Type','Author','Sentiment','Score','Text','URL','Date']];
+  savedItems.forEach(c=>rows.push([c.src,c.type,c.author||'',c.sent,c.score||0,(c.text||'').replace(/"/g,'""'),c.url||'',c.created]));
+  const csv=rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='axiom-saved-'+Date.now()+'.csv';a.click();
+  showToast('CSV downloaded');
+}
+
+function copyAllSaved(){
+  if(!savedItems.length){showToast('No saved items');return;}
+  const text=savedItems.map(c=>`[${c.src}][${c.sent}] ${c.text}\n— ${c.author} | ${ciTimeAgo(c.created)}`).join('\n\n---\n\n');
+  navigator.clipboard.writeText(text).then(()=>showToast('Copied to clipboard')).catch(()=>showToast('Copy failed'));
+}
+
+async function generateSavedReport(){
+  if(!savedItems.length){showToast('No saved items to analyse');return;}
+  const box=document.getElementById('saved-ai-brief');
+  const body=document.getElementById('saved-ai-body');
+  box.style.display='block';
+  body.innerHTML='<div class="ci-ai-bounce"><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><span style="font-size:9px;color:var(--tx3);margin-left:8px">Analysing '+savedItems.length+' saved items...</span></div>';
+  const sample=savedItems.slice(0,15).map(c=>`[${c.src}][${c.sent}] ${c.text.slice(0,200)}`).join('\n\n');
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:`Analyse these ${savedItems.length} saved Australian political comments in 3 short paragraphs: key themes, dominant sentiment, political implications.\n\n${sample}`}]})});
+    const data=await res.json();
+    body.innerHTML=`<span style="color:var(--tx2)">${(data.content?.[0]?.text||'').replace(/\n/g,'<br>')}</span>`;
+  }catch(e){body.innerHTML='<span style="color:var(--c2)">Analysis engine offline.</span>';}
+}
+
+// ════════════ REPORT BUILDER ════════════
+async function generateReport(){
+  const query=document.getElementById('rpt-query-input').value.trim()||ciQuery||'Australian political landscape';
+  const preview=document.getElementById('rb-preview');
+  preview.innerHTML='<div class="ci-ai-bounce"><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><span style="font-size:9px;color:var(--tx3);margin-left:8px">Generating intelligence report...</span></div>';
+  document.getElementById('rb-export-row').style.display='none';
+
+  const isOn=id=>document.getElementById(id)?.classList.contains('on');
+  const sections=[];
+  if(isOn('rpt-executive'))sections.push('1. Executive Summary (2 paragraphs)');
+  if(isOn('rpt-sentiment'))sections.push('2. Sentiment Analysis (positive/negative breakdown, trend direction)');
+  if(isOn('rpt-parties'))sections.push('3. Party Intelligence (ALP/LNP/Greens/Teals narrative and positioning)');
+  if(isOn('rpt-sources'))sections.push('4. Source Breakdown (per-platform volume and tone differences)');
+  if(isOn('rpt-quotes'))sections.push('5. Top Verbatim Quotes (5 most illustrative comments)');
+  if(isOn('rpt-keywords'))sections.push('6. Top Keywords (20 keywords with relative frequency)');
+  if(isOn('rpt-alerts'))sections.push('7. Active Alerts (key intelligence signals)');
+
+  const savedContext=isOn('rpt-saved')&&savedItems.length?'\n\nSAVED ITEMS APPENDIX:\n'+savedItems.slice(0,10).map(c=>`• [${c.src}][${c.sent}] ${c.text.slice(0,160)}`).join('\n'):'';
+
+  const sampleData=ciComments.length?`\nLIVE DATA SAMPLE (${ciComments.length} items from ${ciActiveSrcs.size} sources):\n`+ciComments.sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,15).map(c=>`[${c.src}][${c.sent}] ${c.text.slice(0,150)}`).join('\n'):'';
+
+  const counts={positive:0,negative:0,neutral:0,mixed:0};ciComments.forEach(c=>counts[c.sent]=(counts[c.sent]||0)+1);
+  const total=ciComments.length||1;
+
+  const brandName=localStorage.getItem('axiom_brand_name')||'AXIOM';
+  const prompt=`You are an Australian political intelligence analyst generating a professional report for ${brandName}.
+
+REPORT SUBJECT: "${query}"
+DATE: ${new Date().toLocaleDateString('en-AU',{day:'2-digit',month:'long',year:'numeric'})}
+DATA: ${ciComments.length} items from ${ciActiveSrcs.size} sources
+SENTIMENT: Pos ${Math.round(counts.positive/total*100)}% | Neg ${Math.round(counts.negative/total*100)}% | Neu ${Math.round(counts.neutral/total*100)}% | Mix ${Math.round(counts.mixed/total*100)}%
+${sampleData}${savedContext}
+
+Generate the following sections for a professional client-ready brief:
+${sections.join('\n')}
+
+Format: Clean markdown. Each section starts with a bold header. Keep language professional, analytical, direct. Suitable for a political consulting client or campaign manager.`;
+
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
+    const data=await res.json();
+    const text=data.content?.[0]?.text||'Report generation failed.';
+    // Store for export
+    window._lastReport={text,query,date:new Date().toLocaleDateString('en-AU')};
+    // Render as formatted HTML
+    preview.innerHTML=text.replace(/\*\*(.+?)\*\*/g,'<strong style="color:var(--c1)">$1</strong>').replace(/\n/g,'<br>');
+    document.getElementById('rb-export-row').style.display='flex';
+  }catch(e){preview.innerHTML='<span style="color:var(--c2)">Report generation failed. Check API connection.</span>';}
+}
+
+function exportReportPDF(){
+  if(!window._lastReport){showToast('Generate a report first');return;}
+  const w=window.open('','_blank');
+  const brandName=localStorage.getItem('axiom_brand_name')||'AXIOM';
+  w.document.write(`<!DOCTYPE html><html><head><title>${brandName} Intelligence Report</title><style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;padding:0 20px;color:#111;}h1{font-size:24px;border-bottom:2px solid #111;padding-bottom:12px;}h2{font-size:16px;margin-top:24px;color:#333;}p{line-height:1.7;margin-bottom:12px;}strong{color:#111;}</style></head><body><h1>${brandName} — INTELLIGENCE REPORT</h1><p><strong>Subject:</strong> ${window._lastReport.query}<br><strong>Date:</strong> ${window._lastReport.date}<br><strong>Generated by:</strong> ${brandName} v3.0</p><hr><div>${window._lastReport.text.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>')}</div></body></html>`);
+  w.document.close();w.print();
+}
+
+function exportReportCSV(){
+  if(!ciComments.length){showToast('No data to export');return;}
+  const rows=[['Source','Type','Sentiment','Author','Score','Text','URL','Date']];
+  ciComments.forEach(c=>rows.push([c.src,c.type,c.sent,c.author||'',(c.score||0),(c.text||'').replace(/"/g,'""'),c.url||'',c.created]));
+  const csv=rows.map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='axiom-data-'+Date.now()+'.csv';a.click();
+  showToast('CSV downloaded');
+}
+
+function copyReport(){
+  if(!window._lastReport){showToast('Generate a report first');return;}
+  navigator.clipboard.writeText(window._lastReport.text).then(()=>showToast('Report copied to clipboard')).catch(()=>showToast('Copy failed'));
+}
+
+// ════════════ AI ANALYSE (CI) ════════════
+async function ciAnalyseAll(){
+  if(!ciComments.length)return;
+  setCIAI('loading');document.getElementById('ci-analyse-btn').disabled=true;
+  const counts={positive:0,negative:0,neutral:0,mixed:0};ciComments.forEach(c=>counts[c.sent]=(counts[c.sent]||0)+1);
+  const total=ciComments.length;
+  const bySource={};ciComments.forEach(c=>{const k=c.srcMeta?.n||c.src;bySource[k]=(bySource[k]||0)+1;});
+  const srcBreakdown=Object.entries(bySource).map(([k,v])=>`${k}(${v})`).join(', ');
+  const sample=ciComments.sort((a,b)=>(b.score||0)-(a.score||0)).slice(0,20).map(c=>`[${c.srcMeta?.n||c.src}][${c.type||'post'}][${c.sent}] ${c.text.slice(0,160)}`).join('\n\n');
+  const prompt=`AXIOM Analyst. ${total} items. Query: "${ciQuery}". Sources: ${srcBreakdown}. Sentiment: Pos ${Math.round(counts.positive/total*100)}% Neg ${Math.round(counts.negative/total*100)}% Neu ${Math.round(counts.neutral/total*100)}% Mix ${Math.round(counts.mixed/total*100)}%.\n\nSAMPLE:\n${sample}\n\nWrite a 4-paragraph mobile-friendly brief:\n1. Overall sentiment + dominant emotional tone across all sources\n2. Key arguments and concerns (any platform differences?)\n3. Source/demographic patterns\n4. Political implications — which parties benefit/suffer\n\nShort paragraphs. Direct and analytical.`;
+  try{const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});const data=await res.json();setCIAI('result',data.content?.[0]?.text||'Analysis unavailable.');}catch(e){setCIAI('error');}
+  document.getElementById('ci-analyse-btn').disabled=false;
+}
+
+async function ciAnalyseSingle(btn){
+  const text=btn.getAttribute('data-text');
+  setCIAI('loading');
+  try{const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:`Analyse this Australian public comment in 2-3 short sentences: sentiment, political position, likely demographic, rhetorical pattern.\n\n"${text}"`}]})});const data=await res.json();setCIAI('result',data.content?.[0]?.text||'Unavailable.');}catch(e){setCIAI('error');}
+  document.getElementById('ci-ai-box').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function setCIAI(state,text=''){const el=document.getElementById('ci-ai-body');if(state==='loading'){el.innerHTML=`<div class="ci-ai-bounce"><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><div class="ci-ai-dot"></div><span style="font-size:9px;color:var(--tx3);margin-left:8px">Analysing ${ciComments.length} items from ${ciActiveSrcs.size} sources...</span></div>`;}else if(state==='result'){el.innerHTML=`<span style="color:var(--tx2)">${text.replace(/\n/g,'<br>')}</span>`;}else{el.innerHTML=`<span style="color:var(--c2)">Analysis engine offline.</span>`;}}
+
+// ════════════ WHITE-LABEL BRANDING ════════════
+function applyBranding(){
+  const name=document.getElementById('settings-brand-name').value.trim()||'AXIOM';
+  const tagline=document.getElementById('settings-brand-tagline').value.trim()||'Political Intelligence v3';
+  document.getElementById('brand-name').textContent=name;
+  document.getElementById('brand-tagline').textContent=tagline;
+  document.getElementById('brand-icon').textContent=name.slice(0,2).toUpperCase();
+  document.getElementById('preview-name').textContent=name;
+  document.getElementById('preview-tagline').textContent=tagline;
+  document.getElementById('preview-icon').textContent=name.slice(0,2).toUpperCase();
+  document.title=name;
+  localStorage.setItem('axiom_brand_name',name);
+  localStorage.setItem('axiom_brand_tagline',tagline);
+  showToast('Branding applied ✓');
+}
+
+// Load saved branding on startup
+(()=>{
+  const savedName=localStorage.getItem('axiom_brand_name');
+  const savedTag=localStorage.getItem('axiom_brand_tagline');
+  if(savedName){document.getElementById('brand-name').textContent=savedName;document.getElementById('brand-icon').textContent=savedName.slice(0,2).toUpperCase();document.getElementById('settings-brand-name').value=savedName;document.getElementById('preview-name').textContent=savedName;document.getElementById('preview-icon').textContent=savedName.slice(0,2).toUpperCase();document.title=savedName;}
+  if(savedTag){document.getElementById('brand-tagline').textContent=savedTag;document.getElementById('settings-brand-tagline').value=savedTag;document.getElementById('preview-tagline').textContent=savedTag;}
+})();
+
+// ════════════ ACCENT COLOUR ════════════
+function setAccent(color){
+  document.documentElement.style.setProperty('--c1',color);
+  document.querySelectorAll('.color-swatch').forEach(s=>s.style.border='2px solid transparent');
+  event.target.style.border='2px solid white';
+  localStorage.setItem('axiom_accent',color);
+  showToast('Accent colour updated');
+}
+const savedAccent=localStorage.getItem('axiom_accent');
+if(savedAccent)document.documentElement.style.setProperty('--c1',savedAccent);
+
+// ════════════ WATCHLIST ════════════
+let watchlist=JSON.parse(localStorage.getItem('axiom_watchlist')||'["housing","Albanese","cost of living","nuclear","immigration"]');
+
+function renderWatchlist(){
+  const el=document.getElementById('watchlist-items');
+  if(!watchlist.length){el.innerHTML='<div style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;color:var(--tx3);padding:8px 0">No keywords. Add below.</div>';return;}
+  el.innerHTML=watchlist.map((kw,i)=>`<div class="watchlist-item"><div class="wl-keyword">${esc(kw)}</div><button class="wl-remove" onclick="removeWatchlist(${i})">✕</button></div>`).join('');
+}
+
+function addWatchlistItem(){
+  const inp=document.getElementById('wl-input');
+  const val=inp.value.trim();
+  if(!val)return;
+  if(watchlist.includes(val)){showToast('Already in watchlist');return;}
+  watchlist.push(val);
+  localStorage.setItem('axiom_watchlist',JSON.stringify(watchlist));
+  inp.value='';
+  renderWatchlist();
+  showToast('Added to watchlist ✓');
+}
+
+function removeWatchlist(i){watchlist.splice(i,1);localStorage.setItem('axiom_watchlist',JSON.stringify(watchlist));renderWatchlist();}
+renderWatchlist();
+
+// Saved nav dot on load
+if(savedItems.length)document.getElementById('saved-nav-dot').style.display='block';
+
+// ════════════ UTILITY ════════════
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function showToast(msg){const old=document.querySelector('.toast');if(old)old.remove();const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transform='translateY(8px)';t.style.transition='0.3s';setTimeout(()=>t.remove(),300);},3000);}
+function animateCount(el,target,dur=1500){const step=ts=>{if(!el._t)el._t=ts;const p=Math.min((ts-el._t)/dur,1);el.textContent=Math.floor(p*target).toLocaleString();if(p<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
+setTimeout(()=>{const el=document.getElementById('stat-mentions');if(el)animateCount(el,84219);},300);
+</script>
+</body>
+</html>
