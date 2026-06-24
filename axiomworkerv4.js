@@ -1854,6 +1854,35 @@ export default {
       } catch(e) { await saveProgress('running', `  ✗ Canberra Times failed: ${e}`); }
 
       // ══════════════════════════════════════════════════════════════════════
+      // SOURCE 10b — Extended AU newswire  (METHOD: shared AU_FEEDS registry)
+      // Fans out across the rest of the registry not collected individually
+      // above (Nine federal/regional, AFR, Guardian politics, independents,
+      // news.com.au, AAP, InDaily…). Each feed: one fetch, parsed per topic.
+      // ══════════════════════════════════════════════════════════════════════
+      await saveProgress('running', '⬤ Extended AU newswire — registry feeds');
+      try {
+        const EXTRA_FEED_KEYS = [
+          'smh_pol', 'brisbanetimes', 'watoday', 'afr', 'guardian_pol',
+          'newdaily', 'michaelwest', 'independentau', 'menadue',
+          'saturdaypaper', 'junkee', 'newscomau', 'aap', 'indaily',
+        ];
+        let extraTotal = 0;
+        for (const key of EXTRA_FEED_KEYS) {
+          const feedUrl = AU_FEEDS[key];
+          if (!feedUrl) continue;
+          try {
+            const xml = await getXML(feedUrl);
+            const fitems = [];
+            for (const topic of topics) fitems.push(...parseRSS(xml || '', key, topic));
+            const deduped = [...new Map(fitems.map(i => [i.url, i])).values()];
+            if (deduped.length) { push(deduped, key); extraTotal += deduped.length; }
+          } catch (e) {}
+          await jitter();
+        }
+        await saveProgress('running', `  ✓ Extended newswire: ${extraTotal} items across ${EXTRA_FEED_KEYS.length} feeds`);
+      } catch(e) { await saveProgress('running', `  ✗ Extended newswire failed: ${e}`); }
+
+      // ══════════════════════════════════════════════════════════════════════
       // SOURCE 11 — 9News Politics  (METHOD: HTML scrape — CSS selectors)
       // Nine Network news site — no RSS for politics, scrape required
       // ══════════════════════════════════════════════════════════════════════

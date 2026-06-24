@@ -1721,8 +1721,9 @@ body::after {
     <div class="src-chip on" data-src="hn" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--hn)"></div>HACKER NEWS</div>
     <div class="src-chip on needs-worker" data-src="reddit" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--reddit)"></div>REDDIT ⚡</div>
     <div class="src-grp-label" style="margin-top:6px">⚡ Needs Worker</div>
+    <div class="src-chip on needs-worker" data-src="allnews" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand2)"></div>AU NEWS 20+ ⚡</div>
     <div class="src-chip on needs-worker" data-src="guardian" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--guardian)"></div>GUARDIAN ⚡</div>
-    <div class="src-chip on needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
+    <div class="src-chip needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
     <div class="src-chip needs-worker" data-src="smh_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--smh)"></div>SMH ⚡</div>
     <div class="src-chip needs-worker" data-src="whirlpool" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand)"></div>WHIRLPOOL ⚡</div>
     <div class="src-chip needs-worker" data-src="bigfooty" onclick="toggleSrc(this)"><div class="src-dot" style="background:#c0392b"></div>BIGFOOTY ⚡</div>
@@ -2467,7 +2468,7 @@ let ciComments   = [];
 let ciSortMode   = 'top';
 let ciQuery      = '';
 let ciActiveSrcs = new Set();
-let ciSrcs       = new Set(['hn','reddit','guardian','abc_rss']);
+let ciSrcs       = new Set(['hn','reddit','guardian','allnews']);
 let savedItems   = JSON.parse(localStorage.getItem('axiom_saved') || '[]');
 let watchlist    = JSON.parse(localStorage.getItem('axiom_watchlist') || '["housing crisis","cost of living","Albanese","Dutton","Greens climate","Medicare","AUKUS","immigration"]');
 let autoTimer    = null;
@@ -2477,7 +2478,7 @@ let autoJobItems = [];
 let autoPollTimer = null;
 
 const HN_API       = 'https://hn.algolia.com/api/v1';
-const TOTAL_SOURCES = 15;
+const TOTAL_SOURCES = 29;
 const INTERVAL_MS  = { off:0, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000 };
 const WRANGLER_CRON = { daily:'0 21 * * *', '6h':'0 */6 * * *', manual:null };
 
@@ -3031,6 +3032,7 @@ async function fetchComments() {
   if(ciSrcs.has('hn'))tasks.push(fetchHN(q));
   if(ciSrcs.has('reddit'))['AustralianPolitics','australia','AusFinance','melbourne','sydney','Labor'].forEach(function(sr){tasks.push(fetchReddit(sr,q));});
   if(WORKER_URL){
+    if(ciSrcs.has('allnews'))tasks.push(fetchAllNews(q));
     if(ciSrcs.has('guardian'))tasks.push(fetchGuardian(q));
     if(ciSrcs.has('abc_rss'))tasks.push(fetchRSS('abc_rss','abc',q));
     if(ciSrcs.has('smh_rss'))tasks.push(fetchRSS('smh_rss','smh',q));
@@ -3092,6 +3094,20 @@ async function fetchRSS(srcKey,feed,q) {
     var m=SRC_META[srcKey]||{n:srcKey};
     items.forEach(function(it,i){ciComments.push({id:srcKey+'_'+i+'_'+Date.now(),src:srcKey,type:'article',text:it.title,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(it.title),kw:calcKW(it.title),art:m.n+' RSS'});});
     if(items.length){ciActiveSrcs.add(srcKey);var el=document.getElementById('sri-'+srcKey);if(el)el.textContent=items.length;}
+  }catch(e){}
+}
+// Aggregate 20+ AU outlets in one worker request (Intel tab)
+async function fetchAllNews(q) {
+  if(!WORKER_URL)return;
+  try {
+    var res=await fetch(WORKER_URL+'/allnews?q='+encodeURIComponent(q)+'&max=50');if(!res.ok)return;
+    var data=await res.json();
+    (data.items||[]).forEach(function(it,i){
+      var m=SRC_META[it.src]||{n:it.src};
+      var txt=it.title+(it.desc?' — '+it.desc:'');
+      ciComments.push({id:'news_'+it.src+'_'+i+'_'+Date.now(),src:it.src,type:'article',text:txt,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(txt),kw:calcKW(txt),art:m.n});
+      if(it.src)ciActiveSrcs.add(it.src);
+    });
   }catch(e){}
 }
 async function fetchForum(route,q) {
@@ -3571,7 +3587,7 @@ function appendLog(cls, msg) {
 function clearLog() { var body = document.getElementById('exec-log-body'); if (body) body.innerHTML = '<div style="color:var(--t3);font-style:italic">Log cleared.</div>'; }
 function updateProgressBar(srcCounts) {
   var done = Object.keys(srcCounts||{}).length;
-  var pct  = Math.round(done/TOTAL_SOURCES*100);
+  var pct  = Math.min(100, Math.round(done/TOTAL_SOURCES*100));
   var bar  = document.getElementById('collect-pbar');
   var lbl  = document.getElementById('collect-pbar-label');
   if (bar) bar.style.width = pct + '%';
