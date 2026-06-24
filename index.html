@@ -1427,10 +1427,73 @@ body::before {
 .live-badge { box-shadow: 0 0 0 1px rgba(16,217,142,0.10), 0 4px 14px -6px rgba(16,217,142,0.4); }
 .live-dot { box-shadow: 0 0 8px var(--pos); }
 
+/* ══════════════════════════════════════════════════════════════════════
+   PUSH FURTHER — signature pass: grain, luminous borders, aurora, data type
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Fine film-grain texture — barely-there tactile richness over the mesh */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* Luminous 1px gradient border (mask trick) on hero surfaces */
+.hero-panel::after, .bank-qa::after,
+#page-ai > .card:first-child::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: linear-gradient(135deg, rgba(91,139,255,0.55), rgba(123,94,255,0.30) 40%, transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; z-index: 2;
+}
+.hero-panel, .bank-qa, #page-ai > .card:first-child { position: relative; }
+.bank-qa > * { position: relative; z-index: 1; }
+
+/* Aurora — slow living gradient on the brand mark & hero accent bar */
+@keyframes aurora { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+.brand-mark {
+  background: linear-gradient(120deg, #5B8BFF, #7B5EFF, #00B4A0, #5B8BFF);
+  background-size: 280% 280%;
+  animation: aurora 9s var(--ease-in-out) infinite;
+}
+.hero-panel::before {
+  background: linear-gradient(90deg, var(--brand), var(--mix), var(--pos), var(--brand));
+  background-size: 300% 100%;
+  animation: aurora 11s var(--ease-in-out) infinite;
+}
+
+/* More confident data typography */
+.score-ring-num { font-size: 38px; letter-spacing: -1.4px;
+  background: linear-gradient(180deg, #F4F7FF, #9FB6FF);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero-score { letter-spacing: -1px; font-weight: 700; }
+.sc-val, .party-score, .score-ring-num, .hero-score { font-feature-settings: "tnum" 1; }
+
+/* Collapsible section headers get a faint leading accent tick
+   (only those with a direct .card-title — icon-box headers are untouched) */
+.card-hdr > .card-title:first-child::before {
+  content: ''; display: inline-block; width: 3px; height: 10px; border-radius: 2px;
+  margin-right: 8px; vertical-align: -1px;
+  background: linear-gradient(180deg, var(--brand), var(--mix));
+  box-shadow: 0 0 8px rgba(91,139,255,0.5);
+}
+
+/* Bank mode-toggle active emphasises its label */
+.bank-mode.active .bank-mode-t { color: var(--brand2); }
+
+/* Nav: soft radial bloom behind the active icon */
+.nav-btn .nav-icon, .nav-btn .nav-label { position: relative; z-index: 1; }
+.nav-btn.active::after {
+  content: ''; position: absolute; top: 9px; left: 50%; transform: translateX(-50%);
+  width: 34px; height: 34px; border-radius: 50%; pointer-events: none; z-index: 0;
+  background: radial-gradient(circle, rgba(91,139,255,0.26), transparent 70%);
+}
+
 /* — Respect reduced motion — */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
-  .live-dot, .ticker-track { animation: none !important; }
+  .live-dot, .ticker-track, .brand-mark, .hero-panel::before { animation: none !important; }
 }
 
 </style>
@@ -1854,7 +1917,7 @@ body::before {
       <div style="font-family:var(--ff-mono);font-size:8px;color:var(--pos)">● ASK CLAUDE</div>
     </div>
     <div class="card-body">
-      <div class="bank-intro">Ask anything about Australian politics. Claude answers at <strong>two levels</strong>: grounded in AXIOM's live RSS &amp; news-API feeds, or by searching the wider internet in real time.</div>
+      <div class="bank-intro">Ask anything about Australian politics. Claude answers at <strong>two levels</strong>: grounded in <strong>20+ live AU outlets</strong> (ABC, Guardian, SMH, The Age, AFR, SBS, Crikey, The Conversation, news.com.au, AAP &amp; more) via RSS + the Guardian News API — or by searching the wider internet in real time.</div>
     </div>
   </div>
 
@@ -2436,6 +2499,24 @@ const SRC_META = {
   ozpolitic:    { n:'OzPolitic',       c:'#27ae60',         icon:'OZ'  },
   bbc:          { n:'BBC Australia',   c:'#b71c1c',         icon:'BBC' },
   reuters:      { n:'Reuters',         c:'#ff8f00',         icon:'REU' },
+  // ── expanded AU news registry (matches worker AU_FEEDS keys) ──
+  abc:          { n:'ABC News',        c:'var(--abc)',      icon:'ABC' },
+  abc_top:      { n:'ABC Top Stories', c:'var(--abc)',      icon:'ABC' },
+  smh:          { n:'SMH',             c:'var(--smh)',      icon:'SMH' },
+  smh_pol:      { n:'SMH Federal',     c:'var(--smh)',      icon:'SMH' },
+  brisbanetimes:{ n:'Brisbane Times',  c:'#1565c0',         icon:'BNE' },
+  watoday:      { n:'WAtoday',         c:'#00838f',         icon:'WAT' },
+  afr:          { n:'Fin Review',      c:'#d6336c',         icon:'AFR' },
+  guardian_pol: { n:'Guardian Politics',c:'var(--guardian)',icon:'GUP' },
+  newdaily:     { n:'The New Daily',   c:'#e53935',         icon:'TND' },
+  michaelwest:  { n:'Michael West',    c:'#607d8b',         icon:'MWM' },
+  independentau:{ n:'Independent AU',  c:'#3949ab',         icon:'IA'  },
+  menadue:      { n:'Pearls & Irritations', c:'#8d6e63',    icon:'P&I' },
+  saturdaypaper:{ n:'Saturday Paper',  c:'#455a64',         icon:'TSP' },
+  junkee:       { n:'Junkee',          c:'#d81b60',         icon:'JNK' },
+  newscomau:    { n:'news.com.au',     c:'#c62828',         icon:'NCA' },
+  aap:          { n:'AAP Newswire',    c:'#1976d2',         icon:'AAP' },
+  indaily:      { n:'InDaily',         c:'#00897b',         icon:'IND' },
 };
 
 // ── INIT ────────────────────────────────────────────────────────────
@@ -2703,30 +2784,32 @@ function bankSetQuestion(el) {
   askBank();
 }
 
-// Gather AXIOM's own data (RSS feeds + Guardian News API) via the worker
+// Gather AXIOM's own data — 20+ AU RSS/Atom feeds (via the worker /allnews
+// aggregator) plus the Guardian News API for full-text grounding.
 async function bankGatherSources(q) {
   var items = [];
   if (!WORKER_URL) return items;
-  var qw = q.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(function(w){ return w.length > 3; });
-  function match(t) { var lo = (t||'').toLowerCase(); return qw.length === 0 || qw.some(function(w){ return lo.indexOf(w) !== -1; }); }
-  var feeds = [['abc','abc_rss'],['smh','smh_rss'],['guardian','guardian'],['sbs','sbs'],['crikey','crikey'],['conversation','conversation']];
-  var tasks = feeds.map(function(f) {
-    return fetch(WORKER_URL + '/rss?feed=' + f[0]).then(function(r){ return r.json(); }).then(function(d) {
-      (d.items || []).forEach(function(it) {
-        if (match(it.title)) items.push({ src:f[1], title:it.title, snippet:'', url:it.link||'', date:it.date||'' });
-      });
-    }).catch(function(){});
-  });
+  var tasks = [];
+
+  // One request → the worker fans out across the whole AU feed registry
+  tasks.push(fetch(WORKER_URL + '/allnews?q=' + encodeURIComponent(q) + '&max=44').then(function(r){ return r.json(); }).then(function(d) {
+    (d.items || []).forEach(function(it) {
+      items.push({ src:it.src, title:it.title, snippet:it.desc || '', url:it.link || '', date:it.date || '' });
+    });
+  }).catch(function(){}));
+
+  // Guardian News API — full-text relevance search, an extra grounded source
   tasks.push(fetch(WORKER_URL + '/guardian?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(d) {
-    (((d.response||{}).results) || []).slice(0,8).forEach(function(r) {
+    (((d.response||{}).results) || []).slice(0,6).forEach(function(r) {
       items.push({ src:'guardian', title:r.webTitle, snippet:((r.fields||{}).bodyText||'').slice(0,220), url:r.webUrl, date:r.webPublicationDate });
     });
   }).catch(function(){}));
+
   await Promise.allSettled(tasks);
   // de-dup by url/title, cap for prompt size
   var seen = {}, out = [];
   items.forEach(function(it) { var k = it.url || it.title; if (!seen[k]) { seen[k] = 1; out.push(it); } });
-  return out.slice(0, 24);
+  return out.slice(0, 30);
 }
 
 // Claude call with the server-side web_search tool (handles pause_turn + citations)
