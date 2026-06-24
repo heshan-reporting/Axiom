@@ -3258,16 +3258,16 @@ function renderRRItem(item,delay){
   if(item.stage==='triage'){
     stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 BUILD</button>'
       +'<button class="rr-btn rr-btn-ai" onclick="rrQuickAngles(JSON.parse(this.dataset.item))" data-item="'+itemData+'">AI ANGLES</button>'
-      +'<button class="rr-btn rr-btn-skip" onclick="rrSkipItem(''+item.id+'')">SKIP</button>';
+      +'<button class="rr-btn rr-btn-skip" onclick="rrSkipItem(\''+item.id+'\')">SKIP</button>';
   } else if(item.stage==='copy'){
     stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 EDIT COPY</button>'
-      +'<button class="rr-btn-adv" onclick="rrAdvanceStage(''+item.id+'','design')">\u2192 DESIGN</button>';
+      +'<button class="rr-btn-adv" onclick="rrAdvanceStage(\''+item.id+'\',\'design\')">\u2192 DESIGN</button>';
   } else if(item.stage==='design'){
     stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 VIEW BRIEF</button>'
-      +'<button class="rr-btn-adv" style="border-color:rgba(176,110,255,0.3);background:rgba(176,110,255,0.08);color:var(--mix)" onclick="rrAdvanceStage(''+item.id+'','approval')">\u2192 APPROVAL</button>';
+      +'<button class="rr-btn-adv" style="border-color:rgba(176,110,255,0.3);background:rgba(176,110,255,0.08);color:var(--mix)" onclick="rrAdvanceStage(\''+item.id+'\',\'approval\')">\u2192 APPROVAL</button>';
   } else if(item.stage==='approval'){
-    stageActions='<button class="rr-btn" style="background:rgba(16,217,142,0.1);border-color:rgba(16,217,142,0.3);color:var(--pos)" onclick="rrAdvanceStage(''+item.id+'','live')">\u2713 APPROVE + PUBLISH</button>'
-      +'<button class="rr-btn rr-btn-skip" onclick="rrAdvanceStage(''+item.id+'','design')">\u2190 BACK</button>';
+    stageActions='<button class="rr-btn" style="background:rgba(16,217,142,0.1);border-color:rgba(16,217,142,0.3);color:var(--pos)" onclick="rrAdvanceStage(\''+item.id+'\',\'live\')">\u2713 APPROVE + PUBLISH</button>'
+      +'<button class="rr-btn rr-btn-skip" onclick="rrAdvanceStage(\''+item.id+'\',\'design\')">\u2190 BACK</button>';
   } else if(item.stage==='live'){
     stageActions='<div class="rr-live-badge">\uD83D\uDE80 PUBLISHED</div>';
   }
