@@ -59,6 +59,26 @@
   --ff-sans:  'Sora', sans-serif;
   --ff-mono:  'JetBrains Mono', monospace;
   --ff-title: 'Space Grotesk', sans-serif;
+
+  /* ── Elite layer: elevation, easing, surfaces ── */
+  --ease:      cubic-bezier(0.22, 1, 0.36, 1);   /* refined ease-out */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layered shadows — soft, multi-stop ambient depth */
+  --sh-1: 0 1px 2px rgba(0,0,0,0.30), 0 1px 1px rgba(0,0,0,0.20);
+  --sh-2: 0 4px 14px -4px rgba(0,0,0,0.45), 0 2px 6px -2px rgba(0,0,0,0.30);
+  --sh-3: 0 18px 48px -12px rgba(0,0,0,0.65), 0 8px 20px -8px rgba(0,0,0,0.45);
+  --sh-glow: 0 0 0 1px rgba(79,127,255,0.18), 0 8px 28px -8px rgba(79,127,255,0.30);
+
+  /* Hairline top highlight — the signature of premium dark surfaces */
+  --edge: inset 0 1px 0 0 rgba(255,255,255,0.05);
+  --edge-strong: inset 0 1px 0 0 rgba(255,255,255,0.08);
+
+  /* Surface gradients (subtle top-lit panels) */
+  --surf-1: linear-gradient(180deg, #0F1424 0%, #0C1020 100%);
+  --surf-2: linear-gradient(180deg, #171D32 0%, #121728 100%);
+  --grad-brand: linear-gradient(135deg, #5B8BFF 0%, #7B5EFF 100%);
 }
 
 /* ── RESET ── */
@@ -1246,6 +1266,172 @@ body::before {
 .rr-story-selected { background: var(--ink2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
 
 
+/* ══════════════════════════════════════════════════════════════════════
+   ELITE POLISH LAYER — depth, light, motion & finish (source-order overrides)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* — Global finish — */
+* { -webkit-tap-highlight-color: transparent; }
+html { text-rendering: optimizeLegibility; }
+body { -moz-osx-font-smoothing: grayscale; letter-spacing: 0.1px; }
+::selection { background: rgba(91,139,255,0.32); color: #fff; }
+:focus-visible { outline: 2px solid var(--brand2); outline-offset: 2px; border-radius: 6px; }
+button, a, .nav-btn, .card-hdr, [onclick] { -webkit-tap-highlight-color: transparent; }
+
+/* Tabular figures everywhere numbers matter — stops digit jitter */
+.ff-mono, [class*="-num"], [class*="-score"], .hdr-time, .ticker, .t-item,
+.score-ring-num, .ring-num, .hero-score { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "cv01" 1; }
+
+/* Richer ambient mesh background */
+body::before {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -25%, rgba(91,139,255,0.10) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 45% at 88% 18%, rgba(123,94,255,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 8% 92%, rgba(16,217,142,0.045) 0%, transparent 62%);
+}
+
+/* — Header: luminous hairline + subtle depth — */
+.hdr {
+  background: linear-gradient(180deg, rgba(11,15,28,0.94), rgba(8,11,20,0.88));
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, transparent, rgba(91,139,255,0.30), rgba(123,94,255,0.18), transparent) 1;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px -16px rgba(0,0,0,0.8);
+}
+.brand-mark { box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 6px 18px -4px rgba(79,127,255,0.55), var(--edge-strong); }
+.brand-name { letter-spacing: -0.4px; }
+
+/* — Cards: top-lit surface, hairline highlight, layered shadow — */
+.card {
+  background: var(--surf-1);
+  border: 1px solid rgba(58,72,116,0.55);
+  box-shadow: var(--sh-2), var(--edge);
+  transition: border-color 0.28s var(--ease), box-shadow 0.28s var(--ease), transform 0.28s var(--ease);
+}
+.card-hdr {
+  background: linear-gradient(180deg, rgba(23,29,50,0.85), rgba(17,22,38,0.6));
+  border-bottom: 1px solid rgba(58,72,116,0.45);
+  transition: background 0.2s var(--ease);
+}
+.card-hdr[onclick]:active { background: rgba(34,43,72,0.8); }
+.card-title { letter-spacing: 1.7px; }
+
+/* Hero panel — luminous bordered glass with corner glow */
+.hero-panel {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(123,94,255,0.10), transparent 55%),
+    linear-gradient(135deg, rgba(91,139,255,0.09), rgba(176,110,255,0.05));
+  border: 1px solid rgba(91,139,255,0.22);
+  box-shadow: var(--sh-3), var(--edge-strong);
+}
+
+/* — Bottom nav: frosted, lifted, with active indicator — */
+.bottom-nav {
+  background: linear-gradient(180deg, rgba(11,15,28,0.85), rgba(8,11,20,0.97));
+  border-top: 1px solid rgba(58,72,116,0.4);
+  box-shadow: 0 -8px 30px -10px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.nav-btn { transition: color 0.25s var(--ease), transform 0.18s var(--ease); }
+.nav-btn::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%) scaleX(0);
+  width: 26px; height: 3px; border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, var(--brand), var(--mix));
+  box-shadow: 0 0 12px rgba(91,139,255,0.7);
+  transition: transform 0.32s var(--ease-spring);
+}
+.nav-btn.active::before { transform: translateX(-50%) scaleX(1); }
+.nav-btn.active .nav-icon { transform: translateY(-1px); filter: drop-shadow(0 4px 10px rgba(91,139,255,0.55)); }
+.nav-btn:active { transform: scale(0.92); }
+.nav-label { letter-spacing: 0.9px; }
+
+/* — Buttons & inputs: cohesive press, glow focus — */
+.ai-update-btn.primary, .ci-go-btn, .bank-send, .s-btn-primary, .ci-analyse-btn {
+  position: relative; overflow: hidden;
+  box-shadow: 0 6px 18px -6px rgba(79,127,255,0.5), var(--edge-strong);
+  transition: transform 0.16s var(--ease), box-shadow 0.24s var(--ease), filter 0.2s var(--ease);
+}
+.ai-update-btn.primary:active, .ci-go-btn:active, .bank-send:active,
+.s-btn-primary:active, .ci-analyse-btn:active { transform: translateY(1px) scale(0.985); filter: brightness(1.06); }
+/* sheen sweep on primary actions */
+.ai-update-btn.primary::after, .bank-send::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.18) 50%, transparent 70%);
+  transform: translateX(-120%); transition: transform 0.6s var(--ease);
+}
+.ai-update-btn.primary:active::after, .bank-send:active::after { transform: translateX(120%); }
+
+.bank-input, .ci-input, .chat-input, .set-input, .modal-input, .worker-input, .wl-add-input {
+  transition: border-color 0.22s var(--ease), box-shadow 0.22s var(--ease), background 0.22s var(--ease);
+}
+.bank-input:focus, .ci-input:focus, .chat-input:focus, .set-input:focus,
+.modal-input:focus, .worker-input:focus, .wl-add-input:focus {
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px rgba(91,139,255,0.14), var(--edge) !important;
+}
+
+/* Bank mode toggle — premium selected state */
+.bank-mode { transition: border-color 0.22s var(--ease), background 0.22s var(--ease), transform 0.16s var(--ease), box-shadow 0.22s var(--ease); }
+.bank-mode:active { transform: scale(0.98); }
+.bank-mode.active { box-shadow: 0 6px 20px -10px rgba(79,127,255,0.55), var(--edge); }
+
+/* Quick-prompt & pill chips — tactile press */
+.qp-btn, .bank-src-pill, .card-badge, .t-pill, .intel-tag { transition: all 0.18s var(--ease); }
+.qp-btn:active { transform: scale(0.96); }
+
+/* Q&A cards in the Bank feed get the elevated surface too */
+.bank-qa, .ci-ai-box, .skeleton { box-shadow: var(--sh-2), var(--edge); border-color: rgba(58,72,116,0.55) !important; }
+.bank-qa { background: var(--surf-1); }
+
+/* Modals — deep elevation + scrim blur */
+.modal-card, .set-card { box-shadow: var(--sh-3), var(--edge-strong) !important; }
+
+/* Empty states — softer, designed */
+.empty-icon { opacity: 0.32; filter: drop-shadow(0 8px 20px rgba(91,139,255,0.25)); }
+.empty-title { letter-spacing: -0.2px; }
+
+/* Smoother shimmer on skeletons */
+.skel-line { background: linear-gradient(90deg, var(--ink2) 20%, var(--ink3) 45%, var(--line) 50%, var(--ink3) 55%, var(--ink2) 80%); background-size: 220% 100%; animation: shimmer 1.6s var(--ease-in-out) infinite; }
+
+/* — Motion: page & content entrance — */
+@keyframes pageIn { from { opacity: 0; transform: translateY(8px) scale(0.995); } to { opacity: 1; transform: none; } }
+.page.active { animation: pageIn 0.42s var(--ease) both; }
+.page.active > .card,
+.page.active > .hero-panel,
+.page.active > .quick-prompts,
+.page.active > #bank-feed { animation: fadeUp 0.5s var(--ease) both; }
+.page.active > *:nth-child(2) { animation-delay: 0.04s; }
+.page.active > *:nth-child(3) { animation-delay: 0.08s; }
+.page.active > *:nth-child(4) { animation-delay: 0.12s; }
+.page.active > *:nth-child(5) { animation-delay: 0.16s; }
+.page.active > *:nth-child(6) { animation-delay: 0.20s; }
+
+/* Refined scrollbars where they show (desktop) */
+.bank-a-body, .ci-ai-body, .chat-messages { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+
+/* Score ring — luminous fill + big tabular numeral */
+.score-ring-fill { filter: drop-shadow(0 0 6px rgba(91,139,255,0.45)); }
+.score-ring-num, .hero-score, .sc-val { font-variant-numeric: tabular-nums; }
+.ai-score-wrap::after {
+  content: ''; position: absolute; width: 180px; height: 180px;
+  top: 18px; left: 50%; transform: translateX(-50%);
+  border-radius: 50%; pointer-events: none; z-index: 0;
+  background: radial-gradient(circle, rgba(91,139,255,0.16), transparent 66%);
+}
+.ai-score-wrap { position: relative; }
+.score-ring-container, .ai-update-row, .ai-score-insight, .ai-score-timestamp { position: relative; z-index: 1; }
+
+/* Party & sentiment bars — subtle top sheen + recessed track */
+.party-bar-fill, .sent-bar-fill { box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 1px rgba(0,0,0,0.2); }
+.party-bar-wrap, .sent-bar-wrap { box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
+
+/* Live badge — breathing glow ring */
+.live-badge { box-shadow: 0 0 0 1px rgba(16,217,142,0.10), 0 4px 14px -6px rgba(16,217,142,0.4); }
+.live-dot { box-shadow: 0 0 8px var(--pos); }
+
+/* — Respect reduced motion — */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  .live-dot, .ticker-track { animation: none !important; }
+}
 
 </style>
 
