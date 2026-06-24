@@ -59,6 +59,26 @@
   --ff-sans:  'Sora', sans-serif;
   --ff-mono:  'JetBrains Mono', monospace;
   --ff-title: 'Space Grotesk', sans-serif;
+
+  /* ── Elite layer: elevation, easing, surfaces ── */
+  --ease:      cubic-bezier(0.22, 1, 0.36, 1);   /* refined ease-out */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* Layered shadows — soft, multi-stop ambient depth */
+  --sh-1: 0 1px 2px rgba(0,0,0,0.30), 0 1px 1px rgba(0,0,0,0.20);
+  --sh-2: 0 4px 14px -4px rgba(0,0,0,0.45), 0 2px 6px -2px rgba(0,0,0,0.30);
+  --sh-3: 0 18px 48px -12px rgba(0,0,0,0.65), 0 8px 20px -8px rgba(0,0,0,0.45);
+  --sh-glow: 0 0 0 1px rgba(79,127,255,0.18), 0 8px 28px -8px rgba(79,127,255,0.30);
+
+  /* Hairline top highlight — the signature of premium dark surfaces */
+  --edge: inset 0 1px 0 0 rgba(255,255,255,0.05);
+  --edge-strong: inset 0 1px 0 0 rgba(255,255,255,0.08);
+
+  /* Surface gradients (subtle top-lit panels) */
+  --surf-1: linear-gradient(180deg, #0F1424 0%, #0C1020 100%);
+  --surf-2: linear-gradient(180deg, #171D32 0%, #121728 100%);
+  --grad-brand: linear-gradient(135deg, #5B8BFF 0%, #7B5EFF 100%);
 }
 
 /* ── RESET ── */
@@ -484,6 +504,49 @@ body::before {
   cursor: pointer; transition: all 0.15s;
 }
 .qp-btn:active { background: rgba(79,127,255,0.16); }
+
+/* ── AI BANK ── */
+.bank-intro { font-family: var(--ff-sans); font-size: 12px; line-height: 1.7; color: var(--t1); }
+.bank-mode-row { display: flex; gap: 8px; margin-bottom: 11px; }
+.bank-mode {
+  flex: 1; text-align: left; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--ink1); cursor: pointer;
+  transition: all 0.15s;
+}
+.bank-mode.active { border-color: var(--brand); background: rgba(79,127,255,0.08); }
+.bank-mode-t { font-family: var(--ff-sans); font-size: 12px; font-weight: 600; color: var(--t0); }
+.bank-mode-s { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.4px; color: var(--t3); margin-top: 2px; }
+.bank-ask-wrap { display: flex; gap: 8px; }
+.bank-input {
+  flex: 1; padding: 11px 13px; border-radius: 11px; border: 1px solid var(--line);
+  background: var(--ink0); color: var(--t0); font-family: var(--ff-sans); font-size: 12.5px;
+  outline: none;
+}
+.bank-input:focus { border-color: var(--brand); }
+.bank-send {
+  padding: 0 16px; border-radius: 11px; border: none; cursor: pointer;
+  background: linear-gradient(135deg,var(--brand),var(--mix)); color: #fff;
+  font-family: var(--ff-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+}
+.bank-send:disabled { opacity: 0.5; cursor: default; }
+.bank-qa { background: var(--ink1); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 12px; animation: fadeUp 0.3s ease both; }
+.bank-q { display: flex; align-items: flex-start; gap: 8px; padding: 12px 13px; border-bottom: 1px solid var(--line); }
+.bank-q-icon { width: 20px; height: 20px; border-radius: 6px; background: var(--ink4); color: var(--t2); display: flex; align-items: center; justify-content: center; font-family: var(--ff-mono); font-size: 9px; font-weight: 700; flex-shrink: 0; }
+.bank-q-txt { font-family: var(--ff-sans); font-size: 12.5px; font-weight: 600; color: var(--t0); line-height: 1.5; }
+.bank-a { padding: 13px; }
+.bank-a-lbl { display: flex; align-items: center; gap: 6px; font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.6px; color: var(--t3); margin-bottom: 9px; }
+.bank-a-tag { padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+.bank-a-tag.data { background: rgba(79,127,255,0.14); color: var(--brand2); }
+.bank-a-tag.web { background: rgba(46,160,67,0.16); color: var(--pos); }
+.bank-a-body { font-family: var(--ff-sans); font-size: 12px; line-height: 1.8; color: var(--t1); }
+.bank-a-body strong { color: var(--t0); }
+.bank-a-body a { color: var(--brand2); text-decoration: none; }
+.bank-srcs { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line); }
+.bank-srcs-h { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.6px; color: var(--t3); margin-bottom: 7px; }
+.bank-src { display: flex; align-items: center; gap: 7px; padding: 5px 0; }
+.bank-src-pill { font-family: var(--ff-mono); font-size: 7.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: var(--ink4); color: var(--t2); flex-shrink: 0; }
+.bank-src a { font-family: var(--ff-sans); font-size: 11px; color: var(--t1); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bank-src a:active { color: var(--brand2); }
 
 /* ── CI TAB ── */
 .ci-search-wrap { position: relative; margin-bottom: 10px; }
@@ -1203,6 +1266,235 @@ body::before {
 .rr-story-selected { background: var(--ink2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
 
 
+/* ══════════════════════════════════════════════════════════════════════
+   ELITE POLISH LAYER — depth, light, motion & finish (source-order overrides)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* — Global finish — */
+* { -webkit-tap-highlight-color: transparent; }
+html { text-rendering: optimizeLegibility; }
+body { -moz-osx-font-smoothing: grayscale; letter-spacing: 0.1px; }
+::selection { background: rgba(91,139,255,0.32); color: #fff; }
+:focus-visible { outline: 2px solid var(--brand2); outline-offset: 2px; border-radius: 6px; }
+button, a, .nav-btn, .card-hdr, [onclick] { -webkit-tap-highlight-color: transparent; }
+
+/* Tabular figures everywhere numbers matter — stops digit jitter */
+.ff-mono, [class*="-num"], [class*="-score"], .hdr-time, .ticker, .t-item,
+.score-ring-num, .ring-num, .hero-score { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "cv01" 1; }
+
+/* Richer ambient mesh background */
+body::before {
+  background:
+    radial-gradient(ellipse 90% 55% at 50% -25%, rgba(91,139,255,0.10) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 45% at 88% 18%, rgba(123,94,255,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 8% 92%, rgba(16,217,142,0.045) 0%, transparent 62%);
+}
+
+/* — Header: luminous hairline + subtle depth — */
+.hdr {
+  background: linear-gradient(180deg, rgba(11,15,28,0.94), rgba(8,11,20,0.88));
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, transparent, rgba(91,139,255,0.30), rgba(123,94,255,0.18), transparent) 1;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px -16px rgba(0,0,0,0.8);
+}
+.brand-mark { box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 6px 18px -4px rgba(79,127,255,0.55), var(--edge-strong); }
+.brand-name { letter-spacing: -0.4px; }
+
+/* — Cards: top-lit surface, hairline highlight, layered shadow — */
+.card {
+  background: var(--surf-1);
+  border: 1px solid rgba(58,72,116,0.55);
+  box-shadow: var(--sh-2), var(--edge);
+  transition: border-color 0.28s var(--ease), box-shadow 0.28s var(--ease), transform 0.28s var(--ease);
+}
+.card-hdr {
+  background: linear-gradient(180deg, rgba(23,29,50,0.85), rgba(17,22,38,0.6));
+  border-bottom: 1px solid rgba(58,72,116,0.45);
+  transition: background 0.2s var(--ease);
+}
+.card-hdr[onclick]:active { background: rgba(34,43,72,0.8); }
+.card-title { letter-spacing: 1.7px; }
+
+/* Hero panel — luminous bordered glass with corner glow */
+.hero-panel {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(123,94,255,0.10), transparent 55%),
+    linear-gradient(135deg, rgba(91,139,255,0.09), rgba(176,110,255,0.05));
+  border: 1px solid rgba(91,139,255,0.22);
+  box-shadow: var(--sh-3), var(--edge-strong);
+}
+
+/* — Bottom nav: frosted, lifted, with active indicator — */
+.bottom-nav {
+  background: linear-gradient(180deg, rgba(11,15,28,0.85), rgba(8,11,20,0.97));
+  border-top: 1px solid rgba(58,72,116,0.4);
+  box-shadow: 0 -8px 30px -10px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.nav-btn { transition: color 0.25s var(--ease), transform 0.18s var(--ease); }
+.nav-btn::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%) scaleX(0);
+  width: 26px; height: 3px; border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, var(--brand), var(--mix));
+  box-shadow: 0 0 12px rgba(91,139,255,0.7);
+  transition: transform 0.32s var(--ease-spring);
+}
+.nav-btn.active::before { transform: translateX(-50%) scaleX(1); }
+.nav-btn.active .nav-icon { transform: translateY(-1px); filter: drop-shadow(0 4px 10px rgba(91,139,255,0.55)); }
+.nav-btn:active { transform: scale(0.92); }
+.nav-label { letter-spacing: 0.9px; }
+
+/* — Buttons & inputs: cohesive press, glow focus — */
+.ai-update-btn.primary, .ci-go-btn, .bank-send, .s-btn-primary, .ci-analyse-btn {
+  position: relative; overflow: hidden;
+  box-shadow: 0 6px 18px -6px rgba(79,127,255,0.5), var(--edge-strong);
+  transition: transform 0.16s var(--ease), box-shadow 0.24s var(--ease), filter 0.2s var(--ease);
+}
+.ai-update-btn.primary:active, .ci-go-btn:active, .bank-send:active,
+.s-btn-primary:active, .ci-analyse-btn:active { transform: translateY(1px) scale(0.985); filter: brightness(1.06); }
+/* sheen sweep on primary actions */
+.ai-update-btn.primary::after, .bank-send::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.18) 50%, transparent 70%);
+  transform: translateX(-120%); transition: transform 0.6s var(--ease);
+}
+.ai-update-btn.primary:active::after, .bank-send:active::after { transform: translateX(120%); }
+
+.bank-input, .ci-input, .chat-input, .set-input, .modal-input, .worker-input, .wl-add-input {
+  transition: border-color 0.22s var(--ease), box-shadow 0.22s var(--ease), background 0.22s var(--ease);
+}
+.bank-input:focus, .ci-input:focus, .chat-input:focus, .set-input:focus,
+.modal-input:focus, .worker-input:focus, .wl-add-input:focus {
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px rgba(91,139,255,0.14), var(--edge) !important;
+}
+
+/* Bank mode toggle — premium selected state */
+.bank-mode { transition: border-color 0.22s var(--ease), background 0.22s var(--ease), transform 0.16s var(--ease), box-shadow 0.22s var(--ease); }
+.bank-mode:active { transform: scale(0.98); }
+.bank-mode.active { box-shadow: 0 6px 20px -10px rgba(79,127,255,0.55), var(--edge); }
+
+/* Quick-prompt & pill chips — tactile press */
+.qp-btn, .bank-src-pill, .card-badge, .t-pill, .intel-tag { transition: all 0.18s var(--ease); }
+.qp-btn:active { transform: scale(0.96); }
+
+/* Q&A cards in the Bank feed get the elevated surface too */
+.bank-qa, .ci-ai-box, .skeleton { box-shadow: var(--sh-2), var(--edge); border-color: rgba(58,72,116,0.55) !important; }
+.bank-qa { background: var(--surf-1); }
+
+/* Modals — deep elevation + scrim blur */
+.modal-card, .set-card { box-shadow: var(--sh-3), var(--edge-strong) !important; }
+
+/* Empty states — softer, designed */
+.empty-icon { opacity: 0.32; filter: drop-shadow(0 8px 20px rgba(91,139,255,0.25)); }
+.empty-title { letter-spacing: -0.2px; }
+
+/* Smoother shimmer on skeletons */
+.skel-line { background: linear-gradient(90deg, var(--ink2) 20%, var(--ink3) 45%, var(--line) 50%, var(--ink3) 55%, var(--ink2) 80%); background-size: 220% 100%; animation: shimmer 1.6s var(--ease-in-out) infinite; }
+
+/* — Motion: page & content entrance — */
+@keyframes pageIn { from { opacity: 0; transform: translateY(8px) scale(0.995); } to { opacity: 1; transform: none; } }
+.page.active { animation: pageIn 0.42s var(--ease) both; }
+.page.active > .card,
+.page.active > .hero-panel,
+.page.active > .quick-prompts,
+.page.active > #bank-feed { animation: fadeUp 0.5s var(--ease) both; }
+.page.active > *:nth-child(2) { animation-delay: 0.04s; }
+.page.active > *:nth-child(3) { animation-delay: 0.08s; }
+.page.active > *:nth-child(4) { animation-delay: 0.12s; }
+.page.active > *:nth-child(5) { animation-delay: 0.16s; }
+.page.active > *:nth-child(6) { animation-delay: 0.20s; }
+
+/* Refined scrollbars where they show (desktop) */
+.bank-a-body, .ci-ai-body, .chat-messages { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+
+/* Score ring — luminous fill + big tabular numeral */
+.score-ring-fill { filter: drop-shadow(0 0 6px rgba(91,139,255,0.45)); }
+.score-ring-num, .hero-score, .sc-val { font-variant-numeric: tabular-nums; }
+.ai-score-wrap::after {
+  content: ''; position: absolute; width: 180px; height: 180px;
+  top: 18px; left: 50%; transform: translateX(-50%);
+  border-radius: 50%; pointer-events: none; z-index: 0;
+  background: radial-gradient(circle, rgba(91,139,255,0.16), transparent 66%);
+}
+.ai-score-wrap { position: relative; }
+.score-ring-container, .ai-update-row, .ai-score-insight, .ai-score-timestamp { position: relative; z-index: 1; }
+
+/* Party & sentiment bars — subtle top sheen + recessed track */
+.party-bar-fill, .sent-bar-fill { box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 1px rgba(0,0,0,0.2); }
+.party-bar-wrap, .sent-bar-wrap { box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
+
+/* Live badge — breathing glow ring */
+.live-badge { box-shadow: 0 0 0 1px rgba(16,217,142,0.10), 0 4px 14px -6px rgba(16,217,142,0.4); }
+.live-dot { box-shadow: 0 0 8px var(--pos); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PUSH FURTHER — signature pass: grain, luminous borders, aurora, data type
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Fine film-grain texture — barely-there tactile richness over the mesh */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* Luminous 1px gradient border (mask trick) on hero surfaces */
+.hero-panel::after, .bank-qa::after,
+#page-ai > .card:first-child::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: linear-gradient(135deg, rgba(91,139,255,0.55), rgba(123,94,255,0.30) 40%, transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; z-index: 2;
+}
+.hero-panel, .bank-qa, #page-ai > .card:first-child { position: relative; }
+.bank-qa > * { position: relative; z-index: 1; }
+
+/* Aurora — slow living gradient on the brand mark & hero accent bar */
+@keyframes aurora { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+.brand-mark {
+  background: linear-gradient(120deg, #5B8BFF, #7B5EFF, #00B4A0, #5B8BFF);
+  background-size: 280% 280%;
+  animation: aurora 9s var(--ease-in-out) infinite;
+}
+.hero-panel::before {
+  background: linear-gradient(90deg, var(--brand), var(--mix), var(--pos), var(--brand));
+  background-size: 300% 100%;
+  animation: aurora 11s var(--ease-in-out) infinite;
+}
+
+/* More confident data typography */
+.score-ring-num { font-size: 38px; letter-spacing: -1.4px;
+  background: linear-gradient(180deg, #F4F7FF, #9FB6FF);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero-score { letter-spacing: -1px; font-weight: 700; }
+.sc-val, .party-score, .score-ring-num, .hero-score { font-feature-settings: "tnum" 1; }
+
+/* Collapsible section headers get a faint leading accent tick
+   (only those with a direct .card-title — icon-box headers are untouched) */
+.card-hdr > .card-title:first-child::before {
+  content: ''; display: inline-block; width: 3px; height: 10px; border-radius: 2px;
+  margin-right: 8px; vertical-align: -1px;
+  background: linear-gradient(180deg, var(--brand), var(--mix));
+  box-shadow: 0 0 8px rgba(91,139,255,0.5);
+}
+
+/* Bank mode-toggle active emphasises its label */
+.bank-mode.active .bank-mode-t { color: var(--brand2); }
+
+/* Nav: soft radial bloom behind the active icon */
+.nav-btn .nav-icon, .nav-btn .nav-label { position: relative; z-index: 1; }
+.nav-btn.active::after {
+  content: ''; position: absolute; top: 9px; left: 50%; transform: translateX(-50%);
+  width: 34px; height: 34px; border-radius: 50%; pointer-events: none; z-index: 0;
+  background: radial-gradient(circle, rgba(91,139,255,0.26), transparent 70%);
+}
+
+/* — Respect reduced motion — */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  .live-dot, .ticker-track, .brand-mark, .hero-panel::before { animation: none !important; }
+}
 
 </style>
 
@@ -1429,8 +1721,9 @@ body::before {
     <div class="src-chip on" data-src="hn" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--hn)"></div>HACKER NEWS</div>
     <div class="src-chip on needs-worker" data-src="reddit" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--reddit)"></div>REDDIT ⚡</div>
     <div class="src-grp-label" style="margin-top:6px">⚡ Needs Worker</div>
+    <div class="src-chip on needs-worker" data-src="allnews" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand2)"></div>AU NEWS 20+ ⚡</div>
     <div class="src-chip on needs-worker" data-src="guardian" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--guardian)"></div>GUARDIAN ⚡</div>
-    <div class="src-chip on needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
+    <div class="src-chip needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
     <div class="src-chip needs-worker" data-src="smh_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--smh)"></div>SMH ⚡</div>
     <div class="src-chip needs-worker" data-src="whirlpool" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand)"></div>WHIRLPOOL ⚡</div>
     <div class="src-chip needs-worker" data-src="bigfooty" onclick="toggleSrc(this)"><div class="src-dot" style="background:#c0392b"></div>BIGFOOTY ⚡</div>
@@ -1611,6 +1904,61 @@ body::before {
   </div>
 
 </div><!-- end ai page -->
+
+<!-- ═══ AI BANK PAGE ═══ -->
+<div class="page" id="page-bank">
+
+  <!-- Intro -->
+  <div class="card">
+    <div class="card-hdr" style="cursor:default">
+      <div class="card-hdr-left">
+        <div style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),var(--mix));display:flex;align-items:center;justify-content:center;font-size:11px">🏛️</div>
+        <div class="card-title">Aussie Political AI Bank</div>
+      </div>
+      <div style="font-family:var(--ff-mono);font-size:8px;color:var(--pos)">● ASK CLAUDE</div>
+    </div>
+    <div class="card-body">
+      <div class="bank-intro">Ask anything about Australian politics. Claude answers at <strong>two levels</strong>: grounded in <strong>20+ live AU outlets</strong> (ABC, Guardian, SMH, The Age, AFR, SBS, Crikey, The Conversation, news.com.au, AAP &amp; more) via RSS + the Guardian News API — or by searching the wider internet in real time.</div>
+    </div>
+  </div>
+
+  <!-- Ask box -->
+  <div class="card">
+    <div class="card-body">
+      <div class="bank-mode-row">
+        <button class="bank-mode active" id="bank-mode-data" onclick="bankSetMode(this,'data')">
+          <div class="bank-mode-t">📚 Data Bank</div>
+          <div class="bank-mode-s">RSS + News API feeds</div>
+        </button>
+        <button class="bank-mode" id="bank-mode-web" onclick="bankSetMode(this,'web')">
+          <div class="bank-mode-t">🌐 Live Web</div>
+          <div class="bank-mode-s">Search the internet</div>
+        </button>
+      </div>
+      <div class="bank-ask-wrap">
+        <input class="bank-input" id="bank-input" placeholder="Ask about Australian politics…" onkeydown="if(event.key==='Enter')askBank()">
+        <button class="bank-send" id="bank-send" onclick="askBank()">Ask →</button>
+      </div>
+      <div class="quick-prompts" style="margin-top:11px;margin-bottom:0">
+        <button class="qp-btn" onclick="bankSetQuestion(this)">Latest on the housing crisis?</button>
+        <button class="qp-btn" onclick="bankSetQuestion(this)">Where do ALP and LNP stand on tax?</button>
+        <button class="qp-btn" onclick="bankSetQuestion(this)">What's happening in the Senate?</button>
+        <button class="qp-btn" onclick="bankSetQuestion(this)">Cost of living measures this week?</button>
+        <button class="qp-btn" onclick="bankSetQuestion(this)">Latest preferred-PM polling?</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Answers feed -->
+  <div id="bank-feed">
+    <div class="empty-state" id="bank-empty">
+      <div class="empty-icon">🏛️</div>
+      <div class="empty-title">Ask Your First Question</div>
+      <div class="empty-sub">Pick a level above, type a question, and Claude will answer — citing every source it used.</div>
+    </div>
+  </div>
+
+</div><!-- end bank page -->
 
 <!-- ═══ SAVED PAGE ═══ -->
 <div class="page" id="page-saved">
@@ -2082,6 +2430,7 @@ body::before {
   <button class="nav-btn" id="nav-feed" onclick="switchPage('feed',this)"><div class="nav-icon">📡</div><div class="nav-label">Feed</div></button>
   <button class="nav-btn" id="nav-comments" onclick="switchPage('comments',this)"><div class="nav-icon">💬</div><div class="nav-label">Intel</div><div class="nav-badge" id="ci-nav-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-ai" onclick="switchPage('ai',this)"><div class="nav-icon">🧠</div><div class="nav-label">AI</div></button>
+  <button class="nav-btn" id="nav-bank" onclick="switchPage('bank',this)"><div class="nav-icon">🏛️</div><div class="nav-label">Bank</div></button>
   <button class="nav-btn" id="nav-saved" onclick="switchPage('saved',this)"><div class="nav-icon">📌</div><div class="nav-label">Saved</div><div class="nav-badge" id="saved-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-auto" onclick="switchPage('auto',this)"><div class="nav-icon">⚡</div><div class="nav-label">Auto</div><div class="nav-badge" id="auto-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-rapid" onclick="switchPage('rapid',this)"><div class="nav-icon">&#x1F525;</div><div class="nav-label">Rapid</div><div class="nav-badge" id="rr-nav-badge" style="display:none"></div></button>
@@ -2119,7 +2468,7 @@ let ciComments   = [];
 let ciSortMode   = 'top';
 let ciQuery      = '';
 let ciActiveSrcs = new Set();
-let ciSrcs       = new Set(['hn','reddit','guardian','abc_rss']);
+let ciSrcs       = new Set(['hn','reddit','guardian','allnews']);
 let savedItems   = JSON.parse(localStorage.getItem('axiom_saved') || '[]');
 let watchlist    = JSON.parse(localStorage.getItem('axiom_watchlist') || '["housing crisis","cost of living","Albanese","Dutton","Greens climate","Medicare","AUKUS","immigration"]');
 let autoTimer    = null;
@@ -2129,7 +2478,7 @@ let autoJobItems = [];
 let autoPollTimer = null;
 
 const HN_API       = 'https://hn.algolia.com/api/v1';
-const TOTAL_SOURCES = 15;
+const TOTAL_SOURCES = 29;
 const INTERVAL_MS  = { off:0, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000 };
 const WRANGLER_CRON = { daily:'0 21 * * *', '6h':'0 */6 * * *', manual:null };
 
@@ -2151,6 +2500,24 @@ const SRC_META = {
   ozpolitic:    { n:'OzPolitic',       c:'#27ae60',         icon:'OZ'  },
   bbc:          { n:'BBC Australia',   c:'#b71c1c',         icon:'BBC' },
   reuters:      { n:'Reuters',         c:'#ff8f00',         icon:'REU' },
+  // ── expanded AU news registry (matches worker AU_FEEDS keys) ──
+  abc:          { n:'ABC News',        c:'var(--abc)',      icon:'ABC' },
+  abc_top:      { n:'ABC Top Stories', c:'var(--abc)',      icon:'ABC' },
+  smh:          { n:'SMH',             c:'var(--smh)',      icon:'SMH' },
+  smh_pol:      { n:'SMH Federal',     c:'var(--smh)',      icon:'SMH' },
+  brisbanetimes:{ n:'Brisbane Times',  c:'#1565c0',         icon:'BNE' },
+  watoday:      { n:'WAtoday',         c:'#00838f',         icon:'WAT' },
+  afr:          { n:'Fin Review',      c:'#d6336c',         icon:'AFR' },
+  guardian_pol: { n:'Guardian Politics',c:'var(--guardian)',icon:'GUP' },
+  newdaily:     { n:'The New Daily',   c:'#e53935',         icon:'TND' },
+  michaelwest:  { n:'Michael West',    c:'#607d8b',         icon:'MWM' },
+  independentau:{ n:'Independent AU',  c:'#3949ab',         icon:'IA'  },
+  menadue:      { n:'Pearls & Irritations', c:'#8d6e63',    icon:'P&I' },
+  saturdaypaper:{ n:'Saturday Paper',  c:'#455a64',         icon:'TSP' },
+  junkee:       { n:'Junkee',          c:'#d81b60',         icon:'JNK' },
+  newscomau:    { n:'news.com.au',     c:'#c62828',         icon:'NCA' },
+  aap:          { n:'AAP Newswire',    c:'#1976d2',         icon:'AAP' },
+  indaily:      { n:'InDaily',         c:'#00897b',         icon:'IND' },
 };
 
 // ── INIT ────────────────────────────────────────────────────────────
@@ -2400,6 +2767,155 @@ function setQuickPrompt(el) {
   sendChat();
 }
 
+// ── AI BANK ────────────────────────────────────────────────────────
+var BANK_MODE  = 'data';
+var bankBusy   = false;
+var BANK_SYS   = 'You are AXIOM Analyst, a non-partisan Australian political intelligence AI. '
+  + 'Answer questions about Australian politics clearly and factually for an informed AU audience. '
+  + 'Be concise and analytical; use short paragraphs suited to mobile. Use Australian spelling and context. '
+  + 'When you are uncertain or the evidence is thin, say so rather than speculating.';
+
+function bankSetMode(el, mode) {
+  BANK_MODE = mode;
+  document.querySelectorAll('.bank-mode').forEach(function(b){ b.classList.remove('active'); });
+  el.classList.add('active');
+}
+function bankSetQuestion(el) {
+  document.getElementById('bank-input').value = el.textContent;
+  askBank();
+}
+
+// Gather AXIOM's own data — 20+ AU RSS/Atom feeds (via the worker /allnews
+// aggregator) plus the Guardian News API for full-text grounding.
+async function bankGatherSources(q) {
+  var items = [];
+  if (!WORKER_URL) return items;
+  var tasks = [];
+
+  // One request → the worker fans out across the whole AU feed registry
+  tasks.push(fetch(WORKER_URL + '/allnews?q=' + encodeURIComponent(q) + '&max=44').then(function(r){ return r.json(); }).then(function(d) {
+    (d.items || []).forEach(function(it) {
+      items.push({ src:it.src, title:it.title, snippet:it.desc || '', url:it.link || '', date:it.date || '' });
+    });
+  }).catch(function(){}));
+
+  // Guardian News API — full-text relevance search, an extra grounded source
+  tasks.push(fetch(WORKER_URL + '/guardian?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(d) {
+    (((d.response||{}).results) || []).slice(0,6).forEach(function(r) {
+      items.push({ src:'guardian', title:r.webTitle, snippet:((r.fields||{}).bodyText||'').slice(0,220), url:r.webUrl, date:r.webPublicationDate });
+    });
+  }).catch(function(){}));
+
+  await Promise.allSettled(tasks);
+  // de-dup by url/title, cap for prompt size
+  var seen = {}, out = [];
+  items.forEach(function(it) { var k = it.url || it.title; if (!seen[k]) { seen[k] = 1; out.push(it); } });
+  return out.slice(0, 30);
+}
+
+// Claude call with the server-side web_search tool (handles pause_turn + citations)
+async function callClaudeWeb(question, system, maxTokens) {
+  if (!CLAUDE_KEY) throw new Error('No API key');
+  var messages = [{ role:'user', content: question }];
+  var tools = [{
+    type: 'web_search_20250305', name: 'web_search', max_uses: 6,
+    user_location: { type:'approximate', country:'AU', timezone:'Australia/Sydney' }
+  }];
+  var text = '', citations = [];
+  for (var i = 0; i < 5; i++) {
+    var body = { model:'claude-sonnet-4-6', max_tokens:maxTokens||1600, system:system, messages:messages, tools:tools };
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'x-api-key':CLAUDE_KEY, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
+      body: JSON.stringify(body)
+    });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'Claude API error');
+    (data.content || []).forEach(function(b) {
+      if (b.type === 'text') {
+        text += b.text;
+        (b.citations || []).forEach(function(c){ if (c.url) citations.push({ src:'web', title:c.title || c.url, url:c.url }); });
+      } else if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+        b.content.forEach(function(r){ if (r.url) citations.push({ src:'web', title:r.title || r.url, url:r.url }); });
+      }
+    });
+    if (data.stop_reason === 'pause_turn') { messages.push({ role:'assistant', content:data.content }); continue; }
+    break;
+  }
+  var seen = {}, dedup = [];
+  citations.forEach(function(c){ if (!seen[c.url]) { seen[c.url] = 1; dedup.push(c); } });
+  return { text: text.trim(), citations: dedup };
+}
+
+function bankRenderMarkdown(t) {
+  return esc(t)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+function bankSrcLabel(src) { return (SRC_META[src] || { n:'Web' }).n; }
+function bankSrcPill(src) { return (SRC_META[src] || { icon:'WEB' }).icon || 'WEB'; }
+
+function bankRenderSources(srcs) {
+  if (!srcs || !srcs.length) return '';
+  var rows = srcs.slice(0, 12).map(function(s) {
+    var label = esc(s.title || bankSrcLabel(s.src));
+    var pill  = esc(bankSrcPill(s.src) || 'WEB');
+    var link  = s.url ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + label + '</a>'
+                      : '<span style="font-size:11px;color:var(--t1)">' + label + '</span>';
+    return '<div class="bank-src"><span class="bank-src-pill">' + pill + '</span>' + link + '</div>';
+  }).join('');
+  return '<div class="bank-srcs"><div class="bank-srcs-h">SOURCES · ' + srcs.length + '</div>' + rows + '</div>';
+}
+
+async function askBank() {
+  var input = document.getElementById('bank-input');
+  var q = input.value.trim();
+  if (!q) { showToast('Type a question first'); return; }
+  if (!CLAUDE_KEY) { showToast('Set Claude API key first', 'error'); openAPIModal(); return; }
+  if (bankBusy) return;
+  bankBusy = true;
+
+  var mode = BANK_MODE;
+  var send = document.getElementById('bank-send');
+  send.disabled = true; send.textContent = '…';
+  var empty = document.getElementById('bank-empty');
+  if (empty) empty.remove();
+
+  var feed = document.getElementById('bank-feed');
+  var id = 'bank' + Date.now();
+  var tagCls = mode === 'web' ? 'web' : 'data';
+  var tagTxt = mode === 'web' ? 'LIVE WEB' : 'DATA BANK';
+  feed.insertAdjacentHTML('afterbegin',
+    '<div class="bank-qa" id="' + id + '">'
+    + '<div class="bank-q"><div class="bank-q-icon">Q</div><div class="bank-q-txt">' + esc(q) + '</div></div>'
+    + '<div class="bank-a"><div class="bank-a-lbl">CLAUDE · <span class="bank-a-tag ' + tagCls + '">' + tagTxt + '</span></div>'
+    + '<div class="bank-a-body" id="' + id + '-body"><span style="color:var(--t3);font-style:italic">'
+    + (mode === 'web' ? 'Searching the web…' : 'Reading AXIOM feeds…') + '</span></div></div></div>');
+  input.value = '';
+  document.getElementById('scroll-area').scrollTop = 0;
+
+  var bodyEl = document.getElementById(id + '-body');
+  try {
+    if (mode === 'web') {
+      var r = await callClaudeWeb(q, BANK_SYS + ' Search the web for current, reliable Australian sources and cite them.', 1600);
+      bodyEl.innerHTML = bankRenderMarkdown(r.text || 'No answer returned.') + bankRenderSources(r.citations);
+    } else {
+      var srcs = await bankGatherSources(q);
+      var ctx = srcs.length
+        ? '\n\nHere are recent headlines from AXIOM\'s monitored Australian outlets (RSS feeds + the Guardian News API). Ground your answer in these where relevant and name the outlets you draw on:\n'
+          + srcs.map(function(s){ return '- [' + bankSrcLabel(s.src) + '] ' + s.title + (s.snippet ? ' — ' + s.snippet : ''); }).join('\n')
+        : '\n\n(No matching items were found in AXIOM\'s live feeds' + (WORKER_URL ? '' : ' — no Worker URL is configured') + '. Answer from general knowledge and clearly flag that this is not based on live data.)';
+      var ans = await callClaude([{ role:'user', content: q + ctx }], 1200, BANK_SYS);
+      bodyEl.innerHTML = bankRenderMarkdown(ans || 'No answer returned.') + bankRenderSources(srcs);
+    }
+  } catch (e) {
+    bodyEl.innerHTML = '<span style="color:var(--neg)">Could not answer: ' + esc(String(e.message || e).slice(0, 120)) + '</span>';
+  } finally {
+    bankBusy = false;
+    send.disabled = false; send.textContent = 'Ask →';
+  }
+}
+
 // ── CHARTS ─────────────────────────────────────────────────────────
 function setRange(btn, r) {
   document.querySelectorAll('.chart-ctrl .chart-btn').forEach(function(b){b.classList.remove('active');});
@@ -2516,6 +3032,7 @@ async function fetchComments() {
   if(ciSrcs.has('hn'))tasks.push(fetchHN(q));
   if(ciSrcs.has('reddit'))['AustralianPolitics','australia','AusFinance','melbourne','sydney','Labor'].forEach(function(sr){tasks.push(fetchReddit(sr,q));});
   if(WORKER_URL){
+    if(ciSrcs.has('allnews'))tasks.push(fetchAllNews(q));
     if(ciSrcs.has('guardian'))tasks.push(fetchGuardian(q));
     if(ciSrcs.has('abc_rss'))tasks.push(fetchRSS('abc_rss','abc',q));
     if(ciSrcs.has('smh_rss'))tasks.push(fetchRSS('smh_rss','smh',q));
@@ -2577,6 +3094,20 @@ async function fetchRSS(srcKey,feed,q) {
     var m=SRC_META[srcKey]||{n:srcKey};
     items.forEach(function(it,i){ciComments.push({id:srcKey+'_'+i+'_'+Date.now(),src:srcKey,type:'article',text:it.title,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(it.title),kw:calcKW(it.title),art:m.n+' RSS'});});
     if(items.length){ciActiveSrcs.add(srcKey);var el=document.getElementById('sri-'+srcKey);if(el)el.textContent=items.length;}
+  }catch(e){}
+}
+// Aggregate 20+ AU outlets in one worker request (Intel tab)
+async function fetchAllNews(q) {
+  if(!WORKER_URL)return;
+  try {
+    var res=await fetch(WORKER_URL+'/allnews?q='+encodeURIComponent(q)+'&max=50');if(!res.ok)return;
+    var data=await res.json();
+    (data.items||[]).forEach(function(it,i){
+      var m=SRC_META[it.src]||{n:it.src};
+      var txt=it.title+(it.desc?' — '+it.desc:'');
+      ciComments.push({id:'news_'+it.src+'_'+i+'_'+Date.now(),src:it.src,type:'article',text:txt,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(txt),kw:calcKW(txt),art:m.n});
+      if(it.src)ciActiveSrcs.add(it.src);
+    });
   }catch(e){}
 }
 async function fetchForum(route,q) {
@@ -3056,7 +3587,7 @@ function appendLog(cls, msg) {
 function clearLog() { var body = document.getElementById('exec-log-body'); if (body) body.innerHTML = '<div style="color:var(--t3);font-style:italic">Log cleared.</div>'; }
 function updateProgressBar(srcCounts) {
   var done = Object.keys(srcCounts||{}).length;
-  var pct  = Math.round(done/TOTAL_SOURCES*100);
+  var pct  = Math.min(100, Math.round(done/TOTAL_SOURCES*100));
   var bar  = document.getElementById('collect-pbar');
   var lbl  = document.getElementById('collect-pbar-label');
   if (bar) bar.style.width = pct + '%';

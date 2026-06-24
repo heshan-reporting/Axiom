@@ -17,7 +17,9 @@
  * ║  GET /reddit?q=&sr=           Reddit search proxy (CORS fix)            ║
  * ║  GET /reddit-comments?p=      Reddit post comments proxy                ║
  * ║  GET /guardian?q=             Guardian AU API                           ║
- * ║  GET /rss?feed=               RSS feed aggregator (KV cached 10min)     ║
+ * ║  GET /rss?feed=               Single AU feed from AU_FEEDS (KV 10min)    ║
+ * ║  GET /allnews?q=&max=         Aggregate 20+ AU news feeds, merged +     ║
+ * ║                               keyword-filtered, newest-first (KV 5min)  ║
  * ║  GET /whirlpool?q=            Whirlpool forum scrape                    ║
  * ║  GET /bigfooty?q=             BigFooty AU Politics forum scrape         ║
  * ║  GET /hotcopper?q=            HotCopper Politics board scrape           ║
@@ -99,6 +101,59 @@ function stripHtml(s = '') {
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Australian news / politics RSS + Atom feed registry.
+ * Shared by the /rss (single feed) and /allnews (aggregate) routes.
+ * Feeds that 404 or block bots are skipped gracefully by /allnews.
+ */
+const AU_FEEDS = {
+  // ── Public broadcasters ──
+  abc:           'https://www.abc.net.au/news/feed/51120/rss.xml',        // ABC Politics
+  abc_top:       'https://www.abc.net.au/news/feed/2942460/rss.xml',      // ABC Top Stories
+  sbs:           'https://www.sbs.com.au/news/feed',
+  // ── Nine mastheads ──
+  smh:           'https://www.smh.com.au/rss/feed.xml',
+  smh_pol:       'https://www.smh.com.au/rss/politics/federal.xml',
+  theage:        'https://www.theage.com.au/rss/feed.xml',
+  brisbanetimes: 'https://www.brisbanetimes.com.au/rss/feed.xml',
+  watoday:       'https://www.watoday.com.au/rss/feed.xml',
+  afr:           'https://www.afr.com/rss/feed.xml',
+  // ── Guardian Australia ──
+  guardian:      'https://www.theguardian.com/australia-news/rss',
+  guardian_pol:  'https://www.theguardian.com/australia-news/australian-politics/rss',
+  // ── Independent / analysis ──
+  conversation:  'https://theconversation.com/au/articles.atom',
+  crikey:        'https://www.crikey.com.au/feed/',
+  newdaily:      'https://thenewdaily.com.au/feed/',
+  michaelwest:   'https://michaelwest.com.au/feed/',
+  independentau: 'https://independentaustralia.net/feed/',
+  menadue:       'https://johnmenadue.com/feed/',
+  saturdaypaper: 'https://www.thesaturdaypaper.com.au/feed',
+  junkee:        'https://junkee.com/feed',
+  // ── News Corp / wire ──
+  newscomau:     'https://www.news.com.au/content-feeds/latest-news-national/',
+  aap:           'https://www.aap.com.au/feed/',
+  // ── Regional ──
+  canberratimes: 'https://www.canberratimes.com.au/rss.xml',
+  indaily:       'https://www.indaily.com.au/feed',
+};
+
+/** Parse an RSS/Atom string into [{ title, link, date, desc }] */
+function parseFeedXml(xml = '') {
+  const blocks = [
+    ...xml.matchAll(/<item>([\s\S]*?)<\/item>/g),
+    ...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g),
+  ];
+  return blocks.map(m => {
+    const b = m[1];
+    const title = stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1] || ''));
+    const link  = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || [])[1]?.trim();
+    const date  = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || b.match(/<published>([\s\S]*?)<\/published>/) || b.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1]?.trim();
+    const descRaw = (b.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/) || b.match(/<summary[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/summary>/) || [])[1] || '';
+    return { title, link, date, desc: stripHtml(descRaw).slice(0, 240) };
+  }).filter(i => i.title);
 }
 
 /** KV helpers with silent fail */
@@ -1122,39 +1177,68 @@ export default {
 
     if (path === '/rss') {
       const feed = reqUrl.searchParams.get('feed') || '';
-      const FEEDS = {
-        abc:          'https://www.abc.net.au/news/feed/51120/rss.xml',
-        smh:          'https://www.smh.com.au/rss/feed.xml',
-        guardian:     'https://www.theguardian.com/australia-news/rss',
-        sbs:          'https://www.sbs.com.au/news/feed',
-        crikey:       'https://www.crikey.com.au/feed/',
-        conversation: 'https://theconversation.com/au/articles.atom',
-      };
-      const rssUrl = FEEDS[feed];
+      const rssUrl = AU_FEEDS[feed];
       if (!rssUrl) return new Response('{}', { headers: CORS });
       const cacheKey = `rss_${feed}`;
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r   = await fetch(rssUrl, { headers: { 'User-Agent': 'AXIOM-Worker/3.0' } });
+        const r   = await fetch(rssUrl, { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' } });
         const xml = await r.text();
-        const blocks = [
-          ...xml.matchAll(/<item>([\s\S]*?)<\/item>/g),
-          ...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g),
-        ];
-        const items = blocks.map(m => {
-          const b = m[1];
-          const title = stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1] || ''));
-          const link  = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || [])[1]?.trim();
-          const date  = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || b.match(/<published>([\s\S]*?)<\/published>/) || [])[1]?.trim();
-          return { title, link, date };
-        }).filter(i => i.title);
+        const items = parseFeedXml(xml);
         const out = JSON.stringify({ items });
         await kvPut(env.AXIOM_KV, cacheKey, out, 600);
         return new Response(out, { headers: CORS });
       } catch {
         return jsonResp({ error: 'rss_fetch_failed' }, 502);
       }
+    }
+
+    // ── Aggregate AU news across the whole feed registry (one request) ──
+    // GET /allnews?q=<keywords>&max=<n>   — server-side parallel fetch + merge
+    if (path === '/allnews') {
+      const q   = (reqUrl.searchParams.get('q') || '').toLowerCase();
+      const max = Math.min(parseInt(reqUrl.searchParams.get('max') || '60', 10) || 60, 120);
+      const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+      const cacheKey = `allnews_${q || 'all'}_${max}`;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+
+      const keys = Object.keys(AU_FEEDS);
+      const results = await Promise.allSettled(keys.map(async (key) => {
+        const r = await fetch(AU_FEEDS[key], {
+          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(7000) : undefined,
+        });
+        if (!r.ok) throw new Error(`${key}_${r.status}`);
+        const xml = await r.text();
+        return parseFeedXml(xml).map(it => ({ src: key, ...it }));
+      }));
+
+      let items = [];
+      const sources = [];
+      results.forEach((res, i) => {
+        if (res.status === 'fulfilled') {
+          sources.push({ src: keys[i], count: res.value.length });
+          items.push(...res.value);
+        }
+      });
+
+      // keyword filter (any word matches title or description)
+      if (qw.length) {
+        items = items.filter(it => {
+          const hay = (it.title + ' ' + (it.desc || '')).toLowerCase();
+          return qw.some(w => hay.indexOf(w) !== -1);
+        });
+      }
+
+      // newest first where dates parse, then cap
+      items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+      items = items.slice(0, max);
+
+      const out = JSON.stringify({ items, sources, feeds: keys.length });
+      await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+      return new Response(out, { headers: CORS });
     }
 
     if (path === '/whirlpool') {
@@ -1768,6 +1852,35 @@ export default {
         push(deduped, 'canberratimes');
         await saveProgress('running', `  ✓ Canberra Times: ${deduped.length} items`);
       } catch(e) { await saveProgress('running', `  ✗ Canberra Times failed: ${e}`); }
+
+      // ══════════════════════════════════════════════════════════════════════
+      // SOURCE 10b — Extended AU newswire  (METHOD: shared AU_FEEDS registry)
+      // Fans out across the rest of the registry not collected individually
+      // above (Nine federal/regional, AFR, Guardian politics, independents,
+      // news.com.au, AAP, InDaily…). Each feed: one fetch, parsed per topic.
+      // ══════════════════════════════════════════════════════════════════════
+      await saveProgress('running', '⬤ Extended AU newswire — registry feeds');
+      try {
+        const EXTRA_FEED_KEYS = [
+          'smh_pol', 'brisbanetimes', 'watoday', 'afr', 'guardian_pol',
+          'newdaily', 'michaelwest', 'independentau', 'menadue',
+          'saturdaypaper', 'junkee', 'newscomau', 'aap', 'indaily',
+        ];
+        let extraTotal = 0;
+        for (const key of EXTRA_FEED_KEYS) {
+          const feedUrl = AU_FEEDS[key];
+          if (!feedUrl) continue;
+          try {
+            const xml = await getXML(feedUrl);
+            const fitems = [];
+            for (const topic of topics) fitems.push(...parseRSS(xml || '', key, topic));
+            const deduped = [...new Map(fitems.map(i => [i.url, i])).values()];
+            if (deduped.length) { push(deduped, key); extraTotal += deduped.length; }
+          } catch (e) {}
+          await jitter();
+        }
+        await saveProgress('running', `  ✓ Extended newswire: ${extraTotal} items across ${EXTRA_FEED_KEYS.length} feeds`);
+      } catch(e) { await saveProgress('running', `  ✗ Extended newswire failed: ${e}`); }
 
       // ══════════════════════════════════════════════════════════════════════
       // SOURCE 11 — 9News Politics  (METHOD: HTML scrape — CSS selectors)
