@@ -9,6 +9,8 @@
 <title>AXIOM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- Chart.js for high-end inline analytics (graceful canvas fallback if it fails to load) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
 <style>
 :root {
   /* Core palette — deep navy foundation */
@@ -1741,7 +1743,7 @@ button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color:
   text-transform: uppercase; color: var(--t2); padding: 9px 12px 6px;
   border-bottom: 1px solid var(--hairline);
 }
-.chat-chart-canvas { display: block; width: 100%; }
+.chat-chart-canvas { display: block; width: 100%; padding: 10px 12px 12px; }
 
 /* ── SOURCE CITATIONS ────────────────────────────────────────────── */
 .chat-sources { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
@@ -2319,13 +2321,13 @@ button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color:
         <div class="chat-avatar">AI</div>
         <div class="chat-msg-body">
           <div class="chat-bubble">
-            <strong>G'day.</strong> I'm AXIOM Analyst — powered by Claude with access to Australian political intelligence across 47 sources.<br><br>
+            <strong>G'day.</strong> I'm AXIOM Analyst — powered by Claude. Ask me <strong>anything</strong> about Australian politics. I answer from my own knowledge <em>and</em> live web search, and I cite my sources.<br><br>
             <span class="ch3">MODES</span>
-            ⚡ <strong>Quick</strong> — sharp 2-sentence intel<br>
-            🔬 <strong>Deep</strong> — structured political brief with party implications<br>
-            🌐 <strong>Research</strong> — live web search + synthesis<br>
-            📡 <strong>Forecast</strong> — 30/60/90-day scenario modelling<br><br>
-            <span style="color:var(--t3);font-size:11px">I can generate charts inside this terminal. Try: <em>"Show me ALP vs LNP sentiment as a chart"</em></span>
+            ⚡ <strong>Quick</strong> — fast, conversational answers<br>
+            🔬 <strong>Deep</strong> — structured intelligence brief<br>
+            🌐 <strong>Research</strong> — search-first, full synthesis<br>
+            📡 <strong>Forecast</strong> — 30/60/90-day scenarios<br><br>
+            <span style="color:var(--t3);font-size:11px">Every mode can search the web and draw high-end charts. Try: <em>"Latest 2PP polling — chart the trend"</em> or <em>"Who are the current crossbench senators?"</em></span>
           </div>
         </div>
       </div>
@@ -2987,16 +2989,46 @@ var CHAT_HISTORY  = [];   // full multi-turn conversation history
 var CHAT_IS_BUSY  = false;
 
 /* ── SYSTEM PROMPTS ─────────────────────────────────────────────────── */
+// Shared persona + capabilities. Every mode builds on this so the Analyst
+// can answer ANY Australian-politics question, blending Claude's own
+// knowledge with live web search, and visualising data as charts.
+var CHAT_BASE =
+  'You are AXIOM Analyst — an expert, non-partisan analyst of Australian politics, ' +
+  'comparable to a sharp political correspondent. You can answer ANY question about ' +
+  'Australian politics: facts, history, parliamentary process, policy, elections, ' +
+  'electorates, polling, party positions, personalities, and current events.\n\n' +
+  'KNOWLEDGE + LIVE WEB: Answer from your own knowledge, but you have a live web_search ' +
+  'tool — USE IT whenever the answer depends on recent or verifiable current facts ' +
+  '(who currently holds a seat/portfolio/leadership, latest polling, this week\'s news, ' +
+  'specific dates, figures, quotes, bills before Parliament). Prefer reputable Australian ' +
+  'sources (ABC, Guardian AU, SMH, The Age, AFR, AAP, the AEC, aph.gov.au, Crikey, The ' +
+  'Conversation). Cite specific sources and dates in your text; the app lists them as cards.\n\n' +
+  'STANCE: Strictly non-partisan and accurate. Represent ALP, Coalition (Liberal/Nationals), ' +
+  'Greens, teals, One Nation and others fairly. Distinguish fact from analysis. Flag uncertainty ' +
+  'honestly rather than guessing; if something is unknown or contested, say so. Use Australian ' +
+  'spelling, terminology and context.\n\n' +
+  'CHARTS — render data visually whenever it helps (comparisons, trends, breakdowns, ' +
+  'probabilities, primary/2PP vote, seat counts, timelines). Emit a fenced ```chart block ' +
+  'containing ONLY JSON. Supported shapes:\n' +
+  '• bar / hbar:  {"type":"bar","title":"...","labels":["ALP","LNP","Grn"],"data":[34,36,12],"unit":"%","colors":["#E8344A","#4D8BF5","#2EC470"]}\n' +
+  '• line / area: {"type":"line","title":"...","labels":["Jan","Feb","Mar"],"datasets":[{"label":"ALP","data":[34,35,33],"color":"#E8344A"},{"label":"LNP","data":[36,35,37],"color":"#4D8BF5"}],"unit":"%"}\n' +
+  '• groupedBar / stackedBar: same shape as line but "type":"groupedBar" with datasets\n' +
+  '• donut / pie: {"type":"donut","title":"...","labels":[...],"data":[...],"colors":[...]}\n' +
+  '• radar: {"type":"radar","title":"...","labels":["Economy","Climate","Health"],"datasets":[{"label":"ALP","data":[7,8,9],"color":"#E8344A"}]}\n' +
+  'Use real, sourced numbers where possible; if a figure is an estimate, label it as such in the prose. ' +
+  'Party colours — ALP #E8344A, Liberal/Coalition #4D8BF5, Greens #2EC470, Independents/teal #FFCC00, One Nation #FF7220. ' +
+  'You may include more than one chart. Never put commentary inside the ```chart block.\n\n';
+
 var CHAT_SYSTEMS = {
   quick:
-    'You are AXIOM Analyst — elite Australian political intelligence AI. ' +
-    'For quick questions: answer in 2-3 razor-sharp sentences. Lead with the insight. ' +
-    'Be clinical and direct. No hedging. Mobile-optimised.',
+    CHAT_BASE +
+    'QUICK MODE: Be conversational and direct — answer the actual question first in a tight ' +
+    'paragraph or two (or a short list), then add a sentence of analysis if useful. Search the ' +
+    'web when current facts are needed. Add a chart only if it genuinely clarifies. Mobile-friendly length.',
 
   deep:
-    'You are AXIOM Analyst v2 — elite Australian political intelligence system.\n\n' +
-    'CONTEXT: Real-time monitoring across Reddit, HackerNews, Guardian AU, ABC News, ' +
-    'Whirlpool, BigFooty, OzPolitic, SMH, The Age, Crikey.\n\n' +
+    CHAT_BASE +
+    'DEEP MODE — produce a structured intelligence brief that still draws on your knowledge and live web search.\n\n' +
     'DEEP ANALYSIS FORMAT — use this structure:\n' +
     '**INTELLIGENCE BRIEF — [TOPIC]**\n' +
     'Opening: 1 sentence bottom-line assessment.\n\n' +
@@ -3009,15 +3041,11 @@ var CHAT_SYSTEMS = {
     '## Source Patterns\n' +
     'Which platforms are amplifying what narrative.\n\n' +
     '**CONFIDENCE SCORE: [0-100]** — [one-sentence rationale]\n\n' +
-    'CHART RULE: If showing numerical data or comparisons, ALWAYS output a chart block using this EXACT format:\n' +
-    '```chart\n{"type":"bar","title":"...","labels":[...],"data":[...],"colors":[...]}\n```\n\n' +
-    'For trends use type "line" with "datasets":[{"label":"...","data":[...],"color":"..."}]\n' +
-    'For splits use type "donut".\n\n' +
-    'Keep paragraphs mobile-short (3-4 lines max).',
+    'Include charts for any comparative or numerical data. Keep paragraphs mobile-short (3-4 lines max).',
 
   research:
-    'You are AXIOM Analyst v2 — elite Australian political intelligence system with LIVE WEB SEARCH.\n\n' +
-    'RESEARCH MODE: Search the web for current information before answering. ' +
+    CHAT_BASE +
+    'RESEARCH MODE: ALWAYS run web searches first to gather the latest information before answering. ' +
     'Search for: recent news, specific policy announcements, polling data, political statements.\n\n' +
     'AFTER SEARCHING — produce a full intelligence brief:\n' +
     '**RESEARCH BRIEF — [TOPIC]** 🌐 WEB SOURCED\n\n' +
@@ -3030,12 +3058,10 @@ var CHAT_SYSTEMS = {
     '## Assessment\n' +
     'Your analytical conclusion.\n\n' +
     '**CONFIDENCE SCORE: [0-100]** — [rationale]\n\n' +
-    'CHART RULE: Always include a chart if you have comparative data:\n' +
-    '```chart\n{"type":"bar","title":"...","labels":[...],"data":[...],"colors":[...]}\n```\n\n' +
-    'Cite sources naturally in text. Be specific about dates and sources.',
+    'Include charts for comparative data. Cite specific sources and dates in the text.',
 
   forecast:
-    'You are AXIOM Analyst v2 — strategic political forecasting system.\n\n' +
+    CHAT_BASE +
     'FORECAST MODE: Produce scenario-based political forecasts.\n\n' +
     'FORECAST FORMAT:\n' +
     '**STRATEGIC FORECAST — [TOPIC]**\n\n' +
@@ -3052,9 +3078,7 @@ var CHAT_SYSTEMS = {
     '## Electoral Implications\n' +
     'Seat-level and state-level impacts.\n\n' +
     '**FORECAST CONFIDENCE: [0-100]** — [caveat]\n\n' +
-    'CHART RULE — for forecast timelines or scenario probabilities:\n' +
-    '```chart\n{"type":"bar","title":"Scenario Probabilities (%)","labels":["Bull","Base","Bear"],"data":[25,55,20],"colors":["#30D158","#0A84FF","#FF453A"]}\n```\n\n' +
-    'Base every claim on observable political data. Flag uncertainty honestly.'
+    'Visualise scenario probabilities or timelines as charts. Base every claim on observable political data and flag uncertainty honestly.'
 };
 
 /* ── MODE MANAGEMENT ─────────────────────────────────────────────────── */
@@ -3084,69 +3108,31 @@ function setQuickPromptMode(el, mode) {
   sendChatV2();
 }
 
-/* ── CORE CLAUDE V2 CALL (with web-search tool support) ──────────────── */
+/* ── CORE CLAUDE V2 CALL (server-side web search in every mode) ───────── */
 async function callClaudeV2(messages, system, mode) {
-  var maxTokens = { quick:600, deep:2200, research:3500, forecast:2200 }[mode] || 1200;
+  var maxTokens = { quick:1400, deep:2800, research:3800, forecast:2800 }[mode] || 1600;
+  var maxUses   = { quick:4,    deep:6,    research:10,   forecast:6    }[mode] || 5;
 
+  // web_search_20250305 is a SERVER-side tool — Anthropic runs it inline and
+  // returns web_search_tool_result blocks. We just declare it and, if the
+  // server pauses (pause_turn) mid-search, resume by resending the transcript.
   var body = {
     model: 'claude-sonnet-4-6',
     max_tokens: maxTokens,
     system: system,
-    messages: messages
+    tools: [{
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: maxUses,
+      user_location: { type: 'approximate', country: 'AU', timezone: 'Australia/Sydney' }
+    }]
   };
 
-  // Enable web search for research mode
-  if (mode === 'research') {
-    body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
-  }
+  var convo = messages.slice();
+  var text = '', citations = [], usedSearch = false;
 
-  var res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': CLAUDE_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    var err = await res.json();
-    throw new Error(err.error ? err.error.message : 'API error ' + res.status);
-  }
-
-  var data = await res.json();
-
-  // Handle multi-turn tool use (web search)
-  var iterations = 0;
-  while (data.stop_reason === 'tool_use' && iterations < 4) {
-    iterations++;
-    var toolUseBlocks = (data.content || []).filter(function(b) { return b.type === 'tool_use'; });
-
-    // Build updated conversation
-    var updatedMsgs = messages.concat([{ role: 'assistant', content: data.content }]);
-
-    // For each tool_use, provide results
-    // web_search_20250305 is server-side but may need multi-turn for some API versions
-    // We fall back to HN search for the query
-    var toolResults = [];
-    for (var i = 0; i < toolUseBlocks.length; i++) {
-      var tu = toolUseBlocks[i];
-      var searchContent = '';
-      if (tu.name === 'web_search') {
-        var query = (tu.input && tu.input.query) ? tu.input.query : 'Australian politics';
-        searchContent = await searchHNForContext(query);
-      }
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: tu.id,
-        content: searchContent || 'No results found for this query.'
-      });
-    }
-    updatedMsgs.push({ role: 'user', content: toolResults });
-
-    var res2 = await fetch('https://api.anthropic.com/v1/messages', {
+  for (var turn = 0; turn < 5; turn++) {
+    var res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3154,24 +3140,50 @@ async function callClaudeV2(messages, system, mode) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify(Object.assign({}, body, { messages: updatedMsgs }))
+      body: JSON.stringify(Object.assign({}, body, { messages: convo }))
     });
-    data = await res2.json();
+
+    if (!res.ok) {
+      var err = await res.json().catch(function() { return {}; });
+      throw new Error(err.error ? err.error.message : 'API error ' + res.status);
+    }
+    var data = await res.json();
+    if (data.error) throw new Error(data.error.message || 'Claude API error');
+
+    (data.content || []).forEach(function(b) {
+      if (b.type === 'text') {
+        text += (text ? '\n' : '') + b.text;
+        (b.citations || []).forEach(function(c) { if (c.url) citations.push({ url: c.url, title: c.title || c.url }); });
+      } else if (b.type === 'server_tool_use') {
+        usedSearch = true;
+      } else if (b.type === 'web_search_tool_result') {
+        usedSearch = true;
+        if (Array.isArray(b.content)) {
+          b.content.forEach(function(r) { if (r.url) citations.push({ url: r.url, title: r.title || r.url }); });
+        }
+      }
+    });
+
+    // Server hit its internal tool-loop budget — resume the same turn.
+    if (data.stop_reason === 'pause_turn') {
+      convo = convo.concat([{ role: 'assistant', content: data.content }]);
+      continue;
+    }
+    break;
   }
 
-  // Extract text and any tool-use search queries for display
-  var textBlocks  = (data.content || []).filter(function(b) { return b.type === 'text'; });
-  var searchQueries = ((body.tools && messages.length > 0) ? [] : []);
-  // Collect search queries from conversation
-  var allContent = [].concat.apply([], messages.map(function(m) {
-    return Array.isArray(m.content) ? m.content : [];
-  }));
+  // De-duplicate citations into clean source cards.
+  var seen = {}, sources = [];
+  citations.forEach(function(c) {
+    if (c.url && !seen[c.url]) {
+      seen[c.url] = 1;
+      var host = '';
+      try { host = new URL(c.url).hostname.replace(/^www\./, ''); } catch(e) {}
+      sources.push({ url: c.url, title: c.title || host || c.url, meta: host, icon: '🌐' });
+    }
+  });
 
-  return {
-    text: textBlocks.map(function(b) { return b.text; }).join('\n'),
-    usedSearch: iterations > 0,
-    rawContent: data.content
-  };
+  return { text: text.trim(), usedSearch: usedSearch, sources: sources };
 }
 
 /* ── HN SEARCH FOR WEB-SEARCH TOOL FALLBACK ──────────────────────────── */
@@ -3226,9 +3238,9 @@ async function sendChatV2() {
   var thinkingHTML = '<div class="chat-msg bot" id="' + thinkingId + '">' +
     '<div class="chat-avatar">AI</div>' +
     '<div class="chat-msg-body"><div class="typing-bubble">' +
-    (CHAT_MODE === 'research' ?
-      '<div class="search-status"><div class="search-pulse"></div>' +
-      '<span class="search-status-text" id="search-status-text">Searching live sources…</span></div>' : '') +
+    '<div class="search-status"><div class="search-pulse"></div>' +
+    '<span class="search-status-text" id="search-status-text">' +
+    (CHAT_MODE === 'research' ? 'Searching the web…' : 'Thinking · consulting sources…') + '</span></div>' +
     '<div class="typing-dots"><div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div></div>' +
     '</div></div></div>';
   msgs.insertAdjacentHTML('beforeend', thinkingHTML);
@@ -3245,8 +3257,8 @@ async function sendChatV2() {
     var thinkingEl = document.getElementById(thinkingId);
     if (thinkingEl) thinkingEl.remove();
 
-    // Render response
-    appendChatMsg('bot', null, replyText, null, result.usedSearch);
+    // Render response (with live web sources as citation cards)
+    appendChatMsg('bot', null, replyText, result.sources, result.usedSearch);
     msgs.scrollTop = msgs.scrollHeight;
 
   } catch(e) {
@@ -3394,6 +3406,14 @@ function buildChartHTML(id, jsonStr) {
 function renderChatChart(id, jsonStr) {
   var canvas = document.getElementById(id);
   if (!canvas) return;
+
+  // High-end path: render via Chart.js when it has loaded.
+  var spec; try { spec = JSON.parse(jsonStr); } catch(e) { return; }
+  if (window.Chart) {
+    try { renderChartJS(canvas, spec); return; }
+    catch(e) { /* fall through to built-in canvas renderer */ }
+  }
+
   var dpr = Math.min(window.devicePixelRatio || 1, 2.5);
   var W = canvas.parentElement.clientWidth || 300;
   var H = parseInt(canvas.getAttribute('data-h') || 180);
@@ -3594,6 +3614,123 @@ function renderChatChart(id, jsonStr) {
   }
 
   animate();
+}
+
+/* ── HIGH-END CHART RENDERER (Chart.js) ──────────────────────────────── */
+function _hexA(h, a) {
+  if (typeof h !== 'string') return 'rgba(10,132,255,' + a + ')';
+  var m = h.replace('#', '');
+  if (m.length === 3) m = m[0]+m[0]+m[1]+m[1]+m[2]+m[2];
+  var n = parseInt(m, 16);
+  if (isNaN(n)) return h;
+  return 'rgba(' + ((n>>16)&255) + ',' + ((n>>8)&255) + ',' + (n&255) + ',' + a + ')';
+}
+function renderChartJS(canvas, spec) {
+  if (canvas._chart) { try { canvas._chart.destroy(); } catch(e) {} }
+
+  // Size: honour the height the placeholder reserved.
+  var H = parseInt(canvas.getAttribute('data-h') || '190', 10);
+  canvas.style.height = H + 'px';
+  if (canvas.parentElement) canvas.parentElement.style.height = (H + (spec.title ? 28 : 0)) + 'px';
+
+  var PALETTE = ['#0A84FF','#30D158','#FF453A','#FFD60A','#BF5AF2','#FF9F0A','#64D2FF','#E8344A','#4D8BF5','#2EC470'];
+  var GRID = 'rgba(255,255,255,0.06)', TICK = 'rgba(255,255,255,0.5)';
+  var FONT = "'JetBrains Mono', ui-monospace, monospace";
+  var unit = spec.unit || '';
+  var type = (spec.type || 'bar').toLowerCase();
+  var labels = spec.labels || [];
+
+  function tickFmt(v) { return (typeof v === 'number' ? v : v) + unit; }
+  var baseScale = {
+    grid: { color: GRID, drawBorder: false },
+    ticks: { color: TICK, font: { family: FONT, size: 9 } }
+  };
+  var common = {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 700, easing: 'easeOutQuart' },
+    layout: { padding: 2 },
+    plugins: {
+      legend: { display: false, labels: { color: TICK, font: { family: FONT, size: 10 }, boxWidth: 10, boxHeight: 10, usePointStyle: true } },
+      tooltip: {
+        backgroundColor: 'rgba(10,14,26,0.95)', borderColor: 'rgba(255,255,255,0.12)', borderWidth: 1,
+        titleColor: '#F0F4FF', bodyColor: '#B8C4E0', titleFont: { family: FONT, size: 11 }, bodyFont: { family: FONT, size: 11 },
+        padding: 10, cornerRadius: 8, displayColors: true, usePointStyle: true,
+        callbacks: { label: function(ctx) {
+          var lbl = ctx.dataset.label ? ctx.dataset.label + ': ' : '';
+          var p = ctx.parsed, v;
+          if (p !== null && typeof p === 'object') {
+            var horiz = ctx.chart && ctx.chart.options && ctx.chart.options.indexAxis === 'y';
+            v = (p.r !== undefined) ? p.r : horiz ? p.x : p.y;
+          } else { v = p; }
+          if (v === undefined || v === null) v = ctx.raw;
+          return lbl + v + unit;
+        } }
+      }
+    }
+  };
+
+  var cfg;
+
+  if (type === 'donut' || type === 'pie') {
+    cfg = { type: type === 'pie' ? 'pie' : 'doughnut',
+      data: { labels: labels, datasets: [{ data: spec.data || [], backgroundColor: (spec.colors || PALETTE), borderColor: 'rgba(8,11,20,0.9)', borderWidth: 2, hoverOffset: 6 }] },
+      options: Object.assign({}, common, { cutout: type === 'pie' ? 0 : '62%', plugins: Object.assign({}, common.plugins, { legend: Object.assign({}, common.plugins.legend, { display: true, position: 'right' }) }) })
+    };
+  } else if (type === 'radar') {
+    var rds = (spec.datasets || []).map(function(ds, i) {
+      var col = ds.color || PALETTE[i % PALETTE.length];
+      return { label: ds.label || '', data: ds.data || [], borderColor: col, backgroundColor: _hexA(col, 0.18), borderWidth: 2, pointBackgroundColor: col, pointRadius: 2 };
+    });
+    cfg = { type: 'radar', data: { labels: labels, datasets: rds },
+      options: Object.assign({}, common, {
+        plugins: Object.assign({}, common.plugins, { legend: Object.assign({}, common.plugins.legend, { display: rds.length > 1, position: 'bottom' }) }),
+        scales: { r: { grid: { color: GRID }, angleLines: { color: GRID }, pointLabels: { color: TICK, font: { family: FONT, size: 9 } }, ticks: { display: false, backdropColor: 'transparent' } } }
+      })
+    };
+  } else if (type === 'line' || type === 'area') {
+    var lds0 = spec.datasets || [{ label: '', data: spec.data || [], color: (spec.colors || PALETTE)[0] }];
+    var lds = lds0.map(function(ds, i) {
+      var col = ds.color || PALETTE[i % PALETTE.length];
+      return { label: ds.label || '', data: ds.data || [], borderColor: col,
+        backgroundColor: (type === 'area') ? _hexA(col, 0.20) : col, fill: type === 'area',
+        tension: 0.35, borderWidth: 2.5, pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: col };
+    });
+    cfg = { type: 'line', data: { labels: labels, datasets: lds },
+      options: Object.assign({}, common, {
+        plugins: Object.assign({}, common.plugins, { legend: Object.assign({}, common.plugins.legend, { display: lds.length > 1, position: 'bottom' }) }),
+        scales: { x: baseScale, y: Object.assign({}, baseScale, { ticks: Object.assign({}, baseScale.ticks, { callback: tickFmt }), beginAtZero: true }) }
+      })
+    };
+  } else {
+    // bar family: bar | hbar | groupedBar | stackedBar
+    var horizontal = (type === 'hbar');
+    var stacked = (type === 'stackedbar' || type === 'stacked');
+    var grouped = (type === 'groupedbar' || stacked);
+    var bds;
+    if (grouped && spec.datasets) {
+      bds = spec.datasets.map(function(ds, i) {
+        var col = ds.color || PALETTE[i % PALETTE.length];
+        return { label: ds.label || '', data: ds.data || [], backgroundColor: _hexA(col, 0.85), borderColor: col, borderWidth: 1, borderRadius: 6, borderSkipped: false, maxBarThickness: 46 };
+      });
+    } else {
+      var cols = spec.colors || PALETTE;
+      bds = [{ label: spec.seriesLabel || '', data: spec.data || [],
+        backgroundColor: (spec.data || []).map(function(_, i) { return _hexA(cols[i % cols.length], 0.85); }),
+        borderColor: (spec.data || []).map(function(_, i) { return cols[i % cols.length]; }),
+        borderWidth: 1, borderRadius: 6, borderSkipped: false, maxBarThickness: 54 }];
+    }
+    var valScale = Object.assign({}, baseScale, { ticks: Object.assign({}, baseScale.ticks, { callback: tickFmt }), beginAtZero: true, stacked: stacked });
+    var catScale = Object.assign({}, baseScale, { stacked: stacked });
+    cfg = { type: 'bar', data: { labels: labels, datasets: bds },
+      options: Object.assign({}, common, {
+        indexAxis: horizontal ? 'y' : 'x',
+        plugins: Object.assign({}, common.plugins, { legend: Object.assign({}, common.plugins.legend, { display: !!(grouped && bds.length > 1), position: 'bottom' }) }),
+        scales: horizontal ? { x: valScale, y: catScale } : { x: catScale, y: valScale }
+      })
+    };
+  }
+
+  canvas._chart = new Chart(canvas.getContext('2d'), cfg);
 }
 
 /* ── CHAT UTILITIES ──────────────────────────────────────────────────── */
