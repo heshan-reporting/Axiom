@@ -59,26 +59,6 @@
   --ff-sans:  'Sora', sans-serif;
   --ff-mono:  'JetBrains Mono', monospace;
   --ff-title: 'Space Grotesk', sans-serif;
-
-  /* ── Elite layer: elevation, easing, surfaces ── */
-  --ease:      cubic-bezier(0.22, 1, 0.36, 1);   /* refined ease-out */
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-
-  /* Layered shadows — soft, multi-stop ambient depth */
-  --sh-1: 0 1px 2px rgba(0,0,0,0.30), 0 1px 1px rgba(0,0,0,0.20);
-  --sh-2: 0 4px 14px -4px rgba(0,0,0,0.45), 0 2px 6px -2px rgba(0,0,0,0.30);
-  --sh-3: 0 18px 48px -12px rgba(0,0,0,0.65), 0 8px 20px -8px rgba(0,0,0,0.45);
-  --sh-glow: 0 0 0 1px rgba(79,127,255,0.18), 0 8px 28px -8px rgba(79,127,255,0.30);
-
-  /* Hairline top highlight — the signature of premium dark surfaces */
-  --edge: inset 0 1px 0 0 rgba(255,255,255,0.05);
-  --edge-strong: inset 0 1px 0 0 rgba(255,255,255,0.08);
-
-  /* Surface gradients (subtle top-lit panels) */
-  --surf-1: linear-gradient(180deg, #0F1424 0%, #0C1020 100%);
-  --surf-2: linear-gradient(180deg, #171D32 0%, #121728 100%);
-  --grad-brand: linear-gradient(135deg, #5B8BFF 0%, #7B5EFF 100%);
 }
 
 /* ── RESET ── */
@@ -504,49 +484,6 @@ body::before {
   cursor: pointer; transition: all 0.15s;
 }
 .qp-btn:active { background: rgba(79,127,255,0.16); }
-
-/* ── AI BANK ── */
-.bank-intro { font-family: var(--ff-sans); font-size: 12px; line-height: 1.7; color: var(--t1); }
-.bank-mode-row { display: flex; gap: 8px; margin-bottom: 11px; }
-.bank-mode {
-  flex: 1; text-align: left; padding: 10px 12px; border-radius: 12px;
-  border: 1px solid var(--line); background: var(--ink1); cursor: pointer;
-  transition: all 0.15s;
-}
-.bank-mode.active { border-color: var(--brand); background: rgba(79,127,255,0.08); }
-.bank-mode-t { font-family: var(--ff-sans); font-size: 12px; font-weight: 600; color: var(--t0); }
-.bank-mode-s { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.4px; color: var(--t3); margin-top: 2px; }
-.bank-ask-wrap { display: flex; gap: 8px; }
-.bank-input {
-  flex: 1; padding: 11px 13px; border-radius: 11px; border: 1px solid var(--line);
-  background: var(--ink0); color: var(--t0); font-family: var(--ff-sans); font-size: 12.5px;
-  outline: none;
-}
-.bank-input:focus { border-color: var(--brand); }
-.bank-send {
-  padding: 0 16px; border-radius: 11px; border: none; cursor: pointer;
-  background: linear-gradient(135deg,var(--brand),var(--mix)); color: #fff;
-  font-family: var(--ff-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
-}
-.bank-send:disabled { opacity: 0.5; cursor: default; }
-.bank-qa { background: var(--ink1); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 12px; animation: fadeUp 0.3s ease both; }
-.bank-q { display: flex; align-items: flex-start; gap: 8px; padding: 12px 13px; border-bottom: 1px solid var(--line); }
-.bank-q-icon { width: 20px; height: 20px; border-radius: 6px; background: var(--ink4); color: var(--t2); display: flex; align-items: center; justify-content: center; font-family: var(--ff-mono); font-size: 9px; font-weight: 700; flex-shrink: 0; }
-.bank-q-txt { font-family: var(--ff-sans); font-size: 12.5px; font-weight: 600; color: var(--t0); line-height: 1.5; }
-.bank-a { padding: 13px; }
-.bank-a-lbl { display: flex; align-items: center; gap: 6px; font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.6px; color: var(--t3); margin-bottom: 9px; }
-.bank-a-tag { padding: 2px 7px; border-radius: 6px; font-weight: 700; }
-.bank-a-tag.data { background: rgba(79,127,255,0.14); color: var(--brand2); }
-.bank-a-tag.web { background: rgba(46,160,67,0.16); color: var(--pos); }
-.bank-a-body { font-family: var(--ff-sans); font-size: 12px; line-height: 1.8; color: var(--t1); }
-.bank-a-body strong { color: var(--t0); }
-.bank-a-body a { color: var(--brand2); text-decoration: none; }
-.bank-srcs { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line); }
-.bank-srcs-h { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.6px; color: var(--t3); margin-bottom: 7px; }
-.bank-src { display: flex; align-items: center; gap: 7px; padding: 5px 0; }
-.bank-src-pill { font-family: var(--ff-mono); font-size: 7.5px; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: var(--ink4); color: var(--t2); flex-shrink: 0; }
-.bank-src a { font-family: var(--ff-sans); font-size: 11px; color: var(--t1); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bank-src a:active { color: var(--brand2); }
 
 /* ── CI TAB ── */
 .ci-search-wrap { position: relative; margin-bottom: 10px; }
@@ -1145,355 +1082,765 @@ body::before {
   font-family: var(--ff-mono); font-size: 8px; color: var(--t3);
   text-align: right; margin-top: 4px;
 }
-/* ── RAPID RESPONSE NEWSROOM ── */
-.rr-hero {
-  background: linear-gradient(135deg, rgba(255,69,102,0.08), rgba(255,184,48,0.04));
-  border: 1px solid rgba(255,69,102,0.2);
-  border-radius: var(--r); padding: 16px;
-  margin-bottom: 14px; position: relative; overflow: hidden;
-}
-.rr-hero::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-  background: linear-gradient(90deg, var(--neg), var(--neu));
-}
-.rr-hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.rr-hero-label { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 2px; color: var(--t3); text-transform: uppercase; margin-bottom: 4px; }
-.rr-hero-status { font-family: var(--ff-title); font-size: 20px; font-weight: 700; color: var(--t0); display: flex; align-items: center; gap: 8px; }
-.rr-scan-btn {
-  display: flex; align-items: center; gap: 6px;
-  padding: 9px 14px; border-radius: 10px;
-  background: linear-gradient(135deg, var(--neg), #FF8A9F);
-  border: none; color: white;
-  font-family: var(--ff-mono); font-size: 9px; font-weight: 600;
-  cursor: pointer; letter-spacing: 1px; transition: all 0.2s; flex-shrink: 0;
-}
-.rr-scan-btn:active { transform: scale(0.96); }
-.rr-scan-btn:disabled { background: var(--ink3); color: var(--t3); cursor: not-allowed; }
-.rr-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-.rr-stat { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px; text-align: center; }
-.rr-stat-val { font-family: var(--ff-title); font-size: 22px; font-weight: 700; line-height: 1; color: var(--t0); }
-.rr-stat-lbl { font-family: var(--ff-mono); font-size: 7px; color: var(--t3); letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
-.rr-pipeline {
-  display: flex; margin-bottom: 14px; overflow: hidden;
-  border-radius: 10px; border: 1px solid var(--line);
-}
-.rr-pipe-stage {
-  flex: 1; padding: 10px 4px; text-align: center;
-  border-right: 1px solid var(--line); cursor: pointer;
-  background: var(--ink1); transition: background 0.15s;
-}
-.rr-pipe-stage:last-child { border-right: none; }
-.rr-pipe-stage.active { background: rgba(79,127,255,0.08); }
-.rr-pipe-stage:active { background: rgba(79,127,255,0.12); }
-.rr-pipe-num { font-family: var(--ff-title); font-size: 18px; font-weight: 700; line-height: 1; }
-.rr-pipe-lbl { font-family: var(--ff-mono); font-size: 6.5px; color: var(--t3); letter-spacing: 0.8px; text-transform: uppercase; margin-top: 3px; }
-.rr-item {
-  background: var(--ink1); border: 1px solid var(--line);
-  border-radius: 14px; margin-bottom: 12px; overflow: hidden;
-  animation: fadeUp 0.3s ease both; position: relative;
-}
-.rr-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-.rr-item.flag-hot::before { background: linear-gradient(180deg, var(--neg), transparent); }
-.rr-item.flag-rising::before { background: linear-gradient(180deg, var(--neu), transparent); }
-.rr-item.flag-opp::before { background: linear-gradient(180deg, var(--pos), transparent); }
-.rr-item-hdr {
-  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
-  padding: 9px 13px; background: var(--ink2); border-bottom: 1px solid var(--line);
-}
-.rr-flag-badge {
-  font-family: var(--ff-mono); font-size: 7.5px; font-weight: 600;
-  padding: 2px 8px; border-radius: 4px; letter-spacing: 0.5px; flex-shrink: 0;
-}
-.rr-flag-hot  { background: rgba(255,69,102,0.15); color: var(--neg); border: 1px solid rgba(255,69,102,0.25); }
-.rr-flag-rising { background: rgba(255,184,48,0.12); color: var(--neu); border: 1px solid rgba(255,184,48,0.25); }
-.rr-flag-opp  { background: rgba(16,217,142,0.1); color: var(--pos); border: 1px solid rgba(16,217,142,0.2); }
-.rr-src-pill  { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); margin-left: auto; }
-.rr-time      { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); flex-shrink: 0; }
-.rr-item-body { padding: 13px 13px 0; }
-.rr-headline { font-family: var(--ff-sans); font-size: 14px; font-weight: 600; color: var(--t0); line-height: 1.4; margin-bottom: 7px; }
-.rr-summary  { font-family: var(--ff-sans); font-size: 11.5px; color: var(--t1); line-height: 1.65; margin-bottom: 8px; }
-.rr-why      { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); margin-bottom: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; padding: 7px 10px; }
-.rr-excerpt-label { font-family: var(--ff-mono); font-size: 7.5px; color: var(--t3); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
-.rr-excerpt { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 9px 11px; font-family: var(--ff-sans); font-size: 11px; color: var(--t2); line-height: 1.6; margin-bottom: 4px; font-style: italic; }
-.rr-excerpt::before { content: '\201C'; color: var(--t3); }
-.rr-excerpt::after  { content: '\201D'; color: var(--t3); }
-.rr-excerpt-meta { font-family: var(--ff-mono); font-size: 7.5px; color: var(--t3); margin-bottom: 8px; }
-.rr-actions { display: flex; gap: 8px; padding: 12px 13px; border-top: 1px solid rgba(42,53,88,0.4); }
-.rr-btn { flex: 1; padding: 10px 6px; border-radius: 10px; font-family: var(--ff-mono); font-size: 8px; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; border: 1px solid; transition: all 0.15s; text-align: center; }
-.rr-btn-use  { background: rgba(79,127,255,0.12); border-color: rgba(79,127,255,0.3); color: var(--brand2); }
-.rr-btn-use:active { background: rgba(79,127,255,0.22); }
-.rr-btn-skip { background: rgba(255,255,255,0.03); border-color: var(--line); color: var(--t3); }
-.rr-btn-ai   { background: rgba(176,110,255,0.08); border-color: rgba(176,110,255,0.25); color: var(--mix); }
-.rr-btn-adv  { flex: none; padding: 10px 12px; border-radius: 10px; font-family: var(--ff-mono); font-size: 8px; font-weight: 600; cursor: pointer; border: 1px solid rgba(79,127,255,0.3); background: rgba(79,127,255,0.08); color: var(--brand2); transition: all 0.15s; }
-/* Angle panel */
-.rr-angle-panel { background: var(--ink1); border: 1px solid rgba(79,127,255,0.2); border-radius: 14px; margin-bottom: 14px; overflow: hidden; }
-.rr-angle-hdr { display: flex; align-items: center; gap: 10px; padding: 13px 15px; background: linear-gradient(90deg, rgba(79,127,255,0.08), transparent); border-bottom: 1px solid rgba(79,127,255,0.12); }
-.rr-angle-orb { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--brand), var(--mix)); display: flex; align-items: center; justify-content: center; font-family: var(--ff-mono); font-size: 10px; font-weight: 700; color: white; flex-shrink: 0; box-shadow: 0 0 12px rgba(79,127,255,0.25); }
-.rr-angle-title { font-family: var(--ff-title); font-size: 14px; font-weight: 700; color: var(--t0); }
-.rr-angle-sub { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); margin-top: 1px; }
-.rr-close-btn { margin-left: auto; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line); background: none; color: var(--t3); font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.rr-angle-body { padding: 14px; }
-.rr-section-label { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--t3); margin-bottom: 8px; }
-.rr-angle-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-.rr-angle-chip { font-family: var(--ff-sans); font-size: 11px; padding: 7px 11px; border-radius: 20px; border: 1px solid var(--line); background: var(--ink2); color: var(--t2); cursor: pointer; transition: all 0.15s; }
-.rr-angle-chip.active { border-color: rgba(79,127,255,0.4); color: var(--brand2); background: rgba(79,127,255,0.08); }
-.rr-format-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; margin-bottom: 14px; }
-.rr-format-card { background: var(--ink2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 11px; cursor: pointer; transition: all 0.15s; position: relative; }
-.rr-format-card.active { border-color: rgba(79,127,255,0.4); background: rgba(79,127,255,0.07); }
-.rr-format-icon { font-size: 20px; margin-bottom: 5px; }
-.rr-format-name { font-family: var(--ff-sans); font-size: 11.5px; font-weight: 600; color: var(--t0); margin-bottom: 2px; }
-.rr-format-desc { font-family: var(--ff-mono); font-size: 7.5px; color: var(--t3); }
-.rr-format-check { position: absolute; top: 8px; right: 8px; width: 16px; height: 16px; border-radius: 50%; background: var(--brand); display: none; align-items: center; justify-content: center; font-size: 8px; color: white; }
-.rr-format-card.active .rr-format-check { display: flex; }
-.rr-gen-btn { width: 100%; padding: 13px; background: linear-gradient(135deg, rgba(79,127,255,0.15), rgba(176,110,255,0.12)); border: 1px solid rgba(79,127,255,0.3); border-radius: 12px; color: var(--t0); font-family: var(--ff-sans); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-bottom: 10px; }
-.rr-gen-btn:active { transform: scale(0.98); }
-.rr-gen-btn:disabled { background: var(--ink3); border-color: var(--line); color: var(--t3); cursor: not-allowed; }
-.rr-output-wrap { background: var(--ink2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
-.rr-output-hdr { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
-.rr-output-label { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--brand2); }
-.rr-output-copy-btn { margin-left: auto; font-family: var(--ff-mono); font-size: 8px; padding: 3px 9px; border-radius: 5px; border: 1px solid rgba(79,127,255,0.25); color: var(--brand2); background: rgba(79,127,255,0.06); cursor: pointer; }
-.rr-output-body { padding: 12px 13px; font-family: var(--ff-sans); font-size: 12px; line-height: 1.75; color: var(--t0); min-height: 60px; }
-.rr-output-body.loading { color: var(--t3); font-style: italic; }
-.rr-brief-box { background: rgba(16,217,142,0.04); border: 1px solid rgba(16,217,142,0.18); border-radius: 10px; padding: 12px 13px; margin-bottom: 12px; }
-.rr-brief-label { font-family: var(--ff-mono); font-size: 8px; color: var(--pos); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
-.rr-brief-body { font-family: var(--ff-sans); font-size: 11.5px; line-height: 1.7; color: var(--t1); }
-.rr-action-row { display: flex; gap: 8px; }
-.rr-action-btn { flex: 1; padding: 11px 6px; border-radius: 10px; font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.5px; cursor: pointer; text-align: center; border: 1px solid; transition: all 0.15s; }
-.rr-action-btn.clickup { background: rgba(176,110,255,0.1); border-color: rgba(176,110,255,0.3); color: var(--mix); }
-.rr-action-btn.brief   { background: rgba(16,217,142,0.08); border-color: rgba(16,217,142,0.25); color: var(--pos); }
-.rr-action-btn.copy2   { background: rgba(79,127,255,0.08); border-color: rgba(79,127,255,0.25); color: var(--brand2); }
-.rr-live-badge { font-family: var(--ff-mono); font-size: 9px; color: var(--pos); text-align: center; padding: 10px; }
-.rr-story-selected { background: var(--ink2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
 
 
-/* ══════════════════════════════════════════════════════════════════════
-   ELITE POLISH LAYER — depth, light, motion & finish (source-order overrides)
-   ══════════════════════════════════════════════════════════════════════ */
 
-/* — Global finish — */
-* { -webkit-tap-highlight-color: transparent; }
-html { text-rendering: optimizeLegibility; }
-body { -moz-osx-font-smoothing: grayscale; letter-spacing: 0.1px; }
-::selection { background: rgba(91,139,255,0.32); color: #fff; }
-:focus-visible { outline: 2px solid var(--brand2); outline-offset: 2px; border-radius: 6px; }
-button, a, .nav-btn, .card-hdr, [onclick] { -webkit-tap-highlight-color: transparent; }
+/* ════════════════════════════════════════════════════════════════════
+   AXIOM · APPLE-GRADE REDESIGN LAYER
+   Obsidian depth · frosted glass · electric intelligence · liquid motion
+   (override layer — restyles the design language, preserves all hooks)
+═══════════════════════════════════════════════════════════════════════ */
 
-/* Tabular figures everywhere numbers matter — stops digit jitter */
-.ff-mono, [class*="-num"], [class*="-score"], .hdr-time, .ticker, .t-item,
-.score-ring-num, .ring-num, .hero-score { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "cv01" 1; }
+:root {
+  /* ── Obsidian foundation ── */
+  --ink:   #04050A;
+  --ink1:  #090B12;
+  --ink2:  #0E1019;
+  --ink3:  #161927;
+  --ink4:  #1F2436;
 
-/* Richer ambient mesh background */
+  /* ── Glass system ── */
+  --glass:    rgba(255,255,255,0.045);
+  --glass-2:  rgba(255,255,255,0.075);
+  --glass-3:  rgba(255,255,255,0.11);
+  --line:     rgba(255,255,255,0.085);
+  --line2:    rgba(255,255,255,0.16);
+  --hairline: rgba(255,255,255,0.07);
+  --blur:     blur(34px) saturate(180%);
+  --blur-lg:  blur(50px) saturate(190%);
+
+  /* ── Text hierarchy ── */
+  --t0: #F4F7FF;
+  --t1: #C4CDE6;
+  --t2: #7E8AAE;
+  --t3: #4E5878;
+
+  /* ── Electric intelligence accent ── */
+  --brand:  #0A84FF;
+  --brand2: #4FA4FF;
+  --glow:   rgba(10,132,255,0.30);
+
+  /* ── Sentiment (Apple system tones) ── */
+  --pos: #30D158;
+  --neg: #FF453A;
+  --neu: #FFD60A;
+  --mix: #BF5AF2;
+
+  /* ── Parties ── */
+  --alp: #FF4D5E;
+  --lnp: #4FA4FF;
+  --grn: #32D74B;
+  --ind: #FFD60A;
+  --one: #FF9F0A;
+
+  /* ── Elevation ── */
+  --e1: 0 1px 0 rgba(255,255,255,0.05) inset, 0 6px 22px rgba(0,0,0,0.45);
+  --e2: 0 1px 0 rgba(255,255,255,0.07) inset, 0 18px 50px rgba(0,0,0,0.55);
+  --e-glow: 0 0 0 1px rgba(10,132,255,0.18), 0 10px 40px rgba(10,132,255,0.22);
+
+  --nav-h: 66px;
+  --hdr-h: 58px;
+  --r:    20px;
+  --r-sm: 13px;
+
+  --ff-sans:  -apple-system, BlinkMacSystemFont, 'Sora', sans-serif;
+  --ff-title: 'Space Grotesk', -apple-system, sans-serif;
+  --ff-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --ff-num:   -apple-system, BlinkMacSystemFont, 'Space Grotesk', sans-serif;
+}
+
+/* ── AMBIENT BACKGROUND ─────────────────────────────────────────────── */
+body { background: var(--ink); }
 body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
   background:
-    radial-gradient(ellipse 90% 55% at 50% -25%, rgba(91,139,255,0.10) 0%, transparent 65%),
-    radial-gradient(ellipse 50% 45% at 88% 18%, rgba(123,94,255,0.07) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 8% 92%, rgba(16,217,142,0.045) 0%, transparent 62%);
+    radial-gradient(120% 70% at 50% -25%, rgba(10,132,255,0.16) 0%, transparent 55%),
+    radial-gradient(80% 60% at 100% 8%, rgba(191,90,242,0.10) 0%, transparent 55%),
+    radial-gradient(90% 70% at 0% 100%, rgba(48,209,88,0.06) 0%, transparent 55%),
+    radial-gradient(100% 100% at 50% 50%, #06070D 0%, #04050A 100%);
+  animation: amb-drift 24s ease-in-out infinite alternate;
 }
-
-/* — Header: luminous hairline + subtle depth — */
-.hdr {
-  background: linear-gradient(180deg, rgba(11,15,28,0.94), rgba(8,11,20,0.88));
-  border-bottom: 1px solid transparent;
-  border-image: linear-gradient(90deg, transparent, rgba(91,139,255,0.30), rgba(123,94,255,0.18), transparent) 1;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px -16px rgba(0,0,0,0.8);
+@keyframes amb-drift {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  100% { transform: translate3d(0,-1.5%,0) scale(1.06); }
 }
-.brand-mark { box-shadow: 0 0 0 1px rgba(255,255,255,0.10), 0 6px 18px -4px rgba(79,127,255,0.55), var(--edge-strong); }
-.brand-name { letter-spacing: -0.4px; }
-
-/* — Cards: top-lit surface, hairline highlight, layered shadow — */
-.card {
-  background: var(--surf-1);
-  border: 1px solid rgba(58,72,116,0.55);
-  box-shadow: var(--sh-2), var(--edge);
-  transition: border-color 0.28s var(--ease), box-shadow 0.28s var(--ease), transform 0.28s var(--ease);
-}
-.card-hdr {
-  background: linear-gradient(180deg, rgba(23,29,50,0.85), rgba(17,22,38,0.6));
-  border-bottom: 1px solid rgba(58,72,116,0.45);
-  transition: background 0.2s var(--ease);
-}
-.card-hdr[onclick]:active { background: rgba(34,43,72,0.8); }
-.card-title { letter-spacing: 1.7px; }
-
-/* Hero panel — luminous bordered glass with corner glow */
-.hero-panel {
-  background:
-    radial-gradient(120% 90% at 100% 0%, rgba(123,94,255,0.10), transparent 55%),
-    linear-gradient(135deg, rgba(91,139,255,0.09), rgba(176,110,255,0.05));
-  border: 1px solid rgba(91,139,255,0.22);
-  box-shadow: var(--sh-3), var(--edge-strong);
-}
-
-/* — Bottom nav: frosted, lifted, with active indicator — */
-.bottom-nav {
-  background: linear-gradient(180deg, rgba(11,15,28,0.85), rgba(8,11,20,0.97));
-  border-top: 1px solid rgba(58,72,116,0.4);
-  box-shadow: 0 -8px 30px -10px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
-}
-.nav-btn { transition: color 0.25s var(--ease), transform 0.18s var(--ease); }
-.nav-btn::before {
-  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%) scaleX(0);
-  width: 26px; height: 3px; border-radius: 0 0 3px 3px;
-  background: linear-gradient(90deg, var(--brand), var(--mix));
-  box-shadow: 0 0 12px rgba(91,139,255,0.7);
-  transition: transform 0.32s var(--ease-spring);
-}
-.nav-btn.active::before { transform: translateX(-50%) scaleX(1); }
-.nav-btn.active .nav-icon { transform: translateY(-1px); filter: drop-shadow(0 4px 10px rgba(91,139,255,0.55)); }
-.nav-btn:active { transform: scale(0.92); }
-.nav-label { letter-spacing: 0.9px; }
-
-/* — Buttons & inputs: cohesive press, glow focus — */
-.ai-update-btn.primary, .ci-go-btn, .bank-send, .s-btn-primary, .ci-analyse-btn {
-  position: relative; overflow: hidden;
-  box-shadow: 0 6px 18px -6px rgba(79,127,255,0.5), var(--edge-strong);
-  transition: transform 0.16s var(--ease), box-shadow 0.24s var(--ease), filter 0.2s var(--ease);
-}
-.ai-update-btn.primary:active, .ci-go-btn:active, .bank-send:active,
-.s-btn-primary:active, .ci-analyse-btn:active { transform: translateY(1px) scale(0.985); filter: brightness(1.06); }
-/* sheen sweep on primary actions */
-.ai-update-btn.primary::after, .bank-send::after {
-  content: ''; position: absolute; inset: 0;
-  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.18) 50%, transparent 70%);
-  transform: translateX(-120%); transition: transform 0.6s var(--ease);
-}
-.ai-update-btn.primary:active::after, .bank-send:active::after { transform: translateX(120%); }
-
-.bank-input, .ci-input, .chat-input, .set-input, .modal-input, .worker-input, .wl-add-input {
-  transition: border-color 0.22s var(--ease), box-shadow 0.22s var(--ease), background 0.22s var(--ease);
-}
-.bank-input:focus, .ci-input:focus, .chat-input:focus, .set-input:focus,
-.modal-input:focus, .worker-input:focus, .wl-add-input:focus {
-  border-color: var(--brand) !important;
-  box-shadow: 0 0 0 3px rgba(91,139,255,0.14), var(--edge) !important;
-}
-
-/* Bank mode toggle — premium selected state */
-.bank-mode { transition: border-color 0.22s var(--ease), background 0.22s var(--ease), transform 0.16s var(--ease), box-shadow 0.22s var(--ease); }
-.bank-mode:active { transform: scale(0.98); }
-.bank-mode.active { box-shadow: 0 6px 20px -10px rgba(79,127,255,0.55), var(--edge); }
-
-/* Quick-prompt & pill chips — tactile press */
-.qp-btn, .bank-src-pill, .card-badge, .t-pill, .intel-tag { transition: all 0.18s var(--ease); }
-.qp-btn:active { transform: scale(0.96); }
-
-/* Q&A cards in the Bank feed get the elevated surface too */
-.bank-qa, .ci-ai-box, .skeleton { box-shadow: var(--sh-2), var(--edge); border-color: rgba(58,72,116,0.55) !important; }
-.bank-qa { background: var(--surf-1); }
-
-/* Modals — deep elevation + scrim blur */
-.modal-card, .set-card { box-shadow: var(--sh-3), var(--edge-strong) !important; }
-
-/* Empty states — softer, designed */
-.empty-icon { opacity: 0.32; filter: drop-shadow(0 8px 20px rgba(91,139,255,0.25)); }
-.empty-title { letter-spacing: -0.2px; }
-
-/* Smoother shimmer on skeletons */
-.skel-line { background: linear-gradient(90deg, var(--ink2) 20%, var(--ink3) 45%, var(--line) 50%, var(--ink3) 55%, var(--ink2) 80%); background-size: 220% 100%; animation: shimmer 1.6s var(--ease-in-out) infinite; }
-
-/* — Motion: page & content entrance — */
-@keyframes pageIn { from { opacity: 0; transform: translateY(8px) scale(0.995); } to { opacity: 1; transform: none; } }
-.page.active { animation: pageIn 0.42s var(--ease) both; }
-.page.active > .card,
-.page.active > .hero-panel,
-.page.active > .quick-prompts,
-.page.active > #bank-feed { animation: fadeUp 0.5s var(--ease) both; }
-.page.active > *:nth-child(2) { animation-delay: 0.04s; }
-.page.active > *:nth-child(3) { animation-delay: 0.08s; }
-.page.active > *:nth-child(4) { animation-delay: 0.12s; }
-.page.active > *:nth-child(5) { animation-delay: 0.16s; }
-.page.active > *:nth-child(6) { animation-delay: 0.20s; }
-
-/* Refined scrollbars where they show (desktop) */
-.bank-a-body, .ci-ai-body, .chat-messages { scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
-
-/* Score ring — luminous fill + big tabular numeral */
-.score-ring-fill { filter: drop-shadow(0 0 6px rgba(91,139,255,0.45)); }
-.score-ring-num, .hero-score, .sc-val { font-variant-numeric: tabular-nums; }
-.ai-score-wrap::after {
-  content: ''; position: absolute; width: 180px; height: 180px;
-  top: 18px; left: 50%; transform: translateX(-50%);
-  border-radius: 50%; pointer-events: none; z-index: 0;
-  background: radial-gradient(circle, rgba(91,139,255,0.16), transparent 66%);
-}
-.ai-score-wrap { position: relative; }
-.score-ring-container, .ai-update-row, .ai-score-insight, .ai-score-timestamp { position: relative; z-index: 1; }
-
-/* Party & sentiment bars — subtle top sheen + recessed track */
-.party-bar-fill, .sent-bar-fill { box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 1px rgba(0,0,0,0.2); }
-.party-bar-wrap, .sent-bar-wrap { box-shadow: inset 0 1px 2px rgba(0,0,0,0.35); }
-
-/* Live badge — breathing glow ring */
-.live-badge { box-shadow: 0 0 0 1px rgba(16,217,142,0.10), 0 4px 14px -6px rgba(16,217,142,0.4); }
-.live-dot { box-shadow: 0 0 8px var(--pos); }
-
-/* ══════════════════════════════════════════════════════════════════════
-   PUSH FURTHER — signature pass: grain, luminous borders, aurora, data type
-   ══════════════════════════════════════════════════════════════════════ */
-
-/* Fine film-grain texture — barely-there tactile richness over the mesh */
+/* fine grain to kill banding */
 body::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   mix-blend-mode: overlay;
 }
 
-/* Luminous 1px gradient border (mask trick) on hero surfaces */
-.hero-panel::after, .bank-qa::after,
-#page-ai > .card:first-child::after {
-  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
-  background: linear-gradient(135deg, rgba(91,139,255,0.55), rgba(123,94,255,0.30) 40%, transparent 65%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-  pointer-events: none; z-index: 2;
+/* ── HEADER → floating frosted bar ─────────────────────────────────── */
+.hdr {
+  height: calc(var(--hdr-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 18px 0;
+  background: linear-gradient(180deg, rgba(8,10,18,0.72), rgba(8,10,18,0.30));
+  backdrop-filter: var(--blur-lg);
+  -webkit-backdrop-filter: var(--blur-lg);
+  border-bottom: 1px solid var(--hairline);
 }
-.hero-panel, .bank-qa, #page-ai > .card:first-child { position: relative; }
-.bank-qa > * { position: relative; z-index: 1; }
-
-/* Aurora — slow living gradient on the brand mark & hero accent bar */
-@keyframes aurora { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
 .brand-mark {
-  background: linear-gradient(120deg, #5B8BFF, #7B5EFF, #00B4A0, #5B8BFF);
-  background-size: 280% 280%;
-  animation: aurora 9s var(--ease-in-out) infinite;
+  width: 34px; height: 34px; border-radius: 11px;
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.45), transparent 45%),
+    linear-gradient(140deg, var(--brand), #7B5EFF);
+  box-shadow: 0 0 22px rgba(10,132,255,0.5), 0 1px 0 rgba(255,255,255,0.4) inset;
+  font-family: var(--ff-title); letter-spacing: -0.5px;
+}
+.brand-name {
+  font-size: 18px; letter-spacing: -0.4px;
+  background: linear-gradient(92deg, #FFFFFF, var(--brand2) 120%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.brand-sub { color: var(--t2); letter-spacing: 2.4px; }
+.live-badge {
+  background: rgba(48,209,88,0.10);
+  border: 1px solid rgba(48,209,88,0.28);
+  box-shadow: 0 0 16px rgba(48,209,88,0.12) inset;
+  border-radius: 30px;
+}
+.hdr-api-btn {
+  border-radius: 11px; border: 1px solid var(--line2);
+  background: var(--glass-2); color: var(--brand2);
+  backdrop-filter: var(--blur);
+  transition: transform .2s cubic-bezier(.2,.9,.25,1), background .2s;
+}
+.hdr-api-btn:active { transform: scale(0.9); }
+.hdr-api-btn.has-key {
+  border-color: rgba(48,209,88,0.4); color: var(--pos);
+  background: rgba(48,209,88,0.10); box-shadow: 0 0 14px rgba(48,209,88,0.2);
+}
+
+/* ── TICKER ─────────────────────────────────────────────────────────── */
+.ticker {
+  height: 32px;
+  background: linear-gradient(180deg, rgba(14,16,25,0.55), rgba(8,10,18,0.30));
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--hairline);
+}
+.ticker-badge {
+  background: linear-gradient(90deg, var(--neg), #FF6B80);
+  box-shadow: 0 0 18px rgba(255,69,58,0.45);
+}
+.t-pill { border-radius: 5px; }
+
+/* ── SCROLL AREA + page reveal motion ──────────────────────────────── */
+.scroll-area { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 30px); }
+.page { padding: 18px 16px 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .page.active > * { animation: reveal-up .55s cubic-bezier(.16,1,.3,1) both; }
+  .page.active > *:nth-child(1){animation-delay:.02s}
+  .page.active > *:nth-child(2){animation-delay:.07s}
+  .page.active > *:nth-child(3){animation-delay:.12s}
+  .page.active > *:nth-child(4){animation-delay:.17s}
+  .page.active > *:nth-child(5){animation-delay:.22s}
+  .page.active > *:nth-child(6){animation-delay:.27s}
+  .page.active > *:nth-child(7){animation-delay:.32s}
+  .page.active > *:nth-child(n+8){animation-delay:.36s}
+}
+@keyframes reveal-up { from{opacity:0;transform:translate3d(0,14px,0)} to{opacity:1;transform:none} }
+
+/* ── GLASS CARD LANGUAGE ───────────────────────────────────────────── */
+.card, .intel-panel, .worker-panel, .ci-ai-box, .rb-section, .set-section,
+.exec-log-wrap, .auto-steps-card {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--e1);
+  position: relative;
+}
+.card { margin-bottom: 16px; }
+.card::after, .intel-panel::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 18%);
+  mix-blend-mode: screen;
+}
+.card-hdr, .ci-ai-hdr, .rb-hdr, .set-hdr, .worker-hdr, .exec-log-hdr {
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent);
+  border-bottom: 1px solid var(--hairline);
+  padding: 14px 16px;
+}
+.card-title, .rb-hdr-title, .set-title, .ci-ai-lbl {
+  color: var(--t2); letter-spacing: 1.8px;
+}
+.card-badge {
+  background: rgba(10,132,255,0.12); color: var(--brand2);
+  border: 1px solid rgba(10,132,255,0.28); border-radius: 6px;
+  box-shadow: 0 0 12px rgba(10,132,255,0.1);
+}
+.card-body { padding: 16px; position: relative; z-index: 1; }
+
+/* ── INTELLIGENCE ORB HERO (signature) ─────────────────────────────── */
+.hero-panel {
+  background: linear-gradient(165deg, rgba(10,132,255,0.10), rgba(191,90,242,0.06) 60%, transparent);
+  border: 1px solid var(--line2);
+  border-radius: 26px;
+  padding: 26px 20px 22px;
+  margin-bottom: 16px;
+  backdrop-filter: var(--blur-lg);
+  -webkit-backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2), var(--e-glow);
+  text-align: center;
+  overflow: hidden;
 }
 .hero-panel::before {
-  background: linear-gradient(90deg, var(--brand), var(--mix), var(--pos), var(--brand));
-  background-size: 300% 100%;
-  animation: aurora 11s var(--ease-in-out) infinite;
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(60% 50% at 50% 0%, rgba(10,132,255,0.18), transparent 70%);
+}
+.orb-stage {
+  position: relative; width: 170px; height: 170px; margin: 4px auto 18px;
+  display: flex; align-items: center; justify-content: center;
+}
+.intel-orb-xl {
+  position: relative; width: 132px; height: 132px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background:
+    radial-gradient(120% 120% at 32% 26%, rgba(255,255,255,0.55), transparent 42%),
+    conic-gradient(from 210deg, var(--brand), #7B5EFF, var(--mix), var(--brand));
+  box-shadow:
+    0 0 60px rgba(10,132,255,0.45),
+    0 0 120px rgba(123,94,255,0.25),
+    0 1px 0 rgba(255,255,255,0.5) inset,
+    0 -18px 40px rgba(0,0,0,0.45) inset;
+  animation: orb-breathe 6s ease-in-out infinite;
+}
+@keyframes orb-breathe {
+  0%,100% { transform: scale(1); filter: saturate(1); }
+  50%     { transform: scale(1.035); filter: saturate(1.15); }
+}
+.orb-core {
+  position: absolute; inset: 11px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 38%, rgba(14,17,28,0.55), rgba(6,7,13,0.92) 75%);
+  backdrop-filter: blur(4px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5) inset, 0 0 0 1px rgba(255,255,255,0.08);
+}
+.orb-score {
+  font-family: var(--ff-num); font-weight: 700; font-size: 40px;
+  letter-spacing: -1.5px; line-height: 1; color: #fff;
+  text-shadow: 0 0 24px rgba(79,164,255,0.6);
+}
+.orb-cap {
+  font-family: var(--ff-mono); font-size: 7.5px; letter-spacing: 2.5px;
+  color: var(--brand2); margin-top: 5px;
+}
+.orb-ring {
+  position: absolute; border-radius: 50%; border: 1px solid;
+  inset: 0; pointer-events: none;
+}
+.orb-ring.r1 { border-color: rgba(79,164,255,0.30); animation: orb-spin 14s linear infinite; }
+.orb-ring.r2 { inset: -18px; border-color: rgba(191,90,242,0.18); border-style: dashed; animation: orb-spin 22s linear infinite reverse; }
+.orb-ring.r3 { inset: -36px; border-color: rgba(255,255,255,0.06); animation: orb-pulse 6s ease-in-out infinite; }
+@keyframes orb-spin  { to { transform: rotate(360deg); } }
+@keyframes orb-pulse { 0%,100%{opacity:.3;transform:scale(1)} 50%{opacity:.7;transform:scale(1.04)} }
+
+.hero-meta { margin-bottom: 18px; }
+.hero-score-label { color: var(--t3); letter-spacing: 2.4px; margin-bottom: 6px; }
+.hero-score-sub { font-size: 12px; color: var(--t2); margin-bottom: 12px; }
+.hero-score-delta {
+  display: inline-flex; gap: 6px; border-radius: 30px; padding: 7px 14px;
+  backdrop-filter: var(--blur); font-size: 11px;
+}
+.hero-score-delta.up { background: rgba(48,209,88,0.12); color: var(--pos); border: 1px solid rgba(48,209,88,0.3); }
+.hero-score-delta.dn { background: rgba(255,69,58,0.12); color: var(--neg); border: 1px solid rgba(255,69,58,0.3); }
+.hero-bars { text-align: left; padding: 14px 6px 2px; border-top: 1px solid var(--hairline); }
+.sent-bar-track { height: 7px; background: rgba(255,255,255,0.07); border-radius: 4px; }
+.sent-bar-fill { box-shadow: 0 0 14px currentColor; filter: saturate(1.2); }
+#hb-pos { box-shadow: 0 0 14px rgba(48,209,88,0.6); }
+#hb-neg { box-shadow: 0 0 14px rgba(255,69,58,0.6); }
+#hb-neu { box-shadow: 0 0 14px rgba(255,214,10,0.5); }
+
+/* ── STAT GRID → glass tiles ───────────────────────────────────────── */
+.stat-grid { gap: 12px; margin-bottom: 16px; }
+.stat-card {
+  background: var(--glass); border: 1px solid var(--line);
+  border-radius: 18px; padding: 16px; backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur); box-shadow: var(--e1);
+  transition: transform .25s cubic-bezier(.2,.9,.25,1);
+}
+.stat-card:active { transform: scale(0.97); }
+.stat-card::after { height: 3px; border-radius: 3px; filter: saturate(1.3) drop-shadow(0 0 6px currentColor); }
+.sc-val { font-family: var(--ff-num); letter-spacing: -1px; }
+
+/* ── PARTY ROWS ────────────────────────────────────────────────────── */
+.party-row { border-color: var(--hairline); }
+.party-dot { box-shadow: 0 0 10px currentColor; }
+.party-bar-wrap { width: 88px; height: 6px; background: rgba(255,255,255,0.07); }
+.party-bar-fill { box-shadow: 0 0 10px currentColor; filter: saturate(1.2); }
+
+/* ── AI SCORE RING ─────────────────────────────────────────────────── */
+.score-ring-bg { stroke: rgba(255,255,255,0.07); }
+.score-ring-num { font-family: var(--ff-num); }
+.ai-score-insight {
+  background: rgba(10,132,255,0.06); border: 1px solid rgba(10,132,255,0.16);
+  border-radius: 14px;
+}
+.ai-update-btn { border-radius: 13px; transition: transform .18s, background .18s; }
+.ai-update-btn:active { transform: scale(0.96); }
+.ai-update-btn.primary {
+  background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.34); color: var(--brand2);
 }
 
-/* More confident data typography */
-.score-ring-num { font-size: 38px; letter-spacing: -1.4px;
-  background: linear-gradient(180deg, #F4F7FF, #9FB6FF);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-.hero-score { letter-spacing: -1px; font-weight: 700; }
-.sc-val, .party-score, .score-ring-num, .hero-score { font-feature-settings: "tnum" 1; }
+/* ── TOPIC / FEED CARDS ────────────────────────────────────────────── */
+.topic-card, .topic-result-card, .comment-card, .alert-card, .loaded-banner {
+  background: var(--glass); border: 1px solid var(--line);
+  border-radius: 16px; backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  transition: transform .2s cubic-bezier(.2,.9,.25,1), border-color .2s, box-shadow .2s;
+}
+.topic-card:active, .topic-result-card:active, .comment-card:active { transform: scale(0.98); border-color: var(--line2); }
+.topic-card::before, .alert-card::before { box-shadow: 0 0 12px currentColor; }
+.feed-item { border-color: var(--hairline); transition: background .18s; }
+.feed-item:active { background: rgba(10,132,255,0.06); }
+.feed-src-icon { border-radius: 10px; box-shadow: 0 0 0 1px var(--hairline) inset; }
+.sent-pill { box-shadow: 0 0 0 1px rgba(255,255,255,0.04) inset; }
 
-/* Collapsible section headers get a faint leading accent tick
-   (only those with a direct .card-title — icon-box headers are untouched) */
-.card-hdr > .card-title:first-child::before {
-  content: ''; display: inline-block; width: 3px; height: 10px; border-radius: 2px;
-  margin-right: 8px; vertical-align: -1px;
-  background: linear-gradient(180deg, var(--brand), var(--mix));
-  box-shadow: 0 0 8px rgba(91,139,255,0.5);
+/* ── CHAT ──────────────────────────────────────────────────────────── */
+.chat-msg.bot .chat-avatar {
+  background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.4), transparent 45%), linear-gradient(135deg, var(--brand), var(--mix));
+  box-shadow: 0 0 16px rgba(10,132,255,0.4);
+}
+.chat-msg.bot .chat-bubble {
+  background: var(--glass-2); border: 1px solid var(--line); backdrop-filter: var(--blur);
+  border-radius: 16px; border-bottom-left-radius: 5px;
+}
+.chat-msg.user .chat-bubble {
+  background: rgba(10,132,255,0.14); border: 1px solid rgba(10,132,255,0.28);
+  border-radius: 16px; border-bottom-right-radius: 5px;
+}
+.chat-input {
+  background: var(--glass-2); border: 1px solid var(--line); border-radius: 15px;
+  backdrop-filter: var(--blur); transition: border-color .2s, box-shadow .2s;
+}
+.chat-input:focus { border-color: rgba(10,132,255,0.5); box-shadow: 0 0 0 4px rgba(10,132,255,0.12); }
+.chat-send {
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--brand), var(--mix));
+  box-shadow: 0 6px 22px rgba(10,132,255,0.45);
+  transition: transform .18s;
+}
+.chat-send:active { transform: scale(0.92); }
+
+/* ── CHIPS / PILLS / BUTTONS ───────────────────────────────────────── */
+.qp-btn, .topic-pill, .src-chip, .chart-btn, .ci-sort-btn, .int-btn, .s-btn,
+.set-btn, .wl-add-btn, .worker-save, .ci-go-btn {
+  border-radius: 11px;
+  transition: transform .16s cubic-bezier(.2,.9,.25,1), background .16s, border-color .16s, color .16s;
+}
+.qp-btn:active, .topic-pill:active, .src-chip:active, .chart-btn:active,
+.ci-sort-btn:active, .int-btn:active, .s-btn:active { transform: scale(0.94); }
+.src-chip { background: var(--glass); border-color: var(--line); backdrop-filter: var(--blur); }
+.src-chip.on { border-color: rgba(10,132,255,0.45); color: var(--brand2); background: rgba(10,132,255,0.10); box-shadow: 0 0 14px rgba(10,132,255,0.12); }
+.chart-btn.active, .ci-sort-btn.active, .int-btn.active {
+  border-color: rgba(10,132,255,0.45); color: var(--brand2);
+  background: rgba(10,132,255,0.12); box-shadow: 0 0 14px rgba(10,132,255,0.1);
+}
+.ci-go-btn { background: linear-gradient(135deg, var(--brand), var(--mix)); box-shadow: 0 4px 16px rgba(10,132,255,0.4); }
+.ci-input {
+  background: var(--glass-2); border: 1px solid var(--line); border-radius: 16px;
+  backdrop-filter: var(--blur);
+}
+.ci-input:focus { border-color: rgba(10,132,255,0.5); box-shadow: 0 0 0 4px rgba(10,132,255,0.12); }
+.ci-analyse-btn, .rb-gen-btn {
+  background: linear-gradient(135deg, rgba(10,132,255,0.18), rgba(191,90,242,0.14));
+  border: 1px solid rgba(10,132,255,0.32); border-radius: 14px;
+  transition: transform .2s, box-shadow .2s;
+}
+.ci-analyse-btn:active, .rb-gen-btn:active { transform: scale(0.98); box-shadow: 0 0 24px rgba(10,132,255,0.2); }
+
+/* toggles */
+.toggle.on { background: var(--brand); box-shadow: 0 0 16px rgba(10,132,255,0.5); }
+
+/* ── EXEC LOG / CODE ───────────────────────────────────────────────── */
+.exec-log-wrap, .code-block { background: rgba(4,5,10,0.6); backdrop-filter: var(--blur); }
+
+/* ── AUTOMATION HERO ───────────────────────────────────────────────── */
+.auto-status-hero {
+  background: linear-gradient(160deg, rgba(10,132,255,0.10), rgba(48,209,88,0.05) 70%, transparent);
+  border: 1px solid var(--line2); border-radius: 24px;
+  backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2);
+}
+.auto-meta-cell { background: var(--glass); border: 1px solid var(--hairline); border-radius: 14px; }
+.auto-meta-val { font-family: var(--ff-num); }
+.auto-run-btn {
+  border-radius: 15px; background: linear-gradient(135deg, var(--brand), var(--mix));
+  box-shadow: 0 6px 22px rgba(10,132,255,0.45);
+}
+.auto-run-btn:active { transform: scale(0.95); }
+.auto-status-dot.running, .auto-status-dot.complete { box-shadow: 0 0 14px currentColor; }
+.progress-step.active { background: rgba(10,132,255,0.06); }
+.sched-option.active { background: rgba(10,132,255,0.05); }
+
+/* ── INTEL PANEL ───────────────────────────────────────────────────── */
+.intel-hdr { background: linear-gradient(90deg, rgba(10,132,255,0.10), transparent); }
+.intel-orb {
+  border-radius: 12px;
+  background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.4), transparent 45%), linear-gradient(135deg, var(--brand), var(--mix));
+  box-shadow: 0 0 20px rgba(10,132,255,0.45);
+}
+.intel-name { font-family: var(--ff-title); }
+.intel-refresh-btn { border-radius: 11px; border: 1px solid var(--line2); background: var(--glass-2); transition: transform .3s; }
+.intel-refresh-btn:active { transform: rotate(180deg) scale(0.9); }
+
+/* ── MODAL → centred floating glass sheet ──────────────────────────── */
+.modal-overlay { align-items: center; background: rgba(4,5,10,0.72); backdrop-filter: blur(18px); }
+.modal-sheet {
+  width: calc(100% - 32px); max-width: 420px; margin: 0 16px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(20,23,35,0.9), rgba(10,12,20,0.92));
+  border: 1px solid var(--line2);
+  backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2), 0 0 60px rgba(10,132,255,0.12);
+  padding: 26px 22px 26px;
+  animation: sheet-in .4s cubic-bezier(.16,1,.3,1) both;
+}
+@keyframes sheet-in { from{opacity:0;transform:translateY(20px) scale(.96)} to{opacity:1;transform:none} }
+.modal-title { font-family: var(--ff-title); }
+.modal-input { background: var(--glass-2); border: 1px solid var(--line); border-radius: 14px; }
+.modal-input:focus { border-color: rgba(10,132,255,0.5); }
+.modal-save-btn { border-radius: 14px; background: linear-gradient(135deg, var(--brand), var(--mix)); box-shadow: 0 6px 22px rgba(10,132,255,0.4); }
+
+/* ── TOAST ─────────────────────────────────────────────────────────── */
+.toast {
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);
+  background: linear-gradient(180deg, rgba(20,23,35,0.92), rgba(12,14,22,0.92));
+  border: 1px solid var(--line2); border-left: 3px solid var(--brand);
+  border-radius: 15px; backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2);
 }
 
-/* Bank mode-toggle active emphasises its label */
-.bank-mode.active .bank-mode-t { color: var(--brand2); }
+/* ── FLOATING ADAPTIVE DOCK ────────────────────────────────────────── */
+.bottom-nav {
+  height: var(--nav-h);
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 12px);
+  width: calc(100% - 24px); max-width: 520px;
+  padding: 0 6px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(20,23,35,0.66), rgba(8,10,18,0.55));
+  border: 1px solid var(--line2);
+  backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2), 0 0 0 1px rgba(255,255,255,0.03) inset;
+  z-index: 200;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.bottom-nav::-webkit-scrollbar { display: none; }
+.nav-indicator {
+  position: absolute; top: 7px; height: calc(100% - 14px);
+  border-radius: 17px;
+  background: linear-gradient(180deg, rgba(10,132,255,0.22), rgba(10,132,255,0.10));
+  border: 1px solid rgba(10,132,255,0.32);
+  box-shadow: 0 0 20px rgba(10,132,255,0.25), 0 1px 0 rgba(255,255,255,0.1) inset;
+  z-index: 0; pointer-events: none;
+  transition: left .42s cubic-bezier(.34,1.4,.5,1), width .42s cubic-bezier(.34,1.4,.5,1), opacity .3s;
+  opacity: 0;
+}
+.nav-btn {
+  min-width: 58px; flex: 1 0 auto; gap: 3px; padding: 0 2px;
+  z-index: 1; border-radius: 17px;
+  transition: color .25s, transform .2s;
+}
+.nav-btn.active { color: #fff; }
+.nav-btn.active .nav-icon { filter: drop-shadow(0 0 8px rgba(79,164,255,0.7)); transform: translateY(-1px) scale(1.06); }
+.nav-btn:active .nav-icon { transform: scale(0.85); }
+.nav-icon { font-size: 19px; transition: transform .25s cubic-bezier(.34,1.4,.5,1); }
+.nav-label { font-size: 7px; letter-spacing: 0.6px; }
+.nav-badge { top: 9px; right: calc(50% - 17px); box-shadow: 0 0 8px var(--neg); border-color: rgba(20,23,35,0.9); }
 
-/* Nav: soft radial bloom behind the active icon */
-.nav-btn .nav-icon, .nav-btn .nav-label { position: relative; z-index: 1; }
-.nav-btn.active::after {
-  content: ''; position: absolute; top: 9px; left: 50%; transform: translateX(-50%);
-  width: 34px; height: 34px; border-radius: 50%; pointer-events: none; z-index: 0;
-  background: radial-gradient(circle, rgba(91,139,255,0.26), transparent 70%);
+/* ── FOCUS VISIBILITY (a11y floor) ─────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--brand2); outline-offset: 2px; border-radius: 8px;
+}
+button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color: transparent; }
+
+/* ── REDUCED MOTION ────────────────────────────────────────────────── */
+
+/* ════════════════════════════════════════════════════════════════════
+   AXIOM · DATA-VIZ LAYER  (network graph · 3D constellation · flow chart)
+═══════════════════════════════════════════════════════════════════════ */
+.viz-card .card-body { padding: 14px; }
+.viz-stage {
+  position: relative; width: 100%; border-radius: 16px; overflow: hidden;
+  border: 1px solid var(--hairline);
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(10,132,255,0.08), transparent 60%),
+    rgba(4,5,10,0.45);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35) inset, 0 1px 0 rgba(255,255,255,0.04) inset;
+}
+.viz-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.viz-stage canvas:active { cursor: grabbing; }
+.viz-stage.flat { background: none; border: none; box-shadow: none; }
+
+.viz-tip {
+  position: absolute; left: 0; top: 0; pointer-events: none; z-index: 6;
+  background: linear-gradient(180deg, rgba(22,25,38,0.96), rgba(12,14,22,0.96));
+  border: 1px solid var(--line2); border-radius: 11px;
+  padding: 8px 11px; backdrop-filter: blur(14px);
+  font-family: var(--ff-mono); font-size: 9px; line-height: 1.5; color: var(--t0);
+  box-shadow: var(--e2); opacity: 0; transition: opacity .14s ease;
+  transform: translate(-50%, calc(-100% - 12px)); white-space: nowrap;
+}
+.viz-tip strong { color: #fff; font-weight: 600; }
+.viz-tip .vt-row { color: var(--t2); }
+
+.viz-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; justify-content: center; }
+.viz-leg-item {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--ff-mono); font-size: 7.5px; letter-spacing: 1px; color: var(--t2);
+}
+.viz-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 9px currentColor; }
+.viz-hint {
+  font-family: var(--ff-mono); font-size: 8px; letter-spacing: 0.6px;
+  color: var(--t3); margin-top: 10px; text-align: center;
+}
+.viz-ctrl { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+
+
+/* ════════════════════════════════════════════════════════════════════
+   AXIOM · AI CHAT UPGRADE — deep analysis, web search, inline charts
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ── MODE SELECTOR ───────────────────────────────────────────────── */
+.ai-mode-bar {
+  display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.ai-mode-bar::-webkit-scrollbar { display: none; }
+.mode-btn {
+  flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border-radius: 30px;
+  border: 1px solid var(--line); background: var(--glass);
+  font-family: var(--ff-mono); font-size: 8.5px; letter-spacing: 1.2px;
+  color: var(--t2); cursor: pointer; backdrop-filter: var(--blur);
+  transition: all .22s cubic-bezier(.2,.9,.25,1);
+}
+.mode-btn:active { transform: scale(0.94); }
+.mode-btn.active {
+  background: rgba(10,132,255,0.16); border-color: rgba(10,132,255,0.45);
+  color: #fff; box-shadow: 0 0 18px rgba(10,132,255,0.22);
+}
+.mode-btn .mode-icon { font-size: 14px; line-height: 1; }
+.mode-btn.research.active { background: rgba(191,90,242,0.16); border-color: rgba(191,90,242,0.45); box-shadow: 0 0 18px rgba(191,90,242,0.22); }
+.mode-btn.forecast.active { background: rgba(255,214,10,0.12); border-color: rgba(255,214,10,0.4); color: #fff; }
+.mode-btn.deep.active     { background: rgba(48,209,88,0.12);  border-color: rgba(48,209,88,0.4); }
+
+/* ── CHAT CONTAINER ──────────────────────────────────────────────── */
+.chat-terminal {
+  background: rgba(4,5,10,0.6); border: 1px solid var(--line);
+  border-radius: 20px; overflow: hidden;
+  backdrop-filter: var(--blur-lg); -webkit-backdrop-filter: var(--blur-lg);
+  box-shadow: var(--e2); margin-bottom: 14px;
+}
+.chat-terminal-hdr {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
+  border-bottom: 1px solid var(--hairline);
+}
+.chat-orb {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background:
+    radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.45), transparent 42%),
+    conic-gradient(from 210deg, var(--brand), var(--mix), var(--brand));
+  box-shadow: 0 0 16px rgba(10,132,255,0.5);
+  animation: orb-breathe 6s ease-in-out infinite;
+}
+.chat-status-row { flex: 1; min-width: 0; }
+.chat-status-name { font-family: var(--ff-title); font-size: 13px; font-weight: 600; color: var(--t0); }
+.chat-status-line { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); letter-spacing: 1px; margin-top: 1px; }
+.chat-status-line .dot-live { color: var(--pos); animation: pulse-dot 2s ease-in-out infinite; }
+.chat-hdr-actions { display: flex; gap: 6px; }
+.chat-hdr-btn {
+  width: 28px; height: 28px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--glass-2);
+  color: var(--t3); font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .18s, border-color .18s;
+}
+.chat-hdr-btn:active { color: var(--brand2); border-color: rgba(10,132,255,0.4); }
+
+/* ── MESSAGE AREA ────────────────────────────────────────────────── */
+.chat-messages {
+  max-height: 480px; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  scroll-behavior: smooth;
+}
+.chat-messages::-webkit-scrollbar { width: 3px; }
+.chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ── MESSAGE BUBBLES ─────────────────────────────────────────────── */
+.chat-msg { display: flex; gap: 10px; animation: reveal-up .35s cubic-bezier(.16,1,.3,1) both; }
+.chat-msg.user { flex-direction: row-reverse; }
+.chat-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--ff-mono); font-size: 9px; font-weight: 600; margin-top: 2px;
+}
+.chat-msg.bot .chat-avatar {
+  background: radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.4), transparent 42%), linear-gradient(135deg, var(--brand), var(--mix));
+  box-shadow: 0 0 14px rgba(10,132,255,0.4);
+  color: white;
+}
+.chat-msg.user .chat-avatar { background: var(--ink3); color: var(--t2); }
+.chat-msg-body { max-width: 84%; display: flex; flex-direction: column; gap: 6px; }
+.chat-msg.user .chat-msg-body { align-items: flex-end; }
+
+.chat-bubble {
+  padding: 12px 15px; border-radius: 18px; font-size: 12.5px; line-height: 1.7;
+  position: relative;
+}
+.chat-msg.bot .chat-bubble {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+  border-bottom-left-radius: 5px; color: var(--t0);
+}
+.chat-msg.user .chat-bubble {
+  background: rgba(10,132,255,0.16); border: 1px solid rgba(10,132,255,0.3);
+  border-bottom-right-radius: 5px; color: var(--brand2);
+  font-family: var(--ff-mono); font-size: 11px;
 }
 
-/* — Respect reduced motion — */
+/* rich markdown rendering */
+.chat-bubble .ch2 { display: block; font-family: var(--ff-title); font-size: 13px; font-weight: 700; color: #fff; margin: 10px 0 4px; letter-spacing: -0.2px; }
+.chat-bubble .ch3 { display: block; font-family: var(--ff-mono); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--brand2); margin: 8px 0 3px; }
+.chat-bubble .signal-r { color: #FF453A; } /* 🔴 */
+.chat-bubble .signal-g { color: #30D158; } /* 🟢 */
+.chat-bubble .signal-y { color: #FFD60A; } /* ⚡ */
+.chat-bubble .signal-p { color: #BF5AF2; } /* 🔮 */
+.chat-bubble .cb-hr { display: block; height: 1px; background: var(--hairline); margin: 10px 0; border: none; }
+.chat-bubble .confidence {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(10,132,255,0.1); border: 1px solid rgba(10,132,255,0.25);
+  border-radius: 8px; padding: 6px 10px; margin-top: 8px;
+  font-family: var(--ff-mono); font-size: 9px; color: var(--brand2);
+}
+.confidence-bar { width: 60px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
+.confidence-fill { height: 100%; background: linear-gradient(90deg, var(--brand), var(--mix)); border-radius: 2px; transition: width 1.2s ease; }
+.chat-bubble .search-used {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--ff-mono); font-size: 8px; color: var(--mix);
+  opacity: 0.8; margin-bottom: 6px;
+}
+
+/* ── INLINE CHARTS ───────────────────────────────────────────────── */
+.chat-chart-wrap {
+  width: 100%; border-radius: 14px; overflow: hidden;
+  border: 1px solid var(--line); background: rgba(4,5,10,0.55);
+  margin: 8px 0 4px;
+}
+.chat-chart-title {
+  font-family: var(--ff-mono); font-size: 8px; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--t2); padding: 9px 12px 6px;
+  border-bottom: 1px solid var(--hairline);
+}
+.chat-chart-canvas { display: block; width: 100%; }
+
+/* ── SOURCE CITATIONS ────────────────────────────────────────────── */
+.chat-sources { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.source-card {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--hairline);
+  border-radius: 10px; padding: 8px 10px; cursor: pointer;
+  transition: border-color .18s, background .18s;
+  text-decoration: none;
+}
+.source-card:active { border-color: rgba(10,132,255,0.35); background: rgba(10,132,255,0.06); }
+.source-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.source-info { flex: 1; min-width: 0; }
+.source-title { font-family: var(--ff-sans); font-size: 11px; color: var(--t1); line-height: 1.4; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-meta  { font-family: var(--ff-mono); font-size: 8px; color: var(--t3); }
+.source-arrow { font-size: 12px; color: var(--t3); margin-top: 3px; flex-shrink: 0; }
+
+/* ── THINKING / SEARCH STATUS ────────────────────────────────────── */
+.typing-bubble {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+  border-radius: 18px; border-bottom-left-radius: 5px;
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.typing-dots { display: flex; gap: 5px; align-items: center; }
+.t-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--brand);
+  animation: tdot 1.2s ease-in-out infinite;
+}
+.t-dot:nth-child(2){animation-delay:.2s} .t-dot:nth-child(3){animation-delay:.4s}
+@keyframes tdot{0%,60%,100%{transform:translateY(0);opacity:0.4}30%{transform:translateY(-5px);opacity:1}}
+
+.search-status {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--ff-mono); font-size: 9px; color: var(--mix); letter-spacing: 0.8px;
+}
+.search-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--mix); animation: pulse-dot 1s ease-in-out infinite; }
+.search-status-text { flex: 1; }
+
+/* ── QUICK PROMPTS ───────────────────────────────────────────────── */
+.qp-section { margin-bottom: 14px; }
+.qp-section-label { font-family: var(--ff-mono); font-size: 7.5px; letter-spacing: 2px; color: var(--t3); text-transform: uppercase; margin-bottom: 7px; }
+.quick-prompts { display: flex; gap: 6px; flex-wrap: wrap; }
+.qp-btn {
+  font-family: var(--ff-mono); font-size: 8.5px; letter-spacing: 0.6px;
+  padding: 7px 12px; border-radius: 30px; cursor: pointer;
+  border: 1px solid rgba(10,132,255,0.22); background: rgba(10,132,255,0.07);
+  color: var(--brand2); backdrop-filter: var(--blur);
+  transition: all .2s cubic-bezier(.2,.9,.25,1);
+}
+.qp-btn.research-prompt { border-color: rgba(191,90,242,0.28); background: rgba(191,90,242,0.08); color: var(--mix); }
+.qp-btn.risk-prompt { border-color: rgba(255,69,58,0.28); background: rgba(255,69,58,0.07); color: var(--neg); }
+.qp-btn.forecast-prompt { border-color: rgba(255,214,10,0.28); background: rgba(255,214,10,0.07); color: var(--neu); }
+.qp-btn:active { transform: scale(0.92); }
+
+/* ── INPUT BAR ───────────────────────────────────────────────────── */
+.chat-input-area { padding: 12px 14px; border-top: 1px solid var(--hairline); }
+.chat-input-row { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input {
+  flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--line);
+  border-radius: 16px; padding: 12px 15px;
+  font-family: var(--ff-sans); font-size: 13px; color: var(--t0);
+  outline: none; resize: none; min-height: 46px; max-height: 120px;
+  line-height: 1.45; transition: border-color .2s, box-shadow .2s;
+}
+.chat-input:focus { border-color: rgba(10,132,255,0.5); box-shadow: 0 0 0 4px rgba(10,132,255,0.10); }
+.chat-input::placeholder { color: var(--t3); }
+.chat-send {
+  width: 46px; height: 46px; border-radius: 15px; border: none;
+  background: linear-gradient(135deg, var(--brand), var(--mix));
+  color: white; font-size: 18px; cursor: pointer; flex-shrink: 0;
+  box-shadow: 0 6px 20px rgba(10,132,255,0.4);
+  transition: transform .18s cubic-bezier(.2,.9,.25,1), box-shadow .18s;
+  display: flex; align-items: center; justify-content: center;
+}
+.chat-send:active { transform: scale(0.9); box-shadow: 0 3px 12px rgba(10,132,255,0.3); }
+.chat-send:disabled { background: var(--ink3); box-shadow: none; opacity: 0.4; }
+.chat-mode-indicator {
+  font-family: var(--ff-mono); font-size: 7.5px; letter-spacing: 1.2px;
+  color: var(--t3); text-align: center; margin-top: 6px;
+}
+.chat-mode-indicator span { color: var(--brand2); }
+
+/* ── MSG ACTIONS ─────────────────────────────────────────────────── */
+.msg-actions {
+  display: flex; gap: 5px; opacity: 0; transition: opacity .2s;
+  padding: 0 2px;
+}
+.chat-msg:hover .msg-actions, .chat-msg:focus-within .msg-actions { opacity: 1; }
+.msg-act-btn {
+  font-family: var(--ff-mono); font-size: 8px; padding: 4px 8px;
+  border-radius: 7px; cursor: pointer; border: 1px solid var(--line);
+  background: var(--glass-2); color: var(--t3);
+  transition: color .15s, border-color .15s;
+}
+.msg-act-btn:active { color: var(--brand2); border-color: rgba(10,132,255,0.35); }
+
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
-  .live-dot, .ticker-track, .brand-mark, .hero-panel::before { animation: none !important; }
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; animation-iteration-count: 1 !important; }
+  .nav-indicator { transition: none !important; }
 }
 
 </style>
@@ -1567,19 +1914,29 @@ body::after {
     </div>
   </div>
 
-  <!-- Hero sentiment score -->
+  <!-- Hero — Intelligence Orb -->
   <div class="hero-panel">
-    <div class="hero-score-row">
-      <div class="hero-score-main">
-        <div class="hero-score-label">National Sentiment Score</div>
-        <div class="hero-score-value" id="hero-score">+0.31</div>
-        <div class="hero-score-sub">Across 47 monitored sources</div>
+    <div class="orb-stage">
+      <div class="orb-ring r3"></div>
+      <div class="intel-orb-xl">
+        <div class="orb-ring r1"></div>
+        <div class="orb-ring r2"></div>
+        <div class="orb-core">
+          <div class="orb-score" id="hero-score">+0.31</div>
+          <div class="orb-cap">SENTIMENT INDEX</div>
+        </div>
       </div>
+    </div>
+    <div class="hero-meta">
+      <div class="hero-score-label">National Sentiment Index</div>
+      <div class="hero-score-sub">Synthesised across 47 monitored sources</div>
       <div class="hero-score-delta up" id="hero-delta">↑ +0.04 vs 7d avg</div>
     </div>
-    <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--pos)">POS</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-pos" style="width:51%;background:var(--pos)"></div></div><div class="sent-bar-pct" id="hp-pos">51%</div></div>
-    <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--neg)">NEG</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-neg" style="width:31%;background:var(--neg)"></div></div><div class="sent-bar-pct" id="hp-neg">31%</div></div>
-    <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--neu)">NEU</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-neu" style="width:18%;background:var(--neu)"></div></div><div class="sent-bar-pct" id="hp-neu">18%</div></div>
+    <div class="hero-bars">
+      <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--pos)">POS</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-pos" style="width:51%;background:var(--pos)"></div></div><div class="sent-bar-pct" id="hp-pos">51%</div></div>
+      <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--neg)">NEG</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-neg" style="width:31%;background:var(--neg)"></div></div><div class="sent-bar-pct" id="hp-neg">31%</div></div>
+      <div class="sent-bar-row"><div class="sent-bar-lbl" style="color:var(--neu)">NEU</div><div class="sent-bar-track"><div class="sent-bar-fill" id="hb-neu" style="width:18%;background:var(--neu)"></div></div><div class="sent-bar-pct" id="hp-neu">18%</div></div>
+    </div>
   </div>
 
   <!-- Stat grid -->
@@ -1597,12 +1954,15 @@ body::after {
       <div class="card-arrow open">▾</div>
     </div>
     <div class="card-body">
-      <div class="chart-wrap"><svg id="sent-chart" viewBox="0 0 400 120" preserveAspectRatio="none"></svg></div>
-      <div class="chart-ctrl">
-        <button class="chart-btn active" onclick="setRange(this,'24h')">24H</button>
-        <button class="chart-btn" onclick="setRange(this,'7d')">7D</button>
-        <button class="chart-btn" onclick="setRange(this,'30d')">30D</button>
-        <button class="chart-btn" onclick="setRange(this,'90d')">90D</button>
+      <div class="viz-stage flat" style="height:160px">
+        <canvas id="flow-canvas" data-h="160"></canvas>
+        <div class="viz-tip"></div>
+      </div>
+      <div class="viz-ctrl">
+        <button class="chart-btn active" onclick="setRange(this,'24h');if(window.VIZ_flowSetRange)VIZ_flowSetRange('24h')">24H</button>
+        <button class="chart-btn" onclick="setRange(this,'7d');if(window.VIZ_flowSetRange)VIZ_flowSetRange('7d')">7D</button>
+        <button class="chart-btn" onclick="setRange(this,'30d');if(window.VIZ_flowSetRange)VIZ_flowSetRange('30d')">30D</button>
+        <button class="chart-btn" onclick="setRange(this,'90d');if(window.VIZ_flowSetRange)VIZ_flowSetRange('90d')">90D</button>
       </div>
     </div>
   </div>
@@ -1672,7 +2032,54 @@ body::after {
       <div style="font-family:var(--ff-mono);font-size:10px;color:var(--t2);margin:10px 0 3px">Dutton Net Approval</div>
       <div class="poll-bar"><div class="poll-seg" style="width:33%;background:var(--pos);color:var(--ink)">+33</div><div class="poll-seg" style="width:44%;background:var(--neg);color:white">-44</div><div class="poll-seg" style="width:23%;background:var(--ink4);color:var(--t2)">23</div></div>
     </div>
+    <!-- Intelligence Network Graph -->
+  <div class="card viz-card">
+    <div class="card-hdr" onclick="toggleSection(this)">
+      <div class="card-hdr-left">
+        <div class="card-title">Intelligence Network</div>
+        <div class="card-badge">LIVE · INTERACTIVE</div>
+      </div>
+      <div class="card-arrow open">▾</div>
+    </div>
+    <div class="card-body">
+      <div class="viz-stage" style="height:360px">
+        <canvas id="network-canvas" data-h="360"></canvas>
+        <div class="viz-tip"></div>
+      </div>
+      <div class="viz-legend">
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#FF453A;color:#FF453A"></span>TOPICS</span>
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#4FA4FF;color:#4FA4FF"></span>PARTIES</span>
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#FFD60A;color:#FFD60A"></span>SOURCES</span>
+      </div>
+      <div class="viz-hint">Drag nodes · tap to investigate · edges show association strength</div>
+    </div>
   </div>
+
+  <!-- 3D Sentiment Constellation -->
+  <div class="card viz-card">
+    <div class="card-hdr" onclick="toggleSection(this)">
+      <div class="card-hdr-left">
+        <div class="card-title">Sentiment Constellation</div>
+        <div class="card-badge">3D · 360°</div>
+      </div>
+      <div class="card-arrow open">▾</div>
+    </div>
+    <div class="card-body">
+      <div class="viz-stage" style="height:340px">
+        <canvas id="const-canvas" data-h="340"></canvas>
+        <div class="viz-tip"></div>
+      </div>
+      <div class="viz-legend">
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#30D158;color:#30D158"></span>POSITIVE</span>
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#FF453A;color:#FF453A"></span>NEGATIVE</span>
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#FFD60A;color:#FFD60A"></span>NEUTRAL</span>
+        <span class="viz-leg-item"><span class="viz-dot" style="background:#BF5AF2;color:#BF5AF2"></span>MIXED</span>
+      </div>
+      <div class="viz-hint">Drag to orbit · node proximity = narrative similarity · tap to investigate</div>
+    </div>
+  </div>
+
+</div>
 
 </div><!-- end overview -->
 
@@ -1721,9 +2128,8 @@ body::after {
     <div class="src-chip on" data-src="hn" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--hn)"></div>HACKER NEWS</div>
     <div class="src-chip on needs-worker" data-src="reddit" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--reddit)"></div>REDDIT ⚡</div>
     <div class="src-grp-label" style="margin-top:6px">⚡ Needs Worker</div>
-    <div class="src-chip on needs-worker" data-src="allnews" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand2)"></div>AU NEWS 20+ ⚡</div>
     <div class="src-chip on needs-worker" data-src="guardian" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--guardian)"></div>GUARDIAN ⚡</div>
-    <div class="src-chip needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
+    <div class="src-chip on needs-worker" data-src="abc_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--abc)"></div>ABC RSS ⚡</div>
     <div class="src-chip needs-worker" data-src="smh_rss" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--smh)"></div>SMH ⚡</div>
     <div class="src-chip needs-worker" data-src="whirlpool" onclick="toggleSrc(this)"><div class="src-dot" style="background:var(--brand)"></div>WHIRLPOOL ⚡</div>
     <div class="src-chip needs-worker" data-src="bigfooty" onclick="toggleSrc(this)"><div class="src-dot" style="background:#c0392b"></div>BIGFOOTY ⚡</div>
@@ -1819,13 +2225,16 @@ body::after {
 </div><!-- end comments -->
 
 <!-- ═══ AI CHAT PAGE ═══ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     AXIOM AI PAGE — Deep Analysis Terminal
+════════════════════════════════════════════════════════════════════ -->
 <div class="page" id="page-ai">
 
-  <!-- AI Score ring -->
+  <!-- Intelligence Score Ring (kept for auto-sentiment hook) -->
   <div class="card">
     <div class="card-hdr" style="cursor:default">
       <div class="card-hdr-left">
-        <div style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),var(--mix));display:flex;align-items:center;justify-content:center;font-family:var(--ff-mono);font-size:8px;font-weight:700;color:white">AI</div>
+        <div class="chat-orb" style="width:22px;height:22px;border-radius:7px;animation:orb-breathe 6s ease-in-out infinite"></div>
         <div class="card-title">Intelligence Score</div>
       </div>
       <button class="ci-sort-btn active" onclick="runAutoSentiment()" style="cursor:pointer;padding:4px 10px;font-size:8px">UPDATE NOW</button>
@@ -1856,36 +2265,83 @@ body::after {
     </div>
   </div>
 
-  <!-- Quick prompts -->
-  <div class="quick-prompts">
-    <button class="qp-btn" onclick="setQuickPrompt(this)">Housing sentiment?</button>
-    <button class="qp-btn" onclick="setQuickPrompt(this)">ALP vs LNP?</button>
-    <button class="qp-btn" onclick="setQuickPrompt(this)">Top risk today?</button>
-    <button class="qp-btn" onclick="setQuickPrompt(this)">Climate narrative?</button>
-    <button class="qp-btn" onclick="setQuickPrompt(this)">QLD trends?</button>
-    <button class="qp-btn" onclick="setQuickPrompt(this)">Summarise alerts</button>
+  <!-- Analysis Mode Selector -->
+  <div class="ai-mode-bar" id="ai-mode-bar">
+    <button class="mode-btn active" data-mode="quick" onclick="setAnalysisMode('quick',this)">
+      <span class="mode-icon">⚡</span>QUICK
+    </button>
+    <button class="mode-btn deep" data-mode="deep" onclick="setAnalysisMode('deep',this)">
+      <span class="mode-icon">🔬</span>DEEP
+    </button>
+    <button class="mode-btn research" data-mode="research" onclick="setAnalysisMode('research',this)">
+      <span class="mode-icon">🌐</span>RESEARCH
+    </button>
+    <button class="mode-btn forecast" data-mode="forecast" onclick="setAnalysisMode('forecast',this)">
+      <span class="mode-icon">📡</span>FORECAST
+    </button>
   </div>
 
-  <!-- Chat -->
-  <div class="card">
-    <div class="card-hdr" style="cursor:default">
-      <div class="card-hdr-left">
-        <div style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),var(--mix));display:flex;align-items:center;justify-content:center;font-family:var(--ff-mono);font-size:8px;font-weight:700;color:white">AI</div>
-        <div class="card-title">AXIOM Analyst · Claude</div>
-      </div>
-      <div style="font-family:var(--ff-mono);font-size:8px;color:var(--pos)">● ONLINE</div>
+  <!-- Quick Prompts -->
+  <div class="qp-section">
+    <div class="qp-section-label">Analysis prompts</div>
+    <div class="quick-prompts">
+      <button class="qp-btn" onclick="setQuickPrompt(this)">Housing crisis deep dive</button>
+      <button class="qp-btn" onclick="setQuickPrompt(this)">ALP vs LNP narrative battle</button>
+      <button class="qp-btn" onclick="setQuickPrompt(this)">Climate policy intelligence</button>
+      <button class="qp-btn research-prompt" onclick="setQuickPromptMode(this,'research')">🌐 Latest news search</button>
+      <button class="qp-btn risk-prompt" onclick="setQuickPromptMode(this,'deep')">🔴 Top political risks today</button>
+      <button class="qp-btn research-prompt" onclick="setQuickPromptMode(this,'research')">🌐 Albanese news today</button>
+      <button class="qp-btn forecast-prompt" onclick="setQuickPromptMode(this,'forecast')">📡 Election 90-day forecast</button>
+      <button class="qp-btn forecast-prompt" onclick="setQuickPromptMode(this,'forecast')">📡 QLD swing analysis</button>
+      <button class="qp-btn" onclick="setQuickPrompt(this)">Medicare sentiment</button>
+      <button class="qp-btn risk-prompt" onclick="setQuickPromptMode(this,'deep')">🔴 LNP narrative risks</button>
+      <button class="qp-btn" onclick="setQuickPrompt(this)">Cost of living trends</button>
+      <button class="qp-btn research-prompt" onclick="setQuickPromptMode(this,'research')">🌐 AUKUS latest</button>
     </div>
-    <div class="card-body">
-      <div class="chat-messages" id="chat-messages">
-        <div class="chat-msg bot">
-          <div class="chat-avatar">AI</div>
-          <div class="chat-bubble"><strong>G'day.</strong> I'm AXIOM Analyst, powered by Claude. I monitor 47 Australian political sources — Reddit, Hacker News, Guardian AU, ABC, Whirlpool, BigFooty, HotCopper, OzPolitic and more.<br><br>Set your Claude API key in ⚙ Settings to unlock real-time intelligence, auto-scoring and interval updates.<br><br><span style="color:var(--t3);font-size:11px">Try: "How is housing tracking?" or "What narratives is LNP running?"</span></div>
+  </div>
+
+  <!-- Main Chat Terminal -->
+  <div class="chat-terminal">
+    <div class="chat-terminal-hdr">
+      <div class="chat-orb"></div>
+      <div class="chat-status-row">
+        <div class="chat-status-name">AXIOM Analyst</div>
+        <div class="chat-status-line"><span class="dot-live">●</span> CLAUDE · <span id="chat-mode-label">QUICK MODE</span></div>
+      </div>
+      <div class="chat-hdr-actions">
+        <button class="chat-hdr-btn" onclick="clearChatHistory()" title="Clear chat">✕</button>
+        <button class="chat-hdr-btn" onclick="exportChatTranscript()" title="Export">↓</button>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-msg bot">
+        <div class="chat-avatar">AI</div>
+        <div class="chat-msg-body">
+          <div class="chat-bubble">
+            <strong>G'day.</strong> I'm AXIOM Analyst — powered by Claude with access to Australian political intelligence across 47 sources.<br><br>
+            <span class="ch3">MODES</span>
+            ⚡ <strong>Quick</strong> — sharp 2-sentence intel<br>
+            🔬 <strong>Deep</strong> — structured political brief with party implications<br>
+            🌐 <strong>Research</strong> — live web search + synthesis<br>
+            📡 <strong>Forecast</strong> — 30/60/90-day scenario modelling<br><br>
+            <span style="color:var(--t3);font-size:11px">I can generate charts inside this terminal. Try: <em>"Show me ALP vs LNP sentiment as a chart"</em></span>
+          </div>
         </div>
       </div>
-      <div class="chat-input-wrap">
-        <input class="chat-input" id="chat-input" placeholder="Ask about Australian politics..." onkeydown="if(event.key==='Enter')sendChat()">
-        <button class="chat-send" onclick="sendChat()">→</button>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chat-input" rows="1"
+          placeholder="Ask AXIOM anything about Australian politics..."
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatV2();}"
+          oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+        <button class="chat-send" id="chat-send-btn" onclick="sendChatV2()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
       </div>
+      <div class="chat-mode-indicator" id="chat-mode-indicator">Mode: <span id="chat-mode-badge">⚡ QUICK</span> · Shift+Enter for newline</div>
     </div>
   </div>
 
@@ -1904,61 +2360,6 @@ body::after {
   </div>
 
 </div><!-- end ai page -->
-
-<!-- ═══ AI BANK PAGE ═══ -->
-<div class="page" id="page-bank">
-
-  <!-- Intro -->
-  <div class="card">
-    <div class="card-hdr" style="cursor:default">
-      <div class="card-hdr-left">
-        <div style="width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--brand),var(--mix));display:flex;align-items:center;justify-content:center;font-size:11px">🏛️</div>
-        <div class="card-title">Aussie Political AI Bank</div>
-      </div>
-      <div style="font-family:var(--ff-mono);font-size:8px;color:var(--pos)">● ASK CLAUDE</div>
-    </div>
-    <div class="card-body">
-      <div class="bank-intro">Ask anything about Australian politics. Claude answers at <strong>two levels</strong>: grounded in <strong>20+ live AU outlets</strong> (ABC, Guardian, SMH, The Age, AFR, SBS, Crikey, The Conversation, news.com.au, AAP &amp; more) via RSS + the Guardian News API — or by searching the wider internet in real time.</div>
-    </div>
-  </div>
-
-  <!-- Ask box -->
-  <div class="card">
-    <div class="card-body">
-      <div class="bank-mode-row">
-        <button class="bank-mode active" id="bank-mode-data" onclick="bankSetMode(this,'data')">
-          <div class="bank-mode-t">📚 Data Bank</div>
-          <div class="bank-mode-s">RSS + News API feeds</div>
-        </button>
-        <button class="bank-mode" id="bank-mode-web" onclick="bankSetMode(this,'web')">
-          <div class="bank-mode-t">🌐 Live Web</div>
-          <div class="bank-mode-s">Search the internet</div>
-        </button>
-      </div>
-      <div class="bank-ask-wrap">
-        <input class="bank-input" id="bank-input" placeholder="Ask about Australian politics…" onkeydown="if(event.key==='Enter')askBank()">
-        <button class="bank-send" id="bank-send" onclick="askBank()">Ask →</button>
-      </div>
-      <div class="quick-prompts" style="margin-top:11px;margin-bottom:0">
-        <button class="qp-btn" onclick="bankSetQuestion(this)">Latest on the housing crisis?</button>
-        <button class="qp-btn" onclick="bankSetQuestion(this)">Where do ALP and LNP stand on tax?</button>
-        <button class="qp-btn" onclick="bankSetQuestion(this)">What's happening in the Senate?</button>
-        <button class="qp-btn" onclick="bankSetQuestion(this)">Cost of living measures this week?</button>
-        <button class="qp-btn" onclick="bankSetQuestion(this)">Latest preferred-PM polling?</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Answers feed -->
-  <div id="bank-feed">
-    <div class="empty-state" id="bank-empty">
-      <div class="empty-icon">🏛️</div>
-      <div class="empty-title">Ask Your First Question</div>
-      <div class="empty-sub">Pick a level above, type a question, and Claude will answer — citing every source it used.</div>
-    </div>
-  </div>
-
-</div><!-- end bank page -->
 
 <!-- ═══ SAVED PAGE ═══ -->
 <div class="page" id="page-saved">
@@ -2276,164 +2677,17 @@ body::after {
   </div>
 
 </div><!-- end auto page -->
-
-<!-- ═══ RAPID RESPONSE PAGE ═══ -->
-<div class="page" id="page-rapid">
-
-  <!-- Status Hero -->
-  <div class="rr-hero">
-    <div class="rr-hero-top">
-      <div>
-        <div class="rr-hero-label">Rapid Response Newsroom</div>
-        <div class="rr-hero-status">
-          <div class="auto-status-dot idle" id="rr-dot"></div>
-          <span id="rr-status-text">Monitoring</span>
-        </div>
-      </div>
-      <button class="rr-scan-btn" id="rr-scan-btn" onclick="runRRScan()">
-        <span id="rr-scan-icon">⚡</span>
-        <span id="rr-scan-label">Scan Now</span>
-      </button>
-    </div>
-    <div class="rr-stats">
-      <div class="rr-stat">
-        <div class="rr-stat-val" id="rr-flagged-count" style="color:var(--neg)">0</div>
-        <div class="rr-stat-lbl">Flagged</div>
-      </div>
-      <div class="rr-stat">
-        <div class="rr-stat-val" id="rr-used-count" style="color:var(--pos)">0</div>
-        <div class="rr-stat-lbl">Published</div>
-      </div>
-      <div class="rr-stat">
-        <div class="rr-stat-val" id="rr-pipeline-count" style="color:var(--brand2)">0</div>
-        <div class="rr-stat-lbl">In Pipeline</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Pipeline -->
-  <div class="rr-pipeline">
-    <div class="rr-pipe-stage active" onclick="rrFilterStage(this,'triage')" data-stage="triage">
-      <div class="rr-pipe-num" id="rr-pipe-triage" style="color:var(--neg)">0</div>
-      <div class="rr-pipe-lbl">Triage</div>
-    </div>
-    <div class="rr-pipe-stage" onclick="rrFilterStage(this,'copy')" data-stage="copy">
-      <div class="rr-pipe-num" id="rr-pipe-copy" style="color:var(--neu)">0</div>
-      <div class="rr-pipe-lbl">Copy</div>
-    </div>
-    <div class="rr-pipe-stage" onclick="rrFilterStage(this,'design')" data-stage="design">
-      <div class="rr-pipe-num" id="rr-pipe-design" style="color:var(--brand2)">0</div>
-      <div class="rr-pipe-lbl">Design</div>
-    </div>
-    <div class="rr-pipe-stage" onclick="rrFilterStage(this,'approval')" data-stage="approval">
-      <div class="rr-pipe-num" id="rr-pipe-approval" style="color:var(--mix)">0</div>
-      <div class="rr-pipe-lbl">Approval</div>
-    </div>
-    <div class="rr-pipe-stage" onclick="rrFilterStage(this,'live')" data-stage="live">
-      <div class="rr-pipe-num" id="rr-pipe-live" style="color:var(--pos)">0</div>
-      <div class="rr-pipe-lbl">Live</div>
-    </div>
-  </div>
-
-  <!-- Angle builder (hidden by default) -->
-  <div class="rr-angle-panel" id="rr-angle-panel" style="display:none">
-    <div class="rr-angle-hdr">
-      <div class="rr-angle-orb">RR</div>
-      <div>
-        <div class="rr-angle-title">Angle Builder</div>
-        <div class="rr-angle-sub" id="rr-angle-source-label">Select format and generate copy</div>
-      </div>
-      <button class="rr-close-btn" onclick="closeAnglePanel()">&#x2715;</button>
-    </div>
-    <div class="rr-angle-body">
-      <div class="rr-story-selected">
-        <div class="rr-excerpt-label" style="margin-bottom:4px">Selected Story</div>
-        <div id="rr-selected-headline" style="font-family:var(--ff-sans);font-size:12.5px;font-weight:600;color:var(--t0);line-height:1.4"></div>
-      </div>
-
-      <div class="rr-section-label">Content Angle</div>
-      <div class="rr-angle-chips" id="rr-angle-chips">
-        <div class="rr-angle-chip active" onclick="rrSelectAngle(this,'Headline tear-out — direct quote from source')">&#x1F4F0; Headline tear-out</div>
-        <div class="rr-angle-chip" onclick="rrSelectAngle(this,'Community sentiment — what people are saying')">&#x1F4AC; Community voice</div>
-        <div class="rr-angle-chip" onclick="rrSelectAngle(this,'Narrative hook — emotional storytelling angle')">&#x1FA9D; Narrative hook</div>
-        <div class="rr-angle-chip" onclick="rrSelectAngle(this,'Counter-narrative — challenging the dominant story')">&#x26A1; Counter-narrative</div>
-        <div class="rr-angle-chip" onclick="rrSelectAngle(this,'Data/stat spotlight — leading with a striking number')">&#x1F4CA; Stat spotlight</div>
-      </div>
-
-      <div class="rr-section-label">Content Format</div>
-      <div class="rr-format-grid">
-        <div class="rr-format-card active" onclick="rrSelectFormat(this,'carousel')">
-          <div class="rr-format-check">&#x2713;</div>
-          <div class="rr-format-icon">&#x1F3A0;</div>
-          <div class="rr-format-name">Carousel</div>
-          <div class="rr-format-desc">3&#x2013;5 slide story</div>
-        </div>
-        <div class="rr-format-card" onclick="rrSelectFormat(this,'statcard')">
-          <div class="rr-format-check">&#x2713;</div>
-          <div class="rr-format-icon">&#x1F4CA;</div>
-          <div class="rr-format-name">Stat Card</div>
-          <div class="rr-format-desc">Single bold stat</div>
-        </div>
-        <div class="rr-format-card" onclick="rrSelectFormat(this,'video')">
-          <div class="rr-format-check">&#x2713;</div>
-          <div class="rr-format-icon">&#x1F3AC;</div>
-          <div class="rr-format-name">Video Caption</div>
-          <div class="rr-format-desc">Hook + script notes</div>
-        </div>
-        <div class="rr-format-card" onclick="rrSelectFormat(this,'story')">
-          <div class="rr-format-check">&#x2713;</div>
-          <div class="rr-format-icon">&#x1F4F1;</div>
-          <div class="rr-format-name">Story / Reel</div>
-          <div class="rr-format-desc">Vertical 9:16</div>
-        </div>
-      </div>
-
-      <button class="rr-gen-btn" id="rr-gen-btn" onclick="generateRRContent()">&#x26A1; Generate Copy + Brief</button>
-
-      <div class="rr-output-wrap" id="rr-output-wrap" style="display:none">
-        <div class="rr-output-hdr">
-          <div class="rr-output-label">Generated Copy</div>
-          <button class="rr-output-copy-btn" onclick="copyRROutput()">&#x2398; COPY</button>
-        </div>
-        <div class="rr-output-body" id="rr-output-body"></div>
-      </div>
-
-      <div class="rr-brief-box" id="rr-brief-box" style="display:none">
-        <div class="rr-brief-label">Designer Brief</div>
-        <div class="rr-brief-body" id="rr-brief-body"></div>
-      </div>
-
-      <div class="rr-action-row" id="rr-action-row" style="display:none">
-        <button class="rr-action-btn clickup" onclick="rrSendToClickUp()">&#x1F4CB; ClickUp</button>
-        <button class="rr-action-btn brief" onclick="rrMarkInPipeline()">&#x2713; To Design</button>
-        <button class="rr-action-btn copy2" onclick="copyRRBrief()">&#x2398; Brief</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Triage queue -->
-  <div id="rr-queue">
-    <div class="empty-state">
-      <div class="empty-icon">&#x1F525;</div>
-      <div class="empty-title">No Flagged Items</div>
-      <div class="empty-sub">Tap "Scan Now" with a Claude API key to identify rapid response opportunities from your monitored sources.</div>
-    </div>
-  </div>
-
-</div><!-- end rapid page -->
-
 </div><!-- end scroll area -->
 
 <!-- BOTTOM NAV -->
 <div class="bottom-nav">
+  <div class="nav-indicator" id="nav-indicator"></div>
   <button class="nav-btn active" id="nav-overview" onclick="switchPage('overview',this)"><div class="nav-icon">📊</div><div class="nav-label">Overview</div></button>
   <button class="nav-btn" id="nav-feed" onclick="switchPage('feed',this)"><div class="nav-icon">📡</div><div class="nav-label">Feed</div></button>
   <button class="nav-btn" id="nav-comments" onclick="switchPage('comments',this)"><div class="nav-icon">💬</div><div class="nav-label">Intel</div><div class="nav-badge" id="ci-nav-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-ai" onclick="switchPage('ai',this)"><div class="nav-icon">🧠</div><div class="nav-label">AI</div></button>
-  <button class="nav-btn" id="nav-bank" onclick="switchPage('bank',this)"><div class="nav-icon">🏛️</div><div class="nav-label">Bank</div></button>
   <button class="nav-btn" id="nav-saved" onclick="switchPage('saved',this)"><div class="nav-icon">📌</div><div class="nav-label">Saved</div><div class="nav-badge" id="saved-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-auto" onclick="switchPage('auto',this)"><div class="nav-icon">⚡</div><div class="nav-label">Auto</div><div class="nav-badge" id="auto-badge" style="display:none"></div></button>
-  <button class="nav-btn" id="nav-rapid" onclick="switchPage('rapid',this)"><div class="nav-icon">&#x1F525;</div><div class="nav-label">Rapid</div><div class="nav-badge" id="rr-nav-badge" style="display:none"></div></button>
   <button class="nav-btn" id="nav-alerts" onclick="switchPage('alerts',this)"><div class="nav-icon">🚨</div><div class="nav-label">Alerts</div><div class="nav-badge"></div></button>
   <button class="nav-btn" id="nav-settings" onclick="switchPage('settings',this)"><div class="nav-icon">⚙️</div><div class="nav-label">Settings</div></button>
 </div>
@@ -2468,7 +2722,7 @@ let ciComments   = [];
 let ciSortMode   = 'top';
 let ciQuery      = '';
 let ciActiveSrcs = new Set();
-let ciSrcs       = new Set(['hn','reddit','guardian','allnews']);
+let ciSrcs       = new Set(['hn','reddit','guardian','abc_rss']);
 let savedItems   = JSON.parse(localStorage.getItem('axiom_saved') || '[]');
 let watchlist    = JSON.parse(localStorage.getItem('axiom_watchlist') || '["housing crisis","cost of living","Albanese","Dutton","Greens climate","Medicare","AUKUS","immigration"]');
 let autoTimer    = null;
@@ -2478,7 +2732,7 @@ let autoJobItems = [];
 let autoPollTimer = null;
 
 const HN_API       = 'https://hn.algolia.com/api/v1';
-const TOTAL_SOURCES = 29;
+const TOTAL_SOURCES = 15;
 const INTERVAL_MS  = { off:0, '5m':300000, '15m':900000, '30m':1800000, '1h':3600000 };
 const WRANGLER_CRON = { daily:'0 21 * * *', '6h':'0 */6 * * *', manual:null };
 
@@ -2500,24 +2754,6 @@ const SRC_META = {
   ozpolitic:    { n:'OzPolitic',       c:'#27ae60',         icon:'OZ'  },
   bbc:          { n:'BBC Australia',   c:'#b71c1c',         icon:'BBC' },
   reuters:      { n:'Reuters',         c:'#ff8f00',         icon:'REU' },
-  // ── expanded AU news registry (matches worker AU_FEEDS keys) ──
-  abc:          { n:'ABC News',        c:'var(--abc)',      icon:'ABC' },
-  abc_top:      { n:'ABC Top Stories', c:'var(--abc)',      icon:'ABC' },
-  smh:          { n:'SMH',             c:'var(--smh)',      icon:'SMH' },
-  smh_pol:      { n:'SMH Federal',     c:'var(--smh)',      icon:'SMH' },
-  brisbanetimes:{ n:'Brisbane Times',  c:'#1565c0',         icon:'BNE' },
-  watoday:      { n:'WAtoday',         c:'#00838f',         icon:'WAT' },
-  afr:          { n:'Fin Review',      c:'#d6336c',         icon:'AFR' },
-  guardian_pol: { n:'Guardian Politics',c:'var(--guardian)',icon:'GUP' },
-  newdaily:     { n:'The New Daily',   c:'#e53935',         icon:'TND' },
-  michaelwest:  { n:'Michael West',    c:'#607d8b',         icon:'MWM' },
-  independentau:{ n:'Independent AU',  c:'#3949ab',         icon:'IA'  },
-  menadue:      { n:'Pearls & Irritations', c:'#8d6e63',    icon:'P&I' },
-  saturdaypaper:{ n:'Saturday Paper',  c:'#455a64',         icon:'TSP' },
-  junkee:       { n:'Junkee',          c:'#d81b60',         icon:'JNK' },
-  newscomau:    { n:'news.com.au',     c:'#c62828',         icon:'NCA' },
-  aap:          { n:'AAP Newswire',    c:'#1976d2',         icon:'AAP' },
-  indaily:      { n:'InDaily',         c:'#00897b',         icon:'IND' },
 };
 
 // ── INIT ────────────────────────────────────────────────────────────
@@ -2566,7 +2802,6 @@ function switchPage(name, btn) {
   if (name === 'ai')       { drawTPPChart(); }
   if (name === 'saved')    { renderSaved(); }
   if (name === 'auto')     { initAuto(); renderAutoWatchlistChips(); checkCollectStatus(true); }
-  if (name === 'rapid')    { initRR(); }
 }
 
 function toggleSection(hdr) {
@@ -2642,7 +2877,7 @@ function startAutoInterval() {
 async function callClaude(messages, maxTokens, system) {
   maxTokens = maxTokens || 1000;
   if (!CLAUDE_KEY) throw new Error('No API key');
-  var body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages:messages };
+  var body = { model:'claude-sonnet-4-20250514', max_tokens:maxTokens, messages:messages };
   if (system) body.system = system;
   var res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -2741,180 +2976,690 @@ function updateScoreRing(score) {
 }
 
 // ── CHAT ───────────────────────────────────────────────────────────
-var CHAT_SYS = 'You are AXIOM Analyst, Australian political intelligence AI. Be concise, analytical, direct. Short paragraphs for mobile.';
-async function sendChat() {
-  if (!CLAUDE_KEY) { showToast('Set API key first','error'); openAPIModal(); return; }
-  var input = document.getElementById('chat-input');
-  var msgs  = document.getElementById('chat-messages');
-  var text  = input.value.trim();
-  if (!text) return;
-  msgs.innerHTML += '<div class="chat-msg user"><div class="chat-avatar" style="background:var(--ink4);color:var(--t2)">U</div><div class="chat-bubble">' + esc(text) + '</div></div>';
-  input.value = '';
-  msgs.scrollTop = msgs.scrollHeight;
-  var tid = 't' + Date.now();
-  msgs.innerHTML += '<div class="chat-msg bot" id="' + tid + '"><div class="chat-avatar">AI</div><div class="typing-dots"><div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div></div></div>';
-  msgs.scrollTop = msgs.scrollHeight;
-  try {
-    var reply = await callClaude([{role:'user',content:text}], 1000, CHAT_SYS);
-    document.getElementById(tid).outerHTML = '<div class="chat-msg bot"><div class="chat-avatar">AI</div><div class="chat-bubble">' + reply.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>') + '</div></div>';
-  } catch(e) {
-    document.getElementById(tid).outerHTML = '<div class="chat-msg bot"><div class="chat-avatar">AI</div><div class="chat-bubble" style="color:var(--neg)">Analysis unavailable. Check API key.</div></div>';
-  }
-  msgs.scrollTop = msgs.scrollHeight;
+// ═══════════════════════════════════════════════════════════════════════
+// AXIOM · AI CHAT ENGINE v2
+// Deep analysis · Multi-turn web search · Inline chart rendering
+// ═══════════════════════════════════════════════════════════════════════
+
+/* ── STATE ──────────────────────────────────────────────────────────── */
+var CHAT_MODE     = 'quick';
+var CHAT_HISTORY  = [];   // full multi-turn conversation history
+var CHAT_IS_BUSY  = false;
+
+/* ── SYSTEM PROMPTS ─────────────────────────────────────────────────── */
+var CHAT_SYSTEMS = {
+  quick:
+    'You are AXIOM Analyst — elite Australian political intelligence AI. ' +
+    'For quick questions: answer in 2-3 razor-sharp sentences. Lead with the insight. ' +
+    'Be clinical and direct. No hedging. Mobile-optimised.',
+
+  deep:
+    'You are AXIOM Analyst v2 — elite Australian political intelligence system.\n\n' +
+    'CONTEXT: Real-time monitoring across Reddit, HackerNews, Guardian AU, ABC News, ' +
+    'Whirlpool, BigFooty, OzPolitic, SMH, The Age, Crikey.\n\n' +
+    'DEEP ANALYSIS FORMAT — use this structure:\n' +
+    '**INTELLIGENCE BRIEF — [TOPIC]**\n' +
+    'Opening: 1 sentence bottom-line assessment.\n\n' +
+    '## Key Intelligence\n' +
+    '🔴 RISKS — what\'s dangerous for each party\n' +
+    '🟢 OPPORTUNITIES — what\'s favourable\n' +
+    '⚡ SIGNALS — what\'s new or breaking\n\n' +
+    '## Party Implications\n' +
+    'ALP: ...\nLNP: ...\nGreens: ...\n\n' +
+    '## Source Patterns\n' +
+    'Which platforms are amplifying what narrative.\n\n' +
+    '**CONFIDENCE SCORE: [0-100]** — [one-sentence rationale]\n\n' +
+    'CHART RULE: If showing numerical data or comparisons, ALWAYS output a chart block using this EXACT format:\n' +
+    '```chart\n{"type":"bar","title":"...","labels":[...],"data":[...],"colors":[...]}\n```\n\n' +
+    'For trends use type "line" with "datasets":[{"label":"...","data":[...],"color":"..."}]\n' +
+    'For splits use type "donut".\n\n' +
+    'Keep paragraphs mobile-short (3-4 lines max).',
+
+  research:
+    'You are AXIOM Analyst v2 — elite Australian political intelligence system with LIVE WEB SEARCH.\n\n' +
+    'RESEARCH MODE: Search the web for current information before answering. ' +
+    'Search for: recent news, specific policy announcements, polling data, political statements.\n\n' +
+    'AFTER SEARCHING — produce a full intelligence brief:\n' +
+    '**RESEARCH BRIEF — [TOPIC]** 🌐 WEB SOURCED\n\n' +
+    '## Key Findings\n' +
+    'Synthesise what you found. Lead with most important developments.\n\n' +
+    '## Source Analysis\n' +
+    'Which sources covered this? How did coverage differ?\n\n' +
+    '## Political Intelligence\n' +
+    'Implications for ALP, LNP, Greens. Who benefits, who\'s at risk.\n\n' +
+    '## Assessment\n' +
+    'Your analytical conclusion.\n\n' +
+    '**CONFIDENCE SCORE: [0-100]** — [rationale]\n\n' +
+    'CHART RULE: Always include a chart if you have comparative data:\n' +
+    '```chart\n{"type":"bar","title":"...","labels":[...],"data":[...],"colors":[...]}\n```\n\n' +
+    'Cite sources naturally in text. Be specific about dates and sources.',
+
+  forecast:
+    'You are AXIOM Analyst v2 — strategic political forecasting system.\n\n' +
+    'FORECAST MODE: Produce scenario-based political forecasts.\n\n' +
+    'FORECAST FORMAT:\n' +
+    '**STRATEGIC FORECAST — [TOPIC]**\n\n' +
+    '## Current Trajectory\n' +
+    'Where things stand right now.\n\n' +
+    '## 30-Day Outlook\n' +
+    'Most likely developments in the next month.\n\n' +
+    '## 90-Day Scenarios\n' +
+    '📈 BULL CASE (for [party]): ...\n' +
+    '📉 BEAR CASE: ...\n' +
+    '⚖️ BASE CASE (most likely): ...\n\n' +
+    '## Key Variables\n' +
+    'What could change these forecasts?\n\n' +
+    '## Electoral Implications\n' +
+    'Seat-level and state-level impacts.\n\n' +
+    '**FORECAST CONFIDENCE: [0-100]** — [caveat]\n\n' +
+    'CHART RULE — for forecast timelines or scenario probabilities:\n' +
+    '```chart\n{"type":"bar","title":"Scenario Probabilities (%)","labels":["Bull","Base","Bear"],"data":[25,55,20],"colors":["#30D158","#0A84FF","#FF453A"]}\n```\n\n' +
+    'Base every claim on observable political data. Flag uncertainty honestly.'
+};
+
+/* ── MODE MANAGEMENT ─────────────────────────────────────────────────── */
+function setAnalysisMode(mode, btn) {
+  CHAT_MODE = mode;
+  document.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  var labels = { quick:'⚡ QUICK', deep:'🔬 DEEP', research:'🌐 RESEARCH', forecast:'📡 FORECAST' };
+  var modeLabel = { quick:'QUICK MODE', deep:'DEEP ANALYSIS', research:'RESEARCH MODE', forecast:'FORECAST MODE' };
+  var el = document.getElementById('chat-mode-badge');
+  var lbl = document.getElementById('chat-mode-label');
+  if (el) el.textContent = labels[mode] || mode.toUpperCase();
+  if (lbl) lbl.textContent = modeLabel[mode] || mode.toUpperCase();
+  var ph = { quick:'Ask anything about Australian politics...', deep:'What would you like a deep analysis on?', research:'What topic shall I research across live sources?', forecast:'What would you like a political forecast on?' };
+  var inp = document.getElementById('chat-input');
+  if (inp) inp.placeholder = ph[mode] || ph.quick;
 }
+
 function setQuickPrompt(el) {
-  document.getElementById('chat-input').value = el.textContent;
-  sendChat();
+  document.getElementById('chat-input').value = el.textContent.trim();
+  sendChatV2();
+}
+function setQuickPromptMode(el, mode) {
+  var btn = document.querySelector('.mode-btn[data-mode="'+mode+'"]');
+  setAnalysisMode(mode, btn);
+  document.getElementById('chat-input').value = el.textContent.replace(/^[🌐🔴📡]\s*/,'').trim();
+  sendChatV2();
 }
 
-// ── AI BANK ────────────────────────────────────────────────────────
-var BANK_MODE  = 'data';
-var bankBusy   = false;
-var BANK_SYS   = 'You are AXIOM Analyst, a non-partisan Australian political intelligence AI. '
-  + 'Answer questions about Australian politics clearly and factually for an informed AU audience. '
-  + 'Be concise and analytical; use short paragraphs suited to mobile. Use Australian spelling and context. '
-  + 'When you are uncertain or the evidence is thin, say so rather than speculating.';
+/* ── CORE CLAUDE V2 CALL (with web-search tool support) ──────────────── */
+async function callClaudeV2(messages, system, mode) {
+  var maxTokens = { quick:600, deep:2200, research:3500, forecast:2200 }[mode] || 1200;
 
-function bankSetMode(el, mode) {
-  BANK_MODE = mode;
-  document.querySelectorAll('.bank-mode').forEach(function(b){ b.classList.remove('active'); });
-  el.classList.add('active');
-}
-function bankSetQuestion(el) {
-  document.getElementById('bank-input').value = el.textContent;
-  askBank();
-}
+  var body = {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: maxTokens,
+    system: system,
+    messages: messages
+  };
 
-// Gather AXIOM's own data — 20+ AU RSS/Atom feeds (via the worker /allnews
-// aggregator) plus the Guardian News API for full-text grounding.
-async function bankGatherSources(q) {
-  var items = [];
-  if (!WORKER_URL) return items;
-  var tasks = [];
+  // Enable web search for research mode
+  if (mode === 'research') {
+    body.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+  }
 
-  // One request → the worker fans out across the whole AU feed registry
-  tasks.push(fetch(WORKER_URL + '/allnews?q=' + encodeURIComponent(q) + '&max=44').then(function(r){ return r.json(); }).then(function(d) {
-    (d.items || []).forEach(function(it) {
-      items.push({ src:it.src, title:it.title, snippet:it.desc || '', url:it.link || '', date:it.date || '' });
-    });
-  }).catch(function(){}));
+  var res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': CLAUDE_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify(body)
+  });
 
-  // Guardian News API — full-text relevance search, an extra grounded source
-  tasks.push(fetch(WORKER_URL + '/guardian?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(d) {
-    (((d.response||{}).results) || []).slice(0,6).forEach(function(r) {
-      items.push({ src:'guardian', title:r.webTitle, snippet:((r.fields||{}).bodyText||'').slice(0,220), url:r.webUrl, date:r.webPublicationDate });
-    });
-  }).catch(function(){}));
+  if (!res.ok) {
+    var err = await res.json();
+    throw new Error(err.error ? err.error.message : 'API error ' + res.status);
+  }
 
-  await Promise.allSettled(tasks);
-  // de-dup by url/title, cap for prompt size
-  var seen = {}, out = [];
-  items.forEach(function(it) { var k = it.url || it.title; if (!seen[k]) { seen[k] = 1; out.push(it); } });
-  return out.slice(0, 30);
-}
+  var data = await res.json();
 
-// Claude call with the server-side web_search tool (handles pause_turn + citations)
-async function callClaudeWeb(question, system, maxTokens) {
-  if (!CLAUDE_KEY) throw new Error('No API key');
-  var messages = [{ role:'user', content: question }];
-  var tools = [{
-    type: 'web_search_20250305', name: 'web_search', max_uses: 6,
-    user_location: { type:'approximate', country:'AU', timezone:'Australia/Sydney' }
-  }];
-  var text = '', citations = [];
-  for (var i = 0; i < 5; i++) {
-    var body = { model:'claude-sonnet-4-6', max_tokens:maxTokens||1600, system:system, messages:messages, tools:tools };
-    var res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'x-api-key':CLAUDE_KEY, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
-      body: JSON.stringify(body)
-    });
-    var data = await res.json();
-    if (data.error) throw new Error(data.error.message || 'Claude API error');
-    (data.content || []).forEach(function(b) {
-      if (b.type === 'text') {
-        text += b.text;
-        (b.citations || []).forEach(function(c){ if (c.url) citations.push({ src:'web', title:c.title || c.url, url:c.url }); });
-      } else if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
-        b.content.forEach(function(r){ if (r.url) citations.push({ src:'web', title:r.title || r.url, url:r.url }); });
+  // Handle multi-turn tool use (web search)
+  var iterations = 0;
+  while (data.stop_reason === 'tool_use' && iterations < 4) {
+    iterations++;
+    var toolUseBlocks = (data.content || []).filter(function(b) { return b.type === 'tool_use'; });
+
+    // Build updated conversation
+    var updatedMsgs = messages.concat([{ role: 'assistant', content: data.content }]);
+
+    // For each tool_use, provide results
+    // web_search_20250305 is server-side but may need multi-turn for some API versions
+    // We fall back to HN search for the query
+    var toolResults = [];
+    for (var i = 0; i < toolUseBlocks.length; i++) {
+      var tu = toolUseBlocks[i];
+      var searchContent = '';
+      if (tu.name === 'web_search') {
+        var query = (tu.input && tu.input.query) ? tu.input.query : 'Australian politics';
+        searchContent = await searchHNForContext(query);
       }
-    });
-    if (data.stop_reason === 'pause_turn') { messages.push({ role:'assistant', content:data.content }); continue; }
-    break;
-  }
-  var seen = {}, dedup = [];
-  citations.forEach(function(c){ if (!seen[c.url]) { seen[c.url] = 1; dedup.push(c); } });
-  return { text: text.trim(), citations: dedup };
-}
-
-function bankRenderMarkdown(t) {
-  return esc(t)
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-}
-function bankSrcLabel(src) { return (SRC_META[src] || { n:'Web' }).n; }
-function bankSrcPill(src) { return (SRC_META[src] || { icon:'WEB' }).icon || 'WEB'; }
-
-function bankRenderSources(srcs) {
-  if (!srcs || !srcs.length) return '';
-  var rows = srcs.slice(0, 12).map(function(s) {
-    var label = esc(s.title || bankSrcLabel(s.src));
-    var pill  = esc(bankSrcPill(s.src) || 'WEB');
-    var link  = s.url ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + label + '</a>'
-                      : '<span style="font-size:11px;color:var(--t1)">' + label + '</span>';
-    return '<div class="bank-src"><span class="bank-src-pill">' + pill + '</span>' + link + '</div>';
-  }).join('');
-  return '<div class="bank-srcs"><div class="bank-srcs-h">SOURCES · ' + srcs.length + '</div>' + rows + '</div>';
-}
-
-async function askBank() {
-  var input = document.getElementById('bank-input');
-  var q = input.value.trim();
-  if (!q) { showToast('Type a question first'); return; }
-  if (!CLAUDE_KEY) { showToast('Set Claude API key first', 'error'); openAPIModal(); return; }
-  if (bankBusy) return;
-  bankBusy = true;
-
-  var mode = BANK_MODE;
-  var send = document.getElementById('bank-send');
-  send.disabled = true; send.textContent = '…';
-  var empty = document.getElementById('bank-empty');
-  if (empty) empty.remove();
-
-  var feed = document.getElementById('bank-feed');
-  var id = 'bank' + Date.now();
-  var tagCls = mode === 'web' ? 'web' : 'data';
-  var tagTxt = mode === 'web' ? 'LIVE WEB' : 'DATA BANK';
-  feed.insertAdjacentHTML('afterbegin',
-    '<div class="bank-qa" id="' + id + '">'
-    + '<div class="bank-q"><div class="bank-q-icon">Q</div><div class="bank-q-txt">' + esc(q) + '</div></div>'
-    + '<div class="bank-a"><div class="bank-a-lbl">CLAUDE · <span class="bank-a-tag ' + tagCls + '">' + tagTxt + '</span></div>'
-    + '<div class="bank-a-body" id="' + id + '-body"><span style="color:var(--t3);font-style:italic">'
-    + (mode === 'web' ? 'Searching the web…' : 'Reading AXIOM feeds…') + '</span></div></div></div>');
-  input.value = '';
-  document.getElementById('scroll-area').scrollTop = 0;
-
-  var bodyEl = document.getElementById(id + '-body');
-  try {
-    if (mode === 'web') {
-      var r = await callClaudeWeb(q, BANK_SYS + ' Search the web for current, reliable Australian sources and cite them.', 1600);
-      bodyEl.innerHTML = bankRenderMarkdown(r.text || 'No answer returned.') + bankRenderSources(r.citations);
-    } else {
-      var srcs = await bankGatherSources(q);
-      var ctx = srcs.length
-        ? '\n\nHere are recent headlines from AXIOM\'s monitored Australian outlets (RSS feeds + the Guardian News API). Ground your answer in these where relevant and name the outlets you draw on:\n'
-          + srcs.map(function(s){ return '- [' + bankSrcLabel(s.src) + '] ' + s.title + (s.snippet ? ' — ' + s.snippet : ''); }).join('\n')
-        : '\n\n(No matching items were found in AXIOM\'s live feeds' + (WORKER_URL ? '' : ' — no Worker URL is configured') + '. Answer from general knowledge and clearly flag that this is not based on live data.)';
-      var ans = await callClaude([{ role:'user', content: q + ctx }], 1200, BANK_SYS);
-      bodyEl.innerHTML = bankRenderMarkdown(ans || 'No answer returned.') + bankRenderSources(srcs);
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        content: searchContent || 'No results found for this query.'
+      });
     }
-  } catch (e) {
-    bodyEl.innerHTML = '<span style="color:var(--neg)">Could not answer: ' + esc(String(e.message || e).slice(0, 120)) + '</span>';
-  } finally {
-    bankBusy = false;
-    send.disabled = false; send.textContent = 'Ask →';
+    updatedMsgs.push({ role: 'user', content: toolResults });
+
+    var res2 = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': CLAUDE_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(Object.assign({}, body, { messages: updatedMsgs }))
+    });
+    data = await res2.json();
+  }
+
+  // Extract text and any tool-use search queries for display
+  var textBlocks  = (data.content || []).filter(function(b) { return b.type === 'text'; });
+  var searchQueries = ((body.tools && messages.length > 0) ? [] : []);
+  // Collect search queries from conversation
+  var allContent = [].concat.apply([], messages.map(function(m) {
+    return Array.isArray(m.content) ? m.content : [];
+  }));
+
+  return {
+    text: textBlocks.map(function(b) { return b.text; }).join('\n'),
+    usedSearch: iterations > 0,
+    rawContent: data.content
+  };
+}
+
+/* ── HN SEARCH FOR WEB-SEARCH TOOL FALLBACK ──────────────────────────── */
+async function searchHNForContext(query) {
+  try {
+    var res = await fetch('https://hn.algolia.com/api/v1/search?query=' +
+      encodeURIComponent(query + ' australia') +
+      '&tags=story&hitsPerPage=6');
+    var data = await res.json();
+    if (!data.hits || !data.hits.length) return 'No HN results.';
+    return data.hits.map(function(h) {
+      var age = h.created_at ? new Date(h.created_at).toLocaleDateString('en-AU') : '';
+      return '[' + age + '] ' + h.title +
+             (h.story_text ? ' — ' + h.story_text.slice(0, 200) : '') +
+             '\nURL: https://news.ycombinator.com/item?id=' + h.objectID +
+             '\nPoints: ' + (h.points || 0) + ' | Comments: ' + (h.num_comments || 0);
+    }).join('\n\n---\n\n');
+  } catch(e) {
+    return 'Search unavailable: ' + String(e);
   }
 }
+
+/* ── SEND CHAT V2 ────────────────────────────────────────────────────── */
+async function sendChatV2() {
+  if (!CLAUDE_KEY) { showToast('Set Claude API key first', 'error'); openAPIModal(); return; }
+  if (CHAT_IS_BUSY) return;
+
+  var inputEl  = document.getElementById('chat-input');
+  var sendBtn  = document.getElementById('chat-send-btn');
+  var msgs     = document.getElementById('chat-messages');
+  var text     = inputEl.value.trim();
+  if (!text) return;
+
+  CHAT_IS_BUSY = true;
+  inputEl.value = ''; inputEl.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  // Append user message
+  appendChatMsg('user', null, text, null, false);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Build context from live data
+  var liveCtx = buildLiveContext();
+  var systemPrompt = CHAT_SYSTEMS[CHAT_MODE] || CHAT_SYSTEMS.quick;
+  if (liveCtx) systemPrompt += '\n\nLIVE AXIOM DATA:\n' + liveCtx;
+
+  // Add to history
+  CHAT_HISTORY.push({ role: 'user', content: text });
+
+  // Show typing indicator
+  var thinkingId = 'thinking-' + Date.now();
+  var thinkingHTML = '<div class="chat-msg bot" id="' + thinkingId + '">' +
+    '<div class="chat-avatar">AI</div>' +
+    '<div class="chat-msg-body"><div class="typing-bubble">' +
+    (CHAT_MODE === 'research' ?
+      '<div class="search-status"><div class="search-pulse"></div>' +
+      '<span class="search-status-text" id="search-status-text">Searching live sources…</span></div>' : '') +
+    '<div class="typing-dots"><div class="t-dot"></div><div class="t-dot"></div><div class="t-dot"></div></div>' +
+    '</div></div></div>';
+  msgs.insertAdjacentHTML('beforeend', thinkingHTML);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    var result = await callClaudeV2(CHAT_HISTORY, systemPrompt, CHAT_MODE);
+    var replyText = result.text;
+
+    // Add assistant response to history
+    CHAT_HISTORY.push({ role: 'assistant', content: replyText });
+
+    // Remove typing indicator
+    var thinkingEl = document.getElementById(thinkingId);
+    if (thinkingEl) thinkingEl.remove();
+
+    // Render response
+    appendChatMsg('bot', null, replyText, null, result.usedSearch);
+    msgs.scrollTop = msgs.scrollHeight;
+
+  } catch(e) {
+    var thinkingEl2 = document.getElementById(thinkingId);
+    if (thinkingEl2) thinkingEl2.remove();
+    appendChatMsg('bot', null, '**Analysis unavailable.** ' + esc(String(e).slice(0, 160)) +
+      '\n\nCheck your Claude API key in ⚙ Settings.', null, false);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  CHAT_IS_BUSY = false;
+  sendBtn.disabled = false;
+}
+
+/* ── LIVE CONTEXT BUILDER ────────────────────────────────────────────── */
+function buildLiveContext() {
+  var parts = [];
+  if (ciComments && ciComments.length) {
+    var c = {pos:0, neg:0, neu:0, mix:0};
+    ciComments.forEach(function(i) { c[i.sent] = (c[i.sent]||0) + 1; });
+    var tot = ciComments.length || 1;
+    parts.push('Live items: ' + ciComments.length +
+      ' | POS ' + Math.round(c.pos/tot*100) + '% NEG ' + Math.round(c.neg/tot*100) + '%');
+    var sample = ciComments.sort(function(a,b){return (b.score||0)-(a.score||0);})
+      .slice(0,8).map(function(i){ return '['+i.src+']['+i.sent+'] '+i.text.slice(0,100); }).join('\n');
+    parts.push('Top comments:\n' + sample);
+  }
+  return parts.join('\n\n');
+}
+
+/* ── RICH MESSAGE RENDERER ───────────────────────────────────────────── */
+function renderRichText(raw) {
+  var html = raw;
+
+  // Extract and replace chart blocks first (before other processing)
+  var charts = [];
+  html = html.replace(/```chart\n([\s\S]*?)\n```/g, function(match, json) {
+    var id = 'cch-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+    charts.push({ id: id, json: json.trim() });
+    return '<CHARTPLACEHOLDER:' + id + '>';
+  });
+
+  // Markdown-ish
+  html = html
+    .replace(/^## (.+)/gm, '<span class="ch2">$1</span>')
+    .replace(/^### (.+)/gm, '<span class="ch3">$1</span>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^---$/gm, '<hr class="cb-hr">')
+    .replace(/🔴/g, '<span class="signal-r">🔴</span>')
+    .replace(/🟢/g, '<span class="signal-g">🟢</span>')
+    .replace(/⚡/g, '<span class="signal-y">⚡</span>')
+    .replace(/🔮/g, '<span class="signal-p">🔮</span>')
+    .replace(/📈/g, '<span class="signal-g">📈</span>')
+    .replace(/📉/g, '<span class="signal-r">📉</span>')
+    .replace(/⚖️/g, '<span class="signal-y">⚖️</span>');
+
+  // Confidence score  
+  html = html.replace(/\*\*(CONFIDENCE SCORE|FORECAST CONFIDENCE):\s*(\d+)\*\*(.+)?/g,
+    function(m, label, score, rest) {
+      var pct = Math.min(100, Math.max(0, parseInt(score)));
+      var col = pct >= 70 ? '#30D158' : pct >= 45 ? '#FFD60A' : '#FF453A';
+      var id = 'cbar-' + Date.now().toString(36);
+      setTimeout(function() {
+        var el = document.getElementById(id);
+        if (el) el.style.width = pct + '%';
+      }, 120);
+      return '<span class="confidence">' +
+        label + ': <strong style="color:' + col + '">' + score + '</strong>' +
+        '<span class="confidence-bar"><span class="confidence-fill" id="' + id + '" style="width:0%;background:' + col + '"></span></span>' +
+        (rest ? '<span style="color:var(--t3);font-size:9px">' + rest.replace(/^[—–-]\s*/,'') + '</span>' : '') +
+        '</span>';
+    }
+  );
+
+  // Newlines to br
+  html = html.replace(/\n/g, '<br>');
+
+  // Replace chart placeholders with actual canvas elements
+  charts.forEach(function(c) {
+    var chartHTML = buildChartHTML(c.id, c.json);
+    html = html.replace('<CHARTPLACEHOLDER:' + c.id + '>', chartHTML);
+    // Schedule rendering after DOM insert
+    setTimeout(function() { renderChatChart(c.id, c.json); }, 80);
+  });
+
+  return html;
+}
+
+/* ── APPEND CHAT MESSAGE ─────────────────────────────────────────────── */
+function appendChatMsg(role, avatar, text, sources, usedSearch) {
+  var msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+
+  var isBot = role === 'bot';
+  var msgId = 'msg-' + Date.now().toString(36);
+
+  var bubbleInner = isBot ? renderRichText(text) : esc(text).replace(/\n/g,'<br>');
+
+  var searchBadge = (isBot && usedSearch) ?
+    '<div class="search-used">🌐 WEB SOURCED · Live search results included</div>' : '';
+
+  var actionsHTML = isBot ?
+    '<div class="msg-actions">' +
+    '<button class="msg-act-btn" onclick="copyMsgText(\'' + msgId + '\')">⎘ Copy</button>' +
+    '<button class="msg-act-btn" onclick="deepenMsgAnalysis(\'' + msgId + '\')">🔬 Deepen</button>' +
+    '</div>' : '';
+
+  var sourceHTML = '';
+  if (sources && sources.length) {
+    sourceHTML = '<div class="chat-sources">' +
+      sources.slice(0,4).map(function(s) {
+        return '<a class="source-card" href="' + esc(s.url||'#') + '" target="_blank">' +
+          '<span class="source-icon">' + (s.icon||'📰') + '</span>' +
+          '<span class="source-info"><span class="source-title">' + esc(s.title||'') + '</span>' +
+          '<span class="source-meta">' + esc(s.meta||'') + '</span></span>' +
+          '<span class="source-arrow">↗</span></a>';
+      }).join('') + '</div>';
+  }
+
+  var html = '<div class="chat-msg ' + role + '" id="' + msgId + '">' +
+    '<div class="chat-avatar">' + (isBot ? 'AI' : 'U') + '</div>' +
+    '<div class="chat-msg-body">' +
+    '<div class="chat-bubble">' + searchBadge + bubbleInner + '</div>' +
+    sourceHTML + actionsHTML +
+    '</div></div>';
+
+  msgs.insertAdjacentHTML('beforeend', html);
+}
+
+/* ── CHAT CHART HTML BUILDER ─────────────────────────────────────────── */
+function buildChartHTML(id, jsonStr) {
+  var title = '';
+  try { var d = JSON.parse(jsonStr); title = d.title || ''; } catch(e) {}
+  var h = { bar:180, line:170, donut:200 };
+  var type = 'bar';
+  try { type = JSON.parse(jsonStr).type || 'bar'; } catch(e) {}
+  return '<div class="chat-chart-wrap">' +
+    (title ? '<div class="chat-chart-title">' + esc(title) + '</div>' : '') +
+    '<canvas id="' + id + '" class="chat-chart-canvas" style="height:' + (h[type]||180) + 'px" data-h="' + (h[type]||180) + '"></canvas>' +
+    '</div>';
+}
+
+/* ── INLINE CHART RENDERER ───────────────────────────────────────────── */
+function renderChatChart(id, jsonStr) {
+  var canvas = document.getElementById(id);
+  if (!canvas) return;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  var W = canvas.parentElement.clientWidth || 300;
+  var H = parseInt(canvas.getAttribute('data-h') || 180);
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+  var ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  var d;
+  try { d = JSON.parse(jsonStr); } catch(e) { return; }
+
+  var PAD = { top: 18, right: 14, bottom: 32, left: 36 };
+  var CW  = W - PAD.left - PAD.right;
+  var CH  = H - PAD.top  - PAD.bottom;
+  var t_draw = 0, T = 60;
+
+  var defaultColors = ['#0A84FF','#30D158','#FF453A','#FFD60A','#BF5AF2','#FF9F0A','#64D2FF'];
+
+  function animate() {
+    ctx.clearRect(0, 0, W, H);
+    var frac = Math.min(t_draw / T, 1);
+    var ef   = 1 - Math.pow(1 - frac, 2.5);
+
+    if (d.type === 'bar') drawBar(ef);
+    else if (d.type === 'line') drawLine(ef);
+    else if (d.type === 'donut') drawDonut(ef);
+
+    if (frac < 1) { t_draw++; requestAnimationFrame(animate); }
+  }
+
+  // ── BAR CHART ──────────────────────────────────────────────────
+  function drawBar(ef) {
+    var labels = d.labels || [];
+    var data   = d.data || [];
+    var colors = d.colors || defaultColors;
+    var max    = Math.max.apply(null, data) || 1;
+    var barW   = Math.floor(CW / labels.length);
+    var gap    = Math.max(4, Math.floor(barW * 0.22));
+    var bw     = barW - gap;
+
+    // grid lines
+    [0, 0.25, 0.5, 0.75, 1].forEach(function(t) {
+      var y = PAD.top + CH - t * CH;
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + CW, y); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.font = '500 8px var(--ff-mono)'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(Math.round(t * max) + (d.unit||''), PAD.left - 4, y);
+    });
+
+    data.forEach(function(val, i) {
+      var x   = PAD.left + i * barW + gap / 2;
+      var bh  = (val / max) * CH * ef;
+      var y   = PAD.top + CH - bh;
+      var col = colors[i % colors.length] || defaultColors[i % defaultColors.length];
+
+      // bar glow
+      ctx.save();
+      ctx.shadowColor = col; ctx.shadowBlur = 12;
+      var g = ctx.createLinearGradient(0, y, 0, y + bh);
+      g.addColorStop(0, col + 'FF'); g.addColorStop(1, col + '88');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(x, y, bw, bh, [4, 4, 0, 0]) : ctx.rect(x, y, bw, bh);
+      ctx.fill(); ctx.restore();
+
+      // value label
+      if (ef > 0.7) {
+        ctx.fillStyle = '#fff'; ctx.font = '600 10px var(--ff-mono)';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(val + (d.unit||''), x + bw/2, y - 3);
+      }
+      // x label
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '400 8.5px var(--ff-sans)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(String(labels[i]||'').slice(0,8), x + bw/2, PAD.top + CH + 5);
+    });
+  }
+
+  // ── LINE CHART ────────────────────────────────────────────────
+  function drawLine(ef) {
+    var datasets = d.datasets || [{ label: 'Value', data: d.data || [], color: defaultColors[0] }];
+    var allVals  = [].concat.apply([], datasets.map(function(ds){ return ds.data||[]; }));
+    var maxV = Math.max.apply(null, allVals) || 1;
+    var minV = Math.min.apply(null, allVals);
+    minV = Math.max(0, minV - (maxV - minV) * 0.12);
+    var N = (datasets[0] && datasets[0].data) ? datasets[0].data.length : 1;
+    if (N < 2) return;
+
+    function px(i) { return PAD.left + (i / (N-1)) * CW; }
+    function py(v) { return PAD.top + CH - ((v - minV) / (maxV - minV)) * CH; }
+
+    // grid
+    [0, 0.25, 0.5, 0.75, 1].forEach(function(t) {
+      var v = minV + t * (maxV - minV);
+      var y = py(v);
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+      ctx.setLineDash([4,5]); ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left+CW, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.font = '400 8px var(--ff-mono)';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(Math.round(v)+(d.unit||''), PAD.left-4, y);
+    });
+
+    var nDraw = Math.ceil(N * ef);
+    datasets.forEach(function(ds, di) {
+      var col  = ds.color || defaultColors[di % defaultColors.length];
+      var data = (ds.data || []).slice(0, nDraw);
+      if (data.length < 2) return;
+
+      // area
+      ctx.save(); ctx.globalAlpha = 0.18;
+      var ag = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + CH);
+      ag.addColorStop(0, col); ag.addColorStop(1, col + '00');
+      ctx.fillStyle = ag;
+      ctx.beginPath(); ctx.moveTo(px(0), PAD.top + CH);
+      data.forEach(function(v,i){ ctx.lineTo(px(i), py(v)); });
+      ctx.lineTo(px(data.length-1), PAD.top+CH); ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      // line
+      ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 2.2;
+      ctx.shadowColor = col; ctx.shadowBlur = 6; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(px(0), py(data[0]));
+      data.forEach(function(v,i){ if(i>0) ctx.lineTo(px(i), py(v)); });
+      ctx.stroke(); ctx.restore();
+
+      // legend dot
+      ctx.fillStyle = col; ctx.font = '500 8px var(--ff-mono)';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      var lx = PAD.left + di * 80;
+      ctx.beginPath(); ctx.arc(lx, H - 8, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillText(ds.label||'', lx + 8, H - 8);
+    });
+  }
+
+  // ── DONUT CHART ───────────────────────────────────────────────
+  function drawDonut(ef) {
+    var labels = d.labels || [];
+    var data   = d.data   || [];
+    var colors = d.colors || defaultColors;
+    var total  = data.reduce(function(a,b){ return a+b; }, 0) || 1;
+    var cx = W / 2, cy = PAD.top + (H - PAD.top - PAD.bottom) / 2;
+    var R  = Math.min(cx - PAD.left, cy - 10) * 0.82;
+    var r  = R * 0.58;
+    var start = -Math.PI / 2;
+
+    data.forEach(function(val, i) {
+      var angle = (val / total) * Math.PI * 2 * ef;
+      var col   = colors[i % colors.length];
+      var mid   = start + angle / 2;
+
+      ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 10;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, start, start + angle);
+      ctx.arc(cx, cy, r, start + angle, start, true);
+      ctx.closePath(); ctx.fill(); ctx.restore();
+
+      // gap between segments
+      ctx.save(); ctx.strokeStyle = '#04050A'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx + r*Math.cos(start), cy + r*Math.sin(start));
+      ctx.lineTo(cx + R*Math.cos(start), cy + R*Math.sin(start));
+      ctx.stroke(); ctx.restore();
+
+      // label outside
+      if (ef > 0.85 && angle > 0.3) {
+        var lx = cx + (R + 12) * Math.cos(mid);
+        var ly = cy + (R + 12) * Math.sin(mid);
+        ctx.fillStyle = '#fff'; ctx.font = '600 8.5px var(--ff-mono)';
+        ctx.textAlign = lx > cx ? 'left' : 'right'; ctx.textBaseline = 'middle';
+        ctx.fillText(Math.round(val/total*100)+'%', lx, ly);
+      }
+      start += angle;
+    });
+
+    // centre text
+    ctx.fillStyle = '#fff'; ctx.font = '700 16px var(--ff-num)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(total + (d.unit||''), cx, cy);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '500 8px var(--ff-mono)';
+    ctx.fillText('TOTAL', cx, cy + 14);
+
+    // legend below
+    var lw = labels.length * 70;
+    var lx0 = (W - Math.min(lw, W - PAD.left)) / 2;
+    labels.forEach(function(lbl, i) {
+      var lx = lx0 + i * 70;
+      if (lx + 65 > W) return;
+      var col = colors[i % colors.length];
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx, H-10, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '400 8px var(--ff-sans)';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(lbl).slice(0,7), lx+8, H-10);
+    });
+  }
+
+  animate();
+}
+
+/* ── CHAT UTILITIES ──────────────────────────────────────────────────── */
+function clearChatHistory() {
+  CHAT_HISTORY = [];
+  var msgs = document.getElementById('chat-messages');
+  if (msgs) {
+    msgs.innerHTML = '<div class="chat-msg bot">' +
+      '<div class="chat-avatar">AI</div>' +
+      '<div class="chat-msg-body"><div class="chat-bubble">' +
+      'Chat cleared. What would you like to analyse?' +
+      '</div></div></div>';
+  }
+  showToast('Chat cleared', 'success');
+}
+
+function copyMsgText(msgId) {
+  var el = document.getElementById(msgId);
+  if (!el) return;
+  var bubble = el.querySelector('.chat-bubble');
+  if (!bubble) return;
+  var text = bubble.innerText || bubble.textContent || '';
+  navigator.clipboard.writeText(text).then(function() {
+    showToast('Copied ✓', 'success');
+  }).catch(function() { showToast('Copy failed', 'error'); });
+}
+
+function deepenMsgAnalysis(msgId) {
+  var el = document.getElementById(msgId);
+  if (!el) return;
+  var bubble = el.querySelector('.chat-bubble');
+  if (!bubble) return;
+  var text = (bubble.innerText || '').slice(0, 300);
+  var btn = document.querySelector('.mode-btn[data-mode="deep"]');
+  setAnalysisMode('deep', btn);
+  document.getElementById('chat-input').value = 'Give me a much deeper analysis of this: ' + text;
+  sendChatV2();
+}
+
+function exportChatTranscript() {
+  if (!CHAT_HISTORY.length) { showToast('No chat to export'); return; }
+  var text = CHAT_HISTORY.map(function(m) {
+    return (m.role === 'user' ? 'YOU: ' : 'AXIOM: ') + (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+  }).join('\n\n---\n\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.download = 'axiom-chat-' + Date.now() + '.txt';
+  a.click();
+  showToast('Transcript downloaded', 'success');
+}
+
+// Backward compat — old sendChat and setQuickPrompt still work
+function sendChat() { sendChatV2(); }
+
+// Init mode on page
+(function() {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    var btn = document.querySelector('.mode-btn[data-mode="quick"]');
+    if (btn) setAnalysisMode('quick', btn);
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      var btn = document.querySelector('.mode-btn[data-mode="quick"]');
+      if (btn) setAnalysisMode('quick', btn);
+    });
+  }
+})();
 
 // ── CHARTS ─────────────────────────────────────────────────────────
 function setRange(btn, r) {
@@ -3032,7 +3777,6 @@ async function fetchComments() {
   if(ciSrcs.has('hn'))tasks.push(fetchHN(q));
   if(ciSrcs.has('reddit'))['AustralianPolitics','australia','AusFinance','melbourne','sydney','Labor'].forEach(function(sr){tasks.push(fetchReddit(sr,q));});
   if(WORKER_URL){
-    if(ciSrcs.has('allnews'))tasks.push(fetchAllNews(q));
     if(ciSrcs.has('guardian'))tasks.push(fetchGuardian(q));
     if(ciSrcs.has('abc_rss'))tasks.push(fetchRSS('abc_rss','abc',q));
     if(ciSrcs.has('smh_rss'))tasks.push(fetchRSS('smh_rss','smh',q));
@@ -3094,20 +3838,6 @@ async function fetchRSS(srcKey,feed,q) {
     var m=SRC_META[srcKey]||{n:srcKey};
     items.forEach(function(it,i){ciComments.push({id:srcKey+'_'+i+'_'+Date.now(),src:srcKey,type:'article',text:it.title,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(it.title),kw:calcKW(it.title),art:m.n+' RSS'});});
     if(items.length){ciActiveSrcs.add(srcKey);var el=document.getElementById('sri-'+srcKey);if(el)el.textContent=items.length;}
-  }catch(e){}
-}
-// Aggregate 20+ AU outlets in one worker request (Intel tab)
-async function fetchAllNews(q) {
-  if(!WORKER_URL)return;
-  try {
-    var res=await fetch(WORKER_URL+'/allnews?q='+encodeURIComponent(q)+'&max=50');if(!res.ok)return;
-    var data=await res.json();
-    (data.items||[]).forEach(function(it,i){
-      var m=SRC_META[it.src]||{n:it.src};
-      var txt=it.title+(it.desc?' — '+it.desc:'');
-      ciComments.push({id:'news_'+it.src+'_'+i+'_'+Date.now(),src:it.src,type:'article',text:txt,author:m.n,score:0,replies:0,url:it.link||'#',created:it.date?new Date(it.date):new Date(),sent:calcSent(txt),kw:calcKW(txt),art:m.n});
-      if(it.src)ciActiveSrcs.add(it.src);
-    });
   }catch(e){}
 }
 async function fetchForum(route,q) {
@@ -3587,7 +4317,7 @@ function appendLog(cls, msg) {
 function clearLog() { var body = document.getElementById('exec-log-body'); if (body) body.innerHTML = '<div style="color:var(--t3);font-style:italic">Log cleared.</div>'; }
 function updateProgressBar(srcCounts) {
   var done = Object.keys(srcCounts||{}).length;
-  var pct  = Math.min(100, Math.round(done/TOTAL_SOURCES*100));
+  var pct  = Math.round(done/TOTAL_SOURCES*100);
   var bar  = document.getElementById('collect-pbar');
   var lbl  = document.getElementById('collect-pbar-label');
   if (bar) bar.style.width = pct + '%';
@@ -3649,335 +4379,897 @@ function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace
 function animateCounter(el,target,dur){dur=dur||1500;if(!el)return;var step=function(ts){if(!el._t)el._t=ts;var p=Math.min((ts-el._t)/dur,1);el.textContent=Math.floor(p*target).toLocaleString();if(p<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
 function showToast(msg,type){var old=document.querySelector('.toast');if(old)old.remove();var t=document.createElement('div');t.className='toast'+(type?' '+type:'');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transform='translateY(8px)';t.style.transition='0.3s';setTimeout(function(){t.remove();},300);},3000);}
 
-// ── RAPID RESPONSE ENGINE ──────────────────────────────────────────
-var rrItems = JSON.parse(localStorage.getItem('axiom_rr_items') || '[]');
-var rrCurrentItem = null;
-var rrCurrentAngle = 'Headline tear-out — direct quote from source';
-var rrCurrentFormat = 'carousel';
-var rrActiveStage = 'triage';
-var rrGenOutput = '';
-var rrBriefOutput = '';
+</script>
+<script>
+// ══ VIZ ENGINE ══
 
-function saveRRItems() {
-  try { localStorage.setItem('axiom_rr_items', JSON.stringify(rrItems.slice(0,80))); } catch(e) {}
-}
+// ═══════════════════════════════════════════════════════════════════
+// AXIOM · DATA-VIZ ENGINE v1
+// 1. Force-directed Intelligence Network (Canvas, physics, draggable)
+// 2. 3D Sentiment Constellation (perspective projection, drag-orbit)
+// 3. Enhanced Sentiment Flow (animated draw-in, crosshair tooltip)
+// ═══════════════════════════════════════════════════════════════════
 
-function updateRRBadge() {
-  var badge = document.getElementById('rr-nav-badge');
-  var triage = rrItems.filter(function(i){return i.stage==='triage';}).length;
-  if (badge) badge.style.display = triage > 0 ? 'block' : 'none';
-}
+/* ── SHARED UTILITY ──────────────────────────────────────────────── */
+const VIZ = {};
 
-function updateRRPipelineUI() {
-  var stages = ['triage','copy','design','approval','live'];
-  var counts = {}; stages.forEach(function(s){counts[s]=0;});
-  rrItems.forEach(function(i){ if(counts[i.stage]!==undefined) counts[i.stage]++; });
-  stages.forEach(function(s){
-    var el = document.getElementById('rr-pipe-'+s);
-    if(el) el.textContent = counts[s];
+VIZ.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+VIZ.setupCanvas = function(canvas) {
+  var W = canvas.parentElement.clientWidth;
+  var H = parseInt(canvas.getAttribute('data-h') || 320);
+  canvas.width  = W * VIZ.dpr;
+  canvas.height = H * VIZ.dpr;
+  canvas.style.height = H + 'px';
+  var ctx = canvas.getContext('2d');
+  ctx.scale(VIZ.dpr, VIZ.dpr);
+  return { ctx: ctx, W: W, H: H };
+};
+VIZ.lerp   = function(a, b, t) { return a + (b - a) * t; };
+VIZ.clamp  = function(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); };
+VIZ.ease   = function(t) { return t < .5 ? 2*t*t : -1+(4-2*t)*t; };
+VIZ.easeOut = function(t, p) { p = p||3; return 1 - Math.pow(1-t,p); };
+VIZ.rand   = function(lo, hi) { return lo + Math.random() * (hi - lo); };
+VIZ.palette = {
+  blue:   '#0A84FF', purple: '#BF5AF2', green:  '#30D158',
+  red:    '#FF453A', yellow: '#FFD60A', cyan:   '#64D2FF',
+  pink:   '#FF375F', orange: '#FF9F0A', teal:   '#32ADE6',
+  alp:    '#FF4D5E', lnp:   '#4FA4FF', grn:    '#32D74B',
+  neu:    '#FFD60A', mix:   '#BF5AF2', dim:    'rgba(255,255,255,0.12)'
+};
+
+/* ── CANVAS HI-DPI INIT (retries if layout not ready) ───────────────── */
+VIZ.onVisible = function(el, cb) {
+  // Direct init: if the element is in the DOM, call immediately;
+  // retry once after 200ms in case layout hasn't settled yet
+  function tryInit() {
+    var w = el.parentElement ? el.parentElement.clientWidth : 0;
+    if (w > 0) { cb(); return; }
+    setTimeout(function() {
+      var w2 = el.parentElement ? el.parentElement.clientWidth : 0;
+      if (w2 > 0) cb();
+      else setTimeout(cb, 400); // last resort
+    }, 200);
+  }
+  if (document.readyState === 'complete') tryInit();
+  else window.addEventListener('load', tryInit, { once: true });
+};
+
+/* ─────────────────────────────────────────────────────────────────────
+   1. INTELLIGENCE NETWORK — force-directed
+   ───────────────────────────────────────────────────────────────────── */
+VIZ.buildNetworkGraph = function(canvasId) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  VIZ.onVisible(canvas, function() { VIZ._initNetwork(canvas); });
+};
+
+VIZ._initNetwork = function(canvas) {
+  var dim  = VIZ.setupCanvas(canvas);
+  var ctx  = dim.ctx, W = dim.W, H = dim.H;
+
+  // ── node definitions ──────────────────────────────────────────────
+  var NODES = [
+    // topics
+    {id:'housing',     label:'Housing',     type:'topic', color:VIZ.palette.red,    r:22, mass:2.2},
+    {id:'cost',        label:'Cost of\nLiving', type:'topic', color:VIZ.palette.orange, r:20, mass:2},
+    {id:'climate',     label:'Climate',     type:'topic', color:VIZ.palette.green,  r:18, mass:1.8},
+    {id:'medicare',    label:'Medicare',    type:'topic', color:VIZ.palette.cyan,   r:15, mass:1.5},
+    {id:'immigration', label:'Immigration', type:'topic', color:VIZ.palette.purple, r:14, mass:1.4},
+    {id:'aukus',       label:'AUKUS',       type:'topic', color:VIZ.palette.teal,   r:13, mass:1.3},
+    {id:'nuclear',     label:'Nuclear',     type:'topic', color:VIZ.palette.yellow, r:12, mass:1.2},
+    {id:'rba',         label:'RBA',         type:'topic', color:VIZ.palette.pink,   r:11, mass:1.1},
+    // parties
+    {id:'alp',  label:'ALP',    type:'party', color:VIZ.palette.alp,    r:19, mass:2},
+    {id:'lnp',  label:'LNP',    type:'party', color:VIZ.palette.lnp,    r:18, mass:1.9},
+    {id:'grn',  label:'Greens', type:'party', color:VIZ.palette.grn,    r:16, mass:1.7},
+    {id:'teals',label:'Teals',  type:'party', color:VIZ.palette.teal,   r:13, mass:1.3},
+    // sources
+    {id:'reddit',   label:'Reddit',  type:'source', color:VIZ.palette.orange, r:14, mass:1.5},
+    {id:'hn',       label:'HN',      type:'source', color:VIZ.palette.orange, r:11, mass:1.1},
+    {id:'guardian', label:'Guardian',type:'source', color:VIZ.palette.green,  r:13, mass:1.3},
+    {id:'abc',      label:'ABC',     type:'source', color:VIZ.palette.yellow, r:12, mass:1.2},
+  ];
+
+  var EDGES = [
+    // topic–party relationships (weight = strength of association)
+    {a:'housing',     b:'alp',      w:0.9, color:'rgba(255,77,94,0.35)'},
+    {a:'housing',     b:'lnp',      w:0.7, color:'rgba(79,164,255,0.3)'},
+    {a:'housing',     b:'grn',      w:0.5, color:'rgba(50,215,75,0.25)'},
+    {a:'cost',        b:'alp',      w:0.85,color:'rgba(255,77,94,0.3)'},
+    {a:'cost',        b:'lnp',      w:0.75,color:'rgba(79,164,255,0.3)'},
+    {a:'climate',     b:'grn',      w:0.95,color:'rgba(50,215,75,0.4)'},
+    {a:'climate',     b:'alp',      w:0.6, color:'rgba(255,77,94,0.2)'},
+    {a:'climate',     b:'lnp',      w:0.3, color:'rgba(79,164,255,0.15)'},
+    {a:'nuclear',     b:'lnp',      w:0.9, color:'rgba(79,164,255,0.38)'},
+    {a:'nuclear',     b:'grn',      w:0.7, color:'rgba(50,215,75,0.3)'},
+    {a:'medicare',    b:'alp',      w:0.9, color:'rgba(255,77,94,0.35)'},
+    {a:'medicare',    b:'lnp',      w:0.5, color:'rgba(79,164,255,0.2)'},
+    {a:'aukus',       b:'alp',      w:0.7, color:'rgba(255,77,94,0.25)'},
+    {a:'aukus',       b:'lnp',      w:0.8, color:'rgba(79,164,255,0.3)'},
+    {a:'immigration', b:'lnp',      w:0.85,color:'rgba(79,164,255,0.35)'},
+    {a:'immigration', b:'alp',      w:0.5, color:'rgba(255,77,94,0.2)'},
+    {a:'rba',         b:'cost',     w:0.8, color:'rgba(255,213,10,0.25)'},
+    {a:'rba',         b:'housing',  w:0.7, color:'rgba(255,213,10,0.2)'},
+    // topic–source
+    {a:'housing',  b:'reddit',   w:0.9, color:'rgba(255,159,10,0.25)'},
+    {a:'housing',  b:'guardian', w:0.7, color:'rgba(48,209,88,0.2)'},
+    {a:'housing',  b:'abc',      w:0.6, color:'rgba(255,213,10,0.2)'},
+    {a:'cost',     b:'reddit',   w:0.8, color:'rgba(255,159,10,0.22)'},
+    {a:'cost',     b:'hn',       w:0.5, color:'rgba(255,159,10,0.18)'},
+    {a:'climate',  b:'guardian', w:0.85,color:'rgba(48,209,88,0.28)'},
+    {a:'climate',  b:'reddit',   w:0.7, color:'rgba(255,159,10,0.2)'},
+    {a:'medicare', b:'abc',      w:0.75,color:'rgba(255,213,10,0.22)'},
+    {a:'nuclear',  b:'hn',       w:0.8, color:'rgba(255,159,10,0.25)'},
+    {a:'immigration',b:'reddit', w:0.9, color:'rgba(255,159,10,0.28)'},
+  ];
+
+  // index
+  var nodeMap = {};
+  NODES.forEach(function(n) { nodeMap[n.id] = n; });
+
+  // initial positions: spread in Cx±Rn pattern
+  var Cx = W / 2, Cy = H / 2;
+  var typeAngles = { topic:0, party:Math.PI*2/3, source:Math.PI*4/3 };
+  var typeCount  = { topic:0, party:0, source:0 };
+  NODES.forEach(function(n) { typeCount[n.type]++; });
+  var typeIdx    = { topic:0, party:0, source:0 };
+  NODES.forEach(function(n) {
+    var base  = typeAngles[n.type];
+    var count = typeCount[n.type];
+    var i     = typeIdx[n.type]++;
+    var angle = base + (Math.PI * 2 / 3) * (i / count) - Math.PI / count;
+    var R     = n.type === 'topic' ? W * 0.28 : W * 0.33;
+    n.x  = Cx + Math.cos(angle) * R;
+    n.y  = Cy + Math.sin(angle) * R;
+    n.vx = VIZ.rand(-0.5, 0.5);
+    n.vy = VIZ.rand(-0.5, 0.5);
+    n.fx = null; n.fy = null; // null = not pinned
   });
-  var f = document.getElementById('rr-flagged-count');
-  var u = document.getElementById('rr-used-count');
-  var p = document.getElementById('rr-pipeline-count');
-  if(f) f.textContent = counts.triage;
-  if(u) u.textContent = counts.live;
-  if(p) p.textContent = (counts.copy + counts.design + counts.approval);
-  updateRRBadge();
-}
 
-function rrFilterStage(el, stage) {
-  document.querySelectorAll('.rr-pipe-stage').forEach(function(s){s.classList.remove('active');});
-  el.classList.add('active');
-  rrActiveStage = stage;
-  renderRRQueue();
-}
+  // ── force sim ─────────────────────────────────────────────────────
+  var REPULSION  = 2800;
+  var SPRING_K   = 0.04;
+  var SPRING_LEN = function(e) { return (nodeMap[e.a].r + nodeMap[e.b].r) * 3.2; };
+  var DAMPING    = 0.82;
+  var CENTRE_K   = 0.012;
+  var alpha = 1, targetAlpha = 0.4;
 
-async function runRRScan() {
-  if (!CLAUDE_KEY) { showToast('Set Claude API key first','error'); openAPIModal(); return; }
-  var btn = document.getElementById('rr-scan-btn');
-  var icon = document.getElementById('rr-scan-icon');
-  var lbl = document.getElementById('rr-scan-label');
-  var dot = document.getElementById('rr-dot');
-  var statusEl = document.getElementById('rr-status-text');
-  btn.disabled = true;
-  if(lbl) lbl.textContent = 'Scanning…';
-  if(dot){ dot.classList.remove('idle','complete','error'); dot.classList.add('running'); }
-  if(statusEl) statusEl.textContent = 'Scanning…';
+  function tick() {
+    alpha += (targetAlpha - alpha) * 0.05;
 
-  var dataContext = '';
-  if (ciComments.length > 0) {
-    dataContext = '\n\nLIVE DATA (' + ciComments.length + ' items):\n' +
-      ciComments.sort(function(a,b){return (b.score||0)-(a.score||0);})
-        .slice(0,25).map(function(c){return '['+c.src+']['+c.sent+'] '+c.text.slice(0,200);}).join('\n');
-  } else {
-    dataContext = '\n\nWATCHLIST: '+watchlist.join(', ')+'\nContext: Australian political landscape June 2026. Generate realistic rapid response opportunities based on these watchlist topics.';
+    NODES.forEach(function(n) {
+      if (n.fx !== null) { n.x = n.fx; n.y = n.fy; return; }
+      // repulsion between all pairs
+      NODES.forEach(function(m) {
+        if (m === n) return;
+        var dx = n.x - m.x, dy = n.y - m.y;
+        var d  = Math.sqrt(dx*dx + dy*dy) || 1;
+        var f  = REPULSION * alpha / (d * d);
+        n.vx  += (dx / d) * f;
+        n.vy  += (dy / d) * f;
+      });
+      // centre gravity
+      n.vx += (Cx - n.x) * CENTRE_K * alpha;
+      n.vy += (Cy - n.y) * CENTRE_K * alpha;
+      n.vx *= DAMPING; n.vy *= DAMPING;
+      n.x  += n.vx; n.y += n.vy;
+      // boundary
+      n.x = VIZ.clamp(n.x, n.r + 2, W - n.r - 2);
+      n.y = VIZ.clamp(n.y, n.r + 2, H - n.r - 2);
+    });
+
+    // spring edges
+    EDGES.forEach(function(e) {
+      var a = nodeMap[e.a], b = nodeMap[e.b];
+      if (!a || !b) return;
+      var dx  = b.x - a.x, dy = b.y - a.y;
+      var d   = Math.sqrt(dx*dx + dy*dy) || 1;
+      var len = SPRING_LEN(e);
+      var f   = (d - len) * SPRING_K * e.w * alpha;
+      var fx  = (dx / d) * f, fy = (dy / d) * f;
+      if (a.fx === null) { a.vx += fx / a.mass; a.vy += fy / a.mass; }
+      if (b.fx === null) { b.vx -= fx / b.mass; b.vy -= fy / b.mass; }
+    });
   }
 
-  var prompt = 'You are AXIOM Rapid Response AI for an Australian political campaign. Identify the TOP 3-4 stories that are rapid response content opportunities — news/discussions warranting an immediate social media response.\n\n'
-    + 'Respond with JSON ONLY (no markdown), an array:\n'
-    + '[{"headline":"one punchy sentence","summary":"2 sentences: what happened and why it matters for the campaign","flag_type":"hot|rising|opp","flag_reason":"one sentence: why this needs immediate action","excerpt":"a key community comment or quote verbatim (if any)","excerpt_source":"platform/source name","sentiment":"pos|neg|neu","topic":"main topic word","urgency":"high|med","source":"primary source"}]\n\n'
-    + 'flag_type: hot=crisis/negative needing counter, rising=narrative to get ahead of, opp=positive to amplify'
-    + dataContext;
+  // ── tooltip state ─────────────────────────────────────────────────
+  var tip    = canvas.parentElement.querySelector('.viz-tip');
+  var hovered = null;
+  var activeNode = null;
 
-  try {
-    var res = await callClaude([{role:'user',content:prompt}], 1200);
-    var clean = res.replace(/```json|```/g,'').trim();
-    var match = clean.match(/\[[\s\S]*\]/);
-    if(!match) throw new Error('No JSON found');
-    var items = JSON.parse(match[0]);
-    var added = 0;
-    items.forEach(function(item){
-      var exists = rrItems.some(function(r){return r.headline===item.headline;});
-      if(!exists){
-        rrItems.unshift({
-          id:'rr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
-          headline:item.headline||'',summary:item.summary||'',
-          flag_type:item.flag_type||'rising',flag_reason:item.flag_reason||'',
-          excerpt:item.excerpt||'',excerpt_source:item.excerpt_source||'',
-          sentiment:item.sentiment||'neu',topic:item.topic||'',
-          urgency:item.urgency||'med',source:item.source||'monitor',
-          stage:'triage',created:new Date().toISOString(),
-          copyOutput:'',briefOutput:'',angle:'',format:'',
-        });
-        added++;
+  function posForTip(n) {
+    tip.style.left = n.x + 'px';
+    tip.style.top  = n.y + 'px';
+  }
+  function showTip(n) {
+    hovered = n;
+    var typeLabel = {topic:'TOPIC',party:'PARTY',source:'SOURCE'}[n.type] || n.type.toUpperCase();
+    // find connected nodes
+    var conns = EDGES.filter(function(e){ return e.a===n.id||e.b===n.id; })
+                     .map(function(e){ return e.a===n.id ? e.b : e.a; });
+    var connNames = conns.slice(0,4).map(function(id){ return nodeMap[id] ? nodeMap[id].label.replace('\n',' ') : id; });
+    tip.innerHTML =
+      '<strong style="color:'+n.color+'">'+n.label.replace('\n',' ')+'</strong> ' +
+      '<span style="opacity:.5">'+typeLabel+'</span>' +
+      (conns.length ? '<br><span class="vt-row">↔ '+connNames.join(', ')+(conns.length>4?'…':'')+'</span>' : '') +
+      '<br><span style="opacity:.4">Tap to investigate</span>';
+    posForTip(n);
+    tip.style.opacity = '1';
+  }
+  function hideTip() { tip.style.opacity = '0'; hovered = null; }
+
+  // ── interaction ───────────────────────────────────────────────────
+  var drag = null, mousePos = {x:-1,y:-1};
+
+  function evtPos(e) {
+    var r = canvas.getBoundingClientRect();
+    var pt = e.touches ? e.touches[0] : e;
+    return { x: (pt.clientX - r.left) * (canvas.width / canvas.clientWidth) / VIZ.dpr,
+             y: (pt.clientY - r.top)  * (canvas.height / canvas.clientHeight) / VIZ.dpr };
+  }
+  function hitNode(pos) {
+    for (var i = NODES.length - 1; i >= 0; i--) {
+      var n = NODES[i];
+      var dx = pos.x - n.x, dy = pos.y - n.y;
+      if (dx*dx + dy*dy < (n.r + 6) * (n.r + 6)) return n;
+    }
+    return null;
+  }
+
+  function onDown(e) {
+    e.preventDefault();
+    var pos = evtPos(e);
+    var n   = hitNode(pos);
+    if (n) { drag = n; n.fx = n.x; n.fy = n.y; canvas.style.cursor = 'grabbing'; }
+    else hideTip();
+  }
+  function onMove(e) {
+    e.preventDefault();
+    var pos = evtPos(e);
+    mousePos = pos;
+    if (drag) { drag.fx = pos.x; drag.fy = pos.y; drag.x = pos.x; drag.y = pos.y; return; }
+    var n = hitNode(pos);
+    if (n) { canvas.style.cursor = 'pointer'; if (n !== hovered) showTip(n); }
+    else   { canvas.style.cursor = 'grab'; if (hovered) hideTip(); }
+  }
+  function onUp(e) {
+    if (drag) {
+      var pos = evtPos(e || {touches:[]});
+      var n   = hitNode(pos);
+      if (n === drag) {
+        activeNode = drag;
+        // tap to search
+        if (typeof quickSearch === 'function') quickSearch(drag.label.replace('\n',' ') + ' Australia');
+      }
+      drag.fx = null; drag.fy = null;
+      drag = null;
+    }
+    canvas.style.cursor = 'grab';
+  }
+
+  canvas.addEventListener('mousedown',  onDown);
+  canvas.addEventListener('mousemove',  onMove);
+  canvas.addEventListener('mouseup',    onUp);
+  canvas.addEventListener('mouseleave', function(){ hideTip(); if(drag){drag.fx=null;drag.fy=null;drag=null;} });
+  canvas.addEventListener('touchstart', onDown, {passive:false});
+  canvas.addEventListener('touchmove',  onMove, {passive:false});
+  canvas.addEventListener('touchend',   onUp);
+
+  // ── draw ──────────────────────────────────────────────────────────
+  var t_draw = 0, t_total = 120; // entrance animation frames
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    var frac = Math.min(t_draw / t_total, 1);
+    var eased = VIZ.easeOut(frac, 2.5);
+
+    // edges
+    EDGES.forEach(function(e) {
+      var a = nodeMap[e.a], b = nodeMap[e.b]; if (!a||!b) return;
+      var isHigh = hovered && (hovered === a || hovered === b || hovered === activeNode);
+      var alpha  = isHigh ? 0.85 : 0.3;
+      var w      = isHigh ? e.w * 2 : e.w * 0.9;
+      ctx.save();
+      ctx.globalAlpha = alpha * eased;
+      ctx.lineWidth   = w;
+      ctx.strokeStyle = e.color || VIZ.palette.dim;
+      if (isHigh) {
+        var g = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        g.addColorStop(0, a.color + 'CC');
+        g.addColorStop(1, b.color + 'CC');
+        ctx.strokeStyle = g;
+      }
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.restore();
+    });
+
+    // nodes
+    NODES.forEach(function(n) {
+      var isHov  = n === hovered;
+      var radius = n.r * eased;
+      ctx.save();
+      // glow halo
+      var gA = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, radius * 2.4);
+      gA.addColorStop(0,   n.color + (isHov ? '50':'28'));
+      gA.addColorStop(1,   n.color + '00');
+      ctx.fillStyle = gA;
+      ctx.beginPath(); ctx.arc(n.x, n.y, radius * 2.4, 0, Math.PI*2); ctx.fill();
+
+      // fill circle
+      var g2 = ctx.createRadialGradient(n.x - radius*0.32, n.y - radius*0.32, 0, n.x, n.y, radius);
+      g2.addColorStop(0,   '#FFFFFF38');
+      g2.addColorStop(0.4, n.color + 'CC');
+      g2.addColorStop(1,   n.color + '88');
+      ctx.fillStyle = g2;
+      ctx.beginPath(); ctx.arc(n.x, n.y, radius, 0, Math.PI*2); ctx.fill();
+
+      // ring
+      ctx.strokeStyle = isHov ? '#FFFFFFCC' : n.color + 'AA';
+      ctx.lineWidth   = isHov ? 2 : 1;
+      ctx.beginPath(); ctx.arc(n.x, n.y, radius, 0, Math.PI*2); ctx.stroke();
+
+      // label
+      ctx.globalAlpha = 0.9 * eased;
+      ctx.fillStyle   = '#FFFFFF';
+      ctx.font        = `${isHov ? 600 : 500} ${radius > 17 ? 10 : 8}px var(--ff-sans)`;
+      ctx.textAlign   = 'center'; ctx.textBaseline = 'middle';
+      var lines = n.label.split('\n');
+      if (lines.length === 2) {
+        ctx.fillText(lines[0], n.x, n.y - 4);
+        ctx.fillText(lines[1], n.x, n.y + 6);
+      } else { ctx.fillText(n.label, n.x, n.y); }
+      ctx.restore();
+
+      if (hovered && n !== hovered) {
+        var linked = EDGES.some(function(e){ return (e.a===n.id&&e.b===hovered.id)||(e.b===n.id&&e.a===hovered.id); });
+        if (!linked) { ctx.globalAlpha = 0.25; }
       }
     });
-    saveRRItems();
-    updateRRPipelineUI();
-    rrActiveStage='triage';
-    document.querySelectorAll('.rr-pipe-stage').forEach(function(s,i){s.classList.toggle('active',i===0);});
-    renderRRQueue();
-    if(dot){dot.classList.remove('running','error');dot.classList.add('complete');}
-    if(statusEl) statusEl.textContent='Monitoring active';
-    showToast('⚡ '+added+' opportunit'+(added===1?'y':'ies')+' flagged','success');
-  } catch(e) {
-    if(dot){dot.classList.remove('running','complete');dot.classList.add('error');}
-    if(statusEl) statusEl.textContent='Scan failed';
-    showToast('Scan failed: '+String(e).slice(0,60),'error');
-  }
-  btn.disabled=false;
-  if(lbl) lbl.textContent='Scan Now';
-}
 
-function renderRRQueue() {
-  var queue = document.getElementById('rr-queue'); if(!queue) return;
-  var filtered = rrItems.filter(function(i){return i.stage===rrActiveStage;});
-  if(!filtered.length){
-    var msgs={
-      triage:{icon:'\uD83D\uDD25',title:'No Items to Triage',sub:'Tap "Scan Now" to find rapid response opportunities from your monitored sources.'},
-      copy:{icon:'\u270D\uFE0F',title:'No Items in Copy',sub:'Accept items from Triage to start generating copy.'},
-      design:{icon:'\uD83C\uDFA8',title:'No Items in Design',sub:'Items move here once copy is generated and approved.'},
-      approval:{icon:'\u2705',title:'Nothing Awaiting Approval',sub:'Items appear here once design is complete.'},
-      live:{icon:'\uD83D\uDE80',title:'Nothing Live Yet',sub:'Published content appears here for tracking.'},
-    };
-    var m=msgs[rrActiveStage]||msgs.triage;
-    queue.innerHTML='<div class="empty-state"><div class="empty-icon">'+m.icon+'</div><div class="empty-title">'+m.title+'</div><div class="empty-sub">'+m.sub+'</div></div>';
-    return;
-  }
-  queue.innerHTML=filtered.map(function(item,i){return renderRRItem(item,i);}).join('');
-}
-
-function renderRRItem(item,delay){
-  delay=delay||0;
-  var flagClass={hot:'flag-hot',rising:'flag-rising',opp:'flag-opp'}[item.flag_type]||'flag-rising';
-  var flagBadge={hot:'rr-flag-hot',rising:'rr-flag-rising',opp:'rr-flag-opp'}[item.flag_type]||'rr-flag-rising';
-  var flagLabel={hot:'\uD83D\uDD25 HOT','rising':'\u2191 RISING',opp:'\u25CF OPP'}[item.flag_type]||'\u2191 RISING';
-  var urgencyColor=item.urgency==='high'?'var(--neg)':'var(--neu)';
-  var itemData=JSON.stringify(item).replace(/"/g,'&quot;');
-
-  var stageActions='';
-  if(item.stage==='triage'){
-    stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 BUILD</button>'
-      +'<button class="rr-btn rr-btn-ai" onclick="rrQuickAngles(JSON.parse(this.dataset.item))" data-item="'+itemData+'">AI ANGLES</button>'
-      +'<button class="rr-btn rr-btn-skip" onclick="rrSkipItem(\''+item.id+'\')">SKIP</button>';
-  } else if(item.stage==='copy'){
-    stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 EDIT COPY</button>'
-      +'<button class="rr-btn-adv" onclick="rrAdvanceStage(\''+item.id+'\',\'design\')">\u2192 DESIGN</button>';
-  } else if(item.stage==='design'){
-    stageActions='<button class="rr-btn rr-btn-use" onclick="rrUseItem(JSON.parse(this.dataset.item))" data-item="'+itemData+'">\u25B6 VIEW BRIEF</button>'
-      +'<button class="rr-btn-adv" style="border-color:rgba(176,110,255,0.3);background:rgba(176,110,255,0.08);color:var(--mix)" onclick="rrAdvanceStage(\''+item.id+'\',\'approval\')">\u2192 APPROVAL</button>';
-  } else if(item.stage==='approval'){
-    stageActions='<button class="rr-btn" style="background:rgba(16,217,142,0.1);border-color:rgba(16,217,142,0.3);color:var(--pos)" onclick="rrAdvanceStage(\''+item.id+'\',\'live\')">\u2713 APPROVE + PUBLISH</button>'
-      +'<button class="rr-btn rr-btn-skip" onclick="rrAdvanceStage(\''+item.id+'\',\'design\')">\u2190 BACK</button>';
-  } else if(item.stage==='live'){
-    stageActions='<div class="rr-live-badge">\uD83D\uDE80 PUBLISHED</div>';
+    if (hovered && tip) posForTip(hovered);
   }
 
-  var excerptHtml=item.excerpt?
-    '<div class="rr-excerpt-label">Community Reaction</div>'
-    +'<div class="rr-excerpt">'+esc(item.excerpt)+'</div>'
-    +'<div class="rr-excerpt-meta">— '+esc(item.excerpt_source||'Source')+' · '+timeAgo(item.created)+'</div>'
-    :'';
-
-  return '<div class="rr-item '+flagClass+'" style="animation-delay:'+(delay*50)+'ms">'
-    +'<div class="rr-item-hdr">'
-    +'<span class="rr-flag-badge '+flagBadge+'">'+flagLabel+'</span>'
-    +'<span style="font-family:var(--ff-mono);font-size:7.5px;color:'+urgencyColor+';border:1px solid '+urgencyColor+'35;background:'+urgencyColor+'10;padding:2px 7px;border-radius:4px">'+(item.urgency==='high'?'\u26A1 URGENT':'\u2192 MONITOR')+'</span>'
-    +'<span class="rr-src-pill">\u25CF '+esc(item.source||'MONITOR').toUpperCase()+'</span>'
-    +'<span class="rr-time">'+timeAgo(item.created)+'</span>'
-    +'</div>'
-    +'<div class="rr-item-body">'
-    +'<div class="rr-headline">'+esc(item.headline)+'</div>'
-    +'<div class="rr-summary">'+esc(item.summary)+'</div>'
-    +(item.flag_reason?'<div class="rr-why">Why now: '+esc(item.flag_reason)+'</div>':'')
-    +excerptHtml
-    +'</div>'
-    +'<div class="rr-actions">'+stageActions+'</div>'
-    +'</div>';
-}
-
-function rrSkipItem(id){
-  rrItems=rrItems.filter(function(i){return i.id!==id;});
-  saveRRItems(); updateRRPipelineUI(); renderRRQueue();
-  showToast('Skipped');
-}
-function rrAdvanceStage(id,stage){
-  var item=rrItems.find(function(i){return i.id===id;});
-  if(!item)return;
-  item.stage=stage; saveRRItems(); updateRRPipelineUI(); renderRRQueue();
-  showToast('Moved to '+stage,'success');
-}
-function rrUseItem(item){
-  rrCurrentItem=item;
-  var panel=document.getElementById('rr-angle-panel');
-  var headlineEl=document.getElementById('rr-selected-headline');
-  var sourceLabel=document.getElementById('rr-angle-source-label');
-  if(headlineEl) headlineEl.textContent=item.headline;
-  if(sourceLabel) sourceLabel.textContent=(item.topic||item.source||'').toUpperCase();
-  document.querySelectorAll('.rr-angle-chip').forEach(function(c,i){c.classList.toggle('active',i===0);});
-  document.querySelectorAll('.rr-format-card').forEach(function(c,i){c.classList.toggle('active',i===0);});
-  rrCurrentAngle='Headline tear-out — direct quote from source';
-  rrCurrentFormat='carousel';
-  var outputWrap=document.getElementById('rr-output-wrap');
-  var briefBox=document.getElementById('rr-brief-box');
-  var actionRow=document.getElementById('rr-action-row');
-  if(outputWrap) outputWrap.style.display='none';
-  if(briefBox) briefBox.style.display='none';
-  if(actionRow) actionRow.style.display='none';
-  if(item.copyOutput){
-    var ob=document.getElementById('rr-output-body');
-    if(ob){ob.className='rr-output-body';ob.innerHTML=item.copyOutput.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');}
-    if(outputWrap) outputWrap.style.display='block';
+  // ── loop ──────────────────────────────────────────────────────────
+  var warm = 0; // no warm-up delay — physics runs alongside draw
+  function loop() {
+    tick();
+    t_draw++; draw();
+    requestAnimationFrame(loop);
   }
-  if(item.briefOutput){
-    var bb=document.getElementById('rr-brief-body');
-    if(bb) bb.innerHTML=item.briefOutput.replace(/\n/g,'<br>');
-    if(briefBox) briefBox.style.display='block';
-    if(actionRow) actionRow.style.display='flex';
-  }
-  if(panel){panel.style.display='block';panel.scrollIntoView({behavior:'smooth',block:'start'});}
-}
-function closeAnglePanel(){
-  var panel=document.getElementById('rr-angle-panel');
-  if(panel) panel.style.display='none';
-  rrCurrentItem=null;
-}
-function rrSelectAngle(el,angle){
-  document.querySelectorAll('.rr-angle-chip').forEach(function(c){c.classList.remove('active');});
-  el.classList.add('active'); rrCurrentAngle=angle;
-}
-function rrSelectFormat(el,format){
-  document.querySelectorAll('.rr-format-card').forEach(function(c){c.classList.remove('active');});
-  el.classList.add('active'); rrCurrentFormat=format;
-}
+  loop();
+};
 
-async function generateRRContent(){
-  if(!CLAUDE_KEY){showToast('Set Claude API key first','error');openAPIModal();return;}
-  if(!rrCurrentItem){showToast('Select a story first','error');return;}
-  var btn=document.getElementById('rr-gen-btn');
-  var outputWrap=document.getElementById('rr-output-wrap');
-  var outputBody=document.getElementById('rr-output-body');
-  var briefBox=document.getElementById('rr-brief-box');
-  var briefBody=document.getElementById('rr-brief-body');
-  var actionRow=document.getElementById('rr-action-row');
-  btn.disabled=true; btn.textContent='\u23F3 Generating\u2026';
-  if(outputWrap) outputWrap.style.display='block';
-  if(outputBody){outputBody.className='rr-output-body loading';outputBody.textContent='Claude is generating your content\u2026';}
-  var fmtDesc={
-    carousel:'3-5 slide Instagram/Facebook carousel. Output: Slide 1 hook headline, Slides 2-4 body copy (1-2 sentences each), Slide 5 CTA. Max 20 words per slide.',
-    statcard:'Single bold stat card. Output: The stat/number, One context line, One supporting sentence. Total 3 lines.',
-    video:'Short video caption + script notes. Output: Hook (first 3 words), Caption body (2-3 sentences), 5 hashtags, Script note for VO.',
-    story:'Instagram/Facebook Story 9:16. Output: Headline overlay, Body text (max 15 words), CTA button text, Visual direction note.',
+/* ─────────────────────────────────────────────────────────────────────
+   2. 3D SENTIMENT CONSTELLATION
+   ───────────────────────────────────────────────────────────────────── */
+VIZ.buildConstellation = function(canvasId) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  VIZ.onVisible(canvas, function() { VIZ._initConstellation(canvas); });
+};
+
+VIZ._initConstellation = function(canvas) {
+  var dim = VIZ.setupCanvas(canvas);
+  var ctx = dim.ctx, W = dim.W, H = dim.H;
+
+  var ITEMS = [
+    // topics with sentiment-coded z-clusters
+    {label:'Housing',    sent:'neg', score:-72, x3:0, y3:0, z3:0},
+    {label:'Cost of Living', sent:'neg', score:-65, x3:0, y3:0, z3:0},
+    {label:'Climate',    sent:'pos', score:+52, x3:0, y3:0, z3:0},
+    {label:'Medicare',   sent:'pos', score:+68, x3:0, y3:0, z3:0},
+    {label:'AUKUS',      sent:'neu', score:+12, x3:0, y3:0, z3:0},
+    {label:'Immigration',sent:'neg', score:-41, x3:0, y3:0, z3:0},
+    {label:'Nuclear',    sent:'mix', score:-18, x3:0, y3:0, z3:0},
+    {label:'RBA Rates',  sent:'neg', score:-55, x3:0, y3:0, z3:0},
+    {label:'Albanese',   sent:'pos', score:+44, x3:0, y3:0, z3:0},
+    {label:'Dutton',     sent:'neg', score:-39, x3:0, y3:0, z3:0},
+    {label:'Greens',     sent:'pos', score:+58, x3:0, y3:0, z3:0},
+    {label:'Teals',      sent:'pos', score:+54, x3:0, y3:0, z3:0},
+    {label:'ALP',        sent:'pos', score:+61, x3:0, y3:0, z3:0},
+    {label:'LNP',        sent:'neu', score:+40, x3:0, y3:0, z3:0},
+    {label:'Reddit AU',  sent:'neg', score:-30, x3:0, y3:0, z3:0},
+    {label:'Hacker News',sent:'neu', score:+5,  x3:0, y3:0, z3:0},
+    {label:'Guardian',   sent:'pos', score:+28, x3:0, y3:0, z3:0},
+    {label:'ABC News',   sent:'neu', score:+18, x3:0, y3:0, z3:0},
+    {label:'Whirlpool',  sent:'neg', score:-22, x3:0, y3:0, z3:0},
+    {label:'SMH/Age',    sent:'neu', score:+10, x3:0, y3:0, z3:0},
+  ];
+
+  var SENT_COLOR = {
+    pos: '#30D158', neg: '#FF453A', neu: '#FFD60A', mix: '#BF5AF2'
   };
-  var prompt='You are a rapid response content writer for an Australian political campaign.\n\n'
-    +'STORY: '+rrCurrentItem.headline+'\n'
-    +'CONTEXT: '+rrCurrentItem.summary+'\n'
-    +'ANGLE: '+rrCurrentAngle+'\n'
-    +'FORMAT: '+rrCurrentFormat+' \u2014 '+(fmtDesc[rrCurrentFormat]||'')+'\n\n'
-    +(rrCurrentItem.excerpt?'KEY QUOTE: "'+rrCurrentItem.excerpt+'" \u2014 '+rrCurrentItem.excerpt_source+'\n\n':'')
-    +'Generate punchy, direct copy for immediate publication. Use **bold** for headlines.\n\n'
-    +'Then output:\n---BRIEF---\nFORMAT: '+rrCurrentFormat+'\nANGLE: '+rrCurrentAngle+'\nVisual direction: [what designer should create, 2-3 sentences]\nText to include: [exact copy to design with]\nTone: Urgent, direct, politically resonant\nDeadline: Rapid response \u2014 priority';
-  try{
-    var res=await callClaude([{role:'user',content:prompt}],900);
-    var parts=res.split('---BRIEF---');
-    var copyText=(parts[0]||res).trim();
-    var briefText=(parts[1]||'').trim();
-    rrGenOutput=copyText; rrBriefOutput=briefText;
-    var itemRef=rrItems.find(function(i){return i.id===rrCurrentItem.id;});
-    if(itemRef){
-      itemRef.copyOutput=copyText; itemRef.briefOutput=briefText;
-      itemRef.angle=rrCurrentAngle; itemRef.format=rrCurrentFormat;
-      if(itemRef.stage==='triage') itemRef.stage='copy';
-      rrCurrentItem=itemRef; saveRRItems(); updateRRPipelineUI();
+
+  // place on sphere using Fibonacci lattice
+  var golden = Math.PI * (3 - Math.sqrt(5));
+  var R3 = 1.0;
+  ITEMS.forEach(function(item, i) {
+    var y   = 1 - (i / (ITEMS.length - 1)) * 2;
+    var rad = Math.sqrt(Math.max(0, 1 - y*y));
+    var phi = golden * i;
+    item.x3 = Math.cos(phi) * rad * R3;
+    item.y3 = y * R3;
+    item.z3 = Math.sin(phi) * rad * R3;
+  });
+
+  // ── rotation state ────────────────────────────────────────────────
+  var rotX  = 0.35, rotY = 0;
+  var velX  = 0, velY = 0.004;
+  var autoSpin = true;
+
+  // drag
+  var dragO = null;
+  function onPointerDown(e) {
+    e.preventDefault(); autoSpin = false; velX = 0; velY = 0;
+    var pt = e.touches ? e.touches[0] : e;
+    dragO = { x: pt.clientX, y: pt.clientY, rx: rotX, ry: rotY };
+  }
+  function onPointerMove(e) {
+    e.preventDefault();
+    if (!dragO) return;
+    var pt = e.touches ? e.touches[0] : e;
+    var dx = (pt.clientX - dragO.x) / W;
+    var dy = (pt.clientY - dragO.y) / H;
+    rotY   = dragO.ry + dx * 3.0;
+    rotX   = VIZ.clamp(dragO.rx + dy * 2.0, -Math.PI/2, Math.PI/2);
+    velX   = dy * 0.02; velY = dx * 0.02;
+  }
+  function onPointerUp(e) {
+    if (dragO) { dragO = null; }
+  }
+  canvas.addEventListener('mousedown',  onPointerDown);
+  canvas.addEventListener('mousemove',  onPointerMove, {passive:false});
+  canvas.addEventListener('mouseup',    onPointerUp);
+  canvas.addEventListener('touchstart', onPointerDown, {passive:false});
+  canvas.addEventListener('touchmove',  onPointerMove, {passive:false});
+  canvas.addEventListener('touchend',   onPointerUp);
+
+  // ── project ───────────────────────────────────────────────────────
+  var FL = W * 2.0; // focal length
+  function project(x3, y3, z3) {
+    var cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+    var cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+    // rotate Y
+    var x1 = cosY * x3 + sinY * z3;
+    var z1 = -sinY * x3 + cosY * z3;
+    // rotate X
+    var y2 = cosX * y3 - sinX * z1;
+    var z2 = sinX * y3 + cosX * z1;
+    // perspective
+    var depth = z2 + 2.2; // offset so nothing goes behind camera
+    var scale = FL / (depth * FL * 0.55);
+    return { px: W/2 + x1 * scale * W * 0.36,
+             py: H/2 + y2 * scale * H * 0.38,
+             depth: z2, scale: scale };
+  }
+
+  // ── tooltip ───────────────────────────────────────────────────────
+  var tip = canvas.parentElement.querySelector('.viz-tip');
+  var hovered = null;
+  function showNodeTip(item, px, py) {
+    hovered = item;
+    tip.style.left = px + 'px'; tip.style.top = py + 'px';
+    tip.innerHTML =
+      '<strong style="color:'+SENT_COLOR[item.sent]+'">'+item.label+'</strong>' +
+      '<br><span class="vt-row">Score: <span style="color:'+SENT_COLOR[item.sent]+'">'+(item.score>0?'+':'')+item.score+'</span></span>' +
+      '<br><span style="opacity:.4">Tap to investigate</span>';
+    tip.style.opacity = '1';
+  }
+  function hideTip() { tip.style.opacity = '0'; hovered = null; }
+
+  canvas.addEventListener('click', function(e) {
+    var r   = canvas.getBoundingClientRect();
+    var mx  = (e.clientX - r.left) * (canvas.width / canvas.clientWidth) / VIZ.dpr;
+    var my  = (e.clientY - r.top)  * (canvas.height / canvas.clientHeight) / VIZ.dpr;
+    var hit = null, bestD = 99;
+    ITEMS.forEach(function(item) {
+      var p = project(item.x3, item.y3, item.z3);
+      var r2 = Math.max(5, 10 * p.scale);
+      var d  = Math.sqrt(Math.pow(mx - p.px, 2) + Math.pow(my - p.py, 2));
+      if (d < r2 + 6 && d < bestD) { bestD = d; hit = item; hitP = p; }
+    });
+    if (hit) {
+      if (!dragO) showNodeTip(hit, hitP.px, hitP.py);
+      if (typeof quickSearch === 'function') quickSearch(hit.label + ' Australia');
+    } else hideTip();
+  });
+  canvas.addEventListener('mousemove', function(e) {
+    if (dragO) { hideTip(); return; }
+    var r   = canvas.getBoundingClientRect();
+    var mx  = (e.clientX - r.left) * (canvas.width / canvas.clientWidth) / VIZ.dpr;
+    var my  = (e.clientY - r.top)  * (canvas.height / canvas.clientHeight) / VIZ.dpr;
+    var hit = null, bestD = 99, hitP;
+    ITEMS.forEach(function(item) {
+      var p  = project(item.x3, item.y3, item.z3);
+      var r2 = Math.max(5, 10 * p.scale);
+      var d  = Math.sqrt(Math.pow(mx - p.px, 2) + Math.pow(my - p.py, 2));
+      if (d < r2 + 8 && d < bestD) { bestD = d; hit = item; hitP = p; }
+    });
+    if (hit) { canvas.style.cursor = 'pointer'; if (hit !== hovered) showNodeTip(hit, hitP.px, hitP.py); }
+    else      { canvas.style.cursor = 'grab'; hideTip(); }
+  });
+
+  // ── draw ──────────────────────────────────────────────────────────
+  var t_draw = 0;
+  var BACKDROP_R = W * 0.38;
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // sphere shell glow
+    var gS = ctx.createRadialGradient(W/2, H/2, BACKDROP_R*0.5, W/2, H/2, BACKDROP_R);
+    gS.addColorStop(0,   'rgba(10,132,255,0.04)');
+    gS.addColorStop(0.7, 'rgba(10,132,255,0.02)');
+    gS.addColorStop(1,   'rgba(10,132,255,0.0)');
+    ctx.fillStyle = gS;
+    ctx.beginPath(); ctx.arc(W/2, H/2, BACKDROP_R, 0, Math.PI*2); ctx.fill();
+
+    // latitude/longitude grid lines
+    ctx.save(); ctx.globalAlpha = 0.07; ctx.strokeStyle = '#4FA4FF'; ctx.lineWidth = 0.5;
+    for (var lat = -75; lat <= 75; lat += 30) {
+      var rLat = Math.cos(lat * Math.PI/180);
+      ctx.beginPath();
+      for (var lon = 0; lon <= 360; lon += 5) {
+        var th = lon * Math.PI/180, ph = lat * Math.PI/180;
+        var x3 = Math.cos(ph) * Math.cos(th);
+        var y3 = Math.sin(ph);
+        var z3 = Math.cos(ph) * Math.sin(th);
+        var p  = project(x3, y3, z3);
+        if (p.depth < -0.6) continue; // skip back hemisphere
+        lon === 0 ? ctx.moveTo(p.px, p.py) : ctx.lineTo(p.px, p.py);
+      }
+      ctx.stroke();
     }
-    if(outputBody){outputBody.className='rr-output-body';outputBody.innerHTML=copyText.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong style="color:var(--t0)">$1</strong>');}
-    if(briefText&&briefBody){briefBody.innerHTML=briefText.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');if(briefBox)briefBox.style.display='block';}
-    if(actionRow) actionRow.style.display='flex';
-    showToast('Content generated \u2713','success');
-  } catch(e){
-    if(outputBody){outputBody.className='rr-output-body';outputBody.innerHTML='<span style="color:var(--neg)">Generation failed. Check API key.</span>';}
-    showToast('Generation failed: '+String(e).slice(0,60),'error');
+    for (var lon2 = 0; lon2 < 360; lon2 += 60) {
+      var th2 = lon2 * Math.PI/180;
+      ctx.beginPath();
+      for (var lat2 = -90; lat2 <= 90; lat2 += 6) {
+        var ph2 = lat2 * Math.PI/180;
+        var x32 = Math.cos(ph2)*Math.cos(th2), y32 = Math.sin(ph2), z32 = Math.cos(ph2)*Math.sin(th2);
+        var p2  = project(x32, y32, z32);
+        if (p2.depth < -0.6) continue;
+        lat2 === -90 ? ctx.moveTo(p2.px, p2.py) : ctx.lineTo(p2.px, p2.py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // constellation connector lines
+    var frac  = Math.min(t_draw / 90, 1);
+    var sorted = ITEMS.map(function(item) {
+      var p = project(item.x3, item.y3, item.z3);
+      return { item: item, p: p };
+    }).sort(function(a, b) { return a.p.depth - b.p.depth; });
+
+    sorted.forEach(function(a) {
+      sorted.forEach(function(b) {
+        if (a === b) return;
+        var dx = a.item.x3 - b.item.x3, dy = a.item.y3 - b.item.y3, dz = a.item.z3 - b.item.z3;
+        var d3 = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        if (d3 > 0.72) return; // only nearby
+        if (a.p.depth < -0.4 && b.p.depth < -0.4) return; // hide back
+        var alpha = (1 - d3 / 0.72) * 0.22 * frac;
+        ctx.save(); ctx.globalAlpha = alpha;
+        ctx.strokeStyle = a.item.sent === b.item.sent ? SENT_COLOR[a.item.sent] + '60' : '#4FA4FF40';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath(); ctx.moveTo(a.p.px, a.p.py); ctx.lineTo(b.p.px, b.p.py); ctx.stroke();
+        ctx.restore();
+      });
+    });
+
+    // nodes (back to front by depth)
+    sorted.forEach(function(sd) {
+      var item = sd.item, p = sd.p;
+      var isHov  = item === hovered;
+      var back   = p.depth < 0;
+      var r      = VIZ.clamp(10 * p.scale, 4, 18) * VIZ.easeOut(frac, 3);
+      var color  = SENT_COLOR[item.sent];
+      var opBase = back ? 0.35 : 1;
+
+      ctx.save(); ctx.globalAlpha = opBase * frac;
+
+      // glow
+      var gN = ctx.createRadialGradient(p.px, p.py, 0, p.px, p.py, r * 2.8);
+      gN.addColorStop(0,   color + (isHov ? '55' : '30'));
+      gN.addColorStop(1,   color + '00');
+      ctx.fillStyle = gN;
+      ctx.beginPath(); ctx.arc(p.px, p.py, r * 2.8, 0, Math.PI*2); ctx.fill();
+
+      // disc
+      var gD = ctx.createRadialGradient(p.px - r*0.3, p.py - r*0.3, 0, p.px, p.py, r);
+      gD.addColorStop(0, '#FFFFFF55');
+      gD.addColorStop(0.45, color + 'DD');
+      gD.addColorStop(1,   color + '88');
+      ctx.fillStyle = gD;
+      ctx.beginPath(); ctx.arc(p.px, p.py, r, 0, Math.PI*2); ctx.fill();
+
+      // ring
+      ctx.strokeStyle = isHov ? '#FFFFFF' : color;
+      ctx.lineWidth = isHov ? 1.8 : 0.8;
+      ctx.globalAlpha = (isHov ? 0.9 : 0.5) * opBase;
+      ctx.beginPath(); ctx.arc(p.px, p.py, r, 0, Math.PI*2); ctx.stroke();
+
+      // label (only front hemisphere and larger nodes)
+      if (!back && r > 7) {
+        ctx.globalAlpha = 0.85 * frac;
+        ctx.fillStyle   = '#fff';
+        ctx.font        = (isHov ? '600' : '400') + ' ' + VIZ.clamp(r * 0.82, 7, 11) + 'px var(--ff-sans)';
+        ctx.textAlign   = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(item.label, p.px, p.py + r + 3);
+      }
+      ctx.restore();
+    });
   }
-  btn.disabled=false; btn.textContent='\u26A1 Generate Copy + Brief';
-}
 
-async function rrQuickAngles(item){
-  if(!CLAUDE_KEY){showToast('Set Claude API key first','error');openAPIModal();return;}
-  var prompt='For this Australian political story give 3 rapid response content angles, JSON ONLY:\nStory: '+item.headline+'\n[{"angle":"name","hook":"opening line","format":"carousel|statcard|video","why":"why this works"}]';
-  try{
-    var res=await callClaude([{role:'user',content:prompt}],400);
-    var m=(res.replace(/```json|```/g,'')).match(/\[[\s\S]*\]/);
-    if(!m)throw new Error('no json');
-    var angles=JSON.parse(m[0]);
-    var text=angles.map(function(a,i){return (i+1)+'. **'+a.angle+'** ('+a.format+')\n"'+a.hook+'"\n'+a.why;}).join('\n\n');
-    setCIAI('result',text);
-    switchPage('comments',document.getElementById('nav-comments'));
-    document.getElementById('ci-ai-box').scrollIntoView({behavior:'smooth'});
-    showToast('Angles in Intel tab','success');
-  }catch(e){showToast('Failed to generate angles','error');}
-}
-
-function copyRROutput(){
-  if(!rrGenOutput){showToast('Generate content first');return;}
-  navigator.clipboard.writeText(rrGenOutput).then(function(){showToast('Copied \u2713','success');}).catch(function(){showToast('Copy failed','error');});
-}
-function copyRRBrief(){
-  if(!rrBriefOutput){showToast('Generate brief first');return;}
-  navigator.clipboard.writeText(rrBriefOutput).then(function(){showToast('Brief copied \u2713','success');}).catch(function(){showToast('Copy failed','error');});
-}
-function rrSendToClickUp(){
-  showToast('ClickUp integration: add your API token in Settings','success');
-}
-function rrMarkInPipeline(){
-  if(!rrCurrentItem)return;
-  var item=rrItems.find(function(i){return i.id===rrCurrentItem.id;});
-  if(item){
-    item.stage='design'; saveRRItems(); updateRRPipelineUI(); renderRRQueue(); closeAnglePanel();
-    showToast('Moved to Design \u2713','success');
+  function loop() {
+    if (autoSpin) { rotY += velY; rotX += velX * 0.85; velX *= 0.96; }
+    else if (!dragO) { velX *= 0.94; velY *= 0.94; rotY += velY; rotX += velX; }
+    rotX = VIZ.clamp(rotX, -Math.PI/2, Math.PI/2);
+    t_draw++;
+    draw();
+    requestAnimationFrame(loop);
   }
-}
+  loop();
+};
 
-function initRR(){
-  updateRRPipelineUI();
-  renderRRQueue();
-}
+/* ─────────────────────────────────────────────────────────────────────
+   3. ENHANCED SENTIMENT FLOW CHART (upgrade for sent-chart)
+   ───────────────────────────────────────────────────────────────────── */
+VIZ.buildFlowChart = function(canvasId) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  VIZ._initFlowChart(canvas);
+};
 
-// Initialise badge on page load
-(function(){
-  if(rrItems.length) updateRRBadge();
+VIZ._initFlowChart = function(canvas) {
+  var W, H, ctx;
+  var currentRange = '24h';
+  var t_anim = 0, t_total = 100;
+  var lastData = null;
+  var crossX = -1;
+  var tip = canvas.parentElement.querySelector('.viz-tip') ||
+            (function() { var t = document.createElement('div'); t.className='viz-tip'; canvas.parentElement.appendChild(t); return t; })();
+
+  function gen(n) {
+    var pa=55, na=30, ma=42, va=50, data=[];
+    for (var i=0;i<n;i++) {
+      pa += (Math.random()-0.47)*5; pa = VIZ.clamp(pa, 28, 78);
+      na += (Math.random()-0.53)*4; na = VIZ.clamp(na, 13, 48);
+      ma += (Math.random()-0.50)*3; ma = VIZ.clamp(ma, 25, 60);
+      va += (Math.random()-0.50)*12; va = VIZ.clamp(va, 18, 95);
+      data.push({pos:pa, neg:na, mix:ma, vol:va});
+    }
+    return data;
+  }
+
+  function resize() {
+    var ph = canvas.parentElement;
+    W = ph.clientWidth;
+    H = parseInt(canvas.getAttribute('data-h') || 160);
+    canvas.width  = W * VIZ.dpr;
+    canvas.height = H * VIZ.dpr;
+    canvas.style.height = H + 'px';
+    ctx = canvas.getContext('2d');
+    ctx.scale(VIZ.dpr, VIZ.dpr);
+  }
+
+  function setRange(range) {
+    currentRange = range;
+    t_anim = 0;
+    var n = range==='24h'?48 : range==='7d'?84 : range==='30d'?120 : 180;
+    lastData = gen(n);
+  }
+
+  function drawFrame() {
+    if (!ctx || !lastData) return;
+    ctx.clearRect(0, 0, W, H);
+    var PAD = {top:14, right:14, bottom:28, left:32};
+    var CW = W - PAD.left - PAD.right;
+    var CH = H - PAD.top  - PAD.bottom;
+    var d  = lastData, N = d.length;
+    var frac = Math.min(t_anim / t_total, 1);
+    var ef   = VIZ.easeOut(frac, 2.5);
+    var nDraw = Math.ceil(N * ef);
+
+    function px(i)   { return PAD.left + (i / (N-1)) * CW; }
+    function pySent(v, lo, hi) { return PAD.top + CH - (v - lo) / (hi - lo) * CH; }
+
+    // ── horizontal grid lines ──
+    ctx.save();
+    [0,25,50,75,100].forEach(function(v) {
+      var y = pySent(v, 0, 100);
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+      ctx.setLineDash([4,6]);
+      ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left + CW, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.font = '500 9px var(--ff-mono)'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(v+'%', PAD.left - 5, y);
+    });
+    ctx.restore();
+
+    // ── time labels ──
+    var intervals = {
+      '24h':['0h','4h','8h','12h','16h','20h','24h'],
+      '7d' :['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+      '30d':['W1','W2','W3','W4','W5'],
+      '90d':['M1','M2','M3']
+    }[currentRange] || [''];
+    var step = Math.floor(N / (intervals.length - 1));
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = '400 8px var(--ff-mono)'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    intervals.forEach(function(lbl, i) {
+      var xi = Math.min(i * step, N-1);
+      ctx.fillText(lbl, px(xi), PAD.top + CH + 6);
+    });
+
+    // ── draw areas + lines ────────────────────────────────────────
+    function buildPath(key, lo, hi, steps) {
+      var pts = [];
+      for (var i = 0; i < steps; i++) pts.push({x: px(i), y: pySent(d[i][key], lo, hi)});
+      return pts;
+    }
+
+    function drawArea(pts, color, opA) {
+      if (pts.length < 2) return;
+      ctx.save(); ctx.globalAlpha = opA;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, PAD.top + CH);
+      pts.forEach(function(p) { ctx.lineTo(p.x, p.y); });
+      ctx.lineTo(pts[pts.length-1].x, PAD.top + CH);
+      ctx.closePath();
+      var g = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + CH);
+      g.addColorStop(0, color + '55'); g.addColorStop(1, color + '00');
+      ctx.fillStyle = g; ctx.fill();
+      ctx.restore();
+    }
+
+    function drawLine(pts, color, w) {
+      if (pts.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.shadowColor = color; ctx.shadowBlur = 6;
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+      pts.forEach(function(p, i) { if(i>0) ctx.lineTo(p.x, p.y); });
+      ctx.stroke(); ctx.restore();
+    }
+
+    var posP = buildPath('pos', 0, 100, nDraw);
+    var negP = buildPath('neg', 0, 100, nDraw);
+    var mixP = buildPath('mix', 0, 100, nDraw);
+
+    drawArea(posP, '#30D158', 0.18);
+    drawArea(negP, '#FF453A', 0.14);
+    drawLine(negP, '#FF453A', 1.6);
+    drawLine(mixP, '#BF5AF2', 1.2);
+    drawLine(posP, '#30D158', 2.2);
+
+    // ── crosshair ────────────────────────────────────────────────
+    if (crossX >= 0 && frac >= 1) {
+      var xi = VIZ.clamp(Math.round((crossX - PAD.left) / CW * (N-1)), 0, nDraw - 1);
+      var xPx = px(xi);
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.setLineDash([4,5]);
+      ctx.beginPath(); ctx.moveTo(xPx, PAD.top); ctx.lineTo(xPx, PAD.top + CH); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // dots on each series
+      [[posP,'#30D158'],[negP,'#FF453A'],[mixP,'#BF5AF2']].forEach(function(s) {
+        var pt = s[0][xi]; if (!pt) return;
+        ctx.fillStyle = s[1]; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+      });
+      ctx.restore();
+
+      // tooltip
+      if (tip && d[xi]) {
+        tip.style.left = xPx + 'px';
+        tip.style.top  = PAD.top + 'px';
+        tip.innerHTML  =
+          '<strong>'+currentRange.toUpperCase()+' · Point '+xi+'</strong>' +
+          '<br><span style="color:#30D158">POS '+Math.round(d[xi].pos)+'%</span>' +
+          '<span style="color:#FF453A;margin-left:8px">NEG '+Math.round(d[xi].neg)+'%</span>' +
+          '<span style="color:#BF5AF2;margin-left:8px">MIX '+Math.round(d[xi].mix)+'%</span>';
+        tip.style.opacity = '1';
+      }
+    } else if (tip) { tip.style.opacity = '0'; }
+
+    // ── latest value labels ────────────────────────────────────────
+    if (nDraw >= N && posP.length) {
+      var last = posP[posP.length-1];
+      ctx.fillStyle = '#30D158'; ctx.font = '600 9px var(--ff-mono)'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText('POS', last.x + 4, last.y);
+      last = negP[negP.length-1];
+      ctx.fillStyle = '#FF453A';
+      ctx.fillText('NEG', last.x + 4, last.y);
+    }
+  }
+
+  // ── interaction ─────────────────────────────────────────────────
+  canvas.addEventListener('mousemove', function(e) {
+    var r  = canvas.getBoundingClientRect();
+    crossX = (e.clientX - r.left) * (canvas.width / canvas.clientWidth) / VIZ.dpr;
+  });
+  canvas.addEventListener('mouseleave', function() { crossX = -1; });
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var r  = canvas.getBoundingClientRect();
+    var pt = e.touches[0];
+    crossX = (pt.clientX - r.left) * (canvas.width / canvas.clientWidth) / VIZ.dpr;
+  }, {passive:false});
+
+  // ── expose setRange so existing chart-ctrl buttons still work ──
+  window.VIZ_flowSetRange = function(range) { setRange(range); };
+
+  // ── loop ────────────────────────────────────────────────────────
+  function loop() { t_anim++; drawFrame(); requestAnimationFrame(loop); }
+  resize(); setRange('24h'); loop();
+};
+
+/* ─────────────────────────────────────────────────────────────────────
+   INIT — called after DOM ready
+   ───────────────────────────────────────────────────────────────────── */
+(function() {
+  var ready = document.readyState;
+  function boot() {
+    VIZ.buildNetworkGraph('network-canvas');
+    VIZ.buildConstellation('const-canvas');
+    VIZ.buildFlowChart('flow-canvas');
+    // patch existing range buttons to also redraw new chart
+    document.querySelectorAll('.chart-ctrl .chart-btn').forEach(function(btn) {
+      var orig = btn.getAttribute('onclick');
+      btn.setAttribute('onclick', orig + '; if(window.VIZ_flowSetRange){ var r=this.textContent.trim().toLowerCase(); VIZ_flowSetRange(r.replace(\" \",\"\")); }');
+    });
+  }
+  if (ready === 'complete' || ready === 'interactive') boot();
+  else document.addEventListener('DOMContentLoaded', boot);
 })();
 
+// ══ APPLE ENHANCEMENTS ══
+// ══ AXIOM Apple-redesign enhancements (additive, non-breaking) ══
+(function(){
+  // Liquid floating dock indicator
+  var nav = document.querySelector('.bottom-nav');
+  var ind = document.getElementById('nav-indicator');
+  function moveIndicator(){
+    if(!nav||!ind) return;
+    var active = nav.querySelector('.nav-btn.active');
+    if(!active){ ind.style.opacity='0'; return; }
+    ind.style.opacity='1';
+    ind.style.left  = (active.offsetLeft) + 'px';
+    ind.style.width = (active.offsetWidth) + 'px';
+    // keep the active tab in view on the scrollable dock
+    var L = active.offsetLeft, R = L + active.offsetWidth;
+    if(R > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = R - nav.clientWidth + 12;
+    else if(L < nav.scrollLeft) nav.scrollLeft = Math.max(0, L - 12);
+  }
+  nav && nav.querySelectorAll('.nav-btn').forEach(function(b){
+    b.addEventListener('click', function(){ requestAnimationFrame(moveIndicator); });
+  });
+  window.addEventListener('resize', moveIndicator);
+  // follow programmatic navigation too (topic jumps, deep links, etc.)
+  if(typeof window.switchPage === 'function'){
+    var _sp = window.switchPage;
+    window.switchPage = function(){ var r=_sp.apply(this, arguments); requestAnimationFrame(moveIndicator); return r; };
+  }
+  // initial placement (after layout settles)
+  setTimeout(moveIndicator, 60);
+  setTimeout(moveIndicator, 400);
 
+  // Subtle pointer-reactive glow on the intelligence orb
+  var orb = document.querySelector('.intel-orb-xl');
+  var stage = document.querySelector('.orb-stage');
+  if(orb && stage && window.matchMedia('(prefers-reduced-motion: no-preference)').matches){
+    stage.addEventListener('pointermove', function(e){
+      var r = stage.getBoundingClientRect();
+      var dx = (e.clientX - (r.left + r.width/2)) / r.width;
+      var dy = (e.clientY - (r.top + r.height/2)) / r.height;
+      orb.style.transform = 'translate3d('+(dx*8).toFixed(1)+'px,'+(dy*8).toFixed(1)+'px,0)';
+    });
+    stage.addEventListener('pointerleave', function(){ orb.style.transform=''; });
+  }
+})();
 </script>
 </body>
 </html>
