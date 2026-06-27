@@ -2877,7 +2877,7 @@ function startAutoInterval() {
 async function callClaude(messages, maxTokens, system) {
   maxTokens = maxTokens || 1000;
   if (!CLAUDE_KEY) throw new Error('No API key');
-  var body = { model:'claude-sonnet-4-20250514', max_tokens:maxTokens, messages:messages };
+  var body = { model:'claude-sonnet-4-6', max_tokens:maxTokens, messages:messages };
   if (system) body.system = system;
   var res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -3089,7 +3089,7 @@ async function callClaudeV2(messages, system, mode) {
   var maxTokens = { quick:600, deep:2200, research:3500, forecast:2200 }[mode] || 1200;
 
   var body = {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: maxTokens,
     system: system,
     messages: messages
