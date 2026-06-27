@@ -1747,6 +1747,16 @@ button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color:
 
 /* ── SOURCE CITATIONS ────────────────────────────────────────────── */
 .chat-sources { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.source-head-label { font-family: var(--ff-mono); font-size: 8px; letter-spacing: 1.2px; color: var(--t3); margin: 2px 0 1px; }
+.source-more { display: flex; flex-direction: column; gap: 5px; }
+.source-toggle {
+  align-self: flex-start; margin-top: 3px;
+  font-family: var(--ff-mono); font-size: 9px; letter-spacing: 0.5px;
+  padding: 5px 11px; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--t2);
+  cursor: pointer; transition: background 0.15s, transform 0.12s;
+}
+.source-toggle:active { transform: scale(0.96); background: rgba(10,132,255,0.10); }
 .source-card {
   display: flex; align-items: flex-start; gap: 8px;
   background: rgba(255,255,255,0.03); border: 1px solid var(--hairline);
@@ -1796,6 +1806,7 @@ button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color:
 .qp-btn.research-prompt { border-color: rgba(191,90,242,0.28); background: rgba(191,90,242,0.08); color: var(--mix); }
 .qp-btn.risk-prompt { border-color: rgba(255,69,58,0.28); background: rgba(255,69,58,0.07); color: var(--neg); }
 .qp-btn.forecast-prompt { border-color: rgba(255,214,10,0.28); background: rgba(255,214,10,0.07); color: var(--neu); }
+.qp-btn.chart-prompt { border-color: rgba(10,132,255,0.34); background: rgba(10,132,255,0.10); color: #5AB0FF; }
 .qp-btn:active { transform: scale(0.92); }
 
 /* ── INPUT BAR ───────────────────────────────────────────────────── */
@@ -2287,6 +2298,9 @@ button, .nav-btn, .src-chip, .topic-pill, .qp-btn { -webkit-tap-highlight-color:
   <div class="qp-section">
     <div class="qp-section-label">Analysis prompts</div>
     <div class="quick-prompts">
+      <button class="qp-btn chart-prompt" onclick="setQuickPromptMode(this,'research')">📊 Chart the 2PP polling trend</button>
+      <button class="qp-btn chart-prompt" onclick="setQuickPromptMode(this,'research')">📊 Primary vote by party — donut</button>
+      <button class="qp-btn chart-prompt" onclick="setQuickPromptMode(this,'deep')">📊 Compare ALP vs LNP on key issues</button>
       <button class="qp-btn" onclick="setQuickPrompt(this)">Housing crisis deep dive</button>
       <button class="qp-btn" onclick="setQuickPrompt(this)">ALP vs LNP narrative battle</button>
       <button class="qp-btn" onclick="setQuickPrompt(this)">Climate policy intelligence</button>
@@ -3104,7 +3118,7 @@ function setQuickPrompt(el) {
 function setQuickPromptMode(el, mode) {
   var btn = document.querySelector('.mode-btn[data-mode="'+mode+'"]');
   setAnalysisMode(mode, btn);
-  document.getElementById('chat-input').value = el.textContent.replace(/^[🌐🔴📡]\s*/,'').trim();
+  document.getElementById('chat-input').value = el.textContent.replace(/^[🌐🔴📡📊📈📉]\s*/,'').trim();
   sendChatV2();
 }
 
@@ -3369,14 +3383,25 @@ function appendChatMsg(role, avatar, text, sources, usedSearch) {
 
   var sourceHTML = '';
   if (sources && sources.length) {
+    var sourceCard = function(s) {
+      return '<a class="source-card" href="' + esc(s.url||'#') + '" target="_blank" rel="noopener">' +
+        '<span class="source-icon">' + (s.icon||'📰') + '</span>' +
+        '<span class="source-info"><span class="source-title">' + esc(s.title||'') + '</span>' +
+        '<span class="source-meta">' + esc(s.meta||'') + '</span></span>' +
+        '<span class="source-arrow">↗</span></a>';
+    };
+    var head = sources.slice(0,4).map(sourceCard).join('');
+    var rest = sources.slice(4);
+    var moreHTML = '';
+    if (rest.length) {
+      var sid = 'srcmore-' + msgId;
+      moreHTML = '<div class="source-more" id="' + sid + '" style="display:none">' + rest.map(sourceCard).join('') + '</div>' +
+        '<button class="source-toggle" data-n="' + rest.length + '" onclick="toggleSources(\'' + sid + '\',this)">+ ' +
+        rest.length + ' more source' + (rest.length > 1 ? 's' : '') + ' ▾</button>';
+    }
     sourceHTML = '<div class="chat-sources">' +
-      sources.slice(0,4).map(function(s) {
-        return '<a class="source-card" href="' + esc(s.url||'#') + '" target="_blank">' +
-          '<span class="source-icon">' + (s.icon||'📰') + '</span>' +
-          '<span class="source-info"><span class="source-title">' + esc(s.title||'') + '</span>' +
-          '<span class="source-meta">' + esc(s.meta||'') + '</span></span>' +
-          '<span class="source-arrow">↗</span></a>';
-      }).join('') + '</div>';
+      '<div class="source-head-label">SOURCES · ' + sources.length + '</div>' +
+      head + moreHTML + '</div>';
   }
 
   var html = '<div class="chat-msg ' + role + '" id="' + msgId + '">' +
@@ -3734,6 +3759,16 @@ function renderChartJS(canvas, spec) {
 }
 
 /* ── CHAT UTILITIES ──────────────────────────────────────────────────── */
+function toggleSources(id, btn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'flex';
+  var n = parseInt(btn.getAttribute('data-n') || '0', 10);
+  btn.textContent = open
+    ? '+ ' + n + ' more source' + (n > 1 ? 's' : '') + ' ▾'
+    : 'Hide extra sources ▴';
+}
 function clearChatHistory() {
   CHAT_HISTORY = [];
   var msgs = document.getElementById('chat-messages');
