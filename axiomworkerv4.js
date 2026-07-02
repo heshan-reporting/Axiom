@@ -35,6 +35,14 @@
  * ║                               engine (vBulletin / XenForo / phpBB etc.) ║
  * ║                                                                         ║
  * ║  GET /forum-detect?url=       Detect forum engine at a URL and return   ║
+ * ║                                                                         ║
+ * ║  V5 POLITICAL INTELLIGENCE ROUTES:                                      ║
+ * ║  GET /adlibrary?q=&active=&limit=  Meta Ad Library — AU political ads   ║
+ * ║                                    (secret: META_ACCESS_TOKEN)          ║
+ * ║  GET /gdelt?q=&mode=&timespan=     GDELT news volume/tone/articles      ║
+ * ║  GET /wiki?article=&days=          Wikipedia pageview attention          ║
+ * ║  GET /tvfy?q=                      TheyVoteForYou MP records            ║
+ * ║                                    (secret: TVFY_KEY, free)             ║
  * ║                               metadata: engine, version, name, icon     ║
  * ║                                                                         ║
  * ║  Known AU vBulletin forums pre-registered (pass name= param):          ║
@@ -1125,6 +1133,113 @@ export default {
     const path    = reqUrl.pathname;
     const q       = reqUrl.searchParams.get('q') || '';
     const sr      = reqUrl.searchParams.get('sr') || 'australia';
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // V5 ROUTES — POLITICAL INTELLIGENCE
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // Meta Ad Library — the public register of political & issue ads (AU default)
+    if (path === '/adlibrary') {
+      if (!env.META_ACCESS_TOKEN) return jsonResp({ error: 'no_meta_token', hint: 'Set the META_ACCESS_TOKEN secret on this worker (same Meta token as your ads setup, identity-confirmed at facebook.com/ID).' }, 500);
+      const country = reqUrl.searchParams.get('country') || 'AU';
+      const active  = reqUrl.searchParams.get('active')  || 'ALL';
+      const limit   = Math.min(parseInt(reqUrl.searchParams.get('limit') || '25', 10) || 25, 100);
+      const p = new URLSearchParams();
+      p.set('ad_type', 'POLITICAL_AND_ISSUE_ADS');
+      p.set('ad_reached_countries', JSON.stringify([country]));
+      p.set('ad_active_status', active);
+      if (q) p.set('search_terms', q);
+      const pageIds = reqUrl.searchParams.get('pages');
+      if (pageIds) p.set('search_page_ids', JSON.stringify(pageIds.split(',')));
+      p.set('fields', 'id,page_id,page_name,bylines,ad_creation_time,ad_delivery_start_time,ad_delivery_stop_time,ad_creative_bodies,currency,spend,impressions,demographic_distribution,delivery_by_region,publisher_platforms');
+      p.set('limit', String(limit));
+      p.set('access_token', env.META_ACCESS_TOKEN);
+      try {
+        const d = await (await fetch('https://graph.facebook.com/v22.0/ads_archive?' + p)).json();
+        if (d.error) return jsonResp({ error: 'meta_adlibrary', detail: d.error.message }, 502);
+        const ads = (d.data || []).map(a => ({
+          id: a.id, page: a.page_name, page_id: a.page_id, byline: a.bylines,
+          created: a.ad_creation_time, start: a.ad_delivery_start_time, stop: a.ad_delivery_stop_time,
+          body: (a.ad_creative_bodies || [])[0] ? String(a.ad_creative_bodies[0]).slice(0, 280) : '',
+          currency: a.currency, spend: a.spend, impressions: a.impressions,
+          demographics: (a.demographic_distribution || []).slice(0, 24),
+          regions: (a.delivery_by_region || []).slice(0, 10),
+          platforms: a.publisher_platforms,
+        }));
+        return jsonResp({ ads, total: ads.length, hasMore: !!(d.paging && d.paging.next) });
+      } catch (e) { return jsonResp({ error: 'adlibrary_fetch_failed', detail: String(e) }, 502); }
+    }
+
+    // GDELT DOC 2.0 — free global news monitoring (AU-scoped unless overridden)
+    if (path === '/gdelt') {
+      const mode     = reqUrl.searchParams.get('mode') || 'artlist';
+      const timespan = reqUrl.searchParams.get('timespan') || '7d';
+      const max      = Math.min(parseInt(reqUrl.searchParams.get('max') || '25', 10) || 25, 75);
+      const gq = /sourcecountry:/.test(q) ? q : (q + ' sourcecountry:AS'); // AS = Australia (FIPS)
+      const cacheKey = ('gdelt_' + mode + '_' + timespan + '_' + gq).slice(0, 240);
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+      const p = new URLSearchParams({ query: gq, mode, format: 'json', timespan });
+      if (mode === 'artlist') { p.set('maxrecords', String(max)); p.set('sort', 'hybridrel'); }
+      try {
+        const r = await fetch('https://api.gdeltproject.org/api/v2/doc/doc?' + p, { headers: { 'User-Agent': 'AXIOM/5.0' } });
+        const text = await r.text();
+        let d; try { d = JSON.parse(text); } catch { return jsonResp({ error: 'gdelt_bad_response', detail: text.slice(0, 160) }, 502); }
+        const out = mode === 'artlist'
+          ? JSON.stringify({ articles: (d.articles || []).map(a => ({ title: a.title, url: a.url, domain: a.domain, date: a.seendate, country: a.sourcecountry })) })
+          : JSON.stringify({ timeline: d.timeline || [] });
+        await kvPut(env.AXIOM_KV, cacheKey, out, 600);
+        return new Response(out, { headers: CORS });
+      } catch (e) { return jsonResp({ error: 'gdelt_fetch_failed', detail: String(e) }, 502); }
+    }
+
+    // Wikipedia pageviews — free public-attention metric
+    if (path === '/wiki') {
+      const article = (reqUrl.searchParams.get('article') || '').trim().replace(/ /g, '_');
+      const days    = Math.min(parseInt(reqUrl.searchParams.get('days') || '90', 10) || 90, 365);
+      if (!article) return jsonResp({ error: 'article_required' }, 400);
+      const end = new Date(); end.setDate(end.getDate() - 1); // today is always incomplete
+      const start = new Date(end); start.setDate(start.getDate() - days);
+      const fmt = (dt) => dt.toISOString().slice(0, 10).replace(/-/g, '');
+      const cacheKey = 'wiki_' + article + '_' + days;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+      try {
+        const r = await fetch(
+          'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/' +
+          encodeURIComponent(article) + '/daily/' + fmt(start) + '/' + fmt(end),
+          { headers: { 'User-Agent': 'AXIOM/5.0 (AU political attention dashboard)' } });
+        const d = await r.json();
+        if (!r.ok) return jsonResp({ error: 'wiki_not_found', detail: (d && d.title) || 'Check the exact Wikipedia article title' }, 404);
+        const out = JSON.stringify({ article: article.replace(/_/g, ' '), views: (d.items || []).map(i => ({ d: i.timestamp.slice(0, 8), v: i.views })) });
+        await kvPut(env.AXIOM_KV, cacheKey, out, 3600);
+        return new Response(out, { headers: CORS });
+      } catch (e) { return jsonResp({ error: 'wiki_fetch_failed', detail: String(e) }, 502); }
+    }
+
+    // TheyVoteForYou — Australian MP / senator voting records (free key)
+    if (path === '/tvfy') {
+      if (!env.TVFY_KEY) return jsonResp({ error: 'no_tvfy_key', hint: 'Get a free key at theyvoteforyou.org.au/api and set the TVFY_KEY secret.' }, 500);
+      const cached = await kvGet(env.AXIOM_KV, 'tvfy_people');
+      let ppl;
+      try {
+        if (cached) { ppl = JSON.parse(cached); }
+        else {
+          const r = await fetch('https://theyvoteforyou.org.au/api/v1/people.json?key=' + env.TVFY_KEY, { headers: { 'User-Agent': 'AXIOM/5.0' } });
+          const d = await r.json();
+          ppl = (Array.isArray(d) ? d : []).map(x => ({
+            id: x.id,
+            name: (((x.latest_member || {}).name || {}).first || '') + ' ' + (((x.latest_member || {}).name || {}).last || ''),
+            party: (x.latest_member || {}).party,
+            house: (x.latest_member || {}).house,
+            electorate: (x.latest_member || {}).electorate,
+          }));
+          await kvPut(env.AXIOM_KV, 'tvfy_people', JSON.stringify(ppl), 86400);
+        }
+        const filtered = q ? ppl.filter(x => (x.name || '').toLowerCase().includes(q.toLowerCase())) : ppl;
+        return jsonResp({ people: filtered.slice(0, 30), total: filtered.length });
+      } catch (e) { return jsonResp({ error: 'tvfy_fetch_failed', detail: String(e) }, 502); }
+    }
 
     // ══════════════════════════════════════════════════════════════════════════
     // V2 ROUTES — unchanged from axiom-worker.js v2
