@@ -36,9 +36,9 @@
  * ║                                                                         ║
  * ║  GET /forum-detect?url=       Detect forum engine at a URL and return   ║
  * ║                                                                         ║
- * ║  V5 POLITICAL INTELLIGENCE ROUTES:                                      ║
- * ║  GET /adlibrary?q=&active=&limit=  Meta Ad Library — AU political ads   ║
- * ║                                    (secret: META_ACCESS_TOKEN)          ║
+ * ║  V6 POLITICAL INTELLIGENCE ROUTES (all keyless except /tvfy):           ║
+ * ║  GET /trends?geo=AU                Google Trends — trending searches    ║
+ * ║  GET /social?tag=auspol            Mastodon #auspol public timelines    ║
  * ║  GET /gdelt?q=&mode=&timespan=     GDELT news volume/tone/articles      ║
  * ║  GET /wiki?article=&days=          Wikipedia pageview attention          ║
  * ║  GET /tvfy?q=                      TheyVoteForYou MP records            ║
@@ -1138,36 +1138,82 @@ export default {
     // V5 ROUTES — POLITICAL INTELLIGENCE
     // ══════════════════════════════════════════════════════════════════════════
 
-    // Meta Ad Library — the public register of political & issue ads (AU default)
-    if (path === '/adlibrary') {
-      if (!env.META_ACCESS_TOKEN) return jsonResp({ error: 'no_meta_token', hint: 'Set the META_ACCESS_TOKEN secret on this worker (same Meta token as your ads setup, identity-confirmed at facebook.com/ID).' }, 500);
-      const country = reqUrl.searchParams.get('country') || 'AU';
-      const active  = reqUrl.searchParams.get('active')  || 'ALL';
-      const limit   = Math.min(parseInt(reqUrl.searchParams.get('limit') || '25', 10) || 25, 100);
-      const p = new URLSearchParams();
-      p.set('ad_type', 'POLITICAL_AND_ISSUE_ADS');
-      p.set('ad_reached_countries', JSON.stringify([country]));
-      p.set('ad_active_status', active);
-      if (q) p.set('search_terms', q);
-      const pageIds = reqUrl.searchParams.get('pages');
-      if (pageIds) p.set('search_page_ids', JSON.stringify(pageIds.split(',')));
-      p.set('fields', 'id,page_id,page_name,bylines,ad_creation_time,ad_delivery_start_time,ad_delivery_stop_time,ad_creative_bodies,currency,spend,impressions,demographic_distribution,delivery_by_region,publisher_platforms');
-      p.set('limit', String(limit));
-      p.set('access_token', env.META_ACCESS_TOKEN);
+    // Google Trends — what Australia is searching right now (free RSS, no key)
+    if (path === '/trends') {
+      const geo = (reqUrl.searchParams.get('geo') || 'AU').replace(/[^A-Za-z-]/g, '');
+      const cacheKey = 'trends_' + geo;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
       try {
-        const d = await (await fetch('https://graph.facebook.com/v22.0/ads_archive?' + p)).json();
-        if (d.error) return jsonResp({ error: 'meta_adlibrary', detail: d.error.message }, 502);
-        const ads = (d.data || []).map(a => ({
-          id: a.id, page: a.page_name, page_id: a.page_id, byline: a.bylines,
-          created: a.ad_creation_time, start: a.ad_delivery_start_time, stop: a.ad_delivery_stop_time,
-          body: (a.ad_creative_bodies || [])[0] ? String(a.ad_creative_bodies[0]).slice(0, 280) : '',
-          currency: a.currency, spend: a.spend, impressions: a.impressions,
-          demographics: (a.demographic_distribution || []).slice(0, 24),
-          regions: (a.delivery_by_region || []).slice(0, 10),
-          platforms: a.publisher_platforms,
-        }));
-        return jsonResp({ ads, total: ads.length, hasMore: !!(d.paging && d.paging.next) });
-      } catch (e) { return jsonResp({ error: 'adlibrary_fetch_failed', detail: String(e) }, 502); }
+        const r = await fetch('https://trends.google.com/trending/rss?geo=' + geo, {
+          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
+        });
+        if (!r.ok) return jsonResp({ error: 'trends_' + r.status }, 502);
+        const xml = await r.text();
+        const items = [];
+        const blocks = xml.split('<item>').slice(1);
+        for (const b of blocks.slice(0, 20)) {
+          const g = (tag) => {
+            const m = b.match(new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>'));
+            return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : '';
+          };
+          const term = g('title');
+          if (!term) continue;
+          items.push({
+            term,
+            traffic: g('ht:approx_traffic'),
+            started: g('pubDate'),
+            newsTitle: g('ht:news_item_title'),
+            newsUrl: g('ht:news_item_url'),
+            newsSource: g('ht:news_item_source'),
+          });
+        }
+        const out = JSON.stringify({ trends: items, geo });
+        await kvPut(env.AXIOM_KV, cacheKey, out, 900);
+        return new Response(out, { headers: CORS });
+      } catch (e) { return jsonResp({ error: 'trends_fetch_failed', detail: String(e) }, 502); }
+    }
+
+    // Mastodon — live public political chatter from AU + global instances (no key)
+    if (path === '/social') {
+      const tag = (reqUrl.searchParams.get('tag') || 'auspol').replace(/[^\w]/g, '');
+      const cacheKey = 'social_' + tag;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+      const instances = ['aus.social', 'mastodon.social'];
+      const posts = [];
+      await Promise.all(instances.map(async (inst) => {
+        try {
+          const r = await fetch('https://' + inst + '/api/v1/timelines/tag/' + tag + '?limit=20', {
+            headers: { 'User-Agent': 'AXIOM/6.0' },
+          });
+          if (!r.ok) return;
+          const arr = await r.json();
+          (Array.isArray(arr) ? arr : []).forEach((s) => {
+            const text = String(s.content || '')
+              .replace(/<br\s*\/?>/gi, ' ')
+              .replace(/<\/p>\s*<p>/gi, ' — ')
+              .replace(/<[^>]+>/g, '')
+              .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+              .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+            if (!text) return;
+            posts.push({
+              id: s.id, instance: inst,
+              author: (s.account && (s.account.display_name || s.account.username)) || 'unknown',
+              handle: s.account && s.account.acct,
+              text: text.slice(0, 400),
+              boosts: s.reblogs_count || 0, favs: s.favourites_count || 0, replies: s.replies_count || 0,
+              url: s.url, date: s.created_at,
+            });
+          });
+        } catch {}
+      }));
+      posts.sort((a, b) => new Date(b.date) - new Date(a.date));
+      const seen = new Set(); const uniq = [];
+      for (const p of posts) { const k = p.url || p.id; if (seen.has(k)) continue; seen.add(k); uniq.push(p); }
+      const out = JSON.stringify({ posts: uniq.slice(0, 40), tag });
+      await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+      return new Response(out, { headers: CORS });
     }
 
     // GDELT DOC 2.0 — free global news monitoring (AU-scoped unless overridden)
