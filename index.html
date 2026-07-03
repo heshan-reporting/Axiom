@@ -62,7 +62,7 @@ a{color:inherit}
 .rbtn:hover .rtip{opacity:1}
 .rail .spacer{flex:1}
 
-.main{display:flex;flex-direction:column;min-width:0}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .top{height:var(--top);flex-shrink:0;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--line);
   background:rgba(6,8,15,.6);backdrop-filter:blur(18px)}
 .top-title{font-family:var(--fd);font-size:16px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
@@ -79,7 +79,7 @@ a{color:inherit}
 .icobtn.spin svg{animation:rot 1s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
 
-.content{flex:1;overflow-y:auto;padding:24px 26px 90px;scroll-behavior:smooth}
+.content{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:24px 26px 90px;scroll-behavior:smooth}
 .view{display:none;max-width:1240px;margin:0 auto}
 .view.on{display:block}
 .view.on>*{animation:rise .5s cubic-bezier(.2,.7,.25,1) both}
@@ -205,7 +205,7 @@ a{color:inherit}
 .mode{font-family:var(--fm);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:7px 13px;border-radius:999px;
   border:1px solid var(--line);background:var(--bg1);color:var(--t2);transition:all .15s}
 .mode.on{background:rgba(91,140,255,.13);border-color:var(--ac);color:#BFD3FF}
-.msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:6px 2px 18px}
+.msgs{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:14px;padding:6px 2px 18px}
 .msg{max-width:86%;animation:rise .35s ease both}
 .msg.u{align-self:flex-end}
 .msg.b{align-self:flex-start;width:100%;max-width:100%}
@@ -253,6 +253,54 @@ a{color:inherit}
 .mrow .btn{padding:10px 18px}
 .mnote{font-size:10.5px;color:var(--t3);line-height:1.55;margin-top:14px}
 
+/* boot splash */
+.splash{position:fixed;inset:0;z-index:300;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .5s,visibility .5s}
+.splash.off{opacity:0;visibility:hidden;pointer-events:none}
+.splash .slogo{width:64px;height:64px;border-radius:19px;background:var(--acg);display:flex;align-items:center;justify-content:center;
+  font-family:var(--fd);font-weight:700;font-size:26px;color:#fff;box-shadow:0 10px 50px rgba(91,140,255,.45);animation:spulse 1.4s ease infinite}
+@keyframes spulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+.splash .sname{font-family:var(--fd);font-size:19px;font-weight:700;letter-spacing:.28em;margin-left:.28em}
+.splash .sline{font-family:var(--fm);font-size:9.5px;letter-spacing:.2em;color:var(--t2);text-transform:uppercase;animation:blink 1.6s ease infinite}
+
+/* live ticker */
+.ticker{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg1);
+  padding:9px 13px;margin-bottom:16px;overflow:hidden}
+.ticker-b{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;color:var(--neg);border:1px solid rgba(255,84,112,.3);
+  background:rgba(255,84,112,.08);border-radius:6px;padding:3px 8px;flex-shrink:0;animation:blink 1.6s ease infinite}
+.ticker-vp{flex:1;overflow:hidden;min-width:0}
+.ticker-tk{display:inline-flex;gap:44px;white-space:nowrap;animation:tick 60s linear infinite;will-change:transform}
+.ticker-vp:hover .ticker-tk{animation-play-state:paused}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.ticker-tk a{font-size:12px;color:var(--t1);text-decoration:none}
+.ticker-tk a:hover{color:#fff}
+.ticker-tk .ts{font-family:var(--fm);font-size:9px;color:var(--ac);text-transform:uppercase;margin-right:7px}
+
+/* KPI delta */
+.kdelta{display:inline-block;font-family:var(--fm);font-size:9.5px;border-radius:5px;padding:1.5px 6px;margin-left:7px;vertical-align:3px}
+.kdelta.up{color:var(--pos);background:rgba(34,217,147,.1)}
+.kdelta.dn{color:var(--neg);background:rgba(255,84,112,.1)}
+
+/* clickable narrative */
+.nbar{cursor:pointer;border-radius:8px;padding:3px 5px;margin:0 -5px 6px;transition:background .15s}
+.nbar:hover{background:var(--sur2)}
+.nbar:hover .nbar-term{color:#BFD3FF}
+
+/* command palette */
+.pal{position:fixed;inset:0;z-index:250;background:rgba(3,5,10,.66);backdrop-filter:blur(8px);display:none;align-items:flex-start;justify-content:center;padding:12vh 18px 18px}
+.pal.on{display:flex}
+.pal-box{width:min(560px,94vw);border:1px solid var(--line2);border-radius:18px;background:var(--bg1);overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.6);animation:rise .22s ease}
+.pal-inp{width:100%;background:transparent;border:none;outline:none;color:var(--t0);font-size:15px;font-family:inherit;padding:17px 19px;border-bottom:1px solid var(--line)}
+.pal-inp::placeholder{color:var(--t3)}
+.pal-list{max-height:46vh;overflow-y:auto;padding:7px}
+.pal-it{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:none;border-radius:11px;padding:11px 13px;font-size:13px;color:var(--t1);transition:background .12s}
+.pal-it svg{width:15px;height:15px;color:var(--t2);flex-shrink:0}
+.pal-it.sel,.pal-it:hover{background:var(--sur2);color:var(--t0)}
+.pal-it .k{margin-left:auto;font-family:var(--fm);font-size:9px;color:var(--t3);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+.pal-hint{display:flex;gap:16px;padding:9px 16px;border-top:1px solid var(--line);font-family:var(--fm);font-size:9px;color:var(--t3);letter-spacing:.08em}
+.kbd{font-family:var(--fm);font-size:9px;color:var(--t2);border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:var(--sur)}
+.top .kbd{cursor:pointer;transition:color .15s,border-color .15s}
+.top .kbd:hover{color:var(--t0);border-color:var(--line2)}
+
 /* toast */
 .toast{position:fixed;bottom:86px;left:50%;transform:translateX(-50%);z-index:200;background:var(--bg2);border:1px solid var(--line2);
   color:var(--t0);font-size:12.5px;font-weight:500;padding:11px 18px;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.5);animation:rise .25s ease}
@@ -291,6 +339,21 @@ a{color:inherit}
 <body>
 <div class="aurora"></div><div class="gridbg"></div>
 
+<div class="splash" id="splash">
+  <div class="slogo">A</div>
+  <div class="sname">AXIOM</div>
+  <div class="sline" id="splash-line">CONNECTING TO THE INTELLIGENCE GRID</div>
+</div>
+
+<div class="pal" id="pal" onclick="if(event.target===this)palClose()">
+  <div class="pal-box">
+    <input class="pal-inp" id="pal-inp" placeholder="Search the wire, track a topic, jump anywhere…" autocomplete="off"
+      oninput="palRender()" onkeydown="palKey(event)">
+    <div class="pal-list" id="pal-list"></div>
+    <div class="pal-hint"><span>↑↓ NAVIGATE</span><span>↵ RUN</span><span>ESC CLOSE</span></div>
+  </div>
+</div>
+
 <div class="shell">
   <!-- RAIL -->
   <nav class="rail" aria-label="Primary">
@@ -314,6 +377,7 @@ a{color:inherit}
       </div>
       <div class="live"><i></i>LIVE</div>
       <div class="clock" id="clock">—</div>
+      <span class="kbd" onclick="palOpen()" title="Command palette">⌘K</span>
       <button class="icobtn" id="refbtn" onclick="refreshAll()" title="Refresh all data" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
       <button class="icobtn" onclick="openSettings()" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m8.5-12.5h4m-25 0h4m14.8-6.3l-2.8 2.8M6.5 17.5l-2.8 2.8m16.6 0l-2.8-2.8M6.5 6.5L3.7 3.7"/></svg></button>
     </header>
@@ -322,6 +386,7 @@ a{color:inherit}
 
       <!-- ═══ COMMAND CENTER ═══ -->
       <section class="view on" id="v-command">
+        <div class="ticker"><span class="ticker-b">BREAKING WIRE</span><div class="ticker-vp"><div class="ticker-tk" id="ticker"><a>Loading the national wire…</a></div></div></div>
         <div class="kpis">
           <div class="kpi"><div class="klabel">Stories · 24h</div><div class="kval" id="k-stories">—</div><div class="ksub" id="k-stories-s">across the AU press</div><canvas class="kspark" id="sp-stories" width="152" height="60"></canvas></div>
           <div class="kpi pos"><div class="klabel">Top Search Signal</div><div class="kval" id="k-trend" style="font-size:19px;line-height:1.2">—</div><div class="ksub" id="k-trend-s">Google Trends AU</div></div>
@@ -546,7 +611,7 @@ async function loadCore(){
   try{
     const d=await api('/allnews?max=110');
     state.news=d.items||[];
-    renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();
+    renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();
     updateCtxBadge();
   }catch(e){
     $('wire').innerHTML='<div class="err">'+esc(e.message)+'</div>';
@@ -599,10 +664,21 @@ async function loadTone(){
 
 /* ── COMMAND RENDERERS ── */
 function renderKpiStories(){
-  const day=state.news.filter(n=>(Date.now()-(Date.parse(n.date)||0))<86400e3).length;
+  const now=Date.now();
+  const day=state.news.filter(n=>(now-(Date.parse(n.date)||0))<86400e3).length;
+  const prev=state.news.filter(n=>{const a=now-(Date.parse(n.date)||0);return a>=86400e3&&a<172800e3;}).length;
   countUp($('k-stories'),day||state.news.length);
   const srcs=new Set(state.news.map(n=>n.src)).size;
-  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets';
+  let delta='';
+  if(day&&prev){const pc=Math.round((day-prev)/prev*100);delta=' <span class="kdelta '+(pc>=0?'up':'dn')+'">'+(pc>=0?'▲':'▼')+Math.abs(pc)+'%</span>';}
+  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets'+delta;
+}
+function renderTicker(){
+  const t=$('ticker');if(!t)return;
+  const items=state.news.slice(0,12);
+  if(!items.length)return;
+  const html=items.map(it=>'<a href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="ts">'+esc(it.src||'')+'</span>'+esc(it.title)+'</a>').join('');
+  t.innerHTML=html+html; // duplicated for seamless loop
 }
 function keywords(items,n){
   const freq={};
@@ -620,7 +696,7 @@ function renderNarrative(){
   if(!kw.length){$('narrative').innerHTML='<div class="empty">No live headlines yet.</div>';return;}
   const max=kw[0][1];
   $('narrative').innerHTML=kw.map(([w,n])=>
-    '<div class="nbar"><div class="nbar-term">'+esc(w)+'</div><div class="nbar-track"><div class="nbar-fill" data-w="'+(n/max*100)+'"></div></div><div class="nbar-n">'+n+'</div></div>').join('');
+    '<div class="nbar" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar"><div class="nbar-term">'+esc(w)+'</div><div class="nbar-track"><div class="nbar-fill" data-w="'+(n/max*100)+'"></div></div><div class="nbar-n">'+n+'</div></div>').join('');
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     document.querySelectorAll('#narrative .nbar-fill').forEach(el=>el.style.width=el.dataset.w+'%');
   }));
@@ -697,6 +773,13 @@ function renderSocial(){
   $('sp-list').innerHTML=ps.length?ps.slice(0,20).map(p=>
     '<a class="dcard" href="'+esc(p.url||'#')+'" target="_blank" rel="noopener"><div class="sp-top"><span class="sp-a">'+esc(p.author)+'</span><span class="sp-m">@'+esc(p.handle||'')+' · '+ago(p.date)+'</span></div><div class="sp-t">'+esc(p.text)+'</div><div class="sp-s"><span>↻ '+p.boosts+'</span><span>★ '+p.favs+'</span><span>↩ '+p.replies+'</span><span class="r">'+esc(p.instance)+'</span></div></a>').join('')
     :'<div class="empty">Quiet right now on #'+esc(state.tag)+'.</div>';
+}
+
+function trackTopic(w){
+  go('radar');
+  $('mp-q').value=w;
+  loadRadar();
+  toast('Tracking “'+w+'” in Radar');
 }
 
 /* ── RADAR ── */
@@ -806,6 +889,19 @@ function addMsg(role,html){
   $('msgs').appendChild(el);$('msgs').scrollTop=$('msgs').scrollHeight;
   return el;
 }
+function typeMsg(txt){
+  const el=addMsg('b','');
+  const mb=el.querySelector('.mb');
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches){mb.innerHTML=mdLite(txt);return;}
+  let i=0;const step=Math.max(2,Math.round(txt.length/240));
+  (function tp(){
+    i=Math.min(txt.length,i+step);
+    mb.textContent=txt.slice(0,i);
+    $('msgs').scrollTop=$('msgs').scrollHeight;
+    if(i<txt.length)setTimeout(tp,12);
+    else{mb.innerHTML=mdLite(txt);$('msgs').scrollTop=$('msgs').scrollHeight;}
+  })();
+}
 async function sendChat(){
   const inp=$('chat-inp');const q=inp.value.trim();if(!q)return;
   if(!CLAUDE_KEY){openSettings();toast('Add your Claude API key first',true);return;}
@@ -828,7 +924,7 @@ async function sendChat(){
     if(d.error)throw new Error(d.error.message||'API error');
     const txt=(d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
     state.chat.push({role:'assistant',content:txt});
-    addMsg('b',mdLite(txt));
+    typeMsg(txt);
   }catch(e){th.remove();addMsg('b','<span style="color:var(--neg)">✗ '+esc(e.message)+'</span>');}
   $('send-btn').disabled=false;
 }
@@ -874,13 +970,61 @@ function saveSettings(){
   closeSettings();toast('Saved');refreshAll();
 }
 
+/* ── COMMAND PALETTE ── */
+let palSel=0;
+function palActions(q){
+  q=(q||'').trim();
+  const acts=[];
+  if(q){
+    acts.push({t:'Search the wire for “'+q+'”',k:'NEWSROOM',ic:'M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z',fn:()=>{go('news');$('news-q').value=q;loadNews();}});
+    acts.push({t:'Track “'+q+'” media coverage',k:'RADAR',ic:'M3 3v18h18',fn:()=>{trackTopic(q);}});
+    acts.push({t:'Ask the Analyst about “'+q+'”',k:'AI',ic:'M12 3l1.9 5.8L21 12l-7.1 3.2L12 21l-1.9-5.8L3 12l7.1-3.2z',fn:()=>{go('analyst');$('chat-inp').value=q;sendChat();}});
+    acts.push({t:'Attention Race: add “'+q+'”',k:'WIKI',ic:'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',fn:()=>{go('radar');$('at-q').value=q;addAt();}});
+  }
+  acts.push({t:'Command Center',k:'GO',ic:'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',fn:()=>go('command')});
+  acts.push({t:'Newsroom',k:'GO',ic:'M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16',fn:()=>go('news')});
+  acts.push({t:'Pulse — Search & Social',k:'GO',ic:'M22 12h-4l-3 9L9 3l-3 9H2',fn:()=>go('pulse')});
+  acts.push({t:'Radar — Media Analytics',k:'GO',ic:'M3 3v18h18',fn:()=>go('radar')});
+  acts.push({t:'Generate Daily Briefing',k:'AI',ic:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z',fn:()=>{go('brief');genBrief();}});
+  acts.push({t:'Refresh all live data',k:'SYNC',ic:'M3.51 15a9 9 0 1 0 2.13-9.36L1 10',fn:()=>refreshAll()});
+  return acts;
+}
+function palRender(){
+  const q=$('pal-inp').value;
+  const acts=palActions(q);
+  palSel=Math.min(palSel,acts.length-1);
+  $('pal-list').innerHTML=acts.map((a,i)=>
+    '<button class="pal-it'+(i===palSel?' sel':'')+'" onclick="palRun('+i+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="'+a.ic+'"/></svg>'+esc(a.t)+'<span class="k">'+a.k+'</span></button>').join('');
+}
+function palRun(i){
+  const acts=palActions($('pal-inp').value);
+  if(acts[i]){palClose();acts[i].fn();}
+}
+function palKey(e){
+  const acts=palActions($('pal-inp').value);
+  if(e.key==='ArrowDown'){e.preventDefault();palSel=(palSel+1)%acts.length;palRender();}
+  else if(e.key==='ArrowUp'){e.preventDefault();palSel=(palSel-1+acts.length)%acts.length;palRender();}
+  else if(e.key==='Enter'){e.preventDefault();palRun(palSel);}
+  else if(e.key==='Escape'){palClose();}
+}
+function palOpen(){palSel=0;$('pal').classList.add('on');$('pal-inp').value='';palRender();setTimeout(()=>$('pal-inp').focus(),40);}
+function palClose(){$('pal').classList.remove('on');}
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('on')?palClose():palOpen();}
+  else if(e.key==='Escape'&&$('pal').classList.contains('on'))palClose();
+});
+
 /* ── CLOCK + BOOT ── */
 function tick(){
   const d=new Date();
   $('clock').textContent=d.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})+' · '+d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
 }
 tick();setInterval(tick,30e3);
-refreshAll();
+const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 23 NATIONAL NEWS FEEDS','READING SEARCH & SOCIAL SIGNALS'];
+let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
+function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
+setTimeout(hideSplash,2600);
+refreshAll().then(hideSplash);
 setInterval(refreshAll,5*60e3);
 </script>
 </body>
