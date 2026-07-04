@@ -146,6 +146,18 @@ const AU_FEEDS = {
   // ── Regional ──
   canberratimes: 'https://www.canberratimes.com.au/rss.xml',
   indaily:       'https://www.indaily.com.au/feed',
+  // ── Politics-focused additions (v7) ──
+  pollbludger:   'https://www.pollbludger.net/feed/',                     // polling analysis
+  mandarin:      'https://www.themandarin.com.au/feed/',                  // public sector / govt
+  theshot:       'https://theshot.net.au/feed/',
+  womensagenda:  'https://womensagenda.com.au/feed/',
+  miragenews:    'https://www.miragenews.com/feed/',                      // AU newswire
+  theklaxon:     'https://theklaxon.com.au/feed/',                        // investigative
+  convo_pol:     'https://theconversation.com/au/politics/articles.atom',
+  monthly:       'https://www.themonthly.com.au/rss.xml',
+  // Google News AU political sweeps — huge recall across outlets we don't poll directly
+  gnews_auspol:  'https://news.google.com/rss/search?q=australian%20politics&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_parl:    'https://news.google.com/rss/search?q=federal%20parliament%20canberra&hl=en-AU&gl=AU&ceid=AU:en',
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */

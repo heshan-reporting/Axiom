@@ -253,6 +253,36 @@ a{color:inherit}
 .mrow .btn{padding:10px 18px}
 .mnote{font-size:10.5px;color:var(--t3);line-height:1.55;margin-top:14px}
 
+/* national pulse + signals */
+.pulsewrap{display:flex;gap:26px;align-items:center}
+.gauge{position:relative;width:230px;flex-shrink:0;text-align:center}
+.gsvg{width:100%;display:block}
+.gtrack{fill:none;stroke:rgba(146,166,255,.12);stroke-width:13;stroke-linecap:round}
+.gfill{fill:none;stroke:url(#ggrad);stroke-width:13;stroke-linecap:round;stroke-dasharray:283;stroke-dashoffset:283;transition:stroke-dashoffset 1.2s cubic-bezier(.2,.7,.25,1)}
+.gnum{position:absolute;left:0;right:0;top:52px;font-family:var(--fd);font-size:40px;font-weight:700;letter-spacing:-.02em}
+.glab{font-family:var(--fm);font-size:9px;letter-spacing:.2em;color:var(--t2);margin-top:-14px}
+.gsub{font-size:10.5px;color:var(--t3);margin-top:5px;line-height:1.45}
+.sigs{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.sig{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-left:3px solid var(--ac);border-radius:11px;background:var(--bg1);padding:10px 13px;animation:rise .4s ease both}
+.sig.pos{border-left-color:var(--pos)}.sig.neg{border-left-color:var(--neg)}.sig.amb{border-left-color:var(--amb)}
+.sig-k{font-family:var(--fm);font-size:8.5px;letter-spacing:.12em;color:var(--t3);flex-shrink:0;width:58px}
+.sig-t{font-size:12.5px;color:var(--t1);line-height:1.45;min-width:0}
+.sig-t b{color:var(--t0)}
+.spike{display:inline-flex;align-items:center;gap:4px;font-family:var(--fm);font-size:9.5px;color:var(--amb);background:rgba(255,180,84,.1);border-radius:6px;padding:2px 7px;margin-left:6px;vertical-align:2px}
+
+/* situation room (kiosk) */
+body.kiosk .rail,body.kiosk .tabs,body.kiosk .kbd,body.kiosk #refbtn{display:none!important}
+body.kiosk .shell{grid-template-columns:1fr}
+body.kiosk .content{padding:28px 34px 40px}
+body.kiosk .top{background:rgba(6,8,15,.85)}
+body.kiosk{cursor:none}
+body.kiosk .kexit{display:flex}
+.kexit{display:none;position:fixed;top:14px;right:14px;z-index:400;align-items:center;gap:8px;font-family:var(--fm);font-size:9px;
+  letter-spacing:.12em;color:var(--t2);border:1px solid var(--line);background:rgba(6,8,15,.7);border-radius:999px;padding:7px 13px;cursor:pointer}
+.kprog{position:fixed;top:0;left:0;height:2px;background:var(--acg);width:0;z-index:401;display:none}
+body.kiosk .kprog{display:block}
+@media(max-width:820px){.pulsewrap{flex-direction:column}.gauge{width:210px}}
+
 /* boot splash */
 .splash{position:fixed;inset:0;z-index:300;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;transition:opacity .5s,visibility .5s}
 .splash.off{opacity:0;visibility:hidden;pointer-events:none}
@@ -378,6 +408,7 @@ a{color:inherit}
       <div class="live"><i></i>LIVE</div>
       <div class="clock" id="clock">—</div>
       <span class="kbd" onclick="palOpen()" title="Command palette">⌘K</span>
+      <button class="icobtn" onclick="kiosk(true)" title="Situation Room — full-screen auto-cycling display" aria-label="Situation Room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
       <button class="icobtn" id="refbtn" onclick="refreshAll()" title="Refresh all data" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
       <button class="icobtn" onclick="openSettings()" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m8.5-12.5h4m-25 0h4m14.8-6.3l-2.8 2.8M6.5 17.5l-2.8 2.8m16.6 0l-2.8-2.8M6.5 6.5L3.7 3.7"/></svg></button>
     </header>
@@ -387,6 +418,24 @@ a{color:inherit}
       <!-- ═══ COMMAND CENTER ═══ -->
       <section class="view on" id="v-command">
         <div class="ticker"><span class="ticker-b">BREAKING WIRE</span><div class="ticker-vp"><div class="ticker-tk" id="ticker"><a>Loading the national wire…</a></div></div></div>
+
+        <div class="panel gspan pulsewrap">
+          <div class="gauge">
+            <svg class="gsvg" viewBox="0 0 200 118">
+              <defs><linearGradient id="ggrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#22D993"/><stop offset="55%" stop-color="#5B8CFF"/><stop offset="100%" stop-color="#FF5470"/>
+              </linearGradient></defs>
+              <path class="gtrack" d="M20 108 A 90 90 0 0 1 180 108"/>
+              <path class="gfill" id="gfill" d="M20 108 A 90 90 0 0 1 180 108"/>
+            </svg>
+            <div class="gnum" id="gnum">—</div>
+            <div class="glab">NATIONAL PULSE</div>
+            <div class="gsub" id="gsub">composite of coverage volume, social velocity &amp; tone intensity</div>
+          </div>
+          <div class="sigs" id="sigs">
+            <div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div>
+          </div>
+        </div>
         <div class="kpis">
           <div class="kpi"><div class="klabel">Stories · 24h</div><div class="kval" id="k-stories">—</div><div class="ksub" id="k-stories-s">across the AU press</div><canvas class="kspark" id="sp-stories" width="152" height="60"></canvas></div>
           <div class="kpi pos"><div class="klabel">Top Search Signal</div><div class="kval" id="k-trend" style="font-size:19px;line-height:1.2">—</div><div class="ksub" id="k-trend-s">Google Trends AU</div></div>
@@ -514,6 +563,9 @@ a{color:inherit}
   </div>
 </div>
 
+<button class="kexit" onclick="kiosk(false)">ESC · EXIT SITUATION ROOM</button>
+<div class="kprog" id="kprog"></div>
+
 <!-- MOBILE TABS -->
 <nav class="tabs" aria-label="Primary mobile"><div class="tabs-in">
   <button class="tab on" data-v="command" onclick="go('command')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Home</span></button>
@@ -605,7 +657,61 @@ function go(v){
 async function refreshAll(){
   const b=$('refbtn');b.classList.add('spin');
   await Promise.allSettled([loadCore(),loadTrends(),loadSocial(),loadTone()]);
+  renderIntel();
   b.classList.remove('spin');
+}
+function kwFreq(items){
+  const f={};
+  items.forEach(it=>{String(it.title||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').split(/\s+/).forEach(w=>{
+    w=w.replace(/^['-]+|['-]+$/g,'');if(w.length<4||STOP.has(w))return;f[w]=(f[w]||0)+1;});});
+  return f;
+}
+function renderIntel(){
+  const now=Date.now();
+  const day=state.news.filter(n=>(now-(Date.parse(n.date)||0))<86400e3);
+  const prev=state.news.filter(n=>{const a=now-(Date.parse(n.date)||0);return a>=86400e3&&a<172800e3;});
+  const vel=state.social.filter(p=>(now-Date.parse(p.date))<3600e3).length;
+  const toneAvg=state.tone.length?state.tone.reduce((a,b)=>a+b,0)/state.tone.length:0;
+
+  // ── National Pulse: 0-100 composite of volume momentum, social velocity, tone intensity
+  const volR=prev.length?Math.min(day.length/prev.length,2):(day.length?1:0);
+  const pulse=Math.max(0,Math.min(100,Math.round(volR/2*38+Math.min(vel,30)/30*32+Math.min(Math.abs(toneAvg),6)/6*30)));
+  const gf=$('gfill');
+  if(gf&&(day.length||state.tone.length||vel)){
+    gf.style.strokeDashoffset=String(283*(1-pulse/100));
+    countUp($('gnum'),pulse);
+    const drivers=[['coverage volume',volR/2],['social velocity',Math.min(vel,30)/30],['tone intensity',Math.min(Math.abs(toneAvg),6)/6]].sort((a,b)=>b[1]-a[1]);
+    $('gsub').textContent=(pulse>=66?'RUNNING HOT':pulse>=40?'ELEVATED CYCLE':'STEADY CYCLE')+' · led by '+drivers[0][0];
+  }
+
+  // ── Signal Spikes: keywords surging vs the previous 24h
+  const fNow=kwFreq(day.length?day:state.news),fPrev=kwFreq(prev);
+  const spikes=Object.keys(fNow).filter(w=>fNow[w]>=3)
+    .map(w=>({w,n:fNow[w],r:(fNow[w]+1)/((fPrev[w]||0)+1)}))
+    .filter(s=>s.r>=2).sort((a,b)=>b.r-a.r).slice(0,3);
+
+  // ── Auto-insights (rule-based, always live)
+  const sigs=[];
+  const counts=PARTIES.map(p=>({name:p.name,n:state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length})).sort((a,b)=>b.n-a.n);
+  const totP=counts.reduce((a,b)=>a+b.n,0);
+  if(totP&&counts[0].n){
+    const lead=Math.round(counts[0].n/totP*100),second=counts[1]&&counts[1].n?Math.round(counts[1].n/totP*100):0;
+    sigs.push({k:'VOICE',c:'pos',t:'<b>'+counts[0].name+'</b> leads share of voice at <b>'+lead+'%</b>'+(second?' — '+(lead-second)+'pts clear of '+counts[1].name:'')});
+  }
+  spikes.forEach(s=>sigs.push({k:'SPIKE',c:'amb',t:'<b style="text-transform:capitalize">'+esc(s.w)+'</b> is surging — <b>'+s.n+'</b> stories, ×'+s.r.toFixed(1)+' vs yesterday'}));
+  if(state.tone.length>3){
+    const half=Math.floor(state.tone.length/2);
+    const a=state.tone.slice(0,half).reduce((x,y)=>x+y,0)/half;
+    const b2=state.tone.slice(half).reduce((x,y)=>x+y,0)/(state.tone.length-half);
+    const d=b2-a;
+    if(Math.abs(d)>=0.5)sigs.push({k:'TONE',c:d>0?'pos':'neg',t:'Press tone is <b>'+(d>0?'improving':'souring')+'</b> — '+(d>0?'+':'')+d.toFixed(1)+' over the week (GDELT)'});
+    else sigs.push({k:'TONE',c:'neu',t:'Press tone is <b>stable</b> this week at '+(b2>=0?'+':'')+b2.toFixed(1)+' (GDELT)'});
+  }
+  if(state.trends.length)sigs.push({k:'SEARCH',c:'neu',t:'Australia is searching <b>'+esc(state.trends[0].term)+'</b>'+(state.trends[0].traffic?' ('+esc(state.trends[0].traffic)+')':'')+' right now'});
+  if(vel>=10)sigs.push({k:'SOCIAL',c:'amb',t:'High chatter — <b>'+vel+'</b> #'+esc(state.tag)+' posts in the last hour'});
+  $('sigs').innerHTML=sigs.length?sigs.slice(0,5).map((s,i)=>
+    '<div class="sig '+(s.c||'')+'" style="animation-delay:'+(i*70)+'ms"><span class="sig-k">'+s.k+'</span><span class="sig-t">'+s.t+'</span></div>').join('')
+    :'<div class="empty">Signals appear as live data lands.</div>';
 }
 async function loadCore(){
   try{
@@ -1013,6 +1119,27 @@ document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('pal').classList.contains('on')?palClose():palOpen();}
   else if(e.key==='Escape'&&$('pal').classList.contains('on'))palClose();
 });
+
+/* ── SITUATION ROOM (kiosk) ── */
+let kioskTimer=null,kioskViews=['command','news','pulse'],kioskIdx=0;
+function kiosk(on){
+  document.body.classList.toggle('kiosk',on);
+  clearInterval(kioskTimer);kioskTimer=null;
+  const bar=$('kprog');
+  if(on){
+    kioskIdx=0;go('command');
+    if(document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});
+    const CYCLE=15000;
+    const arm=()=>{bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+CYCLE+'ms linear';bar.style.width='100%';};
+    arm();
+    kioskTimer=setInterval(()=>{kioskIdx=(kioskIdx+1)%kioskViews.length;go(kioskViews[kioskIdx]);arm();},CYCLE);
+    toast('Situation Room — Esc to exit');
+  }else{
+    bar.style.transition='none';bar.style.width='0';
+    if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
+  }
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('kiosk'))kiosk(false);});
 
 /* ── CLOCK + BOOT ── */
 function tick(){
