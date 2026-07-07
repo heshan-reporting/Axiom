@@ -224,6 +224,24 @@ a{color:inherit}
 .tdots i:nth-child(2){animation-delay:.15s}.tdots i:nth-child(3){animation-delay:.3s}
 @keyframes tb{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-4px)}}
 .sugg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.webtag{display:inline-flex;align-items:center;gap:5px;font-family:var(--fm);font-size:8.5px;letter-spacing:.1em;color:var(--pos);
+  background:rgba(34,217,147,.09);border:1px solid rgba(34,217,147,.25);border-radius:6px;padding:2px 8px;margin-bottom:8px}
+.srcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;padding-top:9px;border-top:1px dashed var(--line)}
+.srcchip{display:inline-flex;align-items:center;gap:5px;max-width:100%;font-family:var(--fm);font-size:9.5px;color:var(--t2);
+  background:var(--bg1);border:1px solid var(--line);border-radius:999px;padding:4px 10px;text-decoration:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:border-color .15s,color .15s}
+.srcchip:hover{border-color:var(--ac);color:var(--t0)}
+.chartcard{position:relative;margin-top:10px;background:var(--bg1);border:1px solid var(--line);border-radius:12px;padding:12px 12px 10px}
+.chartcard .ct{font-family:var(--fm);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t2);margin-bottom:8px;padding-right:30px}
+.chartcard .cbox{position:relative;height:190px}
+.cexp{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--sur2);
+  color:var(--t2);font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s}
+.cexp:hover{color:var(--ac);border-color:var(--ac)}
+.send.stop{background:rgba(255,84,112,.15);border:1px solid rgba(255,84,112,.45)}
+.send.stop svg{color:var(--neg)}
+.retry{margin-top:8px;font-family:var(--fm);font-size:10px;letter-spacing:.05em;padding:7px 14px;border-radius:9px;
+  border:1px solid var(--line);background:var(--bg1);color:var(--t1);transition:border-color .15s,color .15s}
+.retry:hover{border-color:var(--ac);color:var(--t0)}
 .chatbar{display:flex;gap:9px;padding-top:12px;border-top:1px solid var(--line)}
 .chatinp{flex:1;resize:none;max-height:120px;background:var(--bg1);border:1px solid var(--line);border-radius:14px;color:var(--t0);
   padding:12px 15px;font-size:13.5px;font-family:inherit;outline:none;transition:border-color .18s,box-shadow .18s;line-height:1.5}
@@ -528,13 +546,15 @@ body.kiosk .kprog{display:block}
             <button class="mode on" data-m="quick" onclick="setMode('quick',this)">Quick</button>
             <button class="mode" data-m="deep" onclick="setMode('deep',this)">Deep Brief</button>
             <button class="mode" data-m="forecast" onclick="setMode('forecast',this)">Forecast</button>
-            <span class="ptag" style="margin-left:auto;align-self:center" id="ctx-badge">LIVE CONTEXT: 0 SIGNALS</span>
+            <button class="mode" onclick="clearChat()" title="Start a new conversation" style="margin-left:auto">＋ New</button>
+            <span class="ptag" style="align-self:center" id="ctx-badge">LIVE CONTEXT: 0 SIGNALS</span>
           </div>
           <div class="msgs" id="msgs">
-            <div class="msg b"><div class="mb"><strong>AXIOM Analyst online.</strong> I read the live wire before every answer — the latest AU headlines, trending searches, social chatter and party share-of-voice are injected into my context. Ask me anything about Australian politics.
+            <div class="msg b"><div class="mb"><strong>AXIOM Analyst online.</strong> Ask me <strong>anything</strong> about Australian politics. I read the live wire before every answer, search the web for current facts, cite my sources — and draw charts when the data calls for it.
             <div class="sugg">
               <button class="chip" onclick="suggest(this)">What's driving the news cycle today?</button>
-              <button class="chip" onclick="suggest(this)">Which party is winning the week and why?</button>
+              <button class="chip" onclick="suggest(this)">Chart the latest 2PP polling</button>
+              <button class="chip" onclick="suggest(this)">Who are the current crossbench senators?</button>
               <button class="chip" onclick="suggest(this)">Biggest political risk on the horizon?</button>
             </div></div></div>
           </div>
@@ -976,8 +996,8 @@ const MODES={
   forecast:'Produce 30/60/90-day scenario analysis with #### headers per horizon, each with a most-likely scenario, a tail risk, and confidence (low/med/high). Ground every claim in the live signals or well-established facts.'
 };
 function sysPrompt(){
-  return 'You are AXIOM Analyst — a senior Australian political intelligence analyst. Today is '+new Date().toDateString()+'.\n\n'+
-  digest()+'\n\nRULES:\n- Ground answers in the live signals above when relevant; name the source type (headline, trend, social).\n- The social sample is small and skews left — say so if you lean on it.\n- Media tone measures press coverage, not voter opinion.\n- Be neutral: analyse all parties clinically.\n- Use **bold** for key takeaways and #### for section headers.\n\nSTYLE: '+MODES[state.mode];
+  return 'You are AXIOM Analyst — a senior Australian political intelligence analyst. Today is '+new Date().toDateString()+'. You can answer ANY question about Australian politics: facts, history, process, policy, elections, personalities, current events.\n\n'+
+  digest()+'\n\nRULES:\n- Ground answers in the live signals above when relevant; name the source type (headline, trend, social).\n- You also have a live web_search tool — use it whenever the answer depends on recent or verifiable current facts (who holds a seat/portfolio, latest polling, this week’s news, dates, figures, quotes). Prefer reputable AU sources (ABC, Guardian AU, SMH, AFR, AAP, AEC, aph.gov.au) and cite them.\n- The social sample is small and skews left — say so if you lean on it.\n- Media tone measures press coverage, not voter opinion.\n- Be neutral: analyse all parties clinically. Flag uncertainty honestly rather than guessing.\n- Use **bold** for key takeaways and #### for section headers.\n\nCHARTS — when comparative or numerical data would land better visually (polling, share of voice, seat counts, scenario probabilities, trends), emit a fenced block containing ONLY JSON:\n```chart\n{"type":"bar","title":"2PP polling","labels":["ALP","LNP"],"data":[52,48],"unit":"%","colors":["#FF5470","#5B8CFF"]}\n```\nTypes: "bar", "hbar", "line"/"area" (use "datasets":[{"label","data","color"}]), "donut", "radar". Party colours: ALP #FF5470, Coalition #5B8CFF, Greens #22D993, teals/IND #FFB454, ON #FF9F0A. Use real sourced numbers; label estimates as estimates in the prose.\n\nSTYLE: '+MODES[state.mode];
 }
 function mdLite(t){
   let h=esc(t);
@@ -995,44 +1015,191 @@ function addMsg(role,html){
   $('msgs').appendChild(el);$('msgs').scrollTop=$('msgs').scrollHeight;
   return el;
 }
-function typeMsg(txt){
+/* Extract ```chart blocks from a reply → {clean, charts:[{id,spec}]} */
+function extractCharts(txt){
+  const charts=[];
+  const clean=txt.replace(/```chart\s*\n([\s\S]*?)\n\s*```/g,(m,json)=>{
+    try{
+      const spec=JSON.parse(json.trim());
+      const id='cc'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      charts.push({id,spec});
+      return '[[CH'+(charts.length-1)+']]';
+    }catch(e){return '';}
+  });
+  return {clean,charts};
+}
+/* Render one chat chart in the app's Chart.js idiom */
+function buildChatChart(id,spec){
+  const cv=document.getElementById(id);if(!cv||!window.Chart)return;
+  const P=['#5B8CFF','#22D993','#FF5470','#FFB454','#9D7BFF','#FF9F0A','#64D2FF'];
+  const grid='rgba(255,255,255,.06)',tick='rgba(235,240,255,.45)';
+  const u=spec.unit||'';const t=(spec.type||'bar').toLowerCase();
+  const hexA=(h,a)=>{const m=(h||'').replace('#','');const n=parseInt(m.length===3?m.split('').map(c=>c+c).join(''):m,16);
+    return isNaN(n)?h:'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';};
+  const scale={grid:{color:grid},ticks:{color:tick,font:{size:9}}};
+  const opts={responsive:true,maintainAspectRatio:false,animation:{duration:600},
+    plugins:{legend:{display:false,position:'bottom',labels:{color:tick,font:{size:10},boxWidth:9,usePointStyle:true}},
+    tooltip:{backgroundColor:'rgba(10,14,24,.95)',borderColor:'rgba(255,255,255,.12)',borderWidth:1,padding:9,cornerRadius:8,
+      callbacks:{label:c=>{const p=c.parsed;const horiz=c.chart.options.indexAxis==='y';
+        const v=(p&&typeof p==='object')?(p.r!==undefined?p.r:horiz?p.x:p.y):p;
+        return (c.dataset.label?c.dataset.label+': ':'')+v+u;}}}}};
+  let cfg;
+  if(t==='donut'||t==='pie'){
+    cfg={type:t==='pie'?'pie':'doughnut',data:{labels:spec.labels||[],datasets:[{data:spec.data||[],
+      backgroundColor:spec.colors||P,borderColor:'rgba(10,14,24,.9)',borderWidth:2,hoverOffset:5}]},
+      options:{...opts,cutout:t==='pie'?0:'62%',plugins:{...opts.plugins,legend:{...opts.plugins.legend,display:true,position:'right'}}}};
+  }else if(t==='radar'){
+    const ds=(spec.datasets||[]).map((d,i)=>{const c=d.color||P[i%P.length];
+      return {label:d.label||'',data:d.data||[],borderColor:c,backgroundColor:hexA(c,.16),borderWidth:2,pointBackgroundColor:c,pointRadius:2};});
+    cfg={type:'radar',data:{labels:spec.labels||[],datasets:ds},
+      options:{...opts,plugins:{...opts.plugins,legend:{...opts.plugins.legend,display:ds.length>1}},
+      scales:{r:{grid:{color:grid},angleLines:{color:grid},pointLabels:{color:tick,font:{size:9}},ticks:{display:false,backdropColor:'transparent'}}}}};
+  }else if(t==='line'||t==='area'){
+    const src=spec.datasets||[{label:'',data:spec.data||[],color:(spec.colors||P)[0]}];
+    const ds=src.map((d,i)=>{const c=d.color||P[i%P.length];
+      return {label:d.label||'',data:d.data||[],borderColor:c,backgroundColor:t==='area'?hexA(c,.18):c,
+        fill:t==='area',tension:.35,borderWidth:2,pointRadius:0,pointHoverRadius:4};});
+    cfg={type:'line',data:{labels:spec.labels||[],datasets:ds},
+      options:{...opts,plugins:{...opts.plugins,legend:{...opts.plugins.legend,display:ds.length>1}},
+      scales:{x:scale,y:{...scale,beginAtZero:true,ticks:{...scale.ticks,callback:v=>v+u}}}}};
+  }else{
+    const horiz=t==='hbar';const cols=spec.colors||P;
+    cfg={type:'bar',data:{labels:spec.labels||[],datasets:[{data:spec.data||[],
+      backgroundColor:(spec.data||[]).map((_,i)=>hexA(cols[i%cols.length],.8)),
+      borderColor:(spec.data||[]).map((_,i)=>cols[i%cols.length]),borderWidth:1,borderRadius:5,maxBarThickness:48}]},
+      options:{...opts,indexAxis:horiz?'y':'x',
+      scales:horiz?{x:{...scale,beginAtZero:true,ticks:{...scale.ticks,callback:v=>v+u}},y:scale}
+                  :{x:scale,y:{...scale,beginAtZero:true,ticks:{...scale.ticks,callback:v=>v+u}}}}};
+  }
+  cv._chart=new Chart(cv.getContext('2d'),cfg);
+}
+function exportChatChart(id){
+  const cv=document.getElementById(id);if(!cv)return;
+  try{
+    const out=document.createElement('canvas');const pad=24;
+    out.width=cv.width+pad*2;out.height=cv.height+pad*2;
+    const cx=out.getContext('2d');cx.fillStyle='#0B0F1A';cx.fillRect(0,0,out.width,out.height);
+    cx.drawImage(cv,pad,pad);
+    const a=document.createElement('a');
+    a.download='axiom-chart-'+new Date().toISOString().slice(0,10)+'.png';
+    a.href=out.toDataURL('image/png');document.body.appendChild(a);a.click();a.remove();
+    toast('Chart saved as PNG');
+  }catch(e){toast('Export failed',true);}
+}
+/* Final reply renderer: markdown + charts + web-source chips */
+function renderReply(mb,txt,sources,usedWeb){
+  const {clean,charts}=extractCharts(txt);
+  let h=mdLite(clean);
+  charts.forEach((c,i)=>{
+    const card='<div class="chartcard">'+
+      '<button class="cexp" onclick="exportChatChart(\''+c.id+'\')" title="Save as PNG" aria-label="Save chart as PNG">⤓</button>'+
+      (c.spec.title?'<div class="ct">'+esc(c.spec.title)+'</div>':'')+
+      '<div class="cbox"><canvas id="'+c.id+'"></canvas></div></div>';
+    h=h.replace('[[CH'+i+']]',card).replace(/<p>\s*<\/p>/g,'');
+  });
+  if(usedWeb)h='<div class="webtag">🌐 WEB SOURCED</div>'+h;
+  if(sources&&sources.length){
+    h+='<div class="srcs">'+sources.slice(0,6).map(s=>
+      '<a class="srcchip" href="'+esc(s.url)+'" target="_blank" rel="noopener">↗ '+esc((s.host||'')+(s.title?' · '+s.title.slice(0,46):''))+'</a>').join('')+'</div>';
+  }
+  mb.innerHTML=h;
+  charts.forEach(c=>buildChatChart(c.id,c.spec));
+  $('msgs').scrollTop=$('msgs').scrollHeight;
+}
+function typeMsg(txt,sources,usedWeb){
   const el=addMsg('b','');
   const mb=el.querySelector('.mb');
-  if(matchMedia('(prefers-reduced-motion:reduce)').matches){mb.innerHTML=mdLite(txt);return;}
-  let i=0;const step=Math.max(2,Math.round(txt.length/240));
+  const {clean}=extractCharts(txt);
+  const plain=clean.replace(/\[\[CH\d+\]\]/g,'');
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches){renderReply(mb,txt,sources,usedWeb);return;}
+  let i=0;const step=Math.max(2,Math.round(plain.length/240));
   (function tp(){
-    i=Math.min(txt.length,i+step);
-    mb.textContent=txt.slice(0,i);
+    i=Math.min(plain.length,i+step);
+    mb.textContent=plain.slice(0,i);
     $('msgs').scrollTop=$('msgs').scrollHeight;
-    if(i<txt.length)setTimeout(tp,12);
-    else{mb.innerHTML=mdLite(txt);$('msgs').scrollTop=$('msgs').scrollHeight;}
+    if(i<plain.length)setTimeout(tp,12);
+    else renderReply(mb,txt,sources,usedWeb);
   })();
 }
+/* Chat session survives reloads */
+function persistChat(){try{localStorage.setItem('axiom_chat_v7',JSON.stringify({c:state.chat.slice(-20),m:state.mode,t:Date.now()}));}catch(e){}}
+function restoreChat(){
+  let s;try{s=JSON.parse(localStorage.getItem('axiom_chat_v7')||'');}catch(e){return;}
+  if(!s||!Array.isArray(s.c)||!s.c.length)return;
+  if(s.t&&Date.now()-s.t>72*3600000)return;
+  state.chat=s.c.filter(m=>m&&m.role&&typeof m.content==='string');
+  if(s.m&&MODES[s.m]){state.mode=s.m;document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('on',b.dataset.m===s.m));}
+  state.chat.forEach(m=>{
+    if(m.role==='user')addMsg('u',esc(m.content));
+    else{const el=addMsg('b','');renderReply(el.querySelector('.mb'),m.content,null,false);}
+  });
+}
+function clearChat(){
+  state.chat=[];try{localStorage.removeItem('axiom_chat_v7');}catch(e){}
+  const first=$('msgs').firstElementChild;
+  $('msgs').innerHTML='';if(first)$('msgs').appendChild(first);
+  toast('New conversation');
+}
+let CHAT_ABORT=null,CHAT_BUSY=false;
 async function sendChat(){
-  const inp=$('chat-inp');const q=inp.value.trim();if(!q)return;
+  const inp=$('chat-inp'),btn=$('send-btn');
+  if(CHAT_BUSY){if(CHAT_ABORT){try{CHAT_ABORT.abort();}catch(e){}}return;} // button = STOP while busy
+  const q=inp.value.trim();if(!q)return;
   if(!CLAUDE_KEY){openSettings();toast('Add your Claude API key first',true);return;}
   inp.value='';inp.style.height='auto';
   addMsg('u',esc(q));
   state.chat.push({role:'user',content:q});
   if(state.chat.length>14)state.chat=state.chat.slice(-14);
   const th=document.createElement('div');th.className='think';
-  th.innerHTML='<div class="tdots"><i></i><i></i><i></i></div>Reading the live wire…';
+  th.innerHTML='<div class="tdots"><i></i><i></i><i></i></div>Reading the wire · searching the web…';
   $('msgs').appendChild(th);$('msgs').scrollTop=$('msgs').scrollHeight;
-  $('send-btn').disabled=true;
+  CHAT_BUSY=true;CHAT_ABORT=typeof AbortController!=='undefined'?new AbortController():null;
+  const sendIcon=btn.innerHTML;
+  btn.classList.add('stop');btn.title='Stop';
+  btn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
   try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':CLAUDE_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:state.mode==='quick'?900:2200,system:sysPrompt(),messages:state.chat})
-    });
-    const d=await r.json();
+    // Server-side web search: declared once; resume on pause_turn.
+    const body={model:'claude-sonnet-4-6',max_tokens:state.mode==='quick'?1400:2600,system:sysPrompt(),
+      tools:[{type:'web_search_20250305',name:'web_search',max_uses:state.mode==='quick'?3:6,
+        user_location:{type:'approximate',country:'AU',timezone:'Australia/Sydney'}}]};
+    let convo=state.chat.slice(),txt='',cites=[],usedWeb=false;
+    for(let turn=0;turn<4;turn++){
+      const r=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':CLAUDE_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({...body,messages:convo}),
+        signal:CHAT_ABORT?CHAT_ABORT.signal:undefined
+      });
+      const d=await r.json();
+      if(d.error)throw new Error(d.error.message||'API error');
+      (d.content||[]).forEach(b=>{
+        if(b.type==='text'){txt+=(txt?'\n':'')+b.text;(b.citations||[]).forEach(c=>{if(c.url)cites.push({url:c.url,title:c.title||''});});}
+        else if(b.type==='server_tool_use')usedWeb=true;
+        else if(b.type==='web_search_tool_result'){usedWeb=true;
+          if(Array.isArray(b.content))b.content.forEach(rr=>{if(rr.url)cites.push({url:rr.url,title:rr.title||''});});}
+      });
+      if(d.stop_reason==='pause_turn'){convo=convo.concat([{role:'assistant',content:d.content}]);continue;}
+      break;
+    }
     th.remove();
-    if(d.error)throw new Error(d.error.message||'API error');
-    const txt=(d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const seen={},sources=[];
+    cites.forEach(c=>{if(!seen[c.url]){seen[c.url]=1;let host='';try{host=new URL(c.url).hostname.replace(/^www\./,'');}catch(e){}
+      sources.push({url:c.url,title:c.title,host});}});
     state.chat.push({role:'assistant',content:txt});
-    typeMsg(txt);
-  }catch(e){th.remove();addMsg('b','<span style="color:var(--neg)">✗ '+esc(e.message)+'</span>');}
-  $('send-btn').disabled=false;
+    persistChat();
+    typeMsg(txt,sources,usedWeb);
+  }catch(e){
+    th.remove();
+    if(state.chat.length&&state.chat[state.chat.length-1].role==='user')state.chat.pop(); // keep history API-consistent
+    const aborted=e&&(e.name==='AbortError'||String(e).includes('abort'));
+    const el=addMsg('b',aborted?'⏹ Stopped.':'<span style="color:var(--neg)">✗ '+esc(e.message||String(e))+'</span>');
+    const rb=document.createElement('button');rb.className='retry';rb.textContent=aborted?'↻ Ask again':'↻ Retry';
+    rb.onclick=()=>{$('chat-inp').value=q;sendChat();};
+    el.querySelector('.mb').appendChild(rb);
+    $('msgs').scrollTop=$('msgs').scrollHeight;
+  }
+  CHAT_BUSY=false;CHAT_ABORT=null;
+  btn.classList.remove('stop');btn.title='Send';btn.innerHTML=sendIcon;
 }
 
 /* ── BRIEFING ── */
@@ -1151,6 +1318,7 @@ const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 23 NATIONAL N
 let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
 function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
 setTimeout(hideSplash,2600);
+restoreChat();
 refreshAll().then(hideSplash);
 setInterval(refreshAll,5*60e3);
 </script>

@@ -1368,34 +1368,59 @@ export default {
     }
 
     // ── Aggregate AU news across the whole feed registry (one request) ──
-    // GET /allnews?q=<keywords>&max=<n>   — server-side parallel fetch + merge
+    // GET /allnews?q=<keywords>&max=<n>&hours=<h>&debug=1
+    //   Time-sensitive: ISO dates + per-item age (minutes), freshness window
+    //   (hours=, default 72), syndicated wire-copy dedupe across outlets,
+    //   and a per-feed health report (debug=1 bypasses cache and reports
+    //   status/latency/count for every feed in the registry).
     if (path === '/allnews') {
-      const q   = (reqUrl.searchParams.get('q') || '').toLowerCase();
-      const max = Math.min(parseInt(reqUrl.searchParams.get('max') || '60', 10) || 60, 120);
-      const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
-      const cacheKey = `allnews_${q || 'all'}_${max}`;
-      const cached = await kvGet(env.AXIOM_KV, cacheKey);
-      if (cached) return new Response(cached, { headers: CORS });
+      const q     = (reqUrl.searchParams.get('q') || '').toLowerCase();
+      const max   = Math.min(parseInt(reqUrl.searchParams.get('max') || '60', 10) || 60, 120);
+      const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '72', 10) || 72, 720);
+      const debug = reqUrl.searchParams.get('debug') === '1';
+      const qw    = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
 
+      const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
+      if (!debug) {
+        const cached = await kvGet(env.AXIOM_KV, cacheKey);
+        if (cached) return new Response(cached, { headers: CORS });
+      }
+
+      const now  = Date.now();
       const keys = Object.keys(AU_FEEDS);
+      const health = [];
       const results = await Promise.allSettled(keys.map(async (key) => {
-        const r = await fetch(AU_FEEDS[key], {
-          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
-          signal: AbortSignal.timeout ? AbortSignal.timeout(7000) : undefined,
-        });
-        if (!r.ok) throw new Error(`${key}_${r.status}`);
-        const xml = await r.text();
-        return parseFeedXml(xml).map(it => ({ src: key, ...it }));
+        const t0 = Date.now();
+        try {
+          const r = await fetch(AU_FEEDS[key], {
+            headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
+            signal: AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined,
+            cf: { cacheTtl: 120, cacheEverything: true },
+          });
+          if (!r.ok) { health.push({ src: key, ok: false, status: r.status, ms: Date.now() - t0 }); return []; }
+          const xml   = await r.text();
+          const items = parseFeedXml(xml).map(it => ({ src: key, ...it }));
+          health.push({ src: key, ok: items.length > 0, status: r.status, count: items.length, ms: Date.now() - t0 });
+          return items;
+        } catch (e) {
+          health.push({ src: key, ok: false, error: String(e && e.name || e).slice(0, 40), ms: Date.now() - t0 });
+          return [];
+        }
       }));
 
       let items = [];
-      const sources = [];
-      results.forEach((res, i) => {
-        if (res.status === 'fulfilled') {
-          sources.push({ src: keys[i], count: res.value.length });
-          items.push(...res.value);
-        }
+      results.forEach((res) => { if (res.status === 'fulfilled') items.push(...res.value); });
+
+      // Normalise dates → ISO + age (minutes). Undated items keep '' and rank last.
+      items.forEach(it => {
+        const t = Date.parse(it.date || '');
+        if (!isNaN(t)) { it.date = new Date(t).toISOString(); it.age = Math.max(0, Math.round((now - t) / 60000)); it._t = t; }
+        else { it.date = ''; it.age = null; it._t = 0; }
       });
+
+      // Freshness window: drop dated items older than `hours`; keep undated.
+      const cutoff = now - hours * 3600000;
+      items = items.filter(it => it._t === 0 || it._t >= cutoff);
 
       // keyword filter (any word matches title or description)
       if (qw.length) {
@@ -1405,12 +1430,24 @@ export default {
         });
       }
 
-      // newest first where dates parse, then cap
-      items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-      items = items.slice(0, max);
+      // Cross-outlet dedupe of syndicated wire copy (normalised-title key).
+      const seenTitle = new Set();
+      items = items.filter(it => {
+        const k = it.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+        if (seenTitle.has(k)) return false;
+        seenTitle.add(k); return true;
+      });
 
-      const out = JSON.stringify({ items, sources, feeds: keys.length });
-      await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+      // Newest first (undated last), then cap.
+      items.sort((a, b) => b._t - a._t);
+      items = items.slice(0, max);
+      items.forEach(it => { delete it._t; });
+
+      const sources = health.filter(h => h.ok).map(h => ({ src: h.src, count: h.count || 0 }));
+      const payload = { items, sources, feeds: keys.length, generated: new Date(now).toISOString(), window_hours: hours };
+      if (debug) payload.health = health.sort((a, b) => (b.ok ? 1 : 0) - (a.ok ? 1 : 0) || (b.count || 0) - (a.count || 0));
+      const out = JSON.stringify(payload);
+      if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
       return new Response(out, { headers: CORS });
     }
 
