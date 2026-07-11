@@ -24,6 +24,10 @@
  * ║                               + tone enrichment, feed circuit breaker,  ║
  * ║                               stale-while-revalidate (KV 4min).         ║
  * ║                               debug=1 → per-feed {ok,status,count,ms}.  ║
+ * ║  GET /history                 Accumulated pulse time series — hourly    ║
+ * ║                               per-party share-of-voice + tone points,   ║
+ * ║                               built by cron + lazy request-path snap-   ║
+ * ║                               shots (KV, ~16 days of hourly points).    ║
  * ║  GET /newsq?q=&hours=&max=    Topical Google News AU search — covers    ║
  * ║                               every outlet Google indexes, when: window,║
  * ║                               outlet extraction, enrichment (KV 5min).  ║
@@ -303,6 +307,37 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   const out = JSON.stringify(payload);
   if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
   return out;
+}
+
+/**
+ * Pulse snapshot: append one time-series point (per-party share-of-voice +
+ * headline tone) to KV. Self-throttles to one point per ~50 min, so it can
+ * be called from cron AND lazily from request paths without duplication.
+ * This is what turns AXIOM from single-window snapshots into real
+ * historical trending (share-of-voice over time, tone shift, baselines).
+ */
+async function snapshotPulse(env) {
+  let hist = [];
+  try { hist = JSON.parse(await kvGet(env.AXIOM_KV, 'pulse_history') || '[]') || []; } catch {}
+  const now = Date.now();
+  if (hist.length && now - hist[hist.length - 1].t < 50 * 60000) return;
+
+  const raw = await buildAllNews(env, { q: '', max: 120, hours: 24 });
+  let items = [];
+  try { items = JSON.parse(raw).items || []; } catch {}
+  if (!items.length) return;
+
+  const point = { t: now, tot: items.length, p: {}, tn: {} };
+  ['alp', 'lnp', 'grn', 'ind', 'on'].forEach(k => {
+    const its = items.filter(i => (i.parties || []).indexOf(k) !== -1);
+    point.p[k]  = its.length;
+    point.tn[k] = its.length ? +(its.reduce((a, b) => a + (b.tone || 0), 0) / its.length).toFixed(2) : 0;
+  });
+  point.tone = +(items.reduce((a, b) => a + (b.tone || 0), 0) / items.length).toFixed(2);
+
+  hist.push(point);
+  if (hist.length > 400) hist = hist.slice(-400); // ~16 days at hourly cadence
+  await kvPut(env.AXIOM_KV, 'pulse_history', JSON.stringify(hist), 40 * 86400);
 }
 
 /** Safe fetch that never throws — returns { ok, html, status } */
@@ -1501,6 +1536,10 @@ export default {
       const debug = reqUrl.searchParams.get('debug') === '1';
       const opts  = { q, max, hours, debug };
 
+      // Lazy time-series accumulation (self-throttled to ~hourly in KV) —
+      // history builds up even on deployments with no cron trigger.
+      if (ctx && !debug) ctx.waitUntil(snapshotPulse(env).catch(() => {}));
+
       if (!debug) {
         const cached = await kvGet(env.AXIOM_KV, `allnews2_${q || 'all'}_${max}_${hours}`);
         if (cached) {
@@ -1514,6 +1553,13 @@ export default {
       }
       const out = await buildAllNews(env, opts);
       return new Response(out, { headers: CORS });
+    }
+
+    // ── Accumulated pulse history: share-of-voice + tone time series ─────
+    // GET /history → { points: [{t, tot, p:{alp..}, tn:{alp..}, tone}] }
+    if (path === '/history') {
+      const raw = await kvGet(env.AXIOM_KV, 'pulse_history');
+      return new Response('{"points":' + (raw || '[]') + '}', { headers: CORS });
     }
 
     // ── Topical time-sensitive search across Google News AU ──────────────
@@ -2528,8 +2574,10 @@ export default {
 async function handleScheduled(env) {
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
 
-  // Pre-warm the default /allnews snapshot so dashboard loads are instant.
+  // Pre-warm the default /allnews snapshot so dashboard loads are instant,
+  // and append a pulse-history point (share-of-voice + tone time series).
   try { await buildAllNews(env, { q: '', max: 60, hours: 72 }); } catch (e) {}
+  try { await snapshotPulse(env); } catch (e) {}
 
   // Default watchlist topics — overridable via KV
   const savedTopics = await kvGet(env.AXIOM_KV, 'auto_watchlist');

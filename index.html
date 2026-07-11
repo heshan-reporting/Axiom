@@ -262,6 +262,38 @@ a{color:inherit}
 .ov{position:fixed;inset:0;z-index:100;background:rgba(3,5,10,.7);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;padding:18px}
 .ov.on{display:flex}
 .modal{width:min(480px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--line2);border-radius:20px;background:var(--bg1);padding:24px;animation:rise .3s ease}
+.modal.wide{width:min(760px,94vw)}
+/* party drill-down */
+.pd-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.pd-dot{width:12px;height:12px;border-radius:4px;flex-shrink:0}
+.pd-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-bottom:16px}
+.pd-kpi{background:var(--bg0,rgba(255,255,255,.02));border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+.pd-kpi .l{font-family:var(--fm);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2)}
+.pd-kpi .v{font-family:var(--fd);font-size:21px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+.pd-kpi .s{font-size:10.5px;color:var(--t2);margin-top:2px}
+.pd-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pd-cbox{position:relative;height:170px}
+@media(max-width:700px){.pd-grid{grid-template-columns:1fr}}
+/* chart empty-state overlay */
+.cbempty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:18px;font-size:11.5px;line-height:1.6;color:var(--t2);background:transparent}
+/* monitors */
+.mons{display:flex;flex-direction:column;gap:8px}
+.mon{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+  background:rgba(255,255,255,.015);cursor:pointer;transition:border-color .15s,background .15s}
+.mon:hover{border-color:var(--ac);background:rgba(91,140,255,.05)}
+.mon-q{font-weight:600;font-size:13px;color:var(--t0);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mon-n{font-family:var(--fm);font-size:10px;color:var(--t2);flex-shrink:0;font-variant-numeric:tabular-nums}
+.mon-new{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.06em;color:#0B0F1A;background:var(--amb);
+  border-radius:999px;padding:3px 9px;flex-shrink:0;animation:rise .3s ease}
+.mon-x{width:24px;height:24px;border-radius:7px;border:1px solid transparent;background:none;color:var(--t2);
+  font-size:14px;line-height:1;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s}
+.mon-x:hover{color:var(--neg);border-color:rgba(255,84,112,.4)}
+/* clickable party rows */
+.pt-row{cursor:pointer;border-radius:8px;transition:background .15s}
+.pt-row:hover{background:rgba(91,140,255,.06)}
+.pt-sig{font-family:var(--fm);font-size:8px;font-weight:700;color:var(--amb);border:1px solid rgba(255,180,84,.4);
+  border-radius:5px;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
 .mtitle{font-family:var(--fd);font-size:17px;font-weight:700;margin-bottom:4px}
 .msub{font-size:12px;color:var(--t2);margin-bottom:18px;line-height:1.5}
 .fl{display:block;font-family:var(--fm);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t2);margin:14px 0 6px}
@@ -473,6 +505,26 @@ body.kiosk .kprog{display:block}
           </div>
         </div>
 
+        <div class="grid2 gspan">
+          <div class="panel">
+            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Share of Voice · Trend</div><span class="ptag" id="hist-tag">ACCUMULATING</span></div>
+            <div class="chartbox"><canvas id="sov-chart"></canvas><div class="cbempty" id="sov-empty">Historical trending switches on automatically — AXIOM snapshots the wire hourly. First trend lines appear within a few hours of worker deploy.</div></div>
+          </div>
+          <div class="panel">
+            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 4 18 3-9h6"/></svg>Tone by Party · Trend</div><span class="ptag">HEADLINE TONE · −1…+1</span></div>
+            <div class="chartbox"><canvas id="ptone-chart"></canvas><div class="cbempty" id="ptone-empty">Party tone trends build from the same hourly snapshots.</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Monitors</div><span class="ptag" id="mon-tag">SAVED QUERIES · ALERT ON NEW COVERAGE</span></div>
+          <div class="bar">
+            <input class="inp" id="mon-inp" placeholder="Track anything — negative gearing, AUKUS, a minister's name…" onkeydown="if(event.key==='Enter')addMonitor()">
+            <button class="btn" style="padding:10px 18px" onclick="addMonitor()">Track</button>
+          </div>
+          <div class="mons" id="mon-list"><div class="empty">No monitors yet. Track the topics you answer for — AXIOM flags new coverage on every sync.</div></div>
+        </div>
+
         <div class="panel">
           <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Live Wire</div><button class="btn ghost" style="padding:7px 14px" onclick="go('news')">Open Newsroom →</button></div>
           <div class="wire" id="wire"><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div></div>
@@ -597,6 +649,23 @@ body.kiosk .kprog{display:block}
 </div></nav>
 
 <!-- SETTINGS MODAL -->
+<div class="ov" id="m-party" onclick="if(event.target===this)closeParty()">
+  <div class="modal wide">
+    <div class="pd-head">
+      <span class="pd-dot" id="pd-dot"></span>
+      <div class="mtitle" id="pd-title" style="margin:0">—</div>
+      <button class="icobtn" onclick="closeParty()" aria-label="Close" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="pd-kpis" id="pd-kpis"></div>
+    <div class="pd-grid">
+      <div><div class="note" style="margin:0 0 6px">Coverage tone split</div><div class="pd-cbox"><canvas id="pd-tone"></canvas></div></div>
+      <div><div class="note" style="margin:0 0 6px">Top outlets covering them</div><div class="pd-cbox"><canvas id="pd-outlets"></canvas></div></div>
+    </div>
+    <div class="note" style="margin:14px 0 6px">Latest coverage</div>
+    <div class="wire" id="pd-stories" style="max-height:220px;overflow-y:auto"></div>
+  </div>
+</div>
+
 <div class="ov" id="m-set" onclick="if(event.target===this)closeSettings()">
   <div class="modal">
     <div class="mtitle">Settings</div>
@@ -628,7 +697,7 @@ const PARTIES=[
   {key:'IND',name:'Teals / Ind.',color:'#2DD4BF',re:/\b(teal(s)?|independent(s)?|pocock|steggall)\b/i},
 ];
 const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
-const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{}};
+const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{}};
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -676,10 +745,15 @@ function go(v){
 /* ── BOOT / REFRESH ── */
 async function refreshAll(){
   const b=$('refbtn');b.classList.add('spin');
-  await Promise.allSettled([loadCore(),loadTrends(),loadSocial(),loadTone()]);
-  renderIntel();
+  await Promise.allSettled([loadCore(),loadTrends(),loadSocial(),loadTone(),loadHistory()]);
+  renderIntel();renderMonitors();
   b.classList.remove('spin');
 }
+/* Client-side tone fallback so drill-downs work before the worker redeploy */
+const T_POS=/\b(win|wins|boost|surge|gain|deal|success|approve|backs?|support|relief|breakthrough|praised?)\b/i;
+const T_NEG=/\b(crisis|scandal|slam(s|med)?|fail(s|ure)?|blast(s|ed)?|anger|fury|chaos|resign|corrupt|attack(s|ed)?|warn(s|ing)?|cuts?|collapse|probe|leak)\b/i;
+function clientTone(it){const hay=(it.title||'')+' '+(it.desc||'');return T_NEG.test(hay)?-1:T_POS.test(hay)?1:0;}
+function clientEnrich(){state.news.forEach(it=>{if(typeof it.tone!=='number')it.tone=clientTone(it);});}
 function kwFreq(items){
   const f={};
   items.forEach(it=>{String(it.title||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').split(/\s+/).forEach(w=>{
@@ -737,8 +811,9 @@ async function loadCore(){
   try{
     const d=await api('/allnews?max=110');
     state.news=d.items||[];
+    clientEnrich();
     renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();
-    updateCtxBadge();
+    updateCtxBadge();renderStatus(d.generated);
   }catch(e){
     $('wire').innerHTML='<div class="err">'+esc(e.message)+'</div>';
     $('narrative').innerHTML='<div class="err">'+esc(e.message)+'</div>';
@@ -833,7 +908,8 @@ function renderParties(){
   countUp($('donut-n'),total);
   $('ptybars').innerHTML=counts.map(p=>{
     const pct=total?Math.round(p.n/total*100):0;
-    return '<div class="pt-row"><span class="pt-dot" style="background:'+p.color+'"></span><span class="pt-name">'+p.name+'</span><div class="pt-track"><div class="pt-fill" data-w="'+pct+'" style="background:'+p.color+'"></div></div><span class="pt-pct">'+pct+'%</span></div>';}).join('');
+    const sig=(state.spikes&&state.spikes[p.key])?'<span class="pt-sig">⚡ SPIKE</span>':'';
+    return '<div class="pt-row" onclick="openParty(\''+p.key+'\')" title="Open coverage profile"><span class="pt-dot" style="background:'+p.color+'"></span><span class="pt-name">'+p.name+sig+'</span><div class="pt-track"><div class="pt-fill" data-w="'+pct+'" style="background:'+p.color+'"></div></div><span class="pt-pct">'+pct+'%</span></div>';}).join('');
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     document.querySelectorAll('#ptybars .pt-fill').forEach(el=>el.style.width=el.dataset.w+'%');
   }));
@@ -841,7 +917,9 @@ function renderParties(){
     killChart('donut');
     state.charts.donut=new Chart($('donut'),{type:'doughnut',
       data:{labels:counts.map(p=>p.name),datasets:[{data:counts.map(p=>p.n||0.001),backgroundColor:counts.map(p=>p.color),borderWidth:0,hoverOffset:6}]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'74%',plugins:{legend:{display:false}},animation:{animateRotate:true,duration:900}}});
+      options:{responsive:true,maintainAspectRatio:false,cutout:'74%',plugins:{legend:{display:false}},animation:{animateRotate:true,duration:900},
+        onClick:(e,els)=>{if(els.length)openParty(counts[els[0].index].key);},
+        onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default';}}});
   }
 }
 function renderWire(){
@@ -849,6 +927,153 @@ function renderWire(){
   $('wire').innerHTML=items.length?items.map(it=>
     '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span></span><span class="wi-time">'+ago(it.date)+'</span></a>').join('')
     :'<div class="empty">The wire is quiet.</div>';
+}
+function renderStatus(gen){
+  const el=document.querySelector('.live');if(!el)return;
+  const n=new Set(state.news.map(x=>x.src)).size;
+  el.innerHTML='<i></i>LIVE · '+n+' SOURCES';
+  el.title='Last sync '+new Date(gen||Date.now()).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
+}
+
+/* ── HISTORICAL TRENDING (share of voice + tone over time) ──────────── */
+const PKEY={ALP:'alp',LNP:'lnp',GRN:'grn',ONP:'on',IND:'ind'};
+const LEGEND={display:true,position:'bottom',labels:{color:'#66739B',font:{size:9,family:'JetBrains Mono'},boxWidth:8,boxHeight:8,usePointStyle:true}};
+async function loadHistory(){
+  try{const d=await api('/history');state.history=d.points||[];}
+  catch(e){state.history=[];}
+  renderHistory();
+}
+function renderHistory(){
+  const pts=state.history||[];
+  const ok=pts.length>=3;
+  const se=$('sov-empty'),te=$('ptone-empty');
+  if(se)se.style.display=ok?'none':'flex';
+  if(te)te.style.display=ok?'none':'flex';
+  const ht=$('hist-tag');if(ht)ht.textContent=ok?(pts.length+' HOURLY SNAPSHOTS'):'ACCUMULATING';
+  computeBaselines(pts);
+  if(!ok||!window.Chart||!$('sov-chart'))return;
+  const labels=pts.map(p=>new Date(p.t).toLocaleString('en-AU',{weekday:'short',hour:'numeric'}));
+  const mk=get=>PARTIES.map(P=>{const k=PKEY[P.key];
+    return{label:P.name,data:pts.map(p=>get(p,k)),borderColor:P.color,backgroundColor:P.color+'22',
+      tension:.35,borderWidth:2,pointRadius:0,pointHoverRadius:4};});
+  killChart('sov');
+  state.charts.sov=new Chart($('sov-chart'),{type:'line',
+    data:{labels,datasets:mk((p,k)=>p.p&&p.p[k]||0)},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:LEGEND},scales:{x:AXISX,y:{...AXIS,beginAtZero:true}}}});
+  killChart('ptone');
+  state.charts.ptone=new Chart($('ptone-chart'),{type:'line',
+    data:{labels,datasets:mk((p,k)=>p.tn&&p.tn[k]||0)},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:LEGEND},scales:{x:AXISX,y:{...AXIS,suggestedMin:-1,suggestedMax:1}}}});
+}
+/* Baseline anomaly detection: latest point vs mean+2σ of its own history */
+function computeBaselines(pts){
+  state.spikes={};
+  if(!pts||pts.length<8)return;
+  let fired=false;
+  PARTIES.forEach(P=>{
+    const k=PKEY[P.key];
+    const series=pts.map(p=>p.p&&p.p[k]||0);
+    const prior=series.slice(0,-1);
+    const mu=prior.reduce((a,b)=>a+b,0)/prior.length;
+    const sd=Math.sqrt(prior.reduce((a,b)=>a+(b-mu)*(b-mu),0)/prior.length)||1;
+    const last=series[series.length-1];
+    if(last>mu+2*sd&&last>=4){
+      state.spikes[P.key]={last,mu:+mu.toFixed(1)};
+      if(!fired&&$('sigs')){
+        fired=true;
+        $('sigs').insertAdjacentHTML('afterbegin',
+          '<div class="sig neg"><span class="sig-k">ANOMALY</span><span class="sig-t"><b>'+P.name+
+          '</b> coverage is running <b>×'+(mu?(last/mu).toFixed(1):'∞')+'</b> its baseline — '+last+
+          ' stories this hour vs ~'+state.spikes[P.key].mu+' typical</span></div>');
+      }
+    }
+  });
+  if(Object.keys(state.spikes).length&&state.news.length)renderParties();
+}
+
+/* ── PARTY DRILL-DOWN (benchmark profile) ───────────────────────────── */
+function partyItems(P){return state.news.filter(it=>P.re.test(it.title+' '+(it.desc||'')));}
+function pdKpi(l,v,s){return '<div class="pd-kpi"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';}
+function openParty(key){
+  const P=PARTIES.find(p=>p.key===key);if(!P)return;
+  const its=partyItems(P);
+  const now=Date.now();
+  const day=its.filter(n=>(now-(Date.parse(n.date)||0))<86400e3);
+  const prev=its.filter(n=>{const a=now-(Date.parse(n.date)||0);return a>=86400e3&&a<172800e3;});
+  const tones=its.map(i=>typeof i.tone==='number'?i.tone:clientTone(i));
+  const avg=tones.length?tones.reduce((a,b)=>a+b,0)/tones.length:0;
+  const pos=tones.filter(t=>t>0).length,neg=tones.filter(t=>t<0).length,neu=tones.length-pos-neg;
+  const delta=prev.length?Math.round((day.length-prev.length)/prev.length*100):null;
+  const sovTotal=PARTIES.reduce((a,p)=>a+partyItems(p).length,0);
+  $('pd-dot').style.background=P.color;
+  $('pd-title').textContent=P.name+' — coverage profile';
+  $('pd-kpis').innerHTML=
+    pdKpi('Stories · 24h',day.length,delta!==null?((delta>=0?'▲ ':'▼ ')+Math.abs(delta)+'% vs prior day'):'no prior-day base')+
+    pdKpi('Share of voice',(sovTotal?Math.round(its.length/sovTotal*100):0)+'%','of party-tagged stories · 72h')+
+    pdKpi('Net tone',(avg>=0?'+':'')+avg.toFixed(2),avg>0.08?'favourable skew':avg<-0.08?'critical skew':'balanced coverage')+
+    (state.spikes&&state.spikes[key]
+      ?pdKpi('Signal','SPIKE','coverage above historical baseline')
+      :pdKpi('Signal','NORMAL','within historical baseline'));
+  if(window.Chart){
+    killChart('pdt');
+    state.charts.pdt=new Chart($('pd-tone'),{type:'doughnut',
+      data:{labels:['Favourable','Neutral','Critical'],datasets:[{data:[pos,neu,neg],backgroundColor:['#22D993','#4A587F','#FF5470'],borderWidth:0,hoverOffset:5}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:LEGEND}}});
+    const oc={};its.forEach(i=>{oc[i.src]=(oc[i.src]||0)+1;});
+    const top=Object.entries(oc).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    killChart('pdo');
+    state.charts.pdo=new Chart($('pd-outlets'),{type:'bar',
+      data:{labels:top.map(t=>t[0]),datasets:[{data:top.map(t=>t[1]),backgroundColor:P.color+'CC',borderRadius:5,maxBarThickness:18}]},
+      options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},
+        scales:{x:{...AXIS,beginAtZero:true},y:{ticks:{color:'#8DA2D0',font:{size:9,family:'JetBrains Mono'}},grid:{display:false}}}}});
+  }
+  $('pd-stories').innerHTML=its.length?its.slice(0,12).map(it=>
+    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span></span><span class="wi-time">'+ago(it.date)+'</span></a>').join('')
+    :'<div class="empty">No stories tagged to '+esc(P.name)+' in the current window.</div>';
+  $('m-party').classList.add('on');
+}
+function closeParty(){$('m-party').classList.remove('on');killChart('pdt');killChart('pdo');}
+
+/* ── MONITORS (saved queries + new-coverage alerts) ─────────────────── */
+let MONITORS=[];
+try{MONITORS=JSON.parse(localStorage.getItem('axiom_monitors')||'[]')||[];}catch(e){}
+function saveMonitors(){try{localStorage.setItem('axiom_monitors',JSON.stringify(MONITORS));}catch(e){}}
+function monMatches(m){const q=m.q.toLowerCase();
+  return state.news.filter(it=>((it.title||'')+' '+(it.desc||'')).toLowerCase().indexOf(q)!==-1);}
+function renderMonitors(){
+  const el=$('mon-list');if(!el)return;
+  if(!MONITORS.length){
+    el.innerHTML='<div class="empty">No monitors yet. Track the topics you answer for — AXIOM flags new coverage on every sync.</div>';
+    const tg=$('mon-tag');if(tg)tg.textContent='SAVED QUERIES · ALERT ON NEW COVERAGE';
+    return;
+  }
+  let alerts=0;
+  el.innerHTML=MONITORS.map((m,i)=>{
+    const hits=monMatches(m);
+    const fresh=hits.filter(it=>(Date.parse(it.date)||0)>(m.seen||0)).length;
+    if(fresh)alerts++;
+    return '<div class="mon" onclick="openMonitor('+i+')" title="Open in Newsroom">'+
+      '<span class="mon-q">'+esc(m.q)+'</span>'+
+      (fresh?'<span class="mon-new">+'+fresh+' NEW</span>':'')+
+      '<span class="mon-n">'+hits.length+' · 72h</span>'+
+      '<button class="mon-x" onclick="event.stopPropagation();delMonitor('+i+')" aria-label="Remove monitor">×</button></div>';
+  }).join('');
+  const tg=$('mon-tag');
+  if(tg)tg.textContent=alerts?(alerts+' MONITOR'+(alerts>1?'S':'')+' WITH NEW COVERAGE'):'ALL QUIET · '+MONITORS.length+' TRACKED';
+}
+function addMonitor(){
+  const inp=$('mon-inp'),q=inp.value.trim();if(!q)return;
+  if(MONITORS.some(m=>m.q.toLowerCase()===q.toLowerCase())){toast('Already tracking that');return;}
+  MONITORS.push({q,seen:Date.now(),created:Date.now()});
+  saveMonitors();inp.value='';renderMonitors();toast('Monitoring “'+q+'”');
+}
+function delMonitor(i){MONITORS.splice(i,1);saveMonitors();renderMonitors();}
+function openMonitor(i){
+  const m=MONITORS[i];if(!m)return;
+  m.seen=Date.now();saveMonitors();
+  go('news');$('news-q').value=m.q;loadNews();renderMonitors();
 }
 
 /* ── NEWSROOM ── */
