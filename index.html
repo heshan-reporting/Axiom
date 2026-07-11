@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js';document.head.appendChild(s)"></script>
 <style>
 /* ═══════════════════ AXIOM 7 · DESIGN SYSTEM ═══════════════════ */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -18,10 +18,11 @@
   --sur:rgba(255,255,255,.032); --sur2:rgba(255,255,255,.055); --sur3:rgba(255,255,255,.09);
   --line:rgba(146,166,255,.10); --line2:rgba(146,166,255,.22);
   --t0:#EEF2FF; --t1:#AAB6D8; --t2:#66739B; --t3:#3D4767;
-  --ac:#5B8CFF; --ac2:#8B5CF6; --acg:linear-gradient(120deg,#5B8CFF,#8B5CF6);
+  --ac:#5B8CFF; --ac2:#3E63E0; --acg:linear-gradient(135deg,#6D9AFF,#3E63E0);
   --glow:rgba(91,140,255,.16);
-  --pos:#22D993; --neg:#FF5470; --amb:#FFB454;
-  --alp:#E8354A; --lnp:#3E7BFA; --grn:#22C55E; --onp:#FF7A1A; --ind:#2DD4BF;
+  --pos:#22D993; --neg:#FF5470; --amb:#F0A64B;
+  /* party palette — CVD/contrast validated for dark surfaces */
+  --alp:#E23B4E; --lnp:#3E7BFA; --grn:#1FA96C; --onp:#D5680B; --ind:#22A0B6;
   --fd:'Space Grotesk',sans-serif; --fb:'Inter',system-ui,sans-serif; --fm:'JetBrains Mono',monospace;
   --r:16px; --rs:11px;
   --rail:76px; --top:62px;
@@ -39,8 +40,8 @@ a{color:inherit}
 /* ambient background */
 .aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 .aurora::before,.aurora::after{content:'';position:absolute;width:60vw;height:60vw;border-radius:50%;filter:blur(120px);opacity:.13;animation:drift 26s ease-in-out infinite alternate}
-.aurora::before{background:#3E63E0;top:-25vw;left:-15vw}
-.aurora::after{background:#7C3AED;bottom:-30vw;right:-15vw;animation-delay:-13s}
+.aurora::before{background:#2E4FC4;top:-25vw;left:-15vw}
+.aurora::after{background:#173A8A;bottom:-30vw;right:-15vw;animation-delay:-13s}
 @keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(6vw,4vh) scale(1.15)}}
 .gridbg{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
   background-image:radial-gradient(rgba(146,166,255,.05) 1px,transparent 1px);background-size:26px 26px;
@@ -68,7 +69,9 @@ a{color:inherit}
 .top-title{font-family:var(--fd);font-size:16px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
 .top-sub{font-family:var(--fm);font-size:9.5px;color:var(--t3);letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
 .live{display:flex;align-items:center;gap:7px;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;color:var(--pos);
-  border:1px solid rgba(34,217,147,.25);background:rgba(34,217,147,.07);border-radius:999px;padding:5px 11px}
+  border:1px solid rgba(34,217,147,.25);background:rgba(34,217,147,.07);border-radius:999px;padding:5px 11px;white-space:nowrap}
+.live em{font-style:normal}
+@media(max-width:820px){.live em{display:none}}
 .live i{width:6px;height:6px;border-radius:50%;background:var(--pos);animation:blink 1.6s ease infinite}
 @keyframes blink{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,217,147,.5)}50%{opacity:.5;box-shadow:0 0 0 5px rgba(34,217,147,0)}}
 .clock{font-family:var(--fm);font-size:11px;color:var(--t2);margin-left:auto;white-space:nowrap}
@@ -106,7 +109,7 @@ a{color:inherit}
   padding:16px 16px 12px;overflow:hidden;transition:transform .2s,border-color .2s}
 .kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
 .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--acg);opacity:.55}
-.kpi.pos::before{background:var(--pos)}.kpi.amb::before{background:var(--amb)}.kpi.vio::before{background:var(--ac2)}
+.kpi.pos::before{background:var(--pos)}.kpi.amb::before{background:var(--amb)}.kpi.vio::before{background:var(--ac)}
 .klabel{font-family:var(--fm);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--t2);margin-bottom:8px}
 .kval{font-family:var(--fd);font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
 .ksub{font-size:10.5px;color:var(--t2);margin-top:7px;min-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -115,7 +118,7 @@ a{color:inherit}
 
 /* narrative bars */
 .nbar{display:flex;align-items:center;gap:11px;margin-bottom:9px}
-.nbar-term{width:132px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize}
+.nbar-term{width:158px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize}
 .nbar-track{flex:1;height:8px;border-radius:4px;background:var(--sur2);overflow:hidden}
 .nbar-fill{height:100%;border-radius:4px;background:var(--acg);width:0;transition:width .9s cubic-bezier(.2,.7,.25,1)}
 .nbar-n{font-family:var(--fm);font-size:10px;color:var(--t2);width:30px;text-align:right;flex-shrink:0}
@@ -126,11 +129,15 @@ a{color:inherit}
 .pt-name{width:96px;font-size:12px;font-weight:600;flex-shrink:0}
 .pt-track{flex:1;height:8px;border-radius:4px;background:var(--sur2);overflow:hidden}
 .pt-fill{height:100%;border-radius:4px;width:0;transition:width .9s cubic-bezier(.2,.7,.25,1)}
-.pt-pct{font-family:var(--fm);font-size:10.5px;color:var(--t1);width:40px;text-align:right;flex-shrink:0}
-.donutwrap{position:relative;height:190px;display:flex;align-items:center;justify-content:center}
-.donut-c{position:absolute;text-align:center;pointer-events:none}
-.donut-n{font-family:var(--fd);font-size:24px;font-weight:700}
-.donut-l{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;color:var(--t2);text-transform:uppercase}
+.pt-pct{font-family:var(--fm);font-size:10.5px;color:var(--t1);width:70px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+/* 100%-stacked share-of-voice bar — 2px surface gaps between segments */
+.sovstack{display:flex;gap:2px;height:30px;border-radius:8px;overflow:hidden;margin-top:4px}
+.sovseg{position:relative;min-width:6px;cursor:pointer;transition:flex-grow .8s cubic-bezier(.2,.7,.25,1),filter .15s;border-radius:3px}
+.sovseg:first-child{border-radius:8px 3px 3px 8px}
+.sovseg:last-child{border-radius:3px 8px 8px 3px}
+.sovseg:hover{filter:brightness(1.2)}
+.sovseg .sl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--fm);font-size:9.5px;font-weight:600;color:rgba(255,255,255,.92);pointer-events:none}
 
 /* wire / lists */
 .wire{display:flex;flex-direction:column}
@@ -142,6 +149,9 @@ a{color:inherit}
 .wi-t{font-size:13px;font-weight:500;color:var(--t0);line-height:1.45;display:block}
 .wi-d{font-size:11px;color:var(--t2);margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .wi-time{font-family:var(--fm);font-size:9.5px;color:var(--t3);flex-shrink:0;padding-top:3px;white-space:nowrap}
+.wi-sig{display:flex;align-items:center;gap:4px;flex-shrink:0;padding-top:5px}
+.wi-sig b{width:7px;height:7px;border-radius:50%;display:block}
+.wi-sig i{width:6px;height:6px;border-radius:2px;display:block}
 
 /* inputs */
 .bar{display:flex;gap:9px;margin-bottom:14px}
@@ -360,6 +370,19 @@ body.kiosk .kprog{display:block}
 .kdelta.up{color:var(--pos);background:rgba(34,217,147,.1)}
 .kdelta.dn{color:var(--neg);background:rgba(255,84,112,.1)}
 
+/* story clusters */
+.cluster{display:flex;gap:12px;align-items:flex-start;padding:11px 4px;border-bottom:1px solid var(--line);text-decoration:none;border-radius:8px;transition:background .15s}
+.cluster:hover{background:var(--sur)}
+.cluster:last-child{border-bottom:0}
+.cl-n{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ac);border:1px solid rgba(91,140,255,.3);
+  background:rgba(91,140,255,.08);border-radius:8px;padding:4px 8px;flex-shrink:0;font-variant-numeric:tabular-nums}
+.cl-body{flex:1;min-width:0}
+.cl-t{display:block;font-size:13px;font-weight:500;color:var(--t0);line-height:1.45}
+.cl-tone{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.cl-outs{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.cl-outs i{font-style:normal;font-family:var(--fm);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--t2);border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+
 /* clickable narrative */
 .nbar{cursor:pointer;border-radius:8px;padding:3px 5px;margin:0 -5px 6px;transition:background .15s}
 .nbar:hover{background:var(--sur2)}
@@ -499,9 +522,10 @@ body.kiosk .kprog{display:block}
             <div id="narrative"><div class="skel" style="height:180px"></div></div>
           </div>
           <div class="panel">
-            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>Share of Voice</div><span class="ptag">PARTY MENTIONS · 24H</span></div>
-            <div class="donutwrap"><canvas id="donut"></canvas><div class="donut-c"><div class="donut-n" id="donut-n">—</div><div class="donut-l">political stories</div></div></div>
-            <div id="ptybars" style="margin-top:8px"></div>
+            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>Share of Voice</div><span class="ptag" id="sov-total">PARTY MENTIONS · 72H</span></div>
+            <div class="sovstack" id="sov-stack" role="img" aria-label="Share of voice by party"></div>
+            <div id="ptybars" style="margin-top:16px"></div>
+            <div class="note" style="margin-top:12px">Tap a party for its full coverage profile — tone split, top outlets, day-over-day movement.</div>
           </div>
         </div>
 
@@ -514,6 +538,11 @@ body.kiosk .kprog{display:block}
             <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 4 18 3-9h6"/></svg>Tone by Party · Trend</div><span class="ptag">HEADLINE TONE · −1…+1</span></div>
             <div class="chartbox"><canvas id="ptone-chart"></canvas><div class="cbempty" id="ptone-empty">Party tone trends build from the same hourly snapshots.</div></div>
           </div>
+        </div>
+
+        <div class="panel">
+          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20"/><path d="M4 7h16v13H4z"/><path d="M9 11h6"/></svg>Top Stories</div><span class="ptag" id="cl-tag">CROSS-OUTLET CLUSTERS</span></div>
+          <div id="clusters"><div class="skel" style="height:52px;margin-bottom:8px"></div><div class="skel" style="height:52px"></div></div>
         </div>
 
         <div class="panel">
@@ -534,10 +563,20 @@ body.kiosk .kprog{display:block}
       <!-- ═══ NEWSROOM ═══ -->
       <section class="view" id="v-news">
         <div class="panel">
-          <div class="phead"><div class="ptitle">Newsroom</div><span class="ptag" id="news-count">LOADING…</span></div>
+          <div class="phead"><div class="ptitle">Newsroom</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn ghost" style="padding:7px 13px;font-size:11px" onclick="exportNewsCSV()" title="Export the current result set as CSV">↓ CSV</button>
+              <span class="ptag" id="news-count">LOADING…</span>
+            </div>
+          </div>
           <div class="bar">
-            <input class="inp" id="news-q" placeholder="Filter the wire — housing, Chalmers, nuclear, Medicare…" onkeydown="if(event.key==='Enter')loadNews()">
+            <input class="inp" id="news-q" placeholder="Search everything — registry feeds + the full Google News AU index…" onkeydown="if(event.key==='Enter')loadNews()">
             <button class="btn" style="padding:10px 18px" onclick="loadNews()">Search</button>
+          </div>
+          <div class="chips" id="news-time" style="margin-bottom:8px">
+            <button class="chip" onclick="setNewsWindow(6,this)">6h</button>
+            <button class="chip" onclick="setNewsWindow(24,this)">24h</button>
+            <button class="chip on" onclick="setNewsWindow(72,this)">72h</button>
           </div>
           <div class="chips" id="news-chips"></div>
           <div class="wire" id="news-list"><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div></div>
@@ -688,7 +727,7 @@ body.kiosk .kprog{display:block}
 let CLAUDE_KEY = localStorage.getItem('axiom_claude_key') || '';
 let WORKER_URL = localStorage.getItem('axiom_worker_url') || 'https://newsaus.heshan-998.workers.dev';
 let AT_PEOPLE  = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_at_people'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['Anthony Albanese','Sussan Ley','Larissa Waters','Pauline Hanson'];})();
-const AT_COLORS=['#5B8CFF','#FF5470','#22D993','#FFB454','#8B5CF6','#2DD4BF'];
+const AT_COLORS=['#5B8CFF','#FF5470','#22D993','#F0A64B','#22A0B6','#D5680B'];
 const PARTIES=[
   {key:'ALP',name:'Labor',color:'#E8354A',re:/\b(labor|albanese|alp|chalmers|plibersek|husic)\b/i},
   {key:'LNP',name:'Coalition',color:'#3E7BFA',re:/\b(coalition|liberal(s)?|lnp|sussan ley|littleproud|nationals|dutton)\b/i},
@@ -696,7 +735,7 @@ const PARTIES=[
   {key:'ONP',name:'One Nation',color:'#FF7A1A',re:/\b(one nation|pauline hanson)\b/i},
   {key:'IND',name:'Teals / Ind.',color:'#2DD4BF',re:/\b(teal(s)?|independent(s)?|pocock|steggall)\b/i},
 ];
-const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
+const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid holds hold unveils unveil pledges pledge calls call flags flag amid attacks attack blocks block push pushes demand demands announces announce warns warn slams slam backs back reveals reveal plans plan looms loom hits hit sets set gets get takes take makes make faces face eyes eye vows vow urges urge seeks seek deal deals talks talk week month year live latest breaking why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
 const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{}};
 
 const $=id=>document.getElementById(id);
@@ -786,6 +825,12 @@ function renderIntel(){
 
   // ── Auto-insights (rule-based, always live)
   const sigs=[];
+  // Baseline anomalies lead — the highest-value signal on the board
+  Object.keys(state.spikes||{}).forEach(k=>{
+    const s=state.spikes[k];
+    sigs.push({k:'ANOMALY',c:'neg',t:'<b>'+s.name+'</b> coverage is running <b>×'+(s.mu?(s.last/s.mu).toFixed(1):'∞')+
+      '</b> its historical baseline — '+s.last+' stories this hour vs ~'+s.mu+' typical'});
+  });
   const counts=PARTIES.map(p=>({name:p.name,n:state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length})).sort((a,b)=>b.n-a.n);
   const totP=counts.reduce((a,b)=>a+b.n,0);
   if(totP&&counts[0].n){
@@ -812,7 +857,7 @@ async function loadCore(){
     const d=await api('/allnews?max=110');
     state.news=d.items||[];
     clientEnrich();
-    renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();
+    renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();renderClusters();
     updateCtxBadge();renderStatus(d.generated);
   }catch(e){
     $('wire').innerHTML='<div class="err">'+esc(e.message)+'</div>';
@@ -840,7 +885,7 @@ async function loadSocial(){
     $('k-social-s').textContent=hr?('#'+state.tag+' posts in the last hour'):('recent #'+state.tag+' posts');
     const buckets=Array(12).fill(0);
     state.social.forEach(p=>{const h=(Date.now()-Date.parse(p.date))/3600e3;if(h<12&&h>=0)buckets[11-Math.floor(h)]++;});
-    spark('sp-social',buckets,'#8B5CF6');
+    spark('sp-social',buckets,'#5B8CFF');
     renderSocial();updateCtxBadge();
   }catch(e){$('sp-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';$('k-social').textContent='—';}
 }
@@ -882,15 +927,22 @@ function renderTicker(){
   t.innerHTML=html+html; // duplicated for seamless loop
 }
 function keywords(items,n){
-  const freq={};
+  // Phrase-first extraction: bigrams of consecutive non-stopwords beat lone
+  // verbs ("housing accord" over "unveils"); unigrams fill remaining slots.
+  const bi={},uni={};
   items.forEach(it=>{
-    String(it.title||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').split(/\s+/).forEach(w=>{
-      w=w.replace(/^['-]+|['-]+$/g,'');
-      if(w.length<4||STOP.has(w))return;
-      freq[w]=(freq[w]||0)+1;
+    const toks=String(it.title||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').split(/\s+/)
+      .map(w=>w.replace(/^['-]+|['-]+$/g,''))
+      .filter(w=>w.length>=3&&!STOP.has(w));
+    toks.forEach((w,i)=>{
+      if(w.length>=4)uni[w]=(uni[w]||0)+1;
+      if(i<toks.length-1)bi[w+' '+toks[i+1]]=(bi[w+' '+toks[i+1]]||0)+1;
     });
   });
-  return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,n);
+  const phrases=Object.entries(bi).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,n);
+  const used=new Set(phrases.flatMap(([p])=>p.split(' ')));
+  const singles=Object.entries(uni).filter(([w])=>!used.has(w)).sort((a,b)=>b[1]-a[1]);
+  return phrases.concat(singles).slice(0,n);
 }
 function renderNarrative(){
   const kw=keywords(state.news,10);
@@ -905,22 +957,22 @@ function renderNarrative(){
 function renderParties(){
   const counts=PARTIES.map(p=>Object.assign({},p,{n:state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length}));
   const total=counts.reduce((a,b)=>a+b.n,0);
-  countUp($('donut-n'),total);
+  const tt=$('sov-total');if(tt)tt.textContent=total+' PARTY-TAGGED STORIES · 72H';
+  // 100%-stacked bar: flex-grow = share; ≥8% segments carry a direct % label
+  const st=$('sov-stack');
+  if(st)st.innerHTML=counts.filter(p=>p.n>0).map(p=>{
+    const pct=total?Math.round(p.n/total*100):0;
+    return '<div class="sovseg" style="flex-grow:'+Math.max(p.n,0.001)+';background:'+p.color+'" '+
+      'onclick="openParty(\''+p.key+'\')" title="'+p.name+' — '+pct+'%">'+
+      (pct>=8?'<span class="sl">'+pct+'%</span>':'')+'</div>';
+  }).join('')||'<div class="empty" style="width:100%">No party-tagged coverage yet.</div>';
   $('ptybars').innerHTML=counts.map(p=>{
     const pct=total?Math.round(p.n/total*100):0;
     const sig=(state.spikes&&state.spikes[p.key])?'<span class="pt-sig">⚡ SPIKE</span>':'';
-    return '<div class="pt-row" onclick="openParty(\''+p.key+'\')" title="Open coverage profile"><span class="pt-dot" style="background:'+p.color+'"></span><span class="pt-name">'+p.name+sig+'</span><div class="pt-track"><div class="pt-fill" data-w="'+pct+'" style="background:'+p.color+'"></div></div><span class="pt-pct">'+pct+'%</span></div>';}).join('');
+    return '<div class="pt-row" onclick="openParty(\''+p.key+'\')" title="Open coverage profile"><span class="pt-dot" style="background:'+p.color+'"></span><span class="pt-name">'+p.name+sig+'</span><div class="pt-track"><div class="pt-fill" data-w="'+pct+'" style="background:'+p.color+'"></div></div><span class="pt-pct">'+p.n+' · '+pct+'%</span></div>';}).join('');
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     document.querySelectorAll('#ptybars .pt-fill').forEach(el=>el.style.width=el.dataset.w+'%');
   }));
-  if(window.Chart){
-    killChart('donut');
-    state.charts.donut=new Chart($('donut'),{type:'doughnut',
-      data:{labels:counts.map(p=>p.name),datasets:[{data:counts.map(p=>p.n||0.001),backgroundColor:counts.map(p=>p.color),borderWidth:0,hoverOffset:6}]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'74%',plugins:{legend:{display:false}},animation:{animateRotate:true,duration:900},
-        onClick:(e,els)=>{if(els.length)openParty(counts[els[0].index].key);},
-        onHover:(e,els)=>{e.native.target.style.cursor=els.length?'pointer':'default';}}});
-  }
 }
 function renderWire(){
   const items=state.news.slice(0,8);
@@ -928,10 +980,54 @@ function renderWire(){
     '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span></span><span class="wi-time">'+ago(it.date)+'</span></a>').join('')
     :'<div class="empty">The wire is quiet.</div>';
 }
+/* ── STORY CLUSTERS: group same-event coverage across outlets ────────── */
+function titleTokens(t){
+  return new Set(String(t||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').split(/\s+/)
+    .map(w=>w.replace(/^['-]+|['-]+$/g,'')).filter(w=>w.length>=4&&!STOP.has(w)));
+}
+function clusterNews(items){
+  const pool=items.map(it=>({it,tok:titleTokens(it.title)})).filter(x=>x.tok.size>=3);
+  const clusters=[];
+  pool.forEach(x=>{
+    let best=null,bestSim=0;
+    clusters.forEach(c=>{
+      const inter=[...x.tok].filter(w=>c.tok.has(w)).length;
+      const sim=inter/Math.min(x.tok.size,c.tok.size);
+      if(sim>bestSim){bestSim=sim;best=c;}
+    });
+    if(best&&bestSim>=0.5){best.items.push(x.it);x.tok.forEach(w=>best.tok.add(w));}
+    else clusters.push({items:[x.it],tok:new Set(x.tok)});
+  });
+  return clusters.filter(c=>new Set(c.items.map(i=>i.src)).size>=2)
+    .sort((a,b)=>b.items.length-a.items.length);
+}
+function renderClusters(){
+  const el=$('clusters');if(!el)return;
+  const cl=clusterNews(state.news).slice(0,5);
+  const tg=$('cl-tag');
+  if(!cl.length){
+    el.innerHTML='<div class="empty">No multi-outlet stories in the current window — clusters form when two or more outlets converge on the same event.</div>';
+    if(tg)tg.textContent='CROSS-OUTLET CLUSTERS';
+    return;
+  }
+  if(tg)tg.textContent=cl.length+' STORIES RUNNING ACROSS OUTLETS';
+  el.innerHTML=cl.map(c=>{
+    const rep=c.items.reduce((a,b)=>(b.title||'').length>(a.title||'').length?b:a);
+    const outs=[...new Set(c.items.map(i=>i.src))];
+    const tones=c.items.map(i=>typeof i.tone==='number'?i.tone:clientTone(i));
+    const avg=tones.reduce((a,b)=>a+b,0)/tones.length;
+    const tcol=avg>0.15?'var(--pos)':avg<-0.15?'var(--neg)':'var(--t3)';
+    return '<a class="cluster" href="'+esc(rep.link||'#')+'" target="_blank" rel="noopener">'+
+      '<span class="cl-n" title="'+outs.length+' outlets on this story">'+outs.length+'×</span>'+
+      '<span class="cl-body"><span class="cl-t"><span class="cl-tone" style="background:'+tcol+'"></span>'+esc(rep.title)+'</span>'+
+      '<span class="cl-outs">'+outs.slice(0,5).map(o=>'<i>'+esc(o)+'</i>').join('')+(outs.length>5?'<i>+'+(outs.length-5)+'</i>':'')+'</span></span>'+
+      '<span class="wi-time">'+ago(rep.date)+'</span></a>';
+  }).join('');
+}
 function renderStatus(gen){
   const el=document.querySelector('.live');if(!el)return;
   const n=new Set(state.news.map(x=>x.src)).size;
-  el.innerHTML='<i></i>LIVE · '+n+' SOURCES';
+  el.innerHTML='<i></i>LIVE<em> · '+n+' SOURCES</em>';
   el.title='Last sync '+new Date(gen||Date.now()).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
 }
 
@@ -947,11 +1043,16 @@ function renderHistory(){
   const pts=state.history||[];
   const ok=pts.length>=3;
   const se=$('sov-empty'),te=$('ptone-empty');
-  if(se)se.style.display=ok?'none':'flex';
-  if(te)te.style.display=ok?'none':'flex';
   const ht=$('hist-tag');if(ht)ht.textContent=ok?(pts.length+' HOURLY SNAPSHOTS'):'ACCUMULATING';
   computeBaselines(pts);
-  if(!ok||!window.Chart||!$('sov-chart'))return;
+  // Empty states stay visible until we actually draw — never a silent blank panel.
+  if(!ok||!window.Chart||!$('sov-chart')){
+    const msg=ok?'Chart engine unavailable — check your connection and refresh.':null;
+    [se,te].forEach(el=>{if(el){el.style.display='flex';if(msg)el.textContent=msg;}});
+    return;
+  }
+  if(se)se.style.display='none';
+  if(te)te.style.display='none';
   const labels=pts.map(p=>new Date(p.t).toLocaleString('en-AU',{weekday:'short',hour:'numeric'}));
   const mk=get=>PARTIES.map(P=>{const k=PKEY[P.key];
     return{label:P.name,data:pts.map(p=>get(p,k)),borderColor:P.color,backgroundColor:P.color+'22',
@@ -967,11 +1068,12 @@ function renderHistory(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
       plugins:{legend:LEGEND},scales:{x:AXISX,y:{...AXIS,suggestedMin:-1,suggestedMax:1}}}});
 }
-/* Baseline anomaly detection: latest point vs mean+2σ of its own history */
+/* Baseline anomaly detection: latest point vs mean+2σ of its own history.
+   Stores results on state; renderIntel (the single owner of #sigs) and
+   renderParties (SPIKE badges) surface them — nothing writes #sigs here. */
 function computeBaselines(pts){
   state.spikes={};
   if(!pts||pts.length<8)return;
-  let fired=false;
   PARTIES.forEach(P=>{
     const k=PKEY[P.key];
     const series=pts.map(p=>p.p&&p.p[k]||0);
@@ -979,16 +1081,7 @@ function computeBaselines(pts){
     const mu=prior.reduce((a,b)=>a+b,0)/prior.length;
     const sd=Math.sqrt(prior.reduce((a,b)=>a+(b-mu)*(b-mu),0)/prior.length)||1;
     const last=series[series.length-1];
-    if(last>mu+2*sd&&last>=4){
-      state.spikes[P.key]={last,mu:+mu.toFixed(1)};
-      if(!fired&&$('sigs')){
-        fired=true;
-        $('sigs').insertAdjacentHTML('afterbegin',
-          '<div class="sig neg"><span class="sig-k">ANOMALY</span><span class="sig-t"><b>'+P.name+
-          '</b> coverage is running <b>×'+(mu?(last/mu).toFixed(1):'∞')+'</b> its baseline — '+last+
-          ' stories this hour vs ~'+state.spikes[P.key].mu+' typical</span></div>');
-      }
-    }
+    if(last>mu+2*sd&&last>=4)state.spikes[P.key]={name:P.name,last,mu:+mu.toFixed(1)};
   });
   if(Object.keys(state.spikes).length&&state.news.length)renderParties();
 }
@@ -1077,21 +1170,52 @@ function openMonitor(i){
 }
 
 /* ── NEWSROOM ── */
+let NEWS_WINDOW=72,NEWS_LAST=[];
+function newsWindowFilter(items){
+  const cut=Date.now()-NEWS_WINDOW*3600e3;
+  return items.filter(it=>{const t=Date.parse(it.date)||0;return !t||t>=cut;});
+}
+function setNewsWindow(h,btn){
+  NEWS_WINDOW=h;
+  document.querySelectorAll('#news-time .chip').forEach(b=>b.classList.toggle('on',b===btn));
+  renderNews();
+}
+function rowSignal(it){
+  const tone=typeof it.tone==='number'?it.tone:clientTone(it);
+  const tcol=tone>0?'var(--pos)':tone<0?'var(--neg)':'var(--t3)';
+  const pd=PARTIES.filter(p=>p.re.test(it.title+' '+(it.desc||''))).slice(0,3)
+    .map(p=>'<i style="background:'+p.color+'" title="'+p.name+'"></i>').join('');
+  return '<span class="wi-sig"><b style="background:'+tcol+'" title="headline tone"></b>'+pd+'</span>';
+}
 function renderNews(list){
-  const items=list||state.news;
+  const items=newsWindowFilter(list||state.news);
+  NEWS_LAST=items;
   const srcs={};state.news.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
-  $('news-count').textContent=Object.keys(srcs).length+' SOURCES · '+state.news.length+' STORIES';
+  $('news-count').textContent=Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
       '<button class="chip" onclick="filterSrc(\''+esc(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
   $('news-list').innerHTML=items.length?items.slice(0,60).map(it=>
-    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span><span class="wi-time">'+ago(it.date)+'</span></a>').join('')
-    :'<div class="empty">Nothing matched.</div>';
+    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span></a>').join('')
+    :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
 }
 function filterSrc(src,btn){
   document.querySelectorAll('#news-chips .chip').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
   renderNews(src?state.news.filter(n=>n.src===src):null);
+}
+function exportNewsCSV(){
+  const rows=[['date','source','title','tone','parties','link']].concat(NEWS_LAST.map(it=>{
+    const tone=typeof it.tone==='number'?it.tone:clientTone(it);
+    const parties=PARTIES.filter(p=>p.re.test(it.title+' '+(it.desc||''))).map(p=>p.key).join('|');
+    return [it.date||'',it.src||'',it.title||'',tone,parties,it.link||''];
+  }));
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='axiom-wire-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+  toast('Exported '+NEWS_LAST.length+' stories to CSV');
 }
 async function loadNews(){
   const q=$('news-q').value.trim();
@@ -1225,10 +1349,29 @@ function digest(){
   const so=state.social.slice(0,8).map(p=>'- @'+(p.handle||p.author)+': '+p.text.slice(0,140)).join('\n')||'(none)';
   const pty=PARTIES.map(p=>p.name+': '+state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length+' mentions').join(' · ');
   const tone=state.tone.length?(state.tone.reduce((a,b)=>a+b,0)/state.tone.length).toFixed(2):'n/a';
+  // Historical context: SOV movement over the last 24h of snapshots + anomalies
+  let hist='(no history yet)';
+  const pts=state.history||[];
+  if(pts.length>=2){
+    const last=pts[pts.length-1],back=pts[Math.max(0,pts.length-25)];
+    hist=PARTIES.map(P=>{const k=PKEY[P.key];
+      const a=back.p&&back.p[k]||0,b=last.p&&last.p[k]||0;
+      const d=b-a;return P.name+': '+b+'/hr ('+(d>=0?'+':'')+d+' vs 24h ago)';}).join(' · ');
+  }
+  const anom=Object.keys(state.spikes||{}).length
+    ?Object.values(state.spikes).map(s=>s.name+' running ×'+(s.mu?(s.last/s.mu).toFixed(1):'∞')+' its baseline').join('; ')
+    :'none — all parties within historical baselines';
+  const mons=(typeof MONITORS!=='undefined'&&MONITORS.length)
+    ?MONITORS.map(m=>{const h=monMatches(m);const f=h.filter(it=>(Date.parse(it.date)||0)>(m.seen||0)).length;
+      return m.q+' ('+h.length+' stories'+(f?', '+f+' NEW':'')+')';}).join(' · ')
+    :'(none set)';
   return 'LIVE AUSTRALIAN POLITICAL SIGNALS (fetched minutes ago):\n\n== LATEST HEADLINES ==\n'+heads+
     '\n\n== GOOGLE TRENDS AU (top searches now) ==\n'+tr+
     '\n\n== SOCIAL CHATTER (#'+state.tag+' fediverse) ==\n'+so+
     '\n\n== PARTY SHARE OF VOICE (24h headlines) ==\n'+pty+
+    '\n\n== SOV TREND (hourly snapshots, latest vs 24h ago) ==\n'+hist+
+    '\n\n== COVERAGE ANOMALIES (vs each party\'s own baseline) ==\n'+anom+
+    '\n\n== USER MONITORS ==\n'+mons+
     '\n\n== MEDIA TONE (GDELT 7d avg, -10..+10) ==\n'+tone;
 }
 const MODES={
@@ -1555,7 +1698,7 @@ function tick(){
   $('clock').textContent=d.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})+' · '+d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
 }
 tick();setInterval(tick,30e3);
-const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 23 NATIONAL NEWS FEEDS','READING SEARCH & SOCIAL SIGNALS'];
+const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 33 NATIONAL NEWS FEEDS','READING SEARCH & SOCIAL SIGNALS'];
 let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
 function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
 setTimeout(hideSplash,2600);
