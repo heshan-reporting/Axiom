@@ -872,9 +872,25 @@ async function loadNews(){
   const q=$('news-q').value.trim();
   $('news-list').innerHTML='<div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div>';
   try{
-    const d=await api('/allnews?max=110'+(q?'&q='+encodeURIComponent(q):''));
-    if(q){renderNews(d.items||[]);}
-    else{state.news=d.items||[];renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();}
+    if(q){
+      // Topical search: registry feeds + the full Google News AU index, merged.
+      const [a,b]=await Promise.allSettled([
+        api('/allnews?max=110&q='+encodeURIComponent(q)),
+        api('/newsq?q='+encodeURIComponent(q)+'&hours=72&max=40')
+      ]);
+      let items=[];
+      if(a.status==='fulfilled')items.push(...(a.value.items||[]));
+      if(b.status==='fulfilled')items.push(...(b.value.items||[]).map(it=>({...it,src:it.outlet||'google news'})));
+      const seen=new Set();
+      items=items.filter(it=>{const k=(it.title||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().slice(0,80);
+        if(seen.has(k))return false;seen.add(k);return true;});
+      items.sort((x,y)=>(Date.parse(y.date)||0)-(Date.parse(x.date)||0));
+      if(!items.length&&a.status==='rejected')throw new Error(a.reason&&a.reason.message||'Search failed');
+      renderNews(items);
+    }else{
+      const d=await api('/allnews?max=110');
+      state.news=d.items||[];renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();
+    }
   }catch(e){$('news-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
 }
 

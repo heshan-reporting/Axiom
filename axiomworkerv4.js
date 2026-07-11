@@ -18,8 +18,15 @@
  * ║  GET /reddit-comments?p=      Reddit post comments proxy                ║
  * ║  GET /guardian?q=             Guardian AU API                           ║
  * ║  GET /rss?feed=               Single AU feed from AU_FEEDS (KV 10min)    ║
- * ║  GET /allnews?q=&max=         Aggregate 20+ AU news feeds, merged +     ║
- * ║                               keyword-filtered, newest-first (KV 5min)  ║
+ * ║  GET /allnews?q=&max=&hours=  Aggregate 30+ AU news feeds — merged,     ║
+ * ║                &debug=1       keyword-filtered, ISO dates + age(min),   ║
+ * ║                               freshness window, wire-copy dedupe, party ║
+ * ║                               + tone enrichment, feed circuit breaker,  ║
+ * ║                               stale-while-revalidate (KV 4min).         ║
+ * ║                               debug=1 → per-feed {ok,status,count,ms}.  ║
+ * ║  GET /newsq?q=&hours=&max=    Topical Google News AU search — covers    ║
+ * ║                               every outlet Google indexes, when: window,║
+ * ║                               outlet extraction, enrichment (KV 5min).  ║
  * ║  GET /whirlpool?q=            Whirlpool forum scrape                    ║
  * ║  GET /bigfooty?q=             BigFooty AU Politics forum scrape         ║
  * ║  GET /hotcopper?q=            HotCopper Politics board scrape           ║
@@ -182,6 +189,120 @@ async function kvGet(kv, key) {
 }
 async function kvPut(kv, key, val, ttl = 300) {
   try { await kv?.put(key, val, { expirationTtl: ttl }); } catch {}
+}
+
+/** ── Item enrichment: party tagging + naive headline tone ─────────────── */
+const PARTY_RES = {
+  alp: /\b(labor|albanese|alp|chalmers|plibersek|marles|wong)\b/i,
+  lnp: /\b(coalition|liberal(s)?|nationals?|ley|littleproud|taylor|dutton|lnp)\b/i,
+  grn: /\b(greens?|bandt|waters|hanson-young)\b/i,
+  ind: /\b(teal(s)?|independents?|pocock|crossbench)\b/i,
+  on:  /\b(one nation|hanson|pauline)\b/i,
+};
+const TONE_POS = /\b(win|wins|boost|surge|gain|deal|success|approve|backs?|support|relief|record high|breakthrough|praised?)\b/i;
+const TONE_NEG = /\b(crisis|scandal|slam(s|med)?|fail(s|ure)?|blast(s|ed)?|anger|fury|chaos|resign|corrupt|attack(s|ed)?|warn(s|ing)?|cuts?|collapse|probe|leak)\b/i;
+function enrichItem(it) {
+  const hay = it.title + ' ' + (it.desc || '');
+  const parties = [];
+  for (const k in PARTY_RES) if (PARTY_RES[k].test(hay)) parties.push(k);
+  if (parties.length) it.parties = parties;
+  it.tone = TONE_NEG.test(hay) ? -1 : TONE_POS.test(hay) ? 1 : 0;
+  return it;
+}
+
+/** ── Circuit breaker: skip feeds that keep failing (KV-persisted) ─────── */
+const CB_THRESHOLD = 4;              // consecutive failures before tripping
+const CB_COOLDOWN  = 4 * 3600000;    // stay tripped for 4 hours
+async function cbLoad(kv)  { try { return JSON.parse(await kvGet(kv, 'feed_cb') || '{}') || {}; } catch { return {}; } }
+async function cbSave(kv, cb) { await kvPut(kv, 'feed_cb', JSON.stringify(cb), 86400); }
+
+/**
+ * Build the aggregated AU news payload. Shared by the /allnews route, the
+ * stale-while-revalidate background refresh, and the cron pre-warm.
+ * Returns the JSON string (and writes it to KV unless debug).
+ */
+async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false } = {}) {
+  const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+  const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
+  const now  = Date.now();
+  const keys = Object.keys(AU_FEEDS);
+  const cb   = await cbLoad(env.AXIOM_KV);
+  const health = [];
+
+  const results = await Promise.allSettled(keys.map(async (key) => {
+    const trip = cb[key];
+    if (!debug && trip && trip.n >= CB_THRESHOLD && now - trip.t < CB_COOLDOWN) {
+      health.push({ src: key, ok: false, skipped: true, fails: trip.n, ms: 0 });
+      return [];
+    }
+    const t0 = Date.now();
+    try {
+      const r = await fetch(AU_FEEDS[key], {
+        headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
+        signal: AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined,
+        cf: { cacheTtl: 120, cacheEverything: true },
+      });
+      if (!r.ok) { health.push({ src: key, ok: false, status: r.status, ms: Date.now() - t0 }); return []; }
+      const xml   = await r.text();
+      const items = parseFeedXml(xml).map(it => ({ src: key, ...it }));
+      health.push({ src: key, ok: items.length > 0, status: r.status, count: items.length, ms: Date.now() - t0 });
+      return items;
+    } catch (e) {
+      health.push({ src: key, ok: false, error: String(e && e.name || e).slice(0, 40), ms: Date.now() - t0 });
+      return [];
+    }
+  }));
+
+  // Update circuit-breaker state: consecutive fails trip; any success resets.
+  let cbChanged = false;
+  health.forEach(h => {
+    if (h.skipped) return;
+    if (h.ok) { if (cb[h.src]) { delete cb[h.src]; cbChanged = true; } }
+    else { cb[h.src] = { n: ((cb[h.src] || {}).n || 0) + 1, t: now }; cbChanged = true; }
+  });
+  if (cbChanged) await cbSave(env.AXIOM_KV, cb);
+
+  let items = [];
+  results.forEach((res) => { if (res.status === 'fulfilled') items.push(...res.value); });
+
+  // Normalise dates → ISO + age (minutes). Undated items keep '' and rank last.
+  items.forEach(it => {
+    const t = Date.parse(it.date || '');
+    if (!isNaN(t)) { it.date = new Date(t).toISOString(); it.age = Math.max(0, Math.round((now - t) / 60000)); it._t = t; }
+    else { it.date = ''; it.age = null; it._t = 0; }
+  });
+
+  // Freshness window: drop dated items older than `hours`; keep undated.
+  const cutoff = now - hours * 3600000;
+  items = items.filter(it => it._t === 0 || it._t >= cutoff);
+
+  // keyword filter (any word matches title or description)
+  if (qw.length) {
+    items = items.filter(it => {
+      const hay = (it.title + ' ' + (it.desc || '')).toLowerCase();
+      return qw.some(w => hay.indexOf(w) !== -1);
+    });
+  }
+
+  // Cross-outlet dedupe of syndicated wire copy (normalised-title key).
+  const seenTitle = new Set();
+  items = items.filter(it => {
+    const k = it.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+    if (seenTitle.has(k)) return false;
+    seenTitle.add(k); return true;
+  });
+
+  // Newest first (undated last), cap, enrich with parties + tone.
+  items.sort((a, b) => b._t - a._t);
+  items = items.slice(0, max);
+  items.forEach(it => { delete it._t; enrichItem(it); });
+
+  const sources = health.filter(h => h.ok).map(h => ({ src: h.src, count: h.count || 0 }));
+  const payload = { items, sources, feeds: keys.length, generated: new Date(now).toISOString(), window_hours: hours };
+  if (debug) payload.health = health.sort((a, b) => (b.ok ? 1 : 0) - (a.ok ? 1 : 0) || (b.count || 0) - (a.count || 0));
+  const out = JSON.stringify(payload);
+  if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
+  return out;
 }
 
 /** Safe fetch that never throws — returns { ok, html, status } */
@@ -1126,7 +1247,7 @@ async function fetchDiscourseJSON(baseUrl, query) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     // Always add CORS to every response including errors
     const addCORS = (resp) => {
       const r = new Response(resp.body, resp);
@@ -1369,86 +1490,73 @@ export default {
 
     // ── Aggregate AU news across the whole feed registry (one request) ──
     // GET /allnews?q=<keywords>&max=<n>&hours=<h>&debug=1
-    //   Time-sensitive: ISO dates + per-item age (minutes), freshness window
-    //   (hours=, default 72), syndicated wire-copy dedupe across outlets,
-    //   and a per-feed health report (debug=1 bypasses cache and reports
-    //   status/latency/count for every feed in the registry).
+    //   Time-sensitive ISO dates + age, freshness window, wire-copy dedupe,
+    //   party/tone enrichment, per-feed circuit breaker, and debug=1 health.
+    //   Served stale-while-revalidate: cached snapshots return instantly and
+    //   a background rebuild refreshes them once they pass half-life.
     if (path === '/allnews') {
       const q     = (reqUrl.searchParams.get('q') || '').toLowerCase();
       const max   = Math.min(parseInt(reqUrl.searchParams.get('max') || '60', 10) || 60, 120);
       const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '72', 10) || 72, 720);
       const debug = reqUrl.searchParams.get('debug') === '1';
-      const qw    = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
+      const opts  = { q, max, hours, debug };
 
-      const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
       if (!debug) {
-        const cached = await kvGet(env.AXIOM_KV, cacheKey);
-        if (cached) return new Response(cached, { headers: CORS });
-      }
-
-      const now  = Date.now();
-      const keys = Object.keys(AU_FEEDS);
-      const health = [];
-      const results = await Promise.allSettled(keys.map(async (key) => {
-        const t0 = Date.now();
-        try {
-          const r = await fetch(AU_FEEDS[key], {
-            headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
-            signal: AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined,
-            cf: { cacheTtl: 120, cacheEverything: true },
-          });
-          if (!r.ok) { health.push({ src: key, ok: false, status: r.status, ms: Date.now() - t0 }); return []; }
-          const xml   = await r.text();
-          const items = parseFeedXml(xml).map(it => ({ src: key, ...it }));
-          health.push({ src: key, ok: items.length > 0, status: r.status, count: items.length, ms: Date.now() - t0 });
-          return items;
-        } catch (e) {
-          health.push({ src: key, ok: false, error: String(e && e.name || e).slice(0, 40), ms: Date.now() - t0 });
-          return [];
+        const cached = await kvGet(env.AXIOM_KV, `allnews2_${q || 'all'}_${max}_${hours}`);
+        if (cached) {
+          // Serve instantly; refresh in the background once older than 2 min.
+          try {
+            const gen = Date.parse(JSON.parse(cached).generated || 0) || 0;
+            if (ctx && Date.now() - gen > 120000) ctx.waitUntil(buildAllNews(env, opts).catch(() => {}));
+          } catch (e) {}
+          return new Response(cached, { headers: CORS });
         }
-      }));
-
-      let items = [];
-      results.forEach((res) => { if (res.status === 'fulfilled') items.push(...res.value); });
-
-      // Normalise dates → ISO + age (minutes). Undated items keep '' and rank last.
-      items.forEach(it => {
-        const t = Date.parse(it.date || '');
-        if (!isNaN(t)) { it.date = new Date(t).toISOString(); it.age = Math.max(0, Math.round((now - t) / 60000)); it._t = t; }
-        else { it.date = ''; it.age = null; it._t = 0; }
-      });
-
-      // Freshness window: drop dated items older than `hours`; keep undated.
-      const cutoff = now - hours * 3600000;
-      items = items.filter(it => it._t === 0 || it._t >= cutoff);
-
-      // keyword filter (any word matches title or description)
-      if (qw.length) {
-        items = items.filter(it => {
-          const hay = (it.title + ' ' + (it.desc || '')).toLowerCase();
-          return qw.some(w => hay.indexOf(w) !== -1);
-        });
       }
-
-      // Cross-outlet dedupe of syndicated wire copy (normalised-title key).
-      const seenTitle = new Set();
-      items = items.filter(it => {
-        const k = it.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
-        if (seenTitle.has(k)) return false;
-        seenTitle.add(k); return true;
-      });
-
-      // Newest first (undated last), then cap.
-      items.sort((a, b) => b._t - a._t);
-      items = items.slice(0, max);
-      items.forEach(it => { delete it._t; });
-
-      const sources = health.filter(h => h.ok).map(h => ({ src: h.src, count: h.count || 0 }));
-      const payload = { items, sources, feeds: keys.length, generated: new Date(now).toISOString(), window_hours: hours };
-      if (debug) payload.health = health.sort((a, b) => (b.ok ? 1 : 0) - (a.ok ? 1 : 0) || (b.count || 0) - (a.count || 0));
-      const out = JSON.stringify(payload);
-      if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
+      const out = await buildAllNews(env, opts);
       return new Response(out, { headers: CORS });
+    }
+
+    // ── Topical time-sensitive search across Google News AU ──────────────
+    // GET /newsq?q=<query>&hours=<h>&max=<n>
+    //   Covers every outlet Google indexes (not just the registry) for
+    //   arbitrary topics — ideal for grounding Analyst answers. Uses the
+    //   Google News RSS search endpoint with an AU locale + when: window.
+    if (path === '/newsq') {
+      const qq    = (reqUrl.searchParams.get('q') || '').trim();
+      if (!qq) return jsonResp({ error: 'q_required' }, 400);
+      const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '48', 10) || 48, 168);
+      const max   = Math.min(parseInt(reqUrl.searchParams.get('max') || '30', 10) || 30, 60);
+      const cacheKey = `newsq_${qq.toLowerCase()}_${hours}_${max}`;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+      try {
+        const when = hours <= 24 ? `when:${hours}h` : `when:${Math.ceil(hours / 24)}d`;
+        const gnUrl = 'https://news.google.com/rss/search?q=' +
+          encodeURIComponent(qq + ' ' + when) + '&hl=en-AU&gl=AU&ceid=AU:en';
+        const r = await fetch(gnUrl, {
+          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+        });
+        if (!r.ok) return jsonResp({ error: `gnews_${r.status}` }, 502);
+        const now = Date.now();
+        let items = parseFeedXml(await r.text()).map(it => {
+          const t = Date.parse(it.date || '');
+          const out = { src: 'gnews', ...it };
+          if (!isNaN(t)) { out.date = new Date(t).toISOString(); out.age = Math.max(0, Math.round((now - t) / 60000)); }
+          else { out.date = ''; out.age = null; }
+          // Google News titles end " - Outlet Name" — surface the outlet.
+          const m = out.title.match(/\s[-–]\s([^-–]{2,40})$/);
+          if (m) { out.outlet = m[1].trim(); out.title = out.title.slice(0, m.index).trim(); }
+          return enrichItem(out);
+        });
+        items.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+        items = items.slice(0, max);
+        const out = JSON.stringify({ items, query: qq, window_hours: hours, generated: new Date(now).toISOString() });
+        await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+        return new Response(out, { headers: CORS });
+      } catch (e) {
+        return jsonResp({ error: 'newsq_failed', detail: String(e).slice(0, 80) }, 502);
+      }
     }
 
     if (path === '/whirlpool') {
@@ -2419,6 +2527,9 @@ export default {
 // ══════════════════════════════════════════════════════════════════════════════
 async function handleScheduled(env) {
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
+
+  // Pre-warm the default /allnews snapshot so dashboard loads are instant.
+  try { await buildAllNews(env, { q: '', max: 60, hours: 72 }); } catch (e) {}
 
   // Default watchlist topics — overridable via KV
   const savedTopics = await kvGet(env.AXIOM_KV, 'auto_watchlist');
