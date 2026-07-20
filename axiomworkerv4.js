@@ -18,8 +18,9 @@
  * ║  GET /reddit-comments?p=      Reddit post comments proxy                ║
  * ║  GET /guardian?q=             Guardian AU API                           ║
  * ║  GET /rss?feed=               Single AU feed from AU_FEEDS (KV 10min)    ║
- * ║  GET /allnews?q=&max=&hours=  Aggregate 30+ AU news feeds — merged,     ║
- * ║                &debug=1       keyword-filtered, ISO dates + age(min),   ║
+ * ║  GET /allnews?q=&max=&hours=  Aggregate 50+ AU news feeds (news, finance,║
+ * ║                &debug=1       econ, think-tanks, topical sweeps) merged, ║
+ * ║                               keyword-filtered, ISO dates + age(min),   ║
  * ║                               freshness window, wire-copy dedupe, party ║
  * ║                               + tone enrichment, feed circuit breaker,  ║
  * ║                               stale-while-revalidate (KV 4min).         ║
@@ -166,9 +167,34 @@ const AU_FEEDS = {
   theklaxon:     'https://theklaxon.com.au/feed/',                        // investigative
   convo_pol:     'https://theconversation.com/au/politics/articles.atom',
   monthly:       'https://www.themonthly.com.au/rss.xml',
-  // Google News AU political sweeps — huge recall across outlets we don't poll directly
+  // ── Finance / economy with a political nexus (v8) ──
+  afr_pol:       'https://www.afr.com/rss/politics',                        // AFR federal politics
+  afr_economy:   'https://www.afr.com/rss/policy/economy',                  // AFR economy & policy
+  macrobusiness: 'https://www.macrobusiness.com.au/feed/',                  // macro/econ/housing analysis
+  convo_business:'https://theconversation.com/au/business/articles.atom',   // business & economy
+  abc_business:  'https://www.abc.net.au/news/feed/51892/rss.xml',          // ABC Business
+  guardian_biz:  'https://www.theguardian.com/australia-news/australian-economy/rss', // Guardian AU economy
+  smartcompany:  'https://www.smartcompany.com.au/feed/',                   // SME / business policy
+  investordaily: 'https://www.investordaily.com.au/feed',                   // funds / super / regulation
+  // ── Economic institutions & official releases ──
+  rba:           'https://www.rba.gov.au/rss/rss-cb-media-releases.xml',    // Reserve Bank media releases
+  // ── Think-tanks & policy institutes ──
+  lowy:          'https://www.lowyinstitute.org/the-interpreter/rss.xml',   // foreign policy / Interpreter
+  grattan:       'https://grattan.edu.au/feed/',                            // Grattan Institute
+  ausinstitute:  'https://australiainstitute.org.au/feed/',                 // The Australia Institute
+  insidestory:   'https://insidestory.org.au/feed/',                        // policy long-form
+  // ── Google News AU topical sweeps — wide recall on politics-adjacent themes ──
   gnews_auspol:  'https://news.google.com/rss/search?q=australian%20politics&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_parl:    'https://news.google.com/rss/search?q=federal%20parliament%20canberra&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_econ:    'https://news.google.com/rss/search?q=australia%20federal%20budget%20OR%20treasury%20OR%20economy%20politics&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_rates:   'https://news.google.com/rss/search?q=RBA%20interest%20rates%20OR%20inflation%20australia&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_jobs:    'https://news.google.com/rss/search?q=australia%20unemployment%20OR%20wages%20OR%20jobs%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_ir:      'https://news.google.com/rss/search?q=australia%20industrial%20relations%20OR%20union%20OR%20fair%20work&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_housing: 'https://news.google.com/rss/search?q=australia%20housing%20policy%20OR%20negative%20gearing%20OR%20rent&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_energy:  'https://news.google.com/rss/search?q=australia%20energy%20policy%20OR%20climate%20OR%20nuclear%20politics&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_immig:   'https://news.google.com/rss/search?q=australia%20immigration%20OR%20migration%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_states:  'https://news.google.com/rss/search?q=australia%20state%20politics%20premier%20OR%20state%20budget&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_election:'https://news.google.com/rss/search?q=australia%20election%20OR%20newspoll%20OR%20preferred%20prime%20minister&hl=en-AU&gl=AU&ceid=AU:en',
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
@@ -2229,6 +2255,15 @@ export default {
           'smh_pol', 'brisbanetimes', 'watoday', 'afr', 'guardian_pol',
           'newdaily', 'michaelwest', 'independentau', 'menadue',
           'saturdaypaper', 'junkee', 'newscomau', 'aap', 'indaily',
+          // finance / economy with political nexus (v8)
+          'afr_pol', 'afr_economy', 'macrobusiness', 'convo_business',
+          'abc_business', 'guardian_biz', 'smartcompany', 'investordaily',
+          // economic institutions & think-tanks
+          'rba', 'lowy', 'grattan', 'ausinstitute', 'insidestory',
+          // topical Google News AU sweeps (economy, jobs, housing, energy…)
+          'gnews_econ', 'gnews_rates', 'gnews_jobs', 'gnews_ir',
+          'gnews_housing', 'gnews_energy', 'gnews_immig', 'gnews_states',
+          'gnews_election',
         ];
         let extraTotal = 0;
         for (const key of EXTRA_FEED_KEYS) {
