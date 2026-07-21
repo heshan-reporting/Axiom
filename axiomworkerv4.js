@@ -29,6 +29,12 @@
  * ║                               per-party share-of-voice + tone points,   ║
  * ║                               built by cron + lazy request-path snap-   ║
  * ║                               shots (KV, ~16 days of hourly points).    ║
+ * ║  GET /analysis?hours=        Election & sentiment read — share-of-voice ║
+ * ║                               × tone × momentum → per-party leaderboard ║
+ * ║                               + plain-English read (media-signal, not a ║
+ * ║                               poll). Computed from /allnews + /history.  ║
+ * ║  GET /census?region=         ABS 2021 Census indicators (national +     ║
+ * ║                               states) for demographic grounding.        ║
  * ║  GET /newsq?q=&hours=&max=    Topical Google News AU search — covers    ║
  * ║                               every outlet Google indexes, when: window,║
  * ║                               outlet extraction, enrichment (KV 5min).  ║
@@ -240,6 +246,34 @@ function enrichItem(it) {
   return it;
 }
 
+/** Party display metadata for the /analysis election read. */
+const PARTY_META = {
+  alp: { name: 'Labor',              tag: 'Government'  },
+  lnp: { name: 'Coalition',          tag: 'Opposition' },
+  grn: { name: 'Greens',             tag: 'Minor'      },
+  ind: { name: 'Independents/Teals', tag: 'Crossbench' },
+  on:  { name: 'One Nation',         tag: 'Minor'      },
+};
+
+/**
+ * ── ABS Census reference data (2021 Census of Population and Housing) ────
+ * Latest published national census (next full count: 2026). Compact set of
+ * politically-salient indicators per region, used to ground the Analyst and
+ * the election read in real demographics. Source: Australian Bureau of
+ * Statistics, 2021 Census QuickStats. Counts are point-in-time Census counts.
+ */
+const CENSUS = {
+  au:  { name: 'Australia',                    population: 25422788, median_age: 38, median_hh_income_wk: 1746, median_rent_wk: 375, median_mortgage_mth: 1863, born_overseas_pct: 27.6, owned_outright_pct: 31.0, mortgage_pct: 35.0, rented_pct: 30.6, other_lang_home_pct: 22.8, no_religion_pct: 38.9, top_ancestry: 'English', seats_hor: 151 },
+  nsw: { name: 'New South Wales',              population: 8072163,  median_age: 39, median_hh_income_wk: 1829, median_rent_wk: 420, median_mortgage_mth: 1986, born_overseas_pct: 29.3, owned_outright_pct: 32.2, mortgage_pct: 32.3, rented_pct: 31.6, other_lang_home_pct: 27.5, no_religion_pct: 32.8, top_ancestry: 'English', seats_hor: 47 },
+  vic: { name: 'Victoria',                     population: 6503491,  median_age: 38, median_hh_income_wk: 1759, median_rent_wk: 400, median_mortgage_mth: 1897, born_overseas_pct: 29.9, owned_outright_pct: 30.4, mortgage_pct: 35.1, rented_pct: 30.4, other_lang_home_pct: 30.4, no_religion_pct: 39.1, top_ancestry: 'English', seats_hor: 39 },
+  qld: { name: 'Queensland',                   population: 5156138,  median_age: 38, median_hh_income_wk: 1660, median_rent_wk: 380, median_mortgage_mth: 1758, born_overseas_pct: 22.6, owned_outright_pct: 29.4, mortgage_pct: 36.2, rented_pct: 32.0, other_lang_home_pct: 13.1, no_religion_pct: 41.2, top_ancestry: 'Australian', seats_hor: 30 },
+  wa:  { name: 'Western Australia',            population: 2660026,  median_age: 38, median_hh_income_wk: 1815, median_rent_wk: 380, median_mortgage_mth: 2058, born_overseas_pct: 32.2, owned_outright_pct: 28.4, mortgage_pct: 39.1, rented_pct: 28.9, other_lang_home_pct: 18.0, no_religion_pct: 43.6, top_ancestry: 'English', seats_hor: 15 },
+  sa:  { name: 'South Australia',              population: 1781516,  median_age: 40, median_hh_income_wk: 1548, median_rent_wk: 330, median_mortgage_mth: 1520, born_overseas_pct: 24.0, owned_outright_pct: 33.7, mortgage_pct: 33.5, rented_pct: 29.6, other_lang_home_pct: 16.8, no_religion_pct: 44.6, top_ancestry: 'Australian', seats_hor: 10 },
+  tas: { name: 'Tasmania',                     population: 557571,   median_age: 42, median_hh_income_wk: 1388, median_rent_wk: 320, median_mortgage_mth: 1517, born_overseas_pct: 15.3, owned_outright_pct: 34.9, mortgage_pct: 32.3, rented_pct: 28.9, other_lang_home_pct: 8.9,  no_religion_pct: 46.9, top_ancestry: 'Australian', seats_hor: 5 },
+  act: { name: 'Australian Capital Territory', population: 454499,   median_age: 35, median_hh_income_wk: 2373, median_rent_wk: 470, median_mortgage_mth: 2318, born_overseas_pct: 30.5, owned_outright_pct: 25.9, mortgage_pct: 39.5, rented_pct: 31.5, other_lang_home_pct: 22.7, no_religion_pct: 43.5, top_ancestry: 'English', seats_hor: 3 },
+  nt:  { name: 'Northern Territory',           population: 232605,   median_age: 34, median_hh_income_wk: 2076, median_rent_wk: 410, median_mortgage_mth: 2044, born_overseas_pct: 21.0, owned_outright_pct: 20.6, mortgage_pct: 32.6, rented_pct: 42.9, other_lang_home_pct: 27.2, no_religion_pct: 39.9, top_ancestry: 'Australian', seats_hor: 2 },
+};
+
 /** ── Circuit breaker: skip feeds that keep failing (KV-persisted) ─────── */
 const CB_THRESHOLD = 4;              // consecutive failures before tripping
 const CB_COOLDOWN  = 4 * 3600000;    // stay tripped for 4 hours
@@ -364,6 +398,80 @@ async function snapshotPulse(env) {
   hist.push(point);
   if (hist.length > 400) hist = hist.slice(-400); // ~16 days at hourly cadence
   await kvPut(env.AXIOM_KV, 'pulse_history', JSON.stringify(hist), 40 * 86400);
+}
+
+/**
+ * ── Election & sentiment analysis (media-signal read) ───────────────────
+ * Synthesises a compact, plain-English read from data AXIOM already has:
+ * current AU news share-of-voice, headline tone, and pulse-history momentum.
+ * Deliberately labelled a media-signal indicator, NOT a voting-intention
+ * poll — it measures the shape of the coverage, not how people will vote.
+ */
+async function buildAnalysis(env, hours = 72) {
+  const now  = Date.now();
+  const keys = ['alp', 'lnp', 'grn', 'ind', 'on'];
+  const raw  = await buildAllNews(env, { q: '', max: 120, hours });
+  let items = []; try { items = JSON.parse(raw).items || []; } catch {}
+  let hist  = []; try { hist  = JSON.parse(await kvGet(env.AXIOM_KV, 'pulse_history') || '[]') || []; } catch {}
+
+  const tagged = items.filter(i => (i.parties || []).length).length || 1;
+  const recent = hist.slice(-6), prior = hist.slice(-24, -6);
+  const shareIn = (arr, k) => arr.length
+    ? arr.reduce((a, p) => { const tot = keys.reduce((s, kk) => s + ((p.p || {})[kk] || 0), 0) || 1; return a + ((p.p || {})[k] || 0) / tot; }, 0) / arr.length
+    : 0;
+
+  const parties = keys.map(k => {
+    const its = items.filter(i => (i.parties || []).indexOf(k) !== -1);
+    const cov = its.length;
+    const sov = +(100 * cov / tagged).toFixed(1);
+    const sentiment = cov ? +(its.reduce((a, b) => a + (b.tone || 0), 0) / cov).toFixed(2) : 0;
+    const momentum = (recent.length && prior.length)
+      ? +(100 * (shareIn(recent, k) - shareIn(prior, k))).toFixed(1) : 0;
+    const drivers = its.slice()
+      .sort((a, b) => Math.abs(b.tone || 0) - Math.abs(a.tone || 0) || (b.age === null) - (a.age === null))
+      .slice(0, 3)
+      .map(i => ({ title: i.title, src: i.src, tone: i.tone || 0, link: i.link }));
+    return { key: k, name: PARTY_META[k].name, tag: PARTY_META[k].tag, coverage: cov, sov, sentiment, momentum, drivers };
+  });
+
+  // Overall media sentiment + coverage-volume direction.
+  const netTone = items.length ? +(items.reduce((a, b) => a + (b.tone || 0), 0) / items.length).toFixed(2) : 0;
+  let volTrend = 0;
+  if (recent.length && prior.length) {
+    const r = recent.reduce((a, p) => a + (p.tot || 0), 0) / recent.length;
+    const p = prior.reduce((a, p) => a + (p.tot || 0), 0) / prior.length;
+    volTrend = p ? +(((r - p) / p) * 100).toFixed(0) : 0;
+  }
+
+  // Media-momentum leaderboard: share-of-voice tilted by tone + momentum.
+  const scored = parties
+    .map(p => ({ key: p.key, name: p.name, score: +(p.sov * (1 + 0.15 * p.sentiment) + 4 * p.momentum).toFixed(1) }))
+    .sort((a, b) => b.score - a.score);
+  const lead = scored[0], second = scored[1] || { name: '—', score: 0 };
+  const gap  = +(lead.score - second.score).toFixed(1);
+  const lp   = parties.find(p => p.key === lead.key) || parties[0];
+
+  const toneWord = t => t > 0.12 ? 'favourable' : t < -0.12 ? 'hostile' : 'mixed';
+  const read = lp
+    ? `${lead.name} lead the media conversation on ${lp.sov}% share of political coverage with ${toneWord(lp.sentiment)} tone` +
+      `${lp.momentum ? ` and ${lp.momentum > 0 ? 'rising' : 'falling'} momentum (${lp.momentum > 0 ? '+' : ''}${lp.momentum}pt)` : ''}, ` +
+      `${gap < 3 ? 'narrowly ahead of' : 'clear of'} ${second.name}.`
+    : 'Insufficient tagged coverage in window.';
+
+  const payload = {
+    generated: new Date(now).toISOString(),
+    window_hours: hours,
+    volume: { articles: items.length, tagged, trend_pct: volTrend },
+    sentiment: { net: netTone, label: netTone > 0.12 ? 'net positive' : netTone < -0.12 ? 'net negative' : 'mixed/neutral' },
+    parties: parties.sort((a, b) => b.sov - a.sov),
+    leaderboard: scored,
+    read,
+    method: 'Share-of-voice × headline tone × short-run momentum over aggregated AU political news.',
+    note: 'Media-signal indicator, not a voting-intention poll.',
+  };
+  const out = JSON.stringify(payload);
+  await kvPut(env.AXIOM_KV, `analysis_${hours}`, out, 600);
+  return out;
 }
 
 /** Safe fetch that never throws — returns { ok, html, status } */
@@ -1586,6 +1694,38 @@ export default {
     if (path === '/history') {
       const raw = await kvGet(env.AXIOM_KV, 'pulse_history');
       return new Response('{"points":' + (raw || '[]') + '}', { headers: CORS });
+    }
+
+    // ── Election & sentiment analysis: computed media-signal read ────────
+    // GET /analysis?hours=72 → { volume, sentiment, parties[], leaderboard[],
+    //   read, note }. Synthesised from share-of-voice + tone + momentum.
+    if (path === '/analysis') {
+      const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '72', 10) || 72, 336);
+      const cacheKey = `analysis_${hours}`;
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) {
+        try {
+          const gen = Date.parse(JSON.parse(cached).generated || 0) || 0;
+          if (ctx && Date.now() - gen > 300000) ctx.waitUntil(buildAnalysis(env, hours).catch(() => {}));
+        } catch (e) {}
+        return new Response(cached, { headers: CORS });
+      }
+      const out = await buildAnalysis(env, hours);
+      return new Response(out, { headers: CORS });
+    }
+
+    // ── ABS Census demographic context (2021 Census) ─────────────────────
+    // GET /census[?region=nsw] → national + state indicators for grounding
+    // electorate/demographic analysis. Source: ABS 2021 Census QuickStats.
+    if (path === '/census') {
+      const region = (reqUrl.searchParams.get('region') || '').toLowerCase().replace(/[^a-z]/g, '');
+      const regions = (region && CENSUS[region]) ? { [region]: CENSUS[region] } : CENSUS;
+      return jsonResp({
+        source: 'ABS 2021 Census of Population and Housing (QuickStats)',
+        year: 2021,
+        note: 'Latest published national census; next full count 2026. Figures are point-in-time Census counts.',
+        regions,
+      });
     }
 
     // ── Topical time-sensitive search across Google News AU ──────────────

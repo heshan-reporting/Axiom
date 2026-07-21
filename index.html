@@ -130,6 +130,22 @@ a{color:inherit}
 .pt-track{flex:1;height:8px;border-radius:4px;background:var(--sur2);overflow:hidden}
 .pt-fill{height:100%;border-radius:4px;width:0;transition:width .9s cubic-bezier(.2,.7,.25,1)}
 .pt-pct{font-family:var(--fm);font-size:10.5px;color:var(--t1);width:70px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+/* Election Read module */
+.er-read{font-size:14px;line-height:1.55;color:var(--t1);font-weight:500}
+.er-read b{color:var(--t0);font-weight:700}
+.er-row{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;transition:background .15s}
+.er-row:hover{background:var(--sur2)}
+.er-dot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.er-name{width:120px;font-size:12px;font-weight:600;flex-shrink:0}
+.er-name small{display:block;font-weight:500;color:var(--t3);font-size:9.5px;letter-spacing:.03em;text-transform:uppercase}
+.er-track{flex:1;height:9px;border-radius:5px;background:var(--sur2);overflow:hidden}
+.er-fill{height:100%;border-radius:5px;width:0;transition:width .9s cubic-bezier(.2,.7,.25,1)}
+.er-metrics{display:flex;gap:12px;flex-shrink:0;font-family:var(--fm);font-size:10.5px;font-variant-numeric:tabular-nums;align-items:center}
+.er-sov{color:var(--t0);font-weight:600;width:44px;text-align:right}
+.er-sent{width:52px;text-align:right}
+.er-mom{width:52px;text-align:right}
+.er-up{color:var(--pos)}.er-dn{color:var(--neg)}.er-flat{color:var(--t3)}
+@media(max-width:640px){.er-metrics .er-sent{display:none}.er-name{width:88px}}
 /* 100%-stacked share-of-voice bar — 2px surface gaps between segments */
 .sovstack{display:flex;gap:2px;height:30px;border-radius:8px;overflow:hidden;margin-top:4px}
 .sovseg{position:relative;min-width:6px;cursor:pointer;transition:flex-grow .8s cubic-bezier(.2,.7,.25,1),filter .15s;border-radius:3px}
@@ -516,6 +532,13 @@ body.kiosk .kprog{display:block}
           <div class="kpi amb"><div class="klabel">Media Tone · 7d</div><div class="kval" id="k-tone">—</div><div class="ksub" id="k-tone-s">GDELT avg tone</div><canvas class="kspark" id="sp-tone" width="152" height="60"></canvas></div>
         </div>
 
+        <div class="panel gspan">
+          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>Election Read</div><span class="ptag" id="er-tag">MEDIA-SIGNAL · 72H</span></div>
+          <div id="er-read" class="er-read"><div class="skel" style="height:22px;max-width:80%"></div></div>
+          <div id="er-board"><div class="skel" style="height:46px;margin-top:12px"></div><div class="skel" style="height:46px;margin-top:8px"></div></div>
+          <div class="note" id="er-note" style="margin-top:12px">Share-of-voice × headline tone × momentum across AU political news. A media-signal indicator — not a voting-intention poll.</div>
+        </div>
+
         <div class="grid2 gspan">
           <div class="panel">
             <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Narrative Radar</div><span class="ptag">LIVE HEADLINE ANALYSIS</span></div>
@@ -736,7 +759,7 @@ const PARTIES=[
   {key:'IND',name:'Teals / Ind.',color:'#2DD4BF',re:/\b(teal(s)?|independent(s)?|pocock|steggall)\b/i},
 ];
 const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid holds hold unveils unveil pledges pledge calls call flags flag amid attacks attack blocks block push pushes demand demands announces announce warns warn slams slam backs back reveals reveal plans plan looms loom hits hit sets set gets get takes take makes make faces face eyes eye vows vow urges urge seeks seek deal deals talks talk week month year live latest breaking why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
-const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{}};
+const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{},analysis:null,census:null};
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -784,7 +807,7 @@ function go(v){
 /* ── BOOT / REFRESH ── */
 async function refreshAll(){
   const b=$('refbtn');b.classList.add('spin');
-  await Promise.allSettled([loadCore(),loadTrends(),loadSocial(),loadTone(),loadHistory()]);
+  await Promise.allSettled([loadCore(),loadTrends(),loadSocial(),loadTone(),loadHistory(),loadAnalysis(),loadCensus()]);
   renderIntel();renderMonitors();
   b.classList.remove('spin');
 }
@@ -858,6 +881,7 @@ async function loadCore(){
     state.news=d.items||[];
     clientEnrich();
     renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();renderClusters();
+    if(!state.analysis||state.analysis._local)renderAnalysisLocal();
     updateCtxBadge();renderStatus(d.generated);
   }catch(e){
     $('wire').innerHTML='<div class="err">'+esc(e.message)+'</div>';
@@ -1038,6 +1062,60 @@ async function loadHistory(){
   try{const d=await api('/history');state.history=d.points||[];}
   catch(e){state.history=[];}
   renderHistory();
+}
+/* ── ELECTION READ: computed media-signal from the worker /analysis ────── */
+const PCOLOR={alp:'#E8354A',lnp:'#3E7BFA',grn:'#22C55E',ind:'#2DD4BF',on:'#FF7A1A'};
+async function loadAnalysis(){
+  try{const d=await api('/analysis?hours=72');state.analysis=d;renderAnalysis();}
+  catch(e){state.analysis=null;renderAnalysisLocal();}
+}
+/* Worker-backed render — the real read */
+function renderAnalysis(){
+  const a=state.analysis;if(!a||!a.parties){renderAnalysisLocal();return;}
+  const rd=$('er-read');if(rd&&a.read)rd.innerHTML=esc(a.read).replace(/(\d+(?:\.\d+)?%|[+-]?\d+(?:\.\d+)?pt|Labor|Coalition|Greens|One Nation|Independents\/Teals)/g,'<b>$1</b>');
+  const nt=$('er-note');if(nt)nt.textContent=a._local
+    ?'Local estimate from the current wire. Deploy the worker /analysis route for momentum-weighted scoring. Media-signal only — not a poll.'
+    :'Share-of-voice × headline tone × short-run momentum across AU political news. A media-signal indicator — not a voting-intention poll.';
+  const tag=$('er-tag');if(tag)tag.textContent=(a._local?'LOCAL ESTIMATE · ':'MEDIA-SIGNAL · ')+(a.volume?a.volume.tagged:0)+' TAGGED · 72H';
+  const maxSov=Math.max(...a.parties.map(p=>p.sov),1);
+  $('er-board').innerHTML=a.parties.filter(p=>p.coverage>0).map(p=>{
+    const col=PCOLOR[p.key]||'#8892b0';
+    const w=Math.round(p.sov/maxSov*100);
+    const sc=p.sentiment>0.12?'er-up':p.sentiment<-0.12?'er-dn':'er-flat';
+    const sTxt=(p.sentiment>0?'+':'')+p.sentiment.toFixed(2);
+    const mc=p.momentum>0?'er-up':p.momentum<0?'er-dn':'er-flat';
+    const mTxt=p.momentum?((p.momentum>0?'▲ ':'▼ ')+Math.abs(p.momentum)+'pt'):'—';
+    return '<div class="er-row"><span class="er-dot" style="background:'+col+'"></span>'+
+      '<span class="er-name">'+esc(p.name)+'<small>'+esc(p.tag)+'</small></span>'+
+      '<div class="er-track"><div class="er-fill" data-w="'+w+'" style="background:'+col+'"></div></div>'+
+      '<div class="er-metrics"><span class="er-sov">'+p.sov+'%</span>'+
+      '<span class="er-sent '+sc+'" title="net headline tone">'+sTxt+'</span>'+
+      '<span class="er-mom '+mc+'" title="share-of-voice momentum">'+mTxt+'</span></div></div>';
+  }).join('')||'<div class="empty">No party-tagged coverage in the window yet.</div>';
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    document.querySelectorAll('#er-board .er-fill').forEach(el=>el.style.width=el.dataset.w+'%');}));
+}
+/* Client fallback — computes the same read from state.news before/without the /analysis deploy */
+function renderAnalysisLocal(){
+  const news=state.news||[];if(!news.length)return;
+  const rows=PARTIES.map(P=>{
+    const its=news.filter(it=>P.re.test(it.title+' '+(it.desc||'')));
+    const tone=its.length?its.reduce((a,it)=>a+(typeof it.tone==='number'?it.tone:clientTone(it)),0)/its.length:0;
+    return{key:PKEY[P.key],name:P.name,tag:'',coverage:its.length,sov:0,sentiment:+tone.toFixed(2),momentum:0};
+  });
+  const tagged=rows.reduce((a,r)=>a+r.coverage,0)||1;
+  rows.forEach(r=>r.sov=+(100*r.coverage/tagged).toFixed(1));
+  rows.sort((a,b)=>b.sov-a.sov);
+  const lead=rows.find(r=>r.coverage>0);
+  state.analysis={_local:true,parties:rows,volume:{tagged},read:lead?lead.name+' lead the media conversation on '+lead.sov+'% of party-tagged coverage.':'',note:'Local estimate — deploy the worker /analysis route for momentum and the full read.'};
+  const tag=$('er-tag');if(tag)tag.textContent='LOCAL ESTIMATE · '+tagged+' TAGGED';
+  const nt=$('er-note');if(nt)nt.textContent='Local estimate from the current wire. Deploy the worker /analysis route for momentum-weighted scoring. Media-signal only — not a poll.';
+  renderAnalysis();
+}
+/* ── CENSUS: ABS demographic context, cached for Analyst grounding ─────── */
+async function loadCensus(){
+  try{const d=await api('/census');state.census=d&&d.regions?d:null;}
+  catch(e){state.census=null;}
 }
 function renderHistory(){
   const pts=state.history||[];
@@ -1365,12 +1443,24 @@ function digest(){
     ?MONITORS.map(m=>{const h=monMatches(m);const f=h.filter(it=>(Date.parse(it.date)||0)>(m.seen||0)).length;
       return m.q+' ('+h.length+' stories'+(f?', '+f+' NEW':'')+')';}).join(' · ')
     :'(none set)';
+  const a=state.analysis;
+  const eread=(a&&a.parties)
+    ?(a.read?a.read+'\n':'')+a.parties.filter(p=>p.coverage>0).map(p=>p.name+': '+p.sov+'% SoV, tone '+(p.sentiment>0?'+':'')+p.sentiment+(p.momentum?', momentum '+(p.momentum>0?'+':'')+p.momentum+'pt':'')).join('\n')
+    :'(accumulating)';
+  const cen=(state.census&&state.census.regions)
+    ?(()=>{const R=state.census.regions;const au=R.au;const ks=Object.keys(R).filter(k=>k!=='au');
+      const natl=au?('National ('+state.census.year+'): pop '+(au.population/1e6).toFixed(1)+'M, median age '+au.median_age+', median household income $'+au.median_hh_income_wk+'/wk, born overseas '+au.born_overseas_pct+'%, renting '+au.rented_pct+'%, no religion '+au.no_religion_pct+'%'):'';
+      const st=ks.map(k=>R[k].name+' '+(R[k].population/1e6).toFixed(2)+'M ('+R[k].seats_hor+' HoR seats)').join('; ');
+      return natl+(st?'\nStates/territories: '+st:'');})()
+    :'(census unavailable)';
   return 'LIVE AUSTRALIAN POLITICAL SIGNALS (fetched minutes ago):\n\n== LATEST HEADLINES ==\n'+heads+
     '\n\n== GOOGLE TRENDS AU (top searches now) ==\n'+tr+
     '\n\n== SOCIAL CHATTER (#'+state.tag+' fediverse) ==\n'+so+
     '\n\n== PARTY SHARE OF VOICE (24h headlines) ==\n'+pty+
+    '\n\n== ELECTION READ (media-signal: SoV × tone × momentum — NOT a poll) ==\n'+eread+
     '\n\n== SOV TREND (hourly snapshots, latest vs 24h ago) ==\n'+hist+
     '\n\n== COVERAGE ANOMALIES (vs each party\'s own baseline) ==\n'+anom+
+    '\n\n== ABS CENSUS CONTEXT (2021, demographic grounding) ==\n'+cen+
     '\n\n== USER MONITORS ==\n'+mons+
     '\n\n== MEDIA TONE (GDELT 7d avg, -10..+10) ==\n'+tone;
 }
@@ -1381,7 +1471,7 @@ const MODES={
 };
 function sysPrompt(){
   return 'You are AXIOM Analyst — a senior Australian political intelligence analyst. Today is '+new Date().toDateString()+'. You can answer ANY question about Australian politics: facts, history, process, policy, elections, personalities, current events.\n\n'+
-  digest()+'\n\nRULES:\n- Ground answers in the live signals above when relevant; name the source type (headline, trend, social).\n- You also have a live web_search tool — use it whenever the answer depends on recent or verifiable current facts (who holds a seat/portfolio, latest polling, this week’s news, dates, figures, quotes). Prefer reputable AU sources (ABC, Guardian AU, SMH, AFR, AAP, AEC, aph.gov.au) and cite them.\n- The social sample is small and skews left — say so if you lean on it.\n- Media tone measures press coverage, not voter opinion.\n- Be neutral: analyse all parties clinically. Flag uncertainty honestly rather than guessing.\n- Use **bold** for key takeaways and #### for section headers.\n\nCHARTS — when comparative or numerical data would land better visually (polling, share of voice, seat counts, scenario probabilities, trends), emit a fenced block containing ONLY JSON:\n```chart\n{"type":"bar","title":"2PP polling","labels":["ALP","LNP"],"data":[52,48],"unit":"%","colors":["#FF5470","#5B8CFF"]}\n```\nTypes: "bar", "hbar", "line"/"area" (use "datasets":[{"label","data","color"}]), "donut", "radar". Party colours: ALP #FF5470, Coalition #5B8CFF, Greens #22D993, teals/IND #FFB454, ON #FF9F0A. Use real sourced numbers; label estimates as estimates in the prose.\n\nSTYLE: '+MODES[state.mode];
+  digest()+'\n\nRULES:\n- Ground answers in the live signals above when relevant; name the source type (headline, trend, social).\n- You also have a live web_search tool — use it whenever the answer depends on recent or verifiable current facts (who holds a seat/portfolio, latest polling, this week’s news, dates, figures, quotes). Prefer reputable AU sources (ABC, Guardian AU, SMH, AFR, AAP, AEC, aph.gov.au) and cite them.\n- The social sample is small and skews left — say so if you lean on it.\n- Media tone measures press coverage, not voter opinion.\n- The Election Read is a media-signal (share-of-voice × tone × momentum), NOT a voting-intention poll — when asked about election standing, use it for narrative momentum but reach for actual polling (Newspoll, Resolve, YouGov, Freshwater) via web_search for voting intention, and keep the two distinct.\n- Use the ABS Census context for demographic grounding (electorate makeup, cost-of-living, tenure, migration) — cite it as \"ABS 2021 Census\".\n- Be neutral: analyse all parties clinically. Flag uncertainty honestly rather than guessing.\n- Use **bold** for key takeaways and #### for section headers.\n\nCHARTS — when comparative or numerical data would land better visually (polling, share of voice, seat counts, scenario probabilities, trends), emit a fenced block containing ONLY JSON:\n```chart\n{"type":"bar","title":"2PP polling","labels":["ALP","LNP"],"data":[52,48],"unit":"%","colors":["#FF5470","#5B8CFF"]}\n```\nTypes: "bar", "hbar", "line"/"area" (use "datasets":[{"label","data","color"}]), "donut", "radar". Party colours: ALP #FF5470, Coalition #5B8CFF, Greens #22D993, teals/IND #FFB454, ON #FF9F0A. Use real sourced numbers; label estimates as estimates in the prose.\n\nSTYLE: '+MODES[state.mode];
 }
 function mdLite(t){
   let h=esc(t);
