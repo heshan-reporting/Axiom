@@ -174,12 +174,10 @@ const AU_FEEDS = {
   convo_pol:     'https://theconversation.com/au/politics/articles.atom',
   monthly:       'https://www.themonthly.com.au/rss.xml',
   // ── Finance / economy with a political nexus (v8) ──
-  afr_pol:       'https://www.afr.com/rss/politics',                        // AFR federal politics
-  afr_economy:   'https://www.afr.com/rss/policy/economy',                  // AFR economy & policy
   macrobusiness: 'https://www.macrobusiness.com.au/feed/',                  // macro/econ/housing analysis
   convo_business:'https://theconversation.com/au/business/articles.atom',   // business & economy
   abc_business:  'https://www.abc.net.au/news/feed/51892/rss.xml',          // ABC Business
-  guardian_biz:  'https://www.theguardian.com/australia-news/australian-economy/rss', // Guardian AU economy
+  guardian_biz:  'https://www.theguardian.com/business/australian-economy/rss', // Guardian AU economy
   smartcompany:  'https://www.smartcompany.com.au/feed/',                   // SME / business policy
   investordaily: 'https://www.investordaily.com.au/feed',                   // funds / super / regulation
   // ── Economic institutions & official releases ──
@@ -281,6 +279,23 @@ async function cbLoad(kv)  { try { return JSON.parse(await kvGet(kv, 'feed_cb') 
 async function cbSave(kv, cb) { await kvPut(kv, 'feed_cb', JSON.stringify(cb), 86400); }
 
 /**
+ * Concurrency-limited map. Cloudflare Workers cap simultaneous outbound
+ * connections (~6), so firing 50+ fetches at once leaves most queued while
+ * their per-request timeout is already counting down — they abort before
+ * ever connecting. Running a small pool means each task's timer only starts
+ * when a connection slot is actually free. `fn` must never throw.
+ */
+async function mapPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx], idx); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+const FEED_POOL = 6;        // matches CF's simultaneous-connection ceiling
+const FEED_TIMEOUT = 5000;  // per-feed abort; repeat offenders get circuit-broken
+
+/**
  * Build the aggregated AU news payload. Shared by the /allnews route, the
  * stale-while-revalidate background refresh, and the cron pre-warm.
  * Returns the JSON string (and writes it to KV unless debug).
@@ -293,7 +308,8 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   const cb   = await cbLoad(env.AXIOM_KV);
   const health = [];
 
-  const results = await Promise.allSettled(keys.map(async (key) => {
+  // Pooled fetch — respect CF's connection ceiling so timers stay honest.
+  const results = await mapPool(keys, FEED_POOL, async (key) => {
     const trip = cb[key];
     if (!debug && trip && trip.n >= CB_THRESHOLD && now - trip.t < CB_COOLDOWN) {
       health.push({ src: key, ok: false, skipped: true, fails: trip.n, ms: 0 });
@@ -303,7 +319,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
     try {
       const r = await fetch(AU_FEEDS[key], {
         headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*' },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined,
+        signal: AbortSignal.timeout ? AbortSignal.timeout(FEED_TIMEOUT) : undefined,
         cf: { cacheTtl: 120, cacheEverything: true },
       });
       if (!r.ok) { health.push({ src: key, ok: false, status: r.status, ms: Date.now() - t0 }); return []; }
@@ -315,7 +331,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
       health.push({ src: key, ok: false, error: String(e && e.name || e).slice(0, 40), ms: Date.now() - t0 });
       return [];
     }
-  }));
+  });
 
   // Update circuit-breaker state: consecutive fails trip; any success resets.
   let cbChanged = false;
@@ -327,7 +343,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   if (cbChanged) await cbSave(env.AXIOM_KV, cb);
 
   let items = [];
-  results.forEach((res) => { if (res.status === 'fulfilled') items.push(...res.value); });
+  results.forEach((v) => { if (Array.isArray(v)) items.push(...v); });
 
   // Normalise dates → ISO + age (minutes). Undated items keep '' and rank last.
   items.forEach(it => {
@@ -2396,7 +2412,7 @@ export default {
           'newdaily', 'michaelwest', 'independentau', 'menadue',
           'saturdaypaper', 'junkee', 'newscomau', 'aap', 'indaily',
           // finance / economy with political nexus (v8)
-          'afr_pol', 'afr_economy', 'macrobusiness', 'convo_business',
+          'macrobusiness', 'convo_business',
           'abc_business', 'guardian_biz', 'smartcompany', 'investordaily',
           // economic institutions & think-tanks
           'rba', 'lowy', 'grattan', 'ausinstitute', 'insidestory',
