@@ -1,78 +1,78 @@
 /**
- * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  AXIOM v4 — CLOUDFLARE WORKER                                           ║
- * ║  Deploy: wrangler deploy                                                ║
- * ╠══════════════════════════════════════════════════════════════════════════╣
- * ║  wrangler.toml:                                                         ║
- * ║    name = "axiom-proxy"                                                 ║
- * ║    main = "axiom-worker-v3.js"                                          ║
- * ║    compatibility_date = "2024-01-01"                                    ║
- * ║    [vars]                                                               ║
- * ║    GUARDIAN_KEY = "your_guardian_api_key"                               ║
- * ║    [[kv_namespaces]]                                                    ║
- * ║    binding = "AXIOM_KV"                                                 ║
- * ║    id = "your_kv_namespace_id"                                          ║
- * ╠══════════════════════════════════════════════════════════════════════════╣
- * ║  EXISTING ROUTES (v2 — unchanged):                                      ║
- * ║  GET /reddit?q=&sr=           Reddit search proxy (CORS fix)            ║
- * ║  GET /reddit-comments?p=      Reddit post comments proxy                ║
- * ║  GET /guardian?q=             Guardian AU API                           ║
- * ║  GET /rss?feed=               Single AU feed from AU_FEEDS (KV 10min)    ║
- * ║  GET /allnews?q=&max=&hours=  Aggregate 50+ AU news feeds (news, finance,║
- * ║                &debug=1       econ, think-tanks, topical sweeps) merged, ║
- * ║                               keyword-filtered, ISO dates + age(min),   ║
- * ║                               freshness window, wire-copy dedupe, party ║
- * ║                               + tone enrichment, feed circuit breaker,  ║
- * ║                               stale-while-revalidate (KV 4min).         ║
- * ║                               debug=1 → per-feed {ok,status,count,ms}.  ║
- * ║  GET /history                 Accumulated pulse time series — hourly    ║
- * ║                               per-party share-of-voice + tone points,   ║
- * ║                               built by cron + lazy request-path snap-   ║
- * ║                               shots (KV, ~16 days of hourly points).    ║
- * ║  GET /analysis?hours=        Election & sentiment read — share-of-voice ║
- * ║                               × tone × momentum → per-party leaderboard ║
- * ║                               + plain-English read (media-signal, not a ║
- * ║                               poll). Computed from /allnews + /history.  ║
- * ║  GET /census?region=         ABS 2021 Census indicators (national +     ║
- * ║                               states) for demographic grounding.        ║
- * ║  GET /newsq?q=&hours=&max=    Topical Google News AU search — covers    ║
- * ║                               every outlet Google indexes, when: window,║
- * ║                               outlet extraction, enrichment (KV 5min).  ║
- * ║  GET /whirlpool?q=            Whirlpool forum scrape                    ║
- * ║  GET /bigfooty?q=             BigFooty AU Politics forum scrape         ║
- * ║  GET /hotcopper?q=            HotCopper Politics board scrape           ║
- * ║  GET /ozpolitic?q=            OzPolitic YaBB forum scrape               ║
- * ║  GET /ozpolitic-rss           OzPolitic RSS recent posts                ║
- * ╠══════════════════════════════════════════════════════════════════════════╣
- * ║  NEW ROUTES (v3):                                                       ║
- * ║  GET /forum?url=&q=&engine=   Universal forum scraper — auto-detects    ║
- * ║                               vBulletin, XenForo, phpBB, MyBB, Discourse║
- * ║                               or pass engine= to force a specific one   ║
- * ║                                                                         ║
- * ║  GET /forum-thread?url=&q=    Scrape full thread posts from any forum   ║
- * ║                               engine (vBulletin / XenForo / phpBB etc.) ║
- * ║                                                                         ║
- * ║  GET /forum-detect?url=       Detect forum engine at a URL and return   ║
- * ║                                                                         ║
- * ║  V6 POLITICAL INTELLIGENCE ROUTES (all keyless except /tvfy):           ║
- * ║  GET /trends?geo=AU                Google Trends — trending searches    ║
- * ║  GET /social?tag=auspol            Mastodon #auspol public timelines    ║
- * ║  GET /gdelt?q=&mode=&timespan=     GDELT news volume/tone/articles      ║
- * ║  GET /wiki?article=&days=          Wikipedia pageview attention          ║
- * ║  GET /tvfy?q=                      TheyVoteForYou MP records            ║
- * ║                                    (secret: TVFY_KEY, free)             ║
- * ║                               metadata: engine, version, name, icon     ║
- * ║                                                                         ║
- * ║  Known AU vBulletin forums pre-registered (pass name= param):          ║
- * ║    aus-politics, productreview-politics, priceSpy,                      ║
- * ║    womensweekly, essentialbaby, globaloffensive-au,                     ║
- * ║    auspol-forum, aussiestock, ausforum                                  ║
- * ╚══════════════════════════════════════════════════════════════════════════╝
+ * +==========================================================================+
+ * |  AXIOM v4 - CLOUDFLARE WORKER                                           |
+ * |  Deploy: wrangler deploy                                                |
+ * +==========================================================================+
+ * |  wrangler.toml:                                                         |
+ * |    name = "axiom-proxy"                                                 |
+ * |    main = "axiom-worker-v3.js"                                          |
+ * |    compatibility_date = "2024-01-01"                                    |
+ * |    [vars]                                                               |
+ * |    GUARDIAN_KEY = "your_guardian_api_key"                               |
+ * |    [[kv_namespaces]]                                                    |
+ * |    binding = "AXIOM_KV"                                                 |
+ * |    id = "your_kv_namespace_id"                                          |
+ * +==========================================================================+
+ * |  EXISTING ROUTES (v2 - unchanged):                                      |
+ * |  GET /reddit?q=&sr=           Reddit search proxy (CORS fix)            |
+ * |  GET /reddit-comments?p=      Reddit post comments proxy                |
+ * |  GET /guardian?q=             Guardian AU API                           |
+ * |  GET /rss?feed=               Single AU feed from AU_FEEDS (KV 10min)    |
+ * |  GET /allnews?q=&max=&hours=  Aggregate 50+ AU news feeds (news, finance,|
+ * |                &debug=1       econ, think-tanks, topical sweeps) merged, |
+ * |                               keyword-filtered, ISO dates + age(min),   |
+ * |                               freshness window, wire-copy dedupe, party |
+ * |                               + tone enrichment, feed circuit breaker,  |
+ * |                               stale-while-revalidate (KV 4min).         |
+ * |                               debug=1 -> per-feed {ok,status,count,ms}.  |
+ * |  GET /history                 Accumulated pulse time series - hourly    |
+ * |                               per-party share-of-voice + tone points,   |
+ * |                               built by cron + lazy request-path snap-   |
+ * |                               shots (KV, ~16 days of hourly points).    |
+ * |  GET /analysis?hours=        Election & sentiment read - share-of-voice |
+ * |                               x tone x momentum -> per-party leaderboard |
+ * |                               + plain-English read (media-signal, not a |
+ * |                               poll). Computed from /allnews + /history.  |
+ * |  GET /census?region=         ABS 2021 Census indicators (national +     |
+ * |                               states) for demographic grounding.        |
+ * |  GET /newsq?q=&hours=&max=    Topical Google News AU search - covers    |
+ * |                               every outlet Google indexes, when: window,|
+ * |                               outlet extraction, enrichment (KV 5min).  |
+ * |  GET /whirlpool?q=            Whirlpool forum scrape                    |
+ * |  GET /bigfooty?q=             BigFooty AU Politics forum scrape         |
+ * |  GET /hotcopper?q=            HotCopper Politics board scrape           |
+ * |  GET /ozpolitic?q=            OzPolitic YaBB forum scrape               |
+ * |  GET /ozpolitic-rss           OzPolitic RSS recent posts                |
+ * +==========================================================================+
+ * |  NEW ROUTES (v3):                                                       |
+ * |  GET /forum?url=&q=&engine=   Universal forum scraper - auto-detects    |
+ * |                               vBulletin, XenForo, phpBB, MyBB, Discourse|
+ * |                               or pass engine= to force a specific one   |
+ * |                                                                         |
+ * |  GET /forum-thread?url=&q=    Scrape full thread posts from any forum   |
+ * |                               engine (vBulletin / XenForo / phpBB etc.) |
+ * |                                                                         |
+ * |  GET /forum-detect?url=       Detect forum engine at a URL and return   |
+ * |                                                                         |
+ * |  V6 POLITICAL INTELLIGENCE ROUTES (all keyless except /tvfy):           |
+ * |  GET /trends?geo=AU                Google Trends - trending searches    |
+ * |  GET /social?tag=auspol            Mastodon #auspol public timelines    |
+ * |  GET /gdelt?q=&mode=&timespan=     GDELT news volume/tone/articles      |
+ * |  GET /wiki?article=&days=          Wikipedia pageview attention          |
+ * |  GET /tvfy?q=                      TheyVoteForYou MP records            |
+ * |                                    (secret: TVFY_KEY, free)             |
+ * |                               metadata: engine, version, name, icon     |
+ * |                                                                         |
+ * |  Known AU vBulletin forums pre-registered (pass name= param):          |
+ * |    aus-politics, productreview-politics, priceSpy,                      |
+ * |    womensweekly, essentialbaby, globaloffensive-au,                     |
+ * |    auspol-forum, aussiestock, ausforum                                  |
+ * +==========================================================================+
  */
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // SHARED HELPERS
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 const CORS = {
   'Access-Control-Allow-Origin':      '*',
@@ -93,7 +93,7 @@ const CORS_ONLY = {
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const MOBILE_UA  = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-// Standard headers that mimic a real browser — helps avoid 403s on forums
+// Standard headers that mimic a real browser - helps avoid 403s on forums
 const FORUM_HEADERS = (referer = '') => ({
   'User-Agent':                BROWSER_UA,
   'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -135,21 +135,21 @@ function stripHtml(s = '') {
  * Feeds that 404 or block bots are skipped gracefully by /allnews.
  */
 const AU_FEEDS = {
-  // ── Public broadcasters ──
+  // -- Public broadcasters --
   abc:           'https://www.abc.net.au/news/feed/51120/rss.xml',        // ABC Politics
   abc_top:       'https://www.abc.net.au/news/feed/2942460/rss.xml',      // ABC Top Stories
   sbs:           'https://www.sbs.com.au/news/feed',
-  // ── Nine mastheads ──
+  // -- Nine mastheads --
   smh:           'https://www.smh.com.au/rss/feed.xml',
   smh_pol:       'https://www.smh.com.au/rss/politics/federal.xml',
   theage:        'https://www.theage.com.au/rss/feed.xml',
   brisbanetimes: 'https://www.brisbanetimes.com.au/rss/feed.xml',
   watoday:       'https://www.watoday.com.au/rss/feed.xml',
   afr:           'https://www.afr.com/rss/feed.xml',
-  // ── Guardian Australia ──
+  // -- Guardian Australia --
   guardian:      'https://www.theguardian.com/australia-news/rss',
   guardian_pol:  'https://www.theguardian.com/australia-news/australian-politics/rss',
-  // ── Independent / analysis ──
+  // -- Independent / analysis --
   conversation:  'https://theconversation.com/au/articles.atom',
   crikey:        'https://www.crikey.com.au/feed/',
   newdaily:      'https://thenewdaily.com.au/feed/',
@@ -158,13 +158,13 @@ const AU_FEEDS = {
   menadue:       'https://johnmenadue.com/feed/',
   saturdaypaper: 'https://www.thesaturdaypaper.com.au/feed',
   junkee:        'https://junkee.com/feed',
-  // ── News Corp / wire ──
+  // -- News Corp / wire --
   newscomau:     'https://www.news.com.au/content-feeds/latest-news-national/',
   aap:           'https://www.aap.com.au/feed/',
-  // ── Regional ──
+  // -- Regional --
   canberratimes: 'https://www.canberratimes.com.au/rss.xml',
   indaily:       'https://www.indaily.com.au/feed',
-  // ── Politics-focused additions (v7) ──
+  // -- Politics-focused additions (v7) --
   pollbludger:   'https://www.pollbludger.net/feed/',                     // polling analysis
   mandarin:      'https://www.themandarin.com.au/feed/',                  // public sector / govt
   theshot:       'https://theshot.net.au/feed/',
@@ -173,21 +173,21 @@ const AU_FEEDS = {
   theklaxon:     'https://theklaxon.com.au/feed/',                        // investigative
   convo_pol:     'https://theconversation.com/au/politics/articles.atom',
   monthly:       'https://www.themonthly.com.au/rss.xml',
-  // ── Finance / economy with a political nexus (v8) ──
+  // -- Finance / economy with a political nexus (v8) --
   macrobusiness: 'https://www.macrobusiness.com.au/feed/',                  // macro/econ/housing analysis
   convo_business:'https://theconversation.com/au/business/articles.atom',   // business & economy
   abc_business:  'https://www.abc.net.au/news/feed/51892/rss.xml',          // ABC Business
   guardian_biz:  'https://www.theguardian.com/business/australian-economy/rss', // Guardian AU economy
   smartcompany:  'https://www.smartcompany.com.au/feed/',                   // SME / business policy
   investordaily: 'https://www.investordaily.com.au/feed',                   // funds / super / regulation
-  // ── Economic institutions & official releases ──
+  // -- Economic institutions & official releases --
   rba:           'https://www.rba.gov.au/rss/rss-cb-media-releases.xml',    // Reserve Bank media releases
-  // ── Think-tanks & policy institutes ──
+  // -- Think-tanks & policy institutes --
   lowy:          'https://www.lowyinstitute.org/the-interpreter/rss.xml',   // foreign policy / Interpreter
   grattan:       'https://grattan.edu.au/feed/',                            // Grattan Institute
   ausinstitute:  'https://australiainstitute.org.au/feed/',                 // The Australia Institute
   insidestory:   'https://insidestory.org.au/feed/',                        // policy long-form
-  // ── Google News AU topical sweeps — wide recall on politics-adjacent themes ──
+  // -- Google News AU topical sweeps - wide recall on politics-adjacent themes --
   gnews_auspol:  'https://news.google.com/rss/search?q=australian%20politics&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_parl:    'https://news.google.com/rss/search?q=federal%20parliament%20canberra&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_econ:    'https://news.google.com/rss/search?q=australia%20federal%20budget%20OR%20treasury%20OR%20economy%20politics&hl=en-AU&gl=AU&ceid=AU:en',
@@ -225,7 +225,7 @@ async function kvPut(kv, key, val, ttl = 300) {
   try { await kv?.put(key, val, { expirationTtl: ttl }); } catch {}
 }
 
-/** ── Item enrichment: party tagging + naive headline tone ─────────────── */
+/** -- Item enrichment: party tagging + naive headline tone --------------- */
 const PARTY_RES = {
   alp: /\b(labor|albanese|alp|chalmers|plibersek|marles|wong)\b/i,
   lnp: /\b(coalition|liberal(s)?|nationals?|ley|littleproud|taylor|dutton|lnp)\b/i,
@@ -254,7 +254,7 @@ const PARTY_META = {
 };
 
 /**
- * ── ABS Census reference data (2021 Census of Population and Housing) ────
+ * -- ABS Census reference data (2021 Census of Population and Housing) ----
  * Latest published national census (next full count: 2026). Compact set of
  * politically-salient indicators per region, used to ground the Analyst and
  * the election read in real demographics. Source: Australian Bureau of
@@ -272,7 +272,7 @@ const CENSUS = {
   nt:  { name: 'Northern Territory',           population: 232605,   median_age: 34, median_hh_income_wk: 2076, median_rent_wk: 410, median_mortgage_mth: 2044, born_overseas_pct: 21.0, owned_outright_pct: 20.6, mortgage_pct: 32.6, rented_pct: 42.9, other_lang_home_pct: 27.2, no_religion_pct: 39.9, top_ancestry: 'Australian', seats_hor: 2 },
 };
 
-/** ── Circuit breaker: skip feeds that keep failing (KV-persisted) ─────── */
+/** -- Circuit breaker: skip feeds that keep failing (KV-persisted) ------- */
 const CB_THRESHOLD = 4;              // consecutive failures before tripping
 const CB_COOLDOWN  = 4 * 3600000;    // stay tripped for 4 hours
 async function cbLoad(kv)  { try { return JSON.parse(await kvGet(kv, 'feed_cb') || '{}') || {}; } catch { return {}; } }
@@ -281,7 +281,7 @@ async function cbSave(kv, cb) { await kvPut(kv, 'feed_cb', JSON.stringify(cb), 8
 /**
  * Concurrency-limited map. Cloudflare Workers cap simultaneous outbound
  * connections (~6), so firing 50+ fetches at once leaves most queued while
- * their per-request timeout is already counting down — they abort before
+ * their per-request timeout is already counting down - they abort before
  * ever connecting. Running a small pool means each task's timer only starts
  * when a connection slot is actually free. `fn` must never throw.
  */
@@ -308,7 +308,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   const cb   = await cbLoad(env.AXIOM_KV);
   const health = [];
 
-  // Pooled fetch — respect CF's connection ceiling so timers stay honest.
+  // Pooled fetch - respect CF's connection ceiling so timers stay honest.
   const results = await mapPool(keys, FEED_POOL, async (key) => {
     const trip = cb[key];
     if (!debug && trip && trip.n >= CB_THRESHOLD && now - trip.t < CB_COOLDOWN) {
@@ -345,7 +345,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   let items = [];
   results.forEach((v) => { if (Array.isArray(v)) items.push(...v); });
 
-  // Normalise dates → ISO + age (minutes). Undated items keep '' and rank last.
+  // Normalise dates -> ISO + age (minutes). Undated items keep '' and rank last.
   items.forEach(it => {
     const t = Date.parse(it.date || '');
     if (!isNaN(t)) { it.date = new Date(t).toISOString(); it.age = Math.max(0, Math.round((now - t) / 60000)); it._t = t; }
@@ -417,11 +417,11 @@ async function snapshotPulse(env) {
 }
 
 /**
- * ── Election & sentiment analysis (media-signal read) ───────────────────
+ * -- Election & sentiment analysis (media-signal read) -------------------
  * Synthesises a compact, plain-English read from data AXIOM already has:
  * current AU news share-of-voice, headline tone, and pulse-history momentum.
  * Deliberately labelled a media-signal indicator, NOT a voting-intention
- * poll — it measures the shape of the coverage, not how people will vote.
+ * poll - it measures the shape of the coverage, not how people will vote.
  */
 async function buildAnalysis(env, hours = 72) {
   const now  = Date.now();
@@ -463,7 +463,7 @@ async function buildAnalysis(env, hours = 72) {
   const scored = parties
     .map(p => ({ key: p.key, name: p.name, score: +(p.sov * (1 + 0.15 * p.sentiment) + 4 * p.momentum).toFixed(1) }))
     .sort((a, b) => b.score - a.score);
-  const lead = scored[0], second = scored[1] || { name: '—', score: 0 };
+  const lead = scored[0], second = scored[1] || { name: '-', score: 0 };
   const gap  = +(lead.score - second.score).toFixed(1);
   const lp   = parties.find(p => p.key === lead.key) || parties[0];
 
@@ -482,7 +482,7 @@ async function buildAnalysis(env, hours = 72) {
     parties: parties.sort((a, b) => b.sov - a.sov),
     leaderboard: scored,
     read,
-    method: 'Share-of-voice × headline tone × short-run momentum over aggregated AU political news.',
+    method: 'Share-of-voice x headline tone x short-run momentum over aggregated AU political news.',
     note: 'Media-signal indicator, not a voting-intention poll.',
   };
   const out = JSON.stringify(payload);
@@ -490,7 +490,7 @@ async function buildAnalysis(env, hours = 72) {
   return out;
 }
 
-/** Safe fetch that never throws — returns { ok, html, status } */
+/** Safe fetch that never throws - returns { ok, html, status } */
 async function safeFetch(url, opts = {}) {
   try {
     const r = await fetch(url, opts);
@@ -512,7 +512,7 @@ function addThread(arr, seen, text, url, extra = {}) {
   arr.push({ text: clean, url: url || '', ...extra });
 }
 
-/** Relevance filter — returns items matching any query word (len > 2) */
+/** Relevance filter - returns items matching any query word (len > 2) */
 function relevanceFilter(items, q) {
   if (!q || items.length <= 3) return items;
   const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 2);
@@ -524,9 +524,9 @@ function relevanceFilter(items, q) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // ENGINE DETECTION
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 /**
  * Detects the forum engine from raw HTML.
@@ -537,7 +537,7 @@ function relevanceFilter(items, q) {
 function detectEngine(html) {
   const h = html.toLowerCase();
 
-  // ── vBulletin 5 ──
+  // -- vBulletin 5 --
   // vB5 uses a React-like SPA shell with data-widget attributes
   if (h.includes('vbulletin 5') || h.includes('vb5') ||
       h.includes('data-widget="vb5') || h.includes('"vbulletin"') ||
@@ -545,7 +545,7 @@ function detectEngine(html) {
     return 'vbulletin5';
   }
 
-  // ── vBulletin 4 ──
+  // -- vBulletin 4 --
   // Classic vB4 has specific markers in the HTML
   if (h.includes('vbulletin') || h.includes('vb_postbit') ||
       h.includes('postcontainer') || h.includes('postbit_legacy') ||
@@ -554,7 +554,7 @@ function detectEngine(html) {
     return 'vbulletin4';
   }
 
-  // ── XenForo 2 ──
+  // -- XenForo 2 --
   if (h.includes('xenforo') || h.includes('xf-') ||
       h.includes('data-xf-') || h.includes('xenforo 2') ||
       h.includes('structitem') || h.includes('contentrow') ||
@@ -562,53 +562,53 @@ function detectEngine(html) {
     return 'xenforo2';
   }
 
-  // ── XenForo 1 ──
+  // -- XenForo 1 --
   if (h.includes('xenbase') || h.includes('xenforo 1') ||
       h.includes('.messagetext') || h.includes('messagelistitem') ||
       h.includes('primarycontent')) {
     return 'xenforo1';
   }
 
-  // ── phpBB ──
+  // -- phpBB --
   if (h.includes('phpbb') || h.includes('viewtopic.php') ||
       h.includes('viewforum.php') || h.includes('postbody') ||
       h.includes('phpbb_') || h.includes('post-author')) {
     return 'phpbb';
   }
 
-  // ── MyBB ──
+  // -- MyBB --
   if (h.includes('mybb') || h.includes('forumdisplay') ||
       h.includes('showthread') && h.includes('post_body') ||
       h.includes('thread_title') || h.includes('mybbuser')) {
     return 'mybb';
   }
 
-  // ── Discourse ──
+  // -- Discourse --
   if (h.includes('discourse') || h.includes('ember-application') ||
       h.includes('d-header') || h.includes('topic-list') ||
       h.includes('data-topic-id')) {
     return 'discourse';
   }
 
-  // ── Invision Power Board (IPB/IPS) ──
+  // -- Invision Power Board (IPB/IPS) --
   if (h.includes('ipsapp') || h.includes('ipb') ||
       h.includes('ips-forum') || h.includes('cPost') ||
       h.includes('data-ipb=') || h.includes('ipstype_')) {
     return 'invision';
   }
 
-  // ── YaBB ──
+  // -- YaBB --
   if (h.includes('yabb') || h.includes('yabb.pl')) {
     return 'yabb';
   }
 
-  // ── SMF (Simple Machines Forum) ──
+  // -- SMF (Simple Machines Forum) --
   if (h.includes('smf') || h.includes('simple machines') ||
       h.includes('smiley_holder') || h.includes('forumposts')) {
     return 'smf';
   }
 
-  // ── Vanilla Forums ──
+  // -- Vanilla Forums --
   if (h.includes('vanillaforums') || h.includes('vanilla-forum') ||
       h.includes('ItemDiscussion') || h.includes('vanilla_')) {
     return 'vanilla';
@@ -621,17 +621,17 @@ function detectEngine(html) {
 function extractForumName(html) {
   const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
   if (!m) return '';
-  return stripHtml(m[1]).replace(/\s*[-|–]\s*.*$/, '').trim().slice(0, 80);
+  return stripHtml(m[1]).replace(/\s*[-|-]\s*.*$/, '').trim().slice(0, 80);
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // PER-ENGINE THREAD LIST EXTRACTORS
 // Each returns an array of { text, url, author?, date?, replyCount?, views? }
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 /**
- * vBulletin 4 — the engine used by:
+ * vBulletin 4 - the engine used by:
  *   Hexus.net, many older AU forums, ProductReview, PriceSpy AU
  *
  * Key selectors (from milesburton/vbulletin-forum-scraper):
@@ -653,12 +653,12 @@ function extractVB4Threads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── 1. Thread list rows (#threads > li.threadbit) ──
+  // -- 1. Thread list rows (#threads > li.threadbit) --
   const threadBitRe = /<li[^>]*class="[^"]*\bthreadbit\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
   for (const m of html.matchAll(threadBitRe)) {
     const block = m[1];
 
-    // Title link — h3.threadtitle a.title  OR  a.title
+    // Title link - h3.threadtitle a.title  OR  a.title
     const titleM = block.match(/<a[^>]+class="[^"]*\btitle\b[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i)
                 || block.match(/href="(showthread\.php[^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
     if (!titleM) continue;
@@ -688,7 +688,7 @@ function extractVB4Threads(html, baseUrl) {
     addThread(threads, seen, text, url, { author, replyCount, views, date, engine: 'vbulletin4' });
   }
 
-  // ── 2. Search results (li.searchresult or div.searchresult) ──
+  // -- 2. Search results (li.searchresult or div.searchresult) --
   const srRe = /<(?:li|div)[^>]*class="[^"]*searchresult[^"]*"[^>]*>([\s\S]*?)<\/(?:li|div)>/gi;
   for (const m of html.matchAll(srRe)) {
     const block  = m[1];
@@ -702,13 +702,13 @@ function extractVB4Threads(html, baseUrl) {
     });
   }
 
-  // ── 3. Subforum links (forumtitle) ──
+  // -- 3. Subforum links (forumtitle) --
   const sfRe = /<h2[^>]*class="[^"]*forumtitle[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(sfRe)) {
     addThread(threads, seen, m[2], resolveUrl(m[1], baseUrl), { type: 'subforum', engine: 'vbulletin4' });
   }
 
-  // ── 4. Generic fallback — any showthread.php or forumdisplay.php link ──
+  // -- 4. Generic fallback - any showthread.php or forumdisplay.php link --
   if (threads.length < 3) {
     const fbRe = /href="((?:showthread|forumdisplay)\.php[^"]*)"[^>]*>([\s\S]{5,120}?)<\/a>/gi;
     for (const m of html.matchAll(fbRe)) {
@@ -721,7 +721,7 @@ function extractVB4Threads(html, baseUrl) {
 }
 
 /**
- * vBulletin 5 — newer SPA-style vBulletin.
+ * vBulletin 5 - newer SPA-style vBulletin.
  * v5 renders content via JavaScript but the initial HTML payload still
  * contains data islands and some plain markup.
  *
@@ -738,7 +738,7 @@ function extractVB5Threads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── 1. Article-based thread cards ──
+  // -- 1. Article-based thread cards --
   const articleRe = /<article[^>]*data-node-id="([^"]*)"[^>]*>([\s\S]*?)<\/article>/gi;
   for (const m of html.matchAll(articleRe)) {
     const block  = m[1];
@@ -752,7 +752,7 @@ function extractVB5Threads(html, baseUrl) {
     addThread(threads, seen, text, href, { author: authorM ? stripHtml(authorM[1]) : '', engine: 'vbulletin5' });
   }
 
-  // ── 2. .js-threadBit blocks ──
+  // -- 2. .js-threadBit blocks --
   const jtRe = /<div[^>]+class="[^"]*js-threadBit[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
   for (const m of html.matchAll(jtRe)) {
     const inner = m[1];
@@ -762,7 +762,7 @@ function extractVB5Threads(html, baseUrl) {
     addThread(threads, seen, linkM[2], resolveUrl(linkM[1], baseUrl), { engine: 'vbulletin5' });
   }
 
-  // ── 3. JSON data island (vB5 often embeds thread data as JSON) ──
+  // -- 3. JSON data island (vB5 often embeds thread data as JSON) --
   const jsonRe = /window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});/;
   const jsonM  = html.match(jsonRe);
   if (jsonM) {
@@ -777,7 +777,7 @@ function extractVB5Threads(html, baseUrl) {
     } catch {}
   }
 
-  // ── 4. vB5 search results ──
+  // -- 4. vB5 search results --
   const srRe = /<div[^>]+class="[^"]*(?:js-searchResult|searchResultItem)[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
   for (const m of html.matchAll(srRe)) {
     const inner = m[1];
@@ -786,7 +786,7 @@ function extractVB5Threads(html, baseUrl) {
     addThread(threads, seen, linkM[2], resolveUrl(linkM[1], baseUrl), { engine: 'vbulletin5' });
   }
 
-  // ── 5. Fallback to vB4 extractor (many vB5 sites still have vB4-style HTML) ──
+  // -- 5. Fallback to vB4 extractor (many vB5 sites still have vB4-style HTML) --
   if (threads.length < 3) {
     const vb4 = extractVB4Threads(html, baseUrl);
     vb4.forEach(t => addThread(threads, seen, t.text, t.url, { ...t, engine: 'vbulletin5' }));
@@ -796,7 +796,7 @@ function extractVB5Threads(html, baseUrl) {
 }
 
 /**
- * XenForo 2 — used by BigFooty, many AU gaming/hobbyist forums.
+ * XenForo 2 - used by BigFooty, many AU gaming/hobbyist forums.
  *
  * Key classes:
  *   Thread row:    .structItem--thread  OR  li.discussionListItem
@@ -817,7 +817,7 @@ function extractXF2Threads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── 1. structItem thread rows ──
+  // -- 1. structItem thread rows --
   const siRe = /<li[^>]+class="[^"]*\bstructItem\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
   for (const m of html.matchAll(siRe)) {
     const block = m[1];
@@ -834,7 +834,7 @@ function extractXF2Threads(html, baseUrl) {
     const authorM = block.match(/<a[^>]+class="[^"]*\busername\b[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
     const author   = authorM ? stripHtml(authorM[1]) : '';
 
-    // Reply count — first dd in .pairs--justified
+    // Reply count - first dd in .pairs--justified
     const replyM = block.match(/class="[^"]*pairs[^"]*"[^>]*>[\s\S]*?<dt[^>]*>[^<]*[Rr]epli[^<]*<\/dt>\s*<dd[^>]*>([\d,]+)/i)
                 || block.match(/<dl[^>]*>[\s\S]*?<dd[^>]*>([\d,]+)/i);
     const replyCount = replyM ? parseInt(replyM[1].replace(/,/g, ''), 10) || 0 : 0;
@@ -846,7 +846,7 @@ function extractXF2Threads(html, baseUrl) {
     addThread(threads, seen, text, url, { author, replyCount, date, engine: 'xenforo2' });
   }
 
-  // ── 2. contentRow (search results & some listing pages) ──
+  // -- 2. contentRow (search results & some listing pages) --
   const crRe = /<div[^>]+class="[^"]*contentRow[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/(?:div|article)>/gi;
   for (const m of html.matchAll(crRe)) {
     const block = m[1];
@@ -860,13 +860,13 @@ function extractXF2Threads(html, baseUrl) {
     });
   }
 
-  // ── 3. Node (subforum) listings ──
+  // -- 3. Node (subforum) listings --
   const nodeRe = /<h[23][^>]+class="[^"]*node-title[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(nodeRe)) {
     addThread(threads, seen, m[2], resolveUrl(m[1], baseUrl), { type: 'subforum', engine: 'xenforo2' });
   }
 
-  // ── 4. p-title links (XF2 thread page title breadcrumb) ──
+  // -- 4. p-title links (XF2 thread page title breadcrumb) --
   if (threads.length < 3) {
     const ptRe = /<h1[^>]+class="[^"]*p-title-value[^"]*"[^>]*>([\s\S]*?)<\/h1>/gi;
     for (const m of html.matchAll(ptRe)) {
@@ -878,7 +878,7 @@ function extractXF2Threads(html, baseUrl) {
 }
 
 /**
- * XenForo 1 — older XF1.x sites.
+ * XenForo 1 - older XF1.x sites.
  * Very similar to XF2 but uses different class names.
  *
  * Thread row:  li.discussionListItem
@@ -890,7 +890,7 @@ function extractXF1Threads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── discussionListItem rows ──
+  // -- discussionListItem rows --
   const dliRe = /<li[^>]+class="[^"]*\bdiscussionListItem\b[^"]*"[^>]*>([\s\S]*?)<\/li>/gi;
   for (const m of html.matchAll(dliRe)) {
     const block = m[1];
@@ -906,7 +906,7 @@ function extractXF1Threads(html, baseUrl) {
     });
   }
 
-  // ── Fallback: any .title or PreviewTooltip link inside .messageList ──
+  // -- Fallback: any .title or PreviewTooltip link inside .messageList --
   if (threads.length < 3) {
     const fbRe = /<a[^>]+class="[^"]*(?:PreviewTooltip|title)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
     for (const m of html.matchAll(fbRe)) {
@@ -919,7 +919,7 @@ function extractXF1Threads(html, baseUrl) {
 }
 
 /**
- * phpBB — one of the most common forum engines.
+ * phpBB - one of the most common forum engines.
  * Used by many AU special-interest boards.
  *
  * Thread row:  tr.row1, tr.row2, tr.bg1, tr.bg2  inside  table.forumline
@@ -932,7 +932,7 @@ function extractPhpBBThreads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── a.topictitle (works across phpBB2, 3, 3.1, 3.2, 3.3) ──
+  // -- a.topictitle (works across phpBB2, 3, 3.1, 3.2, 3.3) --
   const ttRe = /<a[^>]+class="[^"]*topictitle[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(ttRe)) {
     // Extract reply count from surrounding row if possible
@@ -941,7 +941,7 @@ function extractPhpBBThreads(html, baseUrl) {
     if (threads.length >= 30) break;
   }
 
-  // ── viewtopic / viewforum links (fallback) ──
+  // -- viewtopic / viewforum links (fallback) --
   if (threads.length < 3) {
     const fbRe = /href="(viewtopic\.php[^"]*)"[^>]*>([\s\S]{5,120}?)<\/a>/gi;
     for (const m of html.matchAll(fbRe)) {
@@ -954,7 +954,7 @@ function extractPhpBBThreads(html, baseUrl) {
 }
 
 /**
- * MyBB — used by various hobbyist and niche AU forums.
+ * MyBB - used by various hobbyist and niche AU forums.
  *
  * Thread row:  tr.inline_row  inside  table#threadslist
  * Title:       strong > span.subject_bold a  OR  a.subject_bold
@@ -964,14 +964,14 @@ function extractMyBBThreads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── span.subject_bold a ──
+  // -- span.subject_bold a --
   const sbRe = /<span[^>]+class="[^"]*subject_bold[^"]*"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   for (const m of html.matchAll(sbRe)) {
     addThread(threads, seen, m[2], resolveUrl(m[1], baseUrl), { engine: 'mybb' });
     if (threads.length >= 30) break;
   }
 
-  // ── thread_title class (MyBB 1.8+) ──
+  // -- thread_title class (MyBB 1.8+) --
   if (threads.length < 3) {
     const ttRe = /<span[^>]+id="tid_\d+"[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
     for (const m of html.matchAll(ttRe)) {
@@ -980,7 +980,7 @@ function extractMyBBThreads(html, baseUrl) {
     }
   }
 
-  // ── Fallback: showthread links ──
+  // -- Fallback: showthread links --
   if (threads.length < 3) {
     const fbRe = /href="(showthread\.php\?tid=\d+[^"]*)"[^>]*>([\s\S]{5,120}?)<\/a>/gi;
     for (const m of html.matchAll(fbRe)) {
@@ -993,7 +993,7 @@ function extractMyBBThreads(html, baseUrl) {
 }
 
 /**
- * Discourse — modern forum used by some AU councils, GovHack, tech communities.
+ * Discourse - modern forum used by some AU councils, GovHack, tech communities.
  * Discourse is heavily JS-rendered but the topic-list is sometimes in the HTML,
  * and its JSON API (/latest.json, /search.json) is always available.
  */
@@ -1001,7 +1001,7 @@ function extractDiscourseThreads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── topic-list-item rows ──
+  // -- topic-list-item rows --
   const liRe = /<tr[^>]+class="[^"]*topic-list-item[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
   for (const m of html.matchAll(liRe)) {
     const block = m[1];
@@ -1010,7 +1010,7 @@ function extractDiscourseThreads(html, baseUrl) {
     addThread(threads, seen, linkM[2], resolveUrl(linkM[1], baseUrl), { engine: 'discourse' });
   }
 
-  // ── JSON data island ──
+  // -- JSON data island --
   const jsonRe = /window\.__PRELOADED_DISCOURSE_UI_JSON__\s*=\s*({[\s\S]*?});/;
   const jsonM  = html.match(jsonRe);
   if (jsonM) {
@@ -1041,7 +1041,7 @@ function extractIPBThreads(html, baseUrl) {
   const threads = [];
   const seen    = new Set();
 
-  // ── ipsDataItem rows ──
+  // -- ipsDataItem rows --
   const diRe = /<(?:li|div)[^>]+class="[^"]*ipsDataItem[^"]*"[^>]*>([\s\S]*?)<\/(?:li|div)>/gi;
   for (const m of html.matchAll(diRe)) {
     const block = m[1];
@@ -1052,7 +1052,7 @@ function extractIPBThreads(html, baseUrl) {
     addThread(threads, seen, text, resolveUrl(linkM[1], baseUrl), { engine: 'invision' });
   }
 
-  // ── cPost / ipsComment blocks ──
+  // -- cPost / ipsComment blocks --
   if (threads.length < 3) {
     const cpRe = /<h[123][^>]*>[\s\S]*?<a[^>]+href="([^"]*topic[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
     for (const m of html.matchAll(cpRe)) {
@@ -1091,7 +1091,7 @@ function extractSMFThreads(html, baseUrl) {
 }
 
 /**
- * Generic fallback — catches any forum engine not specifically handled.
+ * Generic fallback - catches any forum engine not specifically handled.
  * Uses broad patterns that work across most forum software.
  */
 function extractGenericThreads(html, baseUrl) {
@@ -1121,10 +1121,10 @@ function extractGenericThreads(html, baseUrl) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
-// POST EXTRACTORS — for /forum-thread route
+// ==============================================================================
+// POST EXTRACTORS - for /forum-thread route
 // Returns array of { author, text, date, postId, userUrl, avatar? }
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 function extractVB4Posts(html, baseUrl) {
   const posts = [];
@@ -1143,7 +1143,7 @@ function extractVB4Posts(html, baseUrl) {
     const userLinkM = block.match(/<a[^>]+class="[^"]*\busername\b[^"]*"[^>]+href="([^"]+)"[^>]*>/i);
     const userUrl    = userLinkM ? resolveUrl(userLinkM[1], baseUrl) : '';
 
-    // Post body — div[id^="post_message_"] blockquote.postcontent
+    // Post body - div[id^="post_message_"] blockquote.postcontent
     const bodyM = block.match(/<div[^>]+id="post_message_\d+"[^>]*>[\s\S]*?<blockquote[^>]+class="[^"]*postcontent[^"]*"[^>]*>([\s\S]*?)<\/blockquote>/i)
                || block.match(/<blockquote[^>]+class="[^"]*postcontent[^"]*"[^>]*>([\s\S]*?)<\/blockquote>/i);
     const text  = bodyM ? stripHtml(bodyM[1]).slice(0, 1000) : '';
@@ -1256,7 +1256,7 @@ function extractPhpBBPosts(html, baseUrl) {
   return posts;
 }
 
-/** Generic post extractor — last resort */
+/** Generic post extractor - last resort */
 function extractGenericPosts(html, baseUrl) {
   const posts = [];
   // Look for any element containing "post" in class with substantial text
@@ -1277,9 +1277,9 @@ function extractGenericPosts(html, baseUrl) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // URL RESOLVER
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 function resolveUrl(href, baseUrl) {
   if (!href) return baseUrl;
@@ -1299,9 +1299,9 @@ function resolveUrl(href, baseUrl) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MASTER DISPATCHER — picks the right extractor based on detected engine
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
+// MASTER DISPATCHER - picks the right extractor based on detected engine
+// ==============================================================================
 
 function extractThreads(html, baseUrl, forceEngine = '') {
   const engine = forceEngine || detectEngine(html);
@@ -1346,10 +1346,10 @@ function extractPosts(html, baseUrl, engine = '') {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // KNOWN AUSTRALIAN FORUMS REGISTRY
 // Pre-configured forum URLs, categories, and search patterns
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 const AU_FORUMS = {
   // vBulletin forums
@@ -1374,10 +1374,10 @@ const AU_FORUMS = {
 };
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // DISCOURSE JSON API helper
 // When a Discourse forum is detected, use their open JSON API directly
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 async function fetchDiscourseJSON(baseUrl, query) {
   const threads = [];
@@ -1427,9 +1427,9 @@ async function fetchDiscourseJSON(baseUrl, query) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // WORKER ENTRY
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 
 export default {
   async fetch(req, env, ctx) {
@@ -1452,11 +1452,11 @@ export default {
     const q       = reqUrl.searchParams.get('q') || '';
     const sr      = reqUrl.searchParams.get('sr') || 'australia';
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // V5 ROUTES — POLITICAL INTELLIGENCE
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
+    // V5 ROUTES - POLITICAL INTELLIGENCE
+    // ==========================================================================
 
-    // Google Trends — what Australia is searching right now (free RSS, no key)
+    // Google Trends - what Australia is searching right now (free RSS, no key)
     if (path === '/trends') {
       const geo = (reqUrl.searchParams.get('geo') || 'AU').replace(/[^A-Za-z-]/g, '');
       const cacheKey = 'trends_' + geo;
@@ -1492,7 +1492,7 @@ export default {
       } catch (e) { return jsonResp({ error: 'trends_fetch_failed', detail: String(e) }, 502); }
     }
 
-    // Mastodon — live public political chatter from AU + global instances (no key)
+    // Mastodon - live public political chatter from AU + global instances (no key)
     if (path === '/social') {
       const tag = (reqUrl.searchParams.get('tag') || 'auspol').replace(/[^\w]/g, '');
       const cacheKey = 'social_' + tag;
@@ -1510,7 +1510,7 @@ export default {
           (Array.isArray(arr) ? arr : []).forEach((s) => {
             const text = String(s.content || '')
               .replace(/<br\s*\/?>/gi, ' ')
-              .replace(/<\/p>\s*<p>/gi, ' — ')
+              .replace(/<\/p>\s*<p>/gi, ' - ')
               .replace(/<[^>]+>/g, '')
               .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
               .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
@@ -1534,7 +1534,7 @@ export default {
       return new Response(out, { headers: CORS });
     }
 
-    // GDELT DOC 2.0 — free global news monitoring (AU-scoped unless overridden)
+    // GDELT DOC 2.0 - free global news monitoring (AU-scoped unless overridden)
     if (path === '/gdelt') {
       const mode     = reqUrl.searchParams.get('mode') || 'artlist';
       const timespan = reqUrl.searchParams.get('timespan') || '7d';
@@ -1557,7 +1557,7 @@ export default {
       } catch (e) { return jsonResp({ error: 'gdelt_fetch_failed', detail: String(e) }, 502); }
     }
 
-    // Wikipedia pageviews — free public-attention metric
+    // Wikipedia pageviews - free public-attention metric
     if (path === '/wiki') {
       const article = (reqUrl.searchParams.get('article') || '').trim().replace(/ /g, '_');
       const days    = Math.min(parseInt(reqUrl.searchParams.get('days') || '90', 10) || 90, 365);
@@ -1581,7 +1581,7 @@ export default {
       } catch (e) { return jsonResp({ error: 'wiki_fetch_failed', detail: String(e) }, 502); }
     }
 
-    // TheyVoteForYou — Australian MP / senator voting records (free key)
+    // TheyVoteForYou - Australian MP / senator voting records (free key)
     if (path === '/tvfy') {
       if (!env.TVFY_KEY) return jsonResp({ error: 'no_tvfy_key', hint: 'Get a free key at theyvoteforyou.org.au/api and set the TVFY_KEY secret.' }, 500);
       const cached = await kvGet(env.AXIOM_KV, 'tvfy_people');
@@ -1605,9 +1605,9 @@ export default {
       } catch (e) { return jsonResp({ error: 'tvfy_fetch_failed', detail: String(e) }, 502); }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // V2 ROUTES — unchanged from axiom-worker.js v2
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
+    // V2 ROUTES - unchanged from axiom-worker.js v2
+    // ==========================================================================
 
     if (path === '/reddit') {
       try {
@@ -1673,7 +1673,7 @@ export default {
       }
     }
 
-    // ── Aggregate AU news across the whole feed registry (one request) ──
+    // -- Aggregate AU news across the whole feed registry (one request) --
     // GET /allnews?q=<keywords>&max=<n>&hours=<h>&debug=1
     //   Time-sensitive ISO dates + age, freshness window, wire-copy dedupe,
     //   party/tone enrichment, per-feed circuit breaker, and debug=1 health.
@@ -1686,7 +1686,7 @@ export default {
       const debug = reqUrl.searchParams.get('debug') === '1';
       const opts  = { q, max, hours, debug };
 
-      // Lazy time-series accumulation (self-throttled to ~hourly in KV) —
+      // Lazy time-series accumulation (self-throttled to ~hourly in KV) -
       // history builds up even on deployments with no cron trigger.
       if (ctx && !debug) ctx.waitUntil(snapshotPulse(env).catch(() => {}));
 
@@ -1705,15 +1705,15 @@ export default {
       return new Response(out, { headers: CORS });
     }
 
-    // ── Accumulated pulse history: share-of-voice + tone time series ─────
-    // GET /history → { points: [{t, tot, p:{alp..}, tn:{alp..}, tone}] }
+    // -- Accumulated pulse history: share-of-voice + tone time series -----
+    // GET /history -> { points: [{t, tot, p:{alp..}, tn:{alp..}, tone}] }
     if (path === '/history') {
       const raw = await kvGet(env.AXIOM_KV, 'pulse_history');
       return new Response('{"points":' + (raw || '[]') + '}', { headers: CORS });
     }
 
-    // ── Election & sentiment analysis: computed media-signal read ────────
-    // GET /analysis?hours=72 → { volume, sentiment, parties[], leaderboard[],
+    // -- Election & sentiment analysis: computed media-signal read --------
+    // GET /analysis?hours=72 -> { volume, sentiment, parties[], leaderboard[],
     //   read, note }. Synthesised from share-of-voice + tone + momentum.
     if (path === '/analysis') {
       const hours = Math.min(parseInt(reqUrl.searchParams.get('hours') || '72', 10) || 72, 336);
@@ -1730,8 +1730,8 @@ export default {
       return new Response(out, { headers: CORS });
     }
 
-    // ── ABS Census demographic context (2021 Census) ─────────────────────
-    // GET /census[?region=nsw] → national + state indicators for grounding
+    // -- ABS Census demographic context (2021 Census) ---------------------
+    // GET /census[?region=nsw] -> national + state indicators for grounding
     // electorate/demographic analysis. Source: ABS 2021 Census QuickStats.
     if (path === '/census') {
       const region = (reqUrl.searchParams.get('region') || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -1744,10 +1744,10 @@ export default {
       });
     }
 
-    // ── Topical time-sensitive search across Google News AU ──────────────
+    // -- Topical time-sensitive search across Google News AU --------------
     // GET /newsq?q=<query>&hours=<h>&max=<n>
     //   Covers every outlet Google indexes (not just the registry) for
-    //   arbitrary topics — ideal for grounding Analyst answers. Uses the
+    //   arbitrary topics - ideal for grounding Analyst answers. Uses the
     //   Google News RSS search endpoint with an AU locale + when: window.
     if (path === '/newsq') {
       const qq    = (reqUrl.searchParams.get('q') || '').trim();
@@ -1772,8 +1772,8 @@ export default {
           const out = { src: 'gnews', ...it };
           if (!isNaN(t)) { out.date = new Date(t).toISOString(); out.age = Math.max(0, Math.round((now - t) / 60000)); }
           else { out.date = ''; out.age = null; }
-          // Google News titles end " - Outlet Name" — surface the outlet.
-          const m = out.title.match(/\s[-–]\s([^-–]{2,40})$/);
+          // Google News titles end " - Outlet Name" - surface the outlet.
+          const m = out.title.match(/\s[--]\s([^--]{2,40})$/);
           if (m) { out.outlet = m[1].trim(); out.title = out.title.slice(0, m.index).trim(); }
           return enrichItem(out);
         });
@@ -1927,10 +1927,10 @@ export default {
     }
 
 
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
     // V3 NEW ROUTE: /forum-detect?url=
-    // Detects engine, returns metadata — useful for UI to show engine badge
-    // ══════════════════════════════════════════════════════════════════════════
+    // Detects engine, returns metadata - useful for UI to show engine badge
+    // ==========================================================================
     if (path === '/forum-detect') {
       const targetUrl = reqUrl.searchParams.get('url') || '';
       if (!targetUrl) return jsonResp({ error: 'url_required' }, 400);
@@ -1967,22 +1967,22 @@ export default {
     }
 
 
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
     // V3 NEW ROUTE: /forum?url=&q=&engine=&page=
     // Universal forum thread-list scraper.
     //
     // Params:
-    //   url    — full URL of forum board or search results page
-    //   q      — optional search query (used for URL-based search + relevance filter)
-    //   engine — optional: force engine (vbulletin4|vbulletin5|xenforo2|xenforo1|phpbb|mybb|discourse|invision|smf|generic)
-    //   name   — optional: shortname from AU_FORUMS registry (e.g. 'bigfooty', 'overclockers')
-    //   page   — optional: page number for pagination (default 1)
-    //   ttl    — optional: cache TTL in seconds (default 300)
-    // ══════════════════════════════════════════════════════════════════════════
-    // ══════════════════════════════════════════════════════════════════════════
+    //   url    - full URL of forum board or search results page
+    //   q      - optional search query (used for URL-based search + relevance filter)
+    //   engine - optional: force engine (vbulletin4|vbulletin5|xenforo2|xenforo1|phpbb|mybb|discourse|invision|smf|generic)
+    //   name   - optional: shortname from AU_FORUMS registry (e.g. 'bigfooty', 'overclockers')
+    //   page   - optional: page number for pagination (default 1)
+    //   ttl    - optional: cache TTL in seconds (default 300)
+    // ==========================================================================
+    // ==========================================================================
     // V3 NEW ROUTE: /forum?url=&q=&engine=&name=&page=&ttl=
-    // Universal forum thread-list scraper — auto-detects vBulletin, XenForo, etc.
-    // ══════════════════════════════════════════════════════════════════════════
+    // Universal forum thread-list scraper - auto-detects vBulletin, XenForo, etc.
+    // ==========================================================================
     if (path === '/forum') {
       const forumNameParam = reqUrl.searchParams.get('name') || '';
       const forceEng       = reqUrl.searchParams.get('engine') || '';
@@ -2070,10 +2070,10 @@ export default {
       return new Response(out, { headers: CORS });
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
     // V3 NEW ROUTE: /forum-thread?url=&engine=&page=&q=
     // Scrapes full post content from any forum thread page.
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
     if (path === '/forum-thread') {
       const targetUrl = reqUrl.searchParams.get('url') || '';
       const forceEng  = reqUrl.searchParams.get('engine') || '';
@@ -2139,10 +2139,10 @@ export default {
     }
 
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // v4.1 — AUTO-COLLECT JOB  GET /collect?topics=&notify=
-    // 14 sources · per-source optimal fetch method · SSE progress via KV
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
+    // v4.1 - AUTO-COLLECT JOB  GET /collect?topics=&notify=
+    // 14 sources - per-source optimal fetch method - SSE progress via KV
+    // ==========================================================================
     if (path === '/collect') {
       const topicsParam = reqUrl.searchParams.get('topics') || '';
       const topics = topicsParam
@@ -2165,15 +2165,15 @@ export default {
         }), 86400);
       };
 
-      await saveProgress('running', `Job ${jobId} started — ${topics.length} topics`);
+      await saveProgress('running', `Job ${jobId} started - ${topics.length} topics`);
 
-      // ── helper: push items + track source count ──────────────────────────
+      // -- helper: push items + track source count --------------------------
       const push = (items, src) => {
         items.forEach(i => { i.src = i.src || src; allItems.push(i); });
         srcCounts[src] = (srcCounts[src] || 0) + items.length;
       };
 
-      // ── FETCH HELPERS ─────────────────────────────────────────────────────
+      // -- FETCH HELPERS -----------------------------------------------------
       const get = async (url, hdrs={}) => {
         try {
           const r = await fetch(url, {
@@ -2214,7 +2214,7 @@ export default {
           const desc  = stripHtml((b.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/)?.[1]||'')).slice(0,200);
           const combined = (title+' '+desc).toLowerCase();
           if (qw.length && !qw.some(w=>combined.includes(w))) continue;
-          items.push({ src, text: title+(desc?' — '+desc:''), author: src, score:0, url:link, date, topic });
+          items.push({ src, text: title+(desc?' - '+desc:''), author: src, score:0, url:link, date, topic });
         }
         return items;
       };
@@ -2222,10 +2222,10 @@ export default {
       const delay = (ms) => new Promise(r=>setTimeout(r,ms));
       const jitter = () => delay(300 + Math.random()*500);
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 1 — HackerNews  (METHOD: Algolia JSON API — best method, free)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ HackerNews — Algolia search API');
+      // ======================================================================
+      // SOURCE 1 - HackerNews  (METHOD: Algolia JSON API - best method, free)
+      // ======================================================================
+      await saveProgress('running', '* HackerNews - Algolia search API');
       try {
         const hnItems = [];
         for (const topic of topics) {
@@ -2241,14 +2241,14 @@ export default {
           await jitter();
         }
         push(hnItems, 'hn');
-        await saveProgress('running', `  ✓ HackerNews: ${hnItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ HackerNews failed: ${e}`); }
+        await saveProgress('running', `  [ok] HackerNews: ${hnItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] HackerNews failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 2 — Reddit  (METHOD: JSON API — append .json to any Reddit URL)
+      // ======================================================================
+      // SOURCE 2 - Reddit  (METHOD: JSON API - append .json to any Reddit URL)
       // 6 AU political subreddits
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Reddit — .json API across 6 AU subreddits');
+      // ======================================================================
+      await saveProgress('running', '* Reddit - .json API across 6 AU subreddits');
       const SUBREDDITS = ['AustralianPolitics','australia','AusFinance','Labor','melbourne','sydney'];
       try {
         const rdItems = [];
@@ -2259,7 +2259,7 @@ export default {
               { 'User-Agent': 'AXIOM-Worker/4.1 (cloudflare; heshan@wearecuriousminds.com)' }
             );
             (d?.data?.children||[]).forEach(p => rdItems.push({
-              src:'reddit', sr, text:p.data.title+(p.data.selftext?' — '+p.data.selftext.slice(0,200):''),
+              src:'reddit', sr, text:p.data.title+(p.data.selftext?' - '+p.data.selftext.slice(0,200):''),
               author:p.data.author, score:p.data.score,
               url:'https://reddit.com'+p.data.permalink,
               date:new Date(p.data.created_utc*1000).toISOString(), topic,
@@ -2269,13 +2269,13 @@ export default {
           await jitter();
         }
         push(rdItems, 'reddit');
-        await saveProgress('running', `  ✓ Reddit: ${rdItems.length} items (6 subreddits)`);
-      } catch(e) { await saveProgress('running', `  ✗ Reddit failed: ${e}`); }
+        await saveProgress('running', `  [ok] Reddit: ${rdItems.length} items (6 subreddits)`);
+      } catch(e) { await saveProgress('running', `  [x] Reddit failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 3 — Guardian AU  (METHOD: Official Content API — JSON)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Guardian AU — Content API (JSON)');
+      // ======================================================================
+      // SOURCE 3 - Guardian AU  (METHOD: Official Content API - JSON)
+      // ======================================================================
+      await saveProgress('running', '* Guardian AU - Content API (JSON)');
       if (env.GUARDIAN_KEY) {
         try {
           const guItems = [];
@@ -2285,23 +2285,23 @@ export default {
               `&tag=australia-news/australia-news&show-fields=trailText&page-size=5&api-key=${env.GUARDIAN_KEY}`
             );
             (d?.response?.results||[]).forEach(r => guItems.push({
-              src:'guardian', text:r.webTitle+(r.fields?.trailText?' — '+stripHtml(r.fields.trailText).slice(0,200):''),
+              src:'guardian', text:r.webTitle+(r.fields?.trailText?' - '+stripHtml(r.fields.trailText).slice(0,200):''),
               author:'Guardian AU', score:0, url:r.webUrl, date:r.webPublicationDate, topic,
             }));
             await jitter();
           }
           push(guItems, 'guardian');
-          await saveProgress('running', `  ✓ Guardian AU: ${guItems.length} items`);
-        } catch(e) { await saveProgress('running', `  ✗ Guardian failed: ${e}`); }
+          await saveProgress('running', `  [ok] Guardian AU: ${guItems.length} items`);
+        } catch(e) { await saveProgress('running', `  [x] Guardian failed: ${e}`); }
       } else {
-        await saveProgress('running', '  ⚠ Guardian skipped — no GUARDIAN_KEY set');
+        await saveProgress('running', '  (!) Guardian skipped - no GUARDIAN_KEY set');
       }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 4 — ABC News Politics  (METHOD: RSS feed — XML parse)
+      // ======================================================================
+      // SOURCE 4 - ABC News Politics  (METHOD: RSS feed - XML parse)
       // Politics-specific feed: feed/51120 + top stories: feed/2942460
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ ABC News — RSS feeds (Politics + Top Stories)');
+      // ======================================================================
+      await saveProgress('running', '* ABC News - RSS feeds (Politics + Top Stories)');
       try {
         const abcItems = [];
         const abcFeeds = [
@@ -2315,97 +2315,97 @@ export default {
         }
         const deduped = [...new Map(abcItems.map(i=>[i.url,i])).values()];
         push(deduped, 'abc');
-        await saveProgress('running', `  ✓ ABC News: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ ABC failed: ${e}`); }
+        await saveProgress('running', `  [ok] ABC News: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] ABC failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 5 — SBS News  (METHOD: RSS feed — XML parse)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ SBS News — RSS feed');
+      // ======================================================================
+      // SOURCE 5 - SBS News  (METHOD: RSS feed - XML parse)
+      // ======================================================================
+      await saveProgress('running', '* SBS News - RSS feed');
       try {
         const sbsItems = [];
         const xml = await getXML('https://www.sbs.com.au/news/feed');
         for (const topic of topics) sbsItems.push(...parseRSS(xml||'', 'sbs', topic));
         const deduped = [...new Map(sbsItems.map(i=>[i.url,i])).values()];
         push(deduped, 'sbs');
-        await saveProgress('running', `  ✓ SBS News: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ SBS failed: ${e}`); }
+        await saveProgress('running', `  [ok] SBS News: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] SBS failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 6 — SMH / Sydney Morning Herald  (METHOD: RSS — XML parse)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Sydney Morning Herald — RSS');
+      // ======================================================================
+      // SOURCE 6 - SMH / Sydney Morning Herald  (METHOD: RSS - XML parse)
+      // ======================================================================
+      await saveProgress('running', '* Sydney Morning Herald - RSS');
       try {
         const smhItems = [];
         const xml = await getXML('https://www.smh.com.au/rss/feed.xml');
         for (const topic of topics) smhItems.push(...parseRSS(xml||'', 'smh', topic));
         const deduped = [...new Map(smhItems.map(i=>[i.url,i])).values()];
         push(deduped, 'smh');
-        await saveProgress('running', `  ✓ SMH: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ SMH failed: ${e}`); }
+        await saveProgress('running', `  [ok] SMH: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] SMH failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 7 — The Age  (METHOD: RSS — XML parse)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ The Age (Melbourne) — RSS');
+      // ======================================================================
+      // SOURCE 7 - The Age  (METHOD: RSS - XML parse)
+      // ======================================================================
+      await saveProgress('running', '* The Age (Melbourne) - RSS');
       try {
         const ageItems = [];
         const xml = await getXML('https://www.theage.com.au/rss/feed.xml');
         for (const topic of topics) ageItems.push(...parseRSS(xml||'', 'theage', topic));
         const deduped = [...new Map(ageItems.map(i=>[i.url,i])).values()];
         push(deduped, 'theage');
-        await saveProgress('running', `  ✓ The Age: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ The Age failed: ${e}`); }
+        await saveProgress('running', `  [ok] The Age: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] The Age failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 8 — The Conversation AU  (METHOD: RSS Atom feed — XML parse)
+      // ======================================================================
+      // SOURCE 8 - The Conversation AU  (METHOD: RSS Atom feed - XML parse)
       // academic/expert analysis on AU politics
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ The Conversation AU — Atom RSS feed');
+      // ======================================================================
+      await saveProgress('running', '* The Conversation AU - Atom RSS feed');
       try {
         const convItems = [];
         const xml = await getXML('https://theconversation.com/au/topics/australian-politics-671/articles.atom');
         for (const topic of topics) convItems.push(...parseRSS(xml||'', 'conversation', topic));
         const deduped = [...new Map(convItems.map(i=>[i.url,i])).values()];
         push(deduped, 'conversation');
-        await saveProgress('running', `  ✓ The Conversation: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ The Conversation failed: ${e}`); }
+        await saveProgress('running', `  [ok] The Conversation: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] The Conversation failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 9 — Crikey  (METHOD: RSS feed — XML parse)
+      // ======================================================================
+      // SOURCE 9 - Crikey  (METHOD: RSS feed - XML parse)
       // Independent Australian political journalism
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Crikey — RSS feed');
+      // ======================================================================
+      await saveProgress('running', '* Crikey - RSS feed');
       try {
         const crikeyItems = [];
         const xml = await getXML('https://www.crikey.com.au/feed/');
         for (const topic of topics) crikeyItems.push(...parseRSS(xml||'', 'crikey', topic));
         const deduped = [...new Map(crikeyItems.map(i=>[i.url,i])).values()];
         push(deduped, 'crikey');
-        await saveProgress('running', `  ✓ Crikey: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ Crikey failed: ${e}`); }
+        await saveProgress('running', `  [ok] Crikey: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] Crikey failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 10 — Canberra Times  (METHOD: RSS — XML parse)
+      // ======================================================================
+      // SOURCE 10 - Canberra Times  (METHOD: RSS - XML parse)
       // National politics focus from capital
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Canberra Times — RSS');
+      // ======================================================================
+      await saveProgress('running', '* Canberra Times - RSS');
       try {
         const ctItems = [];
         const xml = await getXML('https://www.canberratimes.com.au/rss.xml');
         for (const topic of topics) ctItems.push(...parseRSS(xml||'', 'canberratimes', topic));
         const deduped = [...new Map(ctItems.map(i=>[i.url,i])).values()];
         push(deduped, 'canberratimes');
-        await saveProgress('running', `  ✓ Canberra Times: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ Canberra Times failed: ${e}`); }
+        await saveProgress('running', `  [ok] Canberra Times: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] Canberra Times failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 10b — Extended AU newswire  (METHOD: shared AU_FEEDS registry)
+      // ======================================================================
+      // SOURCE 10b - Extended AU newswire  (METHOD: shared AU_FEEDS registry)
       // Fans out across the rest of the registry not collected individually
       // above (Nine federal/regional, AFR, Guardian politics, independents,
-      // news.com.au, AAP, InDaily…). Each feed: one fetch, parsed per topic.
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Extended AU newswire — registry feeds');
+      // news.com.au, AAP, InDaily...). Each feed: one fetch, parsed per topic.
+      // ======================================================================
+      await saveProgress('running', '* Extended AU newswire - registry feeds');
       try {
         const EXTRA_FEED_KEYS = [
           'smh_pol', 'brisbanetimes', 'watoday', 'afr', 'guardian_pol',
@@ -2416,7 +2416,7 @@ export default {
           'abc_business', 'guardian_biz', 'smartcompany', 'investordaily',
           // economic institutions & think-tanks
           'rba', 'lowy', 'grattan', 'ausinstitute', 'insidestory',
-          // topical Google News AU sweeps (economy, jobs, housing, energy…)
+          // topical Google News AU sweeps (economy, jobs, housing, energy...)
           'gnews_econ', 'gnews_rates', 'gnews_jobs', 'gnews_ir',
           'gnews_housing', 'gnews_energy', 'gnews_immig', 'gnews_states',
           'gnews_election',
@@ -2434,14 +2434,14 @@ export default {
           } catch (e) {}
           await jitter();
         }
-        await saveProgress('running', `  ✓ Extended newswire: ${extraTotal} items across ${EXTRA_FEED_KEYS.length} feeds`);
-      } catch(e) { await saveProgress('running', `  ✗ Extended newswire failed: ${e}`); }
+        await saveProgress('running', `  [ok] Extended newswire: ${extraTotal} items across ${EXTRA_FEED_KEYS.length} feeds`);
+      } catch(e) { await saveProgress('running', `  [x] Extended newswire failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 11 — 9News Politics  (METHOD: HTML scrape — CSS selectors)
-      // Nine Network news site — no RSS for politics, scrape required
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ 9News — HTML scrape (article cards)');
+      // ======================================================================
+      // SOURCE 11 - 9News Politics  (METHOD: HTML scrape - CSS selectors)
+      // Nine Network news site - no RSS for politics, scrape required
+      // ======================================================================
+      await saveProgress('running', '* 9News - HTML scrape (article cards)');
       try {
         const nineItems = [];
         const r = await get('https://www.9news.com.au/politics', { 'Accept':'text/html' });
@@ -2463,14 +2463,14 @@ export default {
           }
         }
         push(nineItems, '9news');
-        await saveProgress('running', `  ✓ 9News: ${nineItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ 9News failed: ${e}`); }
+        await saveProgress('running', `  [ok] 9News: ${nineItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] 9News failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 12 — BigFooty Politics  (METHOD: XenForo2 HTML scrape)
+      // ======================================================================
+      // SOURCE 12 - BigFooty Politics  (METHOD: XenForo2 HTML scrape)
       // XF2 structItem thread rows, node 229 = AU Politics
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ BigFooty Politics — XenForo2 HTML scrape');
+      // ======================================================================
+      await saveProgress('running', '* BigFooty Politics - XenForo2 HTML scrape');
       try {
         const bfItems = [];
         const seen = new Set();
@@ -2492,15 +2492,15 @@ export default {
           await jitter();
         }
         push(bfItems, 'bigfooty');
-        await saveProgress('running', `  ✓ BigFooty: ${bfItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ BigFooty failed: ${e}`); }
+        await saveProgress('running', `  [ok] BigFooty: ${bfItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] BigFooty failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 13 — Whirlpool Politics  (METHOD: Custom HTML scrape)
-      // Whirlpool uses CFML — search results page with archive links
+      // ======================================================================
+      // SOURCE 13 - Whirlpool Politics  (METHOD: Custom HTML scrape)
+      // Whirlpool uses CFML - search results page with archive links
       // Note: "In the News" forum requires login, use search endpoint instead
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ Whirlpool — search endpoint scrape');
+      // ======================================================================
+      await saveProgress('running', '* Whirlpool - search endpoint scrape');
       try {
         const wpItems = [];
         const seen = new Set();
@@ -2524,13 +2524,13 @@ export default {
           await jitter();
         }
         push(wpItems, 'whirlpool');
-        await saveProgress('running', `  ✓ Whirlpool: ${wpItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ Whirlpool failed: ${e}`); }
+        await saveProgress('running', `  [ok] Whirlpool: ${wpItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] Whirlpool failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 14 — OzPolitic  (METHOD: RSS feed + YaBB HTML scrape fallback)
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ OzPolitic — RSS feed + YaBB HTML fallback');
+      // ======================================================================
+      // SOURCE 14 - OzPolitic  (METHOD: RSS feed + YaBB HTML scrape fallback)
+      // ======================================================================
+      await saveProgress('running', '* OzPolitic - RSS feed + YaBB HTML fallback');
       try {
         const ozItems = [];
         // Try RSS first
@@ -2556,14 +2556,14 @@ export default {
         }
         const deduped = [...new Map(ozItems.map(i=>[i.url,i])).values()].slice(0,20);
         push(deduped, 'ozpolitic');
-        await saveProgress('running', `  ✓ OzPolitic: ${deduped.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ OzPolitic failed: ${e}`); }
+        await saveProgress('running', `  [ok] OzPolitic: ${deduped.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] OzPolitic failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // SOURCE 15 — HotCopper Politics  (METHOD: XenForo HTML scrape)
+      // ======================================================================
+      // SOURCE 15 - HotCopper Politics  (METHOD: XenForo HTML scrape)
       // Finance/politics crossover forum
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ HotCopper Politics — XenForo HTML scrape');
+      // ======================================================================
+      await saveProgress('running', '* HotCopper Politics - XenForo HTML scrape');
       try {
         const hcItems = [];
         const seen = new Set();
@@ -2584,14 +2584,14 @@ export default {
           }
         }
         push(hcItems, 'hotcopper');
-        await saveProgress('running', `  ✓ HotCopper: ${hcItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ HotCopper failed: ${e}`); }
+        await saveProgress('running', `  [ok] HotCopper: ${hcItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] HotCopper failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // INTERNATIONAL — BBC, Reuters, AP on AU politics
+      // ======================================================================
+      // INTERNATIONAL - BBC, Reuters, AP on AU politics
       // METHOD: RSS feeds filtered to Australia-relevant stories
-      // ══════════════════════════════════════════════════════════════════════
-      await saveProgress('running', '⬤ International — BBC/Reuters/AP (Australia filter)');
+      // ======================================================================
+      await saveProgress('running', '* International - BBC/Reuters/AP (Australia filter)');
       try {
         const intlItems = [];
         const intlFeeds = [
@@ -2617,12 +2617,12 @@ export default {
           await jitter();
         }
         push(intlItems, 'intl');
-        await saveProgress('running', `  ✓ International (BBC/Reuters): ${intlItems.length} items`);
-      } catch(e) { await saveProgress('running', `  ✗ International feeds failed: ${e}`); }
+        await saveProgress('running', `  [ok] International (BBC/Reuters): ${intlItems.length} items`);
+      } catch(e) { await saveProgress('running', `  [x] International feeds failed: ${e}`); }
 
-      // ══════════════════════════════════════════════════════════════════════
+      // ======================================================================
       // FINALISE
-      // ══════════════════════════════════════════════════════════════════════
+      // ======================================================================
       const topicSummary = {};
       for (const topic of topics) {
         const tItems = allItems.filter(i=>i.topic===topic);
@@ -2678,10 +2678,10 @@ export default {
       });
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // v4 — GET /collect-status
-    // Returns latest job result from KV — polled by AXIOM UI
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
+    // v4 - GET /collect-status
+    // Returns latest job result from KV - polled by AXIOM UI
+    // ==========================================================================
     if (path === '/collect-status') {
       const latest = await kvGet(env.AXIOM_KV, 'auto_job_latest');
       const lastTs = await kvGet(env.AXIOM_KV, 'auto_last_run_ts');
@@ -2703,10 +2703,10 @@ export default {
       }
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // v4 — GET /collect-history?limit=10
+    // ==========================================================================
+    // v4 - GET /collect-history?limit=10
     // Returns a list of recent job IDs stored in KV
-    // ══════════════════════════════════════════════════════════════════════════
+    // ==========================================================================
     if (path === '/collect-history') {
       const limit = parseInt(reqUrl.searchParams.get('limit') || '10', 10) || 10;
       try {
@@ -2717,7 +2717,7 @@ export default {
       }
     }
 
-    // ── DEFAULT / health check ───────────────────────────────────────────────
+    // -- DEFAULT / health check -----------------------------------------------
     return jsonResp({
       name:    'AXIOM Proxy v4',
       status:  'ok',
@@ -2748,20 +2748,20 @@ export default {
     });
   },
 
-  // Cron Trigger entry point — called by Cloudflare scheduler
+  // Cron Trigger entry point - called by Cloudflare scheduler
   async scheduled(event, env, ctx) {
     ctx.waitUntil(handleScheduled(env));
   },
 };
 
 
-// ══════════════════════════════════════════════════════════════════════════════
+// ==============================================================================
 // CRON TRIGGER HANDLER
 // Runs automatically on the schedule defined in wrangler.toml:
 //   [triggers]
-//   crons = ["0 */6 * * *"]   ← every 6 hours
-//   crons = ["0 21 * * *"]    ← daily at 7am AEST (21:00 UTC)
-// ══════════════════════════════════════════════════════════════════════════════
+//   crons = ["0 */6 * * *"]   <- every 6 hours
+//   crons = ["0 21 * * *"]    <- daily at 7am AEST (21:00 UTC)
+// ==============================================================================
 async function handleScheduled(env) {
   console.log('AXIOM Auto-Collect triggered at', new Date().toISOString());
 
@@ -2770,7 +2770,7 @@ async function handleScheduled(env) {
   try { await buildAllNews(env, { q: '', max: 60, hours: 72 }); } catch (e) {}
   try { await snapshotPulse(env); } catch (e) {}
 
-  // Default watchlist topics — overridable via KV
+  // Default watchlist topics - overridable via KV
   const savedTopics = await kvGet(env.AXIOM_KV, 'auto_watchlist');
   const topics = savedTopics
     ? JSON.parse(savedTopics)
@@ -2818,7 +2818,7 @@ async function handleScheduled(env) {
       try {
         const r = await fetch(`https://www.reddit.com/r/${sr}/search.json?q=${encoded}&sort=top&limit=5&restrict_sr=on&t=week`,
           { headers: { 'User-Agent': 'AXIOM-Cron/4.0' } });
-        if (r.ok) { const d = await r.json(); (d?.data?.children||[]).forEach(p => items.push({ src:'reddit', sr, text:p.data.title+(p.data.selftext?' — '+p.data.selftext.slice(0,200):''), author:p.data.author, score:p.data.score, url:'https://reddit.com'+p.data.permalink, date:new Date(p.data.created_utc*1000).toISOString(), topic })); }
+        if (r.ok) { const d = await r.json(); (d?.data?.children||[]).forEach(p => items.push({ src:'reddit', sr, text:p.data.title+(p.data.selftext?' - '+p.data.selftext.slice(0,200):''), author:p.data.author, score:p.data.score, url:'https://reddit.com'+p.data.permalink, date:new Date(p.data.created_utc*1000).toISOString(), topic })); }
       } catch {}
     }
 
