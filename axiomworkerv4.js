@@ -35,6 +35,8 @@
  * |                               poll). Computed from /allnews + /history.  |
  * |  GET /census?region=         ABS 2021 Census indicators (national +     |
  * |                               states) for demographic grounding.        |
+ * |  POST /clickup               Create a ClickUp task from a flagged story |
+ * |                               (CLICKUP_TOKEN + CLICKUP_LIST_ID secrets).|
  * |  GET /newsq?q=&hours=&max=    Topical Google News AU search - covers    |
  * |                               every outlet Google indexes, when: window,|
  * |                               outlet extraction, enrichment (KV 5min).  |
@@ -1742,6 +1744,40 @@ export default {
         note: 'Latest published national census; next full count 2026. Figures are point-in-time Census counts.',
         regions,
       });
+    }
+
+    // -- ClickUp: create a task from a flagged story ----------------------
+    // POST /clickup  body: { name, description, listId?, priority?, tags?[] }
+    // Token stays server-side as a Worker secret (CLICKUP_TOKEN); the list
+    // defaults to CLICKUP_LIST_ID but can be overridden per request.
+    if (path === '/clickup') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      const token = env.CLICKUP_TOKEN;
+      if (!token) return jsonResp({ error: 'clickup_not_configured', detail: 'Set CLICKUP_TOKEN (and optionally CLICKUP_LIST_ID) as Worker secrets: wrangler secret put CLICKUP_TOKEN' }, 501);
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      const listId = String(body.listId || env.CLICKUP_LIST_ID || '').trim();
+      if (!listId) return jsonResp({ error: 'no_list', detail: 'Provide listId in the request or set CLICKUP_LIST_ID.' }, 400);
+      if (!body.name) return jsonResp({ error: 'no_name' }, 400);
+      const payload = {
+        name: String(body.name).slice(0, 250),
+        description: String(body.description || '').slice(0, 8000),
+        priority: [1, 2, 3, 4].indexOf(body.priority) !== -1 ? body.priority : 2,
+      };
+      if (Array.isArray(body.tags) && body.tags.length) payload.tags = body.tags.slice(0, 10).map(String);
+      try {
+        const r = await fetch('https://api.clickup.com/api/v2/list/' + encodeURIComponent(listId) + '/task', {
+          method: 'POST',
+          headers: { 'Authorization': token, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return jsonResp({ error: 'clickup_' + r.status, detail: (data && (data.err || data.ECODE)) || '' }, 502);
+        return jsonResp({ ok: true, id: data.id, url: data.url, name: payload.name });
+      } catch (e) {
+        return jsonResp({ error: 'clickup_fetch_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
     }
 
     // -- Topical time-sensitive search across Google News AU --------------

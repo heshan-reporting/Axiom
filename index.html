@@ -328,6 +328,40 @@ a{color:inherit}
 .mrow{display:flex;gap:9px;justify-content:flex-end;margin-top:20px}
 .mrow .btn{padding:10px 18px}
 .mnote{font-size:10.5px;color:var(--t3);line-height:1.55;margin-top:14px}
+.mnote code{font-family:var(--fm);font-size:10px;background:var(--sur2);padding:1px 5px;border-radius:5px;color:var(--t1)}
+.mhr{height:1px;background:var(--line);margin:22px 0 16px}
+textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
+.chips-set{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--t1);cursor:pointer;
+  border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:rgba(255,255,255,.015)}
+.chk input{accent-color:var(--ac);width:15px;height:15px}
+.chk.tog{display:flex;margin-top:14px;align-items:flex-start;line-height:1.5}
+.chk.tog em{color:var(--t3);font-style:normal}
+/* Priority Desk cards */
+.fl-card{display:flex;align-items:center;gap:13px;padding:12px 13px;border:1px solid var(--line);border-radius:13px;
+  background:rgba(255,255,255,.015);margin-bottom:8px;transition:border-color .15s}
+.fl-card:hover{border-color:var(--line2)}
+.fl-score{flex-shrink:0;width:46px;height:46px;border-radius:12px;border:1.5px solid;display:flex;align-items:center;justify-content:center;
+  font-family:var(--fd);font-weight:800;font-size:18px;font-variant-numeric:tabular-nums;background:rgba(255,255,255,.02)}
+.fl-body{flex:1;min-width:0}
+.fl-t{display:block;font-weight:600;font-size:13.5px;color:var(--t0);text-decoration:none;line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.fl-t:hover{color:var(--ac)}
+.fl-meta{font-family:var(--fm);font-size:10px;color:var(--t2);margin-top:4px}
+.fl-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.fl-chip{font-family:var(--fm);font-size:9px;letter-spacing:.04em;color:var(--t1);text-transform:capitalize;
+  border:1px solid var(--line);border-radius:6px;padding:2px 7px;background:var(--sur2)}
+.btn.sm{flex-shrink:0;padding:0 14px;height:34px;font-size:12px}
+/* Content Studio */
+.studio-out{border:1px solid var(--line);border-radius:14px;background:var(--bg2);padding:18px 20px;
+  max-height:52vh;overflow-y:auto;margin:6px 0 4px;min-height:120px}
+.studio-md h4{font-family:var(--fd);font-size:13px;color:var(--ac);margin:16px 0 6px;letter-spacing:.01em}
+.studio-md h4:first-child{margin-top:0}
+.studio-md p{font-size:13px;line-height:1.6;color:var(--t1);margin:0 0 8px}
+.studio-md ul{margin:4px 0 10px 18px}
+.studio-md li{font-size:13px;line-height:1.55;color:var(--t1);margin-bottom:4px}
+.studio-md strong{color:var(--t0)}
+.studio-link{display:inline-block;margin-bottom:12px;color:var(--pos);font-weight:600;font-size:12.5px;text-decoration:none}
 
 /* national pulse + signals */
 .pulsewrap{display:flex;gap:26px;align-items:center}
@@ -539,6 +573,12 @@ body.kiosk .kprog{display:block}
           <div class="note" id="er-note" style="margin-top:12px">Share-of-voice × headline tone × momentum across AU political news. A media-signal indicator — not a voting-intention poll.</div>
         </div>
 
+        <div class="panel gspan">
+          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>Priority Desk</div><span class="ptag" id="pri-tag">MONITORING</span></div>
+          <div class="note" style="margin:0 0 12px">Stories AXIOM judges important — cross-outlet pickup, breaking keywords, coverage spikes, tone extremes. Draft a comms package and push it to ClickUp.</div>
+          <div id="priority"><div class="skel" style="height:60px;margin-bottom:8px"></div><div class="skel" style="height:60px"></div></div>
+        </div>
+
         <div class="grid2 gspan">
           <div class="panel">
             <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Narrative Radar</div><span class="ptag">LIVE HEADLINE ANALYSIS</span></div>
@@ -737,9 +777,40 @@ body.kiosk .kprog{display:block}
     <label class="fl" for="set-worker">Worker URL</label>
     <input class="fi" id="set-worker" placeholder="https://newsaus.heshan-998.workers.dev">
     <div class="mnote">The API key stays in this browser's localStorage and is sent only to api.anthropic.com. The worker URL is pre-configured — change it only if you deploy your own.</div>
+
+    <div class="mhr"></div>
+    <div class="mtitle" style="font-size:15px">Comms & ClickUp</div>
+    <label class="fl" for="set-brief">Your communication brief</label>
+    <textarea class="fi" id="set-brief" rows="4" placeholder="Who you are, your objectives, stance, audience, tone, and any do-nots. AXIOM writes every comms package and social post on-brief from this."></textarea>
+    <label class="fl" for="set-social">Social platforms to draft for</label>
+    <div id="set-social" class="chips-set">
+      <label class="chk"><input type="checkbox" value="LinkedIn"> LinkedIn</label>
+      <label class="chk"><input type="checkbox" value="Facebook"> Facebook</label>
+      <label class="chk"><input type="checkbox" value="Instagram"> Instagram</label>
+      <label class="chk"><input type="checkbox" value="X / Twitter"> X / Twitter</label>
+    </div>
+    <label class="fl" for="set-cu-list">ClickUp List ID</label>
+    <input class="fi" id="set-cu-list" placeholder="e.g. 901234567 — the list new tasks land in">
+    <label class="chk tog"><input type="checkbox" id="set-cu-auto"> <span>Auto-create a ClickUp task when a story scores ≥ 65 <em>(otherwise you review &amp; push each one)</em></span></label>
+    <div class="mnote">Your ClickUp <b>token</b> lives only on the worker as a secret (<code>CLICKUP_TOKEN</code>) — never in the browser. Set it with <code>wrangler secret put CLICKUP_TOKEN</code>. The List ID above is safe to store here.</div>
     <div class="mrow">
       <button class="btn ghost" onclick="closeSettings()">Cancel</button>
       <button class="btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="m-studio" onclick="if(event.target===this)closeStudio()">
+  <div class="modal wide">
+    <div class="mtitle">Content Studio</div>
+    <div class="msub" id="studio-head">Draft a comms package + social posts for the flagged story.</div>
+    <div id="studio-out" class="studio-out"><div class="empty">Generating…</div></div>
+    <div class="mrow" style="justify-content:space-between;align-items:center">
+      <button class="btn ghost sm" id="studio-regen" onclick="generateStudio()">↻ Regenerate</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn ghost" onclick="closeStudio()">Close</button>
+        <button class="btn" id="studio-send" onclick="sendClickup()" disabled>Send to ClickUp</button>
+      </div>
     </div>
   </div>
 </div>
@@ -749,6 +820,13 @@ body.kiosk .kprog{display:block}
 'use strict';
 let CLAUDE_KEY = localStorage.getItem('axiom_claude_key') || '';
 let WORKER_URL = localStorage.getItem('axiom_worker_url') || 'https://newsaus.heshan-998.workers.dev';
+/* Comms workflow config */
+let ORG_BRIEF = localStorage.getItem('axiom_org_brief') || '';
+let CLICKUP_LIST = localStorage.getItem('axiom_clickup_list') || '';
+let CLICKUP_AUTO = localStorage.getItem('axiom_clickup_auto') === '1';
+let SOCIAL_PLATFORMS = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_social'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['LinkedIn','Facebook','Instagram'];})();
+const FLAG_THRESHOLD = 45;   // importance score to flag a story
+const AUTO_THRESHOLD = 65;   // higher bar before auto-creating a ClickUp task
 let AT_PEOPLE  = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_at_people'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['Anthony Albanese','Sussan Ley','Larissa Waters','Pauline Hanson'];})();
 const AT_COLORS=['#5B8CFF','#FF5470','#22D993','#F0A64B','#22A0B6','#D5680B'];
 const PARTIES=[
@@ -759,7 +837,7 @@ const PARTIES=[
   {key:'IND',name:'Teals / Ind.',color:'#2DD4BF',re:/\b(teal(s)?|independent(s)?|pocock|steggall)\b/i},
 ];
 const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid holds hold unveils unveil pledges pledge calls call flags flag amid attacks attack blocks block push pushes demand demands announces announce warns warn slams slam backs back reveals reveal plans plan looms loom hits hit sets set gets get takes take makes make faces face eyes eye vows vow urges urge seeks seek deal deals talks talk week month year live latest breaking why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
-const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{},analysis:null,census:null};
+const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{},analysis:null,census:null,flagged:[],studio:null};
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -882,6 +960,7 @@ async function loadCore(){
     clientEnrich();
     renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();renderClusters();
     if(!state.analysis||state.analysis._local)renderAnalysisLocal();
+    computeFlags();
     updateCtxBadge();renderStatus(d.generated);
   }catch(e){
     $('wire').innerHTML='<div class="err">'+esc(e.message)+'</div>';
@@ -1116,6 +1195,120 @@ function renderAnalysisLocal(){
 async function loadCensus(){
   try{const d=await api('/census');state.census=d&&d.regions?d:null;}
   catch(e){state.census=null;}
+}
+/* ── PRIORITY DESK: flag important stories, draft comms, push to ClickUp ── */
+const FLAG_KW=/\b(breaking|resign(s|ed|ation)?|quit(s|ting)?|sacked|dumped|axed|scandal|corrupt(ion)?|inquiry|probe|raid(ed)?|charged|arrest(ed)?|dies|dead|death|elect(ion|oral)|by-?election|newspoll|poll(ing)?|budget|surplus|deficit|recession|crisis|emergency|no confidence|spill|defect(s|ion)?|referendum|interest rate|rate (rise|cut|hold)|unemployment|inflation|strike|shutdown|collapse|bombshell|exclusive|leaked?|backflip|backlash|resigns?|robodebt|aukus|referred)\b/i;
+function scoreStory(c){
+  const it=c.lead,why=[];let s=0;
+  if(c.outlets>=2){s+=Math.min(c.outlets,6)*13;why.push(c.outlets+' outlets');}
+  const age=Date.parse(it.date)?(Date.now()-Date.parse(it.date))/3600e3:99;
+  if(age<2){s+=22;why.push('fresh');}else if(age<6){s+=13;}else if(age<24){s+=5;}
+  const tone=typeof it.tone==='number'?it.tone:clientTone(it);
+  if(Math.abs(tone)>=1){s+=12;why.push(tone<0?'negative':'positive');}
+  if(FLAG_KW.test(it.title+' '+(it.desc||''))){s+=24;why.push('high-signal');}
+  const party=PARTIES.find(p=>p.re.test(it.title+' '+(it.desc||'')));
+  if(party){s+=10;why.push(party.name);}
+  if(party&&state.spikes&&state.spikes[party.key]){s+=14;why.push('spike');}
+  return{score:Math.min(100,Math.round(s)),why};
+}
+function computeFlags(){
+  const items=state.news||[];if(!items.length){state.flagged=[];return renderPriority();}
+  const clusters=clusterNews(items),used=new Set(),cands=[];
+  clusters.forEach(c=>{
+    const outlets=new Set(c.items.map(i=>i.src)).size;
+    const lead=c.items.slice().sort((a,b)=>(Date.parse(b.date)||0)-(Date.parse(a.date)||0))[0];
+    c.items.forEach(i=>used.add(i.link||i.title));
+    cands.push({lead,items:c.items,outlets});
+  });
+  items.forEach(i=>{if(used.has(i.link||i.title))return;
+    if(FLAG_KW.test(i.title+' '+(i.desc||'')))cands.push({lead:i,items:[i],outlets:1});});
+  state.flagged=cands.map(c=>Object.assign(c,scoreStory(c)))
+    .filter(c=>c.score>=FLAG_THRESHOLD).sort((a,b)=>b.score-a.score).slice(0,12);
+  renderPriority();maybeAutoClickup();
+}
+function scoreStyle(s){const c=s>=70?'var(--neg)':s>=55?'var(--amb)':'var(--ac)';return 'color:'+c+';border-color:'+c;}
+function renderPriority(){
+  const el=$('priority');if(!el)return;const fl=state.flagged||[];
+  const tag=$('pri-tag');if(tag)tag.textContent=fl.length?fl.length+' FLAGGED':'MONITORING';
+  el.innerHTML=fl.length?fl.map((f,i)=>{
+    const it=f.lead;const chips=f.why.map(w=>'<span class="fl-chip">'+esc(w)+'</span>').join('');
+    return '<div class="fl-card"><div class="fl-score" style="'+scoreStyle(f.score)+'">'+f.score+'</div>'+
+      '<div class="fl-body"><a class="fl-t" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener">'+esc(it.title)+'</a>'+
+      '<div class="fl-meta">'+esc(it.src||'')+' · '+ago(it.date)+' · '+f.outlets+' outlet'+(f.outlets>1?'s':'')+(f.pushed?' · <span style="color:var(--pos)">in ClickUp ✓</span>':'')+'</div>'+
+      '<div class="fl-chips">'+chips+'</div></div>'+
+      '<button class="btn sm" onclick="openStudio('+i+')">Draft</button></div>';
+  }).join(''):'<div class="empty">No stories over the priority threshold right now. AXIOM flags cross-outlet pickup, breaking keywords, spikes and tone extremes.</div>';
+}
+function openStudio(i){
+  const f=(state.flagged||[])[i];if(!f)return;state.studio=f;
+  $('studio-head').innerHTML='<b>'+esc(f.lead.title)+'</b><br><span style="color:var(--t3)">'+esc(f.lead.src||'')+' · priority '+f.score+'/100 · '+esc((f.why||[]).join(', '))+'</span>';
+  $('studio-send').disabled=true;$('m-studio').classList.add('on');
+  if(f.pkg){$('studio-out').innerHTML='<div class="studio-md">'+mdLite(f.pkg)+'</div>';$('studio-send').disabled=false;}
+  else generateStudio();
+}
+function closeStudio(){$('m-studio').classList.remove('on');}
+function studioPrompt(f){
+  const plats=SOCIAL_PLATFORMS.length?SOCIAL_PLATFORMS:['LinkedIn','Facebook','Instagram'];
+  const sys='You are AXIOM Comms — a senior Australian political communications strategist. Today is '+new Date().toDateString()+'.\n\nOUR COMMUNICATION BRIEF (who we are, objectives, stance, audience, tone, and any do-nots):\n'+(ORG_BRIEF||'(No brief set — assume a neutral, credible Australian public-affairs voice. The output will be sharper once the brief is set in Settings.)')+'\n\nProduce a tight, ready-to-use comms package for the flagged news. Use these #### headers EXACTLY and in order:\n#### Why it matters\n2-3 sentences on significance to our audience and objectives.\n#### Recommended angle\nOur strategic angle plus 3-4 on-brief key messages as bullets.\n#### Risks & sensitivities\n1-2 bullets on traps to avoid.\n'+plats.map(p=>'#### '+p+' post\nA ready-to-publish '+p+' post in our voice'+(p==='LinkedIn'?' (professional, 80-150 words).':p==='Facebook'?' (conversational, 40-80 words).':p==='Instagram'?' (caption plus 5-8 relevant hashtags).':' (concise, on-platform).')).join('\n')+'\n\nGround claims in the facts provided; if current specifics are needed use the web_search tool. Stay neutral about opponents, factual, never fabricate quotes or numbers.';
+  const it=f.lead;
+  const user='FLAGGED NEWS\nHeadline: '+it.title+'\nOutlet: '+(it.src||'')+'\nWhen: '+ago(it.date)+' ago\nSummary: '+(it.desc||'(no summary provided)')+'\nLink: '+(it.link||'')+'\nRelated coverage: '+f.items.length+' article(s) across '+f.outlets+' outlet(s).';
+  return{sys,user};
+}
+async function generateStudio(){
+  const f=state.studio;if(!f)return;
+  if(!CLAUDE_KEY){closeStudio();openSettings();toast('Add your Claude API key first',true);return;}
+  const out=$('studio-out');out.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>Drafting comms & social…</div>';
+  $('studio-send').disabled=true;
+  const{sys,user}=studioPrompt(f);
+  try{
+    const body={model:'claude-sonnet-4-6',max_tokens:1900,system:sys,
+      tools:[{type:'web_search_20250305',name:'web_search',max_uses:3,user_location:{type:'approximate',country:'AU',timezone:'Australia/Sydney'}}],
+      messages:[{role:'user',content:user}]};
+    let convo=body.messages.slice(),txt='';
+    for(let t=0;t<3;t++){
+      const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':CLAUDE_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify(Object.assign({},body,{messages:convo}))});
+      const d=await r.json();if(d.error)throw new Error(d.error.message||'API error');
+      (d.content||[]).forEach(b=>{if(b.type==='text')txt+=(txt?'\n':'')+b.text;});
+      if(d.stop_reason==='pause_turn'){convo=convo.concat([{role:'assistant',content:d.content}]);continue;}
+      break;
+    }
+    f.pkg=txt;
+    if(out)out.innerHTML='<div class="studio-md">'+mdLite(txt)+'</div>';
+    const sb=$('studio-send');if(sb)sb.disabled=false;
+  }catch(e){if(out)out.innerHTML='<div class="err">'+esc(e.message||e)+'</div>';}
+}
+async function sendClickup(){
+  const f=state.studio;if(!f||!f.pkg)return;
+  const btn=$('studio-send');const t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='Creating task…';}
+  const it=f.lead;
+  const name='[AXIOM] '+it.title.slice(0,180);
+  const desc=f.pkg+'\n\n---\nSource: '+(it.src||'')+' — '+(it.link||'')+'\nFlagged by AXIOM · priority '+f.score+'/100 · '+(f.why||[]).join(', ');
+  try{
+    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:f.score>=70?1:2,tags:['axiom','flagged']})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    f.pushed=true;toast('ClickUp task created ✓');renderPriority();
+    if(d.url&&$('studio-out')){const a=document.createElement('a');a.href=d.url;a.target='_blank';a.rel='noopener';a.className='studio-link';a.textContent='Open task in ClickUp →';$('studio-out').prepend(a);}
+  }catch(e){toast('ClickUp: '+(e.message||e),true);}
+  if(btn){btn.disabled=false;btn.textContent=t0;}
+}
+async function maybeAutoClickup(){
+  if(!CLICKUP_AUTO||!CLAUDE_KEY)return;
+  let seen={};try{seen=JSON.parse(localStorage.getItem('axiom_flag_seen')||'{}');}catch(e){}
+  const fresh=(state.flagged||[]).filter(f=>f.score>=AUTO_THRESHOLD)
+    .filter(f=>!seen[f.lead.link||f.lead.title]).slice(0,3);
+  for(const f of fresh){
+    const k=f.lead.link||f.lead.title;seen[k]=Date.now();
+    const prev=state.studio;state.studio=f;
+    try{await generateStudio();if(f.pkg)await sendClickup();}catch(e){}
+    state.studio=prev;
+  }
+  const keys=Object.keys(seen);if(keys.length>200)keys.slice(0,keys.length-200).forEach(k=>delete seen[k]);
+  localStorage.setItem('axiom_flag_seen',JSON.stringify(seen));
 }
 function renderHistory(){
   const pts=state.history||[];
@@ -1707,13 +1900,27 @@ function printBrief(){
 }
 
 /* ── SETTINGS ── */
-function openSettings(){$('set-key').value=CLAUDE_KEY;$('set-worker').value=WORKER_URL;$('m-set').classList.add('on');}
+function openSettings(){
+  $('set-key').value=CLAUDE_KEY;$('set-worker').value=WORKER_URL;
+  $('set-brief').value=ORG_BRIEF;$('set-cu-list').value=CLICKUP_LIST;$('set-cu-auto').checked=CLICKUP_AUTO;
+  document.querySelectorAll('#set-social input').forEach(c=>{c.checked=SOCIAL_PLATFORMS.indexOf(c.value)!==-1;});
+  $('m-set').classList.add('on');
+}
 function closeSettings(){$('m-set').classList.remove('on');}
 function saveSettings(){
   CLAUDE_KEY=$('set-key').value.trim();
   WORKER_URL=$('set-worker').value.trim()||'https://newsaus.heshan-998.workers.dev';
+  ORG_BRIEF=$('set-brief').value.trim();
+  CLICKUP_LIST=$('set-cu-list').value.trim();
+  CLICKUP_AUTO=$('set-cu-auto').checked;
+  SOCIAL_PLATFORMS=Array.from(document.querySelectorAll('#set-social input:checked')).map(c=>c.value);
+  if(!SOCIAL_PLATFORMS.length)SOCIAL_PLATFORMS=['LinkedIn','Facebook','Instagram'];
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
+  localStorage.setItem('axiom_org_brief',ORG_BRIEF);
+  localStorage.setItem('axiom_clickup_list',CLICKUP_LIST);
+  localStorage.setItem('axiom_clickup_auto',CLICKUP_AUTO?'1':'0');
+  localStorage.setItem('axiom_social',JSON.stringify(SOCIAL_PLATFORMS));
   closeSettings();toast('Saved');refreshAll();
 }
 
