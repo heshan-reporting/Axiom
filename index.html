@@ -362,6 +362,8 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .studio-md li{font-size:13px;line-height:1.55;color:var(--t1);margin-bottom:4px}
 .studio-md strong{color:var(--t0)}
 .studio-link{display:inline-block;margin-bottom:12px;color:var(--pos);font-weight:600;font-size:12.5px;text-decoration:none}
+.eng-note{font-family:var(--fm);font-size:9.5px;letter-spacing:.05em;color:var(--t2);text-transform:uppercase;
+  margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
 
 /* national pulse + signals */
 .pulsewrap{display:flex;gap:26px;align-items:center}
@@ -789,6 +791,18 @@ body.kiosk .kprog{display:block}
       <label class="chk"><input type="checkbox" value="Instagram"> Instagram</label>
       <label class="chk"><input type="checkbox" value="X / Twitter"> X / Twitter</label>
     </div>
+    <label class="fl" for="set-engine">Social post engine</label>
+    <select class="fi" id="set-engine" onchange="toggleGemini()">
+      <option value="claude">Claude — one model writes the whole package</option>
+      <option value="gemini">Google Gemini — Claude drafts strategy, Gemini writes the posts</option>
+    </select>
+    <div id="gemini-fields" style="display:none">
+      <label class="fl" for="set-gemini">Google Gemini API key</label>
+      <input class="fi" id="set-gemini" type="password" placeholder="AIza…" autocomplete="off">
+      <label class="fl" for="set-gemini-model">Gemini model</label>
+      <input class="fi" id="set-gemini-model" placeholder="gemini-2.5-flash">
+      <div class="mnote">The Gemini key stays in this browser and is sent only to generativelanguage.googleapis.com. Get one free at aistudio.google.com/apikey. If Gemini fails, AXIOM falls back to Claude for the posts.</div>
+    </div>
     <label class="fl" for="set-cu-list">ClickUp List ID</label>
     <input class="fi" id="set-cu-list" placeholder="e.g. 901234567 — the list new tasks land in">
     <label class="chk tog"><input type="checkbox" id="set-cu-auto"> <span>Auto-create a ClickUp task when a story scores ≥ 65 <em>(otherwise you review &amp; push each one)</em></span></label>
@@ -825,6 +839,9 @@ let ORG_BRIEF = localStorage.getItem('axiom_org_brief') || '';
 let CLICKUP_LIST = localStorage.getItem('axiom_clickup_list') || '';
 let CLICKUP_AUTO = localStorage.getItem('axiom_clickup_auto') === '1';
 let SOCIAL_PLATFORMS = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_social'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['LinkedIn','Facebook','Instagram'];})();
+let GEMINI_KEY = localStorage.getItem('axiom_gemini_key') || '';
+let GEMINI_MODEL = localStorage.getItem('axiom_gemini_model') || 'gemini-2.5-flash';
+let SOCIAL_ENGINE = localStorage.getItem('axiom_social_engine') || 'claude'; // 'claude' | 'gemini'
 const FLAG_THRESHOLD = 45;   // importance score to flag a story
 const AUTO_THRESHOLD = 65;   // higher bar before auto-creating a ClickUp task
 let AT_PEOPLE  = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_at_people'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['Anthony Albanese','Sussan Ley','Larissa Waters','Pauline Hanson'];})();
@@ -1243,23 +1260,42 @@ function openStudio(i){
   const f=(state.flagged||[])[i];if(!f)return;state.studio=f;
   $('studio-head').innerHTML='<b>'+esc(f.lead.title)+'</b><br><span style="color:var(--t3)">'+esc(f.lead.src||'')+' · priority '+f.score+'/100 · '+esc((f.why||[]).join(', '))+'</span>';
   $('studio-send').disabled=true;$('m-studio').classList.add('on');
-  if(f.pkg){$('studio-out').innerHTML='<div class="studio-md">'+mdLite(f.pkg)+'</div>';$('studio-send').disabled=false;}
+  if(f.pkg){$('studio-out').innerHTML=(f.engineNote||'')+'<div class="studio-md">'+mdLite(f.pkg)+'</div>';$('studio-send').disabled=false;}
   else generateStudio();
 }
 function closeStudio(){$('m-studio').classList.remove('on');}
-function studioPrompt(f){
+function platformSpec(p){return p==='LinkedIn'?' (professional, 80-150 words).':p==='Facebook'?' (conversational, 40-80 words).':p==='Instagram'?' (caption plus 5-8 relevant hashtags).':' (concise, on-platform).';}
+function studioPrompt(f,includeSocial){
   const plats=SOCIAL_PLATFORMS.length?SOCIAL_PLATFORMS:['LinkedIn','Facebook','Instagram'];
-  const sys='You are AXIOM Comms — a senior Australian political communications strategist. Today is '+new Date().toDateString()+'.\n\nOUR COMMUNICATION BRIEF (who we are, objectives, stance, audience, tone, and any do-nots):\n'+(ORG_BRIEF||'(No brief set — assume a neutral, credible Australian public-affairs voice. The output will be sharper once the brief is set in Settings.)')+'\n\nProduce a tight, ready-to-use comms package for the flagged news. Use these #### headers EXACTLY and in order:\n#### Why it matters\n2-3 sentences on significance to our audience and objectives.\n#### Recommended angle\nOur strategic angle plus 3-4 on-brief key messages as bullets.\n#### Risks & sensitivities\n1-2 bullets on traps to avoid.\n'+plats.map(p=>'#### '+p+' post\nA ready-to-publish '+p+' post in our voice'+(p==='LinkedIn'?' (professional, 80-150 words).':p==='Facebook'?' (conversational, 40-80 words).':p==='Instagram'?' (caption plus 5-8 relevant hashtags).':' (concise, on-platform).')).join('\n')+'\n\nGround claims in the facts provided; if current specifics are needed use the web_search tool. Stay neutral about opponents, factual, never fabricate quotes or numbers.';
+  const social=includeSocial?'\n'+plats.map(p=>'#### '+p+' post\nA ready-to-publish '+p+' post in our voice'+platformSpec(p)).join('\n'):'';
+  const sys='You are AXIOM Comms — a senior Australian political communications strategist. Today is '+new Date().toDateString()+'.\n\nOUR COMMUNICATION BRIEF (who we are, objectives, stance, audience, tone, and any do-nots):\n'+(ORG_BRIEF||'(No brief set — assume a neutral, credible Australian public-affairs voice. The output will be sharper once the brief is set in Settings.)')+'\n\nProduce a tight, ready-to-use comms package for the flagged news. Use these #### headers EXACTLY and in order:\n#### Why it matters\n2-3 sentences on significance to our audience and objectives.\n#### Recommended angle\nOur strategic angle plus 3-4 on-brief key messages as bullets.\n#### Risks & sensitivities\n1-2 bullets on traps to avoid.'+social+'\n\nGround claims in the facts provided; if current specifics are needed use the web_search tool. Stay neutral about opponents, factual, never fabricate quotes or numbers.';
   const it=f.lead;
   const user='FLAGGED NEWS\nHeadline: '+it.title+'\nOutlet: '+(it.src||'')+'\nWhen: '+ago(it.date)+' ago\nSummary: '+(it.desc||'(no summary provided)')+'\nLink: '+(it.link||'')+'\nRelated coverage: '+f.items.length+' article(s) across '+f.outlets+' outlet(s).';
   return{sys,user};
 }
+/* Gemini writes the social posts, on-brief and consistent with the Claude angle. */
+async function geminiSocial(f,draft){
+  const plats=SOCIAL_PLATFORMS.length?SOCIAL_PLATFORMS:['LinkedIn','Facebook','Instagram'];
+  const prompt='You are a senior social media copywriter for an Australian organisation.\n\nOUR COMMUNICATION BRIEF:\n'+(ORG_BRIEF||'(neutral, credible Australian public-affairs voice)')+'\n\nNEWS\nHeadline: '+f.lead.title+'\nSummary: '+(f.lead.desc||'')+'\n\nOUR AGREED COMMS ANGLE (stay consistent with this):\n'+draft+'\n\nWrite ready-to-publish posts, strictly on-brief and consistent with the angle above. Use these #### headers EXACTLY, and output ONLY the posts:\n'+plats.map(p=>'#### '+p+' post'+platformSpec(p)).join('\n')+'\n\nNo preamble, no commentary. Never fabricate quotes or figures.';
+  const model=(GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,'');
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:1400}})});
+  const d=await r.json();
+  if(d.error)throw new Error(d.error.message||'Gemini error');
+  const cand=(d.candidates||[])[0]||{};
+  const txt=((cand.content&&cand.content.parts)||[]).map(p=>p.text||'').join('').trim();
+  if(!txt)throw new Error('Gemini returned no text'+(cand.finishReason?' ('+cand.finishReason+')':''));
+  return txt;
+}
 async function generateStudio(){
   const f=state.studio;if(!f)return;
   if(!CLAUDE_KEY){closeStudio();openSettings();toast('Add your Claude API key first',true);return;}
-  const out=$('studio-out');out.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>Drafting comms & social…</div>';
-  $('studio-send').disabled=true;
-  const{sys,user}=studioPrompt(f);
+  const useGemini=SOCIAL_ENGINE==='gemini'&&!!GEMINI_KEY;
+  const out=$('studio-out');
+  if(out)out.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>'+(useGemini?'Claude drafting the strategy…':'Drafting comms & social…')+'</div>';
+  const sb0=$('studio-send');if(sb0)sb0.disabled=true;
+  const{sys,user}=studioPrompt(f,!useGemini); // Claude writes social too, unless Gemini will
   try{
     const body={model:'claude-sonnet-4-6',max_tokens:1900,system:sys,
       tools:[{type:'web_search_20250305',name:'web_search',max_uses:3,user_location:{type:'approximate',country:'AU',timezone:'Australia/Sydney'}}],
@@ -1274,8 +1310,29 @@ async function generateStudio(){
       if(d.stop_reason==='pause_turn'){convo=convo.concat([{role:'assistant',content:d.content}]);continue;}
       break;
     }
-    f.pkg=txt;
-    if(out)out.innerHTML='<div class="studio-md">'+mdLite(txt)+'</div>';
+    let engineNote='';
+    if(useGemini){
+      if(out)out.innerHTML='<div class="studio-md">'+mdLite(txt)+'</div><div class="think" style="margin-top:8px"><div class="tdots"><i></i><i></i><i></i></div>Gemini writing the social posts…</div>';
+      try{
+        const social=await geminiSocial(f,txt);
+        txt=txt.trim()+'\n\n'+social.trim();
+        engineNote='<div class="eng-note">Strategy by Claude · social posts by Gemini ('+esc((GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,''))+')</div>';
+      }catch(ge){
+        // Fall back to Claude for the social posts so the user still gets a full package.
+        toast('Gemini failed ('+(ge.message||ge)+') — using Claude for social',true);
+        const sp=studioPrompt(f,true);
+        const r2=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
+          headers:{'Content-Type':'application/json','x-api-key':CLAUDE_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+          body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1900,system:sp.sys,messages:[{role:'user',content:sp.user}]})});
+        const d2=await r2.json();if(d2.error)throw new Error(d2.error.message||'API error');
+        txt=(d2.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+        engineNote='<div class="eng-note">Full package by Claude (Gemini unavailable)</div>';
+      }
+    }else{
+      engineNote='<div class="eng-note">Full package by Claude</div>';
+    }
+    f.pkg=txt;f.engineNote=engineNote;
+    if(out)out.innerHTML=engineNote+'<div class="studio-md">'+mdLite(txt)+'</div>';
     const sb=$('studio-send');if(sb)sb.disabled=false;
   }catch(e){if(out)out.innerHTML='<div class="err">'+esc(e.message||e)+'</div>';}
 }
@@ -1900,10 +1957,12 @@ function printBrief(){
 }
 
 /* ── SETTINGS ── */
+function toggleGemini(){$('gemini-fields').style.display=$('set-engine').value==='gemini'?'block':'none';}
 function openSettings(){
   $('set-key').value=CLAUDE_KEY;$('set-worker').value=WORKER_URL;
   $('set-brief').value=ORG_BRIEF;$('set-cu-list').value=CLICKUP_LIST;$('set-cu-auto').checked=CLICKUP_AUTO;
   document.querySelectorAll('#set-social input').forEach(c=>{c.checked=SOCIAL_PLATFORMS.indexOf(c.value)!==-1;});
+  $('set-engine').value=SOCIAL_ENGINE;$('set-gemini').value=GEMINI_KEY;$('set-gemini-model').value=GEMINI_MODEL;toggleGemini();
   $('m-set').classList.add('on');
 }
 function closeSettings(){$('m-set').classList.remove('on');}
@@ -1915,12 +1974,18 @@ function saveSettings(){
   CLICKUP_AUTO=$('set-cu-auto').checked;
   SOCIAL_PLATFORMS=Array.from(document.querySelectorAll('#set-social input:checked')).map(c=>c.value);
   if(!SOCIAL_PLATFORMS.length)SOCIAL_PLATFORMS=['LinkedIn','Facebook','Instagram'];
+  SOCIAL_ENGINE=$('set-engine').value;
+  GEMINI_KEY=$('set-gemini').value.trim();
+  GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-2.5-flash';
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
   localStorage.setItem('axiom_org_brief',ORG_BRIEF);
   localStorage.setItem('axiom_clickup_list',CLICKUP_LIST);
   localStorage.setItem('axiom_clickup_auto',CLICKUP_AUTO?'1':'0');
   localStorage.setItem('axiom_social',JSON.stringify(SOCIAL_PLATFORMS));
+  localStorage.setItem('axiom_social_engine',SOCIAL_ENGINE);
+  localStorage.setItem('axiom_gemini_key',GEMINI_KEY);
+  localStorage.setItem('axiom_gemini_model',GEMINI_MODEL);
   closeSettings();toast('Saved');refreshAll();
 }
 
