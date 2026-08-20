@@ -364,6 +364,15 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .studio-link{display:inline-block;margin-bottom:12px;color:var(--pos);font-weight:600;font-size:12.5px;text-decoration:none}
 .eng-note{font-family:var(--fm);font-size:9.5px;letter-spacing:.05em;color:var(--t2);text-transform:uppercase;
   margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+/* visual generation + distribution */
+.studio-visual{margin:2px 0 4px}
+.vis-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0}
+.fi.sm{height:34px;padding:0 10px;font-size:12px;width:auto}
+.ref-thumb{width:36px;height:36px;border-radius:8px;object-fit:cover;border:1px solid var(--line)}
+.ref-name{font-size:11.5px;color:var(--t2)}
+.vis-img{display:block;max-width:100%;width:320px;border-radius:14px;border:1px solid var(--line);margin:8px 0 6px}
+.vis-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.vis-hint{font-size:11px;color:var(--t3)}
 
 /* national pulse + signals */
 .pulsewrap{display:flex;gap:26px;align-items:center}
@@ -807,6 +816,13 @@ body.kiosk .kprog{display:block}
     <input class="fi" id="set-cu-list" placeholder="e.g. 901234567 — the list new tasks land in">
     <label class="chk tog"><input type="checkbox" id="set-cu-auto"> <span>Auto-create a ClickUp task when a story scores ≥ 65 <em>(otherwise you review &amp; push each one)</em></span></label>
     <div class="mnote">Your ClickUp <b>token</b> lives only on the worker as a secret (<code>CLICKUP_TOKEN</code>) — never in the browser. Set it with <code>wrangler secret put CLICKUP_TOKEN</code>. The List ID above is safe to store here.</div>
+
+    <div class="mhr"></div>
+    <div class="mtitle" style="font-size:15px">WhatsApp news alerts</div>
+    <label class="fl" for="set-wa">Recipient numbers (comma-separated, international format)</label>
+    <input class="fi" id="set-wa" placeholder="+61412345678, +61498765432">
+    <div class="mnote">For hot news, push the alert + brief straight to WhatsApp from Content Studio. Numbers are safe to store here; the WhatsApp <b>token</b> lives only on the worker — Meta Cloud API (<code>WA_TOKEN</code>+<code>WA_PHONE_ID</code>) or Twilio (<code>TWILIO_SID</code>/<code>TWILIO_AUTH</code>/<code>TWILIO_WA_FROM</code>). Note: outside the 24-hour window Meta requires a pre-approved template.</div>
+    <div class="mnote">Image visuals use Google's <b>gemini-2.5-flash-image</b> ("Nano Banana") via the same Gemini key on the worker (<code>GEMINI_KEY</code>). Upload a reference artwork in Content Studio and it matches that design.</div>
     <div class="mrow">
       <button class="btn ghost" onclick="closeSettings()">Cancel</button>
       <button class="btn" onclick="saveSettings()">Save</button>
@@ -819,10 +835,30 @@ body.kiosk .kprog{display:block}
     <div class="mtitle">Content Studio</div>
     <div class="msub" id="studio-head">Draft a comms package + social posts for the flagged story.</div>
     <div id="studio-out" class="studio-out"><div class="empty">Generating…</div></div>
+    <div id="studio-visual" class="studio-visual" style="display:none">
+      <div class="mhr"></div>
+      <div class="mtitle" style="font-size:14px">Visual &amp; distribution</div>
+      <div class="vis-row">
+        <input type="file" id="ref-file" accept="image/*" style="display:none" onchange="onRefPicked(event)">
+        <button class="btn ghost sm" onclick="document.getElementById('ref-file').click()">Reference artwork ▸</button>
+        <img id="ref-thumb" class="ref-thumb" style="display:none" alt="reference">
+        <span id="ref-name" class="ref-name">none — Gemini follows your brief only</span>
+      </div>
+      <div class="vis-row">
+        <select class="fi sm" id="vis-format" style="max-width:190px;flex:0 0 auto">
+          <option value="square">Square 1080×1080</option>
+          <option value="portrait">Portrait 1080×1350</option>
+          <option value="story">Story 1080×1920</option>
+        </select>
+        <button class="btn sm" id="vis-gen" onclick="produceVisual()">🎨 Generate visual</button>
+      </div>
+      <div id="vis-preview"></div>
+    </div>
     <div class="mrow" style="justify-content:space-between;align-items:center">
       <button class="btn ghost sm" id="studio-regen" onclick="generateStudio()">↻ Regenerate</button>
       <div style="display:flex;gap:10px">
         <button class="btn ghost" onclick="closeStudio()">Close</button>
+        <button class="btn ghost" id="studio-wa" onclick="sendWhatsApp()" style="display:none">💬 WhatsApp alert</button>
         <button class="btn" id="studio-send" onclick="sendClickup()" disabled>Send to ClickUp</button>
       </div>
     </div>
@@ -1260,7 +1296,8 @@ function openStudio(i){
   const f=(state.flagged||[])[i];if(!f)return;state.studio=f;
   $('studio-head').innerHTML='<b>'+esc(f.lead.title)+'</b><br><span style="color:var(--t3)">'+esc(f.lead.src||'')+' · priority '+f.score+'/100 · '+esc((f.why||[]).join(', '))+'</span>';
   $('studio-send').disabled=true;$('m-studio').classList.add('on');
-  if(f.pkg){$('studio-out').innerHTML=(f.engineNote||'')+'<div class="studio-md">'+mdLite(f.pkg)+'</div>';$('studio-send').disabled=false;}
+  {const v=$('studio-visual');if(v)v.style.display='none';const w=$('studio-wa');if(w)w.style.display='none';}
+  if(f.pkg){$('studio-out').innerHTML=(f.engineNote||'')+'<div class="studio-md">'+mdLite(f.pkg)+'</div>';$('studio-send').disabled=false;revealStudioExtras(f);}
   else generateStudio();
 }
 function closeStudio(){$('m-studio').classList.remove('on');}
@@ -1334,6 +1371,7 @@ async function generateStudio(){
     f.pkg=txt;f.engineNote=engineNote;
     if(out)out.innerHTML=engineNote+'<div class="studio-md">'+mdLite(txt)+'</div>';
     const sb=$('studio-send');if(sb)sb.disabled=false;
+    revealStudioExtras(f);
   }catch(e){if(out)out.innerHTML='<div class="err">'+esc(e.message||e)+'</div>';}
 }
 async function sendClickup(){
@@ -1349,6 +1387,11 @@ async function sendClickup(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
     f.pushed=true;toast('ClickUp task created ✓');renderPriority();
+    if(f.visualB64&&d.id){
+      try{await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup-attach',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({taskId:d.id,filename:'axiom-visual.png',b64:f.visualB64,mime:f.visualMime||'image/png'})});
+      }catch(e){}
+    }
     if(d.url&&$('studio-out')){const a=document.createElement('a');a.href=d.url;a.target='_blank';a.rel='noopener';a.className='studio-link';a.textContent='Open task in ClickUp →';$('studio-out').prepend(a);}
   }catch(e){toast('ClickUp: '+(e.message||e),true);}
   if(btn){btn.disabled=false;btn.textContent=t0;}
@@ -1366,6 +1409,78 @@ async function maybeAutoClickup(){
   }
   const keys=Object.keys(seen);if(keys.length>200)keys.slice(0,keys.length-200).forEach(k=>delete seen[k]);
   localStorage.setItem('axiom_flag_seen',JSON.stringify(seen));
+}
+/* ── Visual generation (Gemini image / "Nano Banana") + WhatsApp alerts ── */
+let WA_RECIPIENTS=(()=>{try{const s=JSON.parse(localStorage.getItem('axiom_wa_to'));if(Array.isArray(s))return s;}catch(e){}return [];})();
+const VIS_DIMS={square:'1080x1080 square',portrait:'1080x1350 portrait',story:'1080x1920 vertical story'};
+function revealStudioExtras(f){
+  const v=$('studio-visual');if(v)v.style.display='block';
+  const wa=$('studio-wa');if(wa)wa.style.display=WA_RECIPIENTS.length?'':'none';
+  const th=$('ref-thumb'),nm=$('ref-name'),pv=$('vis-preview'),rf=$('ref-file');
+  if(rf)rf.value='';
+  if(f&&f.referenceB64){setRefThumb(f.referenceB64,f.refName,f.refMime);}
+  else{if(th){th.style.display='none';th.removeAttribute('src');}if(nm)nm.textContent='none — Gemini follows your brief only';}
+  if(f&&f.visualB64){renderVisualPreview(f);}else if(pv)pv.innerHTML='';
+}
+function onRefPicked(ev){
+  const file=ev.target.files&&ev.target.files[0];if(!file)return;const f=state.studio;if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{const res=String(rd.result||''),b64=res.split(',')[1]||'';
+    f.referenceB64=b64;f.refMime=file.type||'image/png';f.refName=file.name;
+    setRefThumb(b64,file.name,f.refMime);};
+  rd.readAsDataURL(file);
+}
+function setRefThumb(b64,name,mime){
+  const th=$('ref-thumb'),nm=$('ref-name');
+  if(th){th.src='data:'+(mime||'image/png')+';base64,'+b64;th.style.display='';}
+  if(nm)nm.textContent=name||'reference selected';
+}
+function buildImagePrompt(f){
+  const fmt=VIS_DIMS[($('vis-format')&&$('vis-format').value)||'square']||VIS_DIMS.square;
+  const angle=(f.pkg||'').slice(0,1500);
+  return 'Create a finished, ready-to-post social media graphic ('+fmt+') for an Australian public-affairs organisation.\n\n'+
+    (f.referenceB64?'MATCH THE STYLE of the attached reference image exactly: same colour palette, layout structure, typography feel, spacing and logo placement. Keep the look; change only the content.\n\n':'')+
+    'HEADLINE: '+f.lead.title+'\n\nCONTENT / ANGLE (draw the key line and one supporting message from this comms package):\n'+angle+'\n\n'+
+    'Put a short punchy headline on the graphic plus at most one supporting line. Credible current-affairs tone, on-brand. No watermarks, no placeholder text, no fabricated logos. Output a single polished graphic.';
+}
+async function produceVisual(){
+  const f=state.studio;if(!f||!f.pkg){toast('Generate the package first',true);return;}
+  const btn=$('vis-gen'),t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='Generating…';}
+  const pv=$('vis-preview');if(pv)pv.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>Gemini is designing the visual…</div>';
+  try{
+    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt:buildImagePrompt(f),referenceB64:f.referenceB64||null,mime:f.refMime||'image/png'})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    f.visualB64=d.imageB64;f.visualMime=d.mime||'image/png';renderVisualPreview(f);toast('Visual generated ✓');
+  }catch(e){if(pv)pv.innerHTML='<div class="err">'+esc(e.message||e)+'</div>';toast('Visual: '+(e.message||e),true);}
+  if(btn){btn.disabled=false;btn.textContent=t0;}
+}
+function renderVisualPreview(f){
+  const pv=$('vis-preview');if(!pv||!f.visualB64)return;
+  const src='data:'+(f.visualMime||'image/png')+';base64,'+f.visualB64;
+  pv.innerHTML='<img class="vis-img" src="'+src+'" alt="generated visual">'+
+    '<div class="vis-actions"><button class="btn ghost sm" onclick="produceVisual()">↻ Regenerate</button>'+
+    '<a class="btn ghost sm" download="axiom-visual.png" href="'+src+'">Download</a>'+
+    '<span class="vis-hint">Attaches to the ClickUp task on send.</span></div>';
+}
+async function sendWhatsApp(){
+  const f=state.studio;if(!f)return;
+  if(!WA_RECIPIENTS.length){toast('Add WhatsApp recipient numbers in Settings',true);closeStudio();openSettings();return;}
+  const it=f.lead,brief=(f.pkg||'').replace(/\n{3,}/g,'\n\n').slice(0,1200);
+  const text='🚨 NEWS ALERT — '+it.title+'\n\n'+(it.desc?it.desc.slice(0,300)+'\n\n':'')+
+    'Source: '+(it.src||'')+(it.link?' · '+it.link:'')+'\nPriority: '+f.score+'/100\n\n—— BRIEF ——\n'+brief;
+  const btn=$('studio-wa'),t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='Sending…';}
+  let ok=0,fail=0;
+  for(const to of WA_RECIPIENTS){
+    try{const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({to,text})});const d=await r.json().catch(()=>({}));
+      if(r.ok&&d.ok)ok++;else{fail++;if(d.detail||d.error)toast('WhatsApp: '+(d.detail||d.error),true);}
+    }catch(e){fail++;}
+  }
+  if(ok)toast('WhatsApp alert sent to '+ok+' recipient'+(ok>1?'s':'')+(fail?' ('+fail+' failed)':'')+' ✓');
+  else if(fail)toast('WhatsApp send failed',true);
+  if(btn){btn.disabled=false;btn.textContent=t0;}
 }
 function renderHistory(){
   const pts=state.history||[];
@@ -1963,6 +2078,7 @@ function openSettings(){
   $('set-brief').value=ORG_BRIEF;$('set-cu-list').value=CLICKUP_LIST;$('set-cu-auto').checked=CLICKUP_AUTO;
   document.querySelectorAll('#set-social input').forEach(c=>{c.checked=SOCIAL_PLATFORMS.indexOf(c.value)!==-1;});
   $('set-engine').value=SOCIAL_ENGINE;$('set-gemini').value=GEMINI_KEY;$('set-gemini-model').value=GEMINI_MODEL;toggleGemini();
+  {const wa=$('set-wa');if(wa)wa.value=WA_RECIPIENTS.join(', ');}
   $('m-set').classList.add('on');
 }
 function closeSettings(){$('m-set').classList.remove('on');}
@@ -1977,6 +2093,7 @@ function saveSettings(){
   SOCIAL_ENGINE=$('set-engine').value;
   GEMINI_KEY=$('set-gemini').value.trim();
   GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-2.5-flash';
+  {const wa=$('set-wa');WA_RECIPIENTS=wa?wa.value.split(',').map(s=>s.trim()).filter(Boolean):WA_RECIPIENTS;localStorage.setItem('axiom_wa_to',JSON.stringify(WA_RECIPIENTS));}
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
   localStorage.setItem('axiom_org_brief',ORG_BRIEF);

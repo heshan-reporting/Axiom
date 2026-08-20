@@ -1780,6 +1780,106 @@ export default {
       }
     }
 
+    // -- Nano Banana: generate a social visual from a brief + reference art -
+    // POST /nano  body: { prompt, referenceB64?, mime?, model? }
+    // Uses the Gemini image model (default gemini-2.5-flash-image). Key stays
+    // server-side as GEMINI_KEY. Returns { imageB64, mime }.
+    if (path === '/nano') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      const key = env.GEMINI_KEY;
+      if (!key) return jsonResp({ error: 'gemini_not_configured', detail: 'Set GEMINI_KEY as a Worker secret: wrangler secret put GEMINI_KEY' }, 501);
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
+      const model = String(body.model || 'gemini-2.5-flash-image').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
+      const parts = [];
+      if (body.referenceB64) parts.push({ inline_data: { mime_type: body.mime || 'image/png', data: String(body.referenceB64) } });
+      parts.push({ text: String(body.prompt).slice(0, 6000) });
+      try {
+        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts }] }),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (data.error) return jsonResp({ error: 'gemini_' + (data.error.code || r.status), detail: String(data.error.message || '').slice(0, 200) }, 502);
+        const cand = (data.candidates || [])[0] || {};
+        const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
+        const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
+        if (!inl || !inl.data) return jsonResp({ error: 'no_image', detail: String(cand.finishReason || 'model returned no image').slice(0, 80) }, 502);
+        return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png' });
+      } catch (e) {
+        return jsonResp({ error: 'nano_fetch_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
+    }
+
+    // -- ClickUp attachment: attach a generated image to an existing task ---
+    // POST /clickup-attach  body: { taskId, filename?, b64, mime? }
+    if (path === '/clickup-attach') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      const token = env.CLICKUP_TOKEN;
+      if (!token) return jsonResp({ error: 'clickup_not_configured' }, 501);
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      if (!body.taskId || !body.b64) return jsonResp({ error: 'missing_fields' }, 400);
+      try {
+        const bin = Uint8Array.from(atob(String(body.b64)), c => c.charCodeAt(0));
+        const form = new FormData();
+        form.append('attachment', new Blob([bin], { type: body.mime || 'image/png' }), String(body.filename || 'axiom-visual.png'));
+        const r = await fetch('https://api.clickup.com/api/v2/task/' + encodeURIComponent(String(body.taskId)) + '/attachment', {
+          method: 'POST', headers: { 'Authorization': token }, body: form,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return jsonResp({ error: 'attach_' + r.status, detail: (data && (data.err || data.ECODE)) || '' }, 502);
+        return jsonResp({ ok: true, id: data.id, url: data.url });
+      } catch (e) {
+        return jsonResp({ error: 'attach_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
+    }
+
+    // -- WhatsApp: push a news alert + brief to a number/group --------------
+    // POST /whatsapp  body: { to, text }
+    // Meta Cloud API (WA_TOKEN + WA_PHONE_ID) or Twilio (TWILIO_SID +
+    // TWILIO_AUTH + TWILIO_WA_FROM). All secrets stay on the worker.
+    if (path === '/whatsapp') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      const to = String(body.to || '').trim();
+      const text = String(body.text || '').slice(0, 4000);
+      if (!to || !text) return jsonResp({ error: 'missing_fields', detail: 'Provide to and text.' }, 400);
+      try {
+        if (env.WA_TOKEN && env.WA_PHONE_ID) {
+          const r = await fetch('https://graph.facebook.com/v21.0/' + encodeURIComponent(env.WA_PHONE_ID) + '/messages', {
+            method: 'POST', headers: { 'Authorization': 'Bearer ' + env.WA_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+            signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) return jsonResp({ error: 'whatsapp_' + r.status, detail: String((data.error && data.error.message) || '').slice(0, 200) }, 502);
+          return jsonResp({ ok: true, provider: 'meta', id: (data.messages && data.messages[0] && data.messages[0].id) || null });
+        }
+        if (env.TWILIO_SID && env.TWILIO_AUTH && env.TWILIO_WA_FROM) {
+          const params = new URLSearchParams();
+          params.set('To', 'whatsapp:' + to);
+          params.set('From', 'whatsapp:' + env.TWILIO_WA_FROM);
+          params.set('Body', text);
+          const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + encodeURIComponent(env.TWILIO_SID) + '/Messages.json', {
+            method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(env.TWILIO_SID + ':' + env.TWILIO_AUTH), 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString(),
+            signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : undefined,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) return jsonResp({ error: 'twilio_' + r.status, detail: String(data.message || '').slice(0, 200) }, 502);
+          return jsonResp({ ok: true, provider: 'twilio', id: data.sid || null });
+        }
+        return jsonResp({ error: 'whatsapp_not_configured', detail: 'Set WA_TOKEN + WA_PHONE_ID (Meta) or TWILIO_SID + TWILIO_AUTH + TWILIO_WA_FROM as Worker secrets.' }, 501);
+      } catch (e) {
+        return jsonResp({ error: 'whatsapp_fetch_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
+    }
+
     // -- Topical time-sensitive search across Google News AU --------------
     // GET /newsq?q=<query>&hours=<h>&max=<n>
     //   Covers every outlet Google indexes (not just the registry) for
