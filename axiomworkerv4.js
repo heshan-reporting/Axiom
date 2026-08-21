@@ -492,6 +492,81 @@ async function buildAnalysis(env, hours = 72) {
   return out;
 }
 
+/**
+ * -- Claude sentiment synthesis (LLM) -----------------------------------
+ * Cloudflare Workers have no Anthropic SDK, so we call the Messages API over
+ * raw HTTPS. The API key stays server-side as the ANTHROPIC_API_KEY secret.
+ * Structured outputs (output_config.format) guarantee the JSON shape below,
+ * so callers always get a predictable SentimentReport.
+ */
+const AI_SCHEMA = {
+  type: 'object',
+  properties: {
+    topic:             { type: 'string' },
+    overall_sentiment: { type: 'string', enum: ['positive', 'mixed', 'negative'] },
+    headline:          { type: 'string' },
+    themes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          theme:     { type: 'string' },
+          sentiment: { type: 'string', enum: ['positive', 'mixed', 'negative'] },
+          summary:   { type: 'string' },
+          evidence:  { type: 'array', items: { type: 'string' } },
+        },
+        required: ['theme', 'sentiment', 'summary', 'evidence'],
+        additionalProperties: false,
+      },
+    },
+    sources_used: { type: 'array', items: { type: 'string' } },
+    caveats:      { type: 'string' },
+  },
+  required: ['topic', 'overall_sentiment', 'headline', 'themes', 'sources_used', 'caveats'],
+  additionalProperties: false,
+};
+
+async function claudeAnalyze(env, topic, items) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error('no_anthropic_key');
+  const evidence = (items || []).slice(0, 60).map(i => {
+    const src = i.src || i.source || '';
+    const txt = String(i.text || i.title || '').replace(/\s+/g, ' ').slice(0, 280);
+    const sc  = (i.score != null && i.score !== 0) ? ` score=${i.score}` : '';
+    return `- [${src}${sc}] ${txt}`;
+  }).join('\n');
+
+  const system =
+    'You are a sentiment analyst for Australian political and media intelligence. ' +
+    'Analyse the supplied evidence and return a concise, honest structured read. ' +
+    'Reddit / X / forum voices over-index vocal, urban, highly-engaged users - note ' +
+    'representativeness in caveats. Ground every theme in the evidence provided; do ' +
+    'not invent facts or figures.';
+  const user = `Topic: ${topic}\n\nEvidence (${(items || []).length} items):\n${evidence}`;
+
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':         env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'content-type':      'application/json',
+    },
+    body: JSON.stringify({
+      model: env.CLAUDE_MODEL || 'claude-opus-4-8',
+      max_tokens: 4000,
+      system,
+      messages: [{ role: 'user', content: user }],
+      output_config: { format: { type: 'json_schema', schema: AI_SCHEMA } },
+    }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('anthropic_' + r.status + '_' + JSON.stringify(data).slice(0, 200));
+  // With output_config.format the JSON lives in a text content block.
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw new Error('no_text_block');
+  return JSON.parse(textBlock.text);
+}
+
 /** Safe fetch that never throws - returns { ok, html, status } */
 async function safeFetch(url, opts = {}) {
   try {
@@ -1732,6 +1807,56 @@ export default {
       return new Response(out, { headers: CORS });
     }
 
+    // -- Claude sentiment synthesis (LLM) --------------------------------
+    // GET  /ai-analyze?topic=<t>   Gathers AU news (buildAllNews) + the latest
+    //                              /collect job items for the topic, then has
+    //                              Claude return a structured SentimentReport.
+    //                              KV-cached 30m.
+    // POST /ai-analyze  { topic, items? }  Analyse caller-supplied items
+    //                              (skips gathering + cache).
+    // Requires the ANTHROPIC_API_KEY secret: `wrangler secret put ANTHROPIC_API_KEY`.
+    if (path === '/ai-analyze') {
+      if (!env.ANTHROPIC_API_KEY) {
+        return jsonResp({ error: 'no_anthropic_key', hint: 'Set it as a Worker secret: wrangler secret put ANTHROPIC_API_KEY' }, 501);
+      }
+      let topic = (reqUrl.searchParams.get('topic') || q || '').trim();
+      let items = null;
+      if (req.method === 'POST') {
+        try { const body = await req.json(); topic = String(body.topic || topic).trim(); if (Array.isArray(body.items)) items = body.items; } catch {}
+      }
+      if (!topic && !items) return jsonResp({ error: 'topic_required' }, 400);
+
+      const cacheKey = 'ai_' + (topic || 'custom').toLowerCase().replace(/\W+/g, '_').slice(0, 60);
+      const usingCache = !(req.method === 'POST' && items);
+      if (usingCache) {
+        const cached = await kvGet(env.AXIOM_KV, cacheKey);
+        if (cached) return new Response(cached, { headers: CORS });
+      }
+
+      // Gather evidence if the caller didn't supply items.
+      if (!items) {
+        items = [];
+        try { const news = JSON.parse(await buildAllNews(env, { q: topic, max: 40, hours: 168 })); items.push(...(news.items || [])); } catch (e) {}
+        try {
+          const job = JSON.parse(await kvGet(env.AXIOM_KV, 'auto_job_latest') || '{}');
+          const tw = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          (job.items || []).forEach(i => { const hay = String(i.text || '').toLowerCase(); if (!tw.length || tw.some(w => hay.includes(w))) items.push(i); });
+        } catch (e) {}
+      }
+      if (!items.length) return jsonResp({ error: 'no_evidence', detail: 'No items gathered for this topic - run /collect or /allnews first, or POST items directly.' }, 404);
+
+      try {
+        const report = await claudeAnalyze(env, topic, items);
+        report.generated = new Date().toISOString();
+        report.evidence_count = items.length;
+        const out = JSON.stringify(report);
+        if (usingCache) await kvPut(env.AXIOM_KV, cacheKey, out, 1800);
+        return new Response(out, { headers: CORS });
+      } catch (e) {
+        return jsonResp({ error: 'ai_analyze_failed', detail: String(e).slice(0, 300) }, 502);
+      }
+    }
+
     // -- ABS Census demographic context (2021 Census) ---------------------
     // GET /census[?region=nsw] -> national + state indicators for grounding
     // electorate/demographic analysis. Source: ABS 2021 Census QuickStats.
@@ -2872,6 +2997,7 @@ export default {
         'GET /forum-detect?url=',
         'GET /forum?url=&q=&engine=&name=&page=&ttl=',
         'GET /forum-thread?url=&q=&engine=&page=',
+        'GET|POST /ai-analyze?topic=  (Claude structured sentiment, needs ANTHROPIC_API_KEY)',
       ],
       knownForums: Object.keys(AU_FORUMS),
       automation: {
