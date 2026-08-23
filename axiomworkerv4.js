@@ -1833,13 +1833,53 @@ export default {
         if (cached) return new Response(cached, { headers: CORS });
       }
 
-      // Gather evidence if the caller didn't supply items.
+      // Gather evidence if the caller didn't supply items. Pull the full
+      // spread so the analysis reflects political, activist AND public voices -
+      // not just headlines: news (new developments) + Reddit threads/reactions
+      // + Mastodon activist chatter + the forum-rich latest /collect job.
       if (!items) {
         items = [];
+        const tw = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+
+        // 1. AU news feeds - new developments
         try { const news = JSON.parse(await buildAllNews(env, { q: topic, max: 40, hours: 168 })); items.push(...(news.items || [])); } catch (e) {}
+
+        // 2. Reddit - people's threads, comments and reactions across AU political subs
+        try {
+          const subs = ['AustralianPolitics', 'australia', 'aussie', 'AusEcon', 'AustralianLeft', 'friendlyjordies'];
+          await Promise.all(subs.map(async (srName) => {
+            try {
+              const rr = await fetch(`https://www.reddit.com/r/${srName}/search.json?q=${encodeURIComponent(topic)}&restrict_sr=on&sort=top&t=month&limit=6`,
+                { headers: { 'User-Agent': 'AXIOM-Worker/4.1 (cloudflare)' } });
+              if (!rr.ok) return;
+              const rd = await rr.json();
+              (rd?.data?.children || []).forEach(p => items.push({
+                src: 'reddit:' + srName,
+                text: p.data.title + (p.data.selftext ? ' - ' + p.data.selftext.slice(0, 240) : ''),
+                score: p.data.score,
+                url: 'https://reddit.com' + p.data.permalink,
+              }));
+            } catch (e) {}
+          }));
+        } catch (e) {}
+
+        // 3. Mastodon #auspol - activist / highly-engaged chatter, topic-filtered
+        try {
+          const mr = await fetch('https://aus.social/api/v1/timelines/tag/auspol?limit=30', { headers: { 'User-Agent': 'AXIOM/6.0' } });
+          if (mr.ok) {
+            (await mr.json()).forEach(s => {
+              const text = stripHtml(String(s.content || ''));
+              const hay = text.toLowerCase();
+              if (text && (!tw.length || tw.some(w => hay.includes(w)))) {
+                items.push({ src: 'mastodon', text: text.slice(0, 280), score: (s.favourites_count || 0) + (s.reblogs_count || 0), url: s.url });
+              }
+            });
+          }
+        } catch (e) {}
+
+        // 4. Latest /collect job (forums, HackerNews, extended newswire) filtered to topic
         try {
           const job = JSON.parse(await kvGet(env.AXIOM_KV, 'auto_job_latest') || '{}');
-          const tw = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
           (job.items || []).forEach(i => { const hay = String(i.text || '').toLowerCase(); if (!tw.length || tw.some(w => hay.includes(w))) items.push(i); });
         } catch (e) {}
       }
