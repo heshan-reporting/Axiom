@@ -966,8 +966,11 @@ body.kiosk .kprog{display:block}
                   <label>Content to draft</label>
                   <div class="cc-typechips" id="cc-types">
                     <button class="cc-tc on" data-t="social">Social posts</button>
-                    <button class="cc-tc" data-t="newspaper">Newspaper-style piece</button>
+                    <button class="cc-tc" data-t="release">Media release</button>
+                    <button class="cc-tc" data-t="talking">Talking points</button>
+                    <button class="cc-tc" data-t="oped">Op-ed</button>
                     <button class="cc-tc" data-t="edm">EDM / email</button>
+                    <button class="cc-tc" data-t="newspaper">Newspaper-style</button>
                   </div>
                 </div>
               </div>
@@ -2427,21 +2430,34 @@ function kiosk(on){
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('kiosk'))kiosk(false);});
 
 /* ═══════════════════ CLIENT CENTRAL ═══════════════════ */
+const CC_SEED_V=2;
 const CC_SEED=[{
   id:'mca',name:'Minerals Council of Australia',short:'MCA',accent:'#F0A64B',accent2:'#E9642A',
-  desc:'National peak body for the Australian minerals industry. Public-affairs voice defending mining’s contribution to jobs, regional communities, and the economy — and rebutting activist misinformation on tax and resources policy.',
-  brief:'You write for the Minerals Council of Australia (MCA). Voice: confident, factual, patriotic, plain-spoken and pro-industry. Defend the minerals sector’s contribution to Australia — jobs, regional communities, exports, and the tax & royalties it pays. Champion regional Australia, farmers, fisheries and workers. Rebut activist and “foreign-funded activist” claims calmly and with facts, never shrill. Never fabricate figures or quotes; if a number isn’t supplied, speak in general terms. Australian English.',
-  keywords:['minerals council','mining tax','fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','mining royalties','resources sector','critical minerals','regional australia','mining jobs','fuel tax','royalties','resources tax','coal','iron ore','mining industry'],
+  desc:'National peak body for the Australian minerals industry (minerals.org.au). Champions mining’s contribution to jobs, regional communities, exports and tax & royalties; advocates on critical minerals, competitive policy and efficient approvals; and rebuts activist campaigns on resources and tax policy.',
+  brief:'You write for the Minerals Council of Australia (MCA), Australia’s peak minerals-industry body. Voice: confident, factual, plain-spoken, pro-industry and pro-regional — never shrill. Core themes: mining underpins Australian prosperity — jobs, higher regional wages, exports, and the tax & royalties the sector pays; Australia should be the critical-minerals “supplier of choice” (rare earths, the $1.2b strategic reserve, the Australia–EU FTA) with stable policy, timely approvals and downstream processing. On Fuel Tax Credits: they are NOT a subsidy — they refund fuel excise (a road-user tax) on fuel used OFF public roads, and they support jobs across farming, mining, tourism, freight, seafood and forestry. IMPORTANT sensitivity: critics dismiss the fuel campaign as “a mining lobby in a farmer’s hat,” so lead with the broad coalition of everyday industries — farmers, fishers, truckies, tradies — not mining alone, and stay measured and fact-led. Never fabricate figures or quotes; if a number is not supplied, speak in general terms. Australian English.',
+  keywords:['minerals council','mca','mining tax','fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','fuel tax','fuel excise','mining royalties','royalties','resources sector','resources tax','critical minerals','rare earths','strategic reserve','mining jobs','regional australia','mining approvals','mining investment','iron ore','coal','mining industry','minerals week'],
   campaigns:[
-    {name:'Hands Off Our Fuel (HOOF)',url:'handsoffourfuel.com.au',tagline:'Protect Fuel Tax Credits for the businesses and regional communities that rely on them.',
-     messages:['Activists are targeting Fuel Tax Credits.','Removing them would hit real businesses and real livelihoods.','We stand with regional Australia — farmers, fisheries and family businesses.','Don’t stay quiet — sign the petition: Hands Off Our Fuel.'],
-     keywords:['fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','fuel tax','hands off our fuel']},
-    {name:'That’s Mining',url:'thatsmining.com.au',tagline:'Myth-busting mining’s real contribution — tax & royalties, jobs and supply chains.',
-     messages:['Mining pays billions in tax and royalties every year.','Mining supports hundreds of thousands of jobs and whole supply chains.','Australia’s prosperity is built on resources.','State opportunities: Victoria, WA and the NT.'],
-     keywords:['thats mining','mining tax','royalties','mining jobs','critical minerals','resources']}
+    {name:'Hands Off Our Fuel (HOOF)',url:'handsoffourfuel.com.au',tagline:'A coalition of regional industries protecting Fuel Tax Credits — not a subsidy, but a fair refund of road tax on fuel used off the road.',
+     messages:['Fuel Tax Credits are not a subsidy — they refund a road-user tax on fuel that is never used on public roads.','They support jobs across farming, mining, tourism, freight, seafood and forestry.','A cut would hit real regional businesses and family livelihoods first.','Regional Australia is standing together — farmers, fishers, truckies and tradies.','Don’t stay quiet — sign the petition: Hands Off Our Fuel.'],
+     keywords:['fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','fuel tax','fuel excise','hands off our fuel']},
+    {name:'That’s Mining',url:'thatsmining.com.au',tagline:'Setting the record straight on mining’s real contribution — tax & royalties, jobs and supply chains.',
+     messages:['Mining pays billions in tax and royalties every year.','Mining supports hundreds of thousands of jobs and whole regional supply chains.','Australia’s prosperity and living standards are built on resources.','Get the facts — that’s mining.'],
+     keywords:['thats mining','mining tax','royalties','mining jobs','supply chain','resources']},
+    {name:'Critical Minerals',url:'minerals.org.au',tagline:'Australia as the critical-minerals supplier of choice — investment, stable policy, timely approvals and downstream processing.',
+     messages:['Australia can be the world’s trusted critical-minerals supplier of choice.','Rare earths and a national strategic reserve strengthen sovereignty and supply chains.','The Australia–EU FTA boosts investment confidence and market access.','Stable policy, timely approvals and downstream processing secure the next generation of mines and jobs.'],
+     keywords:['critical minerals','rare earths','strategic reserve','supply chain','eu fta','approvals','downstream processing','antimony','gallium']}
   ]
 }];
-let CC_CLIENTS=(()=>{try{const s=JSON.parse(localStorage.getItem('axiom_clients'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return CC_SEED;})();
+let CC_CLIENTS=(()=>{try{
+  const s=JSON.parse(localStorage.getItem('axiom_clients'));
+  const v=+(localStorage.getItem('axiom_clients_v')||0);
+  if(Array.isArray(s)&&s.length){
+    if(v>=CC_SEED_V)return s;                              // up to date
+    const seedIds=CC_SEED.map(c=>c.id);                    // refresh seeded clients, keep user-added
+    return CC_SEED.concat(s.filter(c=>seedIds.indexOf(c.id)===-1));
+  }
+}catch(e){}return CC_SEED.slice();})();
+try{localStorage.setItem('axiom_clients_v',String(CC_SEED_V));}catch(e){}
 let CC_ACTIVE=localStorage.getItem('axiom_client_active')||CC_CLIENTS[0].id;
 const ccState={refs:[],types:['social'],campaign:0,signals:[],io:null,booted:false};
 function ccSave(){try{localStorage.setItem('axiom_clients',JSON.stringify(CC_CLIENTS));localStorage.setItem('axiom_client_active',CC_ACTIVE);}catch(e){}}
@@ -2565,8 +2581,11 @@ function ccBuildPrompt(){
   const types=ccState.types.length?ccState.types:['social'];
   let ask='';
   if(types.indexOf('social')!==-1)ask+='\n'+plats.map(p=>'#### '+p+' post'+platformSpec(p)).join('\n');
-  if(types.indexOf('newspaper')!==-1)ask+='\n#### Newspaper-style piece\nWrite in the style of a newspaper article/opinion piece the campaign could turn into a shareable graphic: a strong masthead-style HEADLINE line, a one-line standfirst/kicker, then 120-180 words of body copy, and a short pull-quote. Punchy, campaign-aligned, factual.';
+  if(types.indexOf('release')!==-1)ask+='\n#### Media release\nA short, print-ready media release: a strong headline, a dateline, 2-3 tight paragraphs, and one attributable quote from a spokesperson (attribute generically, e.g. “an MCA spokesperson said”). Newsworthy and on-message.';
+  if(types.indexOf('talking')!==-1)ask+='\n#### Talking points\n4-6 crisp, one-sentence talking points a spokesperson could use on air or with media. Lead with the strongest, most defensible line.';
+  if(types.indexOf('oped')!==-1)ask+='\n#### Op-ed\nA 200-260 word opinion piece in the client’s voice: a clear argument, a human/regional angle, and a call to action. First-person plural where natural.';
   if(types.indexOf('edm')!==-1)ask+='\n#### EDM / email\nSubject line, preview text, and a 90-140 word supporter email with a clear call to action.';
+  if(types.indexOf('newspaper')!==-1)ask+='\n#### Newspaper-style piece\nWrite in the style of a newspaper article/opinion piece the campaign could turn into a shareable graphic: a strong masthead-style HEADLINE line, a one-line standfirst/kicker, then 120-180 words of body copy, and a short pull-quote. Punchy, campaign-aligned, factual.';
   const sys='You are a senior campaign copywriter for '+c.name+'.\n\nCLIENT BRIEF:\n'+(c.brief||c.desc||'')+
     (cm?'\n\nCAMPAIGN: '+cm.name+' ('+(cm.url||'')+')\nTagline: '+(cm.tagline||'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'\n\nContext: general brand / whole-of-client.')+
     (ccState.refs.length?'\n\nReference images are attached — match their visual tone, branding, structure and voice.':'')+
