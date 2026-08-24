@@ -1793,24 +1793,40 @@ export default {
       if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
       const model = String(body.model || 'gemini-2.5-flash-image').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
       const parts = [];
-      if (body.referenceB64) parts.push({ inline_data: { mime_type: body.mime || 'image/png', data: String(body.referenceB64) } });
+      // Prompt first, then the reference image (matches Gemini image-edit ordering).
       parts.push({ text: String(body.prompt).slice(0, 6000) });
-      try {
-        const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key), {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts }] }),
-          signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
-        });
-        const data = await r.json().catch(() => ({}));
-        if (data.error) return jsonResp({ error: 'gemini_' + (data.error.code || r.status), detail: String(data.error.message || '').slice(0, 200) }, 502);
-        const cand = (data.candidates || [])[0] || {};
-        const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
-        const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
-        if (!inl || !inl.data) return jsonResp({ error: 'no_image', detail: String(cand.finishReason || 'model returned no image').slice(0, 80) }, 502);
-        return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png' });
-      } catch (e) {
-        return jsonResp({ error: 'nano_fetch_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      if (body.referenceB64) parts.push({ inline_data: { mime_type: body.mime || 'image/png', data: String(body.referenceB64) } });
+      // The image model must be told to return an image, or it 500s ("Internal error encountered").
+      const payload = JSON.stringify({ contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } });
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
+      let lastDetail = '';
+      // Gemini image 500s ("Internal error encountered") are frequently transient - retry a couple of times.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (attempt) await new Promise(res => setTimeout(res, 700 * attempt));
+          const r = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: payload,
+            signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (data.error) {
+            lastDetail = String(data.error.message || '').slice(0, 200);
+            const code = data.error.code || r.status;
+            if (code === 500 || code === 503 || code === 429) continue; // transient - retry
+            return jsonResp({ error: 'gemini_' + code, detail: lastDetail }, 502);
+          }
+          const cand = (data.candidates || [])[0] || {};
+          const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
+          const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
+          if (inl && inl.data) return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png' });
+          lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
+          if (cand.finishReason && cand.finishReason !== 'STOP') continue; // e.g. transient/blocked - retry once
+        } catch (e) {
+          lastDetail = String(e && e.name || e).slice(0, 60);
+        }
       }
+      return jsonResp({ error: 'no_image', detail: lastDetail || 'image model failed after retries', model }, 502);
     }
 
     // -- ClickUp attachment: attach a generated image to an existing task ---
