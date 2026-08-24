@@ -675,6 +675,8 @@ body.kiosk .kprog{display:block}
 .cc-mini:hover{color:var(--cc-ink);border-color:var(--cc-ink3)}
 .cc-mini.ok{color:#140f08;background:var(--cc-accent);border-color:var(--cc-accent)}
 .cc-card-body{padding:16px 18px;white-space:pre-wrap;font-size:13.5px;line-height:1.62;color:var(--cc-ink)}
+.cc-vis-img{display:block;width:100%;max-height:560px;object-fit:contain;background:#0b0906}
+.cc-mini[download]{text-decoration:none;display:inline-flex;align-items:center}
 .cc-card.news .cc-card-body{font-family:Georgia,'Times New Roman',serif;font-size:14.5px}
 .cc-card.news .cc-np-head{font-family:Georgia,serif;font-weight:700;font-size:21px;line-height:1.2;margin-bottom:4px;color:var(--cc-ink)}
 .cc-thinking{display:flex;align-items:center;gap:12px;padding:22px;color:var(--cc-ink2);font-size:13.5px;
@@ -965,6 +967,7 @@ body.kiosk .kprog{display:block}
                 <div class="cc-field">
                   <label>Content to draft</label>
                   <div class="cc-typechips" id="cc-types">
+                    <button class="cc-tc on" data-t="ad">✦ Ad creative</button>
                     <button class="cc-tc on" data-t="social">Social posts</button>
                     <button class="cc-tc" data-t="release">Media release</button>
                     <button class="cc-tc" data-t="talking">Talking points</button>
@@ -972,6 +975,12 @@ body.kiosk .kprog{display:block}
                     <button class="cc-tc" data-t="edm">EDM / email</button>
                     <button class="cc-tc" data-t="newspaper">Newspaper-style</button>
                   </div>
+                  <select class="cc-in" id="cc-vis-format" style="max-width:280px;margin-top:9px">
+                    <option value="square">Ad format · Square 1080×1080 (feed)</option>
+                    <option value="portrait">Ad format · Portrait 1080×1350 (feed)</option>
+                    <option value="story">Ad format · Story 1080×1920 (reels/stories)</option>
+                    <option value="landscape">Ad format · Landscape 1200×628 (link)</option>
+                  </select>
                 </div>
               </div>
               <div class="cc-field">
@@ -2460,7 +2469,8 @@ let CC_CLIENTS=(()=>{try{
 }catch(e){}return CC_SEED.slice();})();
 try{localStorage.setItem('axiom_clients_v',String(CC_SEED_V));}catch(e){}
 let CC_ACTIVE=localStorage.getItem('axiom_client_active')||CC_CLIENTS[0].id;
-const ccState={refs:[],types:['social'],campaign:0,signals:[],io:null,booted:false};
+const ccState={refs:[],types:['ad','social'],campaign:0,signals:[],io:null,booted:false};
+const CC_DIMS={square:'1080x1080 square',portrait:'1080x1350 portrait',story:'1080x1920 vertical story',landscape:'1200x628 landscape'};
 function ccSave(){try{localStorage.setItem('axiom_clients',JSON.stringify(CC_CLIENTS));localStorage.setItem('axiom_client_active',CC_ACTIVE);}catch(e){}}
 function ccClient(){return CC_CLIENTS.find(c=>c.id===CC_ACTIVE)||CC_CLIENTS[0];}
 function ccInit(){
@@ -2597,26 +2607,87 @@ function ccBuildPrompt(){
   return{sys,user};
 }
 async function ccGenerate(){
-  if(!GEMINI_KEY){go('clients');openSettings();$('set-engine').value='gemini';toggleGemini();toast('Add your Gemini API key to generate',true);return;}
-  if(!ccState.types.length){toast('Pick at least one content type',true);return;}
+  const types=ccState.types||[];
+  const wantsAd=types.indexOf('ad')!==-1;
+  const wantsText=types.some(t=>t!=='ad');
+  if(!types.length){toast('Pick at least one output',true);return;}
+  if(wantsText&&!GEMINI_KEY){go('clients');openSettings();$('set-engine').value='gemini';toggleGemini();toast('Add your Gemini API key to generate copy',true);return;}
   const btn=$('cc-gen');btn.disabled=true;
-  const out=$('cc-output');out.innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting '+ccState.types.join(' + ')+' for '+esc(ccClient().short||ccClient().name)+'…</div>';
+  ccState.secs=[];ccState.visualB64=null;
+  const out=$('cc-output');out.innerHTML=
+    (wantsAd?'<div id="cc-ad-slot"><div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div></div><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>Nano Banana is designing the creative…</div></div></div></div>':'')+
+    (wantsText?'<div id="cc-text-slot"><div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting the copy…</div></div>':'');
+  // Copy and creative run at the same time.
+  const textJob=wantsText?ccGenText().then(txt=>{ccState.lastPkg=txt;ccRenderTextCards(txt);})
+    .catch(e=>{const el=$('cc-text-slot');if(el)el.innerHTML='<div class="cc-err">Copy: '+esc(e.message||e)+'</div>';}):Promise.resolve();
+  const adJob=wantsAd?ccGenImage().then(v=>{ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();})
+    .catch(e=>{const el=$('cc-ad-slot');if(el)el.innerHTML='<div class="cc-err">Ad creative: '+esc(e.message||e)+'</div>';}):Promise.resolve();
+  await Promise.allSettled([textJob,adJob]);
+  btn.disabled=false;
+}
+async function ccGenText(){
   const{sys,user}=ccBuildPrompt();
   const parts=[{text:sys+'\n\n'+user}];
   ccState.refs.forEach(r=>parts.push({inlineData:{mimeType:r.mime,data:r.data}}));
+  const model=(GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,'');
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts}],generationConfig:{temperature:0.75,maxOutputTokens:2000}})});
+  const d=await r.json();
+  if(d.error)throw new Error(d.error.message||'Gemini error');
+  const cand=(d.candidates||[])[0]||{};
+  const txt=((cand.content&&cand.content.parts)||[]).map(p=>p.text||'').join('').trim();
+  if(!txt)throw new Error('no text'+(cand.finishReason?' ('+cand.finishReason+')':''));
+  return txt;
+}
+function ccImagePrompt(){
+  const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
+  const dims=CC_DIMS[($('cc-vis-format')&&$('cc-vis-format').value)||'square']||CC_DIMS.square;
+  const input=($('cc-input').value||'').replace(/^####.*$/gm,'').trim();
+  const headline=input.split('\n').map(x=>x.trim()).filter(Boolean)[0]||(cm&&(cm.messages||[])[0])||c.name;
+  return 'Create a finished, ready-to-publish advertising creative ('+dims+') for '+c.name+(cm?' — campaign: '+cm.name:'')+'.\n\n'+
+    (ccState.refs.length?'MATCH THE STYLE of the attached reference image exactly: same colour palette, layout structure, typography feel, spacing and logo placement. Keep the look; change only the content.\n\n':'Design it clean, confident and credible for an Australian public-affairs campaign.\n\n')+
+    (cm?'Campaign: '+cm.name+'\nTagline: '+(cm.tagline||'')+'\nFeature this key message: '+((cm.messages||[])[0]||'')+'\n\n':'')+
+    'HEADLINE to feature on the creative (short, punchy): '+headline+'\n'+
+    'Add at most one short supporting line and a clear call to action (e.g. the campaign name / “Sign the petition”). No watermarks, no lorem ipsum, no fabricated logos, no invented statistics. Output a single polished graphic.';
+}
+async function ccGenImage(){
+  const refs=ccState.refs||[];
+  const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt:ccImagePrompt(),referenceB64:refs.length?refs[0].data:null,mime:refs.length?refs[0].mime:'image/png'})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status)+' — needs the worker deployed with GEMINI_KEY');
+  return{b64:d.imageB64,mime:d.mime||'image/png'};
+}
+function ccFillAdCard(){
+  const slot=$('cc-ad-slot');if(!slot||!ccState.visualB64)return;
+  const src='data:'+(ccState.visualMime||'image/png')+';base64,'+ccState.visualB64;
+  slot.innerHTML='<div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div>'+
+    '<div class="cc-card-acts"><button class="cc-mini" onclick="ccGenImageRetry()">↻ Regenerate</button>'+
+    '<a class="cc-mini" download="axiom-ad-creative.png" href="'+src+'">Download</a>'+
+    '<button class="cc-mini" onclick="ccAdToClickup()">→ ClickUp</button></div></div>'+
+    '<div class="cc-card-body" style="padding:0"><img class="cc-vis-img" src="'+src+'" alt="ad creative"></div></div>';
+}
+async function ccGenImageRetry(){
+  const slot=$('cc-ad-slot');if(slot)slot.innerHTML='<div class="cc-card"><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>Regenerating creative…</div></div></div>';
+  try{const v=await ccGenImage();ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();}
+  catch(e){if(slot)slot.innerHTML='<div class="cc-err">Ad creative: '+esc(e.message||e)+'</div>';}
+}
+async function ccAdToClickup(){
+  if(!ccState.visualB64){toast('No creative yet',true);return;}
+  const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
+  const base=(WORKER_URL||'').replace(/\/+$/,'');
+  const name='['+(c.short||c.name)+(cm?' · '+cm.name.replace(/\s*\(.*\)/,''):'')+'] Ad creative';
+  const desc=(ccState.lastPkg||$('cc-input').value||'')+'\n\n---\nClient: '+c.name+(cm?'\nCampaign: '+cm.name:'')+'\nAd creative generated in AXIOM Client Central (Nano Banana).';
   try{
-    const model=(GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,'');
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({contents:[{parts}],generationConfig:{temperature:0.75,maxOutputTokens:2000}})});
-    const d=await r.json();
-    if(d.error)throw new Error(d.error.message||'Gemini error');
-    const cand=(d.candidates||[])[0]||{};
-    const txt=((cand.content&&cand.content.parts)||[]).map(p=>p.text||'').join('').trim();
-    if(!txt)throw new Error('Gemini returned no text'+(cand.finishReason?' ('+cand.finishReason+')':''));
-    ccState.lastPkg=txt;ccRenderOutput(txt);
-  }catch(e){out.innerHTML='<div class="cc-err">'+esc(e.message||e)+'</div>';}
-  btn.disabled=false;
+    const r=await fetch(base+'/clickup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:2,tags:['axiom','client-central',c.id]})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    if(d.id){try{await fetch(base+'/clickup-attach',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({taskId:d.id,filename:'ad-creative.png',b64:ccState.visualB64,mime:ccState.visualMime})});}catch(e){}}
+    toast('ClickUp task + creative attached ✓');
+  }catch(e){toast('ClickUp: '+(e.message||e),true);}
 }
 function ccSplitSections(txt){
   const parts=[];const rx=/^####\s+(.+)$/gm;let m,idx=[];
@@ -2625,9 +2696,10 @@ function ccSplitSections(txt){
   idx.forEach((s,i)=>{const end=i+1<idx.length?idx[i+1].start:txt.length;parts.push({title:s.title,body:txt.slice(s.cs,end).trim()});});
   return parts;
 }
-function ccRenderOutput(txt){
+function ccRenderTextCards(txt){
   const secs=ccSplitSections(txt);
-  $('cc-output').innerHTML=secs.map((s,i)=>{
+  const slot=$('cc-text-slot')||$('cc-output');
+  slot.innerHTML=secs.map((s,i)=>{
     const isNews=/newspaper/i.test(s.title);
     let body=esc(s.body);
     if(isNews){const lines=s.body.split('\n').filter(x=>x.trim());if(lines.length){body='<div class="cc-np-head">'+esc(lines[0])+'</div>'+esc(lines.slice(1).join('\n'))}}
