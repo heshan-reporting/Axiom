@@ -542,6 +542,148 @@ body.kiosk .kprog{display:block}
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
 
+/* ═══════════════════ CLIENT CENTRAL — its own design system ═══════════════════ */
+.cc{--cc-accent:#F0A64B;--cc-accent2:#FF7A1A;--cc-ink:#F4F1EA;--cc-ink2:#B9B4A8;--cc-ink3:#7C7669;
+  --cc-glass:rgba(255,255,255,.045);--cc-glass2:rgba(255,255,255,.07);--cc-line:rgba(255,255,255,.10);
+  --cc-panel:#14110C;--cc-fx:'Space Grotesk',sans-serif;
+  position:relative;min-height:100%;padding:6px 4px 60px;isolation:isolate;
+  font-family:'Inter',system-ui,sans-serif;color:var(--cc-ink)}
+.cc-aurora{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;opacity:.55}
+.cc-aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;mix-blend-mode:screen;
+  background:var(--cc-accent);animation:ccFloat 22s ease-in-out infinite}
+.cc-aurora span:nth-child(1){width:46vw;height:46vw;top:-14vw;left:-8vw;background:var(--cc-accent)}
+.cc-aurora span:nth-child(2){width:38vw;height:38vw;top:26vh;right:-10vw;background:var(--cc-accent2);animation-delay:-7s}
+.cc-aurora span:nth-child(3){width:30vw;height:30vw;bottom:-12vw;left:32vw;background:#7C4DFF;opacity:.32;animation-delay:-13s}
+@keyframes ccFloat{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(4vw,-3vh) scale(1.12)}66%{transform:translate(-3vw,4vh) scale(.94)}}
+/* scroll-reveal */
+.cc .reveal{opacity:0;transform:translateY(30px) scale(.985);transition:opacity .8s cubic-bezier(.16,.8,.3,1),transform .8s cubic-bezier(.16,.8,.3,1)}
+.cc .reveal.in{opacity:1;transform:none}
+/* switch bar */
+.cc-switchbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:22px}
+.cc-switch{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.cc-cli{display:flex;align-items:center;gap:9px;padding:9px 15px 9px 11px;border-radius:14px;cursor:pointer;
+  border:1px solid var(--cc-line);background:var(--cc-glass);color:var(--cc-ink2);font-weight:600;font-size:13px;
+  transition:transform .25s cubic-bezier(.16,.8,.3,1),border-color .25s,color .25s,background .25s;backdrop-filter:blur(10px)}
+.cc-cli:hover{transform:translateY(-2px);color:var(--cc-ink)}
+.cc-cli.on{color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));border-color:transparent;box-shadow:0 10px 30px -10px var(--cc-accent)}
+.cc-cli .cc-mono{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--cc-fx);font-weight:800;font-size:12px;background:rgba(0,0,0,.22);color:inherit;letter-spacing:-.02em}
+.cc-cli.on .cc-mono{background:rgba(0,0,0,.18)}
+.cc-newbtn{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:14px;cursor:pointer;
+  border:1px dashed var(--cc-line);background:transparent;color:var(--cc-ink3);font-weight:600;font-size:12.5px;transition:color .2s,border-color .2s}
+.cc-newbtn:hover{color:var(--cc-ink);border-color:var(--cc-accent)}
+.cc-newbtn svg{width:15px;height:15px}
+/* hero */
+.cc-hero{position:relative;border-radius:26px;padding:34px 34px 30px;overflow:hidden;margin-bottom:26px;
+  background:linear-gradient(150deg,rgba(255,255,255,.09),rgba(255,255,255,.02));border:1px solid var(--cc-line);
+  backdrop-filter:blur(16px);box-shadow:0 30px 80px -40px rgba(0,0,0,.9)}
+.cc-hero::before{content:'';position:absolute;inset:0;background:radial-gradient(120% 120% at 0% 0%,color-mix(in srgb,var(--cc-accent) 18%,transparent),transparent 52%);pointer-events:none}
+.cc-hero::after{content:'';position:absolute;top:0;left:-60%;width:50%;height:100%;transform:skewX(-18deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.09),transparent);animation:ccShine 7s ease-in-out 1s infinite}
+@keyframes ccShine{0%{left:-60%}55%,100%{left:130%}}
+.cc-hero-top{display:flex;align-items:center;gap:18px;position:relative;z-index:1;flex-wrap:wrap}
+.cc-badge{width:66px;height:66px;border-radius:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--cc-fx);font-weight:800;font-size:26px;letter-spacing:-.03em;color:#140f08;
+  background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));box-shadow:0 14px 34px -12px var(--cc-accent)}
+.cc-hero h1{font-family:var(--cc-fx);font-size:clamp(24px,3.4vw,38px);font-weight:800;letter-spacing:-.02em;line-height:1.02;margin:0}
+.cc-hero .cc-sub{color:var(--cc-ink2);font-size:13.5px;margin-top:5px;max-width:60ch;line-height:1.5}
+.cc-kpis{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px;position:relative;z-index:1}
+.cc-kpi{flex:1;min-width:120px;background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:16px;padding:15px 17px;backdrop-filter:blur(8px)}
+.cc-kpi .n{font-family:var(--cc-fx);font-size:27px;font-weight:800;letter-spacing:-.02em;line-height:1;background:linear-gradient(120deg,var(--cc-ink),var(--cc-accent));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.cc-kpi .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cc-ink2);margin-top:7px;font-weight:600}
+.cc-kpi{position:relative;z-index:1;background:rgba(10,8,5,.4)}
+/* blocks */
+.cc-block{margin-bottom:34px}
+.cc-blabel{font-family:var(--cc-fx);font-size:19px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.cc-blabel span{font-family:var(--cc-fx);font-size:11px;font-weight:700;color:var(--cc-accent);border:1px solid color-mix(in srgb,var(--cc-accent) 40%,transparent);border-radius:8px;padding:3px 8px;letter-spacing:.05em}
+.cc-blabel em{font-style:normal;font-family:var(--cc-fx);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--cc-ink3);border:1px solid var(--cc-line);padding:3px 9px;border-radius:999px}
+.cc-note{color:var(--cc-ink3);font-size:12px;line-height:1.55;margin:2px 0 16px}
+.cc-note b{color:var(--cc-ink2)}
+/* campaigns */
+.cc-camps{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.cc-camp{position:relative;border-radius:18px;padding:20px;overflow:hidden;cursor:pointer;
+  background:var(--cc-glass);border:1px solid var(--cc-line);backdrop-filter:blur(10px);
+  transition:transform .3s cubic-bezier(.16,.8,.3,1),border-color .3s,box-shadow .3s}
+.cc-camp:hover{transform:translateY(-4px);border-color:color-mix(in srgb,var(--cc-accent) 55%,transparent);box-shadow:0 24px 50px -28px var(--cc-accent)}
+.cc-camp .cc-cbar{position:absolute;top:0;left:0;width:100%;height:3px;background:linear-gradient(90deg,var(--cc-accent),var(--cc-accent2))}
+.cc-camp h4{font-family:var(--cc-fx);font-size:16px;font-weight:700;margin:4px 0 4px}
+.cc-camp .cc-url{font-size:11px;color:var(--cc-accent);font-weight:600;word-break:break-all}
+.cc-camp .cc-tag{font-size:12.5px;color:var(--cc-ink2);line-height:1.5;margin-top:9px}
+.cc-camp .cc-msgs{margin-top:11px;display:flex;flex-direction:column;gap:5px}
+.cc-camp .cc-msg{font-size:11.5px;color:var(--cc-ink2);padding-left:14px;position:relative;line-height:1.45}
+.cc-camp .cc-msg::before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--cc-accent)}
+/* signals */
+.cc-signals{display:flex;flex-direction:column;gap:10px}
+.cc-sig{display:flex;gap:14px;align-items:center;border-radius:16px;padding:14px 16px;
+  background:var(--cc-glass);border:1px solid var(--cc-line);backdrop-filter:blur(8px);
+  transition:transform .25s cubic-bezier(.16,.8,.3,1),border-color .25s,background .25s}
+.cc-sig:hover{transform:translateX(4px);border-color:color-mix(in srgb,var(--cc-accent) 45%,transparent)}
+.cc-sig-rel{flex-shrink:0;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--cc-fx);font-weight:800;font-size:15px;color:var(--cc-accent);border:1.5px solid color-mix(in srgb,var(--cc-accent) 40%,transparent);background:color-mix(in srgb,var(--cc-accent) 10%,transparent)}
+.cc-sig-b{flex:1;min-width:0}
+.cc-sig-t{font-weight:600;font-size:13.5px;color:var(--cc-ink);text-decoration:none;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cc-sig-t:hover{color:var(--cc-accent)}
+.cc-sig-m{font-size:10.5px;color:var(--cc-ink3);margin-top:4px;font-family:var(--cc-fx)}
+.cc-sig-use{flex-shrink:0;padding:8px 13px;border-radius:10px;border:1px solid var(--cc-line);background:transparent;
+  color:var(--cc-ink2);font-weight:600;font-size:11.5px;cursor:pointer;transition:color .2s,border-color .2s,background .2s;white-space:nowrap}
+.cc-sig-use:hover{color:#140f08;background:var(--cc-accent);border-color:var(--cc-accent)}
+/* composer */
+.cc-composer{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:22px;padding:22px;backdrop-filter:blur(12px)}
+.cc-cgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:16px}
+@media(max-width:720px){.cc-cgrid{grid-template-columns:1fr}}
+.cc-field{margin-bottom:16px}
+.cc-field>label{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--cc-ink3);font-weight:600;margin-bottom:8px}
+.cc-opt{text-transform:none;letter-spacing:0;color:var(--cc-ink3);font-weight:400;font-size:11px}
+.cc-ta,.cc-in{width:100%;background:rgba(0,0,0,.28);border:1px solid var(--cc-line);border-radius:13px;color:var(--cc-ink);
+  padding:13px 15px;font-size:13.5px;font-family:inherit;outline:none;transition:border-color .2s,box-shadow .2s;line-height:1.55;resize:vertical}
+.cc-ta:focus,.cc-in:focus{border-color:var(--cc-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--cc-accent) 18%,transparent)}
+.cc-chips,.cc-typechips{display:flex;gap:8px;flex-wrap:wrap}
+.cc-chip,.cc-tc{padding:9px 15px;border-radius:11px;border:1px solid var(--cc-line);background:rgba(0,0,0,.22);
+  color:var(--cc-ink2);font-weight:600;font-size:12.5px;cursor:pointer;transition:all .2s}
+.cc-chip:hover,.cc-tc:hover{color:var(--cc-ink);border-color:var(--cc-ink3)}
+.cc-chip.on,.cc-tc.on{color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));border-color:transparent}
+.cc-drop{border:1.5px dashed var(--cc-line);border-radius:14px;padding:22px;text-align:center;cursor:pointer;
+  transition:border-color .2s,background .2s;background:rgba(0,0,0,.14)}
+.cc-drop:hover,.cc-drop.drag{border-color:var(--cc-accent);background:color-mix(in srgb,var(--cc-accent) 8%,transparent)}
+.cc-drop-in{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--cc-ink3);font-size:13px}
+.cc-drop-in svg{width:22px;height:22px}.cc-drop-in b{color:var(--cc-accent)}
+.cc-refs{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.cc-ref{position:relative;width:78px;height:78px;border-radius:12px;overflow:hidden;border:1px solid var(--cc-line);animation:ccPop .35s cubic-bezier(.16,.8,.3,1)}
+.cc-ref img{width:100%;height:100%;object-fit:cover}
+.cc-ref button{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:7px;border:none;cursor:pointer;
+  background:rgba(0,0,0,.7);color:#fff;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}
+@keyframes ccPop{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
+.cc-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:6px;flex-wrap:wrap}
+.cc-engine{font-family:var(--cc-fx);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--cc-ink3)}
+.cc-gen{display:inline-flex;align-items:center;gap:9px;padding:14px 26px;border-radius:14px;border:none;cursor:pointer;
+  font-weight:700;font-size:14px;color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));
+  box-shadow:0 14px 34px -14px var(--cc-accent);transition:transform .2s,box-shadow .2s}
+.cc-gen:hover{transform:translateY(-2px);box-shadow:0 20px 44px -16px var(--cc-accent)}
+.cc-gen:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.cc-gen svg{width:17px;height:17px}
+/* output */
+.cc-output{margin-top:18px;display:flex;flex-direction:column;gap:14px}
+.cc-card{border-radius:18px;overflow:hidden;border:1px solid var(--cc-line);background:var(--cc-panel);
+  animation:ccRise .5s cubic-bezier(.16,.8,.3,1) both}
+@keyframes ccRise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.cc-card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--cc-line);background:var(--cc-glass)}
+.cc-card-h .cc-plat{display:flex;align-items:center;gap:9px;font-family:var(--cc-fx);font-weight:700;font-size:13px}
+.cc-card-h .cc-dot{width:9px;height:9px;border-radius:50%;background:var(--cc-accent)}
+.cc-card-acts{display:flex;gap:7px}
+.cc-mini{padding:7px 12px;border-radius:9px;border:1px solid var(--cc-line);background:transparent;color:var(--cc-ink2);
+  font-weight:600;font-size:11.5px;cursor:pointer;transition:all .18s;white-space:nowrap}
+.cc-mini:hover{color:var(--cc-ink);border-color:var(--cc-ink3)}
+.cc-mini.ok{color:#140f08;background:var(--cc-accent);border-color:var(--cc-accent)}
+.cc-card-body{padding:16px 18px;white-space:pre-wrap;font-size:13.5px;line-height:1.62;color:var(--cc-ink)}
+.cc-card.news .cc-card-body{font-family:Georgia,'Times New Roman',serif;font-size:14.5px}
+.cc-card.news .cc-np-head{font-family:Georgia,serif;font-weight:700;font-size:21px;line-height:1.2;margin-bottom:4px;color:var(--cc-ink)}
+.cc-thinking{display:flex;align-items:center;gap:12px;padding:22px;color:var(--cc-ink2);font-size:13.5px;
+  background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:16px}
+.cc-spin{width:20px;height:20px;border-radius:50%;border:2.5px solid var(--cc-line);border-top-color:var(--cc-accent);animation:ccSpin .8s linear infinite;flex-shrink:0}
+@keyframes ccSpin{to{transform:rotate(360deg)}}
+.cc-err{padding:16px;border-radius:14px;background:rgba(255,84,112,.1);border:1px solid rgba(255,84,112,.3);color:#ffb3c0;font-size:13px;line-height:1.5}
+.rbtn-cc.on{color:var(--amb)}
+@media(max-width:640px){.cc-hero{padding:24px 20px}.cc-composer{padding:16px}}
 </style>
 </head>
 <body>
@@ -572,6 +714,7 @@ body.kiosk .kprog{display:block}
     <button class="rbtn" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="rtip">Radar — Media Analytics</span></button>
     <button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">AXIOM Analyst</span></button>
     <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Daily Briefing</span></button>
+    <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Client Central</span></button>
     <div class="spacer"></div>
     <button class="rbtn" onclick="openSettings()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m8.5-12.5h4m-25 0h4m14.8-6.3l-2.8 2.8M6.5 17.5l-2.8 2.8m16.6 0l-2.8-2.8M6.5 6.5L3.7 3.7"/></svg><span class="rtip">Settings</span></button>
   </nav>
@@ -788,6 +931,72 @@ body.kiosk .kprog{display:block}
         </div>
       </section>
 
+      <!-- CLIENT CENTRAL -->
+      <section class="view" id="v-clients">
+        <div class="cc" id="cc-root">
+          <div class="cc-aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
+          <div class="cc-switchbar reveal">
+            <div class="cc-switch" id="cc-switch"></div>
+            <button class="cc-newbtn" onclick="ccAddClient()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New client</button>
+          </div>
+
+          <div class="cc-hero reveal" id="cc-hero"></div>
+
+          <div class="cc-block reveal">
+            <div class="cc-blabel"><span>01</span> Campaigns</div>
+            <div class="cc-camps" id="cc-camps"></div>
+          </div>
+
+          <div class="cc-block reveal">
+            <div class="cc-blabel"><span>02</span> Client signals <em id="cc-sig-tag"></em></div>
+            <div class="cc-note">Live AU news matched to this client's brief and campaign keywords. Click <b>Use in composer</b> to draft from any signal.</div>
+            <div class="cc-signals" id="cc-signals"></div>
+          </div>
+
+          <div class="cc-block reveal" id="cc-composer-block">
+            <div class="cc-blabel"><span>03</span> Content composer</div>
+            <div class="cc-composer">
+              <div class="cc-cgrid">
+                <div class="cc-field">
+                  <label>Campaign</label>
+                  <div class="cc-chips" id="cc-comp-camps"></div>
+                </div>
+                <div class="cc-field">
+                  <label>Content to draft</label>
+                  <div class="cc-typechips" id="cc-types">
+                    <button class="cc-tc on" data-t="social">Social posts</button>
+                    <button class="cc-tc" data-t="newspaper">Newspaper-style piece</button>
+                    <button class="cc-tc" data-t="edm">EDM / email</button>
+                  </div>
+                </div>
+              </div>
+              <div class="cc-field">
+                <label>News, development or angle <span class="cc-opt">— paste the story, a quote, or your angle</span></label>
+                <textarea id="cc-input" class="cc-ta" rows="4" placeholder="e.g. The Australian, 24 Aug 2026 — 'Poll reveals two-thirds of Australians believe foreign-funded activists should not be able to influence government tax policy.' Angle: reinforce that everyday Australians reject foreign interference in fuel tax policy…"></textarea>
+              </div>
+              <div class="cc-field">
+                <label>Reference link <span class="cc-opt">— optional source URL</span></label>
+                <input id="cc-link" class="cc-in" placeholder="https://…">
+              </div>
+              <div class="cc-field">
+                <label>Reference images <span class="cc-opt">— brand style, past creative, the source article (Gemini matches the look &amp; tone)</span></label>
+                <div class="cc-drop" id="cc-drop">
+                  <input type="file" id="cc-file" accept="image/*" multiple hidden>
+                  <div class="cc-drop-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span>Drop images or <b>browse</b></span></div>
+                </div>
+                <div class="cc-refs" id="cc-refs"></div>
+              </div>
+              <div class="cc-actions">
+                <div class="cc-engine" id="cc-engine-note"></div>
+                <button class="cc-gen" id="cc-gen" onclick="ccGenerate()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg>Generate with Gemini</button>
+              </div>
+            </div>
+            <div class="cc-output" id="cc-output"></div>
+          </div>
+        </div>
+      </section>
+
     </div>
   </div>
 </div>
@@ -803,6 +1012,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Radar</span></button>
   <button class="tab" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span>AI</span></button>
   <button class="tab" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Brief</span></button>
+  <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
 
 <!-- SETTINGS MODAL -->
@@ -974,9 +1184,10 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  $('vtitle').textContent={command:'Command Center',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'Command Center',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',clients:'Client Central'}[v]||'AXIOM';
   $('content').scrollTop=0;
   if(v==='radar'&&!state.charts.at)loadAt();
+  if(v==='clients')ccInit();
 }
 
 /* ── BOOT / REFRESH ── */
@@ -2214,6 +2425,218 @@ function kiosk(on){
   }
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('kiosk'))kiosk(false);});
+
+/* ═══════════════════ CLIENT CENTRAL ═══════════════════ */
+const CC_SEED=[{
+  id:'mca',name:'Minerals Council of Australia',short:'MCA',accent:'#F0A64B',accent2:'#E9642A',
+  desc:'National peak body for the Australian minerals industry. Public-affairs voice defending mining’s contribution to jobs, regional communities, and the economy — and rebutting activist misinformation on tax and resources policy.',
+  brief:'You write for the Minerals Council of Australia (MCA). Voice: confident, factual, patriotic, plain-spoken and pro-industry. Defend the minerals sector’s contribution to Australia — jobs, regional communities, exports, and the tax & royalties it pays. Champion regional Australia, farmers, fisheries and workers. Rebut activist and “foreign-funded activist” claims calmly and with facts, never shrill. Never fabricate figures or quotes; if a number isn’t supplied, speak in general terms. Australian English.',
+  keywords:['minerals council','mining tax','fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','mining royalties','resources sector','critical minerals','regional australia','mining jobs','fuel tax','royalties','resources tax','coal','iron ore','mining industry'],
+  campaigns:[
+    {name:'Hands Off Our Fuel (HOOF)',url:'handsoffourfuel.com.au',tagline:'Protect Fuel Tax Credits for the businesses and regional communities that rely on them.',
+     messages:['Activists are targeting Fuel Tax Credits.','Removing them would hit real businesses and real livelihoods.','We stand with regional Australia — farmers, fisheries and family businesses.','Don’t stay quiet — sign the petition: Hands Off Our Fuel.'],
+     keywords:['fuel tax credit','fuel tax credits','diesel rebate','diesel fuel rebate','fuel tax','hands off our fuel']},
+    {name:'That’s Mining',url:'thatsmining.com.au',tagline:'Myth-busting mining’s real contribution — tax & royalties, jobs and supply chains.',
+     messages:['Mining pays billions in tax and royalties every year.','Mining supports hundreds of thousands of jobs and whole supply chains.','Australia’s prosperity is built on resources.','State opportunities: Victoria, WA and the NT.'],
+     keywords:['thats mining','mining tax','royalties','mining jobs','critical minerals','resources']}
+  ]
+}];
+let CC_CLIENTS=(()=>{try{const s=JSON.parse(localStorage.getItem('axiom_clients'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return CC_SEED;})();
+let CC_ACTIVE=localStorage.getItem('axiom_client_active')||CC_CLIENTS[0].id;
+const ccState={refs:[],types:['social'],campaign:0,signals:[],io:null,booted:false};
+function ccSave(){try{localStorage.setItem('axiom_clients',JSON.stringify(CC_CLIENTS));localStorage.setItem('axiom_client_active',CC_ACTIVE);}catch(e){}}
+function ccClient(){return CC_CLIENTS.find(c=>c.id===CC_ACTIVE)||CC_CLIENTS[0];}
+function ccInit(){
+  const c=ccClient();
+  const root=$('cc-root');if(root){root.style.setProperty('--cc-accent',c.accent);root.style.setProperty('--cc-accent2',c.accent2||c.accent);}
+  ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccEngineNote();
+  ccBindComposer();
+  if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
+  ccObserve();
+}
+function ccRenderSwitch(){
+  $('cc-switch').innerHTML=CC_CLIENTS.map(c=>'<div class="cc-cli'+(c.id===CC_ACTIVE?' on':'')+'" onclick="ccSwitch(\''+c.id+'\')"><span class="cc-mono">'+esc((c.short||c.name).slice(0,3).toUpperCase())+'</span>'+esc(c.short||c.name)+'</div>').join('');
+}
+function ccSwitch(id){CC_ACTIVE=id;ccSave();ccState.signals=[];ccState.campaign=0;ccInit();$('content').scrollTop=0;}
+function ccRenderHero(){
+  const c=ccClient();
+  $('cc-hero').innerHTML='<div class="cc-hero-top"><div class="cc-badge">'+esc((c.short||c.name).slice(0,3).toUpperCase())+'</div>'+
+    '<div style="flex:1;min-width:0"><h1>'+esc(c.name)+'</h1><div class="cc-sub">'+esc(c.desc||'')+'</div></div></div>'+
+    '<div class="cc-kpis">'+
+    '<div class="cc-kpi"><div class="n">'+(c.campaigns||[]).length+'</div><div class="l">Active campaigns</div></div>'+
+    '<div class="cc-kpi"><div class="n" id="cc-kpi-sig">–</div><div class="l">Live signals</div></div>'+
+    '<div class="cc-kpi"><div class="n">'+(c.keywords||[]).length+'</div><div class="l">Tracked keywords</div></div>'+
+    '<div class="cc-kpi"><div class="n" id="cc-kpi-flag">–</div><div class="l">High-relevance</div></div>'+
+    '</div>';
+}
+function ccRenderCamps(){
+  const c=ccClient();
+  $('cc-camps').innerHTML=(c.campaigns||[]).map(cm=>'<div class="cc-camp" onclick="ccPickCampaign('+ (c.campaigns.indexOf(cm)) +')"><div class="cc-cbar"></div>'+
+    '<h4>'+esc(cm.name)+'</h4><div class="cc-url">'+esc(cm.url||'')+'</div>'+
+    '<div class="cc-tag">'+esc(cm.tagline||'')+'</div>'+
+    '<div class="cc-msgs">'+(cm.messages||[]).slice(0,4).map(m=>'<div class="cc-msg">'+esc(m)+'</div>').join('')+'</div></div>').join('')
+    ||'<div class="cc-note">No campaigns yet for this client.</div>';
+}
+function ccPickCampaign(i){ccState.campaign=i;ccRenderCompCamps();$('cc-composer-block').scrollIntoView({behavior:'smooth',block:'start'});}
+function ccRenderCompCamps(){
+  const c=ccClient();
+  $('cc-comp-camps').innerHTML=(c.campaigns||[]).map((cm,i)=>'<button class="cc-chip'+(i===ccState.campaign?' on':'')+'" onclick="ccState.campaign='+i+';ccRenderCompCamps()">'+esc(cm.name)+'</button>').join('')
+    +'<button class="cc-chip'+(ccState.campaign===-1?' on':'')+'" onclick="ccState.campaign=-1;ccRenderCompCamps()">General / brand</button>';
+}
+function ccRelevance(it,c){
+  const hay=(it.title+' '+(it.desc||'')).toLowerCase();let s=0;const kws=c.keywords||[];
+  kws.forEach(k=>{if(hay.indexOf(k.toLowerCase())!==-1)s+=18;});
+  (c.campaigns||[]).forEach(cm=>(cm.keywords||[]).forEach(k=>{if(hay.indexOf(k.toLowerCase())!==-1)s+=10;}));
+  const age=Date.parse(it.date)?(Date.now()-Date.parse(it.date))/3600e3:99;if(age<12)s+=8;else if(age<48)s+=4;
+  return Math.min(100,s);
+}
+async function ccLoadSignals(){
+  const c=ccClient();
+  $('cc-signals').innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>Scanning the wire for '+esc(c.short||c.name)+' signals…</div>';
+  let items=[];
+  try{const d=await api('/allnews?max=120&hours=168');items=d.items||[];}catch(e){}
+  // enrich with a targeted query for the client's primary theme
+  try{const q=encodeURIComponent((c.keywords||[])[0]||c.name);const d2=await api('/newsq?q='+q+'&hours=168&max=30');(d2.items||[]).forEach(it=>items.push(it));}catch(e){}
+  const seen=new Set();
+  const scored=items.map(it=>Object.assign({},it,{rel:ccRelevance(it,c)}))
+    .filter(it=>it.rel>=18)
+    .filter(it=>{const k=(it.title||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().slice(0,70);if(seen.has(k))return false;seen.add(k);return true;})
+    .sort((a,b)=>b.rel-a.rel||(Date.parse(b.date)||0)-(Date.parse(a.date)||0)).slice(0,14);
+  ccState.signals=scored;ccRenderSignals();
+}
+function ccRenderSignals(){
+  const fl=ccState.signals||[];
+  const st=$('cc-sig-tag');if(st)st.textContent=fl.length?fl.length+' matched':'quiet';
+  const k1=$('cc-kpi-sig');if(k1)k1.textContent=fl.length;
+  const k2=$('cc-kpi-flag');if(k2)k2.textContent=fl.filter(f=>f.rel>=40).length;
+  const el=$('cc-signals');if(!el)return;
+  el.innerHTML=fl.length?fl.map((f,i)=>'<div class="cc-sig"><div class="cc-sig-rel">'+f.rel+'</div>'+
+    '<div class="cc-sig-b"><a class="cc-sig-t" href="'+esc(f.link||'#')+'" target="_blank" rel="noopener">'+esc(f.title)+'</a>'+
+    '<div class="cc-sig-m">'+esc(f.src||f.outlet||'')+' · '+ago(f.date)+'</div></div>'+
+    '<button class="cc-sig-use" onclick="ccUseSignal('+i+')">Use in composer →</button></div>').join('')
+    :'<div class="cc-note">No matching signals in the last 7 days. Try broadening this client’s keywords, or paste a story into the composer below.</div>';
+}
+function ccUseSignal(i){
+  const f=ccState.signals[i];if(!f)return;
+  $('cc-input').value=f.title+(f.desc?'\n\n'+f.desc:'');
+  $('cc-link').value=f.link||'';
+  $('cc-composer-block').scrollIntoView({behavior:'smooth',block:'start'});
+  toast('Loaded into composer');
+}
+function ccBindComposer(){
+  if(ccState.booted)return;ccState.booted=true;
+  $('cc-types').addEventListener('click',e=>{const b=e.target.closest('.cc-tc');if(!b)return;
+    b.classList.toggle('on');ccState.types=Array.from(document.querySelectorAll('#cc-types .cc-tc.on')).map(x=>x.dataset.t);});
+  const drop=$('cc-drop'),file=$('cc-file');
+  drop.addEventListener('click',()=>file.click());
+  file.addEventListener('change',e=>ccAddFiles(e.target.files));
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files)ccAddFiles(e.dataTransfer.files);});
+}
+function ccAddFiles(files){
+  Array.from(files||[]).slice(0,6).forEach(f=>{if(!/^image\//.test(f.type))return;
+    const r=new FileReader();r.onload=()=>{const data=String(r.result).split(',')[1];
+      ccState.refs.push({mime:f.type,data,name:f.name});ccRenderRefs();};r.readAsDataURL(f);});
+}
+function ccRenderRefs(){
+  $('cc-refs').innerHTML=ccState.refs.map((r,i)=>'<div class="cc-ref"><img src="data:'+r.mime+';base64,'+r.data+'" alt=""><button onclick="ccState.refs.splice('+i+',1);ccRenderRefs()">×</button></div>').join('');
+  ccEngineNote();
+}
+function ccEngineNote(){
+  const el=$('cc-engine-note');if(!el)return;
+  el.innerHTML=GEMINI_KEY?('Gemini '+esc((GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,''))+(ccState.refs.length?' · '+ccState.refs.length+' reference image'+(ccState.refs.length>1?'s':''):'')):'⚠ Add a Gemini key in Settings to generate';
+}
+function ccObserve(){
+  if(ccState.io)ccState.io.disconnect();
+  ccState.io=new IntersectionObserver(es=>es.forEach(en=>{if(en.isIntersecting){en.target.classList.add('in');ccState.io.unobserve(en.target);}}),{threshold:.08});
+  document.querySelectorAll('#v-clients .reveal').forEach(el=>{el.classList.remove('in');ccState.io.observe(el);});
+}
+function ccAddClient(){
+  const name=prompt('New client name (e.g. “Acme Advocacy”):');if(!name)return;
+  const id='c'+Date.now().toString(36);
+  const brief=prompt('One-line communication brief (voice, stance, audience). You can refine later:','')||'';
+  CC_CLIENTS.push({id,name:name.trim(),short:name.trim().split(/\s+/).map(w=>w[0]).join('').slice(0,3).toUpperCase(),accent:'#5B8CFF',accent2:'#3E63E0',desc:brief,brief:brief,keywords:name.trim().toLowerCase().split(/\s+/),campaigns:[]});
+  CC_ACTIVE=id;ccSave();ccInit();toast('Client added — add keywords & campaigns anytime');
+}
+function ccBuildPrompt(){
+  const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
+  const plats=SOCIAL_PLATFORMS.length?SOCIAL_PLATFORMS:['LinkedIn','Facebook','Instagram'];
+  const types=ccState.types.length?ccState.types:['social'];
+  let ask='';
+  if(types.indexOf('social')!==-1)ask+='\n'+plats.map(p=>'#### '+p+' post'+platformSpec(p)).join('\n');
+  if(types.indexOf('newspaper')!==-1)ask+='\n#### Newspaper-style piece\nWrite in the style of a newspaper article/opinion piece the campaign could turn into a shareable graphic: a strong masthead-style HEADLINE line, a one-line standfirst/kicker, then 120-180 words of body copy, and a short pull-quote. Punchy, campaign-aligned, factual.';
+  if(types.indexOf('edm')!==-1)ask+='\n#### EDM / email\nSubject line, preview text, and a 90-140 word supporter email with a clear call to action.';
+  const sys='You are a senior campaign copywriter for '+c.name+'.\n\nCLIENT BRIEF:\n'+(c.brief||c.desc||'')+
+    (cm?'\n\nCAMPAIGN: '+cm.name+' ('+(cm.url||'')+')\nTagline: '+(cm.tagline||'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'\n\nContext: general brand / whole-of-client.')+
+    (ccState.refs.length?'\n\nReference images are attached — match their visual tone, branding, structure and voice.':'')+
+    '\n\nWrite ready-to-publish content for the item below. Use these #### headers EXACTLY and output ONLY the content under them:'+ask+
+    '\n\nStay strictly on-brief and consistent with the campaign messages. Australian English. Never fabricate quotes, statistics or figures — if a number is not provided, speak in general terms.';
+  const link=$('cc-link').value.trim();
+  const user='ITEM TO BUILD FROM:\n'+($('cc-input').value.trim()||'(none supplied — draft from the campaign messages)')+(link?'\n\nReference link: '+link:'');
+  return{sys,user};
+}
+async function ccGenerate(){
+  if(!GEMINI_KEY){go('clients');openSettings();$('set-engine').value='gemini';toggleGemini();toast('Add your Gemini API key to generate',true);return;}
+  if(!ccState.types.length){toast('Pick at least one content type',true);return;}
+  const btn=$('cc-gen');btn.disabled=true;
+  const out=$('cc-output');out.innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting '+ccState.types.join(' + ')+' for '+esc(ccClient().short||ccClient().name)+'…</div>';
+  const{sys,user}=ccBuildPrompt();
+  const parts=[{text:sys+'\n\n'+user}];
+  ccState.refs.forEach(r=>parts.push({inlineData:{mimeType:r.mime,data:r.data}}));
+  try{
+    const model=(GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,'');
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({contents:[{parts}],generationConfig:{temperature:0.75,maxOutputTokens:2000}})});
+    const d=await r.json();
+    if(d.error)throw new Error(d.error.message||'Gemini error');
+    const cand=(d.candidates||[])[0]||{};
+    const txt=((cand.content&&cand.content.parts)||[]).map(p=>p.text||'').join('').trim();
+    if(!txt)throw new Error('Gemini returned no text'+(cand.finishReason?' ('+cand.finishReason+')':''));
+    ccState.lastPkg=txt;ccRenderOutput(txt);
+  }catch(e){out.innerHTML='<div class="cc-err">'+esc(e.message||e)+'</div>';}
+  btn.disabled=false;
+}
+function ccSplitSections(txt){
+  const parts=[];const rx=/^####\s+(.+)$/gm;let m,idx=[];
+  while((m=rx.exec(txt)))idx.push({title:m[1].trim(),start:m.index,cs:rx.lastIndex});
+  if(!idx.length)return[{title:'Draft',body:txt.trim()}];
+  idx.forEach((s,i)=>{const end=i+1<idx.length?idx[i+1].start:txt.length;parts.push({title:s.title,body:txt.slice(s.cs,end).trim()});});
+  return parts;
+}
+function ccRenderOutput(txt){
+  const secs=ccSplitSections(txt);
+  $('cc-output').innerHTML=secs.map((s,i)=>{
+    const isNews=/newspaper/i.test(s.title);
+    let body=esc(s.body);
+    if(isNews){const lines=s.body.split('\n').filter(x=>x.trim());if(lines.length){body='<div class="cc-np-head">'+esc(lines[0])+'</div>'+esc(lines.slice(1).join('\n'))}}
+    return '<div class="cc-card'+(isNews?' news':'')+'"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>'+esc(s.title)+'</div>'+
+      '<div class="cc-card-acts"><button class="cc-mini" onclick="ccCopy(this,'+i+')">Copy</button>'+
+      '<button class="cc-mini" onclick="ccToClickup('+i+')">→ ClickUp</button></div></div>'+
+      '<div class="cc-card-body" id="cc-sec-'+i+'">'+body+'</div></div>';
+  }).join('');
+  ccState.secs=secs;
+}
+function ccCopy(btn,i){
+  const s=(ccState.secs||[])[i];if(!s)return;
+  const done=()=>{btn.textContent='Copied ✓';btn.classList.add('ok');setTimeout(()=>{btn.textContent='Copy';btn.classList.remove('ok');},1600);};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s.body).then(done,()=>toast('Copy failed',true));
+  else{const ta=document.createElement('textarea');ta.value=s.body;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done();}catch(e){toast('Copy failed',true);}ta.remove();}
+}
+async function ccToClickup(i){
+  const s=(ccState.secs||[])[i];if(!s)return;const c=ccClient();
+  const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
+  const name='['+(c.short||c.name)+(cm?' · '+cm.name.replace(/\s*\(.*\)/,''):'')+'] '+s.title;
+  const desc=s.body+'\n\n---\nClient: '+c.name+(cm?'\nCampaign: '+cm.name:'')+'\nDrafted in AXIOM Client Central via Gemini.';
+  try{
+    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:2,tags:['axiom','client-central',c.id]})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    toast('ClickUp task created ✓');
+  }catch(e){toast('ClickUp: '+(e.message||e),true);}
+}
 
 /* ── CLOCK + BOOT ── */
 function tick(){
