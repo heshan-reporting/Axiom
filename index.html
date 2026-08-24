@@ -2597,6 +2597,7 @@ function ccBuildPrompt(){
   if(types.indexOf('oped')!==-1)ask+='\n#### Op-ed\nA 200-260 word opinion piece in the client’s voice: a clear argument, a human/regional angle, and a call to action. First-person plural where natural.';
   if(types.indexOf('edm')!==-1)ask+='\n#### EDM / email\nSubject line, preview text, and a 90-140 word supporter email with a clear call to action.';
   if(types.indexOf('newspaper')!==-1)ask+='\n#### Newspaper-style piece\nWrite in the style of a newspaper article/opinion piece the campaign could turn into a shareable graphic: a strong masthead-style HEADLINE line, a one-line standfirst/kicker, then 120-180 words of body copy, and a short pull-quote. Punchy, campaign-aligned, factual.';
+  if(types.indexOf('ad')!==-1)ask+='\n#### Ad creative brief\nThe exact text to place ON the ad graphic, as three labelled lines (nothing else):\nHEADLINE: a bold hook, max 6 words\nSUBHEAD: one supporting line, max 12 words\nCTA: a short call to action (e.g. the campaign name, or “Sign the petition”)';
   const sys='You are a senior campaign copywriter for '+c.name+'.\n\nCLIENT BRIEF:\n'+(c.brief||c.desc||'')+
     (cm?'\n\nCAMPAIGN: '+cm.name+' ('+(cm.url||'')+')\nTagline: '+(cm.tagline||'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'\n\nContext: general brand / whole-of-client.')+
     (ccState.refs.length?'\n\nReference images are attached — match their visual tone, branding, structure and voice.':'')+
@@ -2615,12 +2616,13 @@ async function ccGenerate(){
   const btn=$('cc-gen');btn.disabled=true;
   ccState.secs=[];ccState.visualB64=null;
   const out=$('cc-output');out.innerHTML=
-    (wantsAd?'<div id="cc-ad-slot"><div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div></div><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>Nano Banana is designing the creative…</div></div></div></div>':'')+
+    (wantsAd?'<div id="cc-ad-slot"><div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div></div><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>'+(wantsText?'Writing the copy, then designing the creative…':'Nano Banana is designing the creative…')+'</div></div></div></div>':'')+
     (wantsText?'<div id="cc-text-slot"><div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting the copy…</div></div>':'');
-  // Copy and creative run at the same time.
-  const textJob=wantsText?ccGenText().then(txt=>{ccState.lastPkg=txt;ccRenderTextCards(txt);})
-    .catch(e=>{const el=$('cc-text-slot');if(el)el.innerHTML='<div class="cc-err">Copy: '+esc(e.message||e)+'</div>';}):Promise.resolve();
-  const adJob=wantsAd?ccGenImage().then(v=>{ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();})
+  // One click, both deliverables. Copy runs first so the creative can use the
+  // approved headline/CTA (the #### Ad creative brief) instead of guessing.
+  const textJob=wantsText?ccGenText().then(txt=>{ccState.lastPkg=txt;ccRenderTextCards(txt);return txt;})
+    .catch(e=>{const el=$('cc-text-slot');if(el)el.innerHTML='<div class="cc-err">Copy: '+esc(e.message||e)+'</div>';return '';}):Promise.resolve('');
+  const adJob=wantsAd?textJob.then(txt=>ccGenImage(txt)).then(v=>{ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();})
     .catch(e=>{const el=$('cc-ad-slot');if(el)el.innerHTML='<div class="cc-err">Ad creative: '+esc(e.message||e)+'</div>';}):Promise.resolve();
   await Promise.allSettled([textJob,adJob]);
   btn.disabled=false;
@@ -2640,21 +2642,31 @@ async function ccGenText(){
   if(!txt)throw new Error('no text'+(cand.finishReason?' ('+cand.finishReason+')':''));
   return txt;
 }
-function ccImagePrompt(){
+function ccImagePrompt(copy){
   const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
   const dims=CC_DIMS[($('cc-vis-format')&&$('cc-vis-format').value)||'square']||CC_DIMS.square;
-  const input=($('cc-input').value||'').replace(/^####.*$/gm,'').trim();
-  const headline=input.split('\n').map(x=>x.trim()).filter(Boolean)[0]||(cm&&(cm.messages||[])[0])||c.name;
-  return 'Create a finished, ready-to-publish advertising creative ('+dims+') for '+c.name+(cm?' — campaign: '+cm.name:'')+'.\n\n'+
-    (ccState.refs.length?'MATCH THE STYLE of the attached reference image exactly: same colour palette, layout structure, typography feel, spacing and logo placement. Keep the look; change only the content.\n\n':'Design it clean, confident and credible for an Australian public-affairs campaign.\n\n')+
-    (cm?'Campaign: '+cm.name+'\nTagline: '+(cm.tagline||'')+'\nFeature this key message: '+((cm.messages||[])[0]||'')+'\n\n':'')+
-    'HEADLINE to feature on the creative (short, punchy): '+headline+'\n'+
-    'Add at most one short supporting line and a clear call to action (e.g. the campaign name / “Sign the petition”). No watermarks, no lorem ipsum, no fabricated logos, no invented statistics. Output a single polished graphic.';
+  // Prefer the approved "Ad creative brief" from the copy; fall back to input/campaign.
+  const g=re=>{const m=(copy||'').match(re);return m?m[1].trim().replace(/^["'“”]+|["'“”]+$/g,''):'';};
+  let headline=g(/HEADLINE:\s*(.+)/i),sub=g(/SUBHEAD:\s*(.+)/i),cta=g(/CTA:\s*(.+)/i);
+  if(!headline){const input=($('cc-input').value||'').replace(/^####.*$/gm,'').trim();
+    headline=input.split(/[\n.]/).map(x=>x.trim()).filter(Boolean)[0]||(cm&&(cm.messages||[])[0])||c.name;}
+  if(!sub&&cm)sub=cm.tagline||'';
+  if(!cta&&cm)cta=cm.name.replace(/\s*\(.*\)/,'');
+  const nRef=(ccState.refs||[]).length;
+  return (nRef
+    ? 'You are given '+nRef+' reference image'+(nRef>1?'s':'')+' that define this campaign\'s EXACT brand template. Study '+(nRef>1?'them':'it')+' and design a NEW advertising creative in the SAME visual system — replicate the colour palette, background treatment, layout grid, typography style, logo lockup and framing. Reuse the campaign look precisely; only the wording changes to the copy below. Match it closely enough that it looks like it came from the same design kit.\n\n'
+    : 'Design a clean, confident, credible advertising creative for an Australian public-affairs campaign. Bold, modern, uncluttered.\n\n')+
+    'Client: '+c.name+(cm?'\nCampaign: '+cm.name+(cm.tagline?' — '+cm.tagline:''):'')+'\nFormat / dimensions: '+dims+'.\n\n'+
+    'Place THIS text on the creative, spelled correctly and clearly legible:\n'+
+    '- HEADLINE (largest, dominant): '+headline+'\n'+
+    (sub?'- SUPPORTING LINE (smaller): '+sub+'\n':'')+
+    (cta?'- CALL TO ACTION (button or badge): '+cta+'\n':'')+
+    '\nStrict rules: render only this real English text — no gibberish, no lorem ipsum, no duplicated or garbled letters; do NOT invent logos, brand names, statistics, faces or watermarks; keep composition clean with strong hierarchy. Output one single finished, on-brand graphic.';
 }
-async function ccGenImage(){
-  const refs=ccState.refs||[];
+async function ccGenImage(copy){
+  const refs=(ccState.refs||[]).map(r=>({data:r.data,mime:r.mime}));
   const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt:ccImagePrompt(),referenceB64:refs.length?refs[0].data:null,mime:refs.length?refs[0].mime:'image/png'})});
+    body:JSON.stringify({prompt:ccImagePrompt(copy),references:refs})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status)+' — needs the worker deployed with GEMINI_KEY');
   return{b64:d.imageB64,mime:d.mime||'image/png'};
@@ -2670,7 +2682,7 @@ function ccFillAdCard(){
 }
 async function ccGenImageRetry(){
   const slot=$('cc-ad-slot');if(slot)slot.innerHTML='<div class="cc-card"><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>Regenerating creative…</div></div></div>';
-  try{const v=await ccGenImage();ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();}
+  try{const v=await ccGenImage(ccState.lastPkg||'');ccState.visualB64=v.b64;ccState.visualMime=v.mime;ccFillAdCard();}
   catch(e){if(slot)slot.innerHTML='<div class="cc-err">Ad creative: '+esc(e.message||e)+'</div>';}
 }
 async function ccAdToClickup(){

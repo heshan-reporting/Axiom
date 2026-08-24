@@ -1793,9 +1793,11 @@ export default {
       if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
       const model = String(body.model || 'gemini-2.5-flash-image').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
       const parts = [];
-      // Prompt first, then the reference image (matches Gemini image-edit ordering).
+      // Prompt first, then the reference image(s) (matches Gemini image-edit ordering).
       parts.push({ text: String(body.prompt).slice(0, 6000) });
-      if (body.referenceB64) parts.push({ inline_data: { mime_type: body.mime || 'image/png', data: String(body.referenceB64) } });
+      const refs = Array.isArray(body.references) ? body.references
+        : (body.referenceB64 ? [{ data: body.referenceB64, mime: body.mime }] : []);
+      refs.slice(0, 4).forEach(rf => { if (rf && rf.data) parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } }); });
       // The image model must be told to return an image, or it 500s ("Internal error encountered").
       const payload = JSON.stringify({ contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } });
       const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
