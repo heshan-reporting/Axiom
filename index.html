@@ -1066,7 +1066,7 @@ body.kiosk .kprog{display:block}
       <label class="fl" for="set-gemini">Google Gemini API key</label>
       <input class="fi" id="set-gemini" type="password" placeholder="AIza…" autocomplete="off">
       <label class="fl" for="set-gemini-model">Gemini model</label>
-      <input class="fi" id="set-gemini-model" placeholder="gemini-2.5-flash">
+      <input class="fi" id="set-gemini-model" placeholder="gemini-3.6-flash">
       <div class="mnote">The Gemini key stays in this browser and is sent only to generativelanguage.googleapis.com. Get one free at aistudio.google.com/apikey. If Gemini fails, AXIOM falls back to Claude for the posts.</div>
     </div>
     <label class="fl" for="set-cu-list">ClickUp List ID</label>
@@ -1133,7 +1133,8 @@ let CLICKUP_LIST = localStorage.getItem('axiom_clickup_list') || '';
 let CLICKUP_AUTO = localStorage.getItem('axiom_clickup_auto') === '1';
 let SOCIAL_PLATFORMS = (()=>{try{const s=JSON.parse(localStorage.getItem('axiom_social'));if(Array.isArray(s)&&s.length)return s;}catch(e){}return ['LinkedIn','Facebook','Instagram'];})();
 let GEMINI_KEY = localStorage.getItem('axiom_gemini_key') || '';
-let GEMINI_MODEL = localStorage.getItem('axiom_gemini_model') || 'gemini-2.5-flash';
+let GEMINI_MODEL = localStorage.getItem('axiom_gemini_model') || 'gemini-3.6-flash';
+if(GEMINI_MODEL==='gemini-2.5-flash'){GEMINI_MODEL='gemini-3.6-flash';try{localStorage.setItem('axiom_gemini_model',GEMINI_MODEL);}catch(e){}} // migrate off retired model
 let SOCIAL_ENGINE = localStorage.getItem('axiom_social_engine') || 'claude'; // 'claude' | 'gemini'
 const FLAG_THRESHOLD = 45;   // importance score to flag a story
 const AUTO_THRESHOLD = 65;   // higher bar before auto-creating a ClickUp task
@@ -1572,7 +1573,7 @@ function studioPrompt(f,includeSocial){
 async function geminiSocial(f,draft){
   const plats=SOCIAL_PLATFORMS.length?SOCIAL_PLATFORMS:['LinkedIn','Facebook','Instagram'];
   const prompt='You are a senior social media copywriter for an Australian organisation.\n\nOUR COMMUNICATION BRIEF:\n'+(ORG_BRIEF||'(neutral, credible Australian public-affairs voice)')+'\n\nNEWS\nHeadline: '+f.lead.title+'\nSummary: '+(f.lead.desc||'')+'\n\nOUR AGREED COMMS ANGLE (stay consistent with this):\n'+draft+'\n\nWrite ready-to-publish posts, strictly on-brief and consistent with the angle above. Use these #### headers EXACTLY, and output ONLY the posts:\n'+plats.map(p=>'#### '+p+' post'+platformSpec(p)).join('\n')+'\n\nNo preamble, no commentary. Never fabricate quotes or figures.';
-  const model=(GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,'');
+  const model=(GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,'');
   const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:1400}})});
@@ -1611,7 +1612,7 @@ async function generateStudio(){
       try{
         const social=await geminiSocial(f,txt);
         txt=txt.trim()+'\n\n'+social.trim();
-        engineNote='<div class="eng-note">Strategy by Claude · social posts by Gemini ('+esc((GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,''))+')</div>';
+        engineNote='<div class="eng-note">Strategy by Claude · social posts by Gemini ('+esc((GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,''))+')</div>';
       }catch(ge){
         // Fall back to Claude for the social posts so the user still gets a full package.
         toast('Gemini failed ('+(ge.message||ge)+') — using Claude for social',true);
@@ -2350,7 +2351,7 @@ function saveSettings(){
   if(!SOCIAL_PLATFORMS.length)SOCIAL_PLATFORMS=['LinkedIn','Facebook','Instagram'];
   SOCIAL_ENGINE=$('set-engine').value;
   GEMINI_KEY=$('set-gemini').value.trim();
-  GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-2.5-flash';
+  GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-3.6-flash';
   {const wa=$('set-wa');WA_RECIPIENTS=wa?wa.value.split(',').map(s=>s.trim()).filter(Boolean):WA_RECIPIENTS;localStorage.setItem('axiom_wa_to',JSON.stringify(WA_RECIPIENTS));}
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
@@ -2561,7 +2562,7 @@ function ccRenderRefs(){
 }
 function ccEngineNote(){
   const el=$('cc-engine-note');if(!el)return;
-  el.innerHTML=GEMINI_KEY?('Gemini '+esc((GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,''))+(ccState.refs.length?' · '+ccState.refs.length+' reference image'+(ccState.refs.length>1?'s':''):'')):'⚠ Add a Gemini key in Settings to generate';
+  el.innerHTML=GEMINI_KEY?('Gemini '+esc((GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,''))+(ccState.refs.length?' · '+ccState.refs.length+' reference image'+(ccState.refs.length>1?'s':''):'')):'⚠ Add a Gemini key in Settings to generate';
 }
 function ccObserve(){
   if(ccState.io)ccState.io.disconnect();
@@ -2604,7 +2605,7 @@ async function ccGenerate(){
   const parts=[{text:sys+'\n\n'+user}];
   ccState.refs.forEach(r=>parts.push({inlineData:{mimeType:r.mime,data:r.data}}));
   try{
-    const model=(GEMINI_MODEL||'gemini-2.5-flash').replace(/^models\//,'');
+    const model=(GEMINI_MODEL||'gemini-3.6-flash').replace(/^models\//,'');
     const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(GEMINI_KEY),{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({contents:[{parts}],generationConfig:{temperature:0.75,maxOutputTokens:2000}})});
