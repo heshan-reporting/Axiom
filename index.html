@@ -703,41 +703,67 @@ body.kiosk .kprog{display:block}
 .cc-card-body[contenteditable]{outline:none}
 .cc-card-body[contenteditable]:focus{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--cc-accent) 40%,transparent);border-radius:0 0 18px 18px}
 .cc-edithint{font-family:var(--cc-fx);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--cc-ink3);padding:0 18px 12px}
-/* Creative Studio chat */
+/* ── Creative Studio — the reference implementation ─────────────────────
+   Working surface: motion only on state transitions (arrival, version
+   swap); depth only for hierarchy (active version). */
 .cs-brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-bottom:12px}
-.cs-brief .cc-in{font-size:12.5px;padding:10px 12px}
-.cs-wrap{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:22px;padding:16px;backdrop-filter:blur(12px)}
-.cs-thread{display:flex;flex-direction:column;gap:12px;max-height:62vh;overflow-y:auto;padding:6px 4px 12px;scroll-behavior:smooth}
-.cs-b{max-width:78%;padding:12px 15px;border-radius:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;animation:ccRise .35s cubic-bezier(.16,.8,.3,1) both}
-.cs-b.user{align-self:flex-end;color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));border-bottom-right-radius:6px;font-weight:500}
-.cs-b.ai{align-self:flex-start;background:rgba(0,0,0,.28);border:1px solid var(--cc-line);color:var(--cc-ink);border-bottom-left-radius:6px}
-.cs-b.err{align-self:flex-start;background:rgba(255,84,112,.1);border:1px solid rgba(255,84,112,.3);color:#ffb3c0}
-.cs-b .cs-k{font-family:var(--cc-fx);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--cc-accent);display:block;margin-bottom:6px}
-.cs-confirm{display:flex;gap:8px;margin-top:10px}
-.cs-confirm button{padding:9px 16px;border-radius:11px;border:none;cursor:pointer;font-weight:700;font-size:12.5px;
-  color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2))}
-.cs-confirm .alt{background:transparent;border:1px solid var(--cc-line);color:var(--cc-ink2)}
-.cs-img{align-self:flex-start;max-width:88%;border-radius:16px;overflow:hidden;border:1px solid var(--cc-line);background:var(--cc-panel);animation:ccRise .4s cubic-bezier(.16,.8,.3,1) both}
-.cs-img.active{border-color:color-mix(in srgb,var(--cc-accent) 60%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,var(--cc-accent) 30%,transparent)}
-.cs-img img{display:block;width:100%;max-height:440px;object-fit:contain;background:#0b0906;cursor:pointer}
-.cs-img .cs-vbar{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid var(--cc-line)}
-.cs-img .cs-vtag{font-family:var(--cc-fx);font-weight:800;font-size:11px;color:var(--cc-accent)}
-.cs-img .cs-vnote{flex:1;font-size:10.5px;color:var(--cc-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cs-typing{align-self:flex-start;display:flex;gap:5px;padding:14px 18px}
-.cs-typing i{width:7px;height:7px;border-radius:50%;background:var(--cc-accent);opacity:.4;animation:csDot 1.2s infinite}
-.cs-typing i:nth-child(2){animation-delay:.2s}.cs-typing i:nth-child(3){animation-delay:.4s}
+.cs-brief .cc-in{font-size:var(--x-t-xs);padding:10px 12px}
+.cs-wrap{position:relative;background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:var(--x-r4);padding:var(--x-s4);box-shadow:var(--x-e2)}
+.cs-wrap::before{content:'';position:absolute;inset:0 0 auto 0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.09) 30%,transparent 80%);pointer-events:none}
+.cs-thread{display:flex;flex-direction:column;gap:var(--x-s4);max-height:66vh;overflow-y:auto;padding:var(--x-s2) var(--x-s2) var(--x-s4);scroll-behavior:smooth}
+.cs-b{max-width:76%;padding:12px 16px;border-radius:var(--x-r3);font-size:var(--x-t-sm);line-height:1.62;white-space:pre-wrap}
+.cs-b.new,.cs-img.new{animation:csIn var(--x-d3) var(--x-ease) both}
+@keyframes csIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.cs-b.user{align-self:flex-end;color:var(--x-ac-ink);background:var(--x-ac-grad);border-bottom-right-radius:var(--x-r1);font-weight:500;box-shadow:var(--x-e1)}
+.cs-b.ai{align-self:flex-start;background:var(--x-bg3);border:1px solid var(--x-line1);color:var(--x-ink1);border-bottom-left-radius:var(--x-r1)}
+/* taxonomy: clarifying question - gold spine + label */
+.cs-b.ask{border-left:3px solid var(--x-ac);padding-left:15px}
+/* taxonomy: the brief for sign-off - elevated, serif-led document */
+.cs-b.brief{max-width:88%;background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));border:1px solid var(--x-ac-line);box-shadow:var(--x-e2);border-radius:var(--x-r3)}
+.cs-b.brief .cs-k{color:var(--x-ac)}
+.cs-bt{font-family:var(--x-fd);font-size:var(--x-t-lg);color:var(--x-ink0);margin:2px 0 8px;line-height:1.15}
+.cs-bt em{font-style:italic;color:var(--x-ac)}
+.cs-bgrid{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--x-line1)}
+.cs-bgrid b{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.1em;text-transform:uppercase;color:var(--x-ink3);font-weight:500;padding-top:2px}
+.cs-bgrid span{font-size:var(--x-t-sm);color:var(--x-ink1)}
+.cs-b.err{align-self:flex-start;background:var(--x-neg-dim);border:1px solid rgba(217,106,102,.35);color:#E8A9A6}
+.cs-b .cs-k{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--x-ink2);display:block;margin-bottom:7px;font-weight:500}
+.cs-confirm{display:flex;gap:9px;margin-top:12px}
+.cs-confirm button{padding:10px 18px;border-radius:var(--x-r2);border:none;cursor:pointer;font-weight:600;font-size:var(--x-t-sm);color:var(--x-ac-ink);background:var(--x-ac-grad);box-shadow:var(--x-e-ac);transition:transform var(--x-d2) var(--x-spring),filter var(--x-d1) var(--x-ease)}
+.cs-confirm button:hover{transform:translateY(-1px);filter:brightness(1.06)}
+.cs-confirm .alt{background:transparent;border:1px solid var(--x-line2);color:var(--x-ink1);box-shadow:none}
+/* generated output - generous, gallery-grade */
+.cs-img{align-self:stretch;max-width:none;border-radius:var(--x-r3);overflow:hidden;border:1px solid var(--x-line1);background:var(--x-bg0);box-shadow:var(--x-e2)}
+.cs-img.active{border-color:var(--x-ac-line);box-shadow:var(--x-e2),0 0 0 1px var(--x-ac-line)}
+.cs-img img{display:block;width:100%;max-height:min(64vh,640px);object-fit:contain;background:var(--x-bg0);cursor:pointer;animation:csXfade var(--x-d4) var(--x-ease)}
+@keyframes csXfade{from{opacity:0;filter:saturate(.6)}to{opacity:1;filter:none}}
+.cs-img .cs-vbar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--x-line1);background:var(--x-bg3)}
+.cs-img .cs-vtag{font-family:var(--x-fm);font-weight:600;font-size:var(--x-t-xs);color:var(--x-ac)}
+.cs-img .cs-vnote{flex:1;font-size:var(--x-t-xs);color:var(--x-ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs-typing{align-self:flex-start;display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--x-bg3);border:1px solid var(--x-line1);border-radius:var(--x-r3);border-bottom-left-radius:var(--x-r1)}
+.cs-typing .lbl{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.1em;text-transform:uppercase;color:var(--x-ink2)}
+.cs-typing i{width:5px;height:5px;border-radius:50%;background:var(--x-ac);opacity:.4;animation:csDot 1.2s var(--x-ease) infinite}
+.cs-typing i:nth-child(3){animation-delay:.18s}.cs-typing i:nth-child(4){animation-delay:.36s}
 @keyframes csDot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-4px)}}
-.cs-inputrow{display:flex;gap:9px;margin-top:4px}
-.cs-inputrow textarea{flex:1;background:rgba(0,0,0,.28);border:1px solid var(--cc-line);border-radius:13px;color:var(--cc-ink);
-  padding:12px 14px;font-size:13.5px;font-family:inherit;outline:none;resize:none;line-height:1.5;max-height:120px}
-.cs-inputrow textarea:focus{border-color:var(--cc-accent)}
-.cs-inputrow button{flex-shrink:0;width:46px;border-radius:13px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2))}
-.cs-inputrow button:disabled{opacity:.5;cursor:not-allowed}
+/* version-history strip */
+.cs-strip{display:flex;gap:9px;padding:11px 4px 4px;overflow-x:auto;overscroll-behavior-x:contain}
+.cs-strip:empty{display:none}
+.cs-th{position:relative;flex:0 0 auto;width:78px;height:60px;border-radius:var(--x-r2);overflow:hidden;border:1px solid var(--x-line1);cursor:pointer;padding:0;background:var(--x-bg0);transition:border-color var(--x-d2) var(--x-ease),transform var(--x-d2) var(--x-spring),opacity var(--x-d2) var(--x-ease);opacity:.72}
+.cs-th img{width:100%;height:100%;object-fit:cover;display:block}
+.cs-th:hover{transform:translateY(-2px);opacity:1;border-color:var(--x-line3)}
+.cs-th.on{opacity:1;border-color:var(--x-ac);box-shadow:0 0 0 1px var(--x-ac-line)}
+.cs-th b{position:absolute;left:5px;bottom:4px;font-family:var(--x-fm);font-weight:600;font-size:10px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+.cs-inputrow{display:flex;gap:9px;margin-top:var(--x-s2)}
+.cs-inputrow textarea{flex:1;background:var(--x-bg1);border:1px solid var(--x-line1);border-radius:var(--x-r2);color:var(--x-ink0);padding:12px 15px;font-size:var(--x-t-sm);font-family:inherit;outline:none;resize:none;line-height:1.5;max-height:120px;transition:border-color var(--x-d2) var(--x-ease),box-shadow var(--x-d2) var(--x-ease)}
+.cs-inputrow textarea:focus{border-color:var(--x-ac-line);box-shadow:0 0 0 3px var(--x-ac-dim)}
+.cs-inputrow button{flex-shrink:0;width:48px;border-radius:var(--x-r2);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--x-ac-ink);background:var(--x-ac-grad);box-shadow:var(--x-e-ac);transition:transform var(--x-d2) var(--x-spring),filter var(--x-d1) var(--x-ease)}
+.cs-inputrow button:hover{transform:translateY(-1px);filter:brightness(1.06)}
+.cs-inputrow button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .cs-inputrow button svg{width:18px;height:18px}
 .cs-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
-.cs-status{font-family:var(--cc-fx);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--cc-ink3)}
-.cs-empty{color:var(--cc-ink3);font-size:12.5px;text-align:center;padding:26px 12px;line-height:1.7}
+.cs-status{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.09em;text-transform:uppercase;color:var(--x-ink3)}
+.cs-empty{color:var(--x-ink2);font-size:var(--x-t-sm);text-align:center;padding:34px 16px;line-height:1.8}
+.cs-empty b{color:var(--x-ink1)}
 /* The Curious Mind */
 .mind-wrap{display:flex;flex-direction:column;gap:14px}
 .mind-ingest{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:18px;padding:16px;backdrop-filter:blur(10px)}
@@ -1139,7 +1165,8 @@ body.kiosk .kprog{display:block}
               </select>
             </div>
             <div class="cs-wrap">
-              <div class="cs-thread" id="cs-thread"></div>
+              <div class="cs-thread x-scroll" id="cs-thread" aria-live="polite"></div>
+              <div class="cs-strip x-scroll" id="cs-strip" aria-label="Version history"></div>
               <div class="cs-inputrow">
                 <textarea id="cs-inp" rows="1" placeholder="Describe the creative you need — or answer the studio's question…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSend();}"></textarea>
                 <button id="cs-send" onclick="csSend()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
@@ -3155,24 +3182,49 @@ function csRender(){
   const tag=$('cs-tag');if(tag)tag.textContent=csState.stage==='confirmed'?('ITERATING · V'+(csState.active||'—')):'TAKING THE BRIEF';
   const st=$('cs-status');if(st)st.textContent=csState.stage==='confirmed'&&csState.active?('editing from v'+csState.active+' · '+csState.vers.length+' version'+(csState.vers.length>1?'s':'')):'';
   let h='';
-  if(!csState.thread.length)h='<div class="cs-empty">Tell the studio what you need — e.g. <b>“Instagram ad for HOOF about the new fuel tax poll, use the newspaper style”</b>.<br>It will ask what it needs, confirm the brief, then design and iterate with you.</div>';
+  if(!csState.thread.length)h='<div class="cs-empty">Tell the studio what you need — e.g. <b>“Instagram ad for HOOF about the new fuel tax poll, use the newspaper style”</b>.<br>It asks what it needs, confirms the brief, then designs and iterates with you.</div>';
   csState.thread.forEach(m=>{
-    if(m.r==='u')h+='<div class="cs-b user">'+esc(m.t)+'</div>';
-    else if(m.r==='a')h+='<div class="cs-b ai">'+(m.k?'<span class="cs-k">'+esc(m.k)+'</span>':'')+esc(m.t)+
-      (m.confirm&&csState.stage==='brief'&&csState.pending?'<div class="cs-confirm"><button onclick="csConfirm()">✓ Looks right — create it</button><button class="alt" onclick="$(\'cs-inp\').focus()">Correct something</button></div>':'')+'</div>';
-    else if(m.r==='e')h+='<div class="cs-b err">'+esc(m.t)+'</div>';
+    // Motion only on arrival: entries animate once, never on re-render.
+    const fresh=!m._seen?' new':'';m._seen=true;
+    if(m.r==='u')h+='<div class="cs-b user'+fresh+'">'+esc(m.t)+'</div>';
+    else if(m.r==='a'){
+      const kind=m.kind==='brief'?' brief':m.kind==='ask'?' ask':'';
+      let body=esc(m.t);
+      if(m.kind==='brief'){
+        const b=csState.pending||csState.brief||{};
+        body='<div class="cs-bt">The <em>brief</em></div>'+esc(m.t)+
+          '<div class="cs-bgrid">'+
+          (b.headline?'<b>Headline</b><span>'+esc(b.headline)+'</span>':'')+
+          (b.subhead?'<b>Subhead</b><span>'+esc(b.subhead)+'</span>':'')+
+          (b.cta?'<b>CTA</b><span>'+esc(b.cta)+'</span>':'')+
+          (b.format?'<b>Format</b><span>'+esc(b.format)+'</span>':'')+
+          (b.audience?'<b>Audience</b><span>'+esc(b.audience)+'</span>':'')+
+          (b.tone?'<b>Tone</b><span>'+esc(b.tone)+'</span>':'')+
+          '</div>';
+      }
+      h+='<div class="cs-b ai'+kind+fresh+'">'+(m.k&&m.kind!=='brief'?'<span class="cs-k">'+esc(m.k)+'</span>':'')+body+
+        (m.confirm&&csState.stage==='brief'&&csState.pending?'<div class="cs-confirm"><button onclick="csConfirm()">✓ Looks right — create it</button><button class="alt" onclick="$(\'cs-inp\').focus()">Correct something</button></div>':'')+'</div>';
+    }
+    else if(m.r==='e')h+='<div class="cs-b err'+fresh+'">'+esc(m.t)+'</div>';
     else if(m.r==='img'){
       const im=csState.imgs[m.ver];const active=m.ver===csState.active?' active':'';
-      h+='<div class="cs-img'+active+'" id="cs-v'+m.ver+'">'+
-        (im?'<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="v'+m.ver+'" onclick="csBranch('+m.ver+')">':'<div class="cs-b ai">v'+m.ver+' — loading…</div>')+
+      h+='<div class="cs-img'+active+fresh+'" id="cs-v'+m.ver+'">'+
+        (im?'<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="Version '+m.ver+'" onclick="csBranch('+m.ver+')">':'<div class="cs-b ai">v'+m.ver+' — loading…</div>')+
         '<div class="cs-vbar"><span class="cs-vtag">V'+m.ver+'</span><span class="cs-vnote">'+esc(m.note||'')+'</span>'+
         (im?'<a class="cc-mini" download="creative-v'+m.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'">Download</a>':'')+
         (m.ver!==csState.active?'<button class="cc-mini" onclick="csBranch('+m.ver+')">Branch from this</button>':'')+
         '</div></div>';
     }
   });
-  if(csState.busy)h+='<div class="cs-typing"><i></i><i></i><i></i></div>';
+  if(csState.busy)h+='<div class="cs-typing"><span class="lbl">'+esc(csState.busyLabel||'Working')+'</span><i></i><i></i><i></i></div>';
   el.innerHTML=h;el.scrollTop=el.scrollHeight;
+  // Version-history strip: every version, click to branch, active ringed.
+  const strip=$('cs-strip');
+  if(strip)strip.innerHTML=csState.vers.map(v=>{
+    const im=csState.imgs[v.ver];if(!im)return '';
+    return '<button class="cs-th'+(v.ver===csState.active?' on':'')+'" role="option" aria-selected="'+(v.ver===csState.active)+'" title="v'+v.ver+' — '+esc(v.note||'')+'" onclick="csBranch('+v.ver+')">'+
+      '<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="v'+v.ver+'"><b>v'+v.ver+'</b></button>';
+  }).join('');
 }
 function csBranch(ver){
   if(!csState.imgs[ver]||csState.busy)return;
@@ -3213,7 +3265,7 @@ async function csChat(system){
 async function csSend(){
   const inp=$('cs-inp');const t=inp.value.trim();if(!t||csState.busy)return;
   inp.value='';
-  csState.thread.push({r:'u',t});csState.busy=true;csRender();
+  csState.thread.push({r:'u',t});csState.busy=true;csState.busyLabel=csState.stage==='brief'?'Reading the brief':'Thinking';csRender();
   try{
     // Pull client knowledge from The Curious Mind once per session (also
     // after a restore) so brief-taking and edit-routing know the client.
@@ -3242,9 +3294,9 @@ async function csBriefTurn(){
   const j=csParse(raw);
   if(j&&j.type==='summary'&&j.brief){
     csState.pending=j.brief;
-    csState.thread.push({r:'a',k:'Brief for sign-off',t:j.text||'Here is the brief.',raw,confirm:true});
+    csState.thread.push({r:'a',kind:'brief',k:'Brief for sign-off',t:j.text||'Here is the brief.',raw,confirm:true});
   }else if(j&&j.type==='questions'){
-    csState.thread.push({r:'a',k:'The studio needs',t:j.text||'',raw});
+    csState.thread.push({r:'a',kind:'ask',k:'The studio needs',t:j.text||'',raw});
   }else{
     csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
   }
@@ -3253,7 +3305,7 @@ async function csConfirm(){
   if(!csState.pending||csState.busy)return;
   csState.brief=csState.pending;csState.pending=null;csState.stage='confirmed';
   csState.thread.push({r:'u',t:'Confirmed — go ahead.'});
-  csState.busy=true;csRender();
+  csState.busy=true;csState.busyLabel='Designing v1';csRender();
   try{await csGenerate(null,null);}
   catch(e){csState.thread.push({r:'e',t:'Generation: '+(e.message||e)});}
   csState.busy=false;csSaveDoc();csRender();
@@ -3300,10 +3352,10 @@ async function csEditTurn(instr){
   const raw=await csChat(sys);
   const j=csParse(raw);
   if(j&&j.type==='edit'&&j.prompt){
-    csState.thread.push({r:'a',k:'Editing v'+csState.active,t:j.prompt,raw});csRender();
+    csState.thread.push({r:'a',kind:'edit',k:'Editing v'+csState.active,t:j.prompt,raw});csState.busyLabel='Designing v'+((csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1);csRender();
     await csGenerate(j.prompt,csState.active);
   }else if(j&&j.type==='question'){
-    csState.thread.push({r:'a',k:'Quick check',t:j.text||'',raw});
+    csState.thread.push({r:'a',kind:'ask',k:'Quick check',t:j.text||'',raw});
   }else{
     csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
   }
