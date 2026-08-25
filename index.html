@@ -698,6 +698,8 @@ body.kiosk .kprog{display:block}
 .cc-card-body[contenteditable]:focus{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--cc-accent) 40%,transparent);border-radius:0 0 18px 18px}
 .cc-edithint{font-family:var(--cc-fx);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--cc-ink3);padding:0 18px 12px}
 /* Creative Studio chat */
+.cs-brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-bottom:12px}
+.cs-brief .cc-in{font-size:12.5px;padding:10px 12px}
 .cs-wrap{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:22px;padding:16px;backdrop-filter:blur(12px)}
 .cs-thread{display:flex;flex-direction:column;gap:12px;max-height:62vh;overflow-y:auto;padding:6px 4px 12px;scroll-behavior:smooth}
 .cs-b{max-width:78%;padding:12px 15px;border-radius:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;animation:ccRise .35s cubic-bezier(.16,.8,.3,1) both}
@@ -1095,6 +1097,24 @@ body.kiosk .kprog{display:block}
           <div class="cc-block reveal" id="cc-studio-block">
             <div class="cc-blabel"><span>05</span> Creative Studio <em id="cs-tag">CONVERSATIONAL</em></div>
             <div class="cc-note">Brief it like a designer: it reads your references and client context, asks only what it needs, plays the brief back for sign-off, then iterates the artwork with you — <b>"make the headline bigger"</b>, <b>"try it without people"</b> — without ever starting over. Sessions survive refreshes.</div>
+            <div class="cs-brief" id="cs-briefstrip">
+              <select id="cs-objective" class="cc-in">
+                <option value="">Objective — let the studio ask</option>
+                <option>Awareness</option><option>Petition signups</option><option>Rebuttal / myth-bust</option>
+                <option>Announcement</option><option>Recruitment</option>
+              </select>
+              <input id="cs-audience" class="cc-in" placeholder="Audience — e.g. regional Australians">
+              <select id="cs-tone" class="cc-in">
+                <option value="">Tone — client default</option>
+                <option>Confident &amp; factual</option><option>Urgent</option><option>Optimistic</option>
+                <option>Community-warm</option><option>Hard-hitting</option>
+              </select>
+              <select id="cs-format" class="cc-in">
+                <option value="">Format — let the studio ask</option>
+                <option value="square">Square 1:1</option><option value="portrait">Portrait 4:5</option>
+                <option value="story">Story 9:16</option><option value="landscape">Landscape 16:9</option>
+              </select>
+            </div>
             <div class="cs-wrap">
               <div class="cs-thread" id="cs-thread"></div>
               <div class="cs-inputrow">
@@ -2595,7 +2615,7 @@ function ccInit(){
   const c=ccClient();
   const root=$('cc-root');if(root){root.style.setProperty('--cc-accent',c.accent);root.style.setProperty('--cc-accent2',c.accent2||c.accent);}
   ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccRenderBrandKit();ccEngineNote();
-  ccBindComposer();csInit();
+  ccBindComposer();ccPrefsLoad();csInit();
   if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
   ccObserve();
 }
@@ -2667,7 +2687,8 @@ function ccRenderSignals(){
   el.innerHTML=fl.length?fl.map((f,i)=>'<div class="cc-sig"><div class="cc-sig-rel">'+f.rel+'</div>'+
     '<div class="cc-sig-b"><a class="cc-sig-t" href="'+esc(f.link||'#')+'" target="_blank" rel="noopener">'+esc(f.title)+'</a>'+
     '<div class="cc-sig-m">'+esc(f.src||f.outlet||'')+' · '+ago(f.date)+'</div></div>'+
-    '<button class="cc-sig-use" onclick="ccUseSignal('+i+')">Use in composer →</button></div>').join('')
+    '<button class="cc-sig-use" onclick="ccUseSignal('+i+')">Use in composer →</button>'+
+    '<button class="cc-sig-use" onclick="csFromSignal('+i+')">Brief the Studio ✦</button></div>').join('')
     :'<div class="cc-note">No matching signals in the last 7 days. Try broadening this client’s keywords, or paste a story into the composer below.</div>';
 }
 function ccUseSignal(i){
@@ -2680,7 +2701,9 @@ function ccUseSignal(i){
 function ccBindComposer(){
   if(ccState.booted)return;ccState.booted=true;
   $('cc-types').addEventListener('click',e=>{const b=e.target.closest('.cc-tc');if(!b)return;
-    b.classList.toggle('on');ccState.types=Array.from(document.querySelectorAll('#cc-types .cc-tc.on')).map(x=>x.dataset.t);});
+    b.classList.toggle('on');ccState.types=Array.from(document.querySelectorAll('#cc-types .cc-tc.on')).map(x=>x.dataset.t);ccPrefsSave();});
+  CC_PREF_IDS.forEach(id=>{const el=$(id);if(el)el.addEventListener('change',ccPrefsSave);});
+  $('cc-link').addEventListener('input',()=>{ccState.linkStat=[];ccValidateLinks();});
   const drop=$('cc-drop'),file=$('cc-file');
   drop.addEventListener('click',()=>file.click());
   file.addEventListener('change',e=>ccAddFiles(e.target.files));
@@ -2697,7 +2720,9 @@ function ccBindComposer(){
     libd.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files)ccLibUpload(e.dataTransfer.files);});}
 }
 function ccAddFiles(files){
-  Array.from(files||[]).slice(0,6).forEach(f=>{if(!/^image\//.test(f.type))return;
+  Array.from(files||[]).slice(0,6).forEach(f=>{
+    if(!/^image\//.test(f.type)){toast(f.name+': not an image — use PNG/JPG',true);return;}
+    if(f.size>8*1024*1024){toast(f.name+': over 8MB — export a smaller version',true);return;}
     const r=new FileReader();r.onload=()=>{const data=String(r.result).split(',')[1];
       ccState.refs.push({mime:f.type,data,name:f.name});ccRenderRefs();};r.readAsDataURL(f);});
 }
@@ -2804,6 +2829,8 @@ async function ccGenerate(){
   const wantsText=types.some(t=>t!=='ad');
   if(!types.length){toast('Pick at least one output',true);return;}
   if(wantsText&&!GEMINI_KEY){go('clients');openSettings();$('set-engine').value='gemini';toggleGemini();toast('Add your Gemini API key to generate copy',true);return;}
+  if(!($('cc-input').value||'').trim()&&!ccLinks().length&&ccState.campaign===-1){
+    toast('Give the engine something to work from — notes, a reference link, or pick a campaign',true);$('cc-input').focus();return;}
   const btn=$('cc-gen');btn.disabled=true;
   ccState.secs=[];ccState.visualB64=null;ccState.baseB64=null;
   const mode=($('cc-textmode')&&$('cc-textmode').value)||'model';ccState.mode=mode;
@@ -2994,6 +3021,37 @@ async function ccToClickup(i){
    lose the thread. */
 const csState={id:null,client:null,thread:[],brief:null,pending:null,stage:'brief',vers:[],imgs:{},active:0,busy:false};
 function csBase(){return (WORKER_URL||'').replace(/\/+$/,'');}
+/* Per-client last-used settings - restored on client switch. */
+const CC_PREF_IDS=['cc-vis-format','cc-textmode','cs-objective','cs-audience','cs-tone','cs-format'];
+function ccPrefsSave(){
+  const p={types:ccState.types};
+  CC_PREF_IDS.forEach(id=>{const el=$(id);if(el)p[id]=el.value;});
+  try{localStorage.setItem('axiom_prefs_'+CC_ACTIVE,JSON.stringify(p));}catch(e){}
+}
+function ccPrefsLoad(){
+  let p={};try{p=JSON.parse(localStorage.getItem('axiom_prefs_'+CC_ACTIVE))||{};}catch(e){}
+  CC_PREF_IDS.forEach(id=>{const el=$(id);if(el&&p[id]!==undefined)el.value=p[id];});
+  if(Array.isArray(p.types)&&p.types.length){ccState.types=p.types;
+    document.querySelectorAll('#cc-types .cc-tc').forEach(b=>b.classList.toggle('on',ccState.types.indexOf(b.dataset.t)!==-1));}
+}
+/* Live URL validation for the reference-links field. */
+function ccValidateLinks(){
+  const raw=($('cc-link').value||'').split(/\s+/).map(x=>x.trim()).filter(Boolean);
+  const bad=raw.filter(x=>!/^https?:\/\/[^\s]+\.[^\s]{2,}/i.test(x));
+  const el=$('cc-link-status');if(!el)return;
+  if(bad.length&&!(ccState.linkStat||[]).length)
+    el.innerHTML=bad.map(b=>'<div class="cc-lchip fail">✗ <span>'+esc(b.slice(0,44))+' · not a valid URL</span></div>').join('');
+  else if(!bad.length&&!(ccState.linkStat||[]).length)el.innerHTML='';
+}
+function csFromSignal(i){
+  const f=(ccState.signals||[])[i];if(!f)return;
+  if(csState.thread.length)csFresh();
+  $('cc-link').value=f.link||'';
+  const inp=$('cs-inp');
+  inp.value='Creative about this story: "'+f.title+'"'+(f.desc?' — '+f.desc.slice(0,200):'');
+  $('cc-studio-block').scrollIntoView({behavior:'smooth',block:'start'});
+  csSend();
+}
 function csNewId(){return 'cs'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function csInit(){
   const hash=(location.hash.match(/#cs=([a-zA-Z0-9_-]+)/)||[])[1];
@@ -3073,7 +3131,11 @@ function csCtx(){
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
     '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
-    '\n\nOPERATOR PANEL DEFAULTS: format='+((($('cc-vis-format')||{}).value)||'square')+
+    '\n\nSTRUCTURED BRIEF INPUTS (operator-set; treat as answered — do not re-ask):'+
+    '\n- objective: '+((($('cs-objective')||{}).value)||'(not set)')+
+    '\n- audience: '+((($('cs-audience')||{}).value||'').trim()||'(not set)')+
+    '\n- tone: '+((($('cs-tone')||{}).value)||'(client default)')+
+    '\n- format: '+((($('cs-format')||{}).value)||((($('cc-vis-format')||{}).value)||'(not set)'))+
     ((($('cc-input')||{}).value||'').trim()?'\nComposer notes: '+$('cc-input').value.trim().slice(0,600):'');
 }
 function csParse(txt){
