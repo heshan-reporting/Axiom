@@ -3,46 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#06080F">
+<meta name="theme-color" content="#0C0C0E">
 <meta name="description" content="AXIOM — Australian political intelligence. Live media, search, social and attention analytics.">
 <title>AXIOM — Political Intelligence</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="axiom-ds.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js';document.head.appendChild(s)"></script>
+<!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
+<script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
+<script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
+  ground:'var(--x-bg1)',panel:'var(--x-bg3)',ink:'var(--x-ink0)',ink2:'var(--x-ink2)',
+  signal:'var(--x-ac)',pos:'var(--x-pos)',neg:'var(--x-neg)',warn:'var(--x-warn)'},
+  fontFamily:{display:'var(--x-fd)',body:'var(--x-fb)',mono:'var(--x-fm)'},
+  borderRadius:{tok1:'var(--x-r1)',tok2:'var(--x-r2)',tok3:'var(--x-r3)'},
+  transitionTimingFunction:{signal:'cubic-bezier(.22,.68,.24,.99)'}}},corePlugins:{preflight:false}};}catch(e){}</script>
 <style>
-/* ═══════════════════ AXIOM · DESIGN SYSTEM v9 ═══════════════════ */
+/* ═══════════════ AXIOM · GRAPHITE & SIGNAL (see styleguide.html) ═══════════════
+   The app-level vars below are aliases onto the shared token system in
+   axiom-ds.css, so every legacy selector inherits the new identity. */
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
-  /* base — deep cool OLED with layered elevation */
-  --bg:#05070D; --bg1:#090C16; --bg2:#0D1222; --bg0:rgba(255,255,255,.02);
-  --sur:rgba(150,170,255,.030); --sur2:rgba(150,170,255,.055); --sur3:rgba(150,170,255,.10);
-  --line:rgba(150,170,255,.09); --line2:rgba(150,170,255,.20);
-  --hair:rgba(255,255,255,.06);              /* top "lit edge" highlight */
-  --t0:#F3F6FF; --t1:#AEB9D8; --t2:#6A769F; --t3:#3F4A6A;
-  /* accent — electric indigo-blue */
-  --ac:#5E8BFF; --ac2:#3A5FE0;
-  --acg:linear-gradient(135deg,#7CA2FF 0%,#4E6DF2 52%,#3A5FE0 100%);
-  --acg2:linear-gradient(135deg,#8FB0FF,#5E8BFF);
-  --glow:rgba(94,139,255,.20);
-  /* signal */
-  --pos:#2FE3A0; --neg:#FF5A78; --amb:#F5B15C;
-  /* party palette — CVD/contrast validated for dark surfaces */
+  --bg:var(--x-bg1); --bg1:var(--x-bg2); --bg2:var(--x-bg3); --bg0:rgba(255,255,255,.02);
+  --sur:var(--x-sur1); --sur2:var(--x-sur2); --sur3:var(--x-sur3);
+  --line:var(--x-line1); --line2:var(--x-line2);
+  --hair:rgba(255,255,255,.07);
+  --t0:var(--x-ink0); --t1:var(--x-ink1); --t2:var(--x-ink2); --t3:var(--x-ink3);
+  --ac:var(--x-ac); --ac2:var(--x-ac-lo);
+  --acg:var(--x-ac-grad);
+  --acg2:linear-gradient(135deg,var(--x-ac-hi),var(--x-ac));
+  --glow:var(--x-ac-dim);
+  --pos:var(--x-pos); --neg:var(--x-neg); --amb:var(--x-warn);
+  /* party palette — data encoding, CVD/contrast validated; unchanged */
   --alp:#E23B4E; --lnp:#3E7BFA; --grn:#1FA96C; --onp:#D5680B; --ind:#22A0B6;
-  /* elevation */
-  --sh-sm:0 1px 2px rgba(0,0,0,.4);
-  --sh-md:0 6px 22px -8px rgba(0,0,0,.55);
-  --sh-lg:0 24px 60px -18px rgba(0,0,0,.7);
-  --sh-ac:0 8px 30px -8px rgba(58,95,224,.5);
-  --fd:'Space Grotesk',sans-serif; --fb:'Inter',system-ui,sans-serif; --fm:'JetBrains Mono',monospace;
-  --r:16px; --rs:11px; --r2:22px;
+  --sh-sm:var(--x-e1); --sh-md:var(--x-e2); --sh-lg:var(--x-e3); --sh-ac:var(--x-e-ac);
+  --fd:var(--x-fd); --fb:var(--x-fb); --fm:var(--x-fm);
+  --r:var(--x-r3); --rs:var(--x-r2); --r2:var(--x-r4);
   --rail:78px; --top:64px;
-  --ease:cubic-bezier(.22,.68,.24,1); --spring:cubic-bezier(.34,1.4,.44,1);
+  --ease:var(--x-ease); --spring:var(--x-spring);
 }
-html{scrollbar-color:rgba(150,170,255,.18) transparent}
-body{font-family:var(--fb);background:var(--bg);color:var(--t0);overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;letter-spacing:-.006em}
-::selection{background:rgba(94,139,255,.32);color:#fff}
-:focus-visible{outline:2px solid rgba(94,139,255,.7);outline-offset:2px;border-radius:8px}
+html{scrollbar-color:var(--x-sur3) transparent}
+body{font-family:var(--fb);background:var(--bg);color:var(--t0);overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;letter-spacing:-.004em}
+::selection{background:var(--x-ac-dim);color:var(--x-ink0)}
+:focus-visible{outline:2px solid var(--x-ac);outline-offset:2px;border-radius:8px}
 button{font-family:inherit;cursor:pointer;color:inherit}
 a{color:inherit}
 *::-webkit-scrollbar{width:9px;height:9px}
@@ -543,11 +547,13 @@ body.kiosk .kprog{display:block}
 }
 
 /* ═══════════════════ CLIENT CENTRAL — its own design system ═══════════════════ */
-.cc{--cc-accent:#F0A64B;--cc-accent2:#FF7A1A;--cc-ink:#F4F1EA;--cc-ink2:#B9B4A8;--cc-ink3:#7C7669;
-  --cc-glass:rgba(255,255,255,.045);--cc-glass2:rgba(255,255,255,.07);--cc-line:rgba(255,255,255,.10);
-  --cc-panel:#14110C;--cc-fx:'Space Grotesk',sans-serif;
+/* Client Central rides the shared system; --cc-accent stays per-client (set
+   from client data by JS) but every surface/ink/line token is the system's. */
+.cc{--cc-accent:var(--x-ac);--cc-accent2:var(--x-ac-lo);--cc-ink:var(--x-ink0);--cc-ink2:var(--x-ink1);--cc-ink3:var(--x-ink2);
+  --cc-glass:var(--x-sur1);--cc-glass2:var(--x-sur2);--cc-line:var(--x-line1);
+  --cc-panel:var(--x-bg3);--cc-fx:var(--x-fb);
   position:relative;min-height:100%;padding:6px 4px 60px;isolation:isolate;
-  font-family:'Inter',system-ui,sans-serif;color:var(--cc-ink)}
+  font-family:var(--x-fb);color:var(--cc-ink)}
 .cc-aurora{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;opacity:.55}
 .cc-aurora span{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;mix-blend-mode:screen;
   background:var(--cc-accent);animation:ccFloat 22s ease-in-out infinite}

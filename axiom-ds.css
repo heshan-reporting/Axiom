@@ -1,0 +1,224 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   AXIOM DESIGN SYSTEM — "Graphite & Signal"
+   Shared tokens + primitives for index.html and styleguide.html.
+   Aesthetic: premium intelligence terminal. Near-black graphite base,
+   one restrained gold signal accent, semantic colour only for meaning.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* ── Colour · base ─────────────────────────────────────────────────── */
+  --x-bg0:#070708;          /* page void            */
+  --x-bg1:#0C0C0E;          /* app ground           */
+  --x-bg2:#111114;          /* raised ground        */
+  --x-bg3:#17171B;          /* panel body           */
+  --x-sur1:rgba(255,255,255,.028);
+  --x-sur2:rgba(255,255,255,.05);
+  --x-sur3:rgba(255,255,255,.085);
+  --x-line1:rgba(255,255,255,.07);
+  --x-line2:rgba(255,255,255,.14);
+  --x-line3:rgba(255,255,255,.24);
+
+  /* ── Colour · ink (warm paper on graphite) ─────────────────────────── */
+  --x-ink0:#F4F2EC;
+  --x-ink1:#C9C5BB;
+  --x-ink2:#8F8B81;
+  --x-ink3:#5C5952;
+
+  /* ── Colour · the one accent (signal gold) ─────────────────────────── */
+  --x-ac:#E3B75B;
+  --x-ac-hi:#F0CC7E;
+  --x-ac-lo:#9C7A2E;
+  --x-ac-grad:linear-gradient(135deg,#F0CC7E,#C9992F);
+  --x-ac-ink:#141006;       /* text on accent */
+  --x-ac-dim:rgba(227,183,91,.14);
+  --x-ac-line:rgba(227,183,91,.38);
+
+  /* ── Colour · semantic (status & sentiment only) ───────────────────── */
+  --x-pos:#57B98C;
+  --x-neg:#D96A66;
+  --x-warn:#D98E4A;
+  --x-info:#7D9DC4;
+  --x-pos-dim:rgba(87,185,140,.12);
+  --x-neg-dim:rgba(217,106,102,.12);
+  --x-warn-dim:rgba(217,142,74,.12);
+
+  /* ── Typography ────────────────────────────────────────────────────── */
+  --x-fd:'Instrument Serif',Georgia,'Times New Roman',serif;   /* display  */
+  --x-fb:'Geist','Inter',system-ui,-apple-system,sans-serif;    /* UI/body  */
+  --x-fm:'Geist Mono','JetBrains Mono',ui-monospace,monospace;  /* data     */
+
+  /* Fluid type scale (clamp: 375px → 1600px) */
+  --x-t-2xs:clamp(.594rem,.57rem + .10vw,.66rem);
+  --x-t-xs:clamp(.66rem,.63rem + .12vw,.74rem);
+  --x-t-sm:clamp(.78rem,.74rem + .17vw,.875rem);
+  --x-t-md:clamp(.875rem,.83rem + .20vw,1rem);
+  --x-t-lg:clamp(1.05rem,.98rem + .30vw,1.25rem);
+  --x-t-xl:clamp(1.35rem,1.2rem + .65vw,1.85rem);
+  --x-t-2xl:clamp(1.8rem,1.5rem + 1.3vw,2.8rem);
+  --x-t-3xl:clamp(2.4rem,1.9rem + 2.2vw,4.1rem);
+
+  /* ── Space (4px base) ──────────────────────────────────────────────── */
+  --x-s1:4px; --x-s2:8px; --x-s3:12px; --x-s4:16px; --x-s5:22px;
+  --x-s6:30px; --x-s7:42px; --x-s8:60px; --x-s9:84px;
+
+  /* ── Radius ────────────────────────────────────────────────────────── */
+  --x-r1:6px; --x-r2:10px; --x-r3:16px; --x-r4:22px; --x-rfull:999px;
+
+  /* ── Elevation (layered, never glow) ───────────────────────────────── */
+  --x-e1:0 1px 2px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.25);
+  --x-e2:0 2px 4px rgba(0,0,0,.5),0 8px 24px -6px rgba(0,0,0,.5);
+  --x-e3:0 4px 8px rgba(0,0,0,.55),0 20px 50px -12px rgba(0,0,0,.65);
+  --x-e-ac:0 2px 8px rgba(0,0,0,.4),0 8px 28px -8px rgba(227,183,91,.35);
+
+  /* ── Motion (one curve family, one duration scale) ─────────────────── */
+  --x-ease:cubic-bezier(.22,.68,.24,.99);        /* signal ease           */
+  --x-ease-in:cubic-bezier(.55,.03,.66,.31);
+  --x-spring:cubic-bezier(.28,1.35,.4,1);        /* micro-interactions    */
+  --x-d1:120ms; --x-d2:240ms; --x-d3:420ms; --x-d4:700ms;
+
+  /* ── Z layers ──────────────────────────────────────────────────────── */
+  --x-z-nav:40; --x-z-modal:100; --x-z-toast:120; --x-z-splash:200;
+}
+
+/* ═══ Primitives shared across pages ═══════════════════════════════════ */
+
+.x-label{
+  font-family:var(--x-fm);font-size:var(--x-t-2xs);font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--x-ink2);
+}
+.x-display{
+  font-family:var(--x-fd);font-weight:400;letter-spacing:-.01em;
+  color:var(--x-ink0);line-height:1.04;
+}
+.x-display em{font-style:italic;color:var(--x-ac);}
+.x-num{font-family:var(--x-fm);font-variant-numeric:tabular-nums;}
+
+/* Panel: the core surface. Depth from layered shadow + top-light border. */
+.x-panel{
+  position:relative;background:var(--x-bg3);
+  border:1px solid var(--x-line1);border-radius:var(--x-r3);
+  box-shadow:var(--x-e1);
+}
+.x-panel::before{
+  content:'';position:absolute;inset:0 0 auto 0;height:1px;border-radius:inherit;
+  background:linear-gradient(90deg,transparent 4%,rgba(255,255,255,.10) 30%,rgba(255,255,255,.04) 70%,transparent 96%);
+  pointer-events:none;
+}
+.x-panel--raised{box-shadow:var(--x-e2);background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));}
+.x-glass{
+  background:rgba(17,17,20,.62);border:1px solid var(--x-line1);
+  border-radius:var(--x-r3);
+}
+@supports (backdrop-filter:blur(1px)){
+  .x-glass{backdrop-filter:blur(18px) saturate(1.15);background:rgba(17,17,20,.48);}
+}
+
+/* Buttons */
+.x-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font-family:var(--x-fb);font-weight:600;font-size:var(--x-t-sm);
+  color:var(--x-ac-ink);background:var(--x-ac-grad);
+  border:none;border-radius:var(--x-r2);padding:0 var(--x-s5);height:40px;
+  cursor:pointer;box-shadow:var(--x-e-ac);
+  transition:transform var(--x-d2) var(--x-spring),box-shadow var(--x-d2) var(--x-ease),filter var(--x-d1) var(--x-ease);
+}
+.x-btn:hover{transform:translateY(-1px);filter:brightness(1.06);}
+.x-btn:active{transform:translateY(0) scale(.985);}
+.x-btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none;}
+.x-btn--ghost{
+  background:transparent;color:var(--x-ink1);border:1px solid var(--x-line2);box-shadow:none;
+}
+.x-btn--ghost:hover{color:var(--x-ink0);border-color:var(--x-line3);background:var(--x-sur1);}
+.x-btn--quiet{background:var(--x-sur2);color:var(--x-ink1);box-shadow:none;border:1px solid transparent;}
+.x-btn--quiet:hover{color:var(--x-ink0);background:var(--x-sur3);}
+.x-btn--sm{height:32px;padding:0 var(--x-s4);font-size:var(--x-t-xs);border-radius:var(--x-r1);}
+
+/* Inputs */
+.x-in{
+  width:100%;background:var(--x-bg1);border:1px solid var(--x-line1);
+  border-radius:var(--x-r2);color:var(--x-ink0);
+  font-family:var(--x-fb);font-size:var(--x-t-sm);line-height:1.55;
+  padding:11px 14px;outline:none;
+  transition:border-color var(--x-d2) var(--x-ease),box-shadow var(--x-d2) var(--x-ease),background var(--x-d2) var(--x-ease);
+}
+.x-in::placeholder{color:var(--x-ink3);}
+.x-in:hover{border-color:var(--x-line2);}
+.x-in:focus{border-color:var(--x-ac-line);box-shadow:0 0 0 3px var(--x-ac-dim);background:var(--x-bg2);}
+
+/* Chips / toggles */
+.x-chip{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--x-fb);font-weight:500;font-size:var(--x-t-xs);
+  color:var(--x-ink2);background:var(--x-sur1);
+  border:1px solid var(--x-line1);border-radius:var(--x-rfull);
+  padding:7px 14px;cursor:pointer;
+  transition:color var(--x-d2) var(--x-ease),border-color var(--x-d2) var(--x-ease),background var(--x-d2) var(--x-ease),transform var(--x-d2) var(--x-spring);
+}
+.x-chip:hover{color:var(--x-ink0);border-color:var(--x-line2);transform:translateY(-1px);}
+.x-chip.on,.x-chip[aria-pressed="true"]{
+  color:var(--x-ac-ink);background:var(--x-ac-grad);border-color:transparent;font-weight:600;
+}
+
+/* Status dots + tones */
+.x-dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+.x-dot--pos{background:var(--x-pos);} .x-dot--neg{background:var(--x-neg);}
+.x-dot--warn{background:var(--x-warn);} .x-dot--ac{background:var(--x-ac);}
+.x-tone-pos{color:var(--x-pos);} .x-tone-neg{color:var(--x-neg);}
+.x-tone-warn{color:var(--x-warn);} .x-tone-info{color:var(--x-info);}
+
+/* Animated underline (nav/links) */
+.x-uline{position:relative;text-decoration:none;}
+.x-uline::after{
+  content:'';position:absolute;left:0;right:100%;bottom:-3px;height:1px;
+  background:var(--x-ac);transition:right var(--x-d3) var(--x-ease);
+}
+.x-uline:hover::after,.x-uline:focus-visible::after{right:0;}
+
+/* Reveal-on-scroll (staggered via --i) */
+.x-reveal{opacity:0;transform:translateY(22px);}
+.x-reveal.in{
+  opacity:1;transform:none;
+  transition:opacity var(--x-d4) var(--x-ease),transform var(--x-d4) var(--x-ease);
+  transition-delay:calc(var(--i,0)*60ms);
+}
+
+/* 3D tilt card (JS sets --rx/--ry from pointer) */
+.x-tilt{
+  transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) translateZ(0);
+  transition:transform var(--x-d3) var(--x-ease),box-shadow var(--x-d3) var(--x-ease);
+  will-change:transform;
+}
+.x-tilt:hover{box-shadow:var(--x-e3);}
+
+/* Skeleton shimmer */
+.x-skel{
+  border-radius:var(--x-r2);background:var(--x-sur1);position:relative;overflow:hidden;
+}
+.x-skel::after{
+  content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.05),transparent);
+  animation:x-shimmer 1.6s var(--x-ease) infinite;
+}
+@keyframes x-shimmer{to{transform:translateX(100%);}}
+
+/* Focus — visible, on-brand, everywhere */
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{
+  outline:2px solid var(--x-ac);outline-offset:2px;border-radius:var(--x-r1);
+}
+
+/* Scrollbars */
+.x-scroll::-webkit-scrollbar{width:9px;height:9px;}
+.x-scroll::-webkit-scrollbar-thumb{background:var(--x-sur3);border-radius:999px;border:2px solid var(--x-bg1);}
+.x-scroll::-webkit-scrollbar-thumb:hover{background:var(--x-line3);}
+.x-scroll{scrollbar-width:thin;scrollbar-color:var(--x-sur3) transparent;}
+
+/* Reduced motion: decorative motion off, state changes become fades */
+@media (prefers-reduced-motion:reduce){
+  .x-reveal{opacity:1;transform:none;transition:none;}
+  .x-tilt{transform:none !important;}
+  .x-skel::after{animation:none;}
+  *,*::before,*::after{
+    animation-duration:.01ms !important;animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;scroll-behavior:auto !important;
+  }
+}

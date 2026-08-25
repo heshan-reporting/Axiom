@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AXIOM Design System — Graphite &amp; Signal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="axiom-ds.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--x-bg1);color:var(--x-ink1);font-family:var(--x-fb);font-size:var(--x-t-md);line-height:1.6;padding:var(--x-s8) var(--x-s6) var(--x-s9)}
+.wrap{max-width:1060px;margin:0 auto}
+header{margin-bottom:var(--x-s8)}
+h1{font-family:var(--x-fd);font-size:var(--x-t-3xl);font-weight:400;color:var(--x-ink0);letter-spacing:-.01em;line-height:1.02}
+h1 em{font-style:italic;color:var(--x-ac)}
+.sub{color:var(--x-ink2);margin-top:var(--x-s3);max-width:60ch}
+section{margin-bottom:var(--x-s8)}
+h2{font-family:var(--x-fm);font-size:var(--x-t-xs);font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--x-ac);border-bottom:1px solid var(--x-line1);padding-bottom:var(--x-s3);margin-bottom:var(--x-s5)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--x-s3)}
+.sw{border-radius:var(--x-r2);border:1px solid var(--x-line1);overflow:hidden}
+.sw i{display:block;height:64px}
+.sw b{display:block;font-family:var(--x-fm);font-weight:500;font-size:var(--x-t-2xs);padding:8px 10px;color:var(--x-ink1)}
+.sw span{display:block;font-family:var(--x-fm);font-size:var(--x-t-2xs);padding:0 10px 9px;color:var(--x-ink3)}
+.trow{display:flex;align-items:baseline;gap:var(--x-s5);border-bottom:1px dashed var(--x-line1);padding:var(--x-s3) 0}
+.trow code{font-family:var(--x-fm);font-size:var(--x-t-2xs);color:var(--x-ink3);width:90px;flex-shrink:0}
+.srow{display:flex;align-items:center;gap:var(--x-s4);margin-bottom:var(--x-s2)}
+.srow i{height:14px;background:var(--x-ac-dim);border:1px solid var(--x-ac-line);border-radius:3px;display:block}
+.srow code{font-family:var(--x-fm);font-size:var(--x-t-2xs);color:var(--x-ink2);width:70px}
+.crow{display:flex;flex-wrap:wrap;gap:var(--x-s4);align-items:center}
+.demo{padding:var(--x-s5);display:flex;flex-direction:column;gap:var(--x-s4)}
+.erow{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:var(--x-s5)}
+.ebox{height:110px;border-radius:var(--x-r3);background:var(--x-bg3);border:1px solid var(--x-line1);display:flex;align-items:center;justify-content:center;font-family:var(--x-fm);font-size:var(--x-t-2xs);color:var(--x-ink2)}
+.mrow{display:flex;gap:var(--x-s4);flex-wrap:wrap}
+.mbox{width:120px;height:70px;border-radius:var(--x-r2);background:var(--x-sur2);border:1px solid var(--x-line1);display:flex;align-items:center;justify-content:center;font-family:var(--x-fm);font-size:var(--x-t-2xs);color:var(--x-ink2);cursor:pointer;transition:transform var(--x-d2) var(--x-spring),background var(--x-d2) var(--x-ease)}
+.mbox:hover{transform:translateY(-4px);background:var(--x-sur3)}
+.mbox.slow{transition-duration:var(--x-d4)}
+.mbox.fast{transition-duration:var(--x-d1)}
+.note{font-size:var(--x-t-xs);color:var(--x-ink3);margin-top:var(--x-s3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="x-label" style="margin-bottom:14px">AXIOM · Design System · v1</div>
+  <h1>Graphite &amp; <em>Signal</em></h1>
+  <p class="sub">One graphite base. One gold signal accent. Semantic colour only where it means something. Instrument Serif for display, Geist for the interface, Geist Mono for data. Every distance, radius, shadow and movement comes from the tokens on this page.</p>
+</header>
+
+<section>
+  <h2>01 · Colour — base &amp; ink</h2>
+  <div class="grid">
+    <div class="sw"><i style="background:var(--x-bg0)"></i><b>--x-bg0</b><span>#070708 void</span></div>
+    <div class="sw"><i style="background:var(--x-bg1)"></i><b>--x-bg1</b><span>#0C0C0E ground</span></div>
+    <div class="sw"><i style="background:var(--x-bg2)"></i><b>--x-bg2</b><span>#111114 raised</span></div>
+    <div class="sw"><i style="background:var(--x-bg3)"></i><b>--x-bg3</b><span>#17171B panel</span></div>
+    <div class="sw"><i style="background:var(--x-ink0)"></i><b>--x-ink0</b><span>#F4F2EC primary</span></div>
+    <div class="sw"><i style="background:var(--x-ink1)"></i><b>--x-ink1</b><span>#C9C5BB body</span></div>
+    <div class="sw"><i style="background:var(--x-ink2)"></i><b>--x-ink2</b><span>#8F8B81 secondary</span></div>
+    <div class="sw"><i style="background:var(--x-ink3)"></i><b>--x-ink3</b><span>#5C5952 faint</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>02 · Colour — signal accent &amp; semantic</h2>
+  <div class="grid">
+    <div class="sw"><i style="background:var(--x-ac)"></i><b>--x-ac</b><span>#E3B75B signal</span></div>
+    <div class="sw"><i style="background:var(--x-ac-grad)"></i><b>--x-ac-grad</b><span>accent gradient</span></div>
+    <div class="sw"><i style="background:var(--x-pos)"></i><b>--x-pos</b><span>#57B98C positive</span></div>
+    <div class="sw"><i style="background:var(--x-neg)"></i><b>--x-neg</b><span>#D96A66 negative</span></div>
+    <div class="sw"><i style="background:var(--x-warn)"></i><b>--x-warn</b><span>#D98E4A caution</span></div>
+    <div class="sw"><i style="background:var(--x-info)"></i><b>--x-info</b><span>#7D9DC4 info/link</span></div>
+  </div>
+  <p class="note">Party colours in charts are data encoding, not UI — they stay as defined by the newsroom conventions.</p>
+</section>
+
+<section>
+  <h2>03 · Typography — fluid scale</h2>
+  <div class="trow"><code>--x-t-3xl</code><span class="x-display" style="font-size:var(--x-t-3xl)">National <em>pulse</em></span></div>
+  <div class="trow"><code>--x-t-2xl</code><span class="x-display" style="font-size:var(--x-t-2xl)">Minerals Council of Australia</span></div>
+  <div class="trow"><code>--x-t-xl</code><span style="font-family:var(--x-fb);font-weight:600;font-size:var(--x-t-xl);color:var(--x-ink0)">Priority desk — six flagged stories</span></div>
+  <div class="trow"><code>--x-t-md</code><span style="font-size:var(--x-t-md)">Body — Fuel Tax Credits refund a road-user tax on fuel used off public roads.</span></div>
+  <div class="trow"><code>--x-t-sm</code><span style="font-size:var(--x-t-sm)">Secondary — grounded in the client's data and current news.</span></div>
+  <div class="trow"><code>--x-t-xs</code><span class="x-num" style="font-family:var(--x-fm);font-size:var(--x-t-xs)">DATA 45.1% · SOV +2.4pt · v3</span></div>
+  <div class="trow"><code>--x-t-2xs</code><span class="x-label">Uppercase label · used sparingly</span></div>
+</section>
+
+<section>
+  <h2>04 · Space &amp; radius</h2>
+  <div class="srow"><code>--x-s1</code><i style="width:4px"></i></div>
+  <div class="srow"><code>--x-s2</code><i style="width:8px"></i></div>
+  <div class="srow"><code>--x-s3</code><i style="width:12px"></i></div>
+  <div class="srow"><code>--x-s4</code><i style="width:16px"></i></div>
+  <div class="srow"><code>--x-s5</code><i style="width:22px"></i></div>
+  <div class="srow"><code>--x-s6</code><i style="width:30px"></i></div>
+  <div class="srow"><code>--x-s7</code><i style="width:42px"></i></div>
+  <div class="srow"><code>--x-s8</code><i style="width:60px"></i></div>
+  <div class="crow" style="margin-top:var(--x-s5)">
+    <div class="ebox" style="width:110px;height:70px;border-radius:var(--x-r1)">r1 · 6</div>
+    <div class="ebox" style="width:110px;height:70px;border-radius:var(--x-r2)">r2 · 10</div>
+    <div class="ebox" style="width:110px;height:70px;border-radius:var(--x-r3)">r3 · 16</div>
+    <div class="ebox" style="width:110px;height:70px;border-radius:var(--x-r4)">r4 · 22</div>
+  </div>
+</section>
+
+<section>
+  <h2>05 · Elevation</h2>
+  <div class="erow">
+    <div class="ebox" style="box-shadow:var(--x-e1)">--x-e1 · resting</div>
+    <div class="ebox" style="box-shadow:var(--x-e2)">--x-e2 · raised</div>
+    <div class="ebox" style="box-shadow:var(--x-e3)">--x-e3 · floating</div>
+    <div class="ebox" style="box-shadow:var(--x-e-ac)">--x-e-ac · signal</div>
+  </div>
+</section>
+
+<section>
+  <h2>06 · Motion — one curve, four durations</h2>
+  <div class="mrow">
+    <div class="mbox fast">d1 · 120ms</div>
+    <div class="mbox">d2 · 240ms</div>
+    <div class="mbox slow" style="transition-duration:var(--x-d3)">d3 · 420ms</div>
+    <div class="mbox slow">d4 · 700ms</div>
+  </div>
+  <p class="note">--x-ease cubic-bezier(.22,.68,.24,.99) for movement · --x-spring for micro-interactions · decorative motion is removed entirely under prefers-reduced-motion.</p>
+</section>
+
+<section>
+  <h2>07 · Components</h2>
+  <div class="x-panel demo">
+    <div class="crow">
+      <button class="x-btn">Generate</button>
+      <button class="x-btn x-btn--ghost">Secondary</button>
+      <button class="x-btn x-btn--quiet">Quiet</button>
+      <button class="x-btn x-btn--sm">Small</button>
+      <button class="x-btn" disabled>Disabled</button>
+    </div>
+    <div class="crow">
+      <span class="x-chip">Chip</span>
+      <span class="x-chip on">Selected</span>
+      <span class="x-chip"><span class="x-dot x-dot--pos"></span>Live</span>
+      <span class="x-chip"><span class="x-dot x-dot--neg"></span>3 failing</span>
+    </div>
+    <input class="x-in" placeholder="Input — focus me to see the signal ring" style="max-width:420px">
+    <div class="crow">
+      <span class="x-tone-pos x-num">▲ +2.4pt</span>
+      <span class="x-tone-neg x-num">▼ −1.9pt</span>
+      <span class="x-tone-warn x-num">● holding</span>
+      <a href="#" class="x-uline" style="color:var(--x-ink1)">Animated underline</a>
+    </div>
+    <div class="crow">
+      <div class="x-skel" style="width:220px;height:44px"></div>
+      <div class="x-glass" style="padding:12px 18px;font-size:var(--x-t-sm)">Glass surface</div>
+    </div>
+  </div>
+</section>
+</div>
+</body>
+</html>
