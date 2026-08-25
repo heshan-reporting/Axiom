@@ -1996,6 +1996,168 @@ export default {
         : jsonResp({ ok: false, error: 'not_found' }, 404);
     }
 
+    // ======================================================================
+    // THE CURIOUS MIND - per-client intelligence layer
+    // Architecture: Vectorize (semantic index, per-client namespaces + shared
+    // 'cmm' org namespace) + Workers AI embeddings + D1 (doc/run metadata)
+    // + R2 (raw documents). Bindings: MIND_VECTORS, AI, MIND_DB, MIND_DOCS.
+    // Every route degrades with a clear 501 naming what to create if a
+    // binding is missing. Strict isolation: queries only ever touch the
+    // requested client namespace plus 'cmm' - never another client's.
+    // ======================================================================
+    if (path.indexOf('/mind/') === 0) {
+      const missing = [];
+      if (!env.MIND_VECTORS) missing.push('MIND_VECTORS (Vectorize index, 768 dims, cosine)');
+      if (!env.AI) missing.push('AI (Workers AI binding, for @cf/baai/bge-base-en-v1.5 embeddings)');
+      if (!env.MIND_DB) missing.push('MIND_DB (D1 database)');
+      if (path !== '/mind/query' && !env.MIND_DOCS) missing.push('MIND_DOCS (R2 bucket)');
+      if (missing.length) return jsonResp({ error: 'mind_not_configured', detail: 'Create + bind in the Cloudflare dashboard: ' + missing.join('; ') }, 501);
+      const nsClean = s => String(s || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+      const embed = async texts => {
+        const out = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: texts });
+        return out.data;
+      };
+      const ensureSchema = async () => {
+        await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_docs(id TEXT PRIMARY KEY, ns TEXT, title TEXT, kind TEXT, source TEXT, dt TEXT, chunks INTEGER, created INTEGER)').run();
+        await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
+      };
+      // Retrieval shared by /mind/query and /mind/analyze: the client
+      // namespace plus the shared 'cmm' layer, nothing else, ever.
+      const retrieve = async (ns, q, kClient, kShared) => {
+        const vec = (await embed([q.slice(0, 1500)]))[0];
+        const hits = [];
+        const one = async (space, topK) => {
+          try {
+            const res = await env.MIND_VECTORS.query(vec, { topK, namespace: space, returnMetadata: 'all' });
+            (res.matches || []).forEach(m => hits.push({ ns: space, score: m.score, meta: m.metadata || {} }));
+          } catch (e) {}
+        };
+        await one(ns, kClient);
+        if (ns !== 'cmm') await one('cmm', kShared);
+        hits.sort((a, b) => b.score - a.score);
+        return hits;
+      };
+
+      // POST /mind/ingest {namespace, title, text, kind?, source?, date?}
+      if (path === '/mind/ingest' && req.method === 'POST') {
+        let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+        const ns = nsClean(b.namespace);
+        const text = String(b.text || '').slice(0, 200000);
+        if (!ns || !text.trim()) return jsonResp({ error: 'missing_fields', detail: 'namespace and text are required' }, 400);
+        const docId = ns + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const title = String(b.title || 'Untitled').slice(0, 200);
+        const kind = String(b.kind || 'doc').slice(0, 40);
+        // Chunk ~1200 chars with 150 overlap, embed in batches, insert.
+        const chunks = [];
+        for (let i = 0; i < text.length && chunks.length < 120; i += 1050) chunks.push(text.slice(i, i + 1200));
+        try {
+          await ensureSchema();
+          for (let i = 0; i < chunks.length; i += 20) {
+            const batch = chunks.slice(i, i + 20);
+            const vecs = await embed(batch);
+            await env.MIND_VECTORS.insert(batch.map((c, j) => ({
+              id: docId + '_' + (i + j),
+              values: vecs[j],
+              namespace: ns,
+              metadata: { docId, title, kind, source: String(b.source || '').slice(0, 300), dt: String(b.date || '').slice(0, 20), snippet: c.slice(0, 900) },
+            })));
+          }
+          await env.MIND_DOCS.put('mind/' + ns + '/' + docId + '.txt', text);
+          await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created) VALUES(?,?,?,?,?,?,?,?)')
+            .bind(docId, ns, title, kind, String(b.source || ''), String(b.date || ''), chunks.length, Date.now()).run();
+          return jsonResp({ ok: true, docId, chunks: chunks.length });
+        } catch (e) {
+          return jsonResp({ error: 'ingest_failed', detail: String(e && e.message || e).slice(0, 200) }, 502);
+        }
+      }
+
+      // GET /mind/docs?namespace=  - what the KB holds (for the UI)
+      if (path === '/mind/docs') {
+        const ns = nsClean(reqUrl.searchParams.get('namespace'));
+        if (!ns) return jsonResp({ error: 'no_namespace' }, 400);
+        try {
+          await ensureSchema();
+          const rows = await env.MIND_DB.prepare('SELECT id,title,kind,source,dt,chunks,created FROM mind_docs WHERE ns=? ORDER BY created DESC LIMIT 50').bind(ns).all();
+          return jsonResp({ ok: true, docs: rows.results || [] });
+        } catch (e) { return jsonResp({ error: 'docs_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }
+      }
+
+      // POST /mind/query {namespace, q, topK?} - raw retrieval (debug/UI)
+      if (path === '/mind/query' && req.method === 'POST') {
+        let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+        const ns = nsClean(b.namespace);
+        if (!ns || !b.q) return jsonResp({ error: 'missing_fields' }, 400);
+        try {
+          const hits = await retrieve(ns, String(b.q), Math.min(parseInt(b.topK, 10) || 6, 12), 3);
+          return jsonResp({ ok: true, hits: hits.map(h => ({ ns: h.ns, score: +h.score.toFixed(3), title: h.meta.title, kind: h.meta.kind, snippet: (h.meta.snippet || '').slice(0, 400) })) });
+        } catch (e) { return jsonResp({ error: 'query_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }
+      }
+
+      // POST /mind/analyze {namespace, mode, question?, objective?, keywords?[]}
+      // modes: narrative | patterns | opposition | strategy | impact
+      if (path === '/mind/analyze' && req.method === 'POST') {
+        if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'chat_not_configured', detail: 'Set ANTHROPIC_API_KEY (wrangler secret put ANTHROPIC_API_KEY) - analysis is generated by Claude.' }, 501);
+        let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+        const ns = nsClean(b.namespace);
+        const MODES = {
+          narrative: 'Generate 2-3 NEW campaign narratives grounded in the client knowledge and current news. For each: a name, the core story in 2-3 sentences, why now (tie to a current signal), and the first content moves.',
+          patterns: 'Detect patterns across the client knowledge and current news: recurring themes, sentiment shifts, emerging issues, and what is gaining or losing momentum over time. Be specific about the evidence.',
+          opposition: 'Analyse activity working AGAINST this client\'s goals visible in the news and knowledge base: actors, tactics, messaging frames, momentum, and the strongest counter-positions available.',
+          strategy: 'Recommend campaign and channel strategy tied to the client\'s stated objectives: 3-5 prioritised recommendations, each with rationale, channel, and a first step.',
+          impact: 'Measure impact: compare campaign activity in the knowledge base against changes in coverage volume, tone and momentum in the news/time-series data. Say plainly what moved, what did not, and the most plausible attribution.',
+        };
+        const mode = String(b.mode || '');
+        if (!MODES[mode]) return jsonResp({ error: 'bad_mode', detail: 'mode must be one of: ' + Object.keys(MODES).join(', ') }, 400);
+        if (!ns) return jsonResp({ error: 'no_namespace' }, 400);
+        try {
+          const seed = (b.question || '') + ' ' + (b.objective || '') + ' ' + mode + ' campaign strategy narrative';
+          const hits = await retrieve(ns, seed, 8, 4);
+          // News arm: existing aggregator filtered by client keywords.
+          let news = [];
+          try {
+            const kw = (Array.isArray(b.keywords) ? b.keywords : []).map(s => String(s).toLowerCase()).filter(Boolean).slice(0, 30);
+            const raw = JSON.parse(await buildAllNews(env, { q: '', max: 120, hours: 168 }));
+            news = (raw.items || []).filter(it => {
+              if (!kw.length) return false;
+              const hay = (it.title + ' ' + (it.desc || '')).toLowerCase();
+              return kw.some(k => hay.indexOf(k) !== -1);
+            }).slice(0, 12);
+          } catch (e) {}
+          // Time-series context for patterns/impact.
+          let series = '';
+          if (mode === 'patterns' || mode === 'impact') {
+            try {
+              const hist = JSON.parse(await kvGet(env.AXIOM_KV, 'pulse_history') || '[]') || [];
+              const wk = hist.slice(-168), prev = hist.slice(-336, -168);
+              const avg = (a, f) => a.length ? +(a.reduce((s, p) => s + f(p), 0) / a.length).toFixed(2) : 0;
+              series = 'COVERAGE TIME-SERIES: last-7d avg volume ' + avg(wk, p => p.tot || 0) + ' (prior 7d ' + avg(prev, p => p.tot || 0) + '); last-7d avg tone ' + avg(wk, p => p.tone || 0) + ' (prior ' + avg(prev, p => p.tone || 0) + ').';
+            } catch (e) {}
+          }
+          // Build numbered source register - the citation contract.
+          const sources = [];
+          const kb = hits.map((h, i) => { sources.push({ id: 'S' + (i + 1), title: h.meta.title || 'doc', origin: h.ns === 'cmm' ? 'CMM shared' : 'client KB', kind: h.meta.kind || '' }); return '[S' + (i + 1) + '] (' + (h.ns === 'cmm' ? 'CMM' : 'CLIENT') + ' ' + (h.meta.kind || 'doc') + ') ' + (h.meta.title || '') + ': ' + (h.meta.snippet || ''); });
+          const nw = news.map((n, i) => { sources.push({ id: 'N' + (i + 1), title: n.title, origin: 'news: ' + (n.src || ''), kind: 'news' }); return '[N' + (i + 1) + '] (' + (n.src || 'news') + ', ' + (n.date || '').slice(0, 10) + ') ' + n.title + (n.desc ? ' - ' + n.desc.slice(0, 150) : ''); });
+          const sys = 'You are The Curious Mind, the client-intelligence engine of a communications agency (CMM). You are analysing for ONE client only. Use ONLY the numbered sources provided; never invent facts, quotes or numbers.\n\nTASK: ' + MODES[mode] + (b.objective ? '\n\nCLIENT OBJECTIVES: ' + String(b.objective).slice(0, 600) : '') + (b.question ? '\n\nSPECIFIC QUESTION: ' + String(b.question).slice(0, 400) : '') +
+            '\n\nCITATION RULES (mandatory): after every claim drawn from a source, cite it inline like [S2] or [N4]. If the sources are thin for part of the task, say so rather than padding. Use #### section headers. Australian English.' +
+            '\n\nCLIENT KNOWLEDGE BASE + SHARED CMM CONTEXT:\n' + (kb.join('\n\n') || '(knowledge base is empty - note this in your answer)') +
+            '\n\nCURRENT NEWS (client-relevant, last 7 days):\n' + (nw.join('\n') || '(no matching news items)') + (series ? '\n\n' + series : '');
+          const r = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2200, system: sys, messages: [{ role: 'user', content: 'Run the analysis now.' }] }),
+            signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (data.error) return jsonResp({ error: 'anthropic_error', detail: String(data.error.message || '').slice(0, 200) }, 502);
+          const text = (data.content || []).filter(x => x.type === 'text').map(x => x.text).join('').trim();
+          try { await ensureSchema(); await env.MIND_DB.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, mode, String(b.question || '').slice(0, 200), Date.now()).run(); } catch (e) {}
+          return jsonResp({ ok: true, mode, text, sources });
+        } catch (e) {
+          return jsonResp({ error: 'analyze_failed', detail: String(e && e.message || e).slice(0, 200) }, 502);
+        }
+      }
+      return jsonResp({ error: 'unknown_mind_route' }, 404);
+    }
+
     // -- ClickUp attachment: attach a generated image to an existing task ---
     // POST /clickup-attach  body: { taskId, filename?, b64, mime? }
     if (path === '/clickup-attach') {

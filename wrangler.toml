@@ -31,8 +31,34 @@ crons = ["17 * * * *"]
 binding = "AXIOM_KV"
 id = "PASTE_EXISTING_NAMESPACE_ID"
 
+# ── THE CURIOUS MIND (Phase 5) — create these once, then uncomment. ─────────
+# 1) Vectorize index (768 dims to match the Workers AI bge embedding model):
+#      wrangler vectorize create axiom-mind --dimensions=768 --metric=cosine
+# 2) D1 database:   wrangler d1 create axiom-mind-db   (paste its id below)
+# 3) R2 bucket:     wrangler r2 bucket create axiom-mind-docs
+# (All three can also be created + bound in the dashboard: Worker -> Settings
+#  -> Bindings. Without them, /mind/* routes return a clear 501 and the rest
+#  of AXIOM is unaffected.)
+#
+# [[vectorize]]
+# binding = "MIND_VECTORS"
+# index_name = "axiom-mind"
+#
+# [ai]
+# binding = "AI"
+#
+# [[d1_databases]]
+# binding = "MIND_DB"
+# database_name = "axiom-mind-db"
+# database_id = "PASTE_D1_DATABASE_ID"
+#
+# [[r2_buckets]]
+# binding = "MIND_DOCS"
+# bucket_name = "axiom-mind-docs"
+
 # ── Secrets are NOT stored here. Set each with `wrangler secret put <NAME>`:
-#   GEMINI_KEY        (ad creatives /nano + client copy)
+#   ANTHROPIC_API_KEY (Creative Studio chat + The Curious Mind analysis)
+#   GEMINI_KEY        (image engine /nano + copy + link summarization)
 #   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)
 #   GUARDIAN_KEY      (Guardian API, optional)
 #   TVFY_KEY          (They Vote For You, optional)

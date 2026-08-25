@@ -732,6 +732,23 @@ body.kiosk .kprog{display:block}
 .cs-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
 .cs-status{font-family:var(--cc-fx);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--cc-ink3)}
 .cs-empty{color:var(--cc-ink3);font-size:12.5px;text-align:center;padding:26px 12px;line-height:1.7}
+/* The Curious Mind */
+.mind-wrap{display:flex;flex-direction:column;gap:14px}
+.mind-ingest{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:18px;padding:16px;backdrop-filter:blur(10px)}
+.mind-h{font-family:var(--cc-fx);font-size:12px;font-weight:700;margin-bottom:10px;color:var(--cc-ink2)}
+.mind-row{display:flex;gap:9px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+.mind-row .cc-in{flex:1;min-width:160px}
+.mind-caps{display:flex;gap:8px;flex-wrap:wrap}
+.mind-out{display:flex;flex-direction:column;gap:12px}
+.mind-card{background:var(--cc-panel);border:1px solid var(--cc-line);border-radius:16px;overflow:hidden;animation:ccRise .4s cubic-bezier(.16,.8,.3,1) both}
+.mind-card .mc-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 15px;border-bottom:1px solid var(--cc-line);background:var(--cc-glass);font-family:var(--cc-fx);font-weight:700;font-size:12.5px}
+.mind-card .mc-b{padding:15px 17px;font-size:13px;line-height:1.62;white-space:pre-wrap;color:var(--cc-ink)}
+.mind-card .mc-b h4{font-family:var(--cc-fx);font-size:12.5px;color:var(--cc-accent);margin:14px 0 5px}
+.mind-card .mc-b h4:first-child{margin-top:0}
+.mind-card .mc-cite{color:var(--cc-accent);font-family:var(--cc-fx);font-size:10.5px}
+.mind-src{padding:10px 15px;border-top:1px solid var(--cc-line);display:flex;flex-wrap:wrap;gap:6px}
+.mind-src span{font-family:var(--cc-fx);font-size:9.5px;color:var(--cc-ink3);border:1px solid var(--cc-line);border-radius:7px;padding:3px 8px}
+.mind-src b{color:var(--cc-accent);font-weight:700}
 /* reference-link status chips */
 .cc-linkstat{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .cc-lchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--cc-fx);font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--cc-line);color:var(--cc-ink2);max-width:100%}
@@ -1125,6 +1142,38 @@ body.kiosk .kprog{display:block}
                 <button class="cc-mini" onclick="csFresh()">+ Start fresh</button>
                 <span class="cs-status" id="cs-status"></span>
               </div>
+            </div>
+          </div>
+
+          <div class="cc-block reveal" id="cc-mind-block">
+            <div class="cc-blabel"><span>06</span> The Curious Mind <em id="mind-tag">CLIENT INTELLIGENCE</em></div>
+            <div class="cc-note">A persistent, per-client knowledge layer: client documents + live news + shared CMM context, semantically indexed. Every answer cites its sources; one client's data never touches another's.</div>
+            <div class="mind-wrap">
+              <div class="mind-ingest">
+                <div class="mind-h">Add to this client's knowledge base</div>
+                <div class="mind-row">
+                  <select id="mind-kind" class="cc-in">
+                    <option value="brief">Brief</option><option value="campaign">Campaign plan</option>
+                    <option value="content">Past content</option><option value="results">Results / KPIs</option>
+                    <option value="cmm">CMM shared (all clients)</option><option value="doc">Other</option>
+                  </select>
+                  <input id="mind-title" class="cc-in" placeholder="Title — e.g. HOOF Batch 8 results">
+                </div>
+                <textarea id="mind-text" class="cc-ta" rows="3" placeholder="Paste the document text…"></textarea>
+                <div class="mind-row" style="justify-content:space-between">
+                  <span class="cs-status" id="mind-docs-tag"></span>
+                  <button class="cc-mini" id="mind-add" onclick="mindIngest()">+ Add to knowledge base</button>
+                </div>
+              </div>
+              <div class="mind-caps" id="mind-caps">
+                <button class="cc-chip" data-m="narrative" onclick="mindRun('narrative')">Narratives</button>
+                <button class="cc-chip" data-m="patterns" onclick="mindRun('patterns')">Patterns</button>
+                <button class="cc-chip" data-m="opposition" onclick="mindRun('opposition')">Opposition watch</button>
+                <button class="cc-chip" data-m="strategy" onclick="mindRun('strategy')">Strategy</button>
+                <button class="cc-chip" data-m="impact" onclick="mindRun('impact')">Impact</button>
+              </div>
+              <input id="mind-q" class="cc-in" placeholder="Optional focus — e.g. 'the fuel tax credit debate in Queensland'">
+              <div class="mind-out" id="mind-out"></div>
             </div>
           </div>
         </div>
@@ -2615,7 +2664,7 @@ function ccInit(){
   const c=ccClient();
   const root=$('cc-root');if(root){root.style.setProperty('--cc-accent',c.accent);root.style.setProperty('--cc-accent2',c.accent2||c.accent);}
   ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccRenderBrandKit();ccEngineNote();
-  ccBindComposer();ccPrefsLoad();csInit();
+  ccBindComposer();ccPrefsLoad();csInit();mindDocs();
   if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
   ccObserve();
 }
@@ -3063,7 +3112,7 @@ function csInit(){
 }
 function csReset(id){
   csState.id=id;csState.thread=[];csState.brief=null;csState.pending=null;
-  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;
+  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;csState.mindCtx=undefined;
   try{localStorage.setItem('axiom_cs_'+CC_ACTIVE,id);history.replaceState(null,'','#cs='+id);}catch(e){}
 }
 function csFresh(){csReset(csNewId());csSaveDoc();csRender();toast('New creative session');}
@@ -3131,6 +3180,7 @@ function csCtx(){
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
     '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
+    (csState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind - brand colours, messaging, audience, past creative):\n'+csState.mindCtx:'')+
     '\n\nSTRUCTURED BRIEF INPUTS (operator-set; treat as answered — do not re-ask):'+
     '\n- objective: '+((($('cs-objective')||{}).value)||'(not set)')+
     '\n- audience: '+((($('cs-audience')||{}).value||'').trim()||'(not set)')+
@@ -3159,6 +3209,19 @@ async function csSend(){
   inp.value='';
   csState.thread.push({r:'u',t});csState.busy=true;csRender();
   try{
+    // Pull client knowledge from The Curious Mind once per session (also
+    // after a restore) so brief-taking and edit-routing know the client.
+    // Silently skipped if the Mind is not configured.
+    if(csState.mindCtx===undefined){
+      csState.mindCtx='';
+      try{
+        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:4})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok&&d.ok&&(d.hits||[]).length)
+          csState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
+      }catch(e){}
+    }
     if(csState.stage==='brief')await csBriefTurn();
     else await csEditTurn(t);
   }catch(e){
@@ -3237,6 +3300,59 @@ async function csEditTurn(instr){
     csState.thread.push({r:'a',k:'Quick check',t:j.text||'',raw});
   }else{
     csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
+  }
+}
+
+/* ═══════════ THE CURIOUS MIND — client intelligence layer ═══════════ */
+async function mindDocs(){
+  const tag=$('mind-docs-tag');if(!tag)return;
+  try{const d=await api('/mind/docs?namespace='+encodeURIComponent(CC_ACTIVE));
+    tag.textContent=(d&&d.ok)?((d.docs||[]).length+' documents in this client\'s knowledge base'):'';}
+  catch(e){tag.textContent='';}
+}
+async function mindIngest(){
+  const kind=$('mind-kind').value,title=$('mind-title').value.trim(),text=$('mind-text').value.trim();
+  if(!text){toast('Paste the document text first',true);return;}
+  const btn=$('mind-add');btn.disabled=true;btn.textContent='Indexing…';
+  try{
+    const ns=kind==='cmm'?'cmm':CC_ACTIVE;
+    const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({namespace:ns,title:title||'Untitled',text,kind})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    toast('Indexed ✓ '+d.chunks+' chunks'+(ns==='cmm'?' (shared CMM layer)':''));
+    $('mind-title').value='';$('mind-text').value='';mindDocs();
+  }catch(e){toast('Ingest: '+(e.message||e),true);}
+  btn.disabled=false;btn.textContent='+ Add to knowledge base';
+}
+function mindMd(t){
+  let h=esc(t);
+  h=h.replace(/^####\s*(.+)$/gm,'<h4>$1</h4>');
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  h=h.replace(/\[([SN]\d+)\]/g,'<span class="mc-cite">[$1]</span>');
+  return h;
+}
+async function mindRun(mode){
+  const out=$('mind-out');const c=ccClient();
+  const labels={narrative:'Narratives',patterns:'Pattern detection',opposition:'Opposition watch',strategy:'Strategy',impact:'Impact measurement'};
+  out.innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>The Curious Mind is analysing '+esc(labels[mode]||mode)+' for '+esc(c.short||c.name)+'…</div>'+out.innerHTML;
+  try{
+    const r=await fetch(csBase()+'/mind/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({namespace:CC_ACTIVE,mode,question:$('mind-q').value.trim()||undefined,
+        objective:(c.desc||'').slice(0,500),keywords:c.keywords||[]})});
+    const d=await r.json().catch(()=>({}));
+    out.querySelector('.cc-thinking').remove();
+    if(!r.ok||d.error){
+      out.innerHTML='<div class="cc-err">'+esc(d.detail||d.error||('HTTP '+r.status))+'</div>'+out.innerHTML;return;
+    }
+    out.innerHTML='<div class="mind-card"><div class="mc-h"><span>'+esc(labels[mode]||mode)+' · '+esc(c.short||c.name)+'</span>'+
+      '<span class="cs-status">'+new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'})+'</span></div>'+
+      '<div class="mc-b">'+mindMd(d.text||'')+'</div>'+
+      ((d.sources||[]).length?'<div class="mind-src">'+(d.sources||[]).map(s=>'<span><b>'+esc(s.id)+'</b> '+esc(s.title||'')+' · '+esc(s.origin||'')+'</span>').join('')+'</div>':'')+
+      '</div>'+out.innerHTML;
+  }catch(e){
+    const th=out.querySelector('.cc-thinking');if(th)th.remove();
+    out.innerHTML='<div class="cc-err">'+esc(e.message||e)+'</div>'+out.innerHTML;
   }
 }
 
