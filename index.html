@@ -608,10 +608,11 @@ body.kiosk .kprog{display:block}
   box-shadow:var(--x-e2)}
 .cc-hero::before{content:'';position:absolute;inset:0 0 auto 0;height:1px;
   background:linear-gradient(90deg,transparent,rgba(255,255,255,.12) 30%,transparent 85%);pointer-events:none}
-.cc-hero::after{content:'';position:absolute;top:0;left:-60%;width:45%;height:100%;transform:skewX(-16deg);
+.cc-hero::after{content:'';position:absolute;top:0;left:0;width:45%;height:100%;
   background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--cc-accent) 7%,transparent),transparent);
-  animation:ccShine 1.8s var(--x-ease) .5s 1 both}
-@keyframes ccShine{from{left:-60%}to{left:130%}}
+  transform:translateX(-130%) skewX(-16deg);
+  animation:ccShine 1.8s var(--x-ease) .5s 1 both;will-change:transform}
+@keyframes ccShine{to{transform:translateX(320%) skewX(-16deg)}}
 .cc-hero-top{display:flex;align-items:center;gap:18px;position:relative;z-index:1;flex-wrap:wrap}
 .cc-badge{width:66px;height:66px;border-radius:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
   font-family:var(--x-fd);font-weight:400;font-size:30px;letter-spacing:-.02em;color:var(--x-ac-ink);
@@ -787,7 +788,7 @@ body.kiosk .kprog{display:block}
 .cs-inputrow button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .cs-inputrow button svg{width:18px;height:18px}
 .cs-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
-.cs-status{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.09em;text-transform:uppercase;color:var(--x-ink3)}
+.cs-status{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.09em;text-transform:uppercase;color:var(--x-ink2)}
 .cs-empty{color:var(--x-ink2);font-size:var(--x-t-sm);text-align:center;padding:34px 16px;line-height:1.8}
 .cs-empty b{color:var(--x-ink1)}
 /* The Curious Mind */
@@ -1425,7 +1426,7 @@ function go(v){
   state.view=v;
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
-  document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   $('vtitle').textContent={command:'Command Center',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',clients:'Client Central'}[v]||'AXIOM';
   $('content').scrollTop=0;
   if(v==='radar'&&!state.charts.at)loadAt();
@@ -3528,6 +3529,7 @@ const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 33 NATIONAL N
 let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
 function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
 setTimeout(hideSplash,2600);
+document.querySelectorAll('.rbtn').forEach(b=>{if(!b.getAttribute('aria-label')){const t=b.querySelector('.rtip');if(t)b.setAttribute('aria-label',t.textContent);}});
 restoreChat();
 refreshAll().then(hideSplash);
 setTimeout(function(){if(window.requestIdleCallback)requestIdleCallback(heroBoot,{timeout:2000});else heroBoot();},1200);
