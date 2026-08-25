@@ -222,7 +222,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .chip{background:var(--bg1);border:1px solid var(--line);border-radius:999px;color:var(--t2);font-size:11.5px;font-weight:500;
   padding:7px 14px;transition:all .16s var(--ease)}
 .chip:hover{border-color:var(--line2);color:var(--t1);background:var(--sur2)}
-.chip.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:#C4D6FF;box-shadow:0 0 16px -6px var(--glow)}
+.chip.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
 
 /* cards & states */
 .cards{display:flex;flex-direction:column;gap:9px}
@@ -245,7 +245,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .tr-b{flex:1;min-width:0}
 .tr-term{font-size:13.5px;font-weight:600}
 .tr-news{display:block;font-size:11px;color:var(--t2);text-decoration:none;margin-top:3px;line-height:1.45}
-.tr-news:hover{color:#C4D6FF}
+.tr-news:hover{color:var(--x-ink0)}
 .tr-tr{font-family:var(--fm);font-size:9.5px;color:var(--pos);background:rgba(47,227,160,.11);border-radius:6px;padding:3px 7px;flex-shrink:0}
 
 /* social */
@@ -267,7 +267,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .mode{font-family:var(--fm);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;border-radius:999px;
   border:1px solid var(--line);background:var(--bg1);color:var(--t2);transition:all .16s var(--ease)}
 .mode:hover{border-color:var(--line2);color:var(--t1)}
-.mode.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:#C4D6FF;box-shadow:0 0 16px -6px var(--glow)}
+.mode.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
 .msgs{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:14px;padding:6px 2px 18px}
 .msg{max-width:86%;animation:msgin .4s var(--ease) both}
 @keyframes msgin{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
@@ -276,7 +276,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .mb{border-radius:16px;padding:13px 16px;font-size:13.5px;line-height:1.66}
 .msg.u .mb{background:var(--acg);color:#fff;border-bottom-right-radius:5px;box-shadow:var(--sh-ac),inset 0 1px 0 rgba(255,255,255,.25)}
 .msg.b .mb{background:linear-gradient(180deg,var(--sur2),var(--sur));border:1px solid var(--line);border-top-left-radius:5px;color:var(--t0);box-shadow:var(--sh-sm),inset 0 1px 0 var(--hair)}
-.mb h4{font-family:var(--fd);font-size:13px;margin:12px 0 6px;color:#C4D6FF}
+.mb h4{font-family:var(--x-fd);font-size:var(--x-t-lg);font-weight:400;margin:14px 0 6px;color:var(--x-ink0)}
 .mb h4:first-child{margin-top:0}
 .mb p{margin-bottom:8px}.mb p:last-child{margin-bottom:0}
 .mb ul{margin:4px 0 8px 18px}.mb li{margin-bottom:4px}
@@ -318,7 +318,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
 /* briefing */
 .brief{border:1px solid var(--line);border-radius:var(--r);background:linear-gradient(180deg,var(--sur),var(--bg1));padding:28px 30px;line-height:1.7;font-size:13.5px;box-shadow:var(--sh-md)}
-.brief h4{font-family:var(--fd);font-size:14px;color:#C4D6FF;margin:18px 0 8px}
+.brief h4{font-family:var(--x-fd);font-size:var(--x-t-xl);font-weight:400;color:var(--x-ink0);margin:22px 0 8px;border-bottom:1px solid var(--x-line1);padding-bottom:6px}
 .brief h4:first-child{margin-top:0}
 .brief p{margin-bottom:9px}.brief ul{margin:4px 0 10px 18px}.brief li{margin-bottom:5px}
 .brief strong{color:#fff}
@@ -509,7 +509,7 @@ body.kiosk .kprog{display:block}
 /* clickable narrative */
 .nbar{cursor:pointer;border-radius:9px;padding:3px 5px;margin:0 -5px 6px;transition:background .15s}
 .nbar:hover{background:var(--sur2)}
-.nbar:hover .nbar-term{color:#C4D6FF}
+.nbar:hover .nbar-term{color:var(--x-ink0)}
 
 /* command palette */
 .pal{position:fixed;inset:0;z-index:250;background:rgba(3,5,10,.68);backdrop-filter:blur(10px);display:none;align-items:flex-start;justify-content:center;padding:12vh 18px 18px;animation:ovin .18s ease}
@@ -541,7 +541,7 @@ body.kiosk .kprog{display:block}
 .tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--t3);padding:7px 12px;border-radius:13px;transition:color .18s var(--ease)}
 .tab svg{width:21px;height:21px;transition:transform .2s var(--spring)}
 .tab span{font-family:var(--fm);font-size:7.5px;letter-spacing:.1em;text-transform:uppercase}
-.tab.on{color:#C4D6FF}
+.tab.on{color:var(--x-ink0)}
 .tab.on svg{transform:translateY(-1px)}
 .tab.on::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:22px;height:3px;border-radius:3px;background:var(--acg);box-shadow:0 0 10px var(--glow)}
 
@@ -1417,8 +1417,8 @@ function spark(id,data,color){
   x.beginPath();pts.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.strokeStyle=color;x.lineWidth=1.8;x.stroke();
 }
 function killChart(k){if(state.charts[k]){state.charts[k].destroy();delete state.charts[k];}}
-const AXIS={ticks:{color:'#66739B',font:{size:9,family:'JetBrains Mono'},maxTicksLimit:6},grid:{color:'rgba(146,166,255,.07)'}};
-const AXISX={ticks:{color:'#66739B',font:{size:9,family:'JetBrains Mono'},maxTicksLimit:8},grid:{display:false}};
+const AXIS={ticks:{color:'#8F8B81',font:{size:9,family:'Geist Mono, JetBrains Mono, monospace'},maxTicksLimit:6},grid:{color:'rgba(244,242,236,.06)'}};
+const AXISX={ticks:{color:'#8F8B81',font:{size:9,family:'Geist Mono, JetBrains Mono, monospace'},maxTicksLimit:8},grid:{display:false}};
 
 /* ── ROUTER ── */
 function go(v){
@@ -1686,7 +1686,7 @@ function renderStatus(gen){
 
 /* ── HISTORICAL TRENDING (share of voice + tone over time) ──────────── */
 const PKEY={ALP:'alp',LNP:'lnp',GRN:'grn',ONP:'on',IND:'ind'};
-const LEGEND={display:true,position:'bottom',labels:{color:'#66739B',font:{size:9,family:'JetBrains Mono'},boxWidth:8,boxHeight:8,usePointStyle:true}};
+const LEGEND={display:true,position:'bottom',labels:{color:'#8F8B81',font:{size:9,family:'Geist Mono, JetBrains Mono, monospace'},boxWidth:8,boxHeight:8,usePointStyle:true}};
 async function loadHistory(){
   try{const d=await api('/history');state.history=d.points||[];}
   catch(e){state.history=[];}
@@ -2272,7 +2272,7 @@ async function loadAt(){
     data:{labels:base.views.map(x=>{const s=String(x.d);return s.slice(4,6)+'/'+s.slice(6,8);}),
       datasets:rs.map((r,i)=>({label:r.article,data:(r.views||[]).map(x=>x.v),borderColor:AT_COLORS[i%6],backgroundColor:'transparent',tension:.35,pointRadius:0,borderWidth:2}))},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-      plugins:{legend:{labels:{color:'#AAB6D8',boxWidth:10,font:{size:10,family:'Inter'}}}},scales:{x:AXISX,y:AXIS}}});
+      plugins:{legend:{labels:{color:'#C9C5BB',boxWidth:10,font:{size:10,family:'Geist, Inter, sans-serif'}}}},scales:{x:AXISX,y:AXIS}}});
   const errs=rs.filter(r=>r.err);
   note.textContent=errs.length?('Couldn’t load: '+errs.map(r=>r.article).join(', ')+' — use the exact Wikipedia title.')
     :'Daily Wikipedia pageviews, last 90 days — a hard, public measure of who Australia is looking up.';
