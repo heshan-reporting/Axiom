@@ -1,0 +1,41 @@
+# AXIOM worker deploy config.
+#
+# Deploy:  wrangler deploy
+#
+# IMPORTANT — preserving your existing KV data:
+#   The KV *namespace ID* is NOT stored in the worker .js. It lives on your
+#   Cloudflare account as the AXIOM_KV binding. To keep all cached data
+#   (pulse_history, feed_cb, /allnews caches, feed circuit-breaker), this
+#   file must point AXIOM_KV at your EXISTING namespace id.
+#
+#   Find it:   wrangler kv namespace list
+#              (or Cloudflare dashboard -> Workers & Pages -> KV)
+#   Then paste it into `id` below, replacing PASTE_EXISTING_NAMESPACE_ID.
+#
+#   `name` must stay "newsaus" so this UPDATES the existing worker (and keeps
+#   its secrets + bindings) rather than creating a new one.
+#
+# Prefer zero-risk? Skip wrangler and paste the new code into the dashboard
+# editor instead — that updates only the code and leaves KV + secrets intact.
+
+name = "newsaus"
+main = "axiomworkerv4.js"
+compatibility_date = "2025-01-01"
+
+# Hourly time-series snapshot + cache pre-warm (scheduled handler).
+[triggers]
+crons = ["17 * * * *"]
+
+# Keep the SAME namespace id your worker already uses.
+[[kv_namespaces]]
+binding = "AXIOM_KV"
+id = "PASTE_EXISTING_NAMESPACE_ID"
+
+# ── Secrets are NOT stored here. Set each with `wrangler secret put <NAME>`:
+#   GEMINI_KEY        (ad creatives /nano + client copy)
+#   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)
+#   GUARDIAN_KEY      (Guardian API, optional)
+#   TVFY_KEY          (They Vote For You, optional)
+#   WA_TOKEN, WA_PHONE_ID                (WhatsApp Cloud API, optional)
+#   TWILIO_SID, TWILIO_AUTH, TWILIO_WA_FROM  (Twilio WhatsApp, optional)
+# Existing secrets are preserved across deploys — you only set new/changed ones.
