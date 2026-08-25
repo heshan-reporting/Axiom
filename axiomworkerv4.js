@@ -1831,6 +1831,41 @@ export default {
       return jsonResp({ error: 'no_image', detail: lastDetail || 'image model failed after retries', model }, 502);
     }
 
+    // -- Reference link reader: fetch a public URL for grounding copy --------
+    // GET /fetchurl?url=  -> { ok, title, text, image }. Best-effort; auth-gated
+    // pages (e.g. Google Docs/Sheets that need login) will not return content.
+    if (path === '/fetchurl') {
+      const target = reqUrl.searchParams.get('url') || '';
+      if (!/^https?:\/\//i.test(target)) return jsonResp({ error: 'bad_url' }, 400);
+      const ck = 'fetchurl_' + target.slice(0, 300);
+      const cached = await kvGet(env.AXIOM_KV, ck);
+      if (cached) return new Response(cached, { headers: CORS });
+      try {
+        const r = await fetch(target, {
+          headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
+          signal: AbortSignal.timeout ? AbortSignal.timeout(9000) : undefined,
+          cf: { cacheTtl: 300 },
+        });
+        if (!r.ok) return jsonResp({ error: 'fetch_' + r.status, detail: 'The page did not return content (it may require a login).' }, 502);
+        const html = await r.text();
+        const title = stripHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+        const ogImg = (html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+          || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) || [])[1] || '';
+        // Prefer article/main body; strip scripts/styles/nav, collapse to text.
+        let body = html
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<(nav|header|footer|aside)[\s\S]*?<\/\1>/gi, ' ');
+        const art = (body.match(/<article[\s\S]*?<\/article>/i) || [])[0] || body;
+        const text = stripHtml(art).slice(0, 4000);
+        const out = JSON.stringify({ ok: true, title, text, image: ogImg });
+        await kvPut(env.AXIOM_KV, ck, out, 1800);
+        return new Response(out, { headers: CORS });
+      } catch (e) {
+        return jsonResp({ error: 'fetchurl_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
+    }
+
     // -- ClickUp attachment: attach a generated image to an existing task ---
     // POST /clickup-attach  body: { taskId, filename?, b64, mime? }
     if (path === '/clickup-attach') {
