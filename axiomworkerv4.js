@@ -1858,12 +1858,16 @@ export default {
     }
 
     // -- Reference link reader: fetch a public URL for grounding copy --------
-    // GET /fetchurl?url=  -> { ok, title, text, image }. Best-effort; auth-gated
-    // pages (e.g. Google Docs/Sheets that need login) will not return content.
+    // GET /fetchurl?url=  -> { ok, title, text, image, summarized }
+    // Extracts the main article text (strips nav/ads/boilerplate), pulls the
+    // lead og:image, and - when the page is long and GEMINI_KEY is set -
+    // condenses it server-side with the Gemini text model so prompts stay
+    // inside token limits. Clear failures for auth-gated pages, non-HTML
+    // (e.g. PDFs), 404s and timeouts.
     if (path === '/fetchurl') {
       const target = reqUrl.searchParams.get('url') || '';
-      if (!/^https?:\/\//i.test(target)) return jsonResp({ error: 'bad_url' }, 400);
-      const ck = 'fetchurl_' + target.slice(0, 300);
+      if (!/^https?:\/\//i.test(target)) return jsonResp({ error: 'bad_url', detail: 'Provide a full http(s) URL.' }, 400);
+      const ck = 'fetchurl2_' + target.slice(0, 300);
       const cached = await kvGet(env.AXIOM_KV, ck);
       if (cached) return new Response(cached, { headers: CORS });
       try {
@@ -1872,23 +1876,54 @@ export default {
           signal: AbortSignal.timeout ? AbortSignal.timeout(9000) : undefined,
           cf: { cacheTtl: 300 },
         });
-        if (!r.ok) return jsonResp({ error: 'fetch_' + r.status, detail: 'The page did not return content (it may require a login).' }, 502);
-        const html = await r.text();
+        if (r.status === 401 || r.status === 403) return jsonResp({ error: 'fetch_' + r.status, detail: 'Access denied - the page is behind a login or paywall.' }, 502);
+        if (r.status === 404) return jsonResp({ error: 'fetch_404', detail: 'Page not found (404).' }, 502);
+        if (!r.ok) return jsonResp({ error: 'fetch_' + r.status, detail: 'The page did not return content.' }, 502);
+        const ctype = (r.headers.get('content-type') || '').toLowerCase();
+        if (ctype && !/html|text\/plain|xml/.test(ctype)) {
+          const kind = /pdf/.test(ctype) ? 'a PDF' : /image\//.test(ctype) ? 'an image' : ('type ' + ctype.split(';')[0]);
+          return jsonResp({ error: 'non_html', detail: 'The link is ' + kind + ', not a web page - paste the key text instead.' }, 415);
+        }
+        // Size cap: read at most ~600KB of markup.
+        let html = await r.text();
+        if (html.length > 600000) html = html.slice(0, 600000);
         const title = stripHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
         const ogImg = (html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
           || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) || [])[1] || '';
         // Prefer article/main body; strip scripts/styles/nav, collapse to text.
-        let body = html
+        let bodyHtml = html
           .replace(/<script[\s\S]*?<\/script>/gi, ' ')
           .replace(/<style[\s\S]*?<\/style>/gi, ' ')
           .replace(/<(nav|header|footer|aside)[\s\S]*?<\/\1>/gi, ' ');
-        const art = (body.match(/<article[\s\S]*?<\/article>/i) || [])[0] || body;
-        const text = stripHtml(art).slice(0, 4000);
-        const out = JSON.stringify({ ok: true, title, text, image: ogImg });
+        const art = (bodyHtml.match(/<article[\s\S]*?<\/article>/i) || [])[0]
+          || (bodyHtml.match(/<main[\s\S]*?<\/main>/i) || [])[0] || bodyHtml;
+        let text = stripHtml(art).slice(0, 12000);
+        if (!text.trim()) return jsonResp({ error: 'empty_page', detail: 'No readable text found (the page may render via a login or heavy scripting).' }, 502);
+        // Long page + key available -> condense server-side so prompts stay small.
+        let summarized = false;
+        if (text.length > 4000 && env.GEMINI_KEY) {
+          try {
+            const sr = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=' + encodeURIComponent(env.GEMINI_KEY), {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text:
+                'Condense this web page for a communications team. Keep: topic, key facts with any names/numbers/dates, overall tone/register, and what type of content it is (news article, press release, campaign page, opinion...). 150-200 words, plain prose, no preamble.\n\nTITLE: ' + title + '\n\nPAGE TEXT:\n' + text.slice(0, 11000) }] }],
+                generationConfig: { temperature: 0.2, maxOutputTokens: 500 } }),
+              signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined,
+            });
+            const sd = await sr.json().catch(() => ({}));
+            const sum = (((sd.candidates || [])[0] || {}).content || {}).parts;
+            const stext = (sum || []).map(p => p.text || '').join('').trim();
+            if (stext) { text = stext; summarized = true; }
+          } catch (e) { /* fall through to truncation */ }
+        }
+        if (!summarized) text = text.slice(0, 4000);
+        const out = JSON.stringify({ ok: true, title, text, image: ogImg, summarized });
         await kvPut(env.AXIOM_KV, ck, out, 1800);
         return new Response(out, { headers: CORS });
       } catch (e) {
-        return jsonResp({ error: 'fetchurl_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+        const name = String(e && e.name || e);
+        const detail = /Timeout|Abort/i.test(name) ? 'Timed out fetching the page.' : name.slice(0, 60);
+        return jsonResp({ error: 'fetchurl_failed', detail }, 502);
       }
     }
 

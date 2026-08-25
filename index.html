@@ -697,6 +697,12 @@ body.kiosk .kprog{display:block}
 .cc-card-body[contenteditable]{outline:none}
 .cc-card-body[contenteditable]:focus{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--cc-accent) 40%,transparent);border-radius:0 0 18px 18px}
 .cc-edithint{font-family:var(--cc-fx);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--cc-ink3);padding:0 18px 12px}
+/* reference-link status chips */
+.cc-linkstat{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.cc-lchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--cc-fx);font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--cc-line);color:var(--cc-ink2);max-width:100%}
+.cc-lchip.ok{border-color:color-mix(in srgb,#22D993 45%,transparent);color:#7fe6bd}
+.cc-lchip.fail{border-color:rgba(255,84,112,.4);color:#ffb3c0}
+.cc-lchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px}
 .cc-card.news .cc-card-body{font-family:Georgia,'Times New Roman',serif;font-size:14.5px}
 .cc-card.news .cc-np-head{font-family:Georgia,serif;font-weight:700;font-size:21px;line-height:1.2;margin-bottom:4px;color:var(--cc-ink)}
 .cc-thinking{display:flex;align-items:center;gap:12px;padding:22px;color:var(--cc-ink2);font-size:13.5px;
@@ -1034,8 +1040,9 @@ body.kiosk .kprog{display:block}
                 <textarea id="cc-input" class="cc-ta" rows="4" placeholder="e.g. The Australian, 24 Aug 2026 — 'Poll reveals two-thirds of Australians believe foreign-funded activists should not be able to influence government tax policy.' Angle: reinforce that everyday Australians reject foreign interference in fuel tax policy…"></textarea>
               </div>
               <div class="cc-field">
-                <label>Reference link <span class="cc-opt">— optional source URL</span></label>
-                <input id="cc-link" class="cc-in" placeholder="https://…">
+                <label>Reference links <span class="cc-opt">— one URL per line; each is read, condensed and fed to the engine</span></label>
+                <textarea id="cc-link" class="cc-ta" rows="2" placeholder="https://…&#10;https://…"></textarea>
+                <div class="cc-linkstat" id="cc-link-status"></div>
               </div>
               <div class="cc-field">
                 <label>Reference images <span class="cc-opt">— brand style, past creative, the source article (Gemini matches the look &amp; tone)</span></label>
@@ -2684,13 +2691,42 @@ function ccBrief(copy){
   if(!cta&&cm)cta=(cm.name||'').replace(/\s*\(.*\)/,'');
   return{headline,sub,cta};
 }
-async function ccFetchLink(){
-  const link=$('cc-link').value.trim();
-  if(!link||!/^https?:\/\//i.test(link))return '';
-  try{const d=await api('/fetchurl?url='+encodeURIComponent(link));
-    if(d&&d.text)return '('+(d.title||'source')+') '+d.text;
-  }catch(e){}
-  return '';
+function ccLinks(){
+  return ($('cc-link').value||'').split(/\s+/).map(x=>x.trim())
+    .filter(x=>/^https?:\/\//i.test(x)).slice(0,4);
+}
+function ccRenderLinkStatus(){
+  const el=$('cc-link-status');if(!el)return;
+  el.innerHTML=(ccState.linkStat||[]).map(s=>{
+    let host='';try{host=new URL(s.url).hostname.replace(/^www\./,'');}catch(e){host=s.url.slice(0,40);}
+    return '<div class="cc-lchip '+(s.ok?'ok':'fail')+'" title="'+esc(s.detail||s.title||'')+'">'+
+      (s.ok?'✓':'✗')+' <span>'+esc(host)+(s.ok?(s.summarized?' · condensed':''):' · '+esc(s.detail||'failed'))+'</span></div>';
+  }).join('');
+}
+/* Fetch every reference link via the worker; report per-link success/failure;
+   combine into one capped context block that persists for the session. */
+async function ccFetchLinks(){
+  const links=ccLinks();
+  ccState.linkStat=[];ccState.linkCtx='';
+  if(!links.length){ccRenderLinkStatus();return '';}
+  const el=$('cc-link-status');if(el)el.innerHTML='<div class="cc-lchip">reading '+links.length+' link'+(links.length>1?'s':'')+'…</div>';
+  const results=await Promise.all(links.map(async u=>{
+    try{
+      const d=await api('/fetchurl?url='+encodeURIComponent(u));
+      if(d&&d.ok&&d.text)return{url:u,ok:true,title:d.title||'',text:d.text,summarized:!!d.summarized};
+      return{url:u,ok:false,detail:(d&&(d.detail||d.error))||'no content'};
+    }catch(e){return{url:u,ok:false,detail:(e&&e.message)||'unreachable'};}
+  }));
+  ccState.linkStat=results;ccRenderLinkStatus();
+  let ctx='',n=0;
+  for(const r of results){
+    if(!r.ok)continue;n++;
+    const block='SOURCE '+n+' — '+(r.title||r.url)+' ('+r.url+'):\n'+r.text+'\n\n';
+    if((ctx+block).length>6200){ctx+=block.slice(0,Math.max(0,6200-ctx.length));break;}
+    ctx+=block;
+  }
+  ccState.linkCtx=ctx.trim();
+  return ccState.linkCtx;
 }
 function ccBuildPrompt(linkText){
   const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
@@ -2708,9 +2744,10 @@ function ccBuildPrompt(linkText){
     (ccAllRefs().length?'\n\nApproved reference creatives are attached — mirror their tone and voice.':'')+
     '\n\nWrite ready-to-publish content for the item below. Use these #### headers EXACTLY and output ONLY the content under them:'+ask+
     '\n\nRules: Australian English, impeccable spelling and grammar. Stay strictly on-brief. Be creative and specific, not generic. Never fabricate quotes, statistics or figures — if a number is not provided, speak in general terms.';
-  const link=$('cc-link').value.trim();
+  const links=ccLinks();
   const user='ITEM TO BUILD FROM:\n'+($('cc-input').value.trim()||'(none supplied — draft from the campaign messages)')+
-    (linkText?'\n\nSOURCE FROM REFERENCE LINK (use for facts and context; do not copy verbatim):\n'+linkText.slice(0,3000):(link?'\n\nReference link (could not be read automatically): '+link:''));
+    (linkText?'\n\nSOURCES FROM REFERENCE LINKS (use for facts, tone and context; do not copy verbatim):\n'+linkText.slice(0,6200)
+      :(links.length?'\n\nReference links (could not be read automatically): '+links.join(' '):''));
   return{sys,user};
 }
 async function ccGenerate(){
@@ -2725,7 +2762,7 @@ async function ccGenerate(){
   const out=$('cc-output');out.innerHTML=
     (wantsAd?'<div id="cc-ad-slot"><div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div></div><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>'+(wantsText?'Writing the copy, then designing the creative…':'Designing the creative…')+'</div></div></div></div>':'')+
     (wantsText?'<div id="cc-text-slot"><div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting the copy…</div></div>':'');
-  const linkText=await ccFetchLink();
+  const linkText=await ccFetchLinks();
   const textJob=wantsText?ccGenText(linkText).then(txt=>{ccState.lastPkg=txt;ccRenderTextCards(txt);return txt;})
     .catch(e=>{const el=$('cc-text-slot');if(el)el.innerHTML='<div class="cc-err">Copy: '+esc(e.message||e)+'</div>';return '';}):Promise.resolve('');
   const adJob=wantsAd?textJob.then(txt=>ccMakeCreative(txt,mode))
