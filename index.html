@@ -1134,7 +1134,7 @@ body.kiosk .kprog{display:block}
     <label class="fl" for="set-wa">Recipient numbers (comma-separated, international format)</label>
     <input class="fi" id="set-wa" placeholder="+61412345678, +61498765432">
     <div class="mnote">For hot news, push the alert + brief straight to WhatsApp from Content Studio. Numbers are safe to store here; the WhatsApp <b>token</b> lives only on the worker — Meta Cloud API (<code>WA_TOKEN</code>+<code>WA_PHONE_ID</code>) or Twilio (<code>TWILIO_SID</code>/<code>TWILIO_AUTH</code>/<code>TWILIO_WA_FROM</code>). Note: outside the 24-hour window Meta requires a pre-approved template.</div>
-    <div class="mnote">Image visuals use Google's <b>gemini-2.5-flash-image</b> ("Nano Banana") via the same Gemini key on the worker (<code>GEMINI_KEY</code>). Upload a reference artwork in Content Studio and it matches that design.</div>
+    <div class="mnote">Image visuals use Google's <b>gemini-3-pro-image</b> ("Nano Banana Pro" — strongest text rendering and multi-turn editing) via the Gemini key on the worker (<code>GEMINI_KEY</code>), with automatic fallback to gemini-3.1-flash-image / gemini-2.5-flash-image if unavailable. Upload a reference artwork and it matches that design.</div>
     <div class="mrow">
       <button class="btn ghost" onclick="closeSettings()">Cancel</button>
       <button class="btn" onclick="saveSettings()">Save</button>
@@ -1762,8 +1762,10 @@ async function produceVisual(){
   const btn=$('vis-gen'),t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='Generating…';}
   const pv=$('vis-preview');if(pv)pv.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>Gemini is designing the visual…</div>';
   try{
+    const vfmt=($('vis-format')&&$('vis-format').value)||'square';
     const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({prompt:buildImagePrompt(f),referenceB64:f.referenceB64||null,mime:f.refMime||'image/png'})});
+      body:JSON.stringify({prompt:buildImagePrompt(f),referenceB64:f.referenceB64||null,mime:f.refMime||'image/png',
+        aspect:({square:'1:1',portrait:'4:5',story:'9:16'})[vfmt]||'1:1',size:'1K'})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
     f.visualB64=d.imageB64;f.visualMime=d.mime||'image/png';renderVisualPreview(f);toast('Visual generated ✓');
@@ -2518,6 +2520,9 @@ let CC_ACTIVE=localStorage.getItem('axiom_client_active')||CC_CLIENTS[0].id;
 const ccState={refs:[],types:['ad','caption'],campaign:0,signals:[],io:null,booted:false};
 const CC_DIMS={square:'1080x1080 square',portrait:'1080x1350 portrait',story:'1080x1920 vertical story',landscape:'1200x628 landscape'};
 const CC_PX={square:[1080,1080],portrait:[1080,1350],story:[1080,1920],landscape:[1200,628]};
+/* gemini-3 imageConfig aspect ratios (landscape 1200x628 ~ 1.91:1 -> nearest supported 16:9) */
+const CC_ASPECT={square:'1:1',portrait:'4:5',story:'9:16',landscape:'16:9'};
+function ccAspect(){return CC_ASPECT[($('cc-vis-format')&&$('cc-vis-format').value)||'square']||'1:1';}
 function ccSave(){try{localStorage.setItem('axiom_clients',JSON.stringify(CC_CLIENTS));localStorage.setItem('axiom_client_active',CC_ACTIVE);}catch(e){}}
 function ccClient(){return CC_CLIENTS.find(c=>c.id===CC_ACTIVE)||CC_CLIENTS[0];}
 /* Brand kit (logo + approved references) is stored per client, separate from the
@@ -2761,9 +2766,10 @@ function ccImagePrompt(copy,mode){
 }
 async function ccGenImage(copy,mode){
   const r=await fetch(ccBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({prompt:ccImagePrompt(copy,mode),references:ccAllRefs()})});
+    body:JSON.stringify({prompt:ccImagePrompt(copy,mode),references:ccAllRefs(),aspect:ccAspect(),size:'1K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status)+' — needs the worker deployed with GEMINI_KEY');
+  ccState.lastImgModel=d.model||'';
   return{b64:d.imageB64,mime:d.mime||'image/png'};
 }
 async function ccMakeCreative(copy,mode){
@@ -2823,7 +2829,7 @@ async function ccRefine(){
     const prompt='Edit the FIRST attached image per this instruction: "'+instr+'". Keep the same brand style, layout and dimensions unless the instruction says otherwise. '+
       (ccState.mode==='overlay'?'Do NOT add any text or logo — background artwork only.':'Ensure all on-image words are real, correctly-spelled English; do not add a logo (leave the bottom-right clear).')+
       ' Output only the edited image.';
-    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references:refs})});
+    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references:refs,aspect:ccAspect(),size:'1K'})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||'edit failed');
     ccState.baseB64=d.imageB64;ccState.baseMime=d.mime||'image/png';

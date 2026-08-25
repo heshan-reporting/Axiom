@@ -1780,10 +1780,15 @@ export default {
       }
     }
 
-    // -- Nano Banana: generate a social visual from a brief + reference art -
-    // POST /nano  body: { prompt, referenceB64?, mime?, model? }
-    // Uses the Gemini image model (default gemini-2.5-flash-image). Key stays
-    // server-side as GEMINI_KEY. Returns { imageB64, mime }.
+    // -- Nano Banana: generate/edit a visual from a brief + reference art ----
+    // POST /nano  body: { prompt, references?[{data,mime}], referenceB64?, mime?,
+    //                     model?, aspect?, size? }
+    // Default model: gemini-3-pro-image (Nano Banana Pro - professional asset
+    // production, strongest text rendering, multi-turn image editing). Falls
+    // back through gemini-3.1-flash-image then gemini-2.5-flash-image if a
+    // model is unavailable to this key. Uses the current imageConfig schema
+    // (aspectRatio/imageSize). Key stays server-side as GEMINI_KEY.
+    // Returns { imageB64, mime, model }.
     if (path === '/nano') {
       if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
       const key = env.GEMINI_KEY;
@@ -1791,44 +1796,65 @@ export default {
       let body = {};
       try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
       if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
-      const model = String(body.model || 'gemini-2.5-flash-image').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
+      const clean = m => String(m || '').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
+      // Model chain: requested (or Pro default) first, then fallbacks. Dedupe.
+      const chain = [];
+      [clean(body.model) || 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image']
+        .forEach(m => { if (m && chain.indexOf(m) === -1) chain.push(m); });
       const parts = [];
       // Prompt first, then the reference image(s) (matches Gemini image-edit ordering).
-      parts.push({ text: String(body.prompt).slice(0, 6000) });
+      parts.push({ text: String(body.prompt).slice(0, 8000) });
       const refs = Array.isArray(body.references) ? body.references
         : (body.referenceB64 ? [{ data: body.referenceB64, mime: body.mime }] : []);
-      refs.slice(0, 4).forEach(rf => { if (rf && rf.data) parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } }); });
-      // The image model must be told to return an image, or it 500s ("Internal error encountered").
-      const payload = JSON.stringify({ contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } });
-      const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
-      let lastDetail = '';
-      // Gemini image 500s ("Internal error encountered") are frequently transient - retry a couple of times.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          if (attempt) await new Promise(res => setTimeout(res, 700 * attempt));
-          const r = await fetch(url, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: payload,
-            signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
-          });
-          const data = await r.json().catch(() => ({}));
-          if (data.error) {
-            lastDetail = String(data.error.message || '').slice(0, 200);
-            const code = data.error.code || r.status;
-            if (code === 500 || code === 503 || code === 429) continue; // transient - retry
-            return jsonResp({ error: 'gemini_' + code, detail: lastDetail }, 502);
+      refs.slice(0, 6).forEach(rf => { if (rf && rf.data) parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } }); });
+      // responseModalities is still required; imageConfig is the current way to
+      // request exact aspect ratio / resolution (gemini-3 image models).
+      const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+      const SIZES = ['1K', '2K', '4K'];
+      const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
+      const imgCfg = {};
+      if (ASPECTS.indexOf(body.aspect) !== -1) imgCfg.aspectRatio = body.aspect;
+      if (SIZES.indexOf(body.size) !== -1) imgCfg.imageSize = body.size;
+      let lastDetail = '', lastModel = chain[0];
+      for (const model of chain) {
+        lastModel = model;
+        // gemini-2.5-flash-image predates imageConfig - send it a bare config.
+        const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length)
+          ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
+        const payload = JSON.stringify({ contents: [{ parts }], generationConfig: cfg });
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
+        // 500s from the image models are frequently transient - retry per model.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt) await new Promise(res => setTimeout(res, 700 * attempt));
+            const r = await fetch(url, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: payload,
+              signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+            });
+            const data = await r.json().catch(() => ({}));
+            if (data.error) {
+              lastDetail = String(data.error.message || '').slice(0, 200);
+              const code = data.error.code || r.status;
+              if (code === 500 || code === 503 || code === 429) continue;      // transient - retry this model
+              if (code === 404 || code === 400 || code === 403) break;         // model unavailable to this key - next model
+              return jsonResp({ error: 'gemini_' + code, detail: lastDetail, model }, 502);
+            }
+            const cand = (data.candidates || [])[0] || {};
+            const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
+            const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
+            if (inl && inl.data) return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model });
+            lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
+            if (cand.finishReason && cand.finishReason !== 'STOP') continue;   // blocked/transient - retry
+          } catch (e) {
+            lastDetail = String(e && e.name || e).slice(0, 60);
           }
-          const cand = (data.candidates || [])[0] || {};
-          const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
-          const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
-          if (inl && inl.data) return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png' });
-          lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
-          if (cand.finishReason && cand.finishReason !== 'STOP') continue; // e.g. transient/blocked - retry once
-        } catch (e) {
-          lastDetail = String(e && e.name || e).slice(0, 60);
         }
+        // Fall through to the next model in the chain (unavailable OR exhausted
+        // retries) - resilience beats strict model pinning; the response's
+        // `model` field always reports which one actually produced the image.
       }
-      return jsonResp({ error: 'no_image', detail: lastDetail || 'image model failed after retries', model }, 502);
+      return jsonResp({ error: 'no_image', detail: lastDetail || 'all image models failed', model: lastModel }, 502);
     }
 
     // -- Reference link reader: fetch a public URL for grounding copy --------
