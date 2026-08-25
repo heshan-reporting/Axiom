@@ -697,6 +697,39 @@ body.kiosk .kprog{display:block}
 .cc-card-body[contenteditable]{outline:none}
 .cc-card-body[contenteditable]:focus{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--cc-accent) 40%,transparent);border-radius:0 0 18px 18px}
 .cc-edithint{font-family:var(--cc-fx);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--cc-ink3);padding:0 18px 12px}
+/* Creative Studio chat */
+.cs-wrap{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:22px;padding:16px;backdrop-filter:blur(12px)}
+.cs-thread{display:flex;flex-direction:column;gap:12px;max-height:62vh;overflow-y:auto;padding:6px 4px 12px;scroll-behavior:smooth}
+.cs-b{max-width:78%;padding:12px 15px;border-radius:16px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;animation:ccRise .35s cubic-bezier(.16,.8,.3,1) both}
+.cs-b.user{align-self:flex-end;color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));border-bottom-right-radius:6px;font-weight:500}
+.cs-b.ai{align-self:flex-start;background:rgba(0,0,0,.28);border:1px solid var(--cc-line);color:var(--cc-ink);border-bottom-left-radius:6px}
+.cs-b.err{align-self:flex-start;background:rgba(255,84,112,.1);border:1px solid rgba(255,84,112,.3);color:#ffb3c0}
+.cs-b .cs-k{font-family:var(--cc-fx);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--cc-accent);display:block;margin-bottom:6px}
+.cs-confirm{display:flex;gap:8px;margin-top:10px}
+.cs-confirm button{padding:9px 16px;border-radius:11px;border:none;cursor:pointer;font-weight:700;font-size:12.5px;
+  color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2))}
+.cs-confirm .alt{background:transparent;border:1px solid var(--cc-line);color:var(--cc-ink2)}
+.cs-img{align-self:flex-start;max-width:88%;border-radius:16px;overflow:hidden;border:1px solid var(--cc-line);background:var(--cc-panel);animation:ccRise .4s cubic-bezier(.16,.8,.3,1) both}
+.cs-img.active{border-color:color-mix(in srgb,var(--cc-accent) 60%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,var(--cc-accent) 30%,transparent)}
+.cs-img img{display:block;width:100%;max-height:440px;object-fit:contain;background:#0b0906;cursor:pointer}
+.cs-img .cs-vbar{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid var(--cc-line)}
+.cs-img .cs-vtag{font-family:var(--cc-fx);font-weight:800;font-size:11px;color:var(--cc-accent)}
+.cs-img .cs-vnote{flex:1;font-size:10.5px;color:var(--cc-ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cs-typing{align-self:flex-start;display:flex;gap:5px;padding:14px 18px}
+.cs-typing i{width:7px;height:7px;border-radius:50%;background:var(--cc-accent);opacity:.4;animation:csDot 1.2s infinite}
+.cs-typing i:nth-child(2){animation-delay:.2s}.cs-typing i:nth-child(3){animation-delay:.4s}
+@keyframes csDot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-4px)}}
+.cs-inputrow{display:flex;gap:9px;margin-top:4px}
+.cs-inputrow textarea{flex:1;background:rgba(0,0,0,.28);border:1px solid var(--cc-line);border-radius:13px;color:var(--cc-ink);
+  padding:12px 14px;font-size:13.5px;font-family:inherit;outline:none;resize:none;line-height:1.5;max-height:120px}
+.cs-inputrow textarea:focus{border-color:var(--cc-accent)}
+.cs-inputrow button{flex-shrink:0;width:46px;border-radius:13px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  color:#140f08;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2))}
+.cs-inputrow button:disabled{opacity:.5;cursor:not-allowed}
+.cs-inputrow button svg{width:18px;height:18px}
+.cs-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+.cs-status{font-family:var(--cc-fx);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--cc-ink3)}
+.cs-empty{color:var(--cc-ink3);font-size:12.5px;text-align:center;padding:26px 12px;line-height:1.7}
 /* reference-link status chips */
 .cc-linkstat{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .cc-lchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--cc-fx);font-size:10px;padding:4px 10px;border-radius:8px;border:1px solid var(--cc-line);color:var(--cc-ink2);max-width:100%}
@@ -1013,7 +1046,6 @@ body.kiosk .kprog{display:block}
                 <div class="cc-field">
                   <label>Content to draft</label>
                   <div class="cc-typechips" id="cc-types">
-                    <button class="cc-tc on" data-t="ad">✦ Ad creative</button>
                     <button class="cc-tc on" data-t="caption">Caption</button>
                     <button class="cc-tc" data-t="release">Media release</button>
                     <button class="cc-tc" data-t="talking">Talking points</button>
@@ -1058,6 +1090,22 @@ body.kiosk .kprog{display:block}
               </div>
             </div>
             <div class="cc-output" id="cc-output"></div>
+          </div>
+
+          <div class="cc-block reveal" id="cc-studio-block">
+            <div class="cc-blabel"><span>05</span> Creative Studio <em id="cs-tag">CONVERSATIONAL</em></div>
+            <div class="cc-note">Brief it like a designer: it reads your references and client context, asks only what it needs, plays the brief back for sign-off, then iterates the artwork with you — <b>"make the headline bigger"</b>, <b>"try it without people"</b> — without ever starting over. Sessions survive refreshes.</div>
+            <div class="cs-wrap">
+              <div class="cs-thread" id="cs-thread"></div>
+              <div class="cs-inputrow">
+                <textarea id="cs-inp" rows="1" placeholder="Describe the creative you need — or answer the studio's question…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSend();}"></textarea>
+                <button id="cs-send" onclick="csSend()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+              </div>
+              <div class="cs-tools">
+                <button class="cc-mini" onclick="csFresh()">+ Start fresh</button>
+                <span class="cs-status" id="cs-status"></span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -2524,7 +2572,7 @@ let CC_CLIENTS=(()=>{try{
 }catch(e){}return CC_SEED.slice();})();
 try{localStorage.setItem('axiom_clients_v',String(CC_SEED_V));}catch(e){}
 let CC_ACTIVE=localStorage.getItem('axiom_client_active')||CC_CLIENTS[0].id;
-const ccState={refs:[],types:['ad','caption'],campaign:0,signals:[],io:null,booted:false};
+const ccState={refs:[],types:['caption'],campaign:0,signals:[],io:null,booted:false};
 const CC_DIMS={square:'1080x1080 square',portrait:'1080x1350 portrait',story:'1080x1920 vertical story',landscape:'1200x628 landscape'};
 const CC_PX={square:[1080,1080],portrait:[1080,1350],story:[1080,1920],landscape:[1200,628]};
 /* gemini-3 imageConfig aspect ratios (landscape 1200x628 ~ 1.91:1 -> nearest supported 16:9) */
@@ -2547,7 +2595,7 @@ function ccInit(){
   const c=ccClient();
   const root=$('cc-root');if(root){root.style.setProperty('--cc-accent',c.accent);root.style.setProperty('--cc-accent2',c.accent2||c.accent);}
   ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccRenderBrandKit();ccEngineNote();
-  ccBindComposer();
+  ccBindComposer();csInit();
   if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
   ccObserve();
 }
@@ -2937,6 +2985,197 @@ async function ccToClickup(i){
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
     toast('ClickUp task created ✓');
   }catch(e){toast('ClickUp: '+(e.message||e),true);}
+}
+
+/* ═══════════ CREATIVE STUDIO — conversational image engine ═══════════
+   Claude (via worker /chat) takes the brief, asks batched clarifying
+   questions, confirms, then routes edits; Gemini (via /nano) generates and
+   edits the artwork. Session state lives in worker KV so refreshes never
+   lose the thread. */
+const csState={id:null,client:null,thread:[],brief:null,pending:null,stage:'brief',vers:[],imgs:{},active:0,busy:false};
+function csBase(){return (WORKER_URL||'').replace(/\/+$/,'');}
+function csNewId(){return 'cs'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function csInit(){
+  const hash=(location.hash.match(/#cs=([a-zA-Z0-9_-]+)/)||[])[1];
+  const saved=hash||localStorage.getItem('axiom_cs_'+CC_ACTIVE)||'';
+  if(csState.client===CC_ACTIVE&&csState.id){csRender();return;}
+  csState.client=CC_ACTIVE;
+  if(saved){csState.id=saved;csLoad(saved);}
+  else{csReset(csNewId());csRender();}
+}
+function csReset(id){
+  csState.id=id;csState.thread=[];csState.brief=null;csState.pending=null;
+  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;
+  try{localStorage.setItem('axiom_cs_'+CC_ACTIVE,id);history.replaceState(null,'','#cs='+id);}catch(e){}
+}
+function csFresh(){csReset(csNewId());csSaveDoc();csRender();toast('New creative session');}
+async function csLoad(id){
+  try{
+    const d=await api('/session/load?id='+encodeURIComponent(id));
+    if(d&&d.ok&&d.doc&&d.doc.client===CC_ACTIVE){
+      Object.assign(csState,{thread:d.doc.thread||[],brief:d.doc.brief||null,pending:d.doc.pending||null,
+        stage:d.doc.stage||'brief',vers:d.doc.vers||[],active:d.doc.active||0,imgs:{}});
+      csRender();
+      // Pull stored image versions back from KV (newest first, cap 6).
+      const want=csState.vers.slice(-6).map(v=>v.ver).reverse();
+      for(const ver of want){
+        try{const im=await api('/session/img?id='+encodeURIComponent(id)+'&ver='+ver);
+          if(im&&im.ok&&im.img){csState.imgs[ver]=im.img;csRender();}}catch(e){}
+      }
+      return;
+    }
+  }catch(e){}
+  csReset(id);csRender();
+}
+function csSaveDoc(){
+  const doc={client:CC_ACTIVE,thread:csState.thread.slice(-40),brief:csState.brief,pending:csState.pending,
+    stage:csState.stage,vers:csState.vers,active:csState.active,ts:Date.now()};
+  fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:csState.id,doc})}).catch(()=>{});
+}
+function csSaveImg(ver,b64,mime){
+  fetch(csBase()+'/session/img',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:csState.id,ver,b64,mime})}).catch(()=>{});
+}
+function csRender(){
+  const el=$('cs-thread');if(!el)return;
+  const tag=$('cs-tag');if(tag)tag.textContent=csState.stage==='confirmed'?('ITERATING · V'+(csState.active||'—')):'TAKING THE BRIEF';
+  const st=$('cs-status');if(st)st.textContent=csState.stage==='confirmed'&&csState.active?('editing from v'+csState.active+' · '+csState.vers.length+' version'+(csState.vers.length>1?'s':'')):'';
+  let h='';
+  if(!csState.thread.length)h='<div class="cs-empty">Tell the studio what you need — e.g. <b>“Instagram ad for HOOF about the new fuel tax poll, use the newspaper style”</b>.<br>It will ask what it needs, confirm the brief, then design and iterate with you.</div>';
+  csState.thread.forEach(m=>{
+    if(m.r==='u')h+='<div class="cs-b user">'+esc(m.t)+'</div>';
+    else if(m.r==='a')h+='<div class="cs-b ai">'+(m.k?'<span class="cs-k">'+esc(m.k)+'</span>':'')+esc(m.t)+
+      (m.confirm&&csState.stage==='brief'&&csState.pending?'<div class="cs-confirm"><button onclick="csConfirm()">✓ Looks right — create it</button><button class="alt" onclick="$(\'cs-inp\').focus()">Correct something</button></div>':'')+'</div>';
+    else if(m.r==='e')h+='<div class="cs-b err">'+esc(m.t)+'</div>';
+    else if(m.r==='img'){
+      const im=csState.imgs[m.ver];const active=m.ver===csState.active?' active':'';
+      h+='<div class="cs-img'+active+'" id="cs-v'+m.ver+'">'+
+        (im?'<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="v'+m.ver+'" onclick="csBranch('+m.ver+')">':'<div class="cs-b ai">v'+m.ver+' — loading…</div>')+
+        '<div class="cs-vbar"><span class="cs-vtag">V'+m.ver+'</span><span class="cs-vnote">'+esc(m.note||'')+'</span>'+
+        (im?'<a class="cc-mini" download="creative-v'+m.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'">Download</a>':'')+
+        (m.ver!==csState.active?'<button class="cc-mini" onclick="csBranch('+m.ver+')">Branch from this</button>':'')+
+        '</div></div>';
+    }
+  });
+  if(csState.busy)h+='<div class="cs-typing"><i></i><i></i><i></i></div>';
+  el.innerHTML=h;el.scrollTop=el.scrollHeight;
+}
+function csBranch(ver){
+  if(!csState.imgs[ver]||csState.busy)return;
+  csState.active=ver;csSaveDoc();csRender();
+  toast('Now editing from v'+ver);
+}
+function csCtx(){
+  const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
+  const bk=ccBK(CC_ACTIVE);
+  return 'CLIENT: '+c.name+'\n'+(c.brief||c.desc||'')+
+    (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
+    '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+
+    (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
+    '\n\nOPERATOR PANEL DEFAULTS: format='+((($('cc-vis-format')||{}).value)||'square')+
+    ((($('cc-input')||{}).value||'').trim()?'\nComposer notes: '+$('cc-input').value.trim().slice(0,600):'');
+}
+function csParse(txt){
+  try{return JSON.parse(txt.replace(/^```(json)?/gm,'').replace(/```/g,'').trim());}catch(e){return null;}
+}
+function csMsgs(){
+  return csState.thread.slice(-16).filter(m=>m.r==='u'||m.r==='a'||m.r==='img').map(m=>
+    m.r==='u'?{role:'user',content:m.t}:
+    m.r==='img'?{role:'assistant',content:'[generated image version '+m.ver+']'}:
+    {role:'assistant',content:m.raw||m.t});
+}
+async function csChat(system){
+  const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({system,messages:csMsgs(),max_tokens:1200})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+}
+async function csSend(){
+  const inp=$('cs-inp');const t=inp.value.trim();if(!t||csState.busy)return;
+  inp.value='';
+  csState.thread.push({r:'u',t});csState.busy=true;csRender();
+  try{
+    if(csState.stage==='brief')await csBriefTurn();
+    else await csEditTurn(t);
+  }catch(e){
+    csState.thread.push({r:'e',t:'Studio: '+(e.message||e)});
+  }
+  csState.busy=false;csSaveDoc();csRender();
+}
+async function csBriefTurn(){
+  const sys='You are the creative director of AXIOM Creative Studio, taking a design brief for an advertising creative.\n\n'+csCtx()+
+    '\n\nSTAGE: BRIEF-TAKING.\n1. Read the request and ALL context above. Fill gaps from context yourself wherever you reasonably can.\n2. Only if essentials are genuinely missing (exact headline wording, format/platform, call to action, whether people/places should appear, a contradiction with the references), ask — ALL questions in ONE message, numbered, max 5.\n3. Once complete, play the brief back for sign-off.\n\nReply ONLY with JSON, no markdown fences, one of:\n{"type":"questions","text":"<your numbered questions>"}\n{"type":"summary","text":"<plain-English playback starting: Here\'s what I\'ll make - ...>","brief":{"format":"square|portrait|story|landscape","headline":"<exact text>","subhead":"<exact text or empty>","cta":"<exact text or empty>","audience":"","tone":"","style":"<visual direction incl. reference-match notes>","people":"<people/location guidance or empty>","notes":""}}\n\nIf the user corrects something after a summary, update the brief and reply with the summary JSON again. Australian English. Exact on-image text must be spelled perfectly.';
+  const raw=await csChat(sys);
+  const j=csParse(raw);
+  if(j&&j.type==='summary'&&j.brief){
+    csState.pending=j.brief;
+    csState.thread.push({r:'a',k:'Brief for sign-off',t:j.text||'Here is the brief.',raw,confirm:true});
+  }else if(j&&j.type==='questions'){
+    csState.thread.push({r:'a',k:'The studio needs',t:j.text||'',raw});
+  }else{
+    csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
+  }
+}
+async function csConfirm(){
+  if(!csState.pending||csState.busy)return;
+  csState.brief=csState.pending;csState.pending=null;csState.stage='confirmed';
+  csState.thread.push({r:'u',t:'Confirmed — go ahead.'});
+  csState.busy=true;csRender();
+  try{await csGenerate(null,null);}
+  catch(e){csState.thread.push({r:'e',t:'Generation: '+(e.message||e)});}
+  csState.busy=false;csSaveDoc();csRender();
+}
+function csBriefPrompt(){
+  const b=csState.brief||{};const c=ccClient();const nRef=ccAllRefs().length;
+  return (nRef?'You are given '+nRef+' APPROVED reference creatives defining this brand\'s exact visual system. Replicate it precisely — palette, layout grid, typography style, background treatment, framing. The result must look like it came from the same design kit.\n\n':'Design a clean, confident, premium advertising creative for an Australian public-affairs campaign.\n\n')+
+    'Client: '+c.name+'\nFormat: '+(CC_DIMS[b.format]||CC_DIMS.square)+'.\n\n'+
+    'Place THIS text on the creative, spelled EXACTLY as written, clearly legible:\n'+
+    '- HEADLINE (dominant): '+(b.headline||'')+
+    (b.subhead?'\n- SUPPORTING LINE: '+b.subhead:'')+
+    (b.cta?'\n- CALL TO ACTION (button/badge): '+b.cta:'')+
+    '\n\nAudience: '+(b.audience||'general public')+'. Tone: '+(b.tone||'confident, credible')+'.'+
+    (b.style?'\nVisual direction: '+b.style:'')+(b.people?'\nPeople/location: '+b.people:'')+(b.notes?'\nNotes: '+b.notes:'')+
+    '\n\nStrict: render ONLY the exact text above — no gibberish, no misspellings, no invented words, logos, stats or watermarks. Leave the bottom-right corner clear for a logo (do NOT draw one). Output one finished graphic.';
+}
+async function csGenerate(editPrompt,baseVer){
+  const brand=ccAllRefs();
+  let prompt,refs;
+  if(editPrompt){
+    const base=csState.imgs[baseVer||csState.active];
+    if(!base)throw new Error('base version not loaded yet — click it first');
+    prompt='Edit the FIRST attached image per this instruction: "'+editPrompt+'". Keep everything else — brand style, layout, dimensions — unchanged unless the instruction says otherwise. All on-image words must remain real, correctly-spelled English. Do not add a logo (bottom-right stays clear). Output only the edited image.';
+    refs=[{data:base.b64,mime:base.mime||'image/png'}].concat(brand).slice(0,6);
+  }else{prompt=csBriefPrompt();refs=brand;}
+  const aspect=CC_ASPECT[(csState.brief||{}).format]||'1:1';
+  const r=await fetch(csBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt,references:refs,aspect,size:'1K'})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
+  // Stamp the brand logo (canvas compositor) so it is always present and crisp.
+  const fmtSel=$('cc-vis-format');if(fmtSel&&(csState.brief||{}).format)fmtSel.value=csState.brief.format;
+  const fin=await ccCompose(d.imageB64,d.mime||'image/png','','model');
+  const ver=(csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1;
+  const note=editPrompt?editPrompt.slice(0,80):('from brief — '+((csState.brief||{}).headline||'').slice(0,50));
+  csState.vers.push({ver,note,parent:editPrompt?(baseVer||csState.active):0,mime:'image/png'});
+  csState.imgs[ver]={b64:fin.b64,mime:fin.mime};csState.active=ver;
+  csState.thread.push({r:'img',ver,note});
+  csSaveImg(ver,fin.b64,fin.mime);
+}
+async function csEditTurn(instr){
+  const sys='You route refinement instructions for a generated advertising creative (currently on version '+csState.active+').\n\nCONFIRMED BRIEF:\n'+JSON.stringify(csState.brief)+'\n\n'+csCtx()+
+    '\n\nDecide what the user\'s latest message is:\n- A CLEAR edit to the artwork -> reply {"type":"edit","prompt":"<one clear imperative instruction for the image model, incl. exact corrected text if wording changes>"}\n- AMBIGUOUS (could mean two different things) -> {"type":"question","text":"<one short clarifying question>"} — never guess.\n- Conversation/feedback needing no image change -> {"type":"chat","text":"<reply>"}\n\nReply ONLY the JSON, no fences. Edits are cumulative on the current version.';
+  const raw=await csChat(sys);
+  const j=csParse(raw);
+  if(j&&j.type==='edit'&&j.prompt){
+    csState.thread.push({r:'a',k:'Editing v'+csState.active,t:j.prompt,raw});csRender();
+    await csGenerate(j.prompt,csState.active);
+  }else if(j&&j.type==='question'){
+    csState.thread.push({r:'a',k:'Quick check',t:j.text||'',raw});
+  }else{
+    csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
+  }
 }
 
 /* ── CLOCK + BOOT ── */

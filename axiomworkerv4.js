@@ -1927,6 +1927,75 @@ export default {
       }
     }
 
+    // -- Claude proxy for the Creative Studio chat ---------------------------
+    // POST /chat  body: { system?, messages, max_tokens? }
+    // Keeps the Anthropic key server-side (secret ANTHROPIC_API_KEY). Returns
+    // the raw Messages API response so the client can parse structured output.
+    if (path === '/chat') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      const akey = env.ANTHROPIC_API_KEY;
+      if (!akey) return jsonResp({ error: 'chat_not_configured', detail: 'Set ANTHROPIC_API_KEY as a Worker secret: wrangler secret put ANTHROPIC_API_KEY' }, 501);
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      if (!Array.isArray(body.messages) || !body.messages.length) return jsonResp({ error: 'no_messages' }, 400);
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': akey, 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({
+            model: String(body.model || 'claude-sonnet-4-6').replace(/[^a-zA-Z0-9._-]/g, ''),
+            max_tokens: Math.min(parseInt(body.max_tokens, 10) || 1500, 4000),
+            system: typeof body.system === 'string' ? body.system.slice(0, 30000) : undefined,
+            messages: body.messages,
+          }),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (data.error) return jsonResp({ error: 'anthropic_' + (data.error.type || r.status), detail: String(data.error.message || '').slice(0, 200) }, 502);
+        return jsonResp(data);
+      } catch (e) {
+        return jsonResp({ error: 'chat_failed', detail: String(e && e.name || e).slice(0, 60) }, 502);
+      }
+    }
+
+    // -- Creative Studio session store (KV) ----------------------------------
+    // Sessions survive page refreshes. The small JSON doc (thread text, brief,
+    // version metadata) and each image version live in separate KV entries so
+    // no value approaches KV's 25MB cap. 30-day TTL, refreshed on write.
+    // POST /session/save {id, doc} | GET /session/load?id=
+    // POST /session/img  {id, ver, b64, mime} | GET /session/img?id=&ver=
+    if ((path === '/session/save' || path === '/session/img') && req.method === 'POST') {
+      let body = {};
+      try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      const sid = String(body.id || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+      if (!sid) return jsonResp({ error: 'no_id' }, 400);
+      if (path === '/session/save') {
+        const doc = JSON.stringify(body.doc || {});
+        if (doc.length > 400000) return jsonResp({ error: 'doc_too_large' }, 413);
+        await kvPut(env.AXIOM_KV, 'imgsess_' + sid, doc, 30 * 86400);
+        return jsonResp({ ok: true });
+      }
+      const ver = parseInt(body.ver, 10);
+      if (!(ver >= 1) || !body.b64) return jsonResp({ error: 'missing_fields' }, 400);
+      if (String(body.b64).length > 8000000) return jsonResp({ error: 'image_too_large' }, 413);
+      await kvPut(env.AXIOM_KV, 'imgsess_' + sid + '_v' + ver,
+        JSON.stringify({ b64: String(body.b64), mime: body.mime || 'image/png' }), 30 * 86400);
+      return jsonResp({ ok: true });
+    }
+    if (path === '/session/load' || path === '/session/img') {
+      const sid = String(reqUrl.searchParams.get('id') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+      if (!sid) return jsonResp({ error: 'no_id' }, 400);
+      if (path === '/session/load') {
+        const doc = await kvGet(env.AXIOM_KV, 'imgsess_' + sid);
+        return doc ? new Response('{"ok":true,"doc":' + doc + '}', { headers: CORS })
+          : jsonResp({ ok: false, error: 'not_found' }, 404);
+      }
+      const ver = parseInt(reqUrl.searchParams.get('ver'), 10);
+      const img = await kvGet(env.AXIOM_KV, 'imgsess_' + sid + '_v' + ver);
+      return img ? new Response('{"ok":true,"img":' + img + '}', { headers: CORS })
+        : jsonResp({ ok: false, error: 'not_found' }, 404);
+    }
+
     // -- ClickUp attachment: attach a generated image to an existing task ---
     // POST /clickup-attach  body: { taskId, filename?, b64, mime? }
     if (path === '/clickup-attach') {
