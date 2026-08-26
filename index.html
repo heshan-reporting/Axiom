@@ -3486,11 +3486,26 @@ function csBriefPrompt(){
     (b.style?'\nVisual direction: '+b.style:'')+(b.people?'\nPeople/location: '+b.people:'')+(b.notes?'\nNotes: '+b.notes:'')+
     '\n\nStrict: render ONLY the exact text above — no gibberish, no misspellings, no invented words, logos, stats or watermarks. Leave the bottom-right corner clear for a logo (do NOT draw one). Output one finished graphic.';
 }
-async function csGenerate(editPrompt,baseVer){
+/* Detect an explicit format ask in free text - the deterministic guard that
+   backs up the router's brief_updates. */
+function csDetectFormat(t){
+  t=String(t||'').toLowerCase();
+  if(/\b(square|1\s*:\s*1|1080\s*x\s*1080)\b/.test(t))return 'square';
+  if(/\b(portrait|4\s*:\s*5|1080\s*x\s*1350)\b/.test(t))return 'portrait';
+  if(/\b(story|stories|reel|9\s*:\s*16|1080\s*x\s*1920|vertical)\b/.test(t))return 'story';
+  if(/\b(landscape|16\s*:\s*9|1200\s*x\s*628|banner)\b/.test(t))return 'landscape';
+  return null;
+}
+async function csGenerate(editPrompt,baseVer,opt){
+  opt=opt||{};
   const brand=ccAllRefs();
   let prompt,refs;
   const chatRefs=(csState.srefs||[]).map(r=>({data:r.data,mime:r.mime}));
-  if(editPrompt){
+  if(opt.reformat){
+    const base=csState.imgs[baseVer||csState.active];
+    prompt=csBriefPrompt()+'\n\nRECOMPOSE: the FIRST attached image is the previous version of this exact creative in a different aspect ratio. Recreate the SAME design - identical style, wording, palette, imagery and mood - composed natively for the new '+(CC_DIMS[(csState.brief||{}).format]||CC_DIMS.square)+' canvas. Re-layout elements to suit the new shape; never letterbox, stretch or awkwardly crop.'+(opt.extra?'\nAdditional instruction: '+opt.extra:'');
+    refs=(base?[{data:base.b64,mime:base.mime||'image/png'}]:[]).concat(chatRefs).concat(brand).slice(0,6);
+  }else if(editPrompt){
     const base=csState.imgs[baseVer||csState.active];
     if(!base)throw new Error('base version not loaded yet — click it first');
     prompt='Edit the FIRST attached image per this instruction: "'+editPrompt+'". Keep everything else — brand style, layout, dimensions — unchanged unless the instruction says otherwise. All on-image words must remain real, correctly-spelled English. Do not add a logo (bottom-right stays clear). Output only the edited image.';
@@ -3505,7 +3520,7 @@ async function csGenerate(editPrompt,baseVer){
   const fmtSel=$('cc-vis-format');if(fmtSel&&(csState.brief||{}).format)fmtSel.value=csState.brief.format;
   const fin=await ccCompose(d.imageB64,d.mime||'image/png','','model');
   const ver=(csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1;
-  const note=editPrompt?editPrompt.slice(0,80):('from brief — '+((csState.brief||{}).headline||'').slice(0,50));
+  const note=opt.reformat?('reformatted to '+((csState.brief||{}).format||'')+(opt.extra?' — '+opt.extra.slice(0,50):'')):editPrompt?editPrompt.slice(0,80):('from brief — '+((csState.brief||{}).headline||'').slice(0,50));
   csState.vers.push({ver,note,parent:editPrompt?(baseVer||csState.active):0,mime:'image/png'});
   csState.imgs[ver]={b64:fin.b64,mime:fin.mime};csState.active=ver;
   csState.thread.push({r:'img',ver,note});
@@ -3513,13 +3528,32 @@ async function csGenerate(editPrompt,baseVer){
 }
 async function csEditTurn(instr){
   const sys='You route refinement instructions for a generated advertising creative (currently on version '+csState.active+').\n\nCONFIRMED BRIEF:\n'+JSON.stringify(csState.brief)+'\n\n'+csCtx()+
-    '\n\nDecide what the user\'s latest message is:\n- A CLEAR edit to the artwork -> reply {"type":"edit","prompt":"<one clear imperative instruction for the image model, incl. exact corrected text if wording changes>"}\n- AMBIGUOUS (could mean two different things) -> {"type":"question","text":"<one short clarifying question>"} — never guess.\n- Conversation/feedback needing no image change -> {"type":"chat","text":"<reply>"}\n\nReply ONLY the JSON, no fences. Inside string values use apostrophes, never unescaped double quotes. Edits are cumulative on the current version.';
+    '\n\nDecide what the user\'s latest message is, and reply ONLY JSON (no fences; apostrophes inside strings):\n'+
+    '- A CLEAR change to the artwork -> {"type":"edit","prompt":"<CONCISE imperative CHANGE instruction, max ~60 words>","brief_updates":{<only the brief fields this change alters, e.g. "format":"square", "headline":"...">}}\n'+
+    '- AMBIGUOUS -> {"type":"question","text":"<one short clarifying question>"} - never guess.\n'+
+    '- Conversation needing no image change -> {"type":"chat","text":"<reply>"}\n\n'+
+    'PROMPT DISCIPLINE (critical): the reference images AND the current creative are ALREADY attached to the image engine - it can see them. NEVER re-describe the existing scene, style or layout in your prompt; state only WHAT CHANGES, plus exact text strings when wording changes. Example good prompt: \'Change the masthead to THE REGIONAL GAZETTE and enlarge the headline by ~20%\'.\n'+
+    'FORMAT CHANGES: if the user asks for a different format/aspect (square, portrait, story, landscape), you MUST put it in brief_updates.format (square|portrait|story|landscape) - the canvas size is controlled by that field, not by words in the prompt.\n'+
+    'Edits are cumulative on the current version.';
   const raw=await csChat(sys);
   const j=csParse(raw);
   if(j&&j.type==='edit'&&j.prompt){
-    csState.thread.push({r:'a',kind:'edit',k:'Editing v'+csState.active,t:j.prompt,raw});csState.busyLabel='Designing v'+((csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1);csRender();
-    await csGenerate(j.prompt,csState.active);
+    // Merge any brief updates; a format change means recompose, not edit.
+    const bu=(j.brief_updates&&typeof j.brief_updates==='object')?j.brief_updates:{};
+    const askedFmt=(CC_ASPECT[bu.format]?bu.format:null)||csDetectFormat(instr+' '+j.prompt);
+    csState.brief=csState.brief||{};
+    Object.keys(bu).forEach(k=>{if(bu[k]&&k!=='format')csState.brief[k]=bu[k];});
+    if(askedFmt&&askedFmt!==csState.brief.format){
+      csState.brief.format=askedFmt;
+      csState.thread.push({r:'a',kind:'edit',k:'Reformatting to '+askedFmt,t:'Recomposing the same creative natively for '+(CC_DIMS[askedFmt]||askedFmt)+'.',raw});
+      csState.busyLabel='Designing v'+((csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1)+' · '+askedFmt;csRender();
+      await csGenerate(null,csState.active,{reformat:true,extra:/recompose|reformat|same creative/i.test(j.prompt)?'':j.prompt});
+    }else{
+      csState.thread.push({r:'a',kind:'edit',k:'Editing v'+csState.active,t:j.prompt,raw});csState.busyLabel='Designing v'+((csState.vers.length?csState.vers[csState.vers.length-1].ver:0)+1);csRender();
+      await csGenerate(j.prompt,csState.active);
+    }
   }else if(j&&j.type==='question'){
+
     csState.thread.push({r:'a',kind:'ask',k:'Quick check',t:j.text||'',raw});
   }else{
     csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
