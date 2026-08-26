@@ -772,10 +772,25 @@ body.kiosk .kprog{display:block}
 .cs-typing i{width:5px;height:5px;border-radius:50%;background:var(--x-ac);opacity:.4;animation:csDot 1.2s var(--x-ease) infinite}
 .cs-typing i:nth-child(3){animation-delay:.18s}.cs-typing i:nth-child(4){animation-delay:.36s}
 @keyframes csDot{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-4px)}}
+/* chat-attached reference images */
+.cs-srefs{display:flex;gap:8px;padding:10px 4px 2px;flex-wrap:wrap}
+.cs-srefs:empty{display:none}
+.cs-sref{position:relative;width:64px;height:64px;border-radius:var(--x-r2);overflow:hidden;border:1px solid var(--x-ac-line);animation:csIn var(--x-d3) var(--x-ease) both}
+.cs-sref img{width:100%;height:100%;object-fit:cover;display:block}
+.cs-sref button{position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:6px;border:none;cursor:pointer;background:rgba(7,7,8,.78);color:var(--x-ink0);font-size:12px;line-height:1;display:flex;align-items:center;justify-content:center}
+.cs-sref b{position:absolute;left:4px;bottom:3px;font-family:var(--x-fm);font-size:8px;letter-spacing:.06em;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9);text-transform:uppercase}
+.cs-attach{flex-shrink:0;width:48px;border-radius:var(--x-r2);border:1px solid var(--x-line2);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--x-ink2);transition:color var(--x-d2) var(--x-ease),border-color var(--x-d2) var(--x-ease),background var(--x-d2) var(--x-ease)}
+.cs-attach:hover{color:var(--x-ac);border-color:var(--x-ac-line);background:var(--x-ac-dim)}
+.cs-attach svg{width:18px;height:18px}
+.cs-wrap.drag{border-color:var(--x-ac);box-shadow:0 0 0 3px var(--x-ac-dim)}
+/* strip thumb download */
+.cs-th .dl{position:absolute;right:4px;top:4px;width:20px;height:20px;border-radius:6px;border:none;cursor:pointer;display:none;align-items:center;justify-content:center;background:rgba(7,7,8,.8);color:var(--x-ink0);text-decoration:none}
+.cs-th:hover .dl{display:flex}
+.cs-th .dl svg{width:11px;height:11px}
 /* version-history strip */
 .cs-strip{display:flex;gap:9px;padding:11px 4px 4px;overflow-x:auto;overscroll-behavior-x:contain}
 .cs-strip:empty{display:none}
-.cs-th{position:relative;flex:0 0 auto;width:78px;height:60px;border-radius:var(--x-r2);overflow:hidden;border:1px solid var(--x-line1);cursor:pointer;padding:0;background:var(--x-bg0);transition:border-color var(--x-d2) var(--x-ease),transform var(--x-d2) var(--x-spring),opacity var(--x-d2) var(--x-ease);opacity:.72}
+.cs-th{display:block;position:relative;flex:0 0 auto;width:78px;height:60px;border-radius:var(--x-r2);overflow:hidden;border:1px solid var(--x-line1);cursor:pointer;padding:0;background:var(--x-bg0);transition:border-color var(--x-d2) var(--x-ease),transform var(--x-d2) var(--x-spring),opacity var(--x-d2) var(--x-ease);opacity:.72}
 .cs-th img{width:100%;height:100%;object-fit:cover;display:block}
 .cs-th:hover{transform:translateY(-2px);opacity:1;border-color:var(--x-line3)}
 .cs-th.on{opacity:1;border-color:var(--x-ac);box-shadow:0 0 0 1px var(--x-ac-line)}
@@ -1194,7 +1209,10 @@ body.kiosk .kprog{display:block}
             <div class="cs-wrap">
               <div class="cs-thread x-scroll" id="cs-thread" aria-live="polite"></div>
               <div class="cs-strip x-scroll" id="cs-strip" aria-label="Version history"></div>
+              <div class="cs-srefs" id="cs-srefs" aria-label="Reference images for this creative"></div>
               <div class="cs-inputrow">
+                <button id="cs-attach" class="cs-attach" onclick="document.getElementById('cs-file').click()" aria-label="Attach reference images" title="Attach reference images"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                <input type="file" id="cs-file" accept="image/*" multiple hidden>
                 <textarea id="cs-inp" rows="1" placeholder="Describe the creative you need — or answer the studio's question…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csSend();}"></textarea>
                 <button id="cs-send" onclick="csSend()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
               </div>
@@ -3178,6 +3196,7 @@ function csFromSignal(i){
 }
 function csNewId(){return 'cs'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function csInit(){
+  csBindUploads();
   const hash=(location.hash.match(/#cs=([a-zA-Z0-9_-]+)/)||[])[1];
   const saved=hash||localStorage.getItem('axiom_cs_'+CC_ACTIVE)||'';
   if(csState.client===CC_ACTIVE&&csState.id){csRender();return;}
@@ -3187,7 +3206,7 @@ function csInit(){
 }
 function csReset(id){
   csState.id=id;csState.thread=[];csState.brief=null;csState.pending=null;
-  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;csState.mindCtx=undefined;csState.links=[];
+  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;csState.mindCtx=undefined;csState.links=[];csState.srefs=[];
   try{localStorage.setItem('axiom_cs_'+CC_ACTIVE,id);history.replaceState(null,'','#cs='+id);}catch(e){}
 }
 function csFresh(){csReset(csNewId());csSaveDoc();csRender();toast('New creative session');}
@@ -3196,7 +3215,7 @@ async function csLoad(id){
     const d=await api('/session/load?id='+encodeURIComponent(id));
     if(d&&d.ok&&d.doc&&d.doc.client===CC_ACTIVE){
       Object.assign(csState,{thread:d.doc.thread||[],brief:d.doc.brief||null,pending:d.doc.pending||null,
-        stage:d.doc.stage||'brief',vers:d.doc.vers||[],active:d.doc.active||0,links:d.doc.links||[],imgs:{}});
+        stage:d.doc.stage||'brief',vers:d.doc.vers||[],active:d.doc.active||0,links:d.doc.links||[],srefs:d.doc.srefs||[],imgs:{}});
       csRender();
       // Pull stored image versions back from KV (newest first, cap 6).
       const want=csState.vers.slice(-6).map(v=>v.ver).reverse();
@@ -3211,13 +3230,39 @@ async function csLoad(id){
 }
 function csSaveDoc(){
   const doc={client:CC_ACTIVE,thread:csState.thread.slice(-40),brief:csState.brief,pending:csState.pending,
-    stage:csState.stage,vers:csState.vers,active:csState.active,links:(csState.links||[]).slice(-5),ts:Date.now()};
+    stage:csState.stage,vers:csState.vers,active:csState.active,links:(csState.links||[]).slice(-5),srefs:(csState.srefs||[]).slice(0,3),ts:Date.now()};
   fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:csState.id,doc})}).catch(()=>{});
 }
 function csSaveImg(ver,b64,mime){
   fetch(csBase()+'/session/img',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:csState.id,ver,b64,mime})}).catch(()=>{});
+}
+async function csAddRefs(files){
+  csState.srefs=csState.srefs||[];
+  for(const f of Array.from(files||[])){
+    if(!/^image\//.test(f.type)){toast(f.name+': not an image',true);continue;}
+    if(f.size>8*1024*1024){toast(f.name+': over 8MB',true);continue;}
+    if(csState.srefs.length>=3){toast('Up to 3 reference images per creative - remove one first',true);break;}
+    const d=await ccDownscale(f,720,.78);
+    if(d)csState.srefs.push(d);
+  }
+  csRenderSrefs();csSaveDoc();
+}
+function csDelRef(i){(csState.srefs||[]).splice(i,1);csRenderSrefs();csSaveDoc();}
+function csRenderSrefs(){
+  const el=$('cs-srefs');if(!el)return;
+  el.innerHTML=(csState.srefs||[]).map((r,i)=>'<div class="cs-sref"><img src="data:'+r.mime+';base64,'+r.data+'" alt="reference"><b>ref</b><button aria-label="Remove reference" onclick="csDelRef('+i+')">×</button></div>').join('');
+}
+function csBindUploads(){
+  if(csState._upBound)return;csState._upBound=true;
+  const fi=$('cs-file');if(fi)fi.addEventListener('change',e=>{csAddRefs(e.target.files);e.target.value='';});
+  const wrap=document.querySelector('#cc-studio-block .cs-wrap');
+  if(wrap){
+    ['dragover','dragenter'].forEach(ev=>wrap.addEventListener(ev,e=>{e.preventDefault();wrap.classList.add('drag');}));
+    ['dragleave','drop'].forEach(ev=>wrap.addEventListener(ev,e=>{e.preventDefault();wrap.classList.remove('drag');}));
+    wrap.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files.length)csAddRefs(e.dataTransfer.files);});
+  }
 }
 function csRender(){
   const el=$('cs-thread');if(!el)return;
@@ -3253,19 +3298,21 @@ function csRender(){
       h+='<div class="cs-img'+active+fresh+'" id="cs-v'+m.ver+'">'+
         (im?'<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="Version '+m.ver+'" onclick="csBranch('+m.ver+')">':'<div class="cs-b ai">v'+m.ver+' — loading…</div>')+
         '<div class="cs-vbar"><span class="cs-vtag">V'+m.ver+'</span><span class="cs-vnote">'+esc(m.note||'')+'</span>'+
-        (im?'<a class="cc-mini" download="creative-v'+m.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'">Download</a>':'')+
+        (im?'<a class="cc-mini" style="color:var(--x-ac);border-color:var(--x-ac-line);font-weight:700" download="axiom-'+(ccClient().short||'creative').toLowerCase()+'-v'+m.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'">↓ Download PNG</a>':'')+
         (m.ver!==csState.active?'<button class="cc-mini" onclick="csBranch('+m.ver+')">Branch from this</button>':'')+
         '</div></div>';
     }
   });
   if(csState.busy)h+='<div class="cs-typing"><span class="lbl">'+esc(csState.busyLabel||'Working')+'</span><i></i><i></i><i></i></div>';
   el.innerHTML=h;el.scrollTop=el.scrollHeight;
+  csRenderSrefs();
   // Version-history strip: every version, click to branch, active ringed.
   const strip=$('cs-strip');
   if(strip)strip.innerHTML=csState.vers.map(v=>{
     const im=csState.imgs[v.ver];if(!im)return '';
-    return '<button class="cs-th'+(v.ver===csState.active?' on':'')+'" role="option" aria-selected="'+(v.ver===csState.active)+'" title="v'+v.ver+' — '+esc(v.note||'')+'" onclick="csBranch('+v.ver+')">'+
-      '<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="v'+v.ver+'"><b>v'+v.ver+'</b></button>';
+    return '<span class="cs-th'+(v.ver===csState.active?' on':'')+'" role="option" aria-selected="'+(v.ver===csState.active)+'" title="v'+v.ver+' — '+esc(v.note||'')+'" onclick="csBranch('+v.ver+')" tabindex="0" onkeydown="if(event.key===\'Enter\')csBranch('+v.ver+')">'+
+      '<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="v'+v.ver+'"><b>v'+v.ver+'</b>'+
+      '<a class="dl" aria-label="Download v'+v.ver+'" download="axiom-'+(ccClient().short||'creative').toLowerCase()+'-v'+v.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></a></span>';
   }).join('');
 }
 function csBranch(ver){
@@ -3278,7 +3325,7 @@ function csCtx(){
   const bk=ccBK(CC_ACTIVE);
   return 'CLIENT: '+c.name+'\n'+(c.brief||c.desc||'')+
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
-    '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+
+    '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+((csState.srefs||[]).length?' PLUS '+csState.srefs.length+' reference image'+(csState.srefs.length>1?'s':'')+' attached by the operator in this chat - these define the desired look for THIS creative.':'')+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
     ((csState.links||[]).length?'\n\nSOURCES READ FROM LINKS IN THIS CHAT (quote facts/figures from these - do not ask the user for numbers that appear here):\n'+csState.links.map(function(l){return '- '+(l.title||l.url)+' ('+l.url+'): '+String(l.text||'').slice(0,1400);}).join('\n').slice(0,4200):'')+
     (csState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind - brand colours, messaging, audience, past creative):\n'+csState.mindCtx:'')+
@@ -3423,12 +3470,13 @@ function csBriefPrompt(){
 async function csGenerate(editPrompt,baseVer){
   const brand=ccAllRefs();
   let prompt,refs;
+  const chatRefs=(csState.srefs||[]).map(r=>({data:r.data,mime:r.mime}));
   if(editPrompt){
     const base=csState.imgs[baseVer||csState.active];
     if(!base)throw new Error('base version not loaded yet — click it first');
     prompt='Edit the FIRST attached image per this instruction: "'+editPrompt+'". Keep everything else — brand style, layout, dimensions — unchanged unless the instruction says otherwise. All on-image words must remain real, correctly-spelled English. Do not add a logo (bottom-right stays clear). Output only the edited image.';
-    refs=[{data:base.b64,mime:base.mime||'image/png'}].concat(brand).slice(0,6);
-  }else{prompt=csBriefPrompt();refs=brand;}
+    refs=[{data:base.b64,mime:base.mime||'image/png'}].concat(chatRefs).concat(brand).slice(0,6);
+  }else{prompt=csBriefPrompt();refs=chatRefs.concat(brand).slice(0,6);}
   const aspect=CC_ASPECT[(csState.brief||{}).format]||'1:1';
   const r=await fetch(csBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({prompt,references:refs,aspect,size:'1K'})});
