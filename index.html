@@ -3187,7 +3187,7 @@ function csInit(){
 }
 function csReset(id){
   csState.id=id;csState.thread=[];csState.brief=null;csState.pending=null;
-  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;csState.mindCtx=undefined;
+  csState.stage='brief';csState.vers=[];csState.imgs={};csState.active=0;csState.busy=false;csState.mindCtx=undefined;csState.links=[];
   try{localStorage.setItem('axiom_cs_'+CC_ACTIVE,id);history.replaceState(null,'','#cs='+id);}catch(e){}
 }
 function csFresh(){csReset(csNewId());csSaveDoc();csRender();toast('New creative session');}
@@ -3196,7 +3196,7 @@ async function csLoad(id){
     const d=await api('/session/load?id='+encodeURIComponent(id));
     if(d&&d.ok&&d.doc&&d.doc.client===CC_ACTIVE){
       Object.assign(csState,{thread:d.doc.thread||[],brief:d.doc.brief||null,pending:d.doc.pending||null,
-        stage:d.doc.stage||'brief',vers:d.doc.vers||[],active:d.doc.active||0,imgs:{}});
+        stage:d.doc.stage||'brief',vers:d.doc.vers||[],active:d.doc.active||0,links:d.doc.links||[],imgs:{}});
       csRender();
       // Pull stored image versions back from KV (newest first, cap 6).
       const want=csState.vers.slice(-6).map(v=>v.ver).reverse();
@@ -3211,7 +3211,7 @@ async function csLoad(id){
 }
 function csSaveDoc(){
   const doc={client:CC_ACTIVE,thread:csState.thread.slice(-40),brief:csState.brief,pending:csState.pending,
-    stage:csState.stage,vers:csState.vers,active:csState.active,ts:Date.now()};
+    stage:csState.stage,vers:csState.vers,active:csState.active,links:(csState.links||[]).slice(-5),ts:Date.now()};
   fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:csState.id,doc})}).catch(()=>{});
 }
@@ -3280,6 +3280,7 @@ function csCtx(){
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
     '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
+    ((csState.links||[]).length?'\n\nSOURCES READ FROM LINKS IN THIS CHAT (quote facts/figures from these - do not ask the user for numbers that appear here):\n'+csState.links.map(function(l){return '- '+(l.title||l.url)+' ('+l.url+'): '+String(l.text||'').slice(0,1400);}).join('\n').slice(0,4200):'')+
     (csState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind - brand colours, messaging, audience, past creative):\n'+csState.mindCtx:'')+
     '\n\nSTRUCTURED BRIEF INPUTS (operator-set; treat as answered — do not re-ask):'+
     '\n- objective: '+((($('cs-objective')||{}).value)||'(not set)')+
@@ -3288,8 +3289,31 @@ function csCtx(){
     '\n- format: '+((($('cs-format')||{}).value)||((($('cc-vis-format')||{}).value)||'(not set)'))+
     ((($('cc-input')||{}).value||'').trim()?'\nComposer notes: '+$('cc-input').value.trim().slice(0,600):'');
 }
+/* Parse Claude's structured reply. Models sometimes emit fences or unescaped
+   inner quotes; salvage rather than ever showing raw JSON scaffolding. */
 function csParse(txt){
-  try{return JSON.parse(txt.replace(/^```(json)?/gm,'').replace(/```/g,'').trim());}catch(e){return null;}
+  let s=(txt||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+  try{return JSON.parse(s);}catch(e){}
+  let t=s.replace(/[\u201C\u201D]/g,'\\"').replace(/[\u2018\u2019]/g,"'");
+  try{return JSON.parse(t);}catch(e){}
+  const type=(s.match(/"type"\s*:\s*"(questions|summary|edit|question|chat)"/)||[])[1];
+  if(!type)return null;
+  const un=x=>x==null?null:x.replace(/\\n/g,'\n').replace(/\\"/g,'"').replace(/\\t/g,' ');
+  // Tolerant single-field grab: from the field's opening quote to the LAST
+  // quote in the payload - survives unescaped quotes inside the value.
+  const loose=k=>{const m=s.match(new RegExp('"'+k+'"\\s*:\\s*"'));if(!m)return null;
+    const st=m.index+m[0].length;let en=s.lastIndexOf('"');
+    if(en<=st)return null;let v=s.slice(st,en);
+    v=v.replace(/"\s*,\s*"brief"\s*:[\s\S]*$/,'').replace(/"\s*}\s*$/,'');
+    return v;};
+  if(type==='summary'){
+    const bm=s.match(/"brief"\s*:\s*(\{[\s\S]*?\})\s*\}?\s*$/);
+    if(bm){try{const brief=JSON.parse(bm[1].replace(/[\u201C\u201D]/g,'"').replace(/[\u2018\u2019]/g,"'"));
+      return{type:'summary',text:un(loose('text'))||'Here is the brief.',brief};}catch(e){}}
+    return{type:'chat',text:un(loose('text'))||'I drafted a brief but it did not come through cleanly - tell me to try again.'};
+  }
+  if(type==='edit')return{type:'edit',prompt:un(loose('prompt'))||un(loose('text'))||''};
+  return{type,text:un(loose('text'))||''};
 }
 function csMsgs(){
   return csState.thread.slice(-16).filter(m=>m.r==='u'||m.r==='a'||m.r==='img').map(m=>
@@ -3309,6 +3333,26 @@ async function csSend(){
   inp.value='';
   csState.thread.push({r:'u',t});csState.busy=true;csState.busyLabel=csState.stage==='brief'?'Reading the brief':'Thinking';csRender();
   try{
+    // Links pasted straight into the chat get read server-side and join the
+    // session's reference context - so the studio quotes the source instead
+    // of asking for facts it can fetch itself.
+    const urls=(t.match(/https?:\/\/[^\s"'<>)\]]+/g)||[]).slice(0,3);
+    if(urls.length){
+      csState.busyLabel='Reading '+urls.length+' link'+(urls.length>1?'s':'');csRender();
+      csState.links=csState.links||[];
+      const notes=[];
+      for(const u of urls){
+        let host='';try{host=new URL(u).hostname.replace(/^www\./,'');}catch(e){host=u.slice(0,40);}
+        try{
+          const d=await api('/fetchurl?url='+encodeURIComponent(u));
+          if(d&&d.ok&&d.text){csState.links.push({url:u,title:d.title||'',text:d.text});notes.push('OK '+host+(d.title?' - '+d.title.slice(0,70):''));}
+          else notes.push('FAILED '+host+' - '+((d&&(d.detail||d.error))||'no content'));
+        }catch(e){notes.push('FAILED '+host+' - '+((e&&e.message)||'unreachable'));}
+      }
+      csState.links=csState.links.slice(-5);
+      csState.thread.push({r:'a',kind:'chat',k:'Sources read',t:notes.join('\n')});
+      csState.busyLabel=csState.stage==='brief'?'Reading the brief':'Thinking';csRender();
+    }
     // Pull client knowledge from The Curious Mind once per session (also
     // after a restore) so brief-taking and edit-routing know the client.
     // Silently skipped if the Mind is not configured.
@@ -3331,7 +3375,7 @@ async function csSend(){
 }
 async function csBriefTurn(){
   const sys='You are the creative director of AXIOM Creative Studio, taking a design brief for an advertising creative.\n\n'+csCtx()+
-    '\n\nSTAGE: BRIEF-TAKING.\n1. Read the request and ALL context above. Fill gaps from context yourself wherever you reasonably can.\n2. Only if essentials are genuinely missing (exact headline wording, format/platform, call to action, whether people/places should appear, a contradiction with the references), ask — ALL questions in ONE message, numbered, max 5.\n3. Once complete, play the brief back for sign-off.\n\nReply ONLY with JSON, no markdown fences, one of:\n{"type":"questions","text":"<your numbered questions>"}\n{"type":"summary","text":"<plain-English playback starting: Here\'s what I\'ll make - ...>","brief":{"format":"square|portrait|story|landscape","headline":"<exact text>","subhead":"<exact text or empty>","cta":"<exact text or empty>","audience":"","tone":"","style":"<visual direction incl. reference-match notes>","people":"<people/location guidance or empty>","notes":""}}\n\nIf the user corrects something after a summary, update the brief and reply with the summary JSON again. Australian English. Exact on-image text must be spelled perfectly.';
+    '\n\nSTAGE: BRIEF-TAKING.\n1. Read the request and ALL context above. Fill gaps from context yourself wherever you reasonably can.\n2. Only if essentials are genuinely missing (exact headline wording, format/platform, call to action, whether people/places should appear, a contradiction with the references), ask — ALL questions in ONE message, numbered, max 5.\n3. Once complete, play the brief back for sign-off.\n\nReply ONLY with JSON, no markdown fences, one of:\n{"type":"questions","text":"<your numbered questions>"}\n{"type":"summary","text":"<plain-English playback starting: Here\'s what I\'ll make - ...>","brief":{"format":"square|portrait|story|landscape","headline":"<exact text>","subhead":"<exact text or empty>","cta":"<exact text or empty>","audience":"","tone":"","style":"<visual direction incl. reference-match notes>","people":"<people/location guidance or empty>","notes":""}}\n\nIf the user corrects something after a summary, update the brief and reply with the summary JSON again. Australian English. Exact on-image text must be spelled perfectly.\n\nOUTPUT RULES: raw JSON only - never wrap it in markdown fences. Inside JSON string values use apostrophes instead of double quotes; if a double quote is unavoidable, escape it as \\".';
   const raw=await csChat(sys);
   const j=csParse(raw);
   if(j&&j.type==='summary'&&j.brief){
@@ -3390,7 +3434,7 @@ async function csGenerate(editPrompt,baseVer){
 }
 async function csEditTurn(instr){
   const sys='You route refinement instructions for a generated advertising creative (currently on version '+csState.active+').\n\nCONFIRMED BRIEF:\n'+JSON.stringify(csState.brief)+'\n\n'+csCtx()+
-    '\n\nDecide what the user\'s latest message is:\n- A CLEAR edit to the artwork -> reply {"type":"edit","prompt":"<one clear imperative instruction for the image model, incl. exact corrected text if wording changes>"}\n- AMBIGUOUS (could mean two different things) -> {"type":"question","text":"<one short clarifying question>"} — never guess.\n- Conversation/feedback needing no image change -> {"type":"chat","text":"<reply>"}\n\nReply ONLY the JSON, no fences. Edits are cumulative on the current version.';
+    '\n\nDecide what the user\'s latest message is:\n- A CLEAR edit to the artwork -> reply {"type":"edit","prompt":"<one clear imperative instruction for the image model, incl. exact corrected text if wording changes>"}\n- AMBIGUOUS (could mean two different things) -> {"type":"question","text":"<one short clarifying question>"} — never guess.\n- Conversation/feedback needing no image change -> {"type":"chat","text":"<reply>"}\n\nReply ONLY the JSON, no fences. Inside string values use apostrophes, never unescaped double quotes. Edits are cumulative on the current version.';
   const raw=await csChat(sys);
   const j=csParse(raw);
   if(j&&j.type==='edit'&&j.prompt){
