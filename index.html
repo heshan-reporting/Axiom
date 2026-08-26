@@ -3325,7 +3325,7 @@ function csCtx(){
   const bk=ccBK(CC_ACTIVE);
   return 'CLIENT: '+c.name+'\n'+(c.brief||c.desc||'')+
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
-    '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+((csState.srefs||[]).length?' PLUS '+csState.srefs.length+' reference image'+(csState.srefs.length>1?'s':'')+' attached by the operator in this chat - these define the desired look for THIS creative.':'')+
+    '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+((csState.srefs||[]).length?' PLUS '+csState.srefs.length+' reference image'+(csState.srefs.length>1?'s':'')+' attached by the operator for THIS creative.':'')+' Any reference images are attached to the LATEST user message and are visible to you - look at them, describe what you see when relevant, and never claim you cannot see an attached image.'+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
     ((csState.links||[]).length?'\n\nSOURCES READ FROM LINKS IN THIS CHAT (quote facts/figures from these - do not ask the user for numbers that appear here):\n'+csState.links.map(function(l){return '- '+(l.title||l.url)+' ('+l.url+'): '+String(l.text||'').slice(0,1400);}).join('\n').slice(0,4200):'')+
     (csState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind - brand colours, messaging, audience, past creative):\n'+csState.mindCtx:'')+
@@ -3381,8 +3381,27 @@ function csMsgs(){
   return out;
 }
 async function csChat(system){
+  const msgs=csMsgs();
+  // Make the references genuinely visible to the brief-taker: attach them as
+  // image blocks on the latest user turn (Claude is multimodal; the /chat
+  // proxy passes content blocks through untouched).
+  const srefs=(csState.srefs||[]).slice(0,3);
+  const brand=(ccBK(CC_ACTIVE).library||[]).slice(0,2);
+  if((srefs.length||brand.length)&&msgs.length){
+    const last=msgs[msgs.length-1];
+    const blocks=[{type:'text',text:String(last.content)}];
+    if(srefs.length){
+      blocks.push({type:'text',text:'[Reference image'+(srefs.length>1?'s':'')+' attached by the operator for THIS creative:]'});
+      srefs.forEach(r=>blocks.push({type:'image',source:{type:'base64',media_type:r.mime||'image/jpeg',data:r.data}}));
+    }
+    if(brand.length){
+      blocks.push({type:'text',text:'[Approved brand-kit style reference'+(brand.length>1?'s':'')+' for this client:]'});
+      brand.forEach(r=>blocks.push({type:'image',source:{type:'base64',media_type:r.mime||'image/png',data:r.data}}));
+    }
+    last.content=blocks;
+  }
   const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({system,messages:csMsgs(),max_tokens:1200})});
+    body:JSON.stringify({system,messages:msgs,max_tokens:1200})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
   return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
