@@ -3316,10 +3316,22 @@ function csParse(txt){
   return{type,text:un(loose('text'))||''};
 }
 function csMsgs(){
-  return csState.thread.slice(-16).filter(m=>m.r==='u'||m.r==='a'||m.r==='img').map(m=>
+  // Build an API-legal conversation: UI status bubbles excluded, roles must
+  // strictly alternate, must start AND end with a user turn (no prefill).
+  const raw=csState.thread.slice(-16).filter(m=>!m.ui&&(m.r==='u'||m.r==='a'||m.r==='img')).map(m=>
     m.r==='u'?{role:'user',content:m.t}:
     m.r==='img'?{role:'assistant',content:'[generated image version '+m.ver+']'}:
     {role:'assistant',content:m.raw||m.t});
+  const out=[];
+  for(const m of raw){
+    if(!out.length&&m.role!=='user')continue;
+    const last=out[out.length-1];
+    if(last&&last.role===m.role)last.content+='\n\n'+m.content;
+    else out.push({role:m.role,content:m.content});
+  }
+  if(!out.length)return[{role:'user',content:'Hello'}];
+  if(out[out.length-1].role!=='user')out.push({role:'user',content:'Continue.'});
+  return out;
 }
 async function csChat(system){
   const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -3350,7 +3362,7 @@ async function csSend(){
         }catch(e){notes.push('FAILED '+host+' - '+((e&&e.message)||'unreachable'));}
       }
       csState.links=csState.links.slice(-5);
-      csState.thread.push({r:'a',kind:'chat',k:'Sources read',t:notes.join('\n')});
+      csState.thread.push({r:'a',kind:'chat',k:'Sources read',t:notes.join('\n'),ui:true});
       csState.busyLabel=csState.stage==='brief'?'Reading the brief':'Thinking';csRender();
     }
     // Pull client knowledge from The Curious Mind once per session (also
