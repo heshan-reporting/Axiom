@@ -42,10 +42,10 @@
   --x-neg-dim:rgba(217,106,102,.12);
   --x-warn-dim:rgba(217,142,74,.12);
 
-  /* ── Typography ────────────────────────────────────────────────────── */
-  --x-fd:'Instrument Serif',Georgia,'Times New Roman',serif;   /* display  */
-  --x-fb:'Geist','Inter',system-ui,-apple-system,sans-serif;    /* UI/body  */
-  --x-fm:'Geist Mono','JetBrains Mono',ui-monospace,monospace;  /* data     */
+  /* ── Typography — Broadsheet terminal pairing ──────────────────────── */
+  --x-fd:'Bricolage Grotesque','Archivo Black','Arial Black','Segoe UI',system-ui,sans-serif; /* display */
+  --x-fb:'Instrument Sans','Inter',system-ui,-apple-system,sans-serif;   /* UI/body  */
+  --x-fm:'Spline Sans Mono','JetBrains Mono',ui-monospace,monospace;     /* data     */
 
   /* Fluid type scale (clamp: 375px → 1600px) */
   --x-t-2xs:clamp(.594rem,.57rem + .10vw,.66rem);
@@ -87,10 +87,10 @@
   letter-spacing:.14em;text-transform:uppercase;color:var(--x-ink2);
 }
 .x-display{
-  font-family:var(--x-fd);font-weight:400;letter-spacing:-.01em;
-  color:var(--x-ink0);line-height:1.04;
+  font-family:var(--x-fd);font-weight:750;letter-spacing:-.03em;
+  color:var(--x-ink0);line-height:1.0;
 }
-.x-display em{font-style:italic;color:var(--x-ac);}
+.x-display em{font-style:normal;color:var(--x-ac);}
 .x-num{font-family:var(--x-fm);font-variant-numeric:tabular-nums;}
 
 /* Panel: the core surface. Depth from layered shadow + top-light border. */
