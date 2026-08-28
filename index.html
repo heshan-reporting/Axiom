@@ -56,55 +56,93 @@ a{color:inherit}
 *::-webkit-scrollbar-thumb:hover{background:rgba(244,242,236,.22);background-clip:content-box}
 *::-webkit-scrollbar-track{background:transparent}
 
-/* ambient background — drifting aurora + fine grid + top vignette */
+/* ambient background — deep radial ground + two soft glow fields (per v2 artboard) */
+body{background:radial-gradient(120% 90% at 50% -20%,#1B1A22 0%,#0B0B0F 46%,#070709 100%) fixed}
 .aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
-.aurora::before,.aurora::after{content:'';position:absolute;width:64vw;height:64vw;border-radius:50%;filter:blur(130px);opacity:.10}
-.aurora::before{background:radial-gradient(circle,color-mix(in srgb,var(--x-ac) 55%,transparent),transparent 70%);top:-30vw;left:-18vw}
-.aurora::after{background:radial-gradient(circle,rgba(255,255,255,.5),transparent 70%);bottom:-34vw;right:-18vw;opacity:.05}
+.aurora::before,.aurora::after{content:'';position:absolute;border-radius:50%;filter:blur(150px)}
+.aurora::before{top:-24vw;left:8vw;width:60vw;height:60vw;opacity:.14;background:radial-gradient(circle,rgba(227,183,91,.6),transparent 68%)}
+.aurora::after{bottom:-30vw;right:-6vw;width:56vw;height:56vw;opacity:.07;background:radial-gradient(circle,rgba(125,157,196,.9),transparent 70%)}
 @keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(7vw,5vh) scale(1.18)}}
-.gridbg{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.55;
-  background-image:radial-gradient(rgba(244,242,236,.04) 1px,transparent 1px);background-size:28px 28px;
-  mask-image:radial-gradient(ellipse 92% 72% at 50% 16%,#000 28%,transparent 100%)}
-body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:radial-gradient(ellipse 120% 60% at 50% -10%,rgba(94,139,255,.07),transparent 60%)}
+.gridbg{display:none}
 
-/* ═══ SHELL — full-width masthead over the working canvas ═══ */
-.shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;height:100dvh}
-.rail{display:flex;flex-direction:row;align-items:center;gap:2px;height:var(--mast);flex-shrink:0;
-  padding:0 clamp(14px,2.6vw,36px);border-bottom:1px solid var(--line);
-  background:rgba(9,9,11,.82);backdrop-filter:blur(22px) saturate(1.3)}
-.logo{display:flex;align-items:center;gap:11px;font-family:var(--fd);font-weight:800;font-size:19px;
-  letter-spacing:.045em;color:var(--t0);margin-right:clamp(12px,2.6vw,36px);flex-shrink:0;user-select:none}
-.logo::before{content:'';width:10px;height:10px;border-radius:3px;background:var(--acg);box-shadow:0 0 16px var(--glow);flex-shrink:0}
-.rbtn{position:relative;display:flex;align-items:center;gap:9px;height:37px;padding:0 13px;border-radius:10px;
-  border:none;background:transparent;color:var(--t2);
-  transition:color .2s var(--ease),background .2s var(--ease)}
-.rbtn svg{width:16px;height:16px;flex-shrink:0;transition:transform .2s var(--spring)}
-.rbtn:hover{color:var(--t0);background:var(--sur2)}
-.rbtn:hover svg{transform:scale(1.08)}
-.rbtn.on{color:var(--t0);background:transparent}
-.rbtn.on::after{content:'';position:absolute;left:12px;right:12px;bottom:calc((var(--mast) - 37px)/-2 - 1px);height:2px;
-  border-radius:2px;background:var(--acg);box-shadow:0 0 12px var(--glow)}
-.rtip{position:static;font-family:var(--fm);font-size:9.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
-  color:inherit;background:none;border:none;padding:0;border-radius:0;white-space:nowrap;
-  opacity:1;transform:none;pointer-events:auto;box-shadow:none}
-@media(max-width:1100px){.rtip{display:none}.rbtn{padding:0 11px}}
+/* ═══ SHELL — floating glass app frame (v2 artboard) ═══ */
+.shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;height:100dvh;
+  padding:clamp(10px,2.2vh,26px) clamp(10px,2vw,30px)}
+.main{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;
+  border:1px solid rgba(255,255,255,.09);border-radius:30px;overflow:hidden;
+  background:linear-gradient(180deg,rgba(23,23,27,.92),rgba(12,12,14,.94));
+  box-shadow:0 4px 8px rgba(0,0,0,.55),0 40px 90px -20px rgba(0,0,0,.8);
+  backdrop-filter:blur(24px) saturate(1.2)}
+.main::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;border-radius:30px;
+  background:radial-gradient(90% 60% at 50% -10%,rgba(227,183,91,.10),transparent 60%)}
+.rail{position:relative;z-index:2;display:flex;flex-direction:row;align-items:center;gap:14px;min-height:var(--mast);flex-shrink:0;
+  padding:14px clamp(14px,2vw,26px) 6px}
+.logo{display:flex;align-items:center;gap:11px;font-family:var(--fd);font-weight:800;font-size:22px;
+  letter-spacing:.04em;color:var(--t0);flex-shrink:0;user-select:none}
+.logo::before{content:'';width:12px;height:12px;border-radius:4px;background:var(--acg);box-shadow:0 0 18px var(--glow);flex-shrink:0}
 .rail .spacer{flex:1}
+/* media-pressure segmented pill — live composite vs 7-day baseline */
+.mp-pill{display:flex;align-items:stretch;border:1px solid rgba(255,255,255,.10);border-radius:16px;
+  background:rgba(255,255,255,.035);padding:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06);min-height:44px}
+.mp-seg{display:flex;align-items:center;gap:8px;padding:0 15px}
+.mp-seg:first-child{padding-left:6px}
+.mp-div{width:1px;background:rgba(255,255,255,.10)}
+.mp-bars{display:flex;align-items:flex-end;gap:2px;height:24px}
+.mp-bars span{width:3px;border-radius:1px;background:var(--ac);display:block;min-height:3px}
+.mp-badge{font-family:var(--fm);font-size:10px;font-weight:600;color:#0F0D08;background:var(--acg);border-radius:6px;padding:3px 6px;white-space:nowrap}
+.mp-l{font-size:13px;color:var(--t2);white-space:nowrap}
+.mp-n{font-family:var(--fd);font-size:24px;font-weight:750;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.mp-u{font-family:var(--fm);font-size:10px;color:var(--t3)}
+.mp-blurb{max-width:230px;padding:0 6px 0 15px;font-size:12px;line-height:1.35;color:var(--t1);align-self:center}
+.mp-blurb b{color:var(--ac);font-weight:600}
+@media(max-width:1560px){.mp-blurb,.mp-pill>.mp-div:nth-child(6){display:none}}
+@media(max-width:1340px){.mp-seg.base,.mp-pill>.mp-div:nth-child(4){display:none}}
+@media(max-width:1180px){.mp-pill{display:none}}
+/* header utility cluster */
+.hswitch{width:56px;height:30px;border-radius:999px;background:var(--acg);display:flex;align-items:center;justify-content:flex-end;
+  padding:3px;border:none;box-shadow:0 2px 10px rgba(227,183,91,.35);cursor:pointer;transition:filter .18s;flex-shrink:0}
+.hswitch:hover{filter:brightness(1.08)}
+.hswitch i{width:24px;height:24px;border-radius:50%;background:var(--x-bg3);display:block;box-shadow:0 1px 3px rgba(0,0,0,.6)}
+.hbell{position:relative;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--t1);
+  border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);transition:color .18s,border-color .18s;flex-shrink:0}
+.hbell:hover{color:var(--t0);border-color:rgba(255,255,255,.18)}
+.hbell svg{width:17px;height:17px}
+.hbell .dot{position:absolute;top:7px;right:8px;width:6px;height:6px;border-radius:50%;background:var(--neg);animation:blink 1.8s ease infinite;display:none}
+.hbell.alert .dot{display:block}
+.havatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(160deg,#2A2A33,#16161A);border:1px solid rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;color:var(--t1);transition:color .18s,border-color .18s;flex-shrink:0}
+.havatar:hover{color:var(--t0);border-color:rgba(255,255,255,.28)}
+.havatar svg{width:19px;height:19px}
 
-.main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
-.top{height:var(--top);flex-shrink:0;display:flex;align-items:center;gap:14px;padding:0 clamp(14px,2.6vw,36px);border-bottom:1px solid var(--line);
-  background:rgba(9,9,11,.55);backdrop-filter:blur(22px) saturate(1.3)}
-.top-title{font-family:var(--fm);font-size:10.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--t1);white-space:nowrap}
-.top-sub{font-family:var(--fm);font-size:8.5px;color:var(--t3);letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
-.top>div:first-child{display:flex;align-items:baseline;gap:14px;min-width:0;overflow:hidden}
-.top-title{overflow:hidden;text-overflow:ellipsis}
+/* title row — big screen name + status + nav chips */
+.top{position:relative;z-index:2;min-height:var(--top);flex-shrink:0;display:flex;align-items:center;gap:14px;
+  padding:4px clamp(14px,2vw,26px) 14px;flex-wrap:wrap}
+.top>div:first-child{display:flex;align-items:center;gap:14px;min-width:0;overflow:hidden}
+.top-title{font-family:var(--fd);font-size:26px;font-weight:700;letter-spacing:-.03em;color:var(--t0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vtag{font-family:var(--fm);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amb);white-space:nowrap}
+.vtag:empty{display:none}
+.rbtn{position:relative;display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.09);background:transparent;color:var(--t2);
+  font-family:var(--fm);font-size:9.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
+  transition:color .2s var(--ease),border-color .2s var(--ease),background .2s var(--ease)}
+.rbtn svg{display:none}
+.rbtn:hover{color:var(--t0);border-color:rgba(255,255,255,.2)}
+.rbtn.on{color:#0F0D08;background:var(--acg);border-color:transparent;font-weight:600;box-shadow:0 2px 12px rgba(227,183,91,.3)}
+.rtip{position:static;font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;background:none;border:none;padding:0;
+  white-space:nowrap;opacity:1;transform:none;pointer-events:auto;box-shadow:none}
+.rnav{display:flex;gap:6px;flex-wrap:wrap}
+@media(max-width:1100px){
+  .rtip{display:none}
+  .rbtn{padding:0;width:34px;justify-content:center}
+  .rbtn svg{display:block;width:15px;height:15px}
+}
 .live{display:flex;align-items:center;gap:7px;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;color:var(--pos);
   border:1px solid rgba(47,227,160,.28);background:rgba(47,227,160,.08);border-radius:999px;padding:5px 12px;white-space:nowrap}
 .live em{font-style:normal}
 @media(max-width:820px){.live em{display:none}}
 .live i{width:6px;height:6px;border-radius:50%;background:var(--pos);animation:blink 1.6s ease infinite}
 @keyframes blink{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(47,227,160,.55)}50%{opacity:.5;box-shadow:0 0 0 6px rgba(47,227,160,0)}}
-.clock{font-family:var(--fm);font-size:11px;color:var(--t2);margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}
+.clock{font-family:var(--fm);font-size:11px;color:var(--t2);white-space:nowrap;font-variant-numeric:tabular-nums}
 .icobtn{width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:var(--sur);color:var(--t1);
   display:flex;align-items:center;justify-content:center;transition:all .18s var(--ease);flex-shrink:0}
 .icobtn:hover{border-color:var(--line2);color:var(--t0);background:var(--sur2);transform:translateY(-1px);box-shadow:var(--sh-sm)}
@@ -112,8 +150,8 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .icobtn.spin svg{animation:rot 1s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
 
-.content{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:clamp(22px,3vh,38px) clamp(18px,3.2vw,48px) 110px;scroll-behavior:smooth}
-.view{display:none;max-width:1320px;margin:0 auto}
+.content{position:relative;z-index:1;flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:4px clamp(14px,2vw,26px) 90px;scroll-behavior:smooth}
+.view{display:none;max-width:1300px;margin:0 auto}
 .view.on{display:block}
 .view.on>*{animation:rise .55s var(--ease) both}
 /* when GSAP drives entrances, the CSS entrance stands down (it remains the no-CDN fallback) */
@@ -123,29 +161,108 @@ html.gsap .view.on>*{animation:none}
 .view.on>*:nth-child(6){animation-delay:.25s}.view.on>*:nth-child(7){animation-delay:.3s}
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 
-/* ═══ PANELS — plate cards: hard 2px signal rule on top, hairline sides ═══ */
-.panel{position:relative;border:1px solid var(--line);border-radius:12px;
-  background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));
-  padding:22px;margin-bottom:18px;box-shadow:var(--sh-sm);overflow:hidden;
+/* ═══ PANELS — v2 glass cards: 22px radius, soft white-gradient fill ═══ */
+.panel{position:relative;border:1px solid rgba(255,255,255,.09);border-radius:22px;
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+  padding:20px;margin-bottom:18px;
   transition:border-color .25s var(--ease),transform .25s var(--ease),box-shadow .25s var(--ease)}
-.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;pointer-events:none;
-  background:linear-gradient(90deg,var(--ac),color-mix(in srgb,var(--ac) 22%,transparent) 55%,transparent 100%);opacity:.55}
-.panel:hover{border-color:var(--line2);box-shadow:var(--sh-md)}
+.panel:hover{border-color:rgba(255,255,255,.16)}
 .phead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:15px}
-.ptitle{font-family:var(--fd);font-size:15.5px;font-weight:700;letter-spacing:-.015em;display:flex;align-items:center;gap:9px}
+.ptitle{font-family:var(--fd);font-size:17px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
 .ptitle svg{width:15px;height:15px;color:var(--ac)}
 .ptag{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;color:var(--t3);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .grid2>.panel{margin-bottom:0}
 .gspan{margin-bottom:18px}
-/* ── Command Center bento: 12-col editorial grid at desk widths ── */
-@media(min-width:1100px){
-  #v-command.on{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;align-items:stretch}
-  #v-command.on>*{grid-column:span 12;margin-bottom:0}
-  #v-command.on>.ticker{margin-bottom:0}
-  #v-command.on>.pulsewrap{grid-column:span 8;min-height:380px;margin-bottom:0}
-  #v-command.on>.kpis{grid-column:span 4;grid-template-columns:1fr;gap:18px;margin-bottom:0}
-  #v-command.on .kpi{display:flex;flex-direction:column;justify-content:center}
+/* ═══ COMMAND V2 — hero grid (attention profile | arc gauge | coverage) ═══ */
+.hgrid{display:grid;grid-template-columns:250px 1fr 300px;gap:20px;align-items:start;margin-bottom:26px}
+.hcol{display:flex;flex-direction:column;gap:18px;padding-top:6px}
+.htitle{font-family:var(--fd);font-size:17px;font-weight:700;letter-spacing:-.02em}
+.hdesc{font-size:12.5px;line-height:1.55;color:var(--t2)}
+.hexr{width:100%;max-width:230px}
+/* centre gauge stage */
+.gstage{position:relative;min-height:430px}
+.gstage .hero3d{opacity:0}
+.gstage .hero3d.live{opacity:.55}
+.gview{position:relative;z-index:1}
+.garc{width:100%;display:block}
+.gcenter{position:absolute;left:0;right:0;top:40%;text-align:center;z-index:1;pointer-events:none}
+.gcenter .gnum{position:static;font-family:var(--fd);font-size:64px;font-weight:750;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums}
+.gcenter .glab{font-family:var(--fm);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--t2);margin-top:8px}
+.gcenter .gsub2{font-size:15px;color:var(--t1);margin-top:12px}
+/* floating topic callouts around the gauge */
+.tcall{position:absolute;display:flex;align-items:flex-start;gap:8px;z-index:2;cursor:pointer;background:none;border:none;text-align:left;padding:0}
+.tcall:hover .tc-n{color:var(--ac)}
+.tcall .tc-i{width:16px;height:16px;border-radius:5px;display:flex;align-items:center;justify-content:center;margin-top:3px;flex-shrink:0}
+.tcall .tc-i span{width:5px;height:5px;border-radius:50%;display:block}
+.tcall .tc-n{font-family:var(--fd);font-size:19px;font-weight:700;letter-spacing:-.02em;color:var(--t0);transition:color .15s}
+.tcall .tc-n i{font-style:normal;font-size:11px;color:var(--t2);margin-left:3px}
+.tcall .tc-l{font-size:11px;color:var(--t2);text-transform:capitalize}
+/* right column — coverage volume */
+.stat-pill{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.035);padding:14px 16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.stat-pill .row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.stat-pill .big{font-family:var(--fd);font-size:26px;font-weight:750;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.stat-pill .big i{font-style:normal;font-size:12px;font-weight:600;color:var(--t2);margin-left:5px}
+.stat-pill .st{display:flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap}
+.stat-pill .st b{width:12px;height:12px;border-radius:50%;display:block}
+.stat-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.08);margin-top:12px;overflow:hidden}
+.stat-bar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#C9992F,#F0CC7E);transition:width 1s var(--ease)}
+.volsvg{width:100%}
+.pillbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:9px 16px;
+  font-size:12.5px;font-weight:600;color:var(--t0);background:rgba(255,255,255,.04);cursor:pointer;transition:border-color .18s,background .18s}
+.pillbtn:hover{border-color:rgba(227,183,91,.5);background:rgba(227,183,91,.08)}
+.pillbtn svg{width:13px;height:13px}
+.pillbtn.sm{padding:6px 12px;font-size:11.5px;font-weight:400;color:var(--t1)}
+/* ═══ COMMAND V2 — insight card row ═══ */
+.igrid{display:grid;grid-template-columns:1fr 1.05fr 1.15fr;gap:18px;align-items:start;margin-bottom:26px}
+.icol{display:flex;flex-direction:column;gap:18px}
+.igrid .panel{margin-bottom:0}
+.bigstat{font-family:var(--fd);font-weight:750;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.bigstat i{font-style:normal;font-weight:600;color:var(--t2);margin-left:4px}
+.meter{position:relative;height:7px;border-radius:999px;background:linear-gradient(90deg,var(--pos),var(--ac) 50%,var(--neg))}
+.meter i{position:absolute;top:-4px;width:3px;height:15px;border-radius:2px;background:var(--t0);box-shadow:0 0 8px rgba(0,0,0,.6);transition:left 1s var(--ease)}
+.meter-l{display:flex;justify-content:space-between;font-family:var(--fm);font-size:9px;letter-spacing:.12em;color:var(--t3);margin-top:8px}
+.numchip{width:18px;height:18px;border-radius:50%;background:var(--x-ac-dim);color:var(--ac);font-family:var(--fm);font-size:10px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ins-row{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--t1)}
+.ins-row .sp{flex:1}
+.ins-row .mono{font-family:var(--fm)}
+.frame-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.frame-it{display:flex;align-items:center;gap:8px;border-top:1px solid rgba(255,255,255,.07);padding-top:10px;font-size:11.5px;color:var(--t1);
+  background:none;border-left:none;border-right:none;border-bottom:none;cursor:pointer;text-align:left;text-transform:capitalize}
+.frame-it:hover b{color:var(--ac)}
+.frame-it .c{color:var(--t3)}
+.frame-it b{font-weight:600;transition:color .15s}
+.sov-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid rgba(255,255,255,.09);border-radius:12px;
+  padding:11px 13px;background:rgba(255,255,255,.03);cursor:pointer;transition:border-color .15s,background .15s;width:100%;text-align:left}
+.sov-row:hover{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.05)}
+.sov-row .nm{font-size:12px;color:var(--t1);display:flex;align-items:center;min-width:0}
+.sov-row .nm b{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;flex-shrink:0}
+.sov-row .pc{font-family:var(--fm);font-size:12px;white-space:nowrap}
+.sov-row .pc i{font-style:normal;color:var(--t2);font-size:10px}
+.callout{border:1px solid rgba(227,183,91,.22);background:rgba(227,183,91,.07);border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.5;color:var(--t1)}
+.callout b{color:var(--t0)}
+.klabel2{font-family:var(--fm);font-size:9.5px;letter-spacing:.14em;color:var(--t3)}
+.chgchip{font-family:var(--fm);font-size:10.5px;border-radius:999px;padding:3px 8px;border:1px solid;white-space:nowrap}
+.chgchip.up{color:var(--neg);border-color:rgba(217,106,102,.3);background:rgba(217,106,102,.1)}
+.chgchip.dn{color:var(--pos);border-color:rgba(87,185,140,.3);background:rgba(87,185,140,.1)}
+.chgchip:empty{display:none}
+.bullets{display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.5;color:var(--t1)}
+.bullets>div{display:flex;gap:8px}
+.bullets .c{color:var(--t3)}
+.bullets b{color:var(--t0);font-weight:600}
+.fab{position:absolute;right:16px;bottom:-14px;width:46px;height:46px;border-radius:50%;border:none;cursor:pointer;
+  background:linear-gradient(140deg,#F0CC7E,#9C7A2E);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 24px -6px rgba(227,183,91,.6),0 2px 6px rgba(0,0,0,.5);transition:transform .2s var(--spring)}
+.fab:hover{transform:scale(1.07)}
+.fab svg{width:20px;height:20px;fill:#141006}
+@media(max-width:1100px){
+  .hgrid{grid-template-columns:1fr;gap:24px}
+  .hexr{max-width:260px}
+  .gstage{min-height:0}
+  .tcalls{position:static;display:flex;flex-wrap:wrap;gap:14px 22px;justify-content:center;margin-top:14px}
+  .tcall{position:static!important}
+  .igrid{grid-template-columns:1fr}
 }
 
 /* KPI plates */
@@ -431,55 +548,44 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .vis-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .vis-hint{font-size:11px;color:var(--t3)}
 
-/* national pulse + signals */
-.pulsewrap{display:flex;gap:28px;align-items:center}
-.pulsewrap{position:relative;overflow:hidden}
+/* 3D scene backdrop behind the arc gauge */
 .hero3d{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:0;transition:opacity 1.2s var(--x-ease);pointer-events:none}
 .hero3d.live{opacity:.9}
-.pulsewrap>*:not(.hero3d){position:relative;z-index:1}
 /* layered static fallback when WebGL/CDN is unavailable */
-.pulsewrap.hero-flat{background:
-  radial-gradient(70% 90% at 82% 10%,color-mix(in srgb,var(--x-ac) 7%,transparent),transparent 60%),
-  linear-gradient(180deg,var(--x-bg3),var(--x-bg2))}
+#pulsewrap.hero-flat{background:radial-gradient(60% 70% at 50% 40%,color-mix(in srgb,var(--x-ac) 6%,transparent),transparent 70%);border-radius:24px}
+.tcalls{position:absolute;inset:0;pointer-events:none;z-index:2}
+.tcall{pointer-events:auto}
+@media(max-width:1100px){
+  .gstage .tcalls{position:static;display:flex;flex-wrap:wrap;gap:14px 22px;justify-content:center;margin-top:14px;pointer-events:auto}
+  .gstage .tcall{position:static!important}
+}
 /* scroll-driven parallax reveal on the overview surface (native where supported) */
 @supports (animation-timeline: view()) {
-  #v-command .panel,#v-command .kpi{
+  #v-command .panel{
     animation:xViewIn linear both;animation-timeline:view();animation-range:entry 0% entry 55%;
   }
 }
 @keyframes xViewIn{from{opacity:.35;transform:translateY(26px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){
-  #v-command .panel,#v-command .kpi{animation:none}
+  #v-command .panel{animation:none}
   .hero3d{display:none}
 }
-.gauge{position:relative;width:230px;flex-shrink:0;text-align:center}
-.gsvg{width:100%;display:block}
-.gtrack{fill:none;stroke:var(--x-sur3);stroke-width:13;stroke-linecap:round}
-.gfill{fill:none;stroke:url(#ggrad);stroke-width:13;stroke-linecap:round;stroke-dasharray:283;stroke-dashoffset:283;transition:stroke-dashoffset 1.3s var(--ease);filter:drop-shadow(0 0 8px var(--glow))}
-.gnum{position:absolute;left:0;right:0;top:52px;font-family:var(--fd);font-size:40px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
-.glab{font-family:var(--fm);font-size:9px;letter-spacing:.2em;color:var(--t2);margin-top:-14px}
-.gsub{font-size:10.5px;color:var(--t3);margin-top:5px;line-height:1.45}
-.sigs{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
-.sig{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-left:3px solid var(--ac);border-radius:12px;background:var(--bg1);padding:11px 14px;animation:rise .45s var(--ease) both;transition:transform .18s var(--ease),border-color .18s}
-.sig:hover{transform:translateX(2px)}
-.sig.pos{border-left-color:var(--pos)}.sig.neg{border-left-color:var(--neg)}.sig.amb{border-left-color:var(--amb)}
-.sig-k{font-family:var(--fm);font-size:8.5px;letter-spacing:.12em;color:var(--t3);flex-shrink:0;width:58px}
-.sig-t{font-size:12.5px;color:var(--t1);line-height:1.45;min-width:0}
-.sig-t b{color:var(--t0)}
-.spike{display:inline-flex;align-items:center;gap:4px;font-family:var(--fm);font-size:9.5px;color:var(--amb);background:rgba(245,177,92,.1);border-radius:6px;padding:2px 7px;margin-left:6px;vertical-align:2px}
+/* live arc gauge fill — dash length set by JS (arc length ≈ 377) */
+.gfill{transition:stroke-dasharray 1.3s var(--ease);filter:drop-shadow(0 0 10px rgba(227,183,91,.35))}
 
 /* situation room (kiosk) */
 body.kiosk .rail,body.kiosk .tabs,body.kiosk .kbd,body.kiosk #refbtn{display:none!important}
-body.kiosk .shell{grid-template-columns:1fr}
+body.kiosk .shell{padding:0}
+body.kiosk .main{border-radius:0;border:none}
+body.kiosk .main::before{border-radius:0}
 body.kiosk .content{padding:30px 36px 44px}
-body.kiosk .top{background:rgba(7,7,8,.88)}
 body.kiosk{cursor:none}
 body.kiosk .kexit{display:flex}
 .kexit{display:none;position:fixed;top:14px;right:14px;z-index:400;align-items:center;gap:8px;font-family:var(--fm);font-size:9px;
   letter-spacing:.12em;color:var(--t2);border:1px solid var(--line);background:rgba(5,7,13,.72);border-radius:999px;padding:8px 14px;cursor:pointer}
 .kprog{position:fixed;top:0;left:0;height:2px;background:var(--acg);width:0;z-index:401;display:none;box-shadow:0 0 10px var(--glow)}
 body.kiosk .kprog{display:block}
-@media(max-width:820px){.pulsewrap{flex-direction:column}.gauge{width:210px}}
+@media(max-width:820px){.gcenter .gnum{font-size:46px}}
 
 /* boot splash */
 .splash{position:fixed;inset:0;z-index:300;background:radial-gradient(ellipse 90% 60% at 50% 40%,var(--x-bg2),var(--x-bg0));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .5s,visibility .5s}
@@ -491,8 +597,8 @@ body.kiosk .kprog{display:block}
 .splash .sline{font-family:var(--fm);font-size:9.5px;letter-spacing:.22em;color:var(--t2);text-transform:uppercase;animation:blink 1.6s ease infinite}
 
 /* live ticker */
-.ticker{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:13px;background:var(--bg1);
-  padding:10px 14px;margin-bottom:16px;overflow:hidden;box-shadow:var(--sh-sm)}
+.ticker{display:flex;align-items:center;gap:12px;border:1px solid rgba(255,255,255,.09);border-radius:16px;background:rgba(255,255,255,.03);
+  padding:10px 14px;margin-bottom:20px;overflow:hidden}
 .ticker-b{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;color:var(--neg);border:1px solid rgba(255,90,120,.3);
   background:rgba(255,90,120,.09);border-radius:6px;padding:3px 9px;flex-shrink:0;animation:blink 1.6s ease infinite}
 .ticker-vp{flex:1;overflow:hidden;min-width:0}
@@ -567,19 +673,18 @@ body.kiosk .kprog{display:block}
   .trgrid{grid-template-columns:1fr}
 }
 @media(max-width:820px){
-  .shell{grid-template-columns:1fr}
-  .rail{display:none}
+  .shell{padding:0}
+  .main{border-radius:0;border:none}
+  .main::before{border-radius:0}
   .tabs{display:block}
-  .content{padding:18px 15px 122px}
-  .top{padding:0 15px}
-  .top-sub{display:none}
-  .top .kbd{display:none}
-  .top>div:first-child{flex:1 1 auto}
-  .top-title{letter-spacing:.12em;min-width:0;flex:0 1 auto}
-  .clock{display:none}
-  .kval{font-size:25px}
-  .kspark{width:60px}
-  .chatwrap{height:calc(100dvh - var(--top) - 148px)}
+  .rail{padding:12px 15px 2px;gap:10px}
+  .logo{font-size:19px}
+  .hswitch,.kbd,.clock{display:none}
+  .rnav{display:none}
+  .content{padding:4px 15px 132px}
+  .top{padding:2px 15px 12px}
+  .top-title{font-size:21px}
+  .chatwrap{height:calc(100dvh - var(--mast) - var(--top) - 158px)}
 }
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
@@ -879,33 +984,45 @@ body.kiosk .kprog{display:block}
 </div>
 
 <div class="shell">
-  <!-- RAIL -->
-  <nav class="rail" aria-label="Primary">
-    <div class="logo">AXIOM</div>
-    <button class="rbtn on" data-v="command" onclick="go('command')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="rtip">Command Center</span></button>
-    <button class="rbtn" data-v="news" onclick="go('news')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg><span class="rtip">Newsroom</span></button>
-    <button class="rbtn" data-v="pulse" onclick="go('pulse')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="rtip">Pulse — Search &amp; Social</span></button>
-    <button class="rbtn" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="rtip">Radar — Media Analytics</span></button>
-    <button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">AXIOM Analyst</span></button>
-    <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Daily Briefing</span></button>
-    <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Client Central</span></button>
-    <div class="spacer"></div>
-    <button class="rbtn" onclick="openSettings()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m8.5-12.5h4m-25 0h4m14.8-6.3l-2.8 2.8M6.5 17.5l-2.8 2.8m16.6 0l-2.8-2.8M6.5 6.5L3.7 3.7"/></svg><span class="rtip">Settings</span></button>
-  </nav>
-
-  <!-- MAIN -->
   <div class="main">
-    <header class="top">
-      <div>
-        <div class="top-title" id="vtitle">Command Center</div>
-        <div class="top-sub">AXIOM · AUSTRALIAN POLITICAL INTELLIGENCE</div>
+    <!-- MASTHEAD — wordmark · live media-pressure pill · utilities -->
+    <nav class="rail" aria-label="Masthead">
+      <div class="logo">AXIOM</div>
+      <div class="mp-pill" title="Media pressure — coverage-volume intensity of the AU political wire vs its 7-day baseline (GDELT)">
+        <div class="mp-seg"><div class="mp-bars" id="mp-bars" aria-hidden="true"></div><span class="mp-badge" id="mp-delta">— pts</span></div>
+        <div class="mp-div"></div>
+        <div class="mp-seg"><span class="mp-l">Media pressure</span><span class="mp-n" id="mp-now">—</span><span class="mp-u">idx</span></div>
+        <div class="mp-div"></div>
+        <div class="mp-seg base"><span class="mp-l">7-day baseline</span><span class="mp-n" id="mp-base">—</span><span class="mp-u">idx</span></div>
+        <div class="mp-div"></div>
+        <div class="mp-blurb" id="mp-blurb">Reading the national wire…</div>
       </div>
+      <div class="spacer"></div>
       <div class="live"><i></i>LIVE</div>
       <div class="clock" id="clock">—</div>
       <span class="kbd" onclick="palOpen()" title="Command palette">⌘K</span>
-      <button class="icobtn" onclick="kiosk(true)" title="Situation Room — full-screen auto-cycling display" aria-label="Situation Room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
-      <button class="icobtn" id="refbtn" onclick="refreshAll()" title="Refresh all data" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
-      <button class="icobtn" onclick="openSettings()" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4m8.5-12.5h4m-25 0h4m14.8-6.3l-2.8 2.8M6.5 17.5l-2.8 2.8m16.6 0l-2.8-2.8M6.5 6.5L3.7 3.7"/></svg></button>
+      <button class="hbell" id="refbtn" onclick="refreshAll()" title="Refresh all data" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+      <button class="hbell" id="hbell" onclick="goMonitors()" title="Monitors — saved-query alerts" aria-label="Monitor alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="dot"></span></button>
+      <button class="hswitch" onclick="kiosk(true)" title="Situation Room — full-screen auto-cycling display" aria-label="Situation Room"><i></i></button>
+      <button class="havatar" onclick="openSettings()" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg></button>
+    </nav>
+
+    <!-- TITLE ROW — screen name · status · primary nav -->
+    <header class="top">
+      <div>
+        <div class="top-title" id="vtitle">National Pulse</div>
+        <span class="vtag" id="vtag"></span>
+      </div>
+      <div class="spacer" style="flex:1"></div>
+      <nav class="rnav" aria-label="Primary">
+        <button class="rbtn on" data-v="command" onclick="go('command')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="rtip">Command</span></button>
+        <button class="rbtn" data-v="news" onclick="go('news')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg><span class="rtip">Newsroom</span></button>
+        <button class="rbtn" data-v="pulse" onclick="go('pulse')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="rtip">Pulse</span></button>
+        <button class="rbtn" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="rtip">Radar</span></button>
+        <button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">Analyst</span></button>
+        <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Briefing</span></button>
+        <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
+      </nav>
     </header>
 
     <div class="content" id="content">
@@ -914,35 +1031,135 @@ body.kiosk .kprog{display:block}
       <section class="view on" id="v-command">
         <div class="ticker"><span class="ticker-b">BREAKING WIRE</span><div class="ticker-vp"><div class="ticker-tk" id="ticker"><a>Loading the national wire…</a></div></div></div>
 
-        <div class="panel gspan pulsewrap" id="pulsewrap"><canvas id="hero3d" class="hero3d" aria-hidden="true"></canvas>
-          <div class="gauge">
-            <svg class="gsvg" viewBox="0 0 200 118">
-              <defs><linearGradient id="ggrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stop-color="#57B98C"/><stop offset="55%" stop-color="#E3B75B"/><stop offset="100%" stop-color="#D96A66"/>
-              </linearGradient></defs>
-              <path class="gtrack" d="M20 108 A 90 90 0 0 1 180 108"/>
-              <path class="gfill" id="gfill" d="M20 108 A 90 90 0 0 1 180 108"/>
+        <!-- ═══ HERO — attention profile · pulse gauge · coverage volume ═══ -->
+        <div class="hgrid">
+          <div class="hcol">
+            <div>
+              <div class="htitle">Attention profile</div>
+              <div class="hdesc" style="margin-top:6px">How the national conversation is distributed across the six signals AXIOM tracks.</div>
+            </div>
+            <svg class="hexr" viewBox="0 0 220 220" role="img" aria-label="Six-signal attention radar">
+              <polygon points="110,30 179.3,70 179.3,150 110,190 40.7,150 40.7,70" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="1"/>
+              <polygon points="110,56.7 156.2,83.3 156.2,136.7 110,163.3 63.8,136.7 63.8,83.3" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="1"/>
+              <polygon points="110,83.3 133.1,96.7 133.1,123.3 110,136.7 86.9,123.3 86.9,96.7" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+              <g stroke="rgba(255,255,255,.06)"><line x1="110" y1="110" x2="110" y2="30"/><line x1="110" y1="110" x2="179.3" y2="70"/><line x1="110" y1="110" x2="179.3" y2="150"/><line x1="110" y1="110" x2="110" y2="190"/><line x1="110" y1="110" x2="40.7" y2="150"/><line x1="110" y1="110" x2="40.7" y2="70"/></g>
+              <g id="hexr-data"></g>
+              <text x="110" y="20" text-anchor="middle" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">VOLUME</text>
+              <text x="186" y="64" text-anchor="start" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">TONE</text>
+              <text x="186" y="156" text-anchor="start" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">SEARCH</text>
+              <text x="110" y="206" text-anchor="middle" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">SOCIAL</text>
+              <text x="34" y="156" text-anchor="end" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">REACH</text>
+              <text x="34" y="64" text-anchor="end" fill="#8F8B81" font-size="9" font-family="Spline Sans Mono, monospace">PICKUP</text>
             </svg>
-            <div class="gnum" id="gnum">—</div>
-            <div class="glab">NATIONAL PULSE</div>
-            <div class="gsub" id="gsub">composite of coverage volume, social velocity &amp; tone intensity</div>
           </div>
-          <div class="sigs" id="sigs">
-            <div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div><div class="skel" style="height:44px"></div>
+
+          <div class="gstage" id="pulsewrap">
+            <canvas id="hero3d" class="hero3d" aria-hidden="true"></canvas>
+            <div class="gview">
+            <svg class="garc" viewBox="0 0 520 320" aria-hidden="true">
+              <defs><linearGradient id="v2-arc" x1="0" y1="1" x2="1" y2="0">
+                <stop offset="0%" stop-color="#C9992F"/><stop offset="60%" stop-color="#F0CC7E"/><stop offset="100%" stop-color="#F7E3B4"/>
+              </linearGradient></defs>
+              <path d="M20 280 A 240 240 0 0 1 500 280" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 9"/>
+              <path d="M55 280 A 205 205 0 0 1 465 280" fill="none" stroke="rgba(255,255,255,.11)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 11"/>
+              <path d="M95 280 A 165 165 0 0 1 425 280" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 13"/>
+              <path d="M140 280 A 120 120 0 0 1 380 280" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="13" stroke-linecap="round"/>
+              <path d="M140 280 A 120 120 0 0 1 380 280" fill="none" stroke="url(#v2-arc)" stroke-width="13" stroke-linecap="round" class="gfill" id="gfill" stroke-dasharray="0 377"/>
+              <circle id="gdot" cx="140" cy="280" r="6" fill="#F7E3B4" style="filter:drop-shadow(0 0 8px rgba(240,204,126,.8));transition:cx 1.3s var(--ease),cy 1.3s var(--ease)"/>
+            </svg>
+            <div class="gcenter">
+              <div class="gnum" id="gnum">—</div>
+              <div class="glab">National pulse index</div>
+              <div class="gsub2" id="gsub">composite of coverage volume, social velocity &amp; tone intensity</div>
+            </div>
+            </div>
+            <div class="tcalls" id="tcalls"></div>
           </div>
-        </div>
-        <div class="kpis">
-          <div class="kpi"><div class="klabel">Stories · 24h</div><div class="kval" id="k-stories">—</div><div class="ksub" id="k-stories-s">across the AU press</div><canvas class="kspark" id="sp-stories" width="152" height="60"></canvas></div>
-          <div class="kpi pos"><div class="klabel">Top Search Signal</div><div class="kval" id="k-trend" style="font-size:19px;line-height:1.2">—</div><div class="ksub" id="k-trend-s">Google Trends AU</div></div>
-          <div class="kpi vio"><div class="klabel">Social Velocity</div><div class="kval" id="k-social">—</div><div class="ksub" id="k-social-s">#auspol posts / hour</div><canvas class="kspark" id="sp-social" width="152" height="60"></canvas></div>
-          <div class="kpi amb"><div class="klabel">Media Tone · 7d</div><div class="kval" id="k-tone">—</div><div class="ksub" id="k-tone-s">GDELT avg tone</div><canvas class="kspark" id="sp-tone" width="152" height="60"></canvas></div>
+
+          <div class="hcol">
+            <div class="stat-pill">
+              <div class="row">
+                <div class="big"><span id="k-stories">—</span><i>stories</i></div>
+                <div class="st" id="st-status"><b style="background:var(--t3)"></b>Reading…</div>
+              </div>
+              <div class="stat-bar"><i id="st-bar"></i></div>
+              <div class="hdesc" id="k-stories-s" style="margin-top:10px;font-size:11.5px">across the AU press · 24h</div>
+            </div>
+            <div>
+              <div class="htitle">Coverage volume</div>
+              <div class="hdesc" id="vol-desc" style="margin-top:6px">Volume across the AU political press over the past seven days.</div>
+            </div>
+            <svg class="volsvg" id="volsvg" viewBox="0 0 280 150" role="img" aria-label="Seven-day coverage volume"></svg>
+            <div style="display:flex;justify-content:flex-end">
+              <button class="pillbtn" onclick="go('radar')">Open Radar
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div class="panel gspan">
-          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>Election Read</div><span class="ptag" id="er-tag">MEDIA-SIGNAL · 72H</span></div>
-          <div id="er-read" class="er-read"><div class="skel" style="height:22px;max-width:80%"></div></div>
-          <div id="er-board"><div class="skel" style="height:46px;margin-top:12px"></div><div class="skel" style="height:46px;margin-top:8px"></div></div>
-          <div class="note" id="er-note" style="margin-top:12px">Share-of-voice × headline tone × momentum across AU political news. A media-signal indicator — not a voting-intention poll.</div>
+        <!-- ═══ INSIGHT ROW — election read · share of voice · tone &amp; risk ═══ -->
+        <div class="igrid">
+          <div class="icol">
+            <div class="panel">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+                <div class="htitle">Election read</div>
+                <button class="pillbtn sm" onclick="go('brief')">View report
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="9 6 15 12 9 18"/></svg>
+                </button>
+              </div>
+              <div class="hdesc" id="er-read" style="margin-top:8px">Reading the wire…</div>
+              <div style="display:flex;align-items:baseline;gap:12px;margin-top:16px;flex-wrap:wrap">
+                <div class="bigstat" style="font-size:30px" id="er-a">—</div>
+                <div class="bigstat" style="font-size:22px;color:var(--t1)" id="er-b"></div>
+                <div style="flex:1"></div>
+                <div class="st" id="er-status" style="display:flex;align-items:center;gap:6px;font-size:11.5px"></div>
+              </div>
+              <div class="meter" style="margin-top:14px"><i id="er-marker" style="left:50%"></i></div>
+              <div class="meter-l"><span>SETTLED</span><span>CONTESTED</span><span>VOLATILE</span></div>
+              <div class="note" id="er-note" style="margin-top:10px">Share-of-voice × headline tone × momentum across AU political news. A media-signal indicator — not a voting-intention poll.</div>
+              <span class="ptag" id="er-tag" hidden></span>
+            </div>
+            <div class="panel">
+              <div class="htitle">Narrative markers</div>
+              <div class="ins-row" style="margin-top:12px"><span class="numchip">1</span>Frames gaining ground <span class="sp"></span><span class="mono" style="font-size:10px;color:var(--t3)" id="frames-tag"></span></div>
+              <div class="frame-grid" id="frames"><div class="empty" style="grid-column:1/-1">Frames appear as live headlines land.</div></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="htitle">Share of voice</div>
+            <div style="display:flex;gap:18px;margin-top:16px">
+              <div style="width:96px;flex-shrink:0">
+                <div class="hdesc" style="font-size:12px">Party mentions, last 72h</div>
+                <div class="bigstat" style="font-size:26px;margin-top:10px" id="sov-count">—</div>
+                <div style="font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:4px">TOTAL</div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:0" id="sov-list"><div class="empty">Party coverage lands with the wire.</div></div>
+            </div>
+            <div id="sov-ins"></div>
+          </div>
+
+          <div class="panel" style="position:relative">
+            <div class="htitle">Tone &amp; risk</div>
+            <div class="hdesc" style="margin-top:8px;color:var(--t1)">Headline tone index — AU political press</div>
+            <div style="display:flex;gap:26px;align-items:flex-start;margin-top:16px">
+              <div><div class="klabel2">SCORE</div><div class="bigstat" style="font-size:24px;margin-top:4px" id="tr-score">—</div></div>
+              <div><div class="klabel2">POSITION</div><div class="bigstat" style="font-size:24px;margin-top:4px" id="tr-pct">—</div></div>
+              <div style="flex:1;padding-top:6px;min-width:90px">
+                <div class="meter"><i id="tr-marker" style="left:50%"></i></div>
+                <div class="meter-l" style="letter-spacing:0;font-size:8.5px"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+              </div>
+            </div>
+            <div class="callout" id="tr-callout" style="margin-top:16px">The tone read lands with the first GDELT sync.</div>
+            <div style="display:flex;align-items:baseline;gap:10px;margin-top:16px">
+              <div style="font-size:12.5px;color:var(--t1)">Change over the week</div><div style="flex:1"></div>
+              <div style="font-family:var(--fm);font-size:12px" id="tr-chg">—</div>
+              <span id="tr-chgpct"></span>
+            </div>
+            <div class="bullets" id="tr-bullets" style="margin-top:12px"></div>
+            <button class="fab" onclick="go('analyst')" title="Ask AXIOM Analyst" aria-label="Ask AXIOM Analyst"><svg viewBox="0 0 24 24"><path d="M12 3l1.7 5.3a2 2 0 0 0 1.2 1.2L20.2 11l-5.3 1.7a2 2 0 0 0-1.2 1.2L12 19.2l-1.7-5.3a2 2 0 0 0-1.2-1.2L3.8 11l5.3-1.7a2 2 0 0 0 1.2-1.2z"/></svg></button>
+          </div>
         </div>
 
         <div class="panel gspan">
@@ -951,17 +1168,13 @@ body.kiosk .kprog{display:block}
           <div id="priority"><div class="skel" style="height:60px;margin-bottom:8px"></div><div class="skel" style="height:60px"></div></div>
         </div>
 
-        <div class="grid2 gspan">
-          <div class="panel">
-            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Narrative Radar</div><span class="ptag">LIVE HEADLINE ANALYSIS</span></div>
-            <div id="narrative"><div class="skel" style="height:180px"></div></div>
-          </div>
-          <div class="panel">
-            <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>Share of Voice</div><span class="ptag" id="sov-total">PARTY MENTIONS · 72H</span></div>
-            <div class="sovstack" id="sov-stack" role="img" aria-label="Share of voice by party"></div>
-            <div id="ptybars" style="margin-top:16px"></div>
-            <div class="note" style="margin-top:12px">Tap a party for its full coverage profile — tone split, top outlets, day-over-day movement.</div>
-          </div>
+        <!-- hidden compat sinks for loaders that still address the old KPI ids -->
+        <div hidden aria-hidden="true">
+          <span id="k-trend"></span><span id="k-trend-s"></span>
+          <span id="k-social"></span><span id="k-social-s"></span>
+          <span id="k-tone"></span><span id="k-tone-s"></span>
+          <canvas id="sp-stories" width="10" height="10"></canvas><canvas id="sp-social" width="10" height="10"></canvas><canvas id="sp-tone" width="10" height="10"></canvas>
+          <span id="narrative"></span><span id="sov-total"></span><span id="sov-stack"></span><span id="ptybars"></span><span id="sigs"></span><span id="er-board"></span>
         </div>
 
         <div class="grid2 gspan">
@@ -1465,7 +1678,8 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'Command Center',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',clients:'Client Central'}[v]||'AXIOM';
+  const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   $('content').scrollTop=0;
   if(v==='radar'&&!state.charts.at)loadAt();
   if(v==='clients')ccInit();
@@ -1501,10 +1715,22 @@ function renderIntel(){
   const pulse=Math.max(0,Math.min(100,Math.round(volR/2*38+Math.min(vel,30)/30*32+Math.min(Math.abs(toneAvg),6)/6*30)));
   const gf=$('gfill');
   if(gf&&(day.length||state.tone.length||vel)){
-    gf.style.strokeDashoffset=String(283*(1-pulse/100));
+    state.pulse=pulse;
+    // arc: 120-radius half circle, length ≈ 377; endpoint dot rides the fill
+    gf.setAttribute('stroke-dasharray',(pulse/100*377).toFixed(1)+' 377');
+    const th=Math.PI*(1-pulse/100);
+    const gd=$('gdot');if(gd){gd.setAttribute('cx',(260+120*Math.cos(th)).toFixed(1));gd.setAttribute('cy',(280-120*Math.sin(th)).toFixed(1));}
     countUp($('gnum'),pulse);
     const drivers=[['coverage volume',volR/2],['social velocity',Math.min(vel,30)/30],['tone intensity',Math.min(Math.abs(toneAvg),6)/6]].sort((a,b)=>b[1]-a[1]);
-    $('gsub').textContent=(pulse>=66?'RUNNING HOT':pulse>=40?'ELEVATED CYCLE':'STEADY CYCLE')+' · led by '+drivers[0][0];
+    $('gsub').textContent='Your national attention index · led by '+drivers[0][0];
+    state.pulseTag=pulse>=66?'Running hot':pulse>=40?'Elevated':'Steady';
+    const vt=$('vtag');if(vt&&state.view==='command')vt.textContent=state.pulseTag;
+    // six-signal attention radar (left column of the hero)
+    const srcs=new Set(state.news.map(n=>n.src)).size;
+    renderHex([volR/2,Math.min(Math.abs(toneAvg),6)/6,state.trends.length?Math.min(trafficNum(state.trends[0].traffic)/80e3,1):0,
+      Math.min(vel,30)/30,Math.min(srcs/40,1),Math.min(clusterNews(state.news).length/8,1)]);
+    renderTopics(day.length?day:state.news);
+    renderPressure();renderVolLine();
   }
 
   // ── Signal Spikes: keywords surging vs the previous 24h
@@ -1538,10 +1764,112 @@ function renderIntel(){
   }
   if(state.trends.length)sigs.push({k:'SEARCH',c:'neu',t:'Australia is searching <b>'+esc(state.trends[0].term)+'</b>'+(state.trends[0].traffic?' ('+esc(state.trends[0].traffic)+')':'')+' right now'});
   if(vel>=10)sigs.push({k:'SOCIAL',c:'amb',t:'High chatter — <b>'+vel+'</b> #'+esc(state.tag)+' posts in the last hour'});
-  $('sigs').innerHTML=sigs.length?sigs.slice(0,5).map((s,i)=>
-    '<div class="sig '+(s.c||'')+'" style="animation-delay:'+(i*70)+'ms"><span class="sig-k">'+s.k+'</span><span class="sig-t">'+s.t+'</span></div>').join('')
-    :'<div class="empty">Signals appear as live data lands.</div>';
+  const tb=$('tr-bullets');
+  if(tb)tb.innerHTML=sigs.length?sigs.slice(0,3).map(s=>
+    '<div><span class="c">›</span><span>'+s.t+'</span></div>').join('')
+    :'<div><span class="c">›</span>Signals appear as live data lands.</div>';
+  renderToneCard();
 }
+/* ── COMMAND V2 helpers — every figure below is computed from live state ── */
+function trafficNum(s){
+  const m=String(s||'').match(/([\d.]+)\s*([KM]?)/i);if(!m)return 0;
+  return parseFloat(m[1])*(m[2].toUpperCase()==='M'?1e6:m[2].toUpperCase()==='K'?1e3:1);
+}
+/* hex radar — values are 0..1 in axis order VOLUME/TONE/SEARCH/SOCIAL/REACH/PICKUP */
+function renderHex(vals){
+  const g=document.getElementById('hexr-data');if(!g)return;
+  const ang=[90,30,-30,-90,-150,150].map(a=>a*Math.PI/180);
+  const pts=vals.map((v,i)=>{
+    const r=80*Math.max(.12,Math.min(v||0,1));
+    return [(110+r*Math.cos(ang[i])).toFixed(1),(110-r*Math.sin(ang[i])).toFixed(1)];
+  });
+  g.innerHTML='<polygon points="'+pts.map(p=>p.join(',')).join(' ')+'" fill="rgba(227,183,91,.16)" stroke="#E3B75B" stroke-width="1.6" stroke-linejoin="round"/>'+
+    pts.map(p=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2.6" fill="#F0CC7E"/>').join('');
+}
+/* floating topic callouts — top headline frames with share of keyword mentions */
+const TC_POS=[['left:6%;top:44%'],['left:11%;top:22%'],['left:31%;top:8%'],['right:26%;top:12%'],['right:4%;top:30%'],['right:3%;top:52%']];
+const TC_COL=['#D96A66','#D98E4A','#E3B75B','#57B98C','#7D9DC4','#8F8B81'];
+function renderTopics(items){
+  const el=$('tcalls');if(!el)return;
+  const kw=keywords(items,6);
+  const tot=kw.reduce((a,[,n])=>a+n,0);
+  if(!kw.length||!tot){el.innerHTML='';return;}
+  el.innerHTML=kw.map(([w,n],i)=>{
+    const pct=(n/tot*100).toFixed(1);
+    return '<button class="tcall" style="'+TC_POS[i][0]+'" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar">'+
+      '<span class="tc-i" style="background:'+TC_COL[i]+'29"><span style="background:'+TC_COL[i]+'"></span></span>'+
+      '<span><span class="tc-n">'+pct+'<i>%</i></span><span class="tc-l" style="display:block">'+esc(w)+'</span></span></button>';
+  }).join('');
+}
+/* masthead media-pressure pill — GDELT 7d volume intensity vs its own mean */
+function renderPressure(){
+  const v=state.vol||[];if(v.length<4)return;
+  const mx=Math.max(...v)||1;
+  const nowIdx=Math.round(v[v.length-1]/mx*100);
+  const base=Math.round(v.reduce((a,b)=>a+b,0)/v.length/mx*100);
+  const d=nowIdx-base;
+  const el=(id)=>$(id);
+  if(el('mp-now'))el('mp-now').textContent=nowIdx;
+  if(el('mp-base'))el('mp-base').textContent=base;
+  if(el('mp-delta'))el('mp-delta').textContent=(d>=0?'+':'')+d+' pts';
+  if(el('mp-blurb'))el('mp-blurb').innerHTML=base?('The national wire is running <b>'+Math.abs(Math.round(d/base*100))+'% '+(d>=0?'hotter':'cooler')+'</b> than its seven-day baseline'):'';
+  const bars=el('mp-bars');
+  if(bars){
+    const last=v.slice(-7),bmx=Math.max(...last)||1;
+    bars.innerHTML=last.map((b,i)=>'<span style="height:'+Math.max(3,Math.round(b/bmx*24))+'px;opacity:'+(0.35+i/last.length*.65).toFixed(2)+'"></span>').join('');
+  }
+}
+/* tone & risk card — GDELT 7d tone series */
+function renderToneCard(){
+  const t=state.tone||[];if(!t.length)return;
+  const avg=t.reduce((a,b)=>a+b,0)/t.length;
+  const sc=$('tr-score');if(sc)sc.innerHTML=(avg>=0?'+':'−')+Math.abs(avg).toFixed(1)+'<i>tone</i>';
+  // position on a −6…+6 tone scale, mapped so critical coverage reads high
+  const pct=Math.max(2,Math.min(98,Math.round(50-avg/6*50)));
+  const pp=$('tr-pct');if(pp)pp.innerHTML=pct+'<i>'+(pct%10===1&&pct!==11?'st':pct%10===2&&pct!==12?'nd':pct%10===3&&pct!==13?'rd':'th')+'</i>';
+  const mk=$('tr-marker');if(mk)mk.style.left=pct+'%';
+  const co=$('tr-callout');
+  if(co)co.innerHTML=avg<=-1.5?'Tone sits at <b>'+pct+'</b> on the risk scale — sustained critical framing across the political press.':
+    avg<0?'Tone is mildly critical (<b>'+pct+'</b> on the risk scale) — contested but not hostile coverage.':
+    'Tone is net favourable — coverage risk is low (<b>'+pct+'</b> on the risk scale).';
+  if(t.length>3){
+    const half=Math.floor(t.length/2);
+    const a=t.slice(0,half).reduce((x,y)=>x+y,0)/half;
+    const b2=t.slice(half).reduce((x,y)=>x+y,0)/(t.length-half);
+    const d=b2-a;
+    const ch=$('tr-chg');if(ch)ch.innerHTML=Math.abs(d).toFixed(2)+'<span style="color:var(--t2);font-size:10px"> pts</span>';
+    const cp=$('tr-chgpct');
+    if(cp){const rel=Math.abs(a)>.05?Math.round(Math.abs(d/a)*100):null;
+      // souring tone (d<0) is the risk direction — red chip
+      cp.className='chgchip '+(d<0?'up':'dn');
+      cp.textContent=(d<0?'↓ ':'↑ ')+(rel!==null?rel+'%':Math.abs(d).toFixed(1));}
+  }
+}
+/* coverage-volume line — GDELT 7d volume sampled to one point per day */
+function renderVolLine(){
+  const el=$('volsvg');if(!el)return;
+  const v=state.vol||[];
+  if(v.length<4){el.innerHTML='<text x="140" y="78" text-anchor="middle" fill="#5C5952" font-size="10" font-family="Spline Sans Mono, monospace">VOLUME TREND LANDS WITH THE FIRST GDELT SYNC</text>';return;}
+  const P=7,chunk=Math.max(1,Math.floor(v.length/P));
+  const pts=[];for(let i=0;i<P;i++){const s=v.slice(i*chunk,i===P-1?v.length:(i+1)*chunk);if(s.length)pts.push(s.reduce((a,b)=>a+b,0)/s.length);}
+  const mx=Math.max(...pts)||1,mn=Math.min(...pts);
+  const X=i=>44+i/(pts.length-1)*224,Y=p=>124-((p-mn)/((mx-mn)||1))*96;
+  const days=[];for(let i=pts.length-1;i>=0;i--){days.push(i===0?'NOW':new Date(Date.now()-i*86400e3).toLocaleDateString('en-AU',{weekday:'short'}).toUpperCase());}
+  const fmt=x=>x>=1?x.toFixed(1):x.toFixed(2);
+  el.innerHTML=[16,52,88,124].map((y,i)=>'<line x1="34" y1="'+y+'" x2="272" y2="'+y+'" stroke="rgba(255,255,255,'+(i===3?'.08':'.05')+')"/>'+
+      '<text x="26" y="'+(y+4)+'" text-anchor="end" fill="#5C5952" font-size="8" font-family="Spline Sans Mono, monospace">'+fmt(mx-(mx-mn)*i/3)+'</text>').join('')+
+    '<polyline points="'+pts.map((p,i)=>X(i).toFixed(0)+','+Y(p).toFixed(0)).join(' ')+'" fill="none" stroke="#E3B75B" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'+
+    pts.map((p,i)=>i===pts.length-1
+      ?'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3.6" fill="#F0CC7E"/>'
+      :'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3" fill="#0C0C0E" stroke="#E3B75B" stroke-width="2"/>').join('')+
+    days.map((d2,i)=>'<text x="'+X(i).toFixed(0)+'" y="142" text-anchor="middle" fill="#5C5952" font-size="8" font-family="Spline Sans Mono, monospace">'+d2+'</text>').join('');
+  const vd=$('vol-desc');
+  if(vd){const nowV=pts[pts.length-1],avgV=pts.reduce((a,b)=>a+b,0)/pts.length;
+    vd.textContent=nowV>avgV*1.15?'Volume across the AU press is tracking well above its weekly average.':
+      nowV<avgV*.85?'Volume across the AU press is tracking below its weekly average.':
+      'Volume across the AU press is tracking near its weekly average.';}
+}
+function goMonitors(){go('command');setTimeout(function(){const m=$('mon-list');if(m)m.scrollIntoView({behavior:'smooth',block:'center'});},80);}
 async function loadCore(){
   try{
     const d=await api('/allnews?max=110');
@@ -1597,6 +1925,7 @@ async function loadTone(){
       spark('sp-tone',state.tone,avg>=0?'#22D993':'#FF5470');
     }
     if(state.vol.length)spark('sp-stories',state.vol,'#5B8CFF');
+    renderToneCard();renderVolLine();renderPressure();
   }catch(e){$('k-tone').textContent='—';}
 }
 
@@ -1609,7 +1938,16 @@ function renderKpiStories(){
   const srcs=new Set(state.news.map(n=>n.src)).size;
   let delta='';
   if(day&&prev){const pc=Math.round((day-prev)/prev*100);delta=' <span class="kdelta '+(pc>=0?'up':'dn')+'">'+(pc>=0?'▲':'▼')+Math.abs(pc)+'%</span>';}
-  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets'+delta;
+  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets · 24h'+delta;
+  // status + fill on the stories stat pill
+  const pc=prev?Math.round((day-prev)/prev*100):0;
+  const st=$('st-status');
+  if(st){
+    const lvl=pc>=50?['Surging','var(--neg)']:pc>=15?['Elevated','var(--amb)']:pc<=-15?['Quiet','var(--info)']:['Steady','var(--pos)'];
+    st.innerHTML='<b style="background:'+lvl[1]+'"></b><span style="color:'+lvl[1]+'">'+lvl[0]+'</span>';
+  }
+  const sb=$('st-bar');
+  if(sb){const w=Math.min(100,Math.round((day||state.news.length)/(Math.max(day,prev,1)*1.25)*100));requestAnimationFrame(()=>{sb.style.width=w+'%';});}
 }
 function renderTicker(){
   const t=$('ticker');if(!t)return;
@@ -1637,34 +1975,43 @@ function keywords(items,n){
   return phrases.concat(singles).slice(0,n);
 }
 function renderNarrative(){
-  const kw=keywords(state.news,10);
-  if(!kw.length){$('narrative').innerHTML='<div class="empty">No live headlines yet.</div>';return;}
-  const max=kw[0][1];
-  $('narrative').innerHTML=kw.map(([w,n])=>
-    '<div class="nbar" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar"><div class="nbar-term">'+esc(w)+'</div><div class="nbar-track"><div class="nbar-fill" data-w="'+(n/max*100)+'"></div></div><div class="nbar-n">'+n+'</div></div>').join('');
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    document.querySelectorAll('#narrative .nbar-fill').forEach(el=>el.style.width=el.dataset.w+'%');
-  }));
+  // Narrative markers card — the frames gaining ground in live headlines
+  const el=$('frames');if(!el)return;
+  const now=Date.now();
+  const day=state.news.filter(n=>(now-(Date.parse(n.date)||0))<86400e3);
+  const kw=keywords(day.length>=8?day:state.news,4);
+  const tg=$('frames-tag');if(tg)tg.textContent=kw.length?'LIVE · 24H':'';
+  if(!kw.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">No live headlines yet.</div>';return;}
+  el.innerHTML=kw.map(([w,n])=>
+    '<button class="frame-it" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar — '+n+' headline mentions"><span class="c">›</span><b>'+esc(w)+'</b></button>').join('');
 }
 function renderParties(){
   const counts=PARTIES.map(p=>Object.assign({},p,{n:state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length}));
   const total=counts.reduce((a,b)=>a+b.n,0);
-  const tt=$('sov-total');if(tt)tt.textContent=total+' PARTY-TAGGED STORIES · 72H';
-  // 100%-stacked bar: flex-grow = share; ≥8% segments carry a direct % label
-  const st=$('sov-stack');
-  if(st)st.innerHTML=counts.filter(p=>p.n>0).map(p=>{
-    const pct=total?Math.round(p.n/total*100):0;
-    return '<div class="sovseg" style="flex-grow:'+Math.max(p.n,0.001)+';background:'+p.color+'" '+
-      'onclick="openParty(\''+p.key+'\')" title="'+p.name+' — '+pct+'%">'+
-      (pct>=8?'<span class="sl">'+pct+'%</span>':'')+'</div>';
-  }).join('')||'<div class="empty" style="width:100%">No party-tagged coverage yet.</div>';
-  $('ptybars').innerHTML=counts.map(p=>{
-    const pct=total?Math.round(p.n/total*100):0;
-    const sig=(state.spikes&&state.spikes[p.key])?'<span class="pt-sig">⚡ SPIKE</span>':'';
-    return '<div class="pt-row" onclick="openParty(\''+p.key+'\')" title="Open coverage profile"><span class="pt-dot" style="background:'+p.color+'"></span><span class="pt-name">'+p.name+sig+'</span><div class="pt-track"><div class="pt-fill" data-w="'+pct+'" style="background:'+p.color+'"></div></div><span class="pt-pct">'+p.n+' · '+pct+'%</span></div>';}).join('');
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    document.querySelectorAll('#ptybars .pt-fill').forEach(el=>el.style.width=el.dataset.w+'%');
-  }));
+  const tc=$('sov-count');if(tc)tc.textContent=total.toLocaleString('en-AU');
+  const list=$('sov-list');
+  if(list)list.innerHTML=total?counts.filter(p=>p.n>0).sort((a,b)=>b.n-a.n).map(p=>{
+    const pct=(p.n/total*100).toFixed(1);
+    const sig=(state.spikes&&state.spikes[p.key])?' <span title="coverage spike" style="color:var(--amb)">⚡</span>':'';
+    return '<button class="sov-row" onclick="openParty(\''+p.key+'\')" title="Open coverage profile — '+p.n+' mentions">'+
+      '<span class="nm"><b style="background:'+p.color+'"></b>'+p.name+sig+'</span>'+
+      '<span class="pc">'+pct+'<i> %</i></span></button>';
+  }).join(''):'<div class="empty">No party-tagged coverage yet.</div>';
+  const ins=$('sov-ins');
+  if(ins&&total){
+    const sorted=counts.slice().sort((a,b)=>b.n-a.n);
+    const gap=sorted[1]?(sorted[0].n-sorted[1].n)/total*100:0;
+    const cross=counts.filter(p=>!['ALP','LNP'].includes(p.key)).reduce((a,b)=>a+b.n,0)/total*100;
+    // gap trend from the momentum the /analysis route computes, when available
+    let trend=['Holding','var(--t3)'];
+    const ap=(state.analysis&&state.analysis.parties)||[];
+    const lead=ap.find(p=>p.name===sorted[0].name);
+    if(lead&&lead.momentum>0)trend=['Widening','var(--amb)'];
+    else if(lead&&lead.momentum<0)trend=['Narrowing','var(--pos)'];
+    ins.innerHTML=
+      '<div class="ins-row" style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.07)"><span class="numchip">1</span>'+esc(sorted[0].name)+(sorted[1]?' / '+esc(sorted[1].name):'')+' gap<span class="sp"></span><span style="color:'+trend[1]+'">'+trend[0]+'</span><span class="mono">'+gap.toFixed(1)+'</span></div>'+
+      '<div class="ins-row" style="margin-top:10px"><span class="numchip">2</span>Crossbench share<span class="sp"></span><span style="color:'+(cross>=25?'var(--amb)':'var(--pos)')+'">'+(cross>=25?'Elevated':'Stable')+'</span><span class="mono">'+cross.toFixed(1)+'</span></div>';
+  }else if(ins){ins.innerHTML='';}
 }
 function renderWire(){
   const items=state.news.slice(0,8);
@@ -1745,23 +2092,24 @@ function renderAnalysis(){
     ?'Local estimate from the current wire. Deploy the worker /analysis route for momentum-weighted scoring. Media-signal only — not a poll.'
     :'Share-of-voice × headline tone × short-run momentum across AU political news. A media-signal indicator — not a voting-intention poll.';
   const tag=$('er-tag');if(tag)tag.textContent=(a._local?'LOCAL ESTIMATE · ':'MEDIA-SIGNAL · ')+(a.volume?a.volume.tagged:0)+' TAGGED · 72H';
-  const maxSov=Math.max(...a.parties.map(p=>p.sov),1);
-  $('er-board').innerHTML=a.parties.filter(p=>p.coverage>0).map(p=>{
-    const col=PCOLOR[p.key]||'#8892b0';
-    const w=Math.round(p.sov/maxSov*100);
-    const sc=p.sentiment>0.12?'er-up':p.sentiment<-0.12?'er-dn':'er-flat';
-    const sTxt=(p.sentiment>0?'+':'')+p.sentiment.toFixed(2);
-    const mc=p.momentum>0?'er-up':p.momentum<0?'er-dn':'er-flat';
-    const mTxt=p.momentum?((p.momentum>0?'▲ ':'▼ ')+Math.abs(p.momentum)+'pt'):'—';
-    return '<div class="er-row"><span class="er-dot" style="background:'+col+'"></span>'+
-      '<span class="er-name">'+esc(p.name)+'<small>'+esc(p.tag)+'</small></span>'+
-      '<div class="er-track"><div class="er-fill" data-w="'+w+'" style="background:'+col+'"></div></div>'+
-      '<div class="er-metrics"><span class="er-sov">'+p.sov+'%</span>'+
-      '<span class="er-sent '+sc+'" title="net headline tone">'+sTxt+'</span>'+
-      '<span class="er-mom '+mc+'" title="share-of-voice momentum">'+mTxt+'</span></div></div>';
-  }).join('')||'<div class="empty">No party-tagged coverage in the window yet.</div>';
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    document.querySelectorAll('#er-board .er-fill').forEach(el=>el.style.width=el.dataset.w+'%');}));
+  // headline figures — the two leading parties by share of voice
+  const rows=a.parties.filter(p=>p.coverage>0).slice().sort((x,y)=>y.sov-x.sov);
+  const SHORT={alp:'ALP',lnp:'L/NP',grn:'GRN',on:'ONP',ind:'IND'};
+  const ea=$('er-a'),eb=$('er-b');
+  if(ea)ea.innerHTML=rows[0]?rows[0].sov+'<i>% '+(SHORT[rows[0].key]||rows[0].name)+'</i>':'—';
+  if(eb)eb.innerHTML=rows[1]?rows[1].sov+'<i>% '+(SHORT[rows[1].key]||rows[1].name)+'</i>':'';
+  const es=$('er-status');
+  if(es&&rows[0]){
+    const s=rows[0].sentiment,m=rows[0].momentum;
+    const st=m<0?['Softening','var(--amb)']:m>0?['Firming','var(--pos)']:s<-0.12?['Softening','var(--amb)']:s>0.12?['Firming','var(--pos)']:['Holding','var(--t3)'];
+    es.innerHTML='<b style="width:7px;height:7px;border-radius:50%;background:'+st[1]+';display:block"></b><span style="color:'+st[1]+'">'+st[0]+'</span>';
+  }
+  // volatility meter — a narrow leader gap reads as volatile, a wide one as settled
+  const mk=$('er-marker');
+  if(mk&&rows[0]){
+    const gap=rows[1]?rows[0].sov-rows[1].sov:rows[0].sov;
+    mk.style.left=Math.max(8,Math.min(92,92-gap*2.4))+'%';
+  }
 }
 /* Client fallback — computes the same read from state.news before/without the /analysis deploy */
 function renderAnalysisLocal(){
@@ -2121,6 +2469,7 @@ function renderMonitors(){
   if(!MONITORS.length){
     el.innerHTML='<div class="empty">No monitors yet. Track the topics you answer for — AXIOM flags new coverage on every sync.</div>';
     const tg=$('mon-tag');if(tg)tg.textContent='SAVED QUERIES · ALERT ON NEW COVERAGE';
+    const bl=$('hbell');if(bl)bl.classList.remove('alert');
     return;
   }
   let alerts=0;
@@ -2136,6 +2485,7 @@ function renderMonitors(){
   }).join('');
   const tg=$('mon-tag');
   if(tg)tg.textContent=alerts?(alerts+' MONITOR'+(alerts>1?'S':'')+' WITH NEW COVERAGE'):'ALL QUIET · '+MONITORS.length+' TRACKED';
+  const bell=$('hbell');if(bell)bell.classList.toggle('alert',alerts>0);
 }
 function addMonitor(){
   const inp=$('mon-inp'),q=inp.value.trim();if(!q)return;
