@@ -232,6 +232,16 @@ const AU_FEEDS = {
   gnews_minerals:'https://news.google.com/rss/search?q=%22critical%20minerals%22%20australia%20reserve%20OR%20agreement%20OR%20strategy&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_super:   'https://news.google.com/rss/search?q=australia%20superannuation%20policy%20OR%20%22payday%20super%22&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_col:     'https://news.google.com/rss/search?q=australia%20%22cost%20of%20living%22%20relief%20OR%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  // -- Source expansion (v11, research dossier 2026-08-29). URL patterns
+  //    corroborated by search; verify live with /rss?feed=<key> after deploy.
+  //    Dead feeds fail soft (allSettled + circuit breaker). --
+  sevennews_pol: 'https://7news.com.au/politics/feed',                      // 7News politics (section/feed pattern)
+  tallyroom:     'https://www.tallyroom.com.au/feed',                       // Ben Raue - electorate-level analysis
+  kevinbonham:   'https://kevinbonham.blogspot.com/feeds/posts/default?alt=rss', // poll aggregation + psephology
+  johnquiggin:   'https://johnquiggin.com/feed',                            // economics commentary
+  tastimes:      'https://tasmaniantimes.com/feed',                         // Tasmanian independent
+  rba_speeches:  'https://www.rba.gov.au/rss/rss-cb-speeches.xml',          // RBA speeches (documented RSS)
+  ozbargain:     'https://www.ozbargain.com.au/deals/feed',                 // retail deal-hunting - cost-of-living ground truth
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
@@ -1503,10 +1513,10 @@ async function socialMastodon(tag) {
 
 /** Subreddit routing per pulse tag - falls back to the AU politics pair. */
 const REDDIT_SUBS = {
-  auspol:    'AustralianPolitics+australia',
-  australia: 'australia+AustralianPolitics',
+  auspol:    'AustralianPolitics+australia+australian',
+  australia: 'australia+AustralianPolitics+australian',
   economy:   'AusFinance+AusEcon+AustralianPolitics',
-  housing:   'AusProperty+AusFinance+shitrentals',
+  housing:   'AusProperty+AusPropertyChat+AusFinance+shitrentals',
   climate:   'AustralianPolitics+australia',
 };
 async function socialReddit(tag) {
@@ -1568,6 +1578,15 @@ async function socialBsky(tag) {
 // multi-fallback versions); everything fails soft with per-source status.
 // ==============================================================================
 
+async function forumPropertyChat() {
+  // XenForo 2 exposes a standard whole-forum RSS at /index.rss.
+  const { ok, html } = await safeFetch('https://www.propertychat.com.au/community/index.rss',
+    { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,text/xml,*/*' }, signal: abortAfter(6500) });
+  if (!ok) return [];
+  return parseFeedXml(html).slice(0, 12).map(it => ({
+    text: it.title, url: it.link, date: it.date, source: 'PropertyChat',
+  })).filter(t => t.text);
+}
 async function forumOzRss() {
   const { ok, html } = await safeFetch('https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent',
     { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,text/xml,*/*' }, signal: abortAfter(6500) });
@@ -1786,10 +1805,11 @@ export default {
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       const jobs = [
-        ['OzPolitic',  forumOzRss()],
-        ['Whirlpool',  fq ? forumWhirlpoolQ(fq) : forumWhirlpoolQ('politics')],
-        ['BigFooty',   forumBigfootyLatest()],
-        ['HotCopper',  forumHotcopperLatest()],
+        ['OzPolitic',    forumOzRss()],
+        ['Whirlpool',    fq ? forumWhirlpoolQ(fq) : forumWhirlpoolQ('politics')],
+        ['BigFooty',     forumBigfootyLatest()],
+        ['HotCopper',    forumHotcopperLatest()],
+        ['PropertyChat', forumPropertyChat()],
       ];
       const settled = await Promise.allSettled(jobs.map(j => j[1]));
       const sources = {}; let threads = [];
@@ -3642,7 +3662,7 @@ async function handleScheduled(env) {
     })));
   } catch (e) {}
   try {
-    const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest()]);
+    const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));
     await archiveItems(env, 'forum', th.map(t => ({
       src: t.source, title: t.text, url: t.url, ts: Date.parse(t.date) || 0,

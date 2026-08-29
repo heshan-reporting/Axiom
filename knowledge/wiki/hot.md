@@ -13,7 +13,7 @@ tags:
 
 ## Last Updated
 
-2026-08-29 - doctrine, playbook template and the first two intelligence digests saved.
+2026-08-29 - source-expansion dossier filed; doctrine, playbook template and the first two digests saved.
 
 ## Key Recent Facts
 
@@ -26,6 +26,7 @@ tags:
 
 ## Recent Changes
 
+- Filed [[Source Expansion Dossier 2026-08-29]] and wired the new sources into the worker (v11).
 - Created the vault foundation.
 - Saved [[How We Curate]].
 
