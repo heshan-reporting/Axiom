@@ -242,6 +242,16 @@ const AU_FEEDS = {
   tastimes:      'https://tasmaniantimes.com/feed',                         // Tasmanian independent
   rba_speeches:  'https://www.rba.gov.au/rss/rss-cb-speeches.xml',          // RBA speeches (documented RSS)
   ozbargain:     'https://www.ozbargain.com.au/deals/feed',                 // retail deal-hunting - cost-of-living ground truth
+  // -- Government & official (v12) - primary sources straight from the source.
+  //    health_gov URL is documented by the department; industry_gov follows the
+  //    same govCMS /news/rss.xml pattern (the department runs an RSS program).
+  //    The gnews_gov* sweeps ride Google News' index of the ministerial and
+  //    agency domains - robust even where a site hides its own feed. --
+  health_gov:    'https://www.health.gov.au/news/rss.xml',
+  industry_gov:  'https://www.industry.gov.au/news/rss.xml',                // critical-minerals portfolio
+  gnews_govfed:  'https://news.google.com/rss/search?q=site:ministers.treasury.gov.au%20OR%20site:pm.gov.au%20OR%20site:treasury.gov.au&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_govstate:'https://news.google.com/rss/search?q=site:statements.qld.gov.au%20OR%20site:mediastatements.wa.gov.au%20OR%20site:nsw.gov.au%2Fmedia-releases&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_govagency:'https://news.google.com/rss/search?q=site:abs.gov.au%20OR%20site:accc.gov.au%20OR%20site:aec.gov.au&hl=en-AU&gl=AU&ceid=AU:en',
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */

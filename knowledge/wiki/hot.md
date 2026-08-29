@@ -26,6 +26,7 @@ tags:
 
 ## Recent Changes
 
+- Filed [[Government Sources 2026-08-29]]; gov feed group live in worker v12.
 - Filed [[Source Expansion Dossier 2026-08-29]] and wired the new sources into the worker (v11).
 - Created the vault foundation.
 - Saved [[How We Curate]].

@@ -13,6 +13,10 @@ tags:
 
 Newest completed operations appear first.
 
+## 2026-08-29 - autoresearch-20260829-gov-sources
+
+- Filed [[Government Sources 2026-08-29]] and wired the gov feed group into the worker (v12): 2 department RSS feeds + 3 Google News site-restricted sweeps over ministerial and agency domains.
+
 ## 2026-08-29 - autoresearch-20260829-source-expansion
 
 - Bounded autoresearch for new AU politics/economy sources; filed [[Source Expansion Dossier 2026-08-29]] (cited; URLs pattern-corroborated, live verification via /rss?feed= after deploy).
