@@ -224,6 +224,14 @@ const AU_FEEDS = {
   gnews_regions: 'https://news.google.com/rss/search?q=regional%20australia%20OR%20agriculture%20OR%20drought%20policy&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_tax:     'https://news.google.com/rss/search?q=australia%20tax%20reform%20OR%20fuel%20tax%20credits%20OR%20superannuation%20tax&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_mining:  'https://news.google.com/rss/search?q=australia%20mining%20OR%20critical%20minerals%20OR%20resources%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  // -- Commercial wire (v10) --
+  ninenews:      'https://www.9news.com.au/rss',
+  // -- Client-issue sweeps (v10) - narrow, high-signal queries on the exact
+  //    fights AXIOM's clients are in; archived permanently by the D1 layer --
+  gnews_fueltax: 'https://news.google.com/rss/search?q=%22fuel%20tax%20credit%22%20OR%20%22diesel%20rebate%22%20australia&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_minerals:'https://news.google.com/rss/search?q=%22critical%20minerals%22%20australia%20reserve%20OR%20agreement%20OR%20strategy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_super:   'https://news.google.com/rss/search?q=australia%20superannuation%20policy%20OR%20%22payday%20super%22&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_col:     'https://news.google.com/rss/search?q=australia%20%22cost%20of%20living%22%20relief%20OR%20policy&hl=en-AU&gl=AU&ceid=AU:en',
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
@@ -1610,6 +1618,66 @@ async function forumHotcopperLatest() {
   return out;
 }
 
+// ==============================================================================
+// PERMANENT ARCHIVE (D1) - nothing the wire sees is ever lost again.
+// Reuses the MIND_DB binding (axiom-mind-db). Every news item, social post,
+// forum thread, trend snapshot, fetched reference page and AI conversation
+// turn is written here, deduplicated by (kind, url). All writers fail soft:
+// with no D1 bound, AXIOM behaves exactly as before.
+// ==============================================================================
+let ARC_READY = false;
+function arcHash(s) { let h = 5381; s = String(s || ''); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36); }
+async function ensureArchive(env) {
+  if (!env.MIND_DB) return false;
+  if (ARC_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS arc_items(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, src TEXT, title TEXT, body TEXT, url TEXT, author TEXT, tone REAL, meta TEXT, ts INTEGER, seen INTEGER)'),
+    env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS arc_items_kurl ON arc_items(kind, url)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_items_ts ON arc_items(ts)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_items_src ON arc_items(src)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS arc_convo(id INTEGER PRIMARY KEY AUTOINCREMENT, sid TEXT, surface TEXT, client TEXT, role TEXT, body TEXT, ts INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_convo_sid ON arc_convo(sid)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_convo_ts ON arc_convo(ts)'),
+  ]);
+  ARC_READY = true;
+  return true;
+}
+async function archiveItems(env, kind, rows) {
+  try {
+    if (!rows || !rows.length) return 0;
+    if (!(await ensureArchive(env))) return 0;
+    const now = Date.now();
+    const stmt = env.MIND_DB.prepare(
+      'INSERT INTO arc_items(kind,src,title,body,url,author,tone,meta,ts,seen) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(kind,url) DO NOTHING');
+    const batch = rows.slice(0, 150).map(r => stmt.bind(
+      kind,
+      String(r.src || '').slice(0, 60),
+      String(r.title || '').slice(0, 500),
+      String(r.body || '').slice(0, 6000),
+      String(r.url || ('x:' + kind + ':' + arcHash((r.src || '') + '|' + (r.title || '') + '|' + (r.body || '')))).slice(0, 700),
+      String(r.author || '').slice(0, 140),
+      typeof r.tone === 'number' ? r.tone : null,
+      r.meta ? JSON.stringify(r.meta).slice(0, 1500) : null,
+      r.ts || now,
+      now));
+    await env.MIND_DB.batch(batch);
+    return batch.length;
+  } catch (e) { return 0; }
+}
+/** Archive an /allnews snapshot (the JSON string buildAllNews returns). */
+async function arcNewsSnap(env, jsonStr) {
+  try {
+    const d = JSON.parse(jsonStr);
+    return archiveItems(env, 'news', (d.items || []).map(it => ({
+      src: it.src, title: it.title, body: it.desc, url: it.link, tone: it.tone,
+      meta: it.parties && it.parties.length ? { parties: it.parties } : null,
+      ts: Date.parse(it.date) || 0,
+    })));
+  } catch (e) { return 0; }
+}
+/** Escape LIKE wildcards in user queries. */
+function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) + '%'; }
+
 export default {
   async fetch(req, env, ctx) {
     // Always add CORS to every response including errors
@@ -1667,6 +1735,13 @@ export default {
         }
         const out = JSON.stringify({ trends: items, geo });
         await kvPut(env.AXIOM_KV, cacheKey, out, 900);
+        if (ctx) {
+          const day = new Date().toISOString().slice(0, 10); // one row per term per day
+          ctx.waitUntil(archiveItems(env, 'trend', items.map(t => ({
+            src: 'gtrends', title: t.term, body: t.newsTitle, url: 'trend:' + geo + ':' + day + ':' + t.term.toLowerCase(),
+            meta: { traffic: t.traffic, newsUrl: t.newsUrl, newsSource: t.newsSource },
+          }))).catch(() => {}));
+        }
         return new Response(out, { headers: CORS });
       } catch (e) { return jsonResp({ error: 'trends_fetch_failed', detail: String(e) }, 502); }
     }
@@ -1696,6 +1771,10 @@ export default {
         networks: { mastodon: ms.length, reddit: rd.length, bsky: bs.length },
       });
       await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+      if (ctx) ctx.waitUntil(archiveItems(env, 'social', uniq.slice(0, 60).map(p => ({
+        src: p.network, title: p.author || '', body: p.text, url: p.url, author: p.handle || p.author,
+        ts: Date.parse(p.date) || 0, meta: { tag, ups: p.ups },
+      }))).catch(() => {}));
       return new Response(out, { headers: CORS });
     }
 
@@ -1730,6 +1809,10 @@ export default {
       }
       const out = JSON.stringify({ threads: threads.slice(0, 30), q: fq, sources });
       await kvPut(env.AXIOM_KV, cacheKey, out, 480);
+      if (ctx) ctx.waitUntil(archiveItems(env, 'forum', threads.slice(0, 30).map(t => ({
+        src: t.source, title: t.text, url: t.url, ts: Date.parse(t.date) || 0,
+        meta: fq ? { q: fq } : null,
+      }))).catch(() => {}));
       return new Response(out, { headers: CORS });
     }
 
@@ -1896,12 +1979,13 @@ export default {
           // Serve instantly; refresh in the background once older than 2 min.
           try {
             const gen = Date.parse(JSON.parse(cached).generated || 0) || 0;
-            if (ctx && Date.now() - gen > 120000) ctx.waitUntil(buildAllNews(env, opts).catch(() => {}));
+            if (ctx && Date.now() - gen > 120000) ctx.waitUntil(buildAllNews(env, opts).then(s => arcNewsSnap(env, s)).catch(() => {}));
           } catch (e) {}
           return new Response(cached, { headers: CORS });
         }
       }
       const out = await buildAllNews(env, opts);
+      if (ctx) ctx.waitUntil(arcNewsSnap(env, out).catch(() => {}));
       return new Response(out, { headers: CORS });
     }
 
@@ -2117,12 +2201,100 @@ export default {
         if (!summarized) text = text.slice(0, 4000);
         const out = JSON.stringify({ ok: true, title, text, image: ogImg, summarized });
         await kvPut(env.AXIOM_KV, ck, out, 1800);
+        // Reference pages the team pulls into briefs are knowledge - keep them.
+        if (ctx) ctx.waitUntil(archiveItems(env, 'ref', [{
+          src: 'fetchurl', title, body: text, url: target, meta: { summarized },
+        }]).catch(() => {}));
         return new Response(out, { headers: CORS });
       } catch (e) {
         const name = String(e && e.name || e);
         const detail = /Timeout|Abort/i.test(name) ? 'Timed out fetching the page.' : name.slice(0, 60);
         return jsonResp({ error: 'fetchurl_failed', detail }, 502);
       }
+    }
+
+    // ========================================================================
+    // ARCHIVE ROUTES - the permanent D1 store behind the knowledge system.
+    // All return a clear 501 until the MIND_DB binding exists.
+    // ========================================================================
+
+    // POST /log/chat  { sid, surface, client, role, text } or { sid, surface, client, turns:[{role,text}] }
+    // Fire-and-forget conversation capture from Analyst / Studio / Ad Lab / Composer.
+    if (path === '/log/chat') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        const b = await req.json();
+        await ensureArchive(env);
+        const sid = String(b.sid || '').slice(0, 60);
+        const surface = String(b.surface || '').slice(0, 30);
+        const client = String(b.client || '').slice(0, 40);
+        const turns = Array.isArray(b.turns) ? b.turns : [{ role: b.role, text: b.text }];
+        const now = Date.now();
+        const stmt = env.MIND_DB.prepare('INSERT INTO arc_convo(sid,surface,client,role,body,ts) VALUES(?,?,?,?,?,?)');
+        const batch = turns.slice(0, 20)
+          .filter(t => t && t.text)
+          .map(t => stmt.bind(sid, surface, client, String(t.role || 'user').slice(0, 12), String(t.text).slice(0, 8000), t.ts || now));
+        if (batch.length) await env.MIND_DB.batch(batch);
+        return jsonResp({ ok: true, logged: batch.length });
+      } catch (e) { return jsonResp({ ok: false, error: 'log_failed', detail: String(e).slice(0, 120) }, 500); }
+    }
+
+    // POST /log/ref  { url, title, text, client } - reference material logged by the app
+    if (path === '/log/ref') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        const b = await req.json();
+        const n = await archiveItems(env, 'ref', [{
+          src: String(b.client || 'app').slice(0, 40), title: b.title, body: b.text, url: b.url,
+          meta: b.meta || null,
+        }]);
+        return jsonResp({ ok: true, logged: n });
+      } catch (e) { return jsonResp({ ok: false, error: 'log_failed', detail: String(e).slice(0, 120) }, 500); }
+    }
+
+    // GET /archive/search?q=&kind=&src=&days=&limit=  - query the permanent store
+    if (path === '/archive/search') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        await ensureArchive(env);
+        const kind = (reqUrl.searchParams.get('kind') || '').replace(/[^\w]/g, '').slice(0, 20);
+        const src = (reqUrl.searchParams.get('src') || '').slice(0, 60);
+        const days = Math.min(parseInt(reqUrl.searchParams.get('days') || '0', 10) || 0, 3650);
+        const limit = Math.min(parseInt(reqUrl.searchParams.get('limit') || '40', 10) || 40, 100);
+        const terms = String(reqUrl.searchParams.get('q') || '').slice(0, 120);
+        const where = []; const args = [];
+        if (kind) { where.push('kind=?'); args.push(kind); }
+        if (src) { where.push('src=?'); args.push(src); }
+        if (days) { where.push('ts>?'); args.push(Date.now() - days * 86400000); }
+        if (terms) { where.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')"); const l = arcLike(terms); args.push(l, l); }
+        const sql = 'SELECT kind,src,title,body,url,author,tone,meta,ts FROM arc_items'
+          + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY ts DESC LIMIT ' + limit;
+        const rows = await env.MIND_DB.prepare(sql).bind(...args).all();
+        return jsonResp({ ok: true, items: (rows.results || []).map(r => ({
+          kind: r.kind, src: r.src, title: r.title, body: (r.body || '').slice(0, 500), url: r.url,
+          author: r.author, tone: r.tone, meta: r.meta ? JSON.parse(r.meta) : null, ts: r.ts,
+        })) });
+      } catch (e) { return jsonResp({ ok: false, error: 'search_failed', detail: String(e).slice(0, 160) }, 500); }
+    }
+
+    // GET /archive/stats - totals by kind + last-7-day counts by source (map fuel)
+    if (path === '/archive/stats') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        await ensureArchive(env);
+        const wk = Date.now() - 7 * 86400000;
+        const [kinds, srcs, convo] = await env.MIND_DB.batch([
+          env.MIND_DB.prepare('SELECT kind, COUNT(*) c FROM arc_items GROUP BY kind'),
+          env.MIND_DB.prepare('SELECT src, COUNT(*) c FROM arc_items WHERE ts>? GROUP BY src ORDER BY c DESC LIMIT 200').bind(wk),
+          env.MIND_DB.prepare('SELECT COUNT(*) c, COUNT(DISTINCT sid) s FROM arc_convo'),
+        ]);
+        const byKind = {}; (kinds.results || []).forEach(r => { byKind[r.kind] = r.c; });
+        const bySrc = {}; (srcs.results || []).forEach(r => { bySrc[r.src] = r.c; });
+        const cv = (convo.results || [])[0] || {};
+        return jsonResp({ ok: true, byKind, bySrc7d: bySrc, conversations: { turns: cv.c || 0, sessions: cv.s || 0 } });
+      } catch (e) { return jsonResp({ ok: false, error: 'stats_failed', detail: String(e).slice(0, 160) }, 500); }
     }
 
     // -- Claude proxy for the Creative Studio chat ---------------------------
@@ -3453,8 +3625,29 @@ async function handleScheduled(env) {
 
   // Pre-warm the default /allnews snapshot so dashboard loads are instant,
   // and append a pulse-history point (share-of-voice + tone time series).
-  try { await buildAllNews(env, { q: '', max: 60, hours: 72 }); } catch (e) {}
+  try {
+    const snap = await buildAllNews(env, { q: '', max: 120, hours: 24 });
+    await arcNewsSnap(env, snap); // hourly permanent archive - runs with nobody watching
+  } catch (e) {}
   try { await snapshotPulse(env); } catch (e) {}
+  try {
+    const [ms, rd, bs] = await Promise.all([
+      socialMastodon('auspol').catch(() => []),
+      socialReddit('auspol').catch(() => []),
+      socialBsky('auspol').catch(() => []),
+    ]);
+    await archiveItems(env, 'social', [...ms, ...rd, ...bs].map(p => ({
+      src: p.network, title: p.author || '', body: p.text, url: p.url, author: p.handle || p.author,
+      ts: Date.parse(p.date) || 0, meta: { tag: 'auspol', ups: p.ups },
+    })));
+  } catch (e) {}
+  try {
+    const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest()]);
+    const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));
+    await archiveItems(env, 'forum', th.map(t => ({
+      src: t.source, title: t.text, url: t.url, ts: Date.parse(t.date) || 0,
+    })));
+  } catch (e) {}
 
   // Default watchlist topics - overridable via KV
   const savedTopics = await kvGet(env.AXIOM_KV, 'auto_watchlist');

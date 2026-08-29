@@ -22,9 +22,11 @@ name = "newsaus"
 main = "axiomworkerv4.js"
 compatibility_date = "2025-01-01"
 
-# Hourly time-series snapshot + cache pre-warm (scheduled handler).
+# Every 30 min: time-series snapshot, cache pre-warm, and the permanent
+# D1 archive sweep (news + social + forums) so collection runs with
+# nobody watching.
 [triggers]
-crons = ["17 * * * *"]
+crons = ["7,37 * * * *"]
 
 # Keep the SAME namespace id your worker already uses.
 [[kv_namespaces]]
