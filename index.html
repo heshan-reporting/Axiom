@@ -943,6 +943,93 @@ body.kiosk .kprog{display:block}
 .cs-status{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.09em;text-transform:uppercase;color:var(--x-ink2)}
 .cs-empty{color:var(--x-ink2);font-size:var(--x-t-sm);text-align:center;padding:34px 16px;line-height:1.8}
 .cs-empty b{color:var(--x-ink1)}
+/* ── Ad Lab — copy-first conversational creative flow ─────────────────── */
+.al-wrap{position:relative;background:var(--x-bg2);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:16px}
+.al-thread{display:flex;flex-direction:column;gap:14px;max-height:62vh;overflow-y:auto;padding:4px 4px 14px;scroll-behavior:smooth}
+.al-thread:empty::before{content:'Brief the Lab like a senior creative — objective, audience, a source URL. It reads, asks what it needs, then writes the copy.';
+  display:block;color:var(--x-ink2);font-size:var(--x-t-sm);text-align:center;padding:30px 16px;line-height:1.8}
+.al-b{max-width:78%;padding:12px 16px;border-radius:16px;font-size:var(--x-t-sm);line-height:1.62;white-space:pre-wrap}
+.al-b.user{align-self:flex-end;color:var(--x-ac-ink);background:var(--x-ac-grad);border-bottom-right-radius:6px;font-weight:500}
+.al-b.ai{align-self:flex-start;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);color:var(--x-ink1);border-bottom-left-radius:6px}
+.al-b.ask{border-left:3px solid var(--cc-accent);padding-left:15px}
+.al-b.err{align-self:flex-start;background:var(--x-neg-dim);border:1px solid rgba(217,106,102,.35);color:#E8A9A6}
+.al-b .k{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.12em;text-transform:uppercase;color:var(--x-ink2);display:block;margin-bottom:7px}
+.al-typing{align-self:flex-start;display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);border-radius:16px;border-bottom-left-radius:6px}
+.al-typing .lbl{font-family:var(--x-fm);font-size:var(--x-t-2xs);letter-spacing:.1em;text-transform:uppercase;color:var(--x-ink2)}
+.al-typing i{width:5px;height:5px;border-radius:50%;background:var(--cc-accent);opacity:.4;animation:csDot 1.2s var(--x-ease) infinite}
+.al-typing i:nth-child(3){animation-delay:.18s}.al-typing i:nth-child(4){animation-delay:.36s}
+/* copy-variant cards */
+.al-copies{align-self:stretch;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.al-copy{border:1px solid rgba(255,255,255,.09);border-radius:16px;background:rgba(255,255,255,.03);padding:14px 15px;display:flex;flex-direction:column;gap:7px;transition:border-color .18s}
+.al-copy:hover{border-color:rgba(255,255,255,.2)}
+.al-copy.on{border-color:var(--cc-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--cc-accent) 45%,transparent)}
+.al-copy .ang{font-family:var(--x-fm);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--cc-accent)}
+.al-copy .hl{font-family:var(--x-fd);font-weight:700;font-size:15.5px;letter-spacing:-.015em;color:var(--x-ink0);line-height:1.2;outline:none;border-radius:6px}
+.al-copy .sp{font-size:12px;color:var(--x-ink1);line-height:1.45;outline:none;border-radius:6px}
+.al-copy .cta{font-family:var(--x-fm);font-size:10.5px;letter-spacing:.06em;color:var(--x-ink1);outline:none;border-radius:6px}
+.al-copy [contenteditable]:focus{box-shadow:0 0 0 2px var(--x-ac-dim);background:rgba(255,255,255,.03)}
+.al-copy .use{margin-top:auto;align-self:flex-start;padding:7px 13px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--x-ink1);font-weight:600;font-size:11.5px;cursor:pointer;transition:all .18s}
+.al-copy .use:hover{color:#F4F8FF;background:var(--cc-accent);border-color:var(--cc-accent)}
+/* choice buttons in-thread */
+.al-btns{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap}
+.al-btns button{padding:9px 16px;border-radius:10px;border:none;cursor:pointer;font-weight:600;font-size:var(--x-t-sm);color:#F4F8FF;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));transition:transform var(--x-d2) var(--x-spring),filter .15s}
+.al-btns button:hover{transform:translateY(-1px);filter:brightness(1.06)}
+.al-btns button.alt{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--x-ink1)}
+/* artwork bubble */
+.al-art{align-self:stretch;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.09);background:var(--x-bg0)}
+.al-art img{display:block;width:100%;max-height:min(60vh,600px);object-fit:contain;background:var(--x-bg0)}
+.al-art .bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03)}
+.al-art .vtag{font-family:var(--x-fm);font-weight:600;font-size:var(--x-t-xs);color:var(--cc-accent)}
+.al-art .note2{flex:1;font-size:var(--x-t-xs);color:var(--x-ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* asset rail */
+.al-assets{display:flex;gap:8px;padding:10px 4px 2px;flex-wrap:wrap;align-items:center}
+.al-assets:empty{display:none}
+.al-asset{position:relative;width:58px;height:58px;border-radius:10px;overflow:hidden;border:1px solid var(--x-ac-line)}
+.al-asset img{width:100%;height:100%;object-fit:cover;display:block}
+.al-asset.logo{border-color:rgba(255,255,255,.25);background:#fff}
+.al-asset.logo img{object-fit:contain;padding:5px}
+.al-asset button{position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:6px;border:none;cursor:pointer;background:rgba(7,7,10,.8);color:var(--x-ink0);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center}
+.al-asset b{position:absolute;left:3px;bottom:2px;font-family:var(--x-fm);font-size:7.5px;letter-spacing:.05em;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.95);text-transform:uppercase}
+.al-doc-chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--x-fm);font-size:10px;color:var(--x-ink1);border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:5px 9px;max-width:220px}
+.al-doc-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.al-doc-chip button{background:none;border:none;color:var(--x-ink3);cursor:pointer;font-size:12px;padding:0}
+.al-countl{display:flex;align-items:center;gap:7px;font-family:var(--x-fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--x-ink3)}
+/* ── Canvas editor ── */
+.al-canvaswrap{margin-top:16px;background:var(--x-bg2);border:1px solid rgba(255,255,255,.09);border-radius:22px;padding:16px}
+.al-cvbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.al-cvtitle{font-family:var(--x-fd);font-size:15px;font-weight:700;letter-spacing:-.01em;margin-right:6px}
+.al-cvprops{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:34px;margin-bottom:10px;
+  font-family:var(--x-fm);font-size:10px;letter-spacing:.05em;color:var(--x-ink2)}
+.al-cvprops:empty::before{content:'Select a layer to edit its properties.';color:var(--x-ink3)}
+.al-cvprops input[type=range]{width:90px;accent-color:var(--cc-accent)}
+.al-cvprops input[type=color]{width:26px;height:26px;border:none;background:none;padding:0;cursor:pointer}
+.al-cvprops .pbtn{padding:5px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--x-ink1);cursor:pointer;font:inherit}
+.al-cvprops .pbtn.on{color:#F4F8FF;background:var(--cc-accent);border-color:var(--cc-accent)}
+.al-cvgrid{display:grid;grid-template-columns:1fr 190px;gap:14px;align-items:start}
+@media(max-width:900px){.al-cvgrid{grid-template-columns:1fr}}
+.al-stageouter{border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:
+  conic-gradient(rgba(255,255,255,.05) 90deg,transparent 90deg 180deg,rgba(255,255,255,.05) 180deg 270deg,transparent 270deg) 0 0/22px 22px,var(--x-bg0)}
+.al-stage{position:relative;width:100%;user-select:none;touch-action:none}
+.al-stage>img.base{display:block;width:100%;pointer-events:none}
+.al-layer{position:absolute;cursor:grab;box-sizing:border-box}
+.al-layer:active{cursor:grabbing}
+.al-layer.text{white-space:pre-wrap;line-height:1.14;overflow:visible;word-break:break-word}
+.al-layer.text[contenteditable=true]{cursor:text;outline:2px solid var(--cc-accent)}
+.al-layer.sel{outline:1.5px solid var(--cc-accent)}
+.al-layer .h{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--cc-accent);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6);display:none}
+.al-layer.sel .h{display:block}
+.al-layer .h.se{right:-7px;bottom:-7px;cursor:nwse-resize}
+.al-layer .h.rot{left:50%;top:-26px;transform:translateX(-50%);cursor:grab}
+.al-guide{position:absolute;background:color-mix(in srgb,var(--cc-accent) 70%,transparent);pointer-events:none;display:none}
+.al-guide.v{top:0;bottom:0;width:1px;left:50%}
+.al-guide.hz{left:0;right:0;height:1px;top:50%}
+.al-layerlist{display:flex;flex-direction:column;gap:6px}
+.al-lrow{display:flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.09);border-radius:10px;background:rgba(255,255,255,.03);padding:8px 10px;font-size:11.5px;color:var(--x-ink1);cursor:pointer}
+.al-lrow.on{border-color:var(--cc-accent)}
+.al-lrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.al-lrow button{background:none;border:none;color:var(--x-ink3);cursor:pointer;font-size:12px;padding:2px 4px}
+.al-lrow button:hover{color:var(--x-ink0)}
+@media(max-width:640px){.al-b{max-width:92%}.al-copies{grid-template-columns:1fr}}
 /* The Curious Mind */
 .mind-wrap{display:flex;flex-direction:column;gap:14px}
 .mind-ingest{background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:18px;padding:16px;backdrop-filter:blur(10px)}
@@ -1360,6 +1447,7 @@ body.kiosk .kprog{display:block}
           <!-- Section tabs: one focused workspace per job, not one endless scroll -->
           <nav class="cc-tabs reveal" id="cc-tabs" aria-label="Client workspace">
             <button class="cc-tab on" data-t="overview" onclick="ccShowTab('overview')">Overview</button>
+            <button class="cc-tab" data-t="adlab" onclick="ccShowTab('adlab')">Ad Lab</button>
             <button class="cc-tab" data-t="studio" onclick="ccShowTab('studio')">Creative Studio</button>
             <button class="cc-tab" data-t="composer" onclick="ccShowTab('composer')">Composer</button>
             <button class="cc-tab" data-t="mind" onclick="ccShowTab('mind')">The Curious Mind</button>
@@ -1451,6 +1539,56 @@ body.kiosk .kprog{display:block}
               </div>
             </div>
             <div class="cc-output" id="cc-output"></div>
+          </div>
+
+          <!-- ═══ AD LAB — copy-first conversational creative flow ═══ -->
+          <div class="cc-block reveal" id="cc-adlab-block" data-cct="adlab">
+            <div class="cc-blabel"><span>★</span> Ad Lab <em id="al-tag">COPY-FIRST CREATIVE</em></div>
+            <div class="cc-note">The senior-creative flow: brief it, drop in <b>source URLs</b> it reads for facts, get <b>copy variants</b> to edit and choose from, add <b>reference artwork</b> it can match exactly, hand it your <b>logo and brand PDFs</b> for insight — then generate and fine-tune every element on the <b>canvas</b>.</div>
+            <div class="al-wrap">
+              <div class="al-thread x-scroll" id="al-thread" aria-live="polite"></div>
+              <div class="al-assets" id="al-assets"></div>
+              <div class="cs-inputrow">
+                <button class="cs-attach" onclick="document.getElementById('al-file').click()" title="Attach reference artwork" aria-label="Attach reference artwork"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button>
+                <button class="cs-attach" onclick="document.getElementById('al-logo').click()" title="Upload brand logo" aria-label="Upload brand logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></button>
+                <button class="cs-attach" onclick="document.getElementById('al-doc').click()" title="Upload brand PDF / media kit" aria-label="Upload brand PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
+                <input type="file" id="al-file" accept="image/*" multiple hidden>
+                <input type="file" id="al-logo" accept="image/*" hidden>
+                <input type="file" id="al-doc" accept="application/pdf" multiple hidden>
+                <textarea id="al-inp" rows="1" placeholder="Brief the ad — paste a source URL, or answer the Lab's questions…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();alSend();}"></textarea>
+                <button id="al-send" onclick="alSend()" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+              </div>
+              <div class="cs-tools">
+                <div style="display:flex;gap:9px;align-items:center">
+                  <button class="cc-mini" onclick="alFresh()">+ Start fresh</button>
+                  <label class="al-countl">Variants
+                    <select id="al-count" class="cc-in" style="width:auto;padding:6px 9px;font-size:12px">
+                      <option>3</option><option>4</option><option>5</option><option selected>6</option><option>8</option><option>10</option>
+                    </select>
+                  </label>
+                </div>
+                <span class="cs-status" id="al-status"></span>
+              </div>
+            </div>
+
+            <!-- Canvas — free layer editor over the generated artwork -->
+            <div class="al-canvaswrap" id="al-canvaswrap" hidden>
+              <div class="al-cvbar">
+                <span class="al-cvtitle">Canvas</span>
+                <button class="cc-mini" onclick="alAddText()">+ Text</button>
+                <button class="cc-mini" onclick="alAddLogoLayer()" id="al-addlogo">+ Logo</button>
+                <button class="cc-mini" onclick="alAddShape('rect')">+ Box</button>
+                <button class="cc-mini" onclick="alAddShape('pill')">+ Pill</button>
+                <span style="flex:1"></span>
+                <button class="cc-mini ok" onclick="alExport()">↓ Export PNG</button>
+              </div>
+              <div class="al-cvprops" id="al-cvprops"></div>
+              <div class="al-cvgrid">
+                <div class="al-stageouter"><div class="al-stage" id="al-stage"></div></div>
+                <div class="al-layerlist" id="al-layerlist"></div>
+              </div>
+              <div class="note">Drag to move · corner to resize · handle above to rotate · double-click text to edit · exports at full artwork resolution.</div>
+            </div>
           </div>
 
           <div class="cc-block reveal" id="cc-studio-block" data-cct="studio">
@@ -3196,7 +3334,7 @@ function ccInit(){
   const c=ccClient();
   const root=$('cc-root');if(root){root.style.setProperty('--cc-accent',c.accent);root.style.setProperty('--cc-accent2',c.accent2||c.accent);}
   ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccRenderBrandKit();ccEngineNote();
-  ccBindComposer();ccPrefsLoad();csInit();mindDocs();
+  ccBindComposer();ccPrefsLoad();csInit();alInit();mindDocs();
   if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
   let tab='overview';try{tab=localStorage.getItem('axiom_cc_tab')||'overview';}catch(e){}
   ccShowTab(tab);
@@ -4029,6 +4167,621 @@ async function csEditTurn(instr){
   }else{
     csState.thread.push({r:'a',t:(j&&j.text)||raw,raw});
   }
+}
+
+/* ═══════════ AD LAB — copy-first conversational creative flow ═══════════
+   Stages: intake (batched questions + URL ingestion) -> copy (N editable
+   variants) -> refs (reference upload + match-exactly question) -> detail
+   (final batched questions incl. logo/PDF insight) -> confirmed (artwork +
+   canvas editor + concise chat edits). All Claude calls ride /chat with
+   images AND native PDF document blocks; artwork rides /nano. */
+const alState={client:null,thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false,booted:false};
+function alKey(){return 'axiom_al_'+CC_ACTIVE;}
+function alSave(){
+  try{localStorage.setItem(alKey(),JSON.stringify({
+    thread:alState.thread.filter(m=>m.r!=='art').slice(-40),stage:alState.stage,copies:alState.copies,
+    chosen:alState.chosen,insights:alState.insights,brief:alState.brief,match:alState.match,
+    textmode:alState.textmode,links:(alState.links||[]).map(l=>({url:l.url,title:l.title,text:(l.text||'').slice(0,1500)})),
+    layers:alState.layers.filter(l=>l.type!=='img'),
+  }));}catch(e){}
+}
+function alInit(){
+  if(alState.client===CC_ACTIVE){alRender();return;}
+  alState.client=CC_ACTIVE;
+  Object.assign(alState,{thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false});
+  try{const s=JSON.parse(localStorage.getItem(alKey())||'null');
+    if(s){Object.assign(alState,{thread:s.thread||[],stage:s.stage||'intake',copies:s.copies||[],chosen:s.chosen||null,
+      insights:s.insights||'',brief:s.brief||null,match:s.match||null,textmode:s.textmode||'overlay',links:s.links||[],layers:s.layers||[]});
+      // An artwork never survives a reload (images are not persisted) - fall
+      // back to the last pre-artwork stage so the flow remains coherent.
+      if(alState.stage==='confirmed')alState.stage=alState.brief?'detail':'intake';}
+  }catch(e){}
+  alBind();alRender();alRenderAssets();
+  const cw=$('al-canvaswrap');if(cw)cw.hidden=true;
+}
+function alFresh(){
+  try{localStorage.removeItem(alKey());}catch(e){}
+  alState.client=null;alInit();
+}
+function alBind(){
+  if(alState.booted)return;alState.booted=true;
+  const f=$('al-file');if(f)f.addEventListener('change',e=>{alAddRefs(e.target.files);e.target.value='';});
+  const lg=$('al-logo');if(lg)lg.addEventListener('change',e=>{alAddLogo(e.target.files[0]);e.target.value='';});
+  const dc=$('al-doc');if(dc)dc.addEventListener('change',e=>{alAddDocs(e.target.files);e.target.value='';});
+  const cnt=$('al-count');if(cnt)cnt.addEventListener('change',alSave);
+}
+/* ── rendering ── */
+function alRender(){
+  const el=$('al-thread');if(!el)return;
+  el.innerHTML=alState.thread.map((m,i)=>{
+    if(m.r==='u')return '<div class="al-b user">'+esc(m.t)+'</div>';
+    if(m.r==='e')return '<div class="al-b err">'+esc(m.t)+'</div>';
+    if(m.r==='copies')return alCopiesHtml(m,i);
+    if(m.r==='match')return '<div class="al-b ai ask"><span class="k">Reference received</span>'+esc(m.t)+
+      (alState.match===null&&alState.stage==='refs'?'<div class="al-btns"><button onclick="alMatch(\'exact\')">Match it exactly</button><button class="alt" onclick="alMatch(\'inspired\')">Just take inspiration</button></div>':'')+'</div>';
+    if(m.r==='summary')return alSummaryHtml(m,i);
+    if(m.r==='art')return alArtHtml(m);
+    if(m.r==='insight')return '<div class="al-b ai"><span class="k">Document insights · '+esc(m.doc||'')+'</span>'+esc(m.t)+'</div>';
+    const cls=m.kind==='questions'||m.kind==='question'?' ask':'';
+    return '<div class="al-b ai'+cls+'">'+(m.k?'<span class="k">'+esc(m.k)+'</span>':'')+esc(m.t)+'</div>';
+  }).join('')+(alState.busy?'<div class="al-typing"><span class="lbl">'+esc(alState.busyLabel||'Thinking')+'</span><i></i><i></i><i></i></div>':'');
+  el.scrollTop=el.scrollHeight;
+  const st=$('al-status');if(st)st.textContent=({intake:'Taking the brief',copy:'Pick or edit a copy variant',refs:'Add reference artwork',detail:'Finalising the brief',confirmed:'v'+alState.artVer+' · iterating'})[alState.stage]||'';
+  const sb=$('al-send');if(sb)sb.disabled=!!alState.busy;
+}
+function alCopiesHtml(m,idx){
+  return '<div class="al-b ai" style="max-width:100%"><span class="k">Copy variants — edit any text, then choose one</span>'+esc(m.t||'')+'</div>'+
+    '<div class="al-copies" data-mi="'+idx+'">'+(alState.copies||[]).map((c,i)=>
+      '<div class="al-copy'+(alState.chosen&&alState.chosen._i===i?' on':'')+'" data-ci="'+i+'">'+
+      '<span class="ang">'+esc(c.angle||('Variant '+(i+1)))+'</span>'+
+      '<div class="hl" contenteditable="true" spellcheck="false">'+esc(c.headline||'')+'</div>'+
+      '<div class="sp" contenteditable="true" spellcheck="false">'+esc(c.support||'')+'</div>'+
+      '<div class="cta" contenteditable="true" spellcheck="false">'+esc(c.cta||'')+'</div>'+
+      '<button class="use" onclick="alChoose('+i+')">Use this copy</button></div>').join('')+'</div>';
+}
+function alSummaryHtml(m){
+  const b=m.brief||{};
+  return '<div class="al-b ai" style="max-width:88%"><span class="k">The brief — sign off to generate</span>'+esc(m.t||'')+
+    '<div class="cs-bgrid">'+
+    ['format','headline','support','cta','audience','tone','style','logo'].filter(k=>b[k]).map(k=>'<b>'+k+'</b><span>'+esc(String(b[k]))+'</span>').join('')+
+    '</div>'+
+    '<div class="al-btns" style="margin-top:12px">'+
+    '<button class="alt'+(alState.textmode==='overlay'?'':' ')+'" style="'+(alState.textmode==='overlay'?'background:var(--cc-accent);color:#F4F8FF;border-color:transparent':'')+'" onclick="alTextmode(\'overlay\')" title="Artwork generated clean; your text becomes editable canvas layers">Editable text overlay</button>'+
+    '<button class="alt" style="'+(alState.textmode==='baked'?'background:var(--cc-accent);color:#F4F8FF;border-color:transparent':'')+'" onclick="alTextmode(\'baked\')" title="Text rendered inside the artwork by the image engine">Text in artwork</button>'+
+    '</div>'+
+    (alState.stage!=='confirmed'?'<div class="al-btns"><button onclick="alConfirm()">Confirmed — generate</button><button class="alt" onclick="alAdjust()">Adjust something</button></div>':'')+
+    '</div>';
+}
+function alArtHtml(m){
+  return '<div class="al-art"><img src="data:'+(m.mime||'image/png')+';base64,'+m.b64+'" alt="Generated creative">'+
+    '<div class="bar"><span class="vtag">v'+m.ver+'</span><span class="note2">'+esc(m.note||'')+'</span>'+
+    '<button class="cc-mini" onclick="alOpenCanvas()">Open canvas</button>'+
+    '<a class="cc-mini ok" style="text-decoration:none" download="axiom-adlab-v'+m.ver+'.png" href="data:'+(m.mime||'image/png')+';base64,'+m.b64+'">↓ PNG</a></div></div>';
+}
+function alRenderAssets(){
+  const el=$('al-assets');if(!el)return;
+  el.innerHTML=(alState.refs||[]).map((r,i)=>'<span class="al-asset"><img src="data:'+r.mime+';base64,'+r.data+'" alt=""><b>ref</b><button onclick="alDelRef('+i+')" aria-label="Remove">×</button></span>').join('')+
+    (alState.logo?'<span class="al-asset logo"><img src="data:'+alState.logo.mime+';base64,'+alState.logo.data+'" alt="logo"><b>logo</b><button onclick="alState.logo=null;alRenderAssets()" aria-label="Remove">×</button></span>':'')+
+    (alState.docs||[]).map((d,i)=>'<span class="al-doc-chip" title="'+esc(d.name)+'">📄 <span>'+esc(d.name)+'</span><button onclick="alDelDoc('+i+')" aria-label="Remove">×</button></span>').join('')+
+    (alState.links||[]).map(l=>'<span class="al-doc-chip" title="'+esc(l.url)+'">🔗 <span>'+esc(l.title||l.url)+'</span></span>').join('');
+}
+/* ── uploads ── */
+async function alAddRefs(files){
+  for(const f of Array.from(files||[]).slice(0,4)){
+    if(!/^image\//.test(f.type)){toast('Reference must be an image',1);continue;}
+    if(f.size>8*1024*1024){toast(f.name+' is over 8MB',1);continue;}
+    const d=await ccDownscale(f,900,.8);if(d)alState.refs.push(d);
+  }
+  alState.refs=alState.refs.slice(0,4);
+  alRenderAssets();
+  if(alState.refs.length&&(alState.stage==='refs'||alState.stage==='copy')&&!alState.thread.some(m=>m.r==='match'&&alState.match===null)){
+    if(alState.match===null||alState.match===undefined){
+      alState.match=null;
+      alState.thread.push({r:'match',t:'Great reference. Do you want me to copy this design exactly — same layout, palette and typography — and drop in your chosen copy, or should I just take inspiration from it?'});
+      if(alState.stage==='copy'&&alState.chosen)alState.stage='refs';
+      alSave();alRender();
+    }
+  }
+}
+function alDelRef(i){alState.refs.splice(i,1);alRenderAssets();}
+async function alAddLogo(f){
+  if(!f)return;
+  if(!/^image\//.test(f.type)){toast('Logo must be an image',1);return;}
+  const d=await ccDownscale(f,512,.92,true);
+  if(d){alState.logo=d;alRenderAssets();toast('Logo added to the Lab');}
+}
+function alDelDoc(i){alState.docs.splice(i,1);alRenderAssets();}
+async function alAddDocs(files){
+  for(const f of Array.from(files||[]).slice(0,2)){
+    if(f.type!=='application/pdf'){toast(f.name+': PDFs only here',1);continue;}
+    if(f.size>4.5*1024*1024){toast(f.name+' is over the 4.5MB PDF limit',1);continue;}
+    const b64=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]||'');r.onerror=()=>res('');r.readAsDataURL(f);});
+    if(!b64)continue;
+    alState.docs.push({name:f.name,data:b64});
+    alRenderAssets();
+    await alAnalyzeDoc(alState.docs.length-1);
+  }
+}
+/* Claude-native PDF read: one standalone call per document, so big payloads
+   are sent exactly once and only the distilled insights join the session. */
+async function alAnalyzeDoc(i){
+  const d=alState.docs[i];if(!d||alState.busy)return;
+  alState.busy=true;alState.busyLabel='Reading '+d.name;alRender();
+  try{
+    const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({system:'You are a brand strategist. Extract ONLY what matters for producing ad creative for this client. Reply as plain text, max 180 words: brand colours (hex if visible), fonts/typography rules, logo usage rules, tone-of-voice notes, key claims/stats worth quoting, and any mandatory disclaimers. If the document is irrelevant to brand/creative, say so in one line.',
+        messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:d.data}},{type:'text',text:'Analyse this document ("'+d.name+'") for creative production.'}]}],max_tokens:600})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.error)throw new Error(j.detail||j.error||('HTTP '+r.status));
+    const text=(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+    alState.insights=(alState.insights?alState.insights+'\n\n':'')+('['+d.name+'] '+text);
+    alState.insights=alState.insights.slice(-3000);
+    alState.thread.push({r:'insight',doc:d.name,t:text});
+  }catch(e){
+    alState.thread.push({r:'e',t:'Ad Lab: could not read '+d.name+' — '+(e.message||e)});
+  }
+  alState.busy=false;alSave();alRender();
+}
+/* ── conversation plumbing (mirrors the Studio's proven legality rules) ── */
+function alMsgs(){
+  const raw=alState.thread.slice(-18).filter(m=>!m.ui&&['u','a','copies','summary','match','insight','art'].includes(m.r)).map(m=>
+    m.r==='u'?{role:'user',content:m.t}:
+    m.r==='copies'?{role:'assistant',content:(m.t||'Here are the copy variants.')+'\n'+JSON.stringify(alState.copies)}:
+    m.r==='summary'?{role:'assistant',content:(m.t||'Brief playback.')+'\n'+JSON.stringify(m.brief||{})}:
+    m.r==='art'?{role:'assistant',content:'[generated artwork version '+m.ver+']'}:
+    m.r==='insight'?{role:'assistant',content:'[Document insights from '+(m.doc||'PDF')+']: '+m.t}:
+    {role:'assistant',content:m.raw||m.t});
+  const out=[];
+  for(const m of raw){
+    if(!out.length&&m.role!=='user')continue;
+    const last=out[out.length-1];
+    if(last&&last.role===m.role)last.content+='\n\n'+m.content;
+    else out.push({role:m.role,content:m.content});
+  }
+  if(!out.length)return[{role:'user',content:'Hello'}];
+  if(out[out.length-1].role!=='user')out.push({role:'user',content:'Continue.'});
+  return out;
+}
+async function alChat(system){
+  const msgs=alMsgs();
+  const refs=(alState.refs||[]).slice(0,3);
+  if((refs.length||alState.logo)&&msgs.length){
+    const last=msgs[msgs.length-1];
+    const blocks=[{type:'text',text:String(last.content)}];
+    if(refs.length){
+      blocks.push({type:'text',text:'[Reference artwork uploaded by the operator:]'});
+      refs.forEach(r=>blocks.push({type:'image',source:{type:'base64',media_type:r.mime||'image/jpeg',data:r.data}}));
+    }
+    if(alState.logo){
+      blocks.push({type:'text',text:'[The client\'s brand logo:]'});
+      blocks.push({type:'image',source:{type:'base64',media_type:alState.logo.mime||'image/png',data:alState.logo.data}});
+    }
+    last.content=blocks;
+  }
+  const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({system,messages:msgs,max_tokens:1600})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+  return (d.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('').trim();
+}
+function alParse(txt){
+  let s=(txt||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+  try{return JSON.parse(s);}catch(e){}
+  try{return JSON.parse(s.replace(/[\u201C\u201D]/g,'\\"').replace(/[\u2018\u2019]/g,"'"));}catch(e){}
+  const type=(s.match(/"type"\s*:\s*"(questions|copies|ask|summary|edit|chat)"/)||[])[1];
+  const loose=k=>{const m=s.match(new RegExp('"'+k+'"\\s*:\\s*"'));if(!m)return null;
+    const st=m.index+m[0].length,en=s.lastIndexOf('"');if(en<=st)return null;
+    return s.slice(st,en).replace(/"\s*,\s*"(copies|brief)"\s*:[\s\S]*$/,'').replace(/"\s*}\s*$/,'').replace(/\\n/g,'\n').replace(/\\"/g,'"');};
+  if(!type)return {type:'chat',text:s.slice(0,1200)};
+  if(type==='copies'){
+    const am=s.match(/"copies"\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
+    if(am){try{return{type:'copies',text:loose('text')||'',copies:JSON.parse(am[1].replace(/[\u2018\u2019]/g,"'"))};}catch(e){}}
+    return{type:'chat',text:loose('text')||'The copy variants did not come through cleanly — ask me to try again.'};
+  }
+  if(type==='summary'){
+    const bm=s.match(/"brief"\s*:\s*(\{[\s\S]*?\})\s*\}?\s*$/);
+    if(bm){try{return{type:'summary',text:loose('text')||'Here is the brief.',brief:JSON.parse(bm[1].replace(/[\u2018\u2019]/g,"'"))};}catch(e){}}
+    return{type:'chat',text:loose('text')||'The brief playback broke — tell me to run it again.'};
+  }
+  if(type==='edit')return{type:'edit',prompt:loose('prompt')||loose('text')||''};
+  return{type,text:loose('text')||''};
+}
+function alCtx(){
+  const c=ccClient();
+  const links=(alState.links||[]).map(l=>'SOURCE ('+(l.title||l.url)+'):\n'+(l.text||'').slice(0,1600)).join('\n\n');
+  return 'CLIENT: '+c.name+' — '+(c.desc||'')+
+    '\nCampaigns: '+((c.campaigns||[]).map(x=>x.name+(x.tagline?' ('+x.tagline+')':'')).join('; ')||'none')+
+    '\nTracked keywords: '+((c.keywords||[]).slice(0,12).join(', ')||'none')+
+    (alState.insights?'\n\nBRAND DOCUMENT INSIGHTS:\n'+alState.insights:'')+
+    (links?'\n\nSOURCE MATERIAL (fetched from URLs the operator provided — quote real facts from here):\n'+links:'')+
+    (alState.chosen?'\n\nCHOSEN COPY: '+JSON.stringify(alState.chosen):'')+
+    (alState.match?'\nREFERENCE MODE: '+(alState.match==='exact'?'match the uploaded reference design EXACTLY':'take inspiration from the uploaded reference'):'')+
+    '\nJSON string rule: use apostrophes inside values; escape any unavoidable double quote as \\".';
+}
+/* ── the flow ── */
+async function alSend(){
+  const inp=$('al-inp');const t=inp.value.trim();if(!t||alState.busy)return;
+  inp.value='';
+  alState.thread.push({r:'u',t});alState.busy=true;alState.busyLabel='Thinking';alRender();
+  try{
+    const urls=(t.match(/https?:\/\/[^\s"'<>)\]]+/g)||[]).slice(0,3);
+    if(urls.length){
+      alState.busyLabel='Reading '+urls.length+' link'+(urls.length>1?'s':'');alRender();
+      const notes=[];
+      for(const u of urls){
+        let host='';try{host=new URL(u).hostname.replace(/^www\./,'');}catch(e){host=u.slice(0,40);}
+        try{
+          const d=await api('/fetchurl?url='+encodeURIComponent(u));
+          if(d&&d.ok&&d.text){alState.links.push({url:u,title:d.title||'',text:d.text});notes.push('OK '+host+(d.title?' — '+d.title.slice(0,70):''));}
+          else notes.push('FAILED '+host+' — '+((d&&(d.detail||d.error))||'no content'));
+        }catch(e){notes.push('FAILED '+host+' — '+((e&&e.message)||'unreachable'));}
+      }
+      alState.links=alState.links.slice(-4);
+      alState.thread.push({r:'a',k:'Sources read',t:notes.join('\n'),ui:true});
+      alRenderAssets();alState.busyLabel='Thinking';alRender();
+    }
+    if(alState.stage==='intake'||alState.stage==='copy')await alIntakeTurn();
+    else if(alState.stage==='refs'||alState.stage==='detail')await alDetailTurn();
+    else await alEditTurn(t);
+  }catch(e){alState.thread.push({r:'e',t:'Ad Lab: '+(e.message||e)});}
+  alState.busy=false;alSave();alRender();
+}
+function alCount(){return parseInt(($('al-count')||{}).value||'6',10)||6;}
+async function alIntakeTurn(){
+  const sys='You are the copy chief of AXIOM Ad Lab, running intake for a paid social / advertising creative.\n\n'+alCtx()+
+    '\n\nSTAGE: INTAKE.\n1. Read the request and ALL context (source material, document insights, campaigns). Fill gaps yourself where the context answers them.\n2. If essentials are missing, ask — ALL questions in ONE message, numbered, max 7, covering whichever of these are still unknown: objective, audience, platform & format (square/portrait/story/landscape), tone, the key fact or stat to lead with, call to action, mandatory inclusions or exclusions (legal lines, words to avoid), offer/date specifics.\n3. When you have enough, write EXACTLY '+alCount()+' copy variants, each taking a genuinely different angle (e.g. stat-led, hard question, urgency, community voice, myth-bust, plain-spoken CTA). Ground every factual claim in the source material — never invent statistics.\n\nReply ONLY raw JSON (no fences), one of:\n{"type":"questions","text":"<numbered questions>"}\n{"type":"copies","text":"<one-line intro>","copies":[{"angle":"<2-3 words>","headline":"<max 9 words>","support":"<max 22 words>","cta":"<2-4 words>"}]}\nAustralian English. Headlines must be spelled perfectly.';
+  const raw=await alChat(sys);
+  const j=alParse(raw);
+  if(j.type==='copies'&&Array.isArray(j.copies)&&j.copies.length){
+    alState.copies=j.copies.map(c=>({angle:String(c.angle||''),headline:String(c.headline||''),support:String(c.support||''),cta:String(c.cta||'')}));
+    alState.thread.push({r:'copies',t:j.text||'',raw});
+    alState.stage='copy';
+  }else{
+    alState.thread.push({r:'a',kind:j.type==='questions'?'questions':'chat',t:j.text||raw.slice(0,900),raw});
+  }
+}
+function alChoose(i){
+  // Read the card as edited on screen - the operator's wording wins.
+  const card=document.querySelector('.al-copy[data-ci="'+i+'"]');
+  const g=cls=>card?String((card.querySelector('.'+cls)||{}).innerText||'').trim():'';
+  const base=alState.copies[i]||{};
+  alState.chosen={_i:i,angle:base.angle,headline:g('hl')||base.headline,support:g('sp')||base.support,cta:g('cta')||base.cta};
+  alState.stage='refs';
+  alState.thread.push({r:'u',t:'Going with: "'+alState.chosen.headline+'" / "'+alState.chosen.support+'" / CTA "'+alState.chosen.cta+'"',ui:false});
+  if(alState.refs.length&&alState.match===null){
+    alState.thread.push({r:'match',t:'You already added reference artwork. Should I copy that design exactly and drop this text in, or just take inspiration from it?'});
+  }else if(!alState.refs.length){
+    alState.thread.push({r:'a',k:'Next',t:'Locked in. Now upload reference artwork (📎 image button) if you want a specific design matched — plus your logo (✓ button) and any brand PDFs (📄 button) so I can pull colours, fonts and rules. Or just say "no reference" and I\'ll design from the brand kit.'});
+  }
+  alSave();alRender();
+}
+function alMatch(mode){
+  alState.match=mode;
+  alState.thread.push({r:'u',t:mode==='exact'?'Match the reference design exactly — same layout, palette and typography, with my chosen copy dropped in.':'Take inspiration from the reference, but design fresh.'});
+  alState.stage='detail';
+  alSave();alRender();
+  alDetailQuestions();
+}
+async function alDetailQuestions(){
+  if(alState.busy)return;
+  alState.busy=true;alState.busyLabel='Checking the last details';alRender();
+  try{await alDetailTurn();}catch(e){alState.thread.push({r:'e',t:'Ad Lab: '+(e.message||e)});}
+  alState.busy=false;alSave();alRender();
+}
+async function alDetailTurn(){
+  const sys='You are the creative director of AXIOM Ad Lab, finalising a creative brief.\n\n'+alCtx()+
+    '\n\nSTAGE: FINAL DETAILS. The copy is chosen. Reference artwork and logo may be attached to this conversation — study them.\n'+
+    '1. Ask ONLY the final questions still needed, ALL in ONE numbered message, max 5, chosen from: format (square/portrait/story/landscape) if unknown, colour handling (reference palette vs brand colours from the document insights), logo placement, whether people/faces should appear, any legal or disclaimer line.\n'+
+    '2. When nothing essential is missing, play the brief back.\nReply ONLY raw JSON (no fences), one of:\n'+
+    '{"type":"ask","text":"<numbered questions>"}\n'+
+    '{"type":"summary","text":"<plain-English playback starting: Here\'s the plan - >","brief":{"format":"square|portrait|story|landscape","headline":"<exact>","support":"<exact>","cta":"<exact>","audience":"","tone":"","style":"<visual direction incl. reference-match + colour notes>","logo":"<placement or none>","notes":""}}\n'+
+    'The headline/support/cta in the brief MUST be the chosen copy verbatim unless the operator changed it.';
+  const raw=await alChat(sys);
+  const j=alParse(raw);
+  if(j.type==='summary'&&j.brief){
+    alState.brief=j.brief;
+    alState.thread.push({r:'summary',t:j.text||'',brief:j.brief,raw});
+    alState.stage='detail';
+  }else{
+    alState.thread.push({r:'a',kind:'question',t:j.text||raw.slice(0,900),raw});
+  }
+}
+function alTextmode(m){alState.textmode=m;alSave();alRender();}
+function alAdjust(){const inp=$('al-inp');if(inp){inp.placeholder='Tell the Lab what to change in the brief…';inp.focus();}}
+async function alConfirm(){
+  if(alState.busy||!alState.brief)return;
+  alState.busy=true;alState.busyLabel='Generating the artwork';alRender();
+  try{await alGenerate(null);alState.stage='confirmed';}
+  catch(e){alState.thread.push({r:'e',t:'Ad Lab: '+(e.message||e)});}
+  alState.busy=false;alSave();alRender();
+  if(alState.art)alOpenCanvas();
+}
+function alGenPrompt(editPrompt){
+  const b=alState.brief||{},ch=alState.chosen||{};
+  if(editPrompt)return 'Edit the FIRST attached image per this instruction: "'+editPrompt+'". Keep everything else — style, layout, dimensions — unchanged unless the instruction says otherwise. Output only the edited image.';
+  const head=alState.match==='exact'&&alState.refs.length
+    ?'The FIRST attached image is a reference design to REPLICATE EXACTLY — same layout grid, palette, typography style, background treatment and mood. Recreate it faithfully'+(alState.textmode==='baked'?', replacing its wording with the text below.':' as the visual base.')
+    :(alState.refs.length?'Take clear inspiration from the attached reference artwork — related palette and energy, but an original composition.\n':'Design a clean, confident, premium advertising creative.\n');
+  const txt=alState.textmode==='baked'
+    ?'\n\nPlace THIS text on the creative, spelled EXACTLY as written, clearly legible:\n- HEADLINE (dominant): '+(b.headline||ch.headline||'')+(b.support||ch.support?'\n- SUPPORTING LINE: '+(b.support||ch.support):'')+((b.cta||ch.cta)?'\n- CALL TO ACTION (button/badge): '+(b.cta||ch.cta):'')
+    :'\n\nRender NO text, words, letters or logos anywhere in the image — none. Compose the visual with generous clear negative space where a headline, a supporting line and a CTA button will be overlaid later'+(alState.match==='exact'?', in the same zones the reference used for its text.':' (upper two-thirds preferred).');
+  return head+'\nFormat: '+(CC_DIMS[b.format]||CC_DIMS.square)+'.'+txt+
+    '\n\nAudience: '+(b.audience||'general public')+'. Tone: '+(b.tone||'confident, credible')+'.'+
+    (b.style?'\nVisual direction: '+b.style:'')+(b.notes?'\nNotes: '+b.notes:'')+
+    '\n\nStrict: '+(alState.textmode==='baked'?'render ONLY the exact text above — no gibberish or invented words. ':'absolutely no text or lettering. ')+'Do not draw a logo. Output one finished graphic.';
+}
+async function alGenerate(editPrompt){
+  const b=alState.brief||{};
+  let refs=[];
+  if(editPrompt&&alState.art)refs.push({data:alState.art.b64,mime:alState.art.mime});
+  refs=refs.concat((alState.refs||[]).map(r=>({data:r.data,mime:r.mime})));
+  if(alState.logo&&alState.textmode==='baked')refs.push({data:alState.logo.data,mime:alState.logo.mime});
+  refs=refs.concat(ccAllRefs()).slice(0,6);
+  const r=await fetch(csBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prompt:alGenPrompt(editPrompt),references:refs,aspect:CC_ASPECT[b.format]||'1:1',size:'1K'})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
+  alState.artVer++;
+  alState.art={b64:d.imageB64,mime:d.mime||'image/png'};
+  alState.thread.push({r:'art',ver:alState.artVer,b64:d.imageB64,mime:d.mime||'image/png',note:editPrompt?editPrompt.slice(0,80):('from brief — '+(b.headline||alState.chosen&&alState.chosen.headline||'').slice(0,50))});
+}
+async function alEditTurn(instr){
+  const sys='You route refinement instructions for a generated ad creative (version '+alState.artVer+').\n\nBRIEF: '+JSON.stringify(alState.brief)+'\n'+alCtx()+
+    '\n\nReply ONLY raw JSON (no fences):\n- A CLEAR artwork change -> {"type":"edit","prompt":"<CONCISE imperative instruction, max ~55 words; state only WHAT CHANGES; include exact text strings when wording changes>"}\n- Ambiguous -> {"type":"ask","text":"<one short question>"}\n- Conversation -> {"type":"chat","text":"<reply>"}\nNever re-describe the existing scene — the engine can already see the current image and references.';
+  const raw=await alChat(sys);
+  const j=alParse(raw);
+  if(j.type==='edit'&&j.prompt){
+    alState.thread.push({r:'a',k:'Editing v'+alState.artVer,t:j.prompt,ui:true,raw});
+    alState.busyLabel='Rendering v'+(alState.artVer+1);alRender();
+    await alGenerate(j.prompt);
+    alRefreshCanvasBase();
+  }else{
+    alState.thread.push({r:'a',kind:j.type==='ask'?'question':'chat',t:j.text||raw.slice(0,700),raw});
+  }
+}
+/* ── Ad Lab canvas — free layer editor over the artwork ──────────────────
+   Layers use % coordinates of the stage so layouts survive resizes and
+   export 1:1 at the artwork's native resolution. Types: text | img | shape. */
+const AL_FONTS={display:"'Bricolage Grotesque',sans-serif",body:"'Instrument Sans',sans-serif",mono:"'Spline Sans Mono',monospace"};
+function alLayerId(){return 'L'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function alOpenCanvas(){
+  const cw=$('al-canvaswrap');if(!cw||!alState.art)return;
+  cw.hidden=false;
+  if(!alState.layers.length&&alState.textmode==='overlay'&&alState.chosen){
+    const ch=alState.chosen,b=alState.brief||{};
+    alState.layers=[
+      {id:alLayerId(),type:'text',x:8,y:14,w:84,rot:0,opacity:1,text:(b.headline||ch.headline||'Headline'),size:8.5,weight:750,color:'#FFFFFF',bg:'',align:'left',font:'display'},
+      {id:alLayerId(),type:'text',x:8,y:38,w:70,rot:0,opacity:1,text:(b.support||ch.support||''),size:3.6,weight:500,color:'#EDEFF4',bg:'',align:'left',font:'body'},
+      {id:alLayerId(),type:'text',x:8,y:78,w:40,rot:0,opacity:1,text:(b.cta||ch.cta||''),size:3.2,weight:650,color:'#0F1420',bg:'#FFFFFF',align:'center',font:'body'},
+    ].filter(l=>l.text);
+    if(alState.logo)alState.layers.push({id:alLayerId(),type:'img',x:80,y:86,w:16,h:10,rot:0,opacity:1,src:'data:'+alState.logo.mime+';base64,'+alState.logo.data,name:'Logo'});
+  }
+  alCanvasRender();
+  cw.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function alRefreshCanvasBase(){
+  const cw=$('al-canvaswrap');
+  if(cw&&!cw.hidden)alCanvasRender();
+}
+function alAddText(){
+  alState.layers.push({id:alLayerId(),type:'text',x:20,y:45,w:60,rot:0,opacity:1,text:'New text',size:4.5,weight:650,color:'#FFFFFF',bg:'',align:'left',font:'display'});
+  alState.sel=alState.layers[alState.layers.length-1].id;alSave();alCanvasRender();
+}
+function alAddLogoLayer(){
+  if(!alState.logo){toast('Upload a logo first (the tick button in the Lab)',1);return;}
+  alState.layers.push({id:alLayerId(),type:'img',x:78,y:84,w:18,h:12,rot:0,opacity:1,src:'data:'+alState.logo.mime+';base64,'+alState.logo.data,name:'Logo'});
+  alState.sel=alState.layers[alState.layers.length-1].id;alSave();alCanvasRender();
+}
+function alAddShape(shape){
+  alState.layers.push({id:alLayerId(),type:'shape',shape,x:30,y:60,w:40,h:12,rot:0,opacity:1,fill:shape==='pill'?'#FFFFFF':'rgba(10,14,22,0.55)'});
+  alState.sel=alState.layers[alState.layers.length-1].id;alSave();alCanvasRender();
+}
+function alLayerName(l){return l.type==='text'?('T · '+(l.text||'').slice(0,18)):l.type==='img'?(l.name||'Image'):('◼ '+(l.shape||'shape'));}
+function alCanvasRender(){
+  const st=$('al-stage');if(!st||!alState.art)return;
+  st.innerHTML='<img class="base" src="data:'+alState.art.mime+';base64,'+alState.art.b64+'" alt="">'+
+    '<div class="al-guide v" id="al-gv"></div><div class="al-guide hz" id="al-gh"></div>'+
+    alState.layers.map(l=>{
+      const sel=l.id===alState.sel?' sel':'';
+      const base='left:'+l.x+'%;top:'+l.y+'%;width:'+l.w+'%;'+(l.type!=='text'?'height:'+l.h+'%;':'')+
+        'transform:rotate('+(l.rot||0)+'deg);opacity:'+(l.opacity==null?1:l.opacity)+';';
+      const handles='<span class="h se" data-h="se"></span><span class="h rot" data-h="rot"></span>';
+      if(l.type==='text'){
+        const stW=st.getBoundingClientRect().width||600;
+        return '<div class="al-layer text'+sel+'" data-id="'+l.id+'" style="'+base+
+          'font-family:'+AL_FONTS[l.font||'display']+';font-weight:'+(l.weight||650)+';font-size:'+(l.size*stW/100)+'px;color:'+l.color+
+          ';text-align:'+(l.align||'left')+(l.bg?';background:'+l.bg+';padding:.45em .8em;border-radius:.45em':'')+'">'+esc(l.text||'')+handles+'</div>';
+      }
+      if(l.type==='img')return '<div class="al-layer'+sel+'" data-id="'+l.id+'" style="'+base+'"><img src="'+l.src+'" alt="" style="width:100%;height:100%;object-fit:contain;pointer-events:none">'+handles+'</div>';
+      const rad=l.shape==='pill'?'999px':'6px';
+      return '<div class="al-layer'+sel+'" data-id="'+l.id+'" style="'+base+'background:'+(l.fill||'#fff')+';border-radius:'+rad+'">'+handles+'</div>';
+    }).join('');
+  alLayerListRender();alPropsRender();alStageBind();
+}
+function alLayerListRender(){
+  const el=$('al-layerlist');if(!el)return;
+  el.innerHTML=alState.layers.slice().reverse().map(l=>
+    '<div class="al-lrow'+(l.id===alState.sel?' on':'')+'" onclick="alState.sel=\''+l.id+'\';alCanvasRender()">'+
+    '<span class="nm">'+esc(alLayerName(l))+'</span>'+
+    '<button onclick="event.stopPropagation();alLayerMove(\''+l.id+'\',1)" title="Bring forward" aria-label="Bring forward">▲</button>'+
+    '<button onclick="event.stopPropagation();alLayerMove(\''+l.id+'\',-1)" title="Send back" aria-label="Send back">▼</button>'+
+    '<button onclick="event.stopPropagation();alLayerDel(\''+l.id+'\')" title="Delete" aria-label="Delete">×</button></div>').join('')
+    ||'<div class="note" style="margin:0">No layers yet — add text, your logo or a shape.</div>';
+}
+function alLayerMove(id,dir){
+  const i=alState.layers.findIndex(l=>l.id===id);if(i<0)return;
+  const j=i+dir;if(j<0||j>=alState.layers.length)return;
+  const arr=alState.layers.splice(i,1);alState.layers.splice(j,0,arr[0]);
+  alSave();alCanvasRender();
+}
+function alLayerDel(id){
+  alState.layers=alState.layers.filter(l=>l.id!==id);
+  if(alState.sel===id)alState.sel=null;
+  alSave();alCanvasRender();
+}
+function alSelLayer(){return alState.layers.find(l=>l.id===alState.sel)||null;}
+function alPropsRender(){
+  const el=$('al-cvprops');if(!el)return;
+  const l=alSelLayer();
+  if(!l){el.innerHTML='';return;}
+  const op='<label>Opacity <input type="range" min="10" max="100" value="'+Math.round((l.opacity==null?1:l.opacity)*100)+'" oninput="alProp(\'opacity\',this.value/100)"></label>';
+  if(l.type==='text'){
+    el.innerHTML='<label>Size <input type="range" min="1.5" max="16" step="0.25" value="'+l.size+'" oninput="alProp(\'size\',+this.value)"></label>'+
+      '<label>Colour <input type="color" value="'+(l.color||'#ffffff')+'" oninput="alProp(\'color\',this.value)"></label>'+
+      '<label>Plate <input type="color" value="'+(l.bg?l.bg:'#ffffff')+'" oninput="alProp(\'bg\',this.value)"></label>'+
+      '<button class="pbtn'+(l.bg?'':' on')+'" onclick="alProp(\'bg\',\'\')">No plate</button>'+
+      ['display','body','mono'].map(f=>'<button class="pbtn'+(l.font===f?' on':'')+'" onclick="alProp(\'font\',\''+f+'\')">'+f+'</button>').join('')+
+      ['left','center','right'].map(a=>'<button class="pbtn'+(l.align===a?' on':'')+'" onclick="alProp(\'align\',\''+a+'\')">'+a[0].toUpperCase()+'</button>').join('')+
+      '<button class="pbtn'+(l.weight>=700?' on':'')+'" onclick="alProp(\'weight\','+(l.weight>=700?500:750)+')">Bold</button>'+op;
+  }else if(l.type==='shape'){
+    el.innerHTML='<label>Fill <input type="color" value="'+(/^#/.test(l.fill||'')?l.fill:'#ffffff')+'" oninput="alProp(\'fill\',this.value)"></label>'+op;
+  }else{el.innerHTML=op;}
+}
+function alProp(k,v){const l=alSelLayer();if(!l)return;l[k]=v;alSave();alCanvasRender();}
+/* pointer interactions: drag body / resize SE corner / rotate handle */
+function alStageBind(){
+  const st=$('al-stage');if(!st||st._bound)return;st._bound=true;
+  let act=null;
+  st.addEventListener('pointerdown',e=>{
+    const lay=e.target.closest('.al-layer');
+    if(!lay){alState.sel=null;alCanvasRender();return;}
+    if(lay.getAttribute('contenteditable')==='true')return;
+    const id=lay.dataset.id,l=alState.layers.find(x=>x.id===id);if(!l)return;
+    alState.sel=id;
+    const r=st.getBoundingClientRect();
+    const h=e.target.dataset&&e.target.dataset.h;
+    act={l,mode:h||'move',sx:e.clientX,sy:e.clientY,ox:l.x,oy:l.y,ow:l.w,oh:l.h||0,rw:r.width,rh:r.height,osz:l.size||0};
+    st.setPointerCapture(e.pointerId);
+    alCanvasRender();
+    e.preventDefault();
+  });
+  st.addEventListener('pointermove',e=>{
+    if(!act)return;
+    const dx=(e.clientX-act.sx)/act.rw*100,dy=(e.clientY-act.sy)/act.rh*100;
+    const l=act.l;
+    if(act.mode==='move'){
+      l.x=Math.max(-l.w+2,Math.min(98,act.ox+dx));
+      l.y=Math.max(-4,Math.min(97,act.oy+dy));
+      const cx=l.x+l.w/2,gv=$('al-gv'),gh=$('al-gh');
+      const nearV=Math.abs(cx-50)<1.4;if(nearV)l.x=50-l.w/2;
+      if(gv)gv.style.display=nearV?'block':'none';
+      const ch=l.type==='text'?0:(l.h||0)/2;
+      const cy=l.y+ch;const nearH=ch&&Math.abs(cy-50)<1.4;if(nearH)l.y=50-ch;
+      if(gh)gh.style.display=nearH?'block':'none';
+    }else if(act.mode==='se'){
+      if(l.type==='text'){l.w=Math.max(10,act.ow+dx);l.size=Math.max(1.5,act.osz*(l.w/act.ow));}
+      else{l.w=Math.max(4,act.ow+dx);l.h=Math.max(2,act.oh+dy);}
+    }else if(act.mode==='rot'){
+      const el=document.querySelector('.al-layer[data-id="'+l.id+'"]');
+      if(el){
+        const b=el.getBoundingClientRect();
+        const cx=b.left+b.width/2,cy=b.top+b.height/2;
+        l.rot=Math.round(Math.atan2(e.clientY-cy,e.clientX-cx)*180/Math.PI+90);
+        if(Math.abs(l.rot)<4)l.rot=0;
+      }
+    }
+    alCanvasLight(l);
+  });
+  const end=()=>{if(act){const gv=$('al-gv'),gh=$('al-gh');if(gv)gv.style.display='none';if(gh)gh.style.display='none';act=null;alSave();alCanvasRender();}};
+  st.addEventListener('pointerup',end);st.addEventListener('pointercancel',end);
+  st.addEventListener('dblclick',e=>{
+    const lay=e.target.closest('.al-layer.text');if(!lay)return;
+    const l=alState.layers.find(x=>x.id===lay.dataset.id);if(!l)return;
+    lay.setAttribute('contenteditable','true');lay.focus();
+    const done=()=>{lay.removeAttribute('contenteditable');l.text=lay.innerText.trim();alSave();alCanvasRender();};
+    lay.addEventListener('blur',done,{once:true});
+    lay.addEventListener('keydown',ev=>{if(ev.key==='Escape'){ev.preventDefault();lay.blur();}});
+  });
+}
+/* fast-path update during drags — move the DOM node, defer full re-render */
+function alCanvasLight(l){
+  const el=document.querySelector('.al-layer[data-id="'+l.id+'"]');if(!el)return;
+  el.style.left=l.x+'%';el.style.top=l.y+'%';el.style.width=l.w+'%';
+  if(l.type!=='text')el.style.height=l.h+'%';
+  else{const stW=($('al-stage').getBoundingClientRect().width||600);el.style.fontSize=(l.size*stW/100)+'px';}
+  el.style.transform='rotate('+(l.rot||0)+'deg)';
+}
+/* export at native artwork resolution */
+function alExport(){
+  if(!alState.art){toast('Generate artwork first',1);return;}
+  const img=new Image();
+  img.onload=()=>{
+    const W=img.naturalWidth,H=img.naturalHeight;
+    const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+    const x=cv.getContext('2d');
+    x.drawImage(img,0,0,W,H);
+    let pending=0;const done=()=>{if(pending>0)return;
+      const a=document.createElement('a');
+      a.href=cv.toDataURL('image/png');
+      a.download='axiom-adlab-v'+alState.artVer+'-final.png';
+      document.body.appendChild(a);a.click();a.remove();
+      toast('Exported at '+W+'×'+H);
+    };
+    alState.layers.forEach(l=>{
+      const lx=l.x/100*W,ly=l.y/100*H,lw=l.w/100*W,lh=(l.h||0)/100*H;
+      x.save();
+      x.globalAlpha=l.opacity==null?1:l.opacity;
+      if(l.rot&&l.type!=='img'){
+        const cx2=lx+lw/2,cy2=ly+(l.type==='text'?0:lh/2);
+        x.translate(cx2,cy2);x.rotate(l.rot*Math.PI/180);x.translate(-cx2,-cy2);
+      }
+      if(l.type==='shape'){
+        x.fillStyle=l.fill||'#fff';
+        const rad=l.shape==='pill'?Math.min(lw,lh)/2:Math.min(lw,lh)*.12;
+        x.beginPath();
+        if(x.roundRect)x.roundRect(lx,ly,lw,lh,rad);else x.rect(lx,ly,lw,lh);
+        x.fill();
+      }else if(l.type==='img'&&l.src){
+        pending++;
+        const li=new Image();
+        li.onload=()=>{
+          x.save();x.globalAlpha=l.opacity==null?1:l.opacity;
+          if(l.rot){const cx2=lx+lw/2,cy2=ly+lh/2;x.translate(cx2,cy2);x.rotate(l.rot*Math.PI/180);x.translate(-cx2,-cy2);}
+          const s=Math.min(lw/li.naturalWidth,lh/li.naturalHeight);
+          const dw=li.naturalWidth*s,dh=li.naturalHeight*s;
+          x.drawImage(li,lx+(lw-dw)/2,ly+(lh-dh)/2,dw,dh);
+          x.restore();pending--;done();
+        };
+        li.onerror=()=>{pending--;done();};
+        li.src=l.src;
+      }else if(l.type==='text'){
+        const fs=l.size/100*W;
+        x.font=(l.weight||650)+' '+fs+'px '+AL_FONTS[l.font||'display'];
+        x.textBaseline='top';
+        const pad=l.bg?fs*.45:0,padX=l.bg?fs*.8:0;
+        const maxW=lw-padX*2;
+        const lines=[];
+        String(l.text||'').split('\n').forEach(para=>{
+          let line='';
+          para.split(' ').forEach(wd=>{
+            const t2=line?line+' '+wd:wd;
+            if(x.measureText(t2).width>maxW&&line){lines.push(line);line=wd;}
+            else line=t2;
+          });
+          lines.push(line);
+        });
+        const lineH=fs*1.14;
+        if(l.bg){
+          const tw=Math.max.apply(null,lines.map(s=>x.measureText(s).width));
+          const bw=(l.align==='center'?tw:Math.min(maxW,tw))+padX*2,bh=lines.length*lineH+pad*2;
+          const bx=l.align==='center'?lx+(lw-bw)/2:l.align==='right'?lx+lw-bw:lx;
+          x.fillStyle=l.bg;
+          x.beginPath();
+          if(x.roundRect)x.roundRect(bx,ly,bw,bh,fs*.45);else x.rect(bx,ly,bw,bh);
+          x.fill();
+        }
+        x.fillStyle=l.color||'#fff';
+        lines.forEach((s,i)=>{
+          const tw=x.measureText(s).width;
+          const tx=l.align==='center'?lx+(lw-tw)/2:l.align==='right'?lx+lw-padX-tw:lx+padX;
+          x.fillText(s,tx,ly+pad+i*lineH);
+        });
+      }
+      x.restore();
+    });
+    done();
+  };
+  img.src='data:'+alState.art.mime+';base64,'+alState.art.b64;
 }
 
 /* ═══════════ THE CURIOUS MIND — client intelligence layer ═══════════ */
