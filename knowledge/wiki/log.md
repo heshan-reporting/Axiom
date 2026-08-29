@@ -13,6 +13,11 @@ tags:
 
 Newest completed operations appear first.
 
+## 2026-08-29 - save-20260829-first-intel-digests
+
+- Captured two cited intelligence digests (web search, L2 unreviewed): Resources & Tax (mca) and Macro & Politics (cmm).
+- Indexed both under Sources.
+
 ## 2026-08-29 - save-20260829-playbook-template
 
 - Created [[Client Playbook Template]]: per-client standing rules (style / voice / policy) that the app applies to every generation.

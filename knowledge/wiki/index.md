@@ -15,7 +15,8 @@ This catalog is updated by completed knowledge operations.
 
 ## Sources
 
-- No sources indexed yet.
+- [[Intelligence Digest 2026-08-29 - Resources and Tax]] - fuel tax credit fight (incl. the Fortescue split) and critical-minerals tailwind; client: mca.
+- [[Intelligence Digest 2026-08-29 - Macro and Politics]] - RBA hold at 4.35%, budget measures, contested polling, hardening public mood; shared cmm.
 
 ## Concepts
 
