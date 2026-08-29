@@ -2305,15 +2305,27 @@ export default {
       try {
         await ensureArchive(env);
         const wk = Date.now() - 7 * 86400000;
-        const [kinds, srcs, convo] = await env.MIND_DB.batch([
+        // issue relevance: how much of the last 7 days speaks to the fights our clients are in
+        const ISS = [
+          ['ftc', '%fuel tax%', '%diesel rebate%'],
+          ['cm', '%critical mineral%', '%rare earth%'],
+          ['col', '%cost of living%', '%inflation%'],
+          ['gov', '%newspoll%', '%primary vote%'],
+        ];
+        const stmts = [
           env.MIND_DB.prepare('SELECT kind, COUNT(*) c FROM arc_items GROUP BY kind'),
           env.MIND_DB.prepare('SELECT src, COUNT(*) c FROM arc_items WHERE ts>? GROUP BY src ORDER BY c DESC LIMIT 200').bind(wk),
           env.MIND_DB.prepare('SELECT COUNT(*) c, COUNT(DISTINCT sid) s FROM arc_convo'),
-        ]);
-        const byKind = {}; (kinds.results || []).forEach(r => { byKind[r.kind] = r.c; });
-        const bySrc = {}; (srcs.results || []).forEach(r => { bySrc[r.src] = r.c; });
-        const cv = (convo.results || [])[0] || {};
-        return jsonResp({ ok: true, byKind, bySrc7d: bySrc, conversations: { turns: cv.c || 0, sessions: cv.s || 0 } });
+          env.MIND_DB.prepare("SELECT date(ts/1000,'unixepoch') d, COUNT(*) c FROM arc_items WHERE ts>? GROUP BY d ORDER BY d").bind(Date.now() - 14 * 86400000),
+        ].concat(ISS.map(([, a, b]) =>
+          env.MIND_DB.prepare('SELECT COUNT(*) c FROM arc_items WHERE ts>? AND (title LIKE ? OR title LIKE ?)').bind(wk, a, b)));
+        const out2 = await env.MIND_DB.batch(stmts);
+        const byKind = {}; (out2[0].results || []).forEach(r => { byKind[r.kind] = r.c; });
+        const bySrc = {}; (out2[1].results || []).forEach(r => { bySrc[r.src] = r.c; });
+        const cv = (out2[2].results || [])[0] || {};
+        const byDay = (out2[3].results || []).map(r => ({ d: r.d, c: r.c }));
+        const issues = {}; ISS.forEach(([k], i) => { issues[k] = ((out2[4 + i].results || [])[0] || {}).c || 0; });
+        return jsonResp({ ok: true, byKind, bySrc7d: bySrc, byDay, issues, conversations: { turns: cv.c || 0, sessions: cv.s || 0 } });
       } catch (e) { return jsonResp({ ok: false, error: 'stats_failed', detail: String(e).slice(0, 160) }, 500); }
     }
 
