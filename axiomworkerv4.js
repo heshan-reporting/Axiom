@@ -58,7 +58,11 @@
  * |                                                                         |
  * |  V6 POLITICAL INTELLIGENCE ROUTES (all keyless except /tvfy):           |
  * |  GET /trends?geo=AU                Google Trends - trending searches    |
- * |  GET /social?tag=auspol            Mastodon #auspol public timelines    |
+ * |  GET /social?tag=&net=             Social pulse: Mastodon + Reddit +    |
+ * |                                    Bluesky merged (net=all|mastodon|    |
+ * |                                    reddit|bsky), keyless, fail-soft     |
+ * |  GET /forums?q=                    Forum pulse: OzPolitic + Whirlpool + |
+ * |                                    BigFooty + HotCopper in one call     |
  * |  GET /gdelt?q=&mode=&timespan=     GDELT news volume/tone/articles      |
  * |  GET /wiki?article=&days=          Wikipedia pageview attention          |
  * |  GET /tvfy?q=                      TheyVoteForYou MP records            |
@@ -114,12 +118,13 @@ function jsonResp(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: CORS });
 }
 
-/** Strip HTML tags, decode entities, collapse whitespace */
+/** Strip HTML tags, decode entities, collapse whitespace.
+    NOTE: &amp; must decode LAST or double-encoded input (&amp;lt;) decodes
+    twice and re-introduces markup characters. */
 function stripHtml(s = '') {
   return s
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<[^>]*>/g, '')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -127,6 +132,7 @@ function stripHtml(s = '') {
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -201,6 +207,23 @@ const AU_FEEDS = {
   gnews_immig:   'https://news.google.com/rss/search?q=australia%20immigration%20OR%20migration%20policy&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_states:  'https://news.google.com/rss/search?q=australia%20state%20politics%20premier%20OR%20state%20budget&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_election:'https://news.google.com/rss/search?q=australia%20election%20OR%20newspoll%20OR%20preferred%20prime%20minister&hl=en-AU&gl=AU&ceid=AU:en',
+  // -- Regional dailies (ACM network) - the regional read the metro press misses (v9) --
+  newcastleher:  'https://www.newcastleherald.com.au/rss.xml',
+  illawarramerc: 'https://www.illawarramercury.com.au/rss.xml',
+  examiner:      'https://www.examiner.com.au/rss.xml',                    // Launceston
+  bordermail:    'https://www.bordermail.com.au/rss.xml',                  // Albury-Wodonga
+  bendigoadv:    'https://www.bendigoadvertiser.com.au/rss.xml',
+  // -- Official / primary sources --
+  pmo:           'https://www.pm.gov.au/rss.xml',                          // PM media releases
+  apo:           'https://apo.org.au/rss.xml',                             // Analysis & Policy Observatory
+  // -- Topical sweeps (v9) - defence, health, indigenous affairs, regions,
+  //    and the tax / resources themes AXIOM's clients live in --
+  gnews_defence: 'https://news.google.com/rss/search?q=australia%20defence%20OR%20aukus%20OR%20adf%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_health:  'https://news.google.com/rss/search?q=australia%20medicare%20OR%20ndis%20OR%20health%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_indig:   'https://news.google.com/rss/search?q=australia%20indigenous%20OR%20closing%20the%20gap%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_regions: 'https://news.google.com/rss/search?q=regional%20australia%20OR%20agriculture%20OR%20drought%20policy&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_tax:     'https://news.google.com/rss/search?q=australia%20tax%20reform%20OR%20fuel%20tax%20credits%20OR%20superannuation%20tax&hl=en-AU&gl=AU&ceid=AU:en',
+  gnews_mining:  'https://news.google.com/rss/search?q=australia%20mining%20OR%20critical%20minerals%20OR%20resources%20policy&hl=en-AU&gl=AU&ceid=AU:en',
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
@@ -1433,6 +1456,160 @@ async function fetchDiscourseJSON(baseUrl, query) {
 // WORKER ENTRY
 // ==============================================================================
 
+// ==============================================================================
+// SOCIAL PULSE - multi-network ingestion (Mastodon + Reddit + Bluesky, keyless)
+// Every fetcher is independently timed out and fails soft: one dead network
+// never blanks the pulse. All posts normalise to one schema:
+//   { id, network, author, handle, text, ups, boosts, replies, url, date }
+// ==============================================================================
+
+function abortAfter(ms) {
+  try { return AbortSignal.timeout(ms); } catch { return undefined; }
+}
+
+async function socialMastodon(tag) {
+  const instances = ['aus.social', 'mastodon.social'];
+  const posts = [];
+  await Promise.all(instances.map(async (inst) => {
+    try {
+      const r = await fetch('https://' + inst + '/api/v1/timelines/tag/' + tag + '?limit=20',
+        { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
+      if (!r.ok) return;
+      const arr = await r.json();
+      (Array.isArray(arr) ? arr : []).forEach((s) => {
+        const text = stripHtml(String(s.content || '').replace(/<\/p>\s*<p>/gi, ' - '));
+        if (!text) return;
+        posts.push({
+          id: 'm_' + s.id, network: 'mastodon',
+          author: (s.account && (s.account.display_name || s.account.username)) || 'unknown',
+          handle: (s.account && s.account.acct) || inst,
+          text: text.slice(0, 400),
+          ups: s.favourites_count || 0, boosts: s.reblogs_count || 0, replies: s.replies_count || 0,
+          url: s.url, date: s.created_at,
+        });
+      });
+    } catch {}
+  }));
+  return posts;
+}
+
+/** Subreddit routing per pulse tag - falls back to the AU politics pair. */
+const REDDIT_SUBS = {
+  auspol:    'AustralianPolitics+australia',
+  australia: 'australia+AustralianPolitics',
+  economy:   'AusFinance+AusEcon+AustralianPolitics',
+  housing:   'AusProperty+AusFinance+shitrentals',
+  climate:   'AustralianPolitics+australia',
+};
+async function socialReddit(tag) {
+  const subs = REDDIT_SUBS[tag] || REDDIT_SUBS.auspol;
+  const posts = [];
+  try {
+    // api.reddit.com + descriptive UA: the www host 403s generic cloud UAs.
+    const r = await fetch('https://api.reddit.com/r/' + subs + '/hot?limit=30&raw_json=1',
+      { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(6000) });
+    if (!r.ok) return posts;
+    const d = await r.json();
+    const kids = (d && d.data && d.data.children) || [];
+    const kw = REDDIT_SUBS[tag] ? null : tag.toLowerCase();
+    kids.forEach((c) => {
+      const p = c && c.data; if (!p || p.stickied || p.pinned) return;
+      const text = (p.title || '') + (p.selftext ? ' - ' + p.selftext : '');
+      if (kw && !text.toLowerCase().includes(kw)) return;
+      posts.push({
+        id: 'r_' + p.id, network: 'reddit',
+        author: 'u/' + (p.author || 'unknown'), handle: 'r/' + (p.subreddit || ''),
+        text: stripHtml(text).slice(0, 400),
+        ups: p.score || 0, boosts: 0, replies: p.num_comments || 0,
+        url: 'https://www.reddit.com' + (p.permalink || ''), date: new Date((p.created_utc || 0) * 1000).toISOString(),
+      });
+    });
+  } catch {}
+  return posts;
+}
+
+async function socialBsky(tag) {
+  const posts = [];
+  try {
+    // Public AppView search - no auth required.
+    const r = await fetch('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=' +
+      encodeURIComponent('#' + tag) + '&limit=25&sort=latest',
+      { headers: { 'User-Agent': 'AXIOM/6.0' }, signal: abortAfter(6000) });
+    if (!r.ok) return posts;
+    const d = await r.json();
+    ((d && d.posts) || []).forEach((p) => {
+      const rec = p.record || {}, au = p.author || {};
+      const rkey = String(p.uri || '').split('/').pop();
+      if (!rec.text) return;
+      posts.push({
+        id: 'b_' + rkey, network: 'bsky',
+        author: au.displayName || au.handle || 'unknown', handle: au.handle || '',
+        text: stripHtml(String(rec.text)).slice(0, 400),
+        ups: p.likeCount || 0, boosts: p.repostCount || 0, replies: p.replyCount || 0,
+        url: au.handle && rkey ? 'https://bsky.app/profile/' + au.handle + '/post/' + rkey : '',
+        date: rec.createdAt || p.indexedAt,
+      });
+    });
+  } catch {}
+  return posts;
+}
+
+// ==============================================================================
+// FORUM PULSE - one-call aggregate of the AU political forum scrapers.
+// Lean primary-strategy fetchers (the per-site routes keep their full
+// multi-fallback versions); everything fails soft with per-source status.
+// ==============================================================================
+
+async function forumOzRss() {
+  const { ok, html } = await safeFetch('https://www.ozpolitic.com/forum/YaBB.pl?action=RSSrecent',
+    { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,text/xml,*/*' }, signal: abortAfter(6500) });
+  if (!ok) return [];
+  return [...html.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 12).map(m => {
+    const b = m[1];
+    const title = stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/) || [])[1] || '');
+    const link = ((b.match(/<link[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/) || [])[1] || '').trim();
+    const date = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
+    return { text: title, url: link, date, source: 'OzPolitic' };
+  }).filter(t => t.text);
+}
+
+async function forumWhirlpoolQ(q) {
+  const { ok, html } = await safeFetch('https://forums.whirlpool.net.au/search?q=' + encodeURIComponent(q) + '&forum=0',
+    { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html' }, signal: abortAfter(6500) });
+  if (!ok) return [];
+  const out = [], seen = new Set();
+  for (const m of html.matchAll(/<a[^>]+href="(\/archive\/\d+\/[^"]+|\/thread\/[^"]+)"[^>]*>([^<]{8,})<\/a>/g)) {
+    addThread(out, seen, m[2], 'https://forums.whirlpool.net.au' + m[1], { source: 'Whirlpool' });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+async function forumBigfootyLatest() {
+  const { ok, html } = await safeFetch('https://www.bigfooty.com/forum/forums/australian-politics.229/',
+    { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html', 'Referer': 'https://www.bigfooty.com/' }, signal: abortAfter(6500) });
+  if (!ok) return [];
+  const out = [], seen = new Set();
+  for (const m of html.matchAll(/<a[^>]+href="(https:\/\/www\.bigfooty\.com\/forum\/threads\/[^"?#]+|\/forum\/threads\/[^"?#]+)"[^>]*(?:data-tp-primary="on"[^>]*)?>([\s\S]{6,140}?)<\/a>/g)) {
+    const href = m[1].startsWith('http') ? m[1] : 'https://www.bigfooty.com' + m[1];
+    addThread(out, seen, m[2], href, { source: 'BigFooty' });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+async function forumHotcopperLatest() {
+  const { ok, html } = await safeFetch('https://hotcopper.com.au/discussions/politics/',
+    { headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html', 'Referer': 'https://hotcopper.com.au/' }, signal: abortAfter(6500) });
+  if (!ok) return [];
+  const out = [], seen = new Set();
+  for (const m of html.matchAll(/href="(\/threads\/[^"?#]+)"[^>]*>([\s\S]{8,140}?)<\/a>/g)) {
+    addThread(out, seen, m[2], 'https://hotcopper.com.au' + m[1], { source: 'HotCopper' });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
 export default {
   async fetch(req, env, ctx) {
     // Always add CORS to every response including errors
@@ -1494,45 +1671,65 @@ export default {
       } catch (e) { return jsonResp({ error: 'trends_fetch_failed', detail: String(e) }, 502); }
     }
 
-    // Mastodon - live public political chatter from AU + global instances (no key)
+    // Social pulse - Mastodon + Reddit + Bluesky merged (all keyless).
+    // ?net=all|mastodon|reddit|bsky filters networks; every fetcher fails soft.
     if (path === '/social') {
       const tag = (reqUrl.searchParams.get('tag') || 'auspol').replace(/[^\w]/g, '');
-      const cacheKey = 'social_' + tag;
+      const net = (reqUrl.searchParams.get('net') || 'all').replace(/[^\w]/g, '');
+      const cacheKey = 'social2_' + tag + '_' + net;
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
-      const instances = ['aus.social', 'mastodon.social'];
-      const posts = [];
-      await Promise.all(instances.map(async (inst) => {
-        try {
-          const r = await fetch('https://' + inst + '/api/v1/timelines/tag/' + tag + '?limit=20', {
-            headers: { 'User-Agent': 'AXIOM/6.0' },
-          });
-          if (!r.ok) return;
-          const arr = await r.json();
-          (Array.isArray(arr) ? arr : []).forEach((s) => {
-            const text = String(s.content || '')
-              .replace(/<br\s*\/?>/gi, ' ')
-              .replace(/<\/p>\s*<p>/gi, ' - ')
-              .replace(/<[^>]+>/g, '')
-              .replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-              .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-            if (!text) return;
-            posts.push({
-              id: s.id, instance: inst,
-              author: (s.account && (s.account.display_name || s.account.username)) || 'unknown',
-              handle: s.account && s.account.acct,
-              text: text.slice(0, 400),
-              boosts: s.reblogs_count || 0, favs: s.favourites_count || 0, replies: s.replies_count || 0,
-              url: s.url, date: s.created_at,
-            });
-          });
-        } catch {}
-      }));
+      const want = (n) => net === 'all' || net === n;
+      const [ms, rd, bs] = await Promise.all([
+        want('mastodon') ? socialMastodon(tag) : [],
+        want('reddit')   ? socialReddit(tag)   : [],
+        want('bsky')     ? socialBsky(tag)     : [],
+      ]);
+      const posts = [...ms, ...rd, ...bs];
       posts.sort((a, b) => new Date(b.date) - new Date(a.date));
       const seen = new Set(); const uniq = [];
       for (const p of posts) { const k = p.url || p.id; if (seen.has(k)) continue; seen.add(k); uniq.push(p); }
-      const out = JSON.stringify({ posts: uniq.slice(0, 40), tag });
+      // Legacy field aliases so older clients keep working (favs === ups).
+      uniq.forEach(p => { p.favs = p.ups; });
+      const out = JSON.stringify({
+        posts: uniq.slice(0, 60), tag, net,
+        networks: { mastodon: ms.length, reddit: rd.length, bsky: bs.length },
+      });
       await kvPut(env.AXIOM_KV, cacheKey, out, 300);
+      return new Response(out, { headers: CORS });
+    }
+
+    // Forum pulse - one call aggregating the AU political forum scrapers.
+    // GET /forums?q=  (q optional: relevance-filters Whirlpool search + titles)
+    if (path === '/forums') {
+      const fq = q.slice(0, 80);
+      const cacheKey = 'forums_' + (fq || 'latest').replace(/\W/g, '_').slice(0, 60);
+      const cached = await kvGet(env.AXIOM_KV, cacheKey);
+      if (cached) return new Response(cached, { headers: CORS });
+      const jobs = [
+        ['OzPolitic',  forumOzRss()],
+        ['Whirlpool',  fq ? forumWhirlpoolQ(fq) : forumWhirlpoolQ('politics')],
+        ['BigFooty',   forumBigfootyLatest()],
+        ['HotCopper',  forumHotcopperLatest()],
+      ];
+      const settled = await Promise.allSettled(jobs.map(j => j[1]));
+      const sources = {}; let threads = [];
+      settled.forEach((s, i) => {
+        const name = jobs[i][0];
+        if (s.status === 'fulfilled') { sources[name] = s.value.length; threads.push(...s.value); }
+        else sources[name] = 0;
+      });
+      if (fq) {
+        const filtered = relevanceFilter(threads, fq);
+        // Whirlpool results are already query-scoped; keep them even if the
+        // title itself doesn't repeat the query words.
+        const wp = threads.filter(t => t.source === 'Whirlpool');
+        const merged = [...filtered];
+        wp.forEach(t => { if (!merged.includes(t)) merged.push(t); });
+        threads = merged;
+      }
+      const out = JSON.stringify({ threads: threads.slice(0, 30), q: fq, sources });
+      await kvPut(env.AXIOM_KV, cacheKey, out, 480);
       return new Response(out, { headers: CORS });
     }
 
@@ -1613,10 +1810,11 @@ export default {
 
     if (path === '/reddit') {
       try {
+        // api.reddit.com + a descriptive UA: the www host 403s generic cloud UAs.
         const r = await fetch(
-          `https://www.reddit.com/r/${encodeURIComponent(sr)}/search.json` +
-          `?q=${encodeURIComponent(q)}&sort=top&limit=10&restrict_sr=on&t=month`,
-          { headers: { 'User-Agent': 'AXIOM-Worker/3.0 (cloudflare)' } }
+          `https://api.reddit.com/r/${encodeURIComponent(sr)}/search` +
+          `?q=${encodeURIComponent(q)}&sort=top&limit=10&restrict_sr=on&t=month&raw_json=1`,
+          { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(8000) }
         );
         if (!r.ok) return jsonResp({ error: `reddit_${r.status}` }, 502);
         return jsonResp(await r.json());
@@ -1629,8 +1827,8 @@ export default {
       const permalink = reqUrl.searchParams.get('p') || '';
       try {
         const r = await fetch(
-          `https://www.reddit.com${permalink}.json?limit=6&depth=1`,
-          { headers: { 'User-Agent': 'AXIOM-Worker/3.0 (cloudflare)' } }
+          `https://api.reddit.com${permalink}.json?limit=6&depth=1&raw_json=1`,
+          { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(8000) }
         );
         if (!r.ok) return jsonResp({ error: `reddit_comments_${r.status}` }, 502);
         return jsonResp(await r.json());

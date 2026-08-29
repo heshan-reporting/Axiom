@@ -1242,7 +1242,13 @@ body.kiosk .kprog{display:block}
           <div class="note">What Australia is typing into Google right now. Political surges show up here before the polls move.</div>
         </div>
         <div class="panel">
-          <div class="phead"><div class="ptitle">Social Pulse</div><span class="ptag">MASTODON · PUBLIC FIREHOSE</span></div>
+          <div class="phead"><div class="ptitle">Social Pulse</div><span class="ptag" id="sp-net-tag">MASTODON + REDDIT + BLUESKY</span></div>
+          <div class="chips" id="sp-nets" style="margin-bottom:8px">
+            <button class="chip on" data-n="all" onclick="setNet('all',this)">All networks</button>
+            <button class="chip" data-n="mastodon" onclick="setNet('mastodon',this)">Mastodon</button>
+            <button class="chip" data-n="reddit" onclick="setNet('reddit',this)">Reddit</button>
+            <button class="chip" data-n="bsky" onclick="setNet('bsky',this)">Bluesky</button>
+          </div>
           <div class="chips" id="sp-tags">
             <button class="chip on" onclick="setTag('auspol',this)">#auspol</button>
             <button class="chip" onclick="setTag('australia',this)">#australia</button>
@@ -1251,6 +1257,15 @@ body.kiosk .kprog{display:block}
             <button class="chip" onclick="setTag('economy',this)">#economy</button>
           </div>
           <div class="cards" id="sp-list"><div class="skel" style="height:88px"></div><div class="skel" style="height:88px"></div></div>
+        </div>
+        <div class="panel">
+          <div class="phead"><div class="ptitle">Forum Pulse</div><span class="ptag" id="fp-tag">OZPOLITIC · WHIRLPOOL · BIGFOOTY · HOTCOPPER</span></div>
+          <div class="bar">
+            <input class="inp" id="fp-q" placeholder="Search the forums — fuel tax, negative gearing, a minister's name…" onkeydown="if(event.key==='Enter')loadForums(true)">
+            <button class="btn" style="padding:10px 18px" onclick="loadForums(true)">Search</button>
+          </div>
+          <div class="cards" id="fp-list"><div class="empty">Grassroots political chatter loads when you open Pulse.</div></div>
+          <div class="note">What politically engaged Australians say off the record — live threads scraped from OzPolitic, Whirlpool, BigFooty AU Politics and HotCopper.</div>
         </div>
       </section>
 
@@ -1641,7 +1656,7 @@ const PARTIES=[
   {key:'IND',name:'Teals / Ind.',color:'#2DD4BF',re:/\b(teal(s)?|independent(s)?|pocock|steggall)\b/i},
 ];
 const STOP=new Set(('the a an and or of to in on for with as at by from is are was were be been has have had will would can could this that these those it its his her their our your my not no but if then than over under after before about into out up down new says said say told amid holds hold unveils unveil pledges pledge calls call flags flag amid attacks attack blocks block push pushes demand demands announces announce warns warn slams slam backs back reveals reveal plans plan looms loom hits hit sets set gets get takes take makes make faces face eyes eye vows vow urges urge seeks seek deal deals talks talk week month year live latest breaking why how what when where who australia australian australians news live update updates today amp with will more just been like').split(' '));
-const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{},analysis:null,census:null,flagged:[],studio:null};
+const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',net:'all',forums:null,forumsAt:0,mode:'quick',view:'command',chat:[],charts:{},history:[],spikes:{},analysis:null,census:null,flagged:[],studio:null};
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1686,6 +1701,7 @@ function go(v){
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
   if(v==='radar'&&!state.charts.at)loadAt();
+  if(v==='pulse')loadForums();
   if(v==='clients')ccInit();
 }
 
@@ -1816,7 +1832,7 @@ function renderPressure(){
   if(el('mp-now'))el('mp-now').textContent=nowIdx;
   if(el('mp-base'))el('mp-base').textContent=base;
   if(el('mp-delta'))el('mp-delta').textContent=(d>=0?'+':'')+d+' pts';
-  if(el('mp-blurb'))el('mp-blurb').innerHTML=base?('The national wire is running <b>'+Math.abs(Math.round(d/base*100))+'% '+(d>=0?'hotter':'cooler')+'</b> than its seven-day baseline'):'';
+  if(el('mp-blurb'))el('mp-blurb').innerHTML=base>0?('The national wire is running <b>'+Math.abs(Math.round(d/base*100))+'% '+(d>=0?'hotter':'cooler')+'</b> than its seven-day baseline'):'The national wire is warming up — baseline builds over the week';
   const bars=el('mp-bars');
   if(bars){
     const last=v.slice(-7),bmx=Math.max(...last)||1;
@@ -1902,8 +1918,13 @@ async function loadTrends(){
 }
 async function loadSocial(){
   try{
-    const d=await api('/social?tag='+encodeURIComponent(state.tag));
+    const d=await api('/social?tag='+encodeURIComponent(state.tag)+'&net='+encodeURIComponent(state.net));
     state.social=d.posts||[];
+    const nt=$('sp-net-tag');
+    if(nt&&d.networks){
+      const n=d.networks;
+      nt.textContent=['mastodon','reddit','bsky'].filter(k=>n[k]).map(k=>({mastodon:'MASTODON',reddit:'REDDIT',bsky:'BLUESKY'})[k]+' '+n[k]).join(' + ')||'QUIET ACROSS NETWORKS';
+    }
     const hr=state.social.filter(p=>(Date.now()-Date.parse(p.date))<3600e3).length;
     countUp($('k-social'),hr||state.social.length);
     $('k-social-s').textContent=hr?('#'+state.tag+' posts in the last hour'):('recent #'+state.tag+' posts');
@@ -2596,11 +2617,49 @@ function setTag(tag,btn){
   $('sp-list').innerHTML='<div class="skel" style="height:88px"></div><div class="skel" style="height:88px"></div>';
   loadSocial();
 }
+const NET_META={mastodon:['MASTODON','var(--info)'],reddit:['REDDIT','#FF6A3D'],bsky:['BLUESKY','var(--ac)']};
 function renderSocial(){
   const ps=state.social;
-  $('sp-list').innerHTML=ps.length?ps.slice(0,20).map(p=>
-    '<a class="dcard" href="'+esc(p.url||'#')+'" target="_blank" rel="noopener"><div class="sp-top"><span class="sp-a">'+esc(p.author)+'</span><span class="sp-m">@'+esc(p.handle||'')+' · '+ago(p.date)+'</span></div><div class="sp-t">'+esc(p.text)+'</div><div class="sp-s"><span>↻ '+p.boosts+'</span><span>★ '+p.favs+'</span><span>↩ '+p.replies+'</span><span class="r">'+esc(p.instance)+'</span></div></a>').join('')
-    :'<div class="empty">Quiet right now on #'+esc(state.tag)+'.</div>';
+  $('sp-list').innerHTML=ps.length?ps.slice(0,24).map(p=>{
+    const nm=NET_META[p.network]||['SOCIAL','var(--t3)'];
+    const ups=p.ups!=null?p.ups:(p.favs||0);
+    return '<a class="dcard" href="'+esc(p.url||'#')+'" target="_blank" rel="noopener">'+
+      '<div class="sp-top"><span class="sp-a">'+esc(p.author)+'</span>'+
+      '<span class="sp-m">'+esc(p.handle?(p.network==='reddit'?p.handle:'@'+p.handle):'')+' · '+ago(p.date)+'</span></div>'+
+      '<div class="sp-t">'+esc(p.text)+'</div>'+
+      '<div class="sp-s"><span>▲ '+ups+'</span>'+(p.boosts?'<span>↻ '+p.boosts+'</span>':'')+'<span>↩ '+(p.replies||0)+'</span>'+
+      '<span class="r" style="color:'+nm[1]+'">'+nm[0]+'</span></div></a>';
+  }).join('')
+    :'<div class="empty">Quiet right now on #'+esc(state.tag)+(state.net!=='all'?' ('+esc(state.net)+')':'')+'.</div>';
+}
+function setNet(net,btn){
+  state.net=net;
+  document.querySelectorAll('#sp-nets .chip').forEach(b=>b.classList.toggle('on',b.dataset.n===net));
+  $('sp-list').innerHTML='<div class="skel" style="height:88px"></div><div class="skel" style="height:88px"></div>';
+  loadSocial();
+}
+/* ── FORUM PULSE — grassroots threads from AU political forums ── */
+async function loadForums(force){
+  const el=$('fp-list');if(!el)return;
+  const q=($('fp-q')&&$('fp-q').value.trim())||'';
+  if(!force&&state.forumsAt&&Date.now()-state.forumsAt<8*60e3)return;
+  el.innerHTML='<div class="skel" style="height:52px;margin-bottom:8px"></div><div class="skel" style="height:52px"></div>';
+  try{
+    const d=await api('/forums'+(q?'?q='+encodeURIComponent(q):''));
+    state.forums=d.threads||[];state.forumsAt=Date.now();
+    const tg=$('fp-tag');
+    if(tg&&d.sources){
+      const live=Object.entries(d.sources).filter(([,n])=>n>0);
+      tg.textContent=live.length?live.map(([k,n])=>k.toUpperCase()+' '+n).join(' · '):'FORUMS QUIET OR UNREACHABLE';
+    }
+    el.innerHTML=state.forums.length?state.forums.slice(0,14).map(t=>
+      '<a class="dcard" href="'+esc(t.url||'#')+'" target="_blank" rel="noopener">'+
+      '<div class="sp-top"><span class="sp-a">'+esc(t.text)+'</span>'+
+      '<span class="sp-m">'+(t.date?ago(t.date)+' · ':'')+esc(t.source||'')+'</span></div></a>').join('')
+      :'<div class="empty">'+(q?'Nothing on the boards for “'+esc(q)+'” right now.':'The boards are quiet — try a search.')+'</div>';
+  }catch(e){
+    el.innerHTML='<div class="err">'+esc(e.message||e)+'</div>';
+  }
 }
 
 function trackTopic(w){
@@ -2683,7 +2742,8 @@ function suggest(el){$('chat-inp').value=el.textContent;sendChat();}
 function digest(){
   const heads=state.news.slice(0,18).map(n=>'- ['+n.src+'] '+n.title).join('\n')||'(none loaded)';
   const tr=state.trends.slice(0,8).map((t,i)=>(i+1)+'. '+t.term+(t.traffic?' ('+t.traffic+')':'')).join('\n')||'(none)';
-  const so=state.social.slice(0,8).map(p=>'- @'+(p.handle||p.author)+': '+p.text.slice(0,140)).join('\n')||'(none)';
+  const so=state.social.slice(0,10).map(p=>'- ['+String(p.network||'social').toUpperCase()+'] '+(p.handle||p.author)+': '+p.text.slice(0,140)).join('\n')||'(none)';
+  const fo=(state.forums||[]).slice(0,8).map(t=>'- ['+(t.source||'forum')+'] '+t.text).join('\n')||'(not loaded — open Pulse to sample the boards)';
   const pty=PARTIES.map(p=>p.name+': '+state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length+' mentions').join(' · ');
   const tone=state.tone.length?(state.tone.reduce((a,b)=>a+b,0)/state.tone.length).toFixed(2):'n/a';
   // Historical context: SOV movement over the last 24h of snapshots + anomalies
@@ -2714,7 +2774,8 @@ function digest(){
     :'(census unavailable)';
   return 'LIVE AUSTRALIAN POLITICAL SIGNALS (fetched minutes ago):\n\n== LATEST HEADLINES ==\n'+heads+
     '\n\n== GOOGLE TRENDS AU (top searches now) ==\n'+tr+
-    '\n\n== SOCIAL CHATTER (#'+state.tag+' fediverse) ==\n'+so+
+    '\n\n== SOCIAL CHATTER (#'+state.tag+' · Mastodon/Reddit/Bluesky) ==\n'+so+
+    '\n\n== FORUM PULSE (OzPolitic/Whirlpool/BigFooty/HotCopper threads) ==\n'+fo+
     '\n\n== PARTY SHARE OF VOICE (24h headlines) ==\n'+pty+
     '\n\n== ELECTION READ (media-signal: SoV × tone × momentum — NOT a poll) ==\n'+eread+
     '\n\n== SOV TREND (hourly snapshots, latest vs 24h ago) ==\n'+hist+
@@ -4026,6 +4087,8 @@ if(fx.on){
       magEl=b;
       gsap.to(b,{x:(e.clientX-r.left-r.width/2)/r.width*7,y:(e.clientY-r.top-r.height/2)/r.height*5,duration:.3,ease:'power2.out'});
     },{passive:true});
+    // release the magnet when the pointer leaves the window mid-hover
+    document.documentElement.addEventListener('pointerleave',()=>{if(magEl){gsap.to(magEl,{x:0,y:0,duration:.4,ease:'expo.out'});magEl=null;}});
   }
   // first paint of the default view enters through GSAP too
   fx.view($('v-command'));
@@ -4037,7 +4100,7 @@ function tick(){
   $('clock').textContent=d.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})+' · '+d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
 }
 tick();setInterval(tick,30e3);
-const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 33 NATIONAL NEWS FEEDS','READING SEARCH & SOCIAL SIGNALS'];
+const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 66 NATIONAL & REGIONAL FEEDS','READING SEARCH, SOCIAL & FORUM SIGNALS'];
 let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
 function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
 setTimeout(hideSplash,2600);
