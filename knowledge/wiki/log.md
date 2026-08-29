@@ -13,6 +13,10 @@ tags:
 
 Newest completed operations appear first.
 
+## 2026-08-29 - save-20260829-gov-round2
+
+- Appended round 2 to [[Government Sources 2026-08-29]]: ACT minister + Pettersson MLA endpoints (operator-supplied) and the FlagPost Blogspot mirror; APH directory still sandbox-blocked.
+
 ## 2026-08-29 - autoresearch-20260829-gov-sources
 
 - Filed [[Government Sources 2026-08-29]] and wired the gov feed group into the worker (v12): 2 department RSS feeds + 3 Google News site-restricted sweeps over ministerial and agency domains.

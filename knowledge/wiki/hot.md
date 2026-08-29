@@ -26,6 +26,7 @@ tags:
 
 ## Recent Changes
 
+- Government round 2: ACT minister feeds (operator-supplied) + FlagPost mirror wired (v12.1).
 - Filed [[Government Sources 2026-08-29]]; gov feed group live in worker v12.
 - Filed [[Source Expansion Dossier 2026-08-29]] and wired the new sources into the worker (v11).
 - Created the vault foundation.

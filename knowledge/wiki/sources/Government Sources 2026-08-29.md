@@ -38,6 +38,19 @@ infrastructure-corroborated; verify live with `/rss?feed=<key>` after deploy.
   https://www.mediastatements.wa.gov.au/Pages/SearchMinister.aspx [infrastructure]
 - Agencies sweep - abs.gov.au, accc.gov.au, aec.gov.au via the index. [infrastructure]
 
+## Round 2 (operator-supplied + library mirror, worker v12.1)
+
+- ACT latest-minister media releases and the Michael Pettersson MLA feed -
+  exact endpoints supplied by the operator from the CMTEDD RSS directory
+  (https://www.cmtedd.act.gov.au/open_government/functions/functionality/media_release_rss_feeds/latest_minister_media_releases_rss). [operator-supplied]
+- Parliamentary Library FlagPost via its Blogspot mirror
+  (https://parliamentflagpost.blogspot.com/) - standard Blogspot feed;
+  non-partisan legislative analysis. [corroborated]
+- APH native feeds (https://www.aph.gov.au/Help/Rss_feeds): the directory
+  page stays unreachable from this session's sandbox; APH serves feeds
+  through a feed_reader?feed=<path> viewer whose underlying endpoints need
+  the page itself. Ask the operator to paste the link list. [blocked]
+
 ## Candidates still unwired
 
 - The whole-of-government portfolio RSS directory:

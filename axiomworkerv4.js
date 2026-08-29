@@ -252,6 +252,10 @@ const AU_FEEDS = {
   gnews_govfed:  'https://news.google.com/rss/search?q=site:ministers.treasury.gov.au%20OR%20site:pm.gov.au%20OR%20site:treasury.gov.au&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_govstate:'https://news.google.com/rss/search?q=site:statements.qld.gov.au%20OR%20site:mediastatements.wa.gov.au%20OR%20site:nsw.gov.au%2Fmedia-releases&hl=en-AU&gl=AU&ceid=AU:en',
   gnews_govagency:'https://news.google.com/rss/search?q=site:abs.gov.au%20OR%20site:accc.gov.au%20OR%20site:aec.gov.au&hl=en-AU&gl=AU&ceid=AU:en',
+  // -- Government round 2 (operator-supplied ACT endpoints + parliamentary library) --
+  act_ministers: 'https://www.cmtedd.act.gov.au/open_government/functions/functionality/media_release_rss_feeds/latest_minister_media_releases_rss',
+  act_pettersson:'https://www.cmtedd.act.gov.au/open_government/functions/functionality/media_release_rss_feeds/michael-pettersson-mla-media-releases-rss',
+  flagpost:      'https://parliamentflagpost.blogspot.com/feeds/posts/default?alt=rss', // Parliamentary Library FlagPost (Blogspot mirror)
 };
 
 /** Parse an RSS/Atom string into [{ title, link, date, desc }] */
