@@ -330,9 +330,9 @@ html.gsap .view.on>*{animation:none}
 
 /* wire / lists */
 .wire{display:flex;flex-direction:column}
-.wi{display:flex;gap:12px;padding:12px 8px;border-bottom:1px solid var(--line);text-decoration:none;transition:background .16s var(--ease),padding-left .18s var(--ease);border-radius:9px;position:relative}
-.wi:hover{background:var(--sur);padding-left:12px}
-.wi:last-child{border-bottom:0}
+.wi{display:flex;gap:12px;padding:12px 14px;margin-bottom:8px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);text-decoration:none;transition:border-color .16s var(--ease),background .16s var(--ease);border-radius:12px;position:relative}
+.wi:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.18)}
+.wi:last-child{margin-bottom:0}
 .wi-src{font-family:var(--fm);font-size:9px;letter-spacing:.08em;color:var(--ac);text-transform:uppercase;width:88px;flex-shrink:0;padding-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wi-body{flex:1;min-width:0}
 .wi-t{font-size:13px;font-weight:500;color:var(--t0);line-height:1.45;display:block}
@@ -363,11 +363,11 @@ html.gsap .view.on>*{animation:none}
 .chip{background:var(--bg1);border:1px solid var(--line);border-radius:999px;color:var(--t2);font-size:11.5px;font-weight:500;
   padding:7px 14px;transition:all .16s var(--ease)}
 .chip:hover{border-color:var(--line2);color:var(--t1);background:var(--sur2)}
-.chip.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
+.chip.on{background:rgba(63,140,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
 
 /* cards & states */
 .cards{display:flex;flex-direction:column;gap:9px}
-.dcard{display:block;text-decoration:none;border:1px solid var(--line);background:var(--bg1);border-radius:14px;padding:13px 15px;
+.dcard{display:block;text-decoration:none;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);border-radius:12px;padding:13px 15px;
   transition:border-color .18s,transform .2s var(--ease),box-shadow .2s}
 .dcard:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--sh-md)}
 .empty{padding:28px 12px;color:var(--t2);font-size:12.5px;line-height:1.6;text-align:center}
@@ -380,9 +380,9 @@ html.gsap .view.on>*{animation:none}
 
 /* trends */
 .trgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.tr{display:flex;align-items:flex-start;gap:11px;border:1px solid var(--line);background:var(--bg1);border-radius:14px;padding:13px 14px;transition:border-color .18s,transform .2s var(--ease),box-shadow .2s}
+.tr{display:flex;align-items:flex-start;gap:11px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);border-radius:12px;padding:13px 14px;transition:border-color .18s,transform .2s var(--ease),box-shadow .2s}
 .tr:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--sh-md)}
-.tr-rank{font-family:var(--fm);font-size:11px;color:var(--ac);font-weight:600;min-width:20px;padding-top:2px;font-variant-numeric:tabular-nums}
+.tr-rank{width:18px;height:18px;border-radius:50%;background:var(--x-ac-dim);color:var(--ac);font-family:var(--fm);font-size:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;font-variant-numeric:tabular-nums}
 .tr-b{flex:1;min-width:0}
 .tr-term{font-size:13.5px;font-weight:600}
 .tr-news{display:block;font-size:11px;color:var(--t2);text-decoration:none;margin-top:3px;line-height:1.45}
@@ -408,7 +408,7 @@ html.gsap .view.on>*{animation:none}
 .mode{font-family:var(--fm);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;border-radius:999px;
   border:1px solid var(--line);background:var(--bg1);color:var(--t2);transition:all .16s var(--ease)}
 .mode:hover{border-color:var(--line2);color:var(--t1)}
-.mode.on{background:rgba(94,139,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
+.mode.on{background:rgba(63,140,255,.14);border-color:var(--ac);color:var(--x-ink0);box-shadow:0 0 16px -6px var(--glow)}
 .msgs{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:14px;padding:6px 2px 18px}
 .msg{max-width:86%;animation:msgin .4s var(--ease) both}
 @keyframes msgin{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:none}}
@@ -487,9 +487,9 @@ html.gsap .view.on>*{animation:none}
   padding:18px;font-size:11.5px;line-height:1.6;color:var(--t2);background:transparent}
 /* monitors */
 .mons{display:flex;flex-direction:column;gap:8px}
-.mon{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-radius:13px;padding:12px 14px;
-  background:var(--bg0);cursor:pointer;transition:border-color .16s,background .16s,transform .18s var(--ease)}
-.mon:hover{border-color:var(--ac);background:rgba(94,139,255,.06);transform:translateX(2px)}
+.mon{display:flex;align-items:center;gap:11px;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:12px 14px;
+  background:rgba(255,255,255,.03);cursor:pointer;transition:border-color .16s,background .16s,transform .18s var(--ease)}
+.mon:hover{border-color:var(--ac);background:rgba(63,140,255,.06);transform:translateX(2px)}
 .mon-q{font-weight:600;font-size:13px;color:var(--t0);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mon-n{font-family:var(--fm);font-size:10px;color:var(--t2);flex-shrink:0;font-variant-numeric:tabular-nums}
 .mon-new{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.06em;color:#0B0F1A;background:var(--amb);
@@ -499,7 +499,7 @@ html.gsap .view.on>*{animation:none}
 .mon-x:hover{color:var(--neg);border-color:rgba(255,90,120,.4)}
 /* clickable party rows */
 .pt-row{cursor:pointer;border-radius:9px;transition:background .15s}
-.pt-row:hover{background:rgba(94,139,255,.07)}
+.pt-row:hover{background:rgba(63,140,255,.07)}
 .pt-sig{font-family:var(--fm);font-size:8px;font-weight:700;color:var(--amb);border:1px solid rgba(245,177,92,.4);
   border-radius:5px;padding:1px 5px;margin-left:6px;letter-spacing:.06em}
 .mtitle{font-family:var(--fd);font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:4px}
@@ -521,8 +521,8 @@ textarea.fi{resize:vertical;min-height:70px;line-height:1.5}
 .chk.tog{display:flex;margin-top:14px;align-items:flex-start;line-height:1.5}
 .chk.tog em{color:var(--t3);font-style:normal}
 /* Priority Desk cards */
-.fl-card{display:flex;align-items:center;gap:13px;padding:13px 14px;border:1px solid var(--line);border-radius:14px;
-  background:var(--bg0);margin-bottom:8px;transition:border-color .16s,transform .18s var(--ease),box-shadow .2s}
+.fl-card{display:flex;align-items:center;gap:13px;padding:13px 14px;border:1px solid rgba(255,255,255,.09);border-radius:12px;
+  background:rgba(255,255,255,.03);margin-bottom:8px;transition:border-color .16s,transform .18s var(--ease),box-shadow .2s}
 .fl-card:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--sh-md)}
 .fl-score{flex-shrink:0;width:48px;height:48px;border-radius:13px;border:1.5px solid;display:flex;align-items:center;justify-content:center;
   font-family:var(--fd);font-weight:800;font-size:18px;font-variant-numeric:tabular-nums;background:var(--bg0)}
@@ -594,8 +594,8 @@ body.kiosk .kprog{display:block}
 .splash{position:fixed;inset:0;z-index:300;background:radial-gradient(ellipse 90% 60% at 50% 40%,var(--x-bg2),var(--x-bg0));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .5s,visibility .5s}
 .splash.off{opacity:0;visibility:hidden;pointer-events:none}
 .splash .slogo{width:68px;height:68px;border-radius:20px;background:var(--acg);display:flex;align-items:center;justify-content:center;
-  font-family:var(--fd);font-weight:700;font-size:28px;color:#fff;box-shadow:0 12px 60px rgba(94,139,255,.5),inset 0 1px 0 rgba(255,255,255,.35);animation:spulse 1.5s var(--ease) infinite}
-@keyframes spulse{0%,100%{transform:scale(1);box-shadow:0 12px 60px rgba(94,139,255,.4),inset 0 1px 0 rgba(255,255,255,.35)}50%{transform:scale(1.06);box-shadow:0 16px 80px rgba(94,139,255,.65),inset 0 1px 0 rgba(255,255,255,.4)}}
+  font-family:var(--fd);font-weight:700;font-size:28px;color:#fff;box-shadow:0 12px 60px rgba(63,140,255,.5),inset 0 1px 0 rgba(255,255,255,.35);animation:spulse 1.5s var(--ease) infinite}
+@keyframes spulse{0%,100%{transform:scale(1);box-shadow:0 12px 60px rgba(63,140,255,.4),inset 0 1px 0 rgba(255,255,255,.35)}50%{transform:scale(1.06);box-shadow:0 16px 80px rgba(63,140,255,.65),inset 0 1px 0 rgba(255,255,255,.4)}}
 .splash .sname{font-family:var(--fd);font-size:20px;font-weight:700;letter-spacing:.3em;margin-left:.3em}
 .splash .sline{font-family:var(--fm);font-size:9.5px;letter-spacing:.22em;color:var(--t2);text-transform:uppercase;animation:blink 1.6s ease infinite}
 
@@ -618,11 +618,11 @@ body.kiosk .kprog{display:block}
 .kdelta.dn{color:var(--neg);background:rgba(255,90,120,.1)}
 
 /* story clusters */
-.cluster{display:flex;gap:12px;align-items:flex-start;padding:12px 8px;border-bottom:1px solid var(--line);text-decoration:none;border-radius:9px;transition:background .15s,padding-left .18s var(--ease)}
-.cluster:hover{background:var(--sur);padding-left:12px}
-.cluster:last-child{border-bottom:0}
-.cl-n{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ac);border:1px solid rgba(94,139,255,.3);
-  background:rgba(94,139,255,.08);border-radius:9px;padding:4px 9px;flex-shrink:0;font-variant-numeric:tabular-nums}
+.cluster{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin-bottom:8px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);text-decoration:none;border-radius:12px;transition:background .15s,border-color .16s var(--ease)}
+.cluster:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.18)}
+.cluster:last-child{margin-bottom:0}
+.cl-n{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--ac);border:1px solid rgba(63,140,255,.3);
+  background:rgba(63,140,255,.08);border-radius:9px;padding:4px 9px;flex-shrink:0;font-variant-numeric:tabular-nums}
 .cl-body{flex:1;min-width:0}
 .cl-t{display:block;font-size:13px;font-weight:500;color:var(--t0);line-height:1.45}
 .cl-tone{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
@@ -730,6 +730,15 @@ body.kiosk .kprog{display:block}
   border:1px dashed var(--cc-line);background:transparent;color:var(--cc-ink3);font-weight:600;font-size:12.5px;transition:color .2s,border-color .2s}
 .cc-newbtn:hover{color:var(--cc-ink);border-color:var(--cc-accent)}
 .cc-newbtn svg{width:15px;height:15px}
+/* workspace tabs */
+.cc-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:24px}
+.cc-tab{font-family:var(--x-fm);font-size:9.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
+  padding:9px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.09);background:transparent;color:var(--cc-ink3);
+  cursor:pointer;transition:color .2s,border-color .2s,background .2s}
+.cc-tab:hover{color:var(--cc-ink);border-color:rgba(255,255,255,.2)}
+.cc-tab.on{color:#F4F8FF;background:linear-gradient(135deg,var(--cc-accent),var(--cc-accent2));border-color:transparent;font-weight:600;
+  box-shadow:0 2px 12px -2px var(--cc-accent)}
+.cc-block[hidden]{display:none}
 /* hero */
 .cc-hero{position:relative;border-radius:var(--x-r4);padding:36px 36px 30px;overflow:hidden;margin-bottom:26px;
   background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));border:1px solid var(--x-line1);
@@ -748,21 +757,21 @@ body.kiosk .kprog{display:block}
 .cc-hero h1{font-family:var(--x-fd);font-size:var(--x-t-2xl);font-weight:750;letter-spacing:-.03em;line-height:1.04;margin:0}
 .cc-hero .cc-sub{color:var(--cc-ink2);font-size:13.5px;margin-top:5px;max-width:60ch;line-height:1.5}
 .cc-kpis{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px;position:relative;z-index:1}
-.cc-kpi{flex:1;min-width:120px;background:var(--cc-glass);border:1px solid var(--cc-line);border-radius:16px;padding:15px 17px;backdrop-filter:blur(8px)}
+.cc-kpi{flex:1;min-width:120px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:15px 17px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
 .cc-kpi .n{font-family:var(--x-fd);font-size:clamp(26px,2.4vw,34px);font-weight:700;letter-spacing:-.01em;line-height:1;color:var(--x-ink0)}
 .cc-kpi .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cc-ink2);margin-top:7px;font-weight:600}
 .cc-kpi{position:relative;z-index:1;background:rgba(10,8,5,.4)}
 /* blocks */
 .cc-block{margin-bottom:34px}
 .cc-blabel{font-family:var(--x-fd);font-size:var(--x-t-xl);font-weight:700;letter-spacing:-.025em;display:flex;align-items:baseline;gap:12px;margin-bottom:6px;color:var(--x-ink0)}
-.cc-blabel span{font-family:var(--x-fm);font-style:normal;font-size:var(--x-t-sm);font-weight:600;color:var(--x-ac);border:none;padding:0;letter-spacing:0}
+.cc-blabel span{width:20px;height:20px;border-radius:50%;background:var(--x-ac-dim);color:var(--x-ac);font-family:var(--x-fm);font-style:normal;font-size:10px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;letter-spacing:0;flex-shrink:0;transform:translateY(-2px)}
 .cc-blabel em{font-style:normal;font-family:var(--cc-fx);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--cc-ink3);border:1px solid var(--cc-line);padding:3px 9px;border-radius:999px}
 .cc-note{color:var(--cc-ink3);font-size:12px;line-height:1.55;margin:2px 0 16px}
 .cc-note b{color:var(--cc-ink2)}
 /* campaigns */
 .cc-camps{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
-.cc-camp{position:relative;border-radius:var(--x-r3);padding:20px 20px 20px 24px;overflow:hidden;cursor:pointer;
-  background:var(--x-bg3);border:1px solid var(--x-line1);box-shadow:var(--x-e1);
+.cc-camp{position:relative;border-radius:22px;padding:20px 20px 20px 24px;overflow:hidden;cursor:pointer;
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));border:1px solid rgba(255,255,255,.09);
   transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));
   transition:transform var(--x-d3) var(--x-ease),border-color var(--x-d3) var(--x-ease),box-shadow var(--x-d3) var(--x-ease);will-change:transform}
 .cc-camp:hover{border-color:var(--x-line2);box-shadow:var(--x-e3)}
@@ -775,8 +784,8 @@ body.kiosk .kprog{display:block}
 .cc-camp .cc-msg::before{content:'';position:absolute;left:0;top:7px;width:5px;height:5px;border-radius:50%;background:var(--cc-accent)}
 /* signals */
 .cc-signals{display:flex;flex-direction:column;gap:10px}
-.cc-sig{display:flex;gap:14px;align-items:center;border-radius:16px;padding:14px 16px;
-  background:var(--cc-glass);border:1px solid var(--cc-line);backdrop-filter:blur(8px);
+.cc-sig{display:flex;gap:14px;align-items:center;border-radius:12px;padding:14px 16px;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.09);
   transition:transform .25s cubic-bezier(.16,.8,.3,1),border-color .25s,background .25s}
 .cc-sig:hover{transform:translateX(4px);border-color:color-mix(in srgb,var(--cc-accent) 45%,transparent)}
 .cc-sig-rel{flex-shrink:0;width:46px;height:46px;border-radius:var(--x-r2);display:flex;align-items:center;justify-content:center;
@@ -1348,7 +1357,15 @@ body.kiosk .kprog{display:block}
 
           <div class="cc-hero reveal" id="cc-hero"></div>
 
-          <div class="cc-block reveal">
+          <!-- Section tabs: one focused workspace per job, not one endless scroll -->
+          <nav class="cc-tabs reveal" id="cc-tabs" aria-label="Client workspace">
+            <button class="cc-tab on" data-t="overview" onclick="ccShowTab('overview')">Overview</button>
+            <button class="cc-tab" data-t="studio" onclick="ccShowTab('studio')">Creative Studio</button>
+            <button class="cc-tab" data-t="composer" onclick="ccShowTab('composer')">Composer</button>
+            <button class="cc-tab" data-t="mind" onclick="ccShowTab('mind')">The Curious Mind</button>
+          </nav>
+
+          <div class="cc-block reveal" data-cct="overview">
             <div class="cc-blabel"><span>01</span> Brand kit <em id="cc-bk-tag"></em></div>
             <div class="cc-note">The logo and approved reference creatives here are applied to <b>every</b> generation for this client, so new artwork follows the brand style. Uploaded once, remembered on this device.</div>
             <div class="cc-bk">
@@ -1368,18 +1385,18 @@ body.kiosk .kprog{display:block}
             </div>
           </div>
 
-          <div class="cc-block reveal">
+          <div class="cc-block reveal" data-cct="overview">
             <div class="cc-blabel"><span>02</span> Campaigns</div>
             <div class="cc-camps" id="cc-camps"></div>
           </div>
 
-          <div class="cc-block reveal">
+          <div class="cc-block reveal" data-cct="overview">
             <div class="cc-blabel"><span>03</span> Client signals <em id="cc-sig-tag"></em></div>
             <div class="cc-note">Live AU news matched to this client's brief and campaign keywords. Click <b>Use in composer</b> to draft from any signal.</div>
             <div class="cc-signals" id="cc-signals"></div>
           </div>
 
-          <div class="cc-block reveal" id="cc-composer-block">
+          <div class="cc-block reveal" id="cc-composer-block" data-cct="composer">
             <div class="cc-blabel"><span>04</span> Content composer</div>
             <div class="cc-composer">
               <div class="cc-cgrid">
@@ -1436,7 +1453,7 @@ body.kiosk .kprog{display:block}
             <div class="cc-output" id="cc-output"></div>
           </div>
 
-          <div class="cc-block reveal" id="cc-studio-block">
+          <div class="cc-block reveal" id="cc-studio-block" data-cct="studio">
             <div class="cc-blabel"><span>05</span> Creative Studio <em id="cs-tag">CONVERSATIONAL</em></div>
             <div class="cc-note">Brief it like a designer: it reads your references and client context, asks only what it needs, plays the brief back for sign-off, then iterates the artwork with you — <b>"make the headline bigger"</b>, <b>"try it without people"</b> — without ever starting over. Sessions survive refreshes.</div>
             <div class="cs-brief" id="cs-briefstrip">
@@ -1474,7 +1491,7 @@ body.kiosk .kprog{display:block}
             </div>
           </div>
 
-          <div class="cc-block reveal" id="cc-mind-block">
+          <div class="cc-block reveal" id="cc-mind-block" data-cct="mind">
             <div class="cc-blabel"><span>06</span> The Curious Mind <em id="mind-tag">CLIENT INTELLIGENCE</em></div>
             <div class="cc-note">A persistent, per-client knowledge layer: client documents + live news + shared CMM context, semantically indexed. Every answer cites its sources; one client's data never touches another's.</div>
             <div class="mind-wrap">
@@ -3181,7 +3198,22 @@ function ccInit(){
   ccRenderSwitch();ccRenderHero();ccRenderCamps();ccRenderCompCamps();ccRenderRefs();ccRenderBrandKit();ccEngineNote();
   ccBindComposer();ccPrefsLoad();csInit();mindDocs();
   if(!ccState.signals.length)ccLoadSignals();else ccRenderSignals();
+  let tab='overview';try{tab=localStorage.getItem('axiom_cc_tab')||'overview';}catch(e){}
+  ccShowTab(tab);
   ccObserve();
+}
+/* Workspace tabs: Overview (brand kit / campaigns / signals) · Studio ·
+   Composer · Mind. Deep links (use-in-composer, create-from-signal)
+   switch tabs before scrolling so the target is actually on screen. */
+function ccShowTab(t){
+  if(!document.querySelector('#cc-tabs [data-t="'+t+'"]'))t='overview';
+  try{localStorage.setItem('axiom_cc_tab',t);}catch(e){}
+  document.querySelectorAll('#cc-tabs .cc-tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  document.querySelectorAll('.cc-block[data-cct]').forEach(b=>{
+    const show=b.dataset.cct===t;
+    b.hidden=!show;
+    if(show)b.classList.add('in'); // reveal-on-scroll can't fire for tabbed-in blocks
+  });
 }
 function ccRenderBrandKit(){
   const bk=ccBK(CC_ACTIVE);
@@ -3215,7 +3247,7 @@ function ccRenderCamps(){
     '<div class="cc-msgs">'+(cm.messages||[]).slice(0,4).map(m=>'<div class="cc-msg">'+esc(m)+'</div>').join('')+'</div></div>').join('')
     ||'<div class="cc-note">No campaigns yet for this client.</div>';
 }
-function ccPickCampaign(i){ccState.campaign=i;ccRenderCompCamps();$('cc-composer-block').scrollIntoView({behavior:'smooth',block:'start'});}
+function ccPickCampaign(i){ccState.campaign=i;ccRenderCompCamps();ccShowTab('composer');$('cc-composer-block').scrollIntoView({behavior:'smooth',block:'start'});}
 function ccRenderCompCamps(){
   const c=ccClient();
   $('cc-comp-camps').innerHTML=(c.campaigns||[]).map((cm,i)=>'<button class="cc-chip'+(i===ccState.campaign?' on':'')+'" onclick="ccState.campaign='+i+';ccRenderCompCamps()">'+esc(cm.name)+'</button>').join('')
@@ -3259,6 +3291,7 @@ function ccUseSignal(i){
   const f=ccState.signals[i];if(!f)return;
   $('cc-input').value=f.title+(f.desc?'\n\n'+f.desc:'');
   $('cc-link').value=f.link||'';
+  ccShowTab('composer');
   $('cc-composer-block').scrollIntoView({behavior:'smooth',block:'start'});
   toast('Loaded into composer');
 }
@@ -3628,6 +3661,7 @@ function csFromSignal(i){
   $('cc-link').value=f.link||'';
   const inp=$('cs-inp');
   inp.value='Creative about this story: "'+f.title+'"'+(f.desc?' — '+f.desc.slice(0,200):'');
+  ccShowTab('studio');
   $('cc-studio-block').scrollIntoView({behavior:'smooth',block:'start'});
   csSend();
 }
