@@ -1841,7 +1841,9 @@ body.kiosk .kprog{display:block}
     <input class="fi" id="set-key" type="password" placeholder="sk-ant-…" autocomplete="off">
     <label class="fl" for="set-worker">Worker URL</label>
     <input class="fi" id="set-worker" placeholder="https://newsaus.heshan-998.workers.dev">
-    <div class="mnote">The API key stays in this browser's localStorage and is sent only to api.anthropic.com. The worker URL is pre-configured — change it only if you deploy your own.</div>
+    <label class="fl" for="set-axkey">Access key <span style="color:var(--t3);font-weight:400">— unlocks the Mind, sessions &amp; archive once set on the worker</span></label>
+    <input class="fi" id="set-axkey" type="password" placeholder="Team access key (wrangler secret put AXIOM_ACCESS_KEY)" autocomplete="off">
+    <div class="mnote">The API key stays in this browser's localStorage and is sent only to api.anthropic.com. The access key protects client-confidential knowledge — without it the app still runs on public data, and the map shows only aggregate counts.</div>
 
     <div class="mhr"></div>
     <div class="mtitle" style="font-size:15px">Comms & ClickUp</div>
@@ -1924,6 +1926,10 @@ body.kiosk .kprog{display:block}
 'use strict';
 let CLAUDE_KEY = localStorage.getItem('axiom_claude_key') || '';
 let WORKER_URL = localStorage.getItem('axiom_worker_url') || 'https://newsaus.heshan-998.workers.dev';
+let AX_KEY = localStorage.getItem('axiom_access_key') || '';
+/* Worker access key header — private routes (Mind, sessions, archive content,
+   conversation logs) require it once the AXIOM_ACCESS_KEY secret is set. */
+function axHeaders(){const h={'Content-Type':'application/json'};if(AX_KEY)h['X-Axiom-Key']=AX_KEY;return h;}
 /* Comms workflow config */
 let ORG_BRIEF = localStorage.getItem('axiom_org_brief') || '';
 let CLICKUP_LIST = localStorage.getItem('axiom_clickup_list') || '';
@@ -1954,7 +1960,7 @@ function ago(d){const s=(Date.now()-(Date.parse(d)||Date.now()))/1000;if(s<90)re
 async function api(path){
   const base=(WORKER_URL||'').replace(/\/+$/,'');
   if(!base)throw new Error('Set the Worker URL in Settings');
-  const r=await fetch(base+path);
+  const r=await fetch(base+path,AX_KEY?{headers:{'X-Axiom-Key':AX_KEY}}:undefined);
   let d;try{d=await r.json();}catch(e){d={};}
   if(!r.ok||d.error)throw new Error(d.hint||d.detail||d.error||('HTTP '+r.status));
   return d;
@@ -1965,7 +1971,7 @@ function arcLog(surface,role,text){
   try{
     const base=(WORKER_URL||'').replace(/\/+$/,'');if(!base||!text)return;
     const client=(typeof CC_ACTIVE!=='undefined'&&(surface==='studio'||surface==='adlab'||surface==='composer'))?CC_ACTIVE:'';
-    fetch(base+'/log/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    fetch(base+'/log/chat',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({sid:ARC_SID,surface,client,role,text:String(text).slice(0,6000)})}).catch(()=>{});
   }catch(e){}
 }
@@ -3039,13 +3045,13 @@ async function sendClickup(){
   const desc=f.pkg+'\n\n---\nSource: '+(it.src||'')+' — '+(it.link||'')+'\nFlagged by AXIOM · priority '+f.score+'/100 · '+(f.why||[]).join(', ');
   try{
     const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup',{method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:axHeaders(),
       body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:f.score>=70?1:2,tags:['axiom','flagged']})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
     f.pushed=true;toast('ClickUp task created ✓');renderPriority();
     if(f.visualB64&&d.id){
-      try{await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup-attach',{method:'POST',headers:{'Content-Type':'application/json'},
+      try{await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup-attach',{method:'POST',headers:axHeaders(),
         body:JSON.stringify({taskId:d.id,filename:'axiom-visual.png',b64:f.visualB64,mime:f.visualMime||'image/png'})});
       }catch(e){}
     }
@@ -3106,7 +3112,7 @@ async function produceVisual(){
   const pv=$('vis-preview');if(pv)pv.innerHTML='<div class="think"><div class="tdots"><i></i><i></i><i></i></div>Gemini is designing the visual…</div>';
   try{
     const vfmt=($('vis-format')&&$('vis-format').value)||'square';
-    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({prompt:buildImagePrompt(f),referenceB64:f.referenceB64||null,mime:f.refMime||'image/png',
         aspect:({square:'1:1',portrait:'4:5',story:'9:16'})[vfmt]||'1:1',size:'1K'})});
     const d=await r.json().catch(()=>({}));
@@ -3132,7 +3138,7 @@ async function sendWhatsApp(){
   const btn=$('studio-wa'),t0=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='Sending…';}
   let ok=0,fail=0;
   for(const to of WA_RECIPIENTS){
-    try{const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},
+    try{const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/whatsapp',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({to,text})});const d=await r.json().catch(()=>({}));
       if(r.ok&&d.ok)ok++;else{fail++;if(d.detail||d.error)toast('WhatsApp: '+(d.detail||d.error),true);}
     }catch(e){fail++;}
@@ -3780,6 +3786,7 @@ function printBrief(){
 function toggleGemini(){$('gemini-fields').style.display=$('set-engine').value==='gemini'?'block':'none';}
 function openSettings(){
   $('set-key').value=CLAUDE_KEY;$('set-worker').value=WORKER_URL;
+  {const ak=$('set-axkey');if(ak)ak.value=AX_KEY;}
   $('set-brief').value=ORG_BRIEF;$('set-cu-list').value=CLICKUP_LIST;$('set-cu-auto').checked=CLICKUP_AUTO;
   document.querySelectorAll('#set-social input').forEach(c=>{c.checked=SOCIAL_PLATFORMS.indexOf(c.value)!==-1;});
   $('set-engine').value=SOCIAL_ENGINE;$('set-gemini').value=GEMINI_KEY;$('set-gemini-model').value=GEMINI_MODEL;toggleGemini();
@@ -3799,6 +3806,7 @@ function saveSettings(){
   GEMINI_KEY=$('set-gemini').value.trim();
   GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-3.6-flash';
   {const wa=$('set-wa');WA_RECIPIENTS=wa?wa.value.split(',').map(s=>s.trim()).filter(Boolean):WA_RECIPIENTS;localStorage.setItem('axiom_wa_to',JSON.stringify(WA_RECIPIENTS));}
+  {const ak=$('set-axkey');if(ak){AX_KEY=ak.value.trim();localStorage.setItem('axiom_access_key',AX_KEY);}}
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
   localStorage.setItem('axiom_org_brief',ORG_BRIEF);
@@ -4224,7 +4232,7 @@ function ccImagePrompt(copy,mode){
     '\n\nLeave the bottom-right corner clear for a logo (do NOT draw any logo). Strict: render ONLY the exact real English text above — no gibberish, no misspellings, no duplicated or invented words, no invented statistics or brand names. Output one finished, on-brand graphic.';
 }
 async function ccGenImage(copy,mode){
-  const r=await fetch(ccBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(ccBase()+'/nano',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({prompt:ccImagePrompt(copy,mode),references:ccAllRefs(),aspect:ccAspect(),size:'1K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status)+' — needs the worker deployed with GEMINI_KEY');
@@ -4288,7 +4296,7 @@ async function ccRefine(){
     const prompt='Edit the FIRST attached image per this instruction: "'+instr+'". Keep the same brand style, layout and dimensions unless the instruction says otherwise. '+
       (ccState.mode==='overlay'?'Do NOT add any text or logo — background artwork only.':'Ensure all on-image words are real, correctly-spelled English; do not add a logo (leave the bottom-right clear).')+
       ' Output only the edited image.';
-    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,references:refs,aspect:ccAspect(),size:'1K'})});
+    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:axHeaders(),body:JSON.stringify({prompt,references:refs,aspect:ccAspect(),size:'1K'})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||'edit failed');
     ccState.baseB64=d.imageB64;ccState.baseMime=d.mime||'image/png';
@@ -4308,11 +4316,11 @@ async function ccAdToClickup(){
   const name='['+(c.short||c.name)+(cm?' · '+cm.name.replace(/\s*\(.*\)/,''):'')+'] Ad creative';
   const desc=(ccState.lastPkg||$('cc-input').value||'')+'\n\n---\nClient: '+c.name+(cm?'\nCampaign: '+cm.name:'')+'\nAd creative generated in AXIOM Client Central (Nano Banana).';
   try{
-    const r=await fetch(base+'/clickup',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch(base+'/clickup',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:2,tags:['axiom','client-central',c.id]})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
-    if(d.id){try{await fetch(base+'/clickup-attach',{method:'POST',headers:{'Content-Type':'application/json'},
+    if(d.id){try{await fetch(base+'/clickup-attach',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({taskId:d.id,filename:'ad-creative.png',b64:ccState.visualB64,mime:ccState.visualMime})});}catch(e){}}
     toast('ClickUp task + creative attached ✓');
   }catch(e){toast('ClickUp: '+(e.message||e),true);}
@@ -4353,7 +4361,7 @@ async function ccToClickup(i){
   const name='['+(c.short||c.name)+(cm?' · '+cm.name.replace(/\s*\(.*\)/,''):'')+'] '+s.title;
   const desc=ccSecText(i)+'\n\n---\nClient: '+c.name+(cm?'\nCampaign: '+cm.name:'')+'\nDrafted in AXIOM Client Central via Gemini.';
   try{
-    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/clickup',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({name,description:desc,listId:CLICKUP_LIST||undefined,priority:2,tags:['axiom','client-central',c.id]})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -4437,11 +4445,11 @@ async function csLoad(id){
 function csSaveDoc(){
   const doc={client:CC_ACTIVE,thread:csState.thread.slice(-40),brief:csState.brief,pending:csState.pending,
     stage:csState.stage,vers:csState.vers,active:csState.active,links:(csState.links||[]).slice(-5),srefs:(csState.srefs||[]).slice(0,3),ts:Date.now()};
-  fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
+  fetch(csBase()+'/session/save',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({id:csState.id,doc})}).catch(()=>{});
 }
 function csSaveImg(ver,b64,mime){
-  fetch(csBase()+'/session/img',{method:'POST',headers:{'Content-Type':'application/json'},
+  fetch(csBase()+'/session/img',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({id:csState.id,ver,b64,mime})}).catch(()=>{});
 }
 async function csAddRefs(files){
@@ -4611,7 +4619,7 @@ async function csChat(system){
     }
     last.content=blocks;
   }
-  const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(csBase()+'/chat',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({system,messages:msgs,max_tokens:1200})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -4651,7 +4659,7 @@ async function csSend(){
     if(csState.mindCtx===undefined){
       csState.mindCtx='';
       try{
-        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
           body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:4})});
         const d=await r.json().catch(()=>({}));
         if(r.ok&&d.ok&&(d.hits||[]).length)
@@ -4727,7 +4735,7 @@ async function csGenerate(editPrompt,baseVer,opt){
     refs=[{data:base.b64,mime:base.mime||'image/png'}].concat(chatRefs).concat(brand).slice(0,6);
   }else{prompt=csBriefPrompt();refs=chatRefs.concat(brand).slice(0,6);}
   const aspect=CC_ASPECT[(csState.brief||{}).format]||'1:1';
-  const r=await fetch(csBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(csBase()+'/nano',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({prompt,references:refs,aspect,size:'1K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -4812,19 +4820,19 @@ function alSave(){
   clearTimeout(_alKvT);
   _alKvT=setTimeout(()=>{
     alEnsureSid();
-    fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    fetch(csBase()+'/session/save',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({id:alState.id,doc:alDoc()})}).catch(()=>{});
   },600);
 }
 function alSaveImg(ver,b64,mime){
   if(!b64)return;
   alEnsureSid();
-  fetch(csBase()+'/session/img',{method:'POST',headers:{'Content-Type':'application/json'},
+  fetch(csBase()+'/session/img',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({id:alState.id,ver,b64,mime:mime||'image/png'})}).catch(()=>{});
 }
 async function alLoadImg(ver){
   try{
-    const r=await fetch(csBase()+'/session/img?id='+encodeURIComponent(alState.id)+'&ver='+ver);
+    const r=await fetch(csBase()+'/session/img?id='+encodeURIComponent(alState.id)+'&ver='+ver,{headers:axHeaders()});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok&&d.img&&d.img.b64)return d.img;
   }catch(e){}
@@ -4854,7 +4862,7 @@ function alInit(){
     let doc=local;
     if(alState.id){
       try{
-        const r=await fetch(csBase()+'/session/load?id='+encodeURIComponent(alState.id));
+        const r=await fetch(csBase()+'/session/load?id='+encodeURIComponent(alState.id),{headers:axHeaders()});
         const d=await r.json().catch(()=>({}));
         if(r.ok&&d.ok&&d.doc){doc=d.doc;if(CC_ACTIVE===client&&alState.client===client)alApplyDoc(doc);}
       }catch(e){}
@@ -5000,7 +5008,7 @@ async function alAnalyzeDoc(i){
   const d=alState.docs[i];if(!d||alState.busy)return;
   alState.busy=true;alState.busyLabel='Reading '+d.name;alRender();
   try{
-    const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch(csBase()+'/chat',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({system:'You are a brand strategist. Extract ONLY what matters for producing ad creative for this client. Reply as plain text, max 180 words: brand colours (hex if visible), fonts/typography rules, logo usage rules, tone-of-voice notes, key claims/stats worth quoting, and any mandatory disclaimers. If the document is irrelevant to brand/creative, say so in one line.',
         messages:[{role:'user',content:[{type:'document',source:{type:'base64',media_type:'application/pdf',data:d.data}},{type:'text',text:'Analyse this document ("'+d.name+'") for creative production.'}]}],max_tokens:600})});
     const j=await r.json().catch(()=>({}));
@@ -5051,7 +5059,7 @@ async function alChat(system){
     }
     last.content=blocks;
   }
-  const r=await fetch(csBase()+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(csBase()+'/chat',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({system,messages:msgs,max_tokens:1600})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -5122,7 +5130,7 @@ async function alSend(){
     if(alState.mindCtx===undefined){
       alState.mindCtx='';
       try{
-        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
           body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:5})});
         const d=await r.json().catch(()=>({}));
         if(r.ok&&d.ok&&(d.hits||[]).length)
@@ -5227,7 +5235,7 @@ async function alGenerate(editPrompt){
   refs=refs.concat((alState.refs||[]).map(r=>({data:r.data,mime:r.mime})));
   if(alState.logo&&alState.textmode==='baked')refs.push({data:alState.logo.data,mime:alState.logo.mime});
   refs=refs.concat(ccAllRefs()).slice(0,6);
-  const r=await fetch(csBase()+'/nano',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(csBase()+'/nano',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({prompt:alGenPrompt(editPrompt),references:refs,aspect:CC_ASPECT[b.format]||'1:1',size:'1K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -5266,7 +5274,7 @@ async function ccPlaybook(){
   if(ccState.playbooks[ns]!==undefined)return ccState.playbooks[ns];
   ccState.playbooks[ns]='';
   try{
-    const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({namespace:ns,q:'brand voice tone wording style rules ad creative design guidelines policy messaging pillars',topK:6,kinds:CC_PLAYBOOK_KINDS})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok&&(d.hits||[]).length)
@@ -5290,7 +5298,7 @@ async function ccOutcomeSend(rec){
     rec.cta?'CTA: '+rec.cta:'',
     rec.brief?'Brief: '+JSON.stringify(rec.brief):'',
   ].filter(Boolean);
-  const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+  const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:axHeaders(),
     body:JSON.stringify({namespace:CC_ACTIVE,kind:'outcome',
       title:(rec.verdict==='approved'?'WIN — ':'LOSS — ')+String(rec.headline||rec.surface+' v'+rec.ver).slice(0,140),
       text:lines.join('\n'),source:'app:'+rec.surface,date:new Date().toISOString().slice(0,10)})});
@@ -5599,7 +5607,7 @@ async function mindIngest(){
   const btn=$('mind-add');btn.disabled=true;btn.textContent='Indexing…';
   try{
     const ns=kind==='cmm'?'cmm':CC_ACTIVE;
-    const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({namespace:ns,title:title||'Untitled',text,kind})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
@@ -5624,7 +5632,7 @@ async function mindRun(mode){
   const labels={narrative:'Narratives',patterns:'Pattern detection',opposition:'Opposition watch',strategy:'Strategy',impact:'Impact measurement'};
   out.innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>The Curious Mind is analysing '+esc(labels[mode]||mode)+' for '+esc(c.short||c.name)+'…</div>'+out.innerHTML;
   try{
-    const r=await fetch(csBase()+'/mind/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+    const r=await fetch(csBase()+'/mind/analyze',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({namespace:CC_ACTIVE,mode,question:$('mind-q').value.trim()||undefined,
         objective:(c.desc||'').slice(0,500),keywords:c.keywords||[]})});
     const d=await r.json().catch(()=>({}));

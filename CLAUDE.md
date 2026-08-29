@@ -36,6 +36,27 @@ Reviewed notes sync into the app's retrieval layer with
 Ad Lab and Studio record approved/killed verdicts to the Mind as
 `kind: outcome` — wins and losses that future briefs retrieve.
 
+## Security & org knowledge (Curious Minds = namespace `cmm`)
+
+- Access control: the `AXIOM_ACCESS_KEY` worker secret gates /mind/*,
+  /session/*, /log/*, /archive/search and /archive/add via the `X-Axiom-Key`
+  header (open until the secret is set). `/archive/stats` stays public by
+  design: aggregate counts only, so the map shows presence of knowledge
+  without revealing content. The app sends the key from Settings -> Access key.
+- Confidential material NEVER goes into the git vault (`knowledge/` is in the
+  repo). It goes straight to the Mind (`/mind/ingest`, key-gated, R2/D1/
+  Vectorize) under the owning client's namespace; the vault may hold only a
+  provenance stub. Client namespaces are isolated: retrieval sees the client's
+  own namespace plus `cmm`, never another client's.
+- Org ingestion paths: Google Drive / Slack via this session's MCP connectors
+  (operator names folders/channels; distill -> vault note or direct Mind
+  ingest per confidentiality); file uploads via Ad Lab/Studio in-app; email
+  as exports dropped into Drive.
+- Historical series: `python3 tools/backfill.py gdelt|wiki|aec|polls|all`
+  loads multi-year history (GDELT issue volume/tone, Wikipedia attention,
+  AEC results CSVs, polling CSVs) into the archive as `hist_*` kinds via the
+  key-gated `/archive/add`. Re-runs are safe (url-deduped).
+
 ## Working conventions
 
 - Verify frontend changes with the Playwright harnesses in the session

@@ -83,7 +83,7 @@
 const CORS = {
   'Access-Control-Allow-Origin':      '*',
   'Access-Control-Allow-Methods':     'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With',
+  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key',
   'Access-Control-Max-Age':           '86400',
   'Content-Type':                     'application/json',
 };
@@ -92,7 +92,7 @@ const CORS = {
 const CORS_ONLY = {
   'Access-Control-Allow-Origin':      '*',
   'Access-Control-Allow-Methods':     'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With',
+  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key',
   'Access-Control-Max-Age':           '86400',
 };
 
@@ -1732,6 +1732,20 @@ export default {
     const q       = reqUrl.searchParams.get('q') || '';
     const sr      = reqUrl.searchParams.get('sr') || 'australia';
 
+    // ---- access control ----------------------------------------------------
+    // When the AXIOM_ACCESS_KEY secret is set (wrangler secret put
+    // AXIOM_ACCESS_KEY), the private routes below require the matching
+    // X-Axiom-Key header. Everything stays open until the secret exists, so
+    // nothing breaks before it is configured. /archive/stats intentionally
+    // stays public: aggregate counts only - the map shows presence of
+    // knowledge without revealing any of it.
+    const gated = path.startsWith('/mind/') || path.startsWith('/session/')
+      || path.startsWith('/log/') || path === '/archive/search' || path === '/archive/add';
+    if (gated && env.AXIOM_ACCESS_KEY
+        && (req.headers.get('X-Axiom-Key') || '') !== env.AXIOM_ACCESS_KEY) {
+      return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add the access key in AXIOM Settings.' }, 401);
+    }
+
     // ==========================================================================
     // V5 ROUTES - POLITICAL INTELLIGENCE
     // ==========================================================================
@@ -2286,6 +2300,20 @@ export default {
         }]);
         return jsonResp({ ok: true, logged: n });
       } catch (e) { return jsonResp({ ok: false, error: 'log_failed', detail: String(e).slice(0, 120) }, 500); }
+    }
+
+    // POST /archive/add  { kind, rows:[{src,title,body,url,author,tone,meta,ts}] }
+    // Bulk backfill for historical series (tools/backfill.py). Key-gated.
+    if (path === '/archive/add') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        const b = await req.json();
+        const kind = (String(b.kind || 'hist').replace(/[^\w]/g, '').slice(0, 24)) || 'hist';
+        const rows = Array.isArray(b.rows) ? b.rows : [];
+        const n = await archiveItems(env, kind, rows);
+        return jsonResp({ ok: true, added: n, kind });
+      } catch (e) { return jsonResp({ ok: false, error: 'add_failed', detail: String(e).slice(0, 140) }, 500); }
     }
 
     // GET /archive/search?q=&kind=&src=&days=&limit=  - query the permanent store
