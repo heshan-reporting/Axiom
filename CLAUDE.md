@@ -1,9 +1,12 @@
 # AXIOM — session guidance
 
 AXIOM is an Australian political intelligence platform: a single-file frontend
-(`index.html`, GitHub Pages) plus a Cloudflare Worker backend
+(`docs/index.html`, served by GitHub Pages **from the /docs folder only** —
+Settings -> Pages -> main //docs; this keeps `knowledge/`, the worker source
+and tools off the public site) plus a Cloudflare Worker backend
 (`axiomworkerv4.js`, deployed as `newsaus` — keep it pure ASCII). Design tokens
-live in `axiom-ds.css`; `styleguide.html` documents them.
+live in `docs/axiom-ds.css`; `docs/styleguide.html` documents them. Never move
+non-public files into `docs/`.
 
 ## Knowledge vault (claude-obsidian)
 
@@ -64,4 +67,4 @@ Ad Lab and Studio record approved/killed verdicts to the Mind as
 - Worker secrets (ANTHROPIC_API_KEY, GEMINI_KEY, CLICKUP_TOKEN, …) exist only
   in Cloudflare — never in the repo.
 - Ship flow: commit on `claude/…` branch → push → fast-forward merge to
-  `main` (GitHub Pages serves `main`).
+  `main` (GitHub Pages serves `main` **/docs**).
