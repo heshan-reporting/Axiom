@@ -20,6 +20,7 @@ This catalog is updated by completed knowledge operations.
 ## Concepts
 
 - [[How We Curate]] - editorial intake doctrine: the L0-L4 funnel, noise controls, and how the engine learns.
+- [[Client Playbook Template]] - the standing-rules structure (style / voice / policy) every client playbook copies.
 
 ## Entities
 

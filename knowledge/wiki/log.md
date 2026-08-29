@@ -13,6 +13,11 @@ tags:
 
 Newest completed operations appear first.
 
+## 2026-08-29 - save-20260829-playbook-template
+
+- Created [[Client Playbook Template]]: per-client standing rules (style / voice / policy) that the app applies to every generation.
+- Indexed it under Concepts.
+
 ## 2026-08-29 - save-20260829-curation-doctrine
 
 - Created [[How We Curate]], the editorial intake doctrine (funnel L0-L4, noise controls, engine growth loop).

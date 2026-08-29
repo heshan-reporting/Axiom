@@ -2281,12 +2281,19 @@ export default {
       }
 
       // POST /mind/query {namespace, q, topK?} - raw retrieval (debug/UI)
+      // Optional b.kinds: ['style','voice','policy',...] filters hits by
+      // metadata.kind - used by the client-playbook fetch so standing rules
+      // load deterministically instead of only when semantically similar.
       if (path === '/mind/query' && req.method === 'POST') {
         let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
         const ns = nsClean(b.namespace);
         if (!ns || !b.q) return jsonResp({ error: 'missing_fields' }, 400);
+        const kinds = Array.isArray(b.kinds) ? b.kinds.map(k => String(k).slice(0, 40)) : null;
         try {
-          const hits = await retrieve(ns, String(b.q), Math.min(parseInt(b.topK, 10) || 6, 12), 3);
+          const want = Math.min(parseInt(b.topK, 10) || 6, 12);
+          // Over-fetch when filtering so a kind filter still fills topK.
+          let hits = await retrieve(ns, String(b.q), kinds ? Math.min(want * 3, 24) : want, 3);
+          if (kinds) hits = hits.filter(h => kinds.includes(h.meta.kind)).slice(0, want);
           return jsonResp({ ok: true, hits: hits.map(h => ({ ns: h.ns, score: +h.score.toFixed(3), title: h.meta.title, kind: h.meta.kind, snippet: (h.meta.snippet || '').slice(0, 400) })) });
         } catch (e) { return jsonResp({ error: 'query_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }
       }

@@ -1637,6 +1637,9 @@ body.kiosk .kprog{display:block}
                 <div class="mind-h">Add to this client's knowledge base</div>
                 <div class="mind-row">
                   <select id="mind-kind" class="cc-in">
+                    <option value="style">Style guide — ad creative rules</option>
+                    <option value="voice">Voice &amp; wording rules</option>
+                    <option value="policy">Policy &amp; messaging pillars</option>
                     <option value="brief">Brief</option><option value="campaign">Campaign plan</option>
                     <option value="content">Past content</option><option value="results">Results / KPIs</option>
                     <option value="cmm">CMM shared (all clients)</option><option value="doc">Other</option>
@@ -3562,7 +3565,7 @@ function ccBuildPrompt(linkText){
   if(types.indexOf('edm')!==-1)ask+='\n#### EDM / email\nSubject line, preview text, and a 90-140 word supporter email with a clear call to action.';
   if(types.indexOf('newspaper')!==-1)ask+='\n#### Newspaper-style piece\nWrite in the style of a newspaper article/opinion piece the campaign could turn into a shareable graphic: a strong masthead-style HEADLINE line, a one-line standfirst/kicker, then 120-180 words of body copy, and a short pull-quote. Punchy, campaign-aligned, factual.';
   if(types.indexOf('ad')!==-1)ask+='\n#### Ad creative brief\nThe exact text to place ON the ad graphic, as three labelled lines (nothing else):\nHEADLINE: a bold hook, max 6 words\nSUBHEAD: one supporting line, max 12 words\nCTA: a short call to action (e.g. the campaign name, or “Sign the petition”)';
-  const sys='You are a senior campaign copywriter and creative director for '+c.name+'. Your work goes straight to the client — it must be accurate, on-brand, genuinely creative, and free of spelling or grammatical errors.\n\nCLIENT BRIEF:\n'+(c.brief||c.desc||'')+
+  const sys='You are a senior campaign copywriter and creative director for '+c.name+'. Your work goes straight to the client — it must be accurate, on-brand, genuinely creative, and free of spelling or grammatical errors.\n\nCLIENT BRIEF:\n'+(c.brief||c.desc||'')+ccPlaybookBlock()+
     (cm?'\n\nCAMPAIGN: '+cm.name+' ('+(cm.url||'')+')\nTagline: '+(cm.tagline||'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'\n\nContext: general brand / whole-of-client.')+
     (ccAllRefs().length?'\n\nApproved reference creatives are attached — mirror their tone and voice.':'')+
     '\n\nWrite ready-to-publish content for the item below. Use these #### headers EXACTLY and output ONLY the content under them:'+ask+
@@ -3588,6 +3591,7 @@ async function ccGenerate(){
     (wantsAd?'<div id="cc-ad-slot"><div class="cc-card"><div class="cc-card-h"><div class="cc-plat"><span class="cc-dot"></span>Ad creative</div></div><div class="cc-card-body"><div class="cc-thinking"><div class="cc-spin"></div>'+(wantsText?'Writing the copy, then designing the creative…':'Designing the creative…')+'</div></div></div></div>':'')+
     (wantsText?'<div id="cc-text-slot"><div class="cc-thinking"><div class="cc-spin"></div>Gemini is drafting the copy…</div></div>':'');
   const linkText=await ccFetchLinks();
+  await ccPlaybook(); // standing style/voice/policy rules, cached per client
   const textJob=wantsText?ccGenText(linkText).then(txt=>{ccState.lastPkg=txt;ccRenderTextCards(txt);return txt;})
     .catch(e=>{const el=$('cc-text-slot');if(el)el.innerHTML='<div class="cc-err">Copy: '+esc(e.message||e)+'</div>';return '';}):Promise.resolve('');
   const adJob=wantsAd?textJob.then(txt=>ccMakeCreative(txt,mode))
@@ -3937,7 +3941,7 @@ function csBranch(ver){
 function csCtx(){
   const c=ccClient();const cm=ccState.campaign>=0?(c.campaigns||[])[ccState.campaign]:null;
   const bk=ccBK(CC_ACTIVE);
-  return 'CLIENT: '+c.name+'\n'+(c.brief||c.desc||'')+
+  return 'CLIENT: '+c.name+'\n'+(c.brief||c.desc||'')+ccPlaybookBlock()+
     (cm?'\n\nACTIVE CAMPAIGN: '+cm.name+(cm.tagline?' — '+cm.tagline:'')+'\nKey messages:\n- '+(cm.messages||[]).join('\n- '):'')+
     '\n\nBRAND KIT: logo on file: '+(bk.logo?'yes (auto-stamped on every creative)':'no')+'; '+((bk.library||[]).length)+' approved reference creatives (visual style must match them).'+((csState.srefs||[]).length?' PLUS '+csState.srefs.length+' reference image'+(csState.srefs.length>1?'s':'')+' attached by the operator for THIS creative.':'')+' Any reference images are attached to the LATEST user message and are visible to you - look at them, describe what you see when relevant, and never claim you cannot see an attached image.'+
     (ccState.linkCtx?'\n\nREFERENCE SOURCES (already read):\n'+ccState.linkCtx.slice(0,3500):'')+
@@ -4058,6 +4062,7 @@ async function csSend(){
           csState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
       }catch(e){}
     }
+    await ccPlaybook(); // standing style/voice/policy rules, cached per client
     if(csState.stage==='brief')await csBriefTurn();
     else await csEditTurn(t);
   }catch(e){
@@ -4480,7 +4485,7 @@ function alParse(txt){
 function alCtx(){
   const c=ccClient();
   const links=(alState.links||[]).map(l=>'SOURCE ('+(l.title||l.url)+'):\n'+(l.text||'').slice(0,1600)).join('\n\n');
-  return 'CLIENT: '+c.name+' — '+(c.desc||'')+
+  return 'CLIENT: '+c.name+' — '+(c.desc||'')+ccPlaybookBlock()+
     '\nCampaigns: '+((c.campaigns||[]).map(x=>x.name+(x.tagline?' ('+x.tagline+')':'')).join('; ')||'none')+
     '\nTracked keywords: '+((c.keywords||[]).slice(0,12).join(', ')||'none')+
     (alState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind — curated notes and past WIN/LOSS outcomes; learn from the losses, lean on the wins):\n'+alState.mindCtx:'')+
@@ -4524,6 +4529,7 @@ async function alSend(){
           alState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
       }catch(e){}
     }
+    await ccPlaybook(); // standing style/voice/policy rules, cached per client
     if(alState.stage==='intake'||alState.stage==='copy')await alIntakeTurn();
     else if(alState.stage==='refs'||alState.stage==='detail')await alDetailTurn();
     else await alEditTurn(t);
@@ -4649,6 +4655,30 @@ async function alEditTurn(instr){
    as kind "outcome" under the client's namespace, so future briefs retrieve
    what actually worked. Verdicts are always kept locally in the session even
    when the Mind is not yet deployed. */
+/* Client playbook — standing style/voice/policy rules retrieved from The
+   Curious Mind by KIND (not query similarity), so they apply to EVERY
+   generation for the client: Studio, Ad Lab and the Composer. Cached per
+   client per session; invalidated when new knowledge is ingested. */
+const CC_PLAYBOOK_KINDS=['style','voice','policy'];
+async function ccPlaybook(){
+  const ns=CC_ACTIVE;
+  ccState.playbooks=ccState.playbooks||{};
+  if(ccState.playbooks[ns]!==undefined)return ccState.playbooks[ns];
+  ccState.playbooks[ns]='';
+  try{
+    const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({namespace:ns,q:'brand voice tone wording style rules ad creative design guidelines policy messaging pillars',topK:6,kinds:CC_PLAYBOOK_KINDS})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok&&(d.hits||[]).length)
+      ccState.playbooks[ns]=d.hits.map(h=>'['+String(h.kind||'doc').toUpperCase()+' · '+(h.title||'')+']\n'+(h.snippet||'')).join('\n\n').slice(0,3200);
+  }catch(e){}
+  return ccState.playbooks[ns];
+}
+function ccPlaybookSync(){return (ccState.playbooks||{})[CC_ACTIVE]||'';}
+function ccPlaybookBlock(){
+  const p=ccPlaybookSync();
+  return p?'\n\nCLIENT PLAYBOOK — STANDING RULES (always apply these to voice, wording, tone, creative style and policy lines; they outrank generic taste):\n'+p:'';
+}
 async function ccOutcomeSend(rec){
   const lines=[
     'VERDICT: '+rec.verdict.toUpperCase(),
@@ -4974,6 +5004,10 @@ async function mindIngest(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
     toast('Indexed ✓ '+d.chunks+' chunks'+(ns==='cmm'?' (shared CMM layer)':''));
+    // Fresh knowledge invalidates the cached playbook and retrieval context
+    // so the next generation picks it up immediately.
+    if(ccState.playbooks)delete ccState.playbooks[ns];
+    csState.mindCtx=undefined;alState.mindCtx=undefined;
     $('mind-title').value='';$('mind-text').value='';mindDocs();
   }catch(e){toast('Ingest: '+(e.message||e),true);}
   btn.disabled=false;btn.textContent='+ Add to knowledge base';
