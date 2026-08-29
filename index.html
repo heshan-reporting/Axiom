@@ -4175,32 +4175,106 @@ async function csEditTurn(instr){
    (final batched questions incl. logo/PDF insight) -> confirmed (artwork +
    canvas editor + concise chat edits). All Claude calls ride /chat with
    images AND native PDF document blocks; artwork rides /nano. */
-const alState={client:null,thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false,booted:false};
+const alState={client:null,id:null,thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false,booted:false};
 function alKey(){return 'axiom_al_'+CC_ACTIVE;}
+function alSidKey(){return 'axiom_al_sid_'+CC_ACTIVE;}
+/* KV image slots: artwork versions 1..N, logo 9001, references 9101..9104 */
+const AL_V_LOGO=9001,AL_V_REF0=9101;
+function alDoc(){
+  return {
+    thread:alState.thread.slice(-40).map(m=>m.r==='art'?{r:'art',ver:m.ver,note:m.note,mime:m.mime}:m),
+    stage:alState.stage,copies:alState.copies,chosen:alState.chosen,insights:alState.insights,
+    brief:alState.brief,match:alState.match,textmode:alState.textmode,artVer:alState.artVer,
+    refsN:(alState.refs||[]).length,hasLogo:!!alState.logo,
+    links:(alState.links||[]).map(l=>({url:l.url,title:l.title,text:(l.text||'').slice(0,1500)})),
+    layers:alState.layers,
+  };
+}
+let _alKvT=null;
+function alEnsureSid(){
+  if(!alState.id){
+    alState.id='al'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    try{localStorage.setItem(alSidKey(),alState.id);}catch(e){}
+  }
+  return alState.id;
+}
 function alSave(){
-  try{localStorage.setItem(alKey(),JSON.stringify({
-    thread:alState.thread.filter(m=>m.r!=='art').slice(-40),stage:alState.stage,copies:alState.copies,
-    chosen:alState.chosen,insights:alState.insights,brief:alState.brief,match:alState.match,
-    textmode:alState.textmode,links:(alState.links||[]).map(l=>({url:l.url,title:l.title,text:(l.text||'').slice(0,1500)})),
-    layers:alState.layers.filter(l=>l.type!=='img'),
-  }));}catch(e){}
+  const doc=alDoc();
+  try{localStorage.setItem(alKey(),JSON.stringify(doc));}catch(e){}
+  // Debounced KV write - the session (and its artwork, saved separately)
+  // survives refreshes and moves between devices, exactly like the Studio's.
+  clearTimeout(_alKvT);
+  _alKvT=setTimeout(()=>{
+    alEnsureSid();
+    fetch(csBase()+'/session/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:alState.id,doc:alDoc()})}).catch(()=>{});
+  },600);
+}
+function alSaveImg(ver,b64,mime){
+  if(!b64)return;
+  alEnsureSid();
+  fetch(csBase()+'/session/img',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:alState.id,ver,b64,mime:mime||'image/png'})}).catch(()=>{});
+}
+async function alLoadImg(ver){
+  try{
+    const r=await fetch(csBase()+'/session/img?id='+encodeURIComponent(alState.id)+'&ver='+ver);
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok&&d.img&&d.img.b64)return d.img;
+  }catch(e){}
+  return null;
+}
+function alApplyDoc(s){
+  Object.assign(alState,{thread:s.thread||[],stage:s.stage||'intake',copies:s.copies||[],chosen:s.chosen||null,
+    insights:s.insights||'',brief:s.brief||null,match:s.match||null,textmode:s.textmode||'overlay',
+    artVer:s.artVer||0,links:s.links||[],layers:s.layers||[]});
+  return s;
 }
 function alInit(){
   if(alState.client===CC_ACTIVE){alRender();return;}
   alState.client=CC_ACTIVE;
-  Object.assign(alState,{thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false});
-  try{const s=JSON.parse(localStorage.getItem(alKey())||'null');
-    if(s){Object.assign(alState,{thread:s.thread||[],stage:s.stage||'intake',copies:s.copies||[],chosen:s.chosen||null,
-      insights:s.insights||'',brief:s.brief||null,match:s.match||null,textmode:s.textmode||'overlay',links:s.links||[],layers:s.layers||[]});
-      // An artwork never survives a reload (images are not persisted) - fall
-      // back to the last pre-artwork stage so the flow remains coherent.
-      if(alState.stage==='confirmed')alState.stage=alState.brief?'detail':'intake';}
-  }catch(e){}
-  alBind();alRender();alRenderAssets();
+  Object.assign(alState,{id:null,thread:[],stage:'intake',copies:[],chosen:null,refs:[],logo:null,docs:[],insights:'',links:[],brief:null,match:null,textmode:'overlay',art:null,artVer:0,layers:[],sel:null,busy:false});
+  try{alState.id=localStorage.getItem(alSidKey())||null;}catch(e){}
+  alBind();
   const cw=$('al-canvaswrap');if(cw)cw.hidden=true;
+  // Local snapshot first for instant paint, then the KV session (which also
+  // rehydrates artwork, logo and references) replaces it when it arrives.
+  let local=null;
+  try{local=JSON.parse(localStorage.getItem(alKey())||'null');}catch(e){}
+  if(local)alApplyDoc(local);
+  const client=CC_ACTIVE;
+  alRender();alRenderAssets();
+  (async()=>{
+    let doc=local;
+    if(alState.id){
+      try{
+        const r=await fetch(csBase()+'/session/load?id='+encodeURIComponent(alState.id));
+        const d=await r.json().catch(()=>({}));
+        if(r.ok&&d.ok&&d.doc){doc=d.doc;if(CC_ACTIVE===client&&alState.client===client)alApplyDoc(doc);}
+      }catch(e){}
+    }
+    if(CC_ACTIVE!==client||alState.client!==client)return;
+    // Rehydrate binary assets from KV.
+    if(alState.id&&doc){
+      if(doc.hasLogo){const im=await alLoadImg(AL_V_LOGO);if(im)alState.logo={data:im.b64,mime:im.mime};}
+      const rn=Math.min(doc.refsN||0,4);
+      for(let i=0;i<rn;i++){const im=await alLoadImg(AL_V_REF0+i);if(im)alState.refs.push({data:im.b64,mime:im.mime});}
+      let latest=null;
+      for(const m of alState.thread){
+        if(m.r==='art'&&!m.b64){const im=await alLoadImg(m.ver);if(im){m.b64=im.b64;m.mime=im.mime;latest=m;}}
+        else if(m.r==='art'&&m.b64)latest=m;
+      }
+      if(latest&&latest.b64)alState.art={b64:latest.b64,mime:latest.mime||'image/png'};
+    }
+    if(CC_ACTIVE!==client||alState.client!==client)return;
+    // Without a restorable artwork, a confirmed session steps back to the
+    // last coherent pre-artwork stage.
+    if(alState.stage==='confirmed'&&!alState.art)alState.stage=alState.brief?'detail':'intake';
+    alRender();alRenderAssets();
+  })();
 }
 function alFresh(){
-  try{localStorage.removeItem(alKey());}catch(e){}
+  try{localStorage.removeItem(alKey());localStorage.removeItem(alSidKey());}catch(e){}
   alState.client=null;alInit();
 }
 function alBind(){
@@ -4253,6 +4327,7 @@ function alSummaryHtml(m){
     '</div>';
 }
 function alArtHtml(m){
+  if(!m.b64)return '<div class="al-b ai"><span class="k">v'+m.ver+' · '+esc(m.note||'')+'</span>This artwork has expired from the 30-day session store — say what you\'d like and I\'ll regenerate it.</div>';
   return '<div class="al-art"><img src="data:'+(m.mime||'image/png')+';base64,'+m.b64+'" alt="Generated creative">'+
     '<div class="bar"><span class="vtag">v'+m.ver+'</span><span class="note2">'+esc(m.note||'')+'</span>'+
     '<button class="cc-mini" onclick="alOpenCanvas()">Open canvas</button>'+
@@ -4273,6 +4348,8 @@ async function alAddRefs(files){
     const d=await ccDownscale(f,900,.8);if(d)alState.refs.push(d);
   }
   alState.refs=alState.refs.slice(0,4);
+  alState.refs.forEach((r2,i)=>alSaveImg(AL_V_REF0+i,r2.data,r2.mime));
+  alSave();
   alRenderAssets();
   if(alState.refs.length&&(alState.stage==='refs'||alState.stage==='copy')&&!alState.thread.some(m=>m.r==='match'&&alState.match===null)){
     if(alState.match===null||alState.match===undefined){
@@ -4283,12 +4360,16 @@ async function alAddRefs(files){
     }
   }
 }
-function alDelRef(i){alState.refs.splice(i,1);alRenderAssets();}
+function alDelRef(i){
+  alState.refs.splice(i,1);
+  alState.refs.forEach((r2,j)=>alSaveImg(AL_V_REF0+j,r2.data,r2.mime));
+  alSave();alRenderAssets();
+}
 async function alAddLogo(f){
   if(!f)return;
   if(!/^image\//.test(f.type)){toast('Logo must be an image',1);return;}
   const d=await ccDownscale(f,512,.92,true);
-  if(d){alState.logo=d;alRenderAssets();toast('Logo added to the Lab');}
+  if(d){alState.logo=d;alRenderAssets();alSaveImg(AL_V_LOGO,d.data,d.mime);alSave();toast('Logo added to the Lab');}
 }
 function alDelDoc(i){alState.docs.splice(i,1);alRenderAssets();}
 async function alAddDocs(files){
@@ -4524,6 +4605,7 @@ async function alGenerate(editPrompt){
   alState.artVer++;
   alState.art={b64:d.imageB64,mime:d.mime||'image/png'};
   alState.thread.push({r:'art',ver:alState.artVer,b64:d.imageB64,mime:d.mime||'image/png',note:editPrompt?editPrompt.slice(0,80):('from brief — '+(b.headline||alState.chosen&&alState.chosen.headline||'').slice(0,50))});
+  alSaveImg(alState.artVer,d.imageB64,d.mime||'image/png');
 }
 async function alEditTurn(instr){
   const sys='You route refinement instructions for a generated ad creative (version '+alState.artVer+').\n\nBRIEF: '+JSON.stringify(alState.brief)+'\n'+alCtx()+
