@@ -13,16 +13,19 @@ tags:
 
 ## Last Updated
 
-Vault initialized. No knowledge operations have completed yet.
+2026-08-29 - curation doctrine saved.
 
 ## Key Recent Facts
 
-- No facts recorded.
+- Intake follows the [[How We Curate]] funnel: firehose -> candidates -> cited capture -> human-gated knowledge -> distilled intelligence.
+- Client notes declare `client: <id>` frontmatter; default namespace is `cmm`.
 
 ## Recent Changes
 
 - Created the vault foundation.
+- Saved [[How We Curate]].
 
 ## Active Threads
 
-- Add a source to `inbox/`, then ingest it.
+- Ingest the first real sources through the funnel.
+- Sync reviewed notes with `tools/vault2mind.py` once the Mind is deployed.

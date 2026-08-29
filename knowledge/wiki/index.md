@@ -19,7 +19,7 @@ This catalog is updated by completed knowledge operations.
 
 ## Concepts
 
-- No concepts indexed yet.
+- [[How We Curate]] - editorial intake doctrine: the L0-L4 funnel, noise controls, and how the engine learns.
 
 ## Entities
 

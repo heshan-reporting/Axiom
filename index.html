@@ -3906,7 +3906,12 @@ function csRender(){
       const im=csState.imgs[m.ver];const active=m.ver===csState.active?' active':'';
       h+='<div class="cs-img'+active+fresh+'" id="cs-v'+m.ver+'">'+
         (im?'<img src="data:'+(im.mime||'image/png')+';base64,'+im.b64+'" alt="Version '+m.ver+'" onclick="csBranch('+m.ver+')">':'<div class="cs-b ai">v'+m.ver+' — loading…</div>')+
-        '<div class="cs-vbar"><span class="cs-vtag">V'+m.ver+'</span><span class="cs-vnote">'+esc(m.note||'')+'</span>'+
+        '<div class="cs-vbar" style="flex-wrap:wrap"><span class="cs-vtag">V'+m.ver+'</span><span class="cs-vnote">'+esc(m.note||'')+'</span>'+
+        (function(){const vrec=csState.vers.find(x=>x.ver===m.ver)||{};
+          if(csState.outPend&&csState.outPend.ver===m.ver)return ccOutcomeWhyRow('csOutcomeSave()','csOutcomeCancel()');
+          if(vrec.outcome)return ccOutcomeBadge(vrec.outcome);
+          return im?'<button class="cc-mini" style="color:var(--pos)" onclick="csOutcome('+m.ver+',\'approved\')" title="Record a win — trains future briefs">✓</button>'+
+            '<button class="cc-mini" style="color:var(--neg)" onclick="csOutcome('+m.ver+',\'killed\')" title="Record a loss — trains future briefs">✗</button>':'';})()+
         (im?'<a class="cc-mini" style="color:var(--x-ac);border-color:var(--x-ac-line);font-weight:700" download="axiom-'+(ccClient().short||'creative').toLowerCase()+'-v'+m.ver+'.png" href="data:'+(im.mime||'image/png')+';base64,'+im.b64+'">↓ Download PNG</a>':'')+
         (m.ver!==csState.active?'<button class="cc-mini" onclick="csBranch('+m.ver+')">Branch from this</button>':'')+
         '</div></div>';
@@ -4182,7 +4187,7 @@ function alSidKey(){return 'axiom_al_sid_'+CC_ACTIVE;}
 const AL_V_LOGO=9001,AL_V_REF0=9101;
 function alDoc(){
   return {
-    thread:alState.thread.slice(-40).map(m=>m.r==='art'?{r:'art',ver:m.ver,note:m.note,mime:m.mime}:m),
+    thread:alState.thread.slice(-40).map(m=>m.r==='art'?{r:'art',ver:m.ver,note:m.note,mime:m.mime,outcome:m.outcome}:m),
     stage:alState.stage,copies:alState.copies,chosen:alState.chosen,insights:alState.insights,
     brief:alState.brief,match:alState.match,textmode:alState.textmode,artVer:alState.artVer,
     refsN:(alState.refs||[]).length,hasLogo:!!alState.logo,
@@ -4328,8 +4333,13 @@ function alSummaryHtml(m){
 }
 function alArtHtml(m){
   if(!m.b64)return '<div class="al-b ai"><span class="k">v'+m.ver+' · '+esc(m.note||'')+'</span>This artwork has expired from the 30-day session store — say what you\'d like and I\'ll regenerate it.</div>';
+  const pend=alState.outPend&&alState.outPend.ver===m.ver;
   return '<div class="al-art"><img src="data:'+(m.mime||'image/png')+';base64,'+m.b64+'" alt="Generated creative">'+
-    '<div class="bar"><span class="vtag">v'+m.ver+'</span><span class="note2">'+esc(m.note||'')+'</span>'+
+    '<div class="bar" style="flex-wrap:wrap"><span class="vtag">v'+m.ver+'</span><span class="note2">'+esc(m.note||'')+'</span>'+
+    (pend?ccOutcomeWhyRow('alOutcomeSave()','alOutcomeCancel()'):
+      m.outcome?ccOutcomeBadge(m.outcome):
+      '<button class="cc-mini" style="color:var(--pos)" onclick="alOutcome('+m.ver+',\'approved\')" title="Record a win — trains future briefs">✓ Approve</button>'+
+      '<button class="cc-mini" style="color:var(--neg)" onclick="alOutcome('+m.ver+',\'killed\')" title="Record a loss — trains future briefs">✗ Kill</button>')+
     '<button class="cc-mini" onclick="alOpenCanvas()">Open canvas</button>'+
     '<a class="cc-mini ok" style="text-decoration:none" download="axiom-adlab-v'+m.ver+'.png" href="data:'+(m.mime||'image/png')+';base64,'+m.b64+'">↓ PNG</a></div></div>';
 }
@@ -4473,6 +4483,7 @@ function alCtx(){
   return 'CLIENT: '+c.name+' — '+(c.desc||'')+
     '\nCampaigns: '+((c.campaigns||[]).map(x=>x.name+(x.tagline?' ('+x.tagline+')':'')).join('; ')||'none')+
     '\nTracked keywords: '+((c.keywords||[]).slice(0,12).join(', ')||'none')+
+    (alState.mindCtx?'\n\nCLIENT KNOWLEDGE (The Curious Mind — curated notes and past WIN/LOSS outcomes; learn from the losses, lean on the wins):\n'+alState.mindCtx:'')+
     (alState.insights?'\n\nBRAND DOCUMENT INSIGHTS:\n'+alState.insights:'')+
     (links?'\n\nSOURCE MATERIAL (fetched from URLs the operator provided — quote real facts from here):\n'+links:'')+
     (alState.chosen?'\n\nCHOSEN COPY: '+JSON.stringify(alState.chosen):'')+
@@ -4500,6 +4511,18 @@ async function alSend(){
       alState.links=alState.links.slice(-4);
       alState.thread.push({r:'a',k:'Sources read',t:notes.join('\n'),ui:true});
       alRenderAssets();alState.busyLabel='Thinking';alRender();
+    }
+    // Pull client knowledge (curated notes + past outcomes) from The Curious
+    // Mind once per session; silently skipped when the Mind is not deployed.
+    if(alState.mindCtx===undefined){
+      alState.mindCtx='';
+      try{
+        const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:5})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok&&d.ok&&(d.hits||[]).length)
+          alState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
+      }catch(e){}
     }
     if(alState.stage==='intake'||alState.stage==='copy')await alIntakeTurn();
     else if(alState.stage==='refs'||alState.stage==='detail')await alDetailTurn();
@@ -4621,6 +4644,73 @@ async function alEditTurn(instr){
     alState.thread.push({r:'a',kind:j.type==='ask'?'question':'chat',t:j.text||raw.slice(0,700),raw});
   }
 }
+/* ── Outcome feedback — the loop that trains the engine ──────────────────
+   Approved/killed verdicts (with a one-line why) file into The Curious Mind
+   as kind "outcome" under the client's namespace, so future briefs retrieve
+   what actually worked. Verdicts are always kept locally in the session even
+   when the Mind is not yet deployed. */
+async function ccOutcomeSend(rec){
+  const lines=[
+    'VERDICT: '+rec.verdict.toUpperCase(),
+    'Why: '+(rec.why||'(no reason given)'),
+    'Surface: '+rec.surface+' v'+rec.ver,
+    'Date: '+new Date().toISOString().slice(0,10),
+    rec.headline?'Headline: '+rec.headline:'',
+    rec.support?'Support: '+rec.support:'',
+    rec.cta?'CTA: '+rec.cta:'',
+    rec.brief?'Brief: '+JSON.stringify(rec.brief):'',
+  ].filter(Boolean);
+  const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({namespace:CC_ACTIVE,kind:'outcome',
+      title:(rec.verdict==='approved'?'WIN — ':'LOSS — ')+String(rec.headline||rec.surface+' v'+rec.ver).slice(0,140),
+      text:lines.join('\n'),source:'app:'+rec.surface,date:new Date().toISOString().slice(0,10)})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.ok)throw new Error(d.detail||d.error||('HTTP '+r.status));
+  return d;
+}
+function ccOutcomeBadge(o){
+  if(!o)return '';
+  return o.verdict==='approved'
+    ?'<span title="'+esc(o.why||'')+'" style="font-family:var(--x-fm);font-size:10px;color:var(--pos);border:1px solid rgba(87,185,140,.35);background:rgba(87,185,140,.1);border-radius:999px;padding:3px 9px;white-space:nowrap">✓ Approved</span>'
+    :'<span title="'+esc(o.why||'')+'" style="font-family:var(--x-fm);font-size:10px;color:var(--neg);border:1px solid rgba(217,106,102,.35);background:rgba(217,106,102,.1);border-radius:999px;padding:3px 9px;white-space:nowrap">✗ Killed</span>';
+}
+function ccOutcomeWhyRow(saveFn,cancelFn){
+  return '<span style="display:inline-flex;gap:6px;align-items:center;flex:1;min-width:200px">'+
+    '<input id="cc-out-why" class="cc-in" placeholder="Why? one line — this trains the engine" style="flex:1;padding:7px 10px;font-size:12px" onkeydown="if(event.key===\'Enter\')'+saveFn+'">'+
+    '<button class="cc-mini ok" onclick="'+saveFn+'">Save</button>'+
+    '<button class="cc-mini" onclick="'+cancelFn+'">×</button></span>';
+}
+function alOutcome(ver,verdict){alState.outPend={ver,verdict};alRender();
+  requestAnimationFrame(()=>{const i=$('cc-out-why');if(i)i.focus();});}
+function alOutcomeCancel(){alState.outPend=null;alRender();}
+function alOutcomeSave(){
+  const p=alState.outPend;if(!p)return;
+  const why=(($('cc-out-why')||{}).value||'').trim();
+  const m=alState.thread.find(x=>x.r==='art'&&x.ver===p.ver);if(!m){alState.outPend=null;alRender();return;}
+  m.outcome={verdict:p.verdict,why,at:Date.now()};
+  alState.outPend=null;alSave();alRender();
+  const b=alState.brief||{},ch=alState.chosen||{};
+  ccOutcomeSend({surface:'adlab',ver:p.ver,verdict:p.verdict,why,
+    headline:b.headline||ch.headline,support:b.support||ch.support,cta:b.cta||ch.cta,brief:b})
+    .then(()=>toast(p.verdict==='approved'?'Win recorded — the engine will remember':'Loss recorded — the engine will remember'))
+    .catch(e=>toast('Recorded locally — Mind not reachable ('+(e.message||e)+')',1));
+}
+function csOutcome(ver,verdict){csState.outPend={ver,verdict};csRender();
+  requestAnimationFrame(()=>{const i=$('cc-out-why');if(i)i.focus();});}
+function csOutcomeCancel(){csState.outPend=null;csRender();}
+function csOutcomeSave(){
+  const p=csState.outPend;if(!p)return;
+  const why=(($('cc-out-why')||{}).value||'').trim();
+  const v=csState.vers.find(x=>x.ver===p.ver);if(!v){csState.outPend=null;csRender();return;}
+  v.outcome={verdict:p.verdict,why,at:Date.now()};
+  csState.outPend=null;csSaveDoc();csRender();
+  const b=csState.brief||{};
+  ccOutcomeSend({surface:'studio',ver:p.ver,verdict:p.verdict,why,
+    headline:b.headline,support:b.subhead,cta:b.cta,brief:b})
+    .then(()=>toast(p.verdict==='approved'?'Win recorded — the engine will remember':'Loss recorded — the engine will remember'))
+    .catch(e=>toast('Recorded locally — Mind not reachable ('+(e.message||e)+')',1));
+}
+
 /* ── Ad Lab canvas — free layer editor over the artwork ──────────────────
    Layers use % coordinates of the stage so layouts survive resizes and
    export 1:1 at the artwork's native resolution. Types: text | img | shape. */

@@ -25,6 +25,17 @@ client intelligence, powered by the vendored
 - Cloud containers are ephemeral: vault changes only survive if committed.
   After vault-mutating operations, commit and push `knowledge/`.
 
+### The growth loop
+
+Curation doctrine lives in the vault: `knowledge/wiki/concepts/How We Curate.md`
+(the L0–L4 funnel — apply it before treating anything as knowledge).
+Reviewed notes sync into the app's retrieval layer with
+`python3 tools/vault2mind.py` (dry-run; add `--apply` to push; commit
+`tools/mind-sync-state.json` afterwards). Client-specific notes declare
+`client: <id>` frontmatter; the default namespace is `cmm`. In-app,
+Ad Lab and Studio record approved/killed verdicts to the Mind as
+`kind: outcome` — wins and losses that future briefs retrieve.
+
 ## Working conventions
 
 - Verify frontend changes with the Playwright harnesses in the session
