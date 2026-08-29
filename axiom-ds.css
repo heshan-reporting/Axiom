@@ -1,37 +1,37 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   AXIOM DESIGN SYSTEM — "Graphite & Signal"
+   AXIOM DESIGN SYSTEM — "Graphite & Signal" v2
    Shared tokens + primitives for index.html and styleguide.html.
-   Aesthetic: premium intelligence terminal. Near-black graphite base,
-   one restrained gold signal accent, semantic colour only for meaning.
+   Aesthetic: premium intelligence terminal. Deep navy-graphite base,
+   one azure signal accent, semantic colour only for meaning.
    ═══════════════════════════════════════════════════════════════════════ */
 
 :root{
-  /* ── Colour · base ─────────────────────────────────────────────────── */
-  --x-bg0:#070708;          /* page void            */
-  --x-bg1:#0C0C0E;          /* app ground           */
-  --x-bg2:#111114;          /* raised ground        */
-  --x-bg3:#17171B;          /* panel body           */
-  --x-sur1:rgba(255,255,255,.028);
-  --x-sur2:rgba(255,255,255,.05);
-  --x-sur3:rgba(255,255,255,.085);
-  --x-line1:rgba(255,255,255,.07);
-  --x-line2:rgba(255,255,255,.14);
-  --x-line3:rgba(255,255,255,.24);
+  /* ── Colour · base (cool navy-graphite) ────────────────────────────── */
+  --x-bg0:#06080D;          /* page void            */
+  --x-bg1:#0B0F16;          /* app ground           */
+  --x-bg2:#10151D;          /* raised ground        */
+  --x-bg3:#161C26;          /* panel body           */
+  --x-sur1:rgba(210,228,255,.03);
+  --x-sur2:rgba(210,228,255,.055);
+  --x-sur3:rgba(210,228,255,.09);
+  --x-line1:rgba(210,228,255,.08);
+  --x-line2:rgba(210,228,255,.15);
+  --x-line3:rgba(210,228,255,.25);
 
-  /* ── Colour · ink (warm paper on graphite) ─────────────────────────── */
-  --x-ink0:#F4F2EC;
-  --x-ink1:#C9C5BB;
-  --x-ink2:#8F8B81;
-  --x-ink3:#5C5952;
+  /* ── Colour · ink (cool slate on navy) ─────────────────────────────── */
+  --x-ink0:#F2F5FA;
+  --x-ink1:#C6CDD8;
+  --x-ink2:#8B94A3;
+  --x-ink3:#57606E;
 
-  /* ── Colour · the one accent (signal gold) ─────────────────────────── */
-  --x-ac:#E3B75B;
-  --x-ac-hi:#F0CC7E;
-  --x-ac-lo:#9C7A2E;
-  --x-ac-grad:linear-gradient(135deg,#F0CC7E,#C9992F);
-  --x-ac-ink:#141006;       /* text on accent */
-  --x-ac-dim:rgba(227,183,91,.14);
-  --x-ac-line:rgba(227,183,91,.38);
+  /* ── Colour · the one accent (signal azure) ────────────────────────── */
+  --x-ac:#3F8CFF;
+  --x-ac-hi:#8FB9FF;
+  --x-ac-lo:#1D4ED8;
+  --x-ac-grad:linear-gradient(135deg,#5EA0FF,#2563EB);
+  --x-ac-ink:#F4F8FF;       /* text on accent */
+  --x-ac-dim:rgba(63,140,255,.14);
+  --x-ac-line:rgba(63,140,255,.4);
 
   /* ── Colour · semantic (status & sentiment only) ───────────────────── */
   --x-pos:#57B98C;
@@ -68,7 +68,7 @@
   --x-e1:0 1px 2px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.25);
   --x-e2:0 2px 4px rgba(0,0,0,.5),0 8px 24px -6px rgba(0,0,0,.5);
   --x-e3:0 4px 8px rgba(0,0,0,.55),0 20px 50px -12px rgba(0,0,0,.65);
-  --x-e-ac:0 2px 8px rgba(0,0,0,.4),0 8px 28px -8px rgba(227,183,91,.35);
+  --x-e-ac:0 2px 8px rgba(0,0,0,.4),0 8px 28px -8px rgba(63,140,255,.4);
 
   /* ── Motion (one curve family, one duration scale) ─────────────────── */
   --x-ease:cubic-bezier(.22,.68,.24,.99);        /* signal ease           */
