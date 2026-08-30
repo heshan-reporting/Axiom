@@ -4132,7 +4132,7 @@ function kiosk(on){
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('kiosk'))kiosk(false);});
 
 /* ═══════════════════ CLIENT CENTRAL ═══════════════════ */
-const CC_SEED_V=2;
+const CC_SEED_V=3;
 const CC_SEED=[{
   id:'mca',name:'Minerals Council of Australia',short:'MCA',accent:'#F0A64B',accent2:'#E9642A',
   desc:'National peak body for the Australian minerals industry (minerals.org.au). Champions mining’s contribution to jobs, regional communities, exports and tax & royalties; advocates on critical minerals, competitive policy and efficient approvals; and rebuts activist campaigns on resources and tax policy.',
@@ -4149,6 +4149,30 @@ const CC_SEED=[{
      messages:['Australia can be the world’s trusted critical-minerals supplier of choice.','Rare earths and a national strategic reserve strengthen sovereignty and supply chains.','The Australia–EU FTA boosts investment confidence and market access.','Stable policy, timely approvals and downstream processing secure the next generation of mines and jobs.'],
      keywords:['critical minerals','rare earths','strategic reserve','supply chain','eu fta','approvals','downstream processing','antimony','gallium']}
   ]
+},{
+  id:'aep',name:'Australian Energy Producers',short:'AEP',accent:'#4FC3D9',accent2:'#2F8FB8',
+  desc:'National peak body for Australia’s oil and gas exploration and production industry (energyproducers.au). Advocates gas’s role in energy security, reliability and the transition; domestic supply and investment certainty.',
+  brief:'You write for Australian Energy Producers (AEP), the peak body for Australia’s oil and gas industry. Voice: measured, factual, energy-security-led — never dismissive of the transition. Core themes: natural gas underpins reliable, affordable energy and backs up renewables; new supply and investment certainty prevent shortfalls and price spikes; LNG exports fund jobs, regions and government revenue. Avoid climate-denial framing entirely — the argument is reliability, affordability and partnership in the transition. Never fabricate figures; Australian English.',
+  keywords:['australian energy producers','gas supply','gas reservation','gas shortfall','gas market','gas price','domestic gas','lng','energy policy','energy prices','energy security','energy transition','electricity price','power bill'],
+  campaigns:[]
+},{
+  id:'vicnats',name:'The Nationals Victoria',short:'VNat',accent:'#7CC96B',accent2:'#4E9A3F',
+  desc:'The Victorian Nationals — the party of regional and rural Victoria. Campaigning on regional roads, rail, health and services, cost of living, and holding the Victorian government to account ahead of the state election.',
+  brief:'You write for The Nationals Victoria, the party of regional and rural Victoria. Voice: grounded, community-first, plain-spoken — a local member talking to their own town, not a press gallery. Core themes: regional Victoria deserves its fair share — roads, rail, hospitals and services; city-centric government has left country communities behind; cost of living is hitting regional families hardest. Always concrete and local where possible. Respect political advertising rules; authorisation lines are added downstream. Australian English.',
+  keywords:['nationals victoria','victorian nationals','victorian election','victorian government','victorian premier','spring street','regional victoria','country victoria','regional rail','regional roads','regional health','regional hospital'],
+  campaigns:[]
+},{
+  id:'pca',name:'Property Council of Australia',short:'PCA',accent:'#6FA0FF',accent2:'#3E63E0',
+  desc:'Peak body for the Australian property industry (propertycouncil.com.au). Advocates on housing supply and planning reform, build-to-rent, property taxation and the vitality of cities and CBDs.',
+  brief:'You write for the Property Council of Australia, the peak body for the property industry. Voice: constructive, solutions-led, evidence-based — the industry that builds the answer to the housing crisis, not the villain of it. Core themes: the fix for housing affordability is supply — faster approvals, planning reform, more homes of every type; property is one of Australia’s biggest employers and taxpayers; thriving cities and CBDs matter to the whole economy. Never fabricate figures; Australian English.',
+  keywords:['property council','housing supply','housing policy','housing crisis','housing targets','housing approvals','planning reform','build-to-rent','negative gearing','property industry','cbd'],
+  campaigns:[]
+},{
+  id:'mba',name:'Master Builders Australia',short:'MBA',accent:'#E3C556',accent2:'#B8912E',
+  desc:'National peak body for the building and construction industry (masterbuilders.com.au). Advocates on the housing pipeline, construction costs, workplace relations and the trades workforce.',
+  brief:'You write for Master Builders Australia, the peak body for building and construction. Voice: practical, pro-trades, straight-talking — builders and subbies, not boardrooms. Core themes: Australia cannot hit its housing targets without a healthy building industry — workable IR settings, lower construction costs, faster approvals and more apprentices; lawlessness on sites (e.g. CFMEU conduct) raises the cost of every home and hospital. Never fabricate figures; Australian English.',
+  keywords:['master builders','construction industry','construction costs','construction union','cfmeu','building industry','building approvals','building code','apprentices','housing pipeline','tradies'],
+  campaigns:[]
 }];
 let CC_CLIENTS=(()=>{try{
   const s=JSON.parse(localStorage.getItem('axiom_clients'));
