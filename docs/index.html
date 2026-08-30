@@ -1227,6 +1227,18 @@ body.kiosk .kprog{display:block}
 .mind-h{font-family:var(--cc-fx);font-size:12px;font-weight:700;margin-bottom:10px;color:var(--cc-ink2)}
 .mind-row{display:flex;gap:9px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
 .mind-row .cc-in{flex:1;min-width:160px}
+.mind-bulk{margin-top:16px;padding-top:14px;border-top:1px dashed rgba(255,255,255,.12);border-radius:0 0 14px 14px}
+.mind-bulk.drop{outline:2px dashed var(--x-cy,#6FE3F0);outline-offset:-6px}
+.mind-bulk code{font-family:var(--x-fm);font-size:10px;color:var(--x-ink1);background:rgba(255,255,255,.06);padding:1px 4px;border-radius:4px}
+.mb-row{display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
+.mb-name{font-family:var(--x-fm);font-size:10px;color:var(--x-ink2);flex:0 1 170px;min-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mb-row .cc-in{margin:0;padding:6px 9px;font-size:11px}
+.mb-ns{flex:0 1 120px;min-width:96px}
+.mb-kind{flex:0 1 96px;min-width:76px}
+.mb-title{flex:1 1 180px;min-width:140px}
+.mb-st{flex:0 0 auto;font-family:var(--x-fm);font-size:10px;min-width:24px;text-align:right}
+.mb-ok{color:#7ED9A0}.mb-err{color:#E88989}.mb-run{color:var(--x-ink2)}
+.mb-x{background:none;border:none;color:var(--x-ink3);cursor:pointer;font-size:13px;padding:0 2px}
 .mind-caps{display:flex;gap:8px;flex-wrap:wrap}
 .mind-out{display:flex;flex-direction:column;gap:12px}
 .mind-card{background:var(--cc-panel);border:1px solid var(--cc-line);border-radius:16px;overflow:hidden;animation:ccRise .4s cubic-bezier(.16,.8,.3,1) both}
@@ -1884,6 +1896,21 @@ body.kiosk .kprog{display:block}
                 <div class="mind-row" style="justify-content:space-between">
                   <span class="cs-status" id="mind-docs-tag"></span>
                   <button class="cc-mini" id="mind-add" onclick="mindIngest()">+ Add to knowledge base</button>
+                </div>
+                <div class="mind-bulk" id="mind-bulk"
+                     ondragover="event.preventDefault();this.classList.add('drop')"
+                     ondragleave="this.classList.remove('drop')"
+                     ondrop="event.preventDefault();this.classList.remove('drop');mindBulkAdd(event.dataTransfer.files)">
+                  <div class="mind-h">Bulk upload — a whole folder of notes at once</div>
+                  <div class="cc-note" style="margin-bottom:10px">Drop .md or .txt files here, or choose them. AXIOM reads each file, routes it to the right client and kind automatically (a <code>namespace:</code> header wins; otherwise it matches the content), and you press one button to index everything. Review the routing below before you do.</div>
+                  <input type="file" id="mind-files" accept=".md,.markdown,.txt,text/plain,text/markdown" multiple hidden onchange="mindBulkAdd(this.files);this.value=''">
+                  <div class="mind-row">
+                    <button class="cc-mini" onclick="document.getElementById('mind-files').click()">Choose files…</button>
+                    <span class="cs-status" id="mind-bulk-tag"></span>
+                    <span style="flex:1"></span>
+                    <button class="cc-mini" id="mind-bulk-go" onclick="mindBulkGo()" hidden>Index all</button>
+                  </div>
+                  <div id="mind-bulk-list"></div>
                 </div>
               </div>
               <div class="mind-caps" id="mind-caps">
@@ -5890,6 +5917,85 @@ async function mindIngest(){
     $('mind-title').value='';$('mind-text').value='';mindDocs();
   }catch(e){toast('Ingest: '+(e.message||e),true);}
   btn.disabled=false;btn.textContent='+ Add to knowledge base';
+}
+
+/* ── Bulk ingest: many files at once, auto-routed to the right client ── */
+const mindBulk={q:[],busy:false};
+function mindFm(text){
+  const m=String(text).match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  const fm={};let body=String(text);
+  if(m){body=body.slice(m[0].length);
+    m[1].split(/\r?\n/).forEach(l=>{const i=l.indexOf(':');
+      if(i>0)fm[l.slice(0,i).trim().toLowerCase()]=l.slice(i+1).trim();});}
+  return{fm,body};
+}
+function mindRoute(name,text){
+  const low=String(name||'').toLowerCase();
+  const known=CC_CLIENTS.map(c=>c.id).concat(['cmm']);
+  for(const id of known){if(low.startsWith(id+'-')||low.startsWith(id+'_'))return id;}
+  const t=String(text).toLowerCase();let best='cmm',bestN=0;
+  CC_CLIENTS.forEach(c=>{let n=0;(c.keywords||[]).forEach(k=>{if(t.indexOf(k)>=0)n++;});
+    if(n>bestN){bestN=n;best=c.id;}});
+  return bestN>=2?best:'cmm';
+}
+async function mindBulkAdd(files){
+  for(const f of Array.from(files||[])){
+    if(f.name&&!/\.(md|markdown|txt)$/i.test(f.name))continue;
+    let raw='';try{raw=await f.text();}catch(e){continue;}
+    if(!raw.trim())continue;
+    const{fm,body}=mindFm(raw);
+    const ns=nsOk(fm.namespace||fm.client)||mindRoute(f.name,body);
+    mindBulk.q.push({name:f.name||'pasted',ns,
+      kind:(fm.kind||'doc').toLowerCase().slice(0,40),
+      title:(fm.title||String(f.name||'Untitled').replace(/\.(md|markdown|txt)$/i,'')).slice(0,200),
+      text:body.slice(0,200000),st:'ready',msg:''});
+  }
+  mindBulkRender();
+}
+function nsOk(v){
+  if(!v)return'';const id=String(v).trim().toLowerCase();
+  return(id==='cmm'||CC_CLIENTS.some(c=>c.id===id))?id:'';
+}
+function mindBulkRender(){
+  const list=$('mind-bulk-list'),go=$('mind-bulk-go'),tag=$('mind-bulk-tag');
+  if(!list)return;
+  const nsOpts=CC_CLIENTS.map(c=>({id:c.id,l:c.short||c.name})).concat([{id:'cmm',l:'CMM shared'}])
+    .filter((o,i,a)=>a.findIndex(x=>x.id===o.id)===i);
+  list.innerHTML=mindBulk.q.map((n,i)=>{
+    const sel=nsOpts.map(o=>'<option value="'+o.id+'"'+(o.id===n.ns?' selected':'')+'>'+esc(o.l)+'</option>').join('');
+    const st=n.st==='done'?'<span class="mb-ok">✓ '+esc(n.msg)+'</span>'
+      :n.st==='err'?'<span class="mb-err" title="'+esc(n.msg)+'">✕ '+esc(n.msg)+'</span>'
+      :n.st==='busy'?'<span class="mb-run">indexing…</span>'
+      :'<button class="mb-x" onclick="mindBulk.q.splice('+i+',1);mindBulkRender()" aria-label="Remove">×</button>';
+    return'<div class="mb-row"><span class="mb-name" title="'+esc(n.name)+'">'+esc(n.name)+'</span>'+
+      '<select class="cc-in mb-ns" onchange="mindBulk.q['+i+'].ns=this.value" '+(n.st!=='ready'?'disabled':'')+'>'+sel+'</select>'+
+      '<input class="cc-in mb-kind" value="'+esc(n.kind)+'" onchange="mindBulk.q['+i+'].kind=this.value.trim()||\'doc\'" '+(n.st!=='ready'?'disabled':'')+'>'+
+      '<input class="cc-in mb-title" value="'+esc(n.title)+'" onchange="mindBulk.q['+i+'].title=this.value.trim()||\'Untitled\'" '+(n.st!=='ready'?'disabled':'')+'>'+
+      '<span class="mb-st">'+st+'</span></div>';
+  }).join('');
+  const ready=mindBulk.q.filter(n=>n.st==='ready'||n.st==='err').length;
+  if(go){go.hidden=!ready||mindBulk.busy;go.textContent='Index all ('+ready+')';}
+  if(tag)tag.textContent=mindBulk.q.length?(mindBulk.q.length+' file'+(mindBulk.q.length>1?'s':'')+' staged'):'';
+}
+async function mindBulkGo(){
+  if(mindBulk.busy)return;mindBulk.busy=true;
+  let ok=0,fail=0;
+  for(const n of mindBulk.q){
+    if(n.st!=='ready'&&n.st!=='err')continue;
+    n.st='busy';mindBulkRender();
+    try{
+      const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:axHeaders(),
+        body:JSON.stringify({namespace:n.ns,title:n.title,text:n.text,kind:n.kind})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+      n.st='done';n.msg=(d.chunks||0)+' chunks → '+n.ns;ok++;
+      if(ccState.playbooks)delete ccState.playbooks[n.ns];
+    }catch(e){n.st='err';n.msg=String(e.message||e).slice(0,80);fail++;}
+    mindBulkRender();
+  }
+  mindBulk.busy=false;mindBulkRender();
+  csState.mindCtx=undefined;alState.mindCtx=undefined;mindDocs();
+  toast(fail?('Indexed '+ok+', failed '+fail+' — fix and press Index all again'):('Indexed ✓ all '+ok+' notes'),!!fail);
 }
 function mindMd(t){
   let h=esc(t);
