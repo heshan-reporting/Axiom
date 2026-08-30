@@ -32,7 +32,7 @@
   --line:var(--x-line1); --line2:var(--x-line2);
   --hair:rgba(255,255,255,.07);
   --t0:var(--x-ink0); --t1:var(--x-ink1); --t2:var(--x-ink2); --t3:var(--x-ink3);
-  --ac:var(--x-ac); --ac2:var(--x-ac-lo);
+  --ac:var(--x-ac); --ac2:var(--x-ac-lo); --cy:var(--x-cy); --cy2:var(--x-cy-lo); --vio:var(--x-vio);
   --acg:var(--x-ac-grad);
   --acg2:linear-gradient(135deg,var(--x-ac-hi),var(--x-ac));
   --glow:var(--x-ac-dim);
@@ -56,26 +56,41 @@ a{color:inherit}
 *::-webkit-scrollbar-thumb:hover{background:rgba(235,241,250,.22);background-clip:content-box}
 *::-webkit-scrollbar-track{background:transparent}
 
-/* ambient background — deep radial ground + two soft glow fields (per v2 artboard) */
-/* dusk-over-water backdrop behind the floating frame (per reference) */
-body{background:linear-gradient(180deg,#C9909F 0%,#B98DA9 9%,#8D87B2 19%,#5C6D99 31%,#31456C 45%,#182742 60%,#0C1523 76%,#070C15 100%) fixed}
+/* ═══ ENVIRONMENT — one continuous atmosphere the whole interface sits inside.
+   Wine-black at the top with a reddish illumination, easing through charcoal
+   and muted violet into a cool blue-gray, then a muted teal at the floor.
+   No hard boundary anywhere: every stop is a neighbour of the last. ═══ */
+body{background:linear-gradient(180deg,
+  #2B1017 0%, #2E1219 6%, #2A141D 14%, #241624 24%,
+  #1E1823 34%, #191A24 44%, #161C27 55%,
+  #141F2A 66%, #132630 77%, #123039 88%, #113742 100%) fixed}
 .aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
 .aurora::before,.aurora::after{content:'';position:absolute;border-radius:50%;filter:blur(150px)}
-.aurora::before{top:-26vw;left:14vw;width:56vw;height:56vw;opacity:.22;background:radial-gradient(circle,rgba(255,182,170,.6),transparent 66%)}
-.aurora::after{bottom:-30vw;right:-6vw;width:56vw;height:56vw;opacity:.1;background:radial-gradient(circle,rgba(90,130,190,.9),transparent 70%)}
+/* reddish atmospheric light bleeding down from the top of the environment */
+.aurora::before{top:-30vw;left:8vw;width:70vw;height:52vw;opacity:.34;
+  background:radial-gradient(circle,rgba(196,74,86,.55),transparent 66%)}
+/* cool teal illumination rising from the floor */
+.aurora::after{bottom:-34vw;right:-10vw;width:82vw;height:60vw;opacity:.4;
+  background:radial-gradient(circle,rgba(52,168,184,.6),transparent 70%)}
+/* a second, dimmer warm source keeps the top corners from going flat */
+.aurora i{position:absolute;top:-18vw;right:2vw;width:44vw;height:38vw;border-radius:50%;
+  filter:blur(140px);opacity:.2;background:radial-gradient(circle,rgba(150,60,90,.6),transparent 68%)}
 @keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(7vw,5vh) scale(1.18)}}
 .gridbg{display:none}
 
 /* ═══ SHELL — floating glass app frame (v2 artboard) ═══ */
 .shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;height:100dvh;
   padding:clamp(10px,2.2vh,26px) clamp(10px,2vw,30px)}
+/* The frame is glass, not a surface: the environment stays visible through it,
+   which is why it carries no backdrop-filter of its own (that would trap the
+   panels inside a new backdrop root and cut them off from the atmosphere). */
 .main{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;
-  border:1px solid rgba(255,255,255,.09);border-radius:30px;overflow:hidden;
-  background:linear-gradient(180deg,rgba(15,20,29,.93),rgba(8,11,17,.95));
-  box-shadow:0 4px 8px rgba(0,0,0,.55),0 40px 90px -20px rgba(0,0,0,.8);
-  backdrop-filter:blur(24px) saturate(1.2)}
+  border:1px solid rgba(255,255,255,.085);border-radius:30px;overflow:hidden;
+  background:linear-gradient(180deg,rgba(20,13,19,.5) 0%,rgba(15,14,22,.46) 30%,rgba(11,17,26,.42) 65%,rgba(9,24,32,.36) 100%);
+  box-shadow:0 4px 10px rgba(0,0,0,.5),0 44px 100px -22px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.07)}
 .main::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:0;border-radius:30px;
-  background:radial-gradient(90% 60% at 50% -10%,rgba(63,140,255,.10),transparent 60%)}
+  background:radial-gradient(120% 55% at 50% -12%,rgba(198,78,94,.13),transparent 62%),
+             radial-gradient(110% 48% at 50% 112%,rgba(56,176,190,.11),transparent 60%)}
 .rail{position:relative;z-index:2;display:flex;flex-direction:row;align-items:center;gap:14px;min-height:var(--mast);flex-shrink:0;
   padding:14px clamp(14px,2vw,26px) 6px}
 .logo{display:flex;align-items:center;gap:11px;font-family:var(--fd);font-weight:800;font-size:22px;
@@ -84,7 +99,8 @@ body{background:linear-gradient(180deg,#C9909F 0%,#B98DA9 9%,#8D87B2 19%,#5C6D99
 .rail .spacer{flex:1}
 /* media-pressure segmented pill — live composite vs 7-day baseline */
 .mp-pill{display:flex;align-items:stretch;border:1px solid rgba(255,255,255,.10);border-radius:16px;
-  background:rgba(255,255,255,.035);padding:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06);min-height:44px}
+  background:linear-gradient(180deg,rgba(226,238,255,.06),rgba(226,238,255,.02));backdrop-filter:blur(20px) saturate(1.25);
+  -webkit-backdrop-filter:blur(20px) saturate(1.25);padding:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08);min-height:44px}
 .mp-seg{display:flex;align-items:center;gap:8px;padding:0 15px}
 .mp-seg:first-child{padding-left:6px}
 .mp-div{width:1px;background:rgba(255,255,255,.10)}
@@ -181,8 +197,12 @@ html.gsap .view.on>*{animation:none}
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 
 /* ═══ PANELS — v2 glass cards: 22px radius, soft white-gradient fill ═══ */
-.panel{position:relative;border:1px solid rgba(255,255,255,.09);border-radius:22px;
-  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+/* Glass panels: translucent dark glass over the environment, a hairline of
+   reflected light along the top edge, and a soft shadow to lift them off it. */
+.panel{position:relative;border:1px solid rgba(255,255,255,.085);border-radius:22px;
+  background:linear-gradient(180deg,rgba(226,238,255,.058),rgba(226,238,255,.018));
+  backdrop-filter:blur(26px) saturate(1.3);-webkit-backdrop-filter:blur(26px) saturate(1.3);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.075),0 18px 44px -24px rgba(0,0,0,.8);
   padding:20px;margin-bottom:18px;
   transition:border-color .25s var(--ease),transform .25s var(--ease),box-shadow .25s var(--ease)}
 .panel:hover{border-color:rgba(255,255,255,.16)}
@@ -218,14 +238,15 @@ html.gsap .view.on>*{animation:none}
 .tcall .tc-n i{font-style:normal;font-size:11px;color:var(--t2);margin-left:3px}
 .tcall .tc-l{font-size:11px;color:var(--t2);text-transform:capitalize}
 /* right column — coverage volume */
-.stat-pill{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.035);padding:14px 16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.stat-pill{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:linear-gradient(180deg,rgba(226,238,255,.06),rgba(226,238,255,.02));
+  backdrop-filter:blur(20px) saturate(1.25);-webkit-backdrop-filter:blur(20px) saturate(1.25);padding:14px 16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
 .stat-pill .row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .stat-pill .big{font-family:var(--fd);font-size:26px;font-weight:750;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
 .stat-pill .big i{font-style:normal;font-size:12px;font-weight:600;color:var(--t2);margin-left:5px}
 .stat-pill .st{display:flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap}
 .stat-pill .st b{width:12px;height:12px;border-radius:50%;display:block}
 .stat-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.08);margin-top:12px;overflow:hidden}
-.stat-bar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#2563EB,#8FB9FF);transition:width 1s var(--ease)}
+.stat-bar i{display:block;height:100%;width:0;border-radius:999px;background:var(--x-data-grad);transition:width 1s var(--ease)}
 .volsvg{width:100%}
 .pillbtn{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:9px 16px;
   font-size:12.5px;font-weight:600;color:var(--t0);background:rgba(255,255,255,.04);cursor:pointer;transition:border-color .18s,background .18s}
@@ -323,8 +344,9 @@ html.gsap .view.on>*{animation:none}
 /* KPI plates */
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
 .kpi{position:relative;border:1px solid var(--line);border-radius:12px;
-  background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));
-  padding:17px 17px 13px;overflow:hidden;box-shadow:var(--sh-sm);
+  background:linear-gradient(180deg,rgba(226,238,255,.055),rgba(226,238,255,.018));
+  backdrop-filter:blur(22px) saturate(1.25);-webkit-backdrop-filter:blur(22px) saturate(1.25);
+  padding:17px 17px 13px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.07),var(--sh-sm);
   transition:transform .28s var(--ease),border-color .25s var(--ease),box-shadow .28s var(--ease)}
 .kpi:hover{transform:translateY(-3px);border-color:var(--line2);box-shadow:var(--sh-lg)}
 .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--acg);opacity:.7}
@@ -515,7 +537,8 @@ html.gsap .view.on>*{animation:none}
 @keyframes ovin{from{opacity:0}to{opacity:1}}
 .ov.on{display:flex}
 .modal{width:min(480px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--line2);border-radius:var(--r2);
-  background:linear-gradient(180deg,var(--bg2),var(--bg1));padding:26px;animation:modalin .34s var(--spring);box-shadow:var(--sh-lg),inset 0 1px 0 var(--hair)}
+  background:linear-gradient(180deg,rgba(30,24,34,.86),rgba(14,24,32,.88));backdrop-filter:blur(34px) saturate(1.3);
+  -webkit-backdrop-filter:blur(34px) saturate(1.3);padding:26px;animation:modalin .34s var(--spring);box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.08)}
 @keyframes modalin{from{opacity:0;transform:translateY(20px) scale(.97)}to{opacity:1;transform:none}}
 .modal.wide{width:min(760px,94vw)}
 /* party drill-down */
@@ -706,13 +729,16 @@ body.kiosk .kprog{display:block}
 
 /* ═══ SENTINEL — spike alerts, angles, and the response clock ═══ */
 .sen-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
-.sen-stat{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.035);padding:14px 16px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.sen-stat{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:linear-gradient(180deg,rgba(226,238,255,.06),rgba(226,238,255,.02));
+  backdrop-filter:blur(20px) saturate(1.25);-webkit-backdrop-filter:blur(20px) saturate(1.25);padding:14px 16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
 .sen-stat .k{font-family:var(--fm);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3)}
 .sen-stat .v{font-family:var(--fd);font-size:27px;font-weight:750;letter-spacing:-.035em;margin-top:7px;font-variant-numeric:tabular-nums}
 .sen-stat .v i{font-style:normal;font-size:12px;font-weight:600;color:var(--t2);margin-left:4px}
 .sen-stat .s{font-size:11.5px;color:var(--t2);margin-top:5px}
-.sen-card{border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));
+.sen-card{border:1px solid rgba(255,255,255,.085);border-radius:16px;background:linear-gradient(180deg,rgba(226,238,255,.055),rgba(226,238,255,.018));
+  backdrop-filter:blur(24px) saturate(1.28);-webkit-backdrop-filter:blur(24px) saturate(1.28);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 16px 40px -24px rgba(0,0,0,.8);
   padding:18px 18px 16px;margin-bottom:14px;position:relative;overflow:hidden}
 .sen-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
 .sen-card.critical::before{background:linear-gradient(180deg,#E05A54,#8B2F2B)}
@@ -759,8 +785,8 @@ body.kiosk .kprog{display:block}
 @media(max-width:900px){.sen-strip{grid-template-columns:1fr 1fr}}
 
 /* knowledge map — map-of-science network */
-.kmwrap{position:relative;height:calc(100dvh - var(--mast, 64px) - 150px);min-height:420px;border:1px solid var(--line2);
-  border-radius:18px;overflow:hidden;background:#191a1c;box-shadow:var(--sh-lg),inset 0 1px 0 var(--hair)}
+.kmwrap{position:relative;height:calc(100dvh - var(--mast, 64px) - 150px);min-height:420px;border:1px solid rgba(255,255,255,.1);
+  border-radius:18px;overflow:hidden;background:#14161d;box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.07)}
 .kmwrap canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
 .km-cap{position:absolute;left:16px;bottom:12px;font-family:var(--fm);font-size:9.5px;letter-spacing:.14em;color:#5c6068;text-transform:uppercase;pointer-events:none}
 .km-tip{position:absolute;pointer-events:none;background:rgba(18,19,22,.94);border:1px solid rgba(255,255,255,.14);border-radius:8px;
@@ -825,7 +851,8 @@ body.kiosk .kprog{display:block}
 /* mobile nav — floating pill dock */
 .tabs{display:none;position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:50;
   border:1px solid var(--line2);border-radius:24px;
-  background:rgba(10,14,20,.88);backdrop-filter:blur(24px) saturate(1.3);padding:6px 4px;box-shadow:var(--sh-lg)}
+  background:linear-gradient(180deg,rgba(24,20,30,.72),rgba(12,24,32,.72));backdrop-filter:blur(30px) saturate(1.35);
+  -webkit-backdrop-filter:blur(30px) saturate(1.35);padding:6px 4px;box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.07)}
 .tabs-in{display:flex;justify-content:space-around;max-width:520px;margin:0 auto}
 .tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--t3);padding:7px 12px;border-radius:13px;transition:color .18s var(--ease)}
 .tab svg{width:21px;height:21px;transition:transform .2s var(--spring)}
@@ -1229,7 +1256,7 @@ body.kiosk .kprog{display:block}
 </style>
 </head>
 <body>
-<div class="aurora"></div><div class="gridbg"></div>
+<div class="aurora"><i></i></div><div class="gridbg"></div>
 
 <div class="splash" id="splash">
   <div class="slogo">A</div>
@@ -1326,14 +1353,14 @@ body.kiosk .kprog{display:block}
             <div class="gview">
             <svg class="garc" viewBox="0 0 520 320" aria-hidden="true">
               <defs><linearGradient id="v2-arc" x1="0" y1="1" x2="1" y2="0">
-                <stop offset="0%" stop-color="#2563EB"/><stop offset="60%" stop-color="#8FB9FF"/><stop offset="100%" stop-color="#CFE2FF"/>
+                <stop offset="0%" stop-color="#1E5FD8"/><stop offset="45%" stop-color="#3F8CFF"/><stop offset="78%" stop-color="#63C6EC"/><stop offset="100%" stop-color="#6FE3F0"/>
               </linearGradient></defs>
               <path d="M20 280 A 240 240 0 0 1 500 280" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 9"/>
               <path d="M55 280 A 205 205 0 0 1 465 280" fill="none" stroke="rgba(255,255,255,.11)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 11"/>
               <path d="M95 280 A 165 165 0 0 1 425 280" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1.4 13"/>
               <path d="M140 280 A 120 120 0 0 1 380 280" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="13" stroke-linecap="round"/>
               <path d="M140 280 A 120 120 0 0 1 380 280" fill="none" stroke="url(#v2-arc)" stroke-width="13" stroke-linecap="round" class="gfill" id="gfill" stroke-dasharray="0 377"/>
-              <circle id="gdot" cx="140" cy="280" r="6" fill="#CFE2FF" style="filter:drop-shadow(0 0 8px rgba(143,185,255,.8));transition:cx 1.3s var(--ease),cy 1.3s var(--ease)"/>
+              <circle id="gdot" cx="140" cy="280" r="6" fill="#8FF0FA" style="filter:drop-shadow(0 0 10px rgba(111,227,240,.85));transition:cx 1.3s var(--ease),cy 1.3s var(--ease)"/>
               <polygon id="gneedle" points="0,-9 5.5,2 -5.5,2" fill="#F4F8FF" style="filter:drop-shadow(0 0 5px rgba(255,255,255,.6));transition:transform 1.3s var(--ease)" transform="translate(140,280) rotate(-90)"/>
             </svg>
             <div class="gcenter">
@@ -2369,7 +2396,7 @@ function kmDraw(){
   const cv=$('km-cv');if(!cv)return;
   const x2=cv.getContext('2d'),{k,x:camx,y:camy}=km.cam;
   x2.setTransform(km.dpr,0,0,km.dpr,0,0);
-  x2.fillStyle='#191a1c';x2.fillRect(0,0,km.W,km.H);
+  x2.fillStyle='#14161d';x2.fillRect(0,0,km.W,km.H);
   x2.setTransform(km.dpr*k,0,0,km.dpr*k,km.dpr*camx,km.dpr*camy);
   const foc=km.hover||km.sel,hset=foc?km.adj.get(foc.id)||new Set():null;
   km.links.forEach(l=>{
@@ -2775,8 +2802,8 @@ function renderHex(vals){
     const r=80*Math.max(.12,Math.min(v||0,1));
     return [(110+r*Math.cos(ang[i])).toFixed(1),(110-r*Math.sin(ang[i])).toFixed(1)];
   });
-  g.innerHTML='<polygon points="'+pts.map(p=>p.join(',')).join(' ')+'" fill="rgba(63,140,255,.16)" stroke="#3F8CFF" stroke-width="1.6" stroke-linejoin="round"/>'+
-    pts.map(p=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2.6" fill="#8FB9FF"/>').join('');
+  g.innerHTML='<polygon points="'+pts.map(p=>p.join(',')).join(' ')+'" fill="rgba(79,168,232,.18)" stroke="#5AB4E8" stroke-width="1.6" stroke-linejoin="round"/>'+
+    pts.map(p=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="2.6" fill="#8FF0FA"/>').join('');
 }
 /* floating topic callouts — top headline frames with share of keyword mentions */
 const TC_POS=[['left:6%;top:44%'],['left:11%;top:22%'],['left:31%;top:8%'],['right:26%;top:12%'],['right:4%;top:30%'],['right:3%;top:52%']];
@@ -2850,10 +2877,10 @@ function renderVolLine(){
   const fmt=x=>x>=1?x.toFixed(1):x.toFixed(2);
   el.innerHTML=[16,52,88,124].map((y,i)=>'<line x1="34" y1="'+y+'" x2="272" y2="'+y+'" stroke="rgba(255,255,255,'+(i===3?'.08':'.05')+')"/>'+
       '<text x="26" y="'+(y+4)+'" text-anchor="end" fill="#57606E" font-size="8" font-family="Spline Sans Mono, monospace">'+fmt(mx-(mx-mn)*i/3)+'</text>').join('')+
-    '<polyline points="'+pts.map((p,i)=>X(i).toFixed(0)+','+Y(p).toFixed(0)).join(' ')+'" fill="none" stroke="#3F8CFF" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'+
+    '<polyline points="'+pts.map((p,i)=>X(i).toFixed(0)+','+Y(p).toFixed(0)).join(' ')+'" fill="none" stroke="#4FA8E8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'+
     pts.map((p,i)=>i===pts.length-1
-      ?'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3.6" fill="#8FB9FF"/>'
-      :'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3" fill="#0B0F16" stroke="#3F8CFF" stroke-width="2"/>').join('')+
+      ?'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3.6" fill="#8FF0FA"/>'
+      :'<circle cx="'+X(i).toFixed(0)+'" cy="'+Y(p).toFixed(0)+'" r="3" fill="rgba(12,18,26,.9)" stroke="#4FA8E8" stroke-width="2"/>').join('')+
     days.map((d2,i)=>'<text x="'+X(i).toFixed(0)+'" y="142" text-anchor="middle" fill="#57606E" font-size="8" font-family="Spline Sans Mono, monospace">'+d2+'</text>').join('');
   const vd=$('vol-desc');
   if(vd){const nowV=pts[pts.length-1],avgV=pts.reduce((a,b)=>a+b,0)/pts.length;

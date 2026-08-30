@@ -1,8 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════════
    AXIOM DESIGN SYSTEM — "Graphite & Signal" v2
    Shared tokens + primitives for index.html and styleguide.html.
-   Aesthetic: premium intelligence terminal. Deep navy-graphite base,
-   one azure signal accent, semantic colour only for meaning.
+   Aesthetic: premium intelligence terminal sitting inside one continuous
+   atmosphere - wine-black at the crown, easing through charcoal and muted
+   violet into a cool blue-gray and a muted teal floor. Panels are glass:
+   the environment stays visible through them. Electric blue easing to cyan
+   is the data accent; semantic colour carries meaning only.
    ═══════════════════════════════════════════════════════════════════════ */
 
 :root{
@@ -32,6 +35,12 @@
   --x-ac-ink:#F4F8FF;       /* text on accent */
   --x-ac-dim:rgba(63,140,255,.14);
   --x-ac-line:rgba(63,140,255,.4);
+  /* data illumination — electric blue easing to cyan, with a muted violet second */
+  --x-cy:#6FE3F0;
+  --x-cy-lo:#2FA8C7;
+  --x-vio:#9C86D8;
+  --x-vio-dim:rgba(156,134,216,.14);
+  --x-data-grad:linear-gradient(90deg,#1E5FD8,#3F8CFF 55%,#6FE3F0);
 
   /* ── Colour · semantic (status & sentiment only) ───────────────────── */
   --x-pos:#57B98C;
