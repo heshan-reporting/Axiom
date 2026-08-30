@@ -58,9 +58,15 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 # binding = "MIND_DOCS"
 # bucket_name = "axiom-mind-docs"
 
+# ── Full step-by-step install: see SETUP.md in the repo root. ──────────────
+#
 # ── Secrets are NOT stored here. Set each with `wrangler secret put <NAME>`:
-#   ANTHROPIC_API_KEY (Creative Studio chat + The Curious Mind analysis)
+#   ANTHROPIC_API_KEY (Creative Studio chat, Mind analysis, Sentinel angles)
 #   GEMINI_KEY        (image engine /nano + copy + link summarization)
+#   AXIOM_ACCESS_KEY  (single full-access key gating the private routes)
+#   AXIOM_KEYS        (per-person keys with roles, JSON on one line:
+#                      {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
+#                      role "read" may only hit read routes; writes return 403)
 #   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)
 #   GUARDIAN_KEY      (Guardian API, optional)
 #   TVFY_KEY          (They Vote For You, optional)
