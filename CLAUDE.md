@@ -39,6 +39,31 @@ Reviewed notes sync into the app's retrieval layer with
 Ad Lab and Studio record approved/killed verdicts to the Mind as
 `kind: outcome` — wins and losses that future briefs retrieve.
 
+## The Sentinel (rapid response — the agency's flagship loop)
+
+`CLIENT_ISSUES` in the worker maps each client namespace to the issues they
+own (mca: fuel tax credits / critical minerals / mining policy; aep: gas +
+energy; vicnats: VIC election + regional; pca: housing; mba: construction;
+cmm: cost of living + federal politics). Every cron tick `sentinelScan()`
+counts matching stories in a 6h hot window against that issue's own 14-day
+baseline from the archive; a spike (>=2.5x, >=3 stories, 12h cooldown unless
+intensity grows 1.6x) fires an alert, drafts an angle with Claude grounded in
+Mind retrieval, and pushes it to Slack (webhooks in KV `slack_webhooks`:
+`{"mca":"https://hooks.slack…","_default":"…"}`). Rows live in `arc_alerts`
+with the lifecycle stamps that measure speed to respond: detected ->
+notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
+In-app: the Sentinel view (nav badge counts what is unactioned) with
+Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
+
+## Access roles
+
+Two optional worker secrets. `AXIOM_ACCESS_KEY` is a single full-access key.
+`AXIOM_KEYS` is JSON of per-person keys:
+`{"key1":{"n":"Heshan","r":"full"},"key2":{"n":"Steve","r":"read"}}`.
+`read` may only hit read routes (`/mind/query`, `/mind/docs`,
+`/archive/search`, `/sentinel/alerts`, `/sentinel/metrics`, `/session/load`);
+writes return 403. The app hides mutating buttons for read-only keys.
+
 ## Security & org knowledge (Curious Minds = namespace `cmm`)
 
 - Access control: the `AXIOM_ACCESS_KEY` worker secret gates /mind/*,

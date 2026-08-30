@@ -137,6 +137,9 @@ body{background:linear-gradient(180deg,#C9909F 0%,#B98DA9 9%,#8D87B2 19%,#5C6D99
 .backc[disabled]{opacity:.4;cursor:default;pointer-events:none}
 .vtag{font-family:var(--fm);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--amb);white-space:nowrap}
 .vtag:empty{display:none}
+.rdot{position:absolute;top:-4px;right:-3px;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:#D96A66;
+  color:#fff;font-family:var(--fm);font-size:9px;line-height:15px;text-align:center;box-shadow:0 0 0 2px var(--x-bg1)}
+.rdot[hidden]{display:none}
 .rbtn{position:relative;display:flex;align-items:center;gap:8px;height:32px;padding:0 14px;border-radius:999px;
   border:1px solid rgba(255,255,255,.09);background:transparent;color:var(--t2);
   font-family:var(--fm);font-size:9.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
@@ -701,6 +704,60 @@ body.kiosk .kprog{display:block}
 @keyframes toastin{from{opacity:0;transform:translateX(-50%) translateY(12px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .toast.err{border-color:rgba(255,90,120,.4);color:#FF8FA3}
 
+/* ═══ SENTINEL — spike alerts, angles, and the response clock ═══ */
+.sen-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.sen-stat{border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.035);padding:14px 16px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
+.sen-stat .k{font-family:var(--fm);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3)}
+.sen-stat .v{font-family:var(--fd);font-size:27px;font-weight:750;letter-spacing:-.035em;margin-top:7px;font-variant-numeric:tabular-nums}
+.sen-stat .v i{font-style:normal;font-size:12px;font-weight:600;color:var(--t2);margin-left:4px}
+.sen-stat .s{font-size:11.5px;color:var(--t2);margin-top:5px}
+.sen-card{border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,var(--x-bg3),var(--x-bg2));
+  padding:18px 18px 16px;margin-bottom:14px;position:relative;overflow:hidden}
+.sen-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.sen-card.critical::before{background:linear-gradient(180deg,#E05A54,#8B2F2B)}
+.sen-card.high::before{background:linear-gradient(180deg,#E8A04C,#8B5A20)}
+.sen-card.watch::before{background:linear-gradient(180deg,#7EC8E8,#2C5F7A)}
+.sen-card.done{opacity:.72}
+.sen-h{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.sen-sev{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;border-radius:6px;padding:4px 9px;white-space:nowrap}
+.sen-sev.critical{color:#F0A9A5;background:rgba(224,90,84,.14);border:1px solid rgba(224,90,84,.4)}
+.sen-sev.high{color:#E8C08C;background:rgba(232,160,76,.13);border:1px solid rgba(232,160,76,.36)}
+.sen-sev.watch{color:#A8D8EA;background:rgba(126,200,232,.11);border:1px solid rgba(126,200,232,.32)}
+.sen-t{font-family:var(--fd);font-size:18px;font-weight:700;letter-spacing:-.02em;line-height:1.25}
+.sen-t span{display:block;font-family:var(--fs,inherit);font-size:12px;font-weight:400;color:var(--t2);letter-spacing:0;margin-top:3px}
+.sen-when{font-family:var(--fm);font-size:10px;color:var(--t3);white-space:nowrap;margin-left:auto}
+.sen-ev{display:flex;gap:22px;flex-wrap:wrap;margin:14px 0 0;padding:12px 14px;border-radius:12px;
+  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07)}
+.sen-ev div{min-width:0}
+.sen-ev .n{font-family:var(--fd);font-size:20px;font-weight:750;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.sen-ev .n i{font-style:normal;font-size:11px;font-weight:600;color:var(--t2);margin-left:3px}
+.sen-ev .l{font-family:var(--fm);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t3);margin-top:4px}
+.sen-block{margin-top:14px;border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.55;
+  border:1px solid rgba(63,140,255,.2);background:rgba(63,140,255,.06);color:var(--t1)}
+.sen-block b{color:var(--t0);font-weight:600}
+.sen-block .lbl{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:block;margin-bottom:5px}
+.sen-block+.sen-block{margin-top:8px}
+.sen-block.risk{border-color:rgba(232,160,76,.24);background:rgba(232,160,76,.06)}
+.sen-draft{margin-top:8px;border:1px solid rgba(255,255,255,.1);border-radius:12px;background:rgba(255,255,255,.04);padding:12px 14px}
+.sen-draft .lbl{font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.sen-draft .lbl button{margin-left:auto;font-family:var(--fm);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ac);
+  background:none;border:1px solid rgba(63,140,255,.34);border-radius:7px;padding:3px 8px;cursor:pointer}
+.sen-draft .lbl button:hover{background:rgba(63,140,255,.14)}
+.sen-draft p{font-size:12.5px;line-height:1.55;color:var(--t0);margin:0}
+.sen-heads{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+.sen-heads a{display:flex;gap:9px;align-items:baseline;font-size:12px;color:var(--t1);text-decoration:none;line-height:1.45}
+.sen-heads a:hover{color:var(--t0)}
+.sen-heads .src{font-family:var(--fm);font-size:9px;color:var(--ac);text-transform:uppercase;flex:none;min-width:62px}
+.sen-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:13px;border-top:1px solid rgba(255,255,255,.07)}
+.sen-acts button{font-size:12px;font-weight:600;border-radius:999px;padding:8px 15px;cursor:pointer;
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:var(--t0);transition:border-color .18s,background .18s}
+.sen-acts button:hover{border-color:rgba(63,140,255,.5);background:rgba(63,140,255,.09)}
+.sen-acts button.pri{border-color:rgba(63,140,255,.45);background:rgba(63,140,255,.14);color:#CFE2FF}
+.sen-acts .done-tag{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#7BC89B;font-weight:600}
+.sen-acts .done-tag b{width:7px;height:7px;border-radius:50%;background:#57B98C;display:inline-block}
+@media(max-width:900px){.sen-strip{grid-template-columns:1fr 1fr}}
+
 /* knowledge map — map-of-science network */
 .kmwrap{position:relative;height:calc(100dvh - var(--mast, 64px) - 150px);min-height:420px;border:1px solid var(--line2);
   border-radius:18px;overflow:hidden;background:#191a1c;box-shadow:var(--sh-lg),inset 0 1px 0 var(--hair)}
@@ -1228,6 +1285,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="rtip">Radar</span></button>
         <button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">Analyst</span></button>
         <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Briefing</span></button>
+        <button class="rbtn" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rtip">Sentinel</span><span class="rdot" id="sen-dot" hidden></span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -1545,6 +1603,25 @@ body.kiosk .kprog{display:block}
         </div>
       </section>
 
+      <!-- ═══ SENTINEL ═══ -->
+      <section class="view" id="v-sentinel">
+        <div class="sen-strip" id="sen-strip"></div>
+        <div class="panel">
+          <div class="phead">
+            <div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg>Live Alerts</div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select class="sel" id="sen-filter" onchange="renderSentinel()" style="padding:7px 11px;font-size:11.5px">
+                <option value="open">Needs response</option>
+                <option value="all">All alerts · 7d</option>
+              </select>
+              <button class="btn ghost" style="padding:7px 13px;font-size:11px" id="sen-scan" onclick="senScan()">Scan now</button>
+            </div>
+          </div>
+          <div class="note" style="margin:0 0 14px">AXIOM watches every client issue against its own 14-day baseline. When coverage spikes, it drafts the angle and pushes it to the team — the clock starts the moment it fires.</div>
+          <div id="sen-list"><div class="empty">Loading the watch…</div></div>
+        </div>
+      </section>
+
       <!-- KNOWLEDGE MAP -->
       <section class="view" id="v-map">
         <div class="kmwrap">
@@ -1811,6 +1888,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span>Radar</span></button>
   <button class="tab" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span>AI</span></button>
   <button class="tab" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Brief</span></button>
+  <button class="tab" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span>Alerts</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
@@ -2025,7 +2103,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2034,6 +2112,7 @@ function go(v){
   if(v==='map')kmInit();
   if(v==='radar')renderIssueStrip();
   if(v==='brief')renderBriefMem();
+  if(v==='sentinel'){renderSentinel();senLoad();}
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */
@@ -2063,6 +2142,147 @@ function renderBriefMem(){
       +' — the brief draws on all of it.';
   };
   if(ARC_STATS)show(ARC_STATS);else arcStats(show);
+}
+
+/* ── THE SENTINEL — client-issue spikes, drafted angles, response clock ──
+   Every alert carries its own lifecycle: detected -> notified -> acknowledged
+   -> drafted. Those stamps are the agency's speed-to-respond measurement. */
+const sen={alerts:[],metrics:null,role:'full',loaded:false,busy:false,timer:0};
+function senBase(){return (WORKER_URL||'').replace(/\/+$/,'');}
+async function senLoad(){
+  if(sen.busy)return;sen.busy=true;
+  try{
+    const[a,m]=await Promise.all([
+      fetch(senBase()+'/sentinel/alerts?days=7&limit=40',{headers:axHeaders()}).then(r=>r.json()).catch(()=>({})),
+      fetch(senBase()+'/sentinel/metrics?days=30',{headers:axHeaders()}).then(r=>r.json()).catch(()=>({}))
+    ]);
+    if(a&&a.ok){sen.alerts=a.alerts||[];sen.role=a.role||'full';sen.loaded=true;}
+    else if(a&&a.error){sen.err=a.detail||a.error;}
+    if(m&&m.ok)sen.metrics=m;
+    senDot();
+  }finally{sen.busy=false;}
+  if(state.view==='sentinel')renderSentinel();
+}
+function senDot(){
+  const d=$('sen-dot');if(!d)return;
+  const open=sen.alerts.filter(x=>!x.acked).length;
+  d.hidden=!open;d.textContent=open>9?'9+':String(open);
+}
+function senInit(){
+  senLoad();
+  if(!sen.timer)sen.timer=setInterval(()=>{if(state.view==='sentinel'||document.visibilityState==='visible')senLoad();},90000);
+}
+function senMin(v){
+  if(v===null||v===undefined)return['—',''];
+  if(v<1)return['<1',' min'];
+  if(v<90)return[Math.round(v),' min'];
+  return[(v/60).toFixed(1),' hr'];
+}
+function renderSentinel(){
+  const strip=$('sen-strip'),list=$('sen-list');if(!strip||!list)return;
+  const m=sen.metrics||{};
+  const[ack,ackU]=senMin(m.medianAckMin),[dr,drU]=senMin(m.medianDraftMin);
+  const open=sen.alerts.filter(a=>!a.acked).length;
+  strip.innerHTML=
+    '<div class="sen-stat"><div class="k">Median time to respond</div><div class="v">'+ack+'<i>'+ackU+'</i></div><div class="s">'+(m.acked||0)+' alerts acknowledged · 30d</div></div>'+
+    '<div class="sen-stat"><div class="k">Median time to draft</div><div class="v">'+dr+'<i>'+drU+'</i></div><div class="s">'+(m.drafted||0)+' angles taken to content</div></div>'+
+    '<div class="sen-stat"><div class="k">Awaiting response</div><div class="v" style="color:'+(open?'#E8C08C':'inherit')+'">'+open+'</div><div class="s">'+(m.total||0)+' fired in the last 30 days</div></div>'+
+    '<div class="sen-stat"><div class="k">Watching</div><div class="v">11</div><div class="s">client issues across '+(new Set(sen.alerts.map(a=>a.ns)).size||6)+'+ namespaces</div></div>';
+  const filt=($('sen-filter')&&$('sen-filter').value)||'open';
+  const rows=sen.alerts.filter(a=>filt==='all'||!a.acked);
+  if(!sen.loaded){
+    list.innerHTML='<div class="empty">'+(sen.err?esc(sen.err):'The Sentinel switches on with the worker deploy and the D1 database — then it watches every client issue against its own baseline, day and night.')+'</div>';
+    return;
+  }
+  if(!rows.length){
+    list.innerHTML='<div class="empty">'+(filt==='open'?'Nothing needs a response. Every alert has been actioned.':'No spikes on client issues in the last 7 days — the wire is behaving.')+'</div>';
+    return;
+  }
+  const ro=sen.role==='read';
+  list.innerHTML=rows.map(a=>{
+    const A=a.angle||{};
+    const social=(A.drafts||[]).find(d=>d.channel==='social');
+    const stmt=(A.drafts||[]).find(d=>d.channel==='statement');
+    let h='<div class="sen-card '+esc(a.severity)+(a.acked?' done':'')+'">';
+    h+='<div class="sen-h"><span class="sen-sev '+esc(a.severity)+'">'+esc(a.severity)+'</span>'+
+       '<div class="sen-t">'+esc(a.label)+'<span>'+esc(a.client)+'</span></div>'+
+       '<span class="sen-when">'+ago(new Date(a.detected).toISOString())+(a.notified?' · pushed':'')+'</span></div>';
+    h+='<div class="sen-ev">'+
+       '<div><div class="n">'+(a.ratio||0).toFixed(1)+'<i>×</i></div><div class="l">vs baseline</div></div>'+
+       '<div><div class="n">'+a.hot+'</div><div class="l">stories · 6h</div></div>'+
+       '<div><div class="n">'+a.srcs+'</div><div class="l">outlets</div></div>'+
+       (typeof a.tone==='number'?'<div><div class="n">'+(a.tone>=0?'+':'−')+Math.abs(a.tone).toFixed(1)+'</div><div class="l">tone</div></div>':'')+
+       '</div>';
+    if(A.read)h+='<div class="sen-block"><span class="lbl">What is happening</span>'+esc(A.read)+'</div>';
+    if(A.angle)h+='<div class="sen-block"><span class="lbl">Suggested angle</span><b>'+esc(A.angle)+'</b></div>';
+    if(A.risk)h+='<div class="sen-block risk"><span class="lbl">Risk</span>'+esc(A.risk)+'</div>';
+    if(social&&social.text)h+='<div class="sen-draft"><div class="lbl">Draft post<button onclick="senCopy('+a.id+',\'social\')">Copy</button></div><p>'+esc(social.text)+'</p></div>';
+    if(stmt&&stmt.text)h+='<div class="sen-draft"><div class="lbl">Draft statement<button onclick="senCopy('+a.id+',\'statement\')">Copy</button></div><p>'+esc(stmt.text)+'</p></div>';
+    if((a.evidence||[]).length){
+      h+='<div class="sen-heads">'+a.evidence.slice(0,4).map(e=>
+        '<a href="'+esc(e.u||'#')+'" target="_blank" rel="noopener"><span class="src">'+esc(e.s||'')+'</span><span>'+esc(e.t||'')+'</span></a>').join('')+'</div>';
+    }
+    h+='<div class="sen-acts">';
+    if(a.acked)h+='<span class="done-tag"><b></b>Responded'+(a.ackedBy?' · '+esc(a.ackedBy):'')+' in '+senMin((a.acked-a.detected)/60000).join('')+'</span>';
+    else if(!ro)h+='<button class="pri" onclick="senAck('+a.id+')">Acknowledge</button>';
+    if(!ro)h+='<button onclick="senDraftIn('+a.id+')">Draft in Ad Lab →</button>';
+    if(a.mapnode)h+='<button onclick="kmJump(\''+esc(a.mapnode)+'\')">See on the map</button>';
+    h+='<button onclick="senCoverage('+a.id+')">Open the coverage</button>';
+    h+='</div></div>';
+    return h;
+  }).join('');
+}
+function senCoverage(id){
+  const a=sen.alerts.find(x=>x.id===id);if(!a)return;
+  go('news');
+  setTimeout(()=>{const q=$('news-q');if(q){q.value=a.label;loadNews();}},90);
+}
+function senCopy(id,ch){
+  const a=sen.alerts.find(x=>x.id===id);if(!a||!a.angle)return;
+  const d=(a.angle.drafts||[]).find(x=>x.channel===ch);if(!d)return;
+  try{navigator.clipboard.writeText(d.text);toast('Draft copied');}catch(e){toast('Copy failed',true);}
+}
+async function senAck(id,drafted){
+  const a=sen.alerts.find(x=>x.id===id);
+  try{
+    const r=await fetch(senBase()+'/sentinel/ack',{method:'POST',headers:axHeaders(),
+      body:JSON.stringify({id:id,drafted:!!drafted})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    if(a){if(drafted)a.drafted=Date.now();else{a.acked=Date.now();a.ackedBy=d.by||'you';}}
+    senDot();renderSentinel();
+    if(!drafted)toast('Response logged — clock stopped');
+  }catch(e){toast(e.message||'Could not log it',true);}
+}
+function senDraftIn(id){
+  const a=sen.alerts.find(x=>x.id===id);if(!a)return;
+  senAck(id,true);                                    // stamp the draft clock
+  if(!a.acked)senAck(id);                             // drafting is a response
+  const hit=CC_CLIENTS.find(c=>c.id===a.ns);
+  if(hit&&CC_ACTIVE!==a.ns){CC_ACTIVE=a.ns;ccSave();}
+  const A=a.angle||{};
+  const brief='BREAKING — '+a.label+' is spiking ('+(a.ratio||0).toFixed(1)+'x baseline, '+a.hot+' stories across '+a.srcs+' outlets).'
+    +(A.angle?'\n\nAngle to run: '+A.angle:'')
+    +(A.read?'\n\nContext: '+A.read:'')
+    +((a.evidence||[]).length?'\n\nCoverage:\n'+a.evidence.slice(0,3).map(e=>'- '+(e.s||'')+': '+(e.t||'')+(e.u?' '+e.u:'')).join('\n'):'')
+    +'\n\nWrite rapid-response social copy for this, on the client brief.';
+  go('clients');
+  setTimeout(()=>{
+    try{ccShowTab('adlab');}catch(e){}
+    setTimeout(()=>{const inp=$('al-inp');if(inp){inp.value=brief;inp.focus();inp.dispatchEvent(new Event('input'));}
+      toast('Brief loaded in Ad Lab — review and send');},140);
+  },90);
+}
+async function senScan(){
+  const b=$('sen-scan');if(b){b.disabled=true;b.textContent='Scanning…';}
+  try{
+    const r=await fetch(senBase()+'/sentinel/scan',{method:'POST',headers:axHeaders(),body:'{}'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    toast(d.fired?d.fired+' new alert'+(d.fired>1?'s':''):'No spikes right now — nothing fired');
+    await senLoad();
+  }catch(e){toast(e.message||'Scan failed',true);}
+  if(b){b.disabled=false;b.textContent='Scan now';}
 }
 
 /* ── KNOWLEDGE MAP — living map of everything AXIOM knows ── */
@@ -5707,6 +5927,7 @@ function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.a
 setTimeout(hideSplash,2600);
 document.querySelectorAll('.rbtn').forEach(b=>{if(!b.getAttribute('aria-label')){const t=b.querySelector('.rtip');if(t)b.setAttribute('aria-label',t.textContent);}});
 restoreChat();
+senInit();                       // the watch runs from boot, on every view
 refreshAll().then(hideSplash);
 /* 3D globe removed from the sentiment gauge per design direction — heroBoot no longer runs. */
 setInterval(refreshAll,5*60e3);

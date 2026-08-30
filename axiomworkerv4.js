@@ -1711,6 +1711,229 @@ async function arcNewsSnap(env, jsonStr) {
 /** Escape LIKE wildcards in user queries. */
 function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) + '%'; }
 
+// ==============================================================================
+// ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
+// ==============================================================================
+function axAuth(req, env) {
+  const supplied = req.headers.get('X-Axiom-Key') || '';
+  let roster = null;
+  if (env.AXIOM_KEYS) { try { roster = JSON.parse(env.AXIOM_KEYS); } catch (e) { roster = null; } }
+  const enforced = !!(env.AXIOM_ACCESS_KEY || (roster && Object.keys(roster).length));
+  if (!enforced) return { enforced: false, ok: true, role: 'full', name: 'open' };
+  if (env.AXIOM_ACCESS_KEY && supplied === env.AXIOM_ACCESS_KEY) {
+    return { enforced: true, ok: true, role: 'full', name: 'admin' };
+  }
+  const who = roster && Object.prototype.hasOwnProperty.call(roster, supplied) ? roster[supplied] : null;
+  if (who) {
+    return { enforced: true, ok: true, role: (who.r === 'read' ? 'read' : 'full'), name: String(who.n || 'user').slice(0, 40) };
+  }
+  return { enforced: true, ok: false, role: null, name: '' };
+}
+
+// ==============================================================================
+// THE SENTINEL - watches the wire for spikes on the issues our clients own,
+// drafts an angle, and pushes it to the team within minutes. Every alert
+// carries lifecycle timestamps so "speed to respond" is measured, not guessed.
+// ==============================================================================
+const SENTINEL = {
+  HOT_HOURS: 6,          // the window we call "right now"
+  BASE_DAYS: 14,         // history the baseline is drawn from
+  MIN_HOT: 3,            // never alert on fewer than this many stories
+  MIN_RATIO: 2.5,        // stories vs baseline before it counts as a spike
+  COOLDOWN_H: 12,        // one alert per issue per this many hours...
+  ESCALATE: 1.6,         // ...unless intensity grows by this factor
+};
+// The issues AXIOM's clients actually own. ns must match the Mind namespace.
+const CLIENT_ISSUES = [
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'ftc', label: 'Fuel tax credits',
+    map: 'i_ftc', rx: /fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit/i },
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'cm', label: 'Critical minerals',
+    map: 'i_cm', rx: /critical minerals?|rare earths?|gallium|antimony|strategic reserve/i },
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'mining', label: 'Mining policy',
+    rx: /mining (tax|royalt|approval|jobs)|resources (sector|industry|policy)|royalties/i },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'gas', label: 'Gas supply & reservation',
+    rx: /gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b/i },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'energy', label: 'Energy policy',
+    rx: /energy (policy|prices|bills|transition|security)|electricity price|power bill/i },
+  { ns: 'vicnats', client: 'The Nationals Victoria', id: 'vicelection', label: 'Victorian election',
+    rx: /victorian? (state )?election|victorian (government|premier|parliament)|spring street/i },
+  { ns: 'vicnats', client: 'The Nationals Victoria', id: 'regional', label: 'Regional Victoria',
+    rx: /regional victoria|country victoria|regional (rail|road|health|hospital|service)/i },
+  { ns: 'pca', client: 'Property Council of Australia', id: 'housing', label: 'Housing & planning',
+    rx: /housing (policy|supply|crisis|target|approval)|planning reform|build-to-rent|negative gearing/i },
+  { ns: 'mba', client: 'Master Builders', id: 'construction', label: 'Construction & IR',
+    rx: /construction (industry|sector|union|cost)|\bcfmeu\b|building (industry|code|approvals)/i },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'col', label: 'Cost of living',
+    map: 'i_col', rx: /cost of living|inflation|interest rates?|rba (decision|hold|cut|rise|board)/i },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'gov', label: 'Federal politics',
+    map: 'i_gov', rx: /newspoll|primary vote|preferred prime minister|approval rating|by-?election|leadership spill/i },
+];
+let SEN_READY = false;
+async function ensureSentinel(env) {
+  if (!env.MIND_DB) return false;
+  if (SEN_READY) return true;
+  await ensureArchive(env);
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS arc_alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, client TEXT, issue TEXT, label TEXT, mapnode TEXT, severity TEXT, hot INTEGER, baseline REAL, ratio REAL, srcs INTEGER, tone REAL, evidence TEXT, angle TEXT, detected_ts INTEGER, notified_ts INTEGER, acked_ts INTEGER, acked_by TEXT, drafted_ts INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_alerts_ts ON arc_alerts(detected_ts)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS arc_alerts_issue ON arc_alerts(ns, issue, detected_ts)'),
+  ]);
+  SEN_READY = true;
+  return true;
+}
+/** Median of a numeric array, or null. */
+function median(a) {
+  const v = a.filter(x => typeof x === 'number' && isFinite(x)).sort((x, y) => x - y);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+/** Mind retrieval for background jobs (the /mind/* routes keep their own copy,
+    which is request-scoped). Client namespace plus the shared cmm layer only. */
+async function mindRetrieve(env, ns, q, topK = 5) {
+  if (!env.MIND_VECTORS || !env.AI) return [];
+  const out = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [String(q).slice(0, 1500)] });
+  const vec = out.data[0];
+  const hits = [];
+  const one = async (space, k) => {
+    try {
+      const res = await env.MIND_VECTORS.query(vec, { topK: k, namespace: space, returnMetadata: 'all' });
+      (res.matches || []).forEach(m => hits.push({ ns: space, score: m.score, meta: m.metadata || {} }));
+    } catch (e) {}
+  };
+  await one(ns, topK);
+  if (ns !== 'cmm') await one('cmm', 3);
+  hits.sort((a, b) => b.score - a.score);
+  return hits;
+}
+/** Ask Claude for the angle. Returns a JSON string, or '' when unavailable. */
+async function sentinelAngle(env, alert, items) {
+  if (!env.ANTHROPIC_API_KEY) return '';
+  let playbook = '';
+  try {
+    const hits = await mindRetrieve(env, alert.ns, alert.label + ' ' + ((items[0] && items[0].title) || ''), 5);
+    playbook = hits.map(h => '- (' + (h.meta.kind || 'doc') + ') ' + (h.meta.title || '') + ': ' + (h.meta.snippet || '').slice(0, 300)).join('\n').slice(0, 2200);
+  } catch (e) { /* Mind optional */ }
+  const heads = items.slice(0, 6).map(it => '- ' + (it.src || '') + ': ' + (it.title || '')).join('\n');
+  const sys = 'You are the senior political strategist at Curious Minds, an Australian marketing, advocacy and political campaign agency. '
+    + 'A monitored issue for one of our clients has just spiked in the news. Give the account team what they need to respond within the hour. '
+    + 'Reply with ONLY a JSON object: {"read":"2-3 sentences on what is actually happening and why it matters to this client",'
+    + '"angle":"the single sharpest position this client should take right now, in one sentence",'
+    + '"risk":"the main way this could backfire, in one sentence",'
+    + '"drafts":[{"channel":"social","text":"a ready-to-post caption, under 220 characters"},'
+    + '{"channel":"statement","text":"2-3 sentence media statement in the client voice"}]}. '
+    + 'Ground everything in the headlines given. Never invent facts, numbers or quotes.';
+  const user = 'CLIENT: ' + alert.client + ' (namespace ' + alert.ns + ')\nISSUE: ' + alert.label
+    + '\nSPIKE: ' + alert.hot + ' stories in the last ' + SENTINEL.HOT_HOURS + 'h across ' + alert.srcs
+    + ' outlets - ' + alert.ratio.toFixed(1) + 'x its 14-day baseline.\n\nHEADLINES:\n' + heads
+    + (playbook ? '\n\nCLIENT KNOWLEDGE (standing rules, past positions and outcomes):\n' + playbook : '');
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 900, system: sys, messages: [{ role: 'user', content: user }] }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined,
+    });
+    const d = await r.json().catch(() => ({}));
+    const txt = (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+    if (!txt) return '';
+    const s = txt.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    JSON.parse(s); // validate before storing
+    return s;
+  } catch (e) { return ''; }
+}
+/** Post an alert to Slack. Webhooks live in KV key slack_webhooks: {ns:url,_default:url}. */
+async function sentinelNotify(env, alert, items, angle) {
+  let hooks = {};
+  try { hooks = JSON.parse((await kvGet(env.AXIOM_KV, 'slack_webhooks')) || '{}'); } catch (e) { hooks = {}; }
+  const url = hooks[alert.ns] || hooks._default || env.SLACK_WEBHOOK_URL || '';
+  if (!url) return false;
+  let a = null; try { a = angle ? JSON.parse(angle) : null; } catch (e) { a = null; }
+  const sev = alert.severity === 'critical' ? ':rotating_light: CRITICAL' : alert.severity === 'high' ? ':warning: HIGH' : ':eyes: WATCH';
+  const lines = [
+    sev + '  *' + alert.label + '* is spiking for *' + alert.client + '*',
+    '`' + alert.hot + ' stories / ' + SENTINEL.HOT_HOURS + 'h across ' + alert.srcs + ' outlets - ' + alert.ratio.toFixed(1) + 'x baseline`',
+  ];
+  if (a && a.read) lines.push('', '*What is happening*  ' + a.read);
+  if (a && a.angle) lines.push('*Suggested angle*  ' + a.angle);
+  if (a && a.risk) lines.push('*Risk*  ' + a.risk);
+  const draft = a && Array.isArray(a.drafts) ? a.drafts.find(d => d.channel === 'social') : null;
+  if (draft && draft.text) lines.push('', '*Draft post*  ' + draft.text);
+  lines.push('', '*Headlines*');
+  items.slice(0, 4).forEach(it => lines.push('- <' + (it.link || it.url || '') + '|' + String(it.title || '').replace(/[<>|]/g, ' ').slice(0, 120) + '> _(' + (it.src || '') + ')_'));
+  lines.push('', '_AXIOM Sentinel - acknowledge in the app to log response time._');
+  try {
+    const r = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: lines.join('\n') }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+    });
+    return r.ok;
+  } catch (e) { return false; }
+}
+/** One detection pass. Returns {scanned, fired, alerts:[...]}. */
+async function sentinelScan(env, opts = {}) {
+  if (!(await ensureSentinel(env))) return { ok: false, error: 'mind_unbound' };
+  const now = Date.now();
+  const hotMs = SENTINEL.HOT_HOURS * 3600000;
+  // Hot window comes off the live wire so detection works from the first minute.
+  let items = [];
+  try {
+    const snap = await buildAllNews(env, { q: '', max: 120, hours: Math.max(SENTINEL.HOT_HOURS, 6) });
+    items = (JSON.parse(snap).items || []).filter(it => (now - (Date.parse(it.date) || 0)) <= hotMs);
+  } catch (e) { items = []; }
+  const fired = [];
+  for (const iss of CLIENT_ISSUES) {
+    const hits = items.filter(it => iss.rx.test((it.title || '') + ' ' + (it.desc || '')));
+    if (hits.length < (opts.minHot || SENTINEL.MIN_HOT)) continue;
+    // Baseline: the same matcher across the permanent archive, per hot-window.
+    let baseline = 0;
+    try {
+      const since = now - SENTINEL.BASE_DAYS * 86400000;
+      const like = '%' + iss.label.split(' ')[0].toLowerCase() + '%';
+      const row = await env.MIND_DB.prepare(
+        "SELECT title, body FROM arc_items WHERE kind='news' AND ts>? AND ts<? LIMIT 4000").bind(since, now - hotMs).all();
+      const past = (row.results || []).filter(r => iss.rx.test((r.title || '') + ' ' + (r.body || ''))).length;
+      const windows = (SENTINEL.BASE_DAYS * 24) / SENTINEL.HOT_HOURS;
+      baseline = past / windows;
+      void like;
+    } catch (e) { baseline = 0; }
+    const base = Math.max(baseline, 0.5); // floor keeps a thin archive from screaming
+    const ratio = hits.length / base;
+    if (ratio < (opts.minRatio || SENTINEL.MIN_RATIO)) continue;
+    // Cooldown, unless the story has materially escalated.
+    let prev = null;
+    try {
+      const p = await env.MIND_DB.prepare(
+        'SELECT id, ratio, detected_ts FROM arc_alerts WHERE ns=? AND issue=? ORDER BY detected_ts DESC LIMIT 1')
+        .bind(iss.ns, iss.id).all();
+      prev = (p.results || [])[0] || null;
+    } catch (e) { prev = null; }
+    if (prev && (now - prev.detected_ts) < SENTINEL.COOLDOWN_H * 3600000
+        && ratio < (prev.ratio || 0) * SENTINEL.ESCALATE) continue;
+    const srcs = new Set(hits.map(h => h.src)).size;
+    const tones = hits.map(h => typeof h.tone === 'number' ? h.tone : null).filter(t => t !== null);
+    const tone = tones.length ? tones.reduce((a, b) => a + b, 0) / tones.length : null;
+    const severity = (ratio >= 5 && srcs >= 4) ? 'critical' : (ratio >= 3.5 || srcs >= 4) ? 'high' : 'watch';
+    const alert = {
+      ns: iss.ns, client: iss.client, issue: iss.id, label: iss.label, mapnode: iss.map || '',
+      severity, hot: hits.length, baseline: +base.toFixed(3), ratio: +ratio.toFixed(2), srcs, tone,
+    };
+    const evidence = JSON.stringify(hits.slice(0, 6).map(h => ({ t: h.title, u: h.link, s: h.src, d: h.date })));
+    const angle = opts.noAngle ? '' : await sentinelAngle(env, alert, hits);
+    let notified = 0;
+    if (!opts.noNotify && await sentinelNotify(env, alert, hits, angle)) notified = Date.now();
+    const ins = await env.MIND_DB.prepare(
+      'INSERT INTO arc_alerts(ns,client,issue,label,mapnode,severity,hot,baseline,ratio,srcs,tone,evidence,angle,detected_ts,notified_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(alert.ns, alert.client, alert.issue, alert.label, alert.mapnode, alert.severity, alert.hot,
+            alert.baseline, alert.ratio, alert.srcs, alert.tone, evidence, angle, now, notified || null).run();
+    alert.id = (ins.meta && ins.meta.last_row_id) || null;
+    alert.notified = !!notified;
+    fired.push(alert);
+  }
+  return { ok: true, scanned: CLIENT_ISSUES.length, wire: items.length, fired: fired.length, alerts: fired };
+}
+
 export default {
   async fetch(req, env, ctx) {
     // Always add CORS to every response including errors
@@ -1733,17 +1956,25 @@ export default {
     const sr      = reqUrl.searchParams.get('sr') || 'australia';
 
     // ---- access control ----------------------------------------------------
-    // When the AXIOM_ACCESS_KEY secret is set (wrangler secret put
-    // AXIOM_ACCESS_KEY), the private routes below require the matching
-    // X-Axiom-Key header. Everything stays open until the secret exists, so
-    // nothing breaks before it is configured. /archive/stats intentionally
-    // stays public: aggregate counts only - the map shows presence of
-    // knowledge without revealing any of it.
-    const gated = path.startsWith('/mind/') || path.startsWith('/session/')
-      || path.startsWith('/log/') || path === '/archive/search' || path === '/archive/add';
-    if (gated && env.AXIOM_ACCESS_KEY
-        && (req.headers.get('X-Axiom-Key') || '') !== env.AXIOM_ACCESS_KEY) {
-      return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add the access key in AXIOM Settings.' }, 401);
+    // Two secrets, both optional:
+    //   AXIOM_ACCESS_KEY  - a single full-access key (legacy, still honoured)
+    //   AXIOM_KEYS        - JSON of per-person keys with roles, e.g.
+    //                       {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
+    // Roles: "full" may write (ingest, log, save, ack); "read" may only read
+    // (query, search, alerts, metrics). Everything stays open until at least
+    // one secret exists, so nothing breaks before they are configured.
+    // /archive/stats stays public by design: aggregate counts only, so the map
+    // shows presence of knowledge without revealing any of it.
+    const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load'];
+    const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET');
+    const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
+      || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/');
+    const auth = axAuth(req, env);
+    if (gated && auth.enforced) {
+      if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
+      if (auth.role === 'read' && !isRead) {
+        return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
+      }
     }
 
     // ==========================================================================
@@ -2300,6 +2531,81 @@ export default {
         }]);
         return jsonResp({ ok: true, logged: n });
       } catch (e) { return jsonResp({ ok: false, error: 'log_failed', detail: String(e).slice(0, 120) }, 500); }
+    }
+
+    // ========================================================================
+    // SENTINEL ROUTES - spike alerts, angles, and the speed-to-respond clock.
+    // ========================================================================
+
+    // GET /sentinel/alerts?days=7&ns=&status=open|all&limit=
+    if (path === '/sentinel/alerts') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      try {
+        await ensureSentinel(env);
+        const days = Math.min(parseInt(reqUrl.searchParams.get('days') || '7', 10) || 7, 90);
+        const ns = (reqUrl.searchParams.get('ns') || '').replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+        const status = reqUrl.searchParams.get('status') || 'all';
+        const limit = Math.min(parseInt(reqUrl.searchParams.get('limit') || '40', 10) || 40, 100);
+        const where = ['detected_ts>?']; const args = [Date.now() - days * 86400000];
+        if (ns) { where.push('ns=?'); args.push(ns); }
+        if (status === 'open') where.push('acked_ts IS NULL');
+        const rows = await env.MIND_DB.prepare(
+          'SELECT * FROM arc_alerts WHERE ' + where.join(' AND ') + ' ORDER BY detected_ts DESC LIMIT ' + limit).bind(...args).all();
+        return jsonResp({ ok: true, role: auth.role, who: auth.name, alerts: (rows.results || []).map(r => ({
+          id: r.id, ns: r.ns, client: r.client, issue: r.issue, label: r.label, mapnode: r.mapnode,
+          severity: r.severity, hot: r.hot, baseline: r.baseline, ratio: r.ratio, srcs: r.srcs, tone: r.tone,
+          evidence: r.evidence ? JSON.parse(r.evidence) : [], angle: r.angle ? JSON.parse(r.angle) : null,
+          detected: r.detected_ts, notified: r.notified_ts, acked: r.acked_ts, ackedBy: r.acked_by, drafted: r.drafted_ts,
+        })) });
+      } catch (e) { return jsonResp({ ok: false, error: 'alerts_failed', detail: String(e).slice(0, 160) }, 500); }
+    }
+
+    // POST /sentinel/scan  {minRatio?, minHot?, noNotify?, noAngle?} - manual sweep
+    if (path === '/sentinel/scan') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
+      let b = {}; try { b = await req.json(); } catch (e) { b = {}; }
+      const res = await sentinelScan(env, b);
+      return jsonResp(res);
+    }
+
+    // POST /sentinel/ack  {id, by?} - stamps the response clock
+    if (path === '/sentinel/ack') {
+      if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound' }, 501);
+      try {
+        const b = await req.json();
+        const id = parseInt(b.id, 10);
+        if (!id) return jsonResp({ error: 'missing_id' }, 400);
+        const who = String(b.by || auth.name || 'team').slice(0, 40);
+        const field = b.drafted ? 'drafted_ts' : 'acked_ts';
+        await env.MIND_DB.prepare('UPDATE arc_alerts SET ' + field + '=COALESCE(' + field + ',?), acked_by=COALESCE(acked_by,?) WHERE id=?')
+          .bind(Date.now(), who, id).run();
+        return jsonResp({ ok: true, id, field, by: who });
+      } catch (e) { return jsonResp({ ok: false, error: 'ack_failed', detail: String(e).slice(0, 140) }, 500); }
+    }
+
+    // GET /sentinel/metrics?days=30 - the 90-day success metric, measured
+    if (path === '/sentinel/metrics') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound' }, 501);
+      try {
+        await ensureSentinel(env);
+        const days = Math.min(parseInt(reqUrl.searchParams.get('days') || '30', 10) || 30, 365);
+        const rows = await env.MIND_DB.prepare(
+          'SELECT severity, detected_ts, notified_ts, acked_ts, drafted_ts FROM arc_alerts WHERE detected_ts>?')
+          .bind(Date.now() - days * 86400000).all();
+        const rs = rows.results || [];
+        const mins = (a, b) => rs.filter(r => r[a] && r[b]).map(r => (r[b] - r[a]) / 60000);
+        const ackTimes = mins('detected_ts', 'acked_ts');
+        const draftTimes = mins('detected_ts', 'drafted_ts');
+        return jsonResp({ ok: true, days, total: rs.length,
+          open: rs.filter(r => !r.acked_ts).length,
+          notified: rs.filter(r => r.notified_ts).length,
+          acked: ackTimes.length, drafted: draftTimes.length,
+          medianAckMin: median(ackTimes), medianDraftMin: median(draftTimes),
+          fastestAckMin: ackTimes.length ? Math.min(...ackTimes) : null,
+          bySeverity: rs.reduce((a, r) => { a[r.severity] = (a[r.severity] || 0) + 1; return a; }, {}) });
+      } catch (e) { return jsonResp({ ok: false, error: 'metrics_failed', detail: String(e).slice(0, 140) }, 500); }
     }
 
     // POST /archive/add  { kind, rows:[{src,title,body,url,author,tone,meta,ts}] }
@@ -3704,6 +4010,12 @@ async function handleScheduled(env) {
     await arcNewsSnap(env, snap); // hourly permanent archive - runs with nobody watching
   } catch (e) {}
   try { await snapshotPulse(env); } catch (e) {}
+  // The Sentinel runs every tick: detect spikes on client issues, draft the
+  // angle, push it to Slack. This is the loop that makes response time small.
+  try {
+    const s = await sentinelScan(env);
+    if (s && s.fired) console.log('Sentinel fired', s.fired, 'alert(s)');
+  } catch (e) { console.log('Sentinel scan failed', String(e).slice(0, 120)); }
   try {
     const [ms, rd, bs] = await Promise.all([
       socialMastodon('auspol').catch(() => []),
