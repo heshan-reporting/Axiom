@@ -550,6 +550,14 @@ html.gsap .view.on>*{animation:none}
 .fh-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .fh-live .fh-dot{background:var(--pos,#22D993)}.fh-quiet .fh-dot{background:var(--amb,#F7B955)}
 .fh-bad .fh-dot{background:var(--neg,#FF5470)}.fh-rest .fh-dot{background:var(--ink3,#5F6C7E)}
+/* deep research */
+.rs-bar{display:flex;gap:9px;flex-wrap:wrap}
+.rs-bar .inp{flex:1;min-width:220px}
+.rs-srow{font-size:12px;color:var(--ink2);padding:4px 0;border-bottom:1px solid var(--line)}
+.rs-srow:last-child{border-bottom:none}
+.rs-srow b{font-family:var(--x-fm,monospace);font-size:10px;color:var(--x-cy,#6FE3F0);margin-right:4px}
+.rs-srow span{color:var(--ink3);font-size:11px;margin-left:6px}
+.rs-acts{display:flex;gap:8px;margin-top:12px}
 .modal{width:min(480px,94vw);max-height:90vh;overflow-y:auto;border:1px solid var(--line2);border-radius:var(--r2);
   background:linear-gradient(180deg,rgba(30,24,34,.86),rgba(14,24,32,.88));backdrop-filter:blur(34px) saturate(1.3);
   -webkit-backdrop-filter:blur(34px) saturate(1.3);padding:26px;animation:modalin .34s var(--spring);box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.08)}
@@ -1637,6 +1645,25 @@ body.kiosk .kprog{display:block}
           <div class="chatbar">
             <textarea class="chatinp" id="chat-inp" rows="1" placeholder="Ask about Australian politics…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}" oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
             <button class="send" id="send-btn" onclick="sendChat()" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>Deep Research</div><span class="ptag">AGENT · PLANS, READS, CITES</span></div>
+          <div class="note" style="margin:0 0 12px">Give it a question. The agent plans its own searches, sweeps the live news index, reads the strongest pages, cross-references the permanent archive and the memory bank, and returns a dossier where every claim carries its source.</div>
+          <div class="rs-bar">
+            <input class="inp" id="rs-q" placeholder="e.g. Where is the fuel tax credit debate heading before the next budget?" onkeydown="if(event.key==='Enter')rsRun()">
+            <select class="inp" id="rs-ns" style="flex:0 0 170px" title="Ground the implications in one client's knowledge">
+              <option value="">Agency-wide (CMM)</option>
+            </select>
+            <button class="btn" id="rs-go" onclick="rsRun()" style="padding:10px 20px">Research</button>
+          </div>
+          <div class="note" id="rs-status" style="display:none;margin:10px 0 0"></div>
+          <div id="rs-out" style="display:none"></div>
+          <div class="rs-src" id="rs-src"></div>
+          <div class="rs-acts" id="rs-acts" style="display:none">
+            <button class="cc-mini" onclick="rsSave()">Save to the Mind</button>
+            <button class="cc-mini" onclick="rsCopy()">Copy dossier</button>
           </div>
         </div>
       </section>
@@ -3056,6 +3083,51 @@ async function openFeedHealth(ev,force){
   fhBusy=false;
 }
 function closeFeedHealth(){$('m-fh').classList.remove('on');}
+
+/* ── DEEP RESEARCH — the in-worker agent (plan → sweep → read → cite) ── */
+const rsState={report:'',q:'',ns:'',sources:[]};
+function rsNsFill(){const s=$('rs-ns');if(!s||s.options.length>1)return;
+  CC_CLIENTS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.short||c.name;s.appendChild(o);});}
+async function rsRun(){
+  const q=$('rs-q').value.trim();if(!q){toast('Type a research question first',true);return;}
+  const btn=$('rs-go'),st=$('rs-status'),out=$('rs-out'),src=$('rs-src'),acts=$('rs-acts');
+  btn.disabled=true;btn.textContent='Working…';out.style.display='none';src.innerHTML='';acts.style.display='none';
+  st.style.display='block';
+  const stages=['Planning the searches…','Sweeping the live news index…','Reading the strongest pages…','Cross-referencing the archive and the Mind…','Writing the dossier — every claim cited…'];
+  let si=0;st.textContent=stages[0];
+  const tick=setInterval(()=>{si=Math.min(si+1,stages.length-1);st.textContent=stages[si];},9000);
+  try{
+    const ns=$('rs-ns').value;
+    const r=await fetch(csBase()+'/research',{method:'POST',headers:axHeaders(),
+      body:JSON.stringify(ns?{q:q,ns:ns}:{q:q})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    rsState.report=d.report||'';rsState.q=q;rsState.ns=ns;rsState.sources=d.sources||[];
+    out.className='mind-out';out.innerHTML=mindMd(rsState.report);out.style.display='block';
+    src.innerHTML=rsState.sources.length?'<div class="note" style="margin:14px 0 6px">Sources</div>'+
+      rsState.sources.map(s=>'<div class="rs-srow"><b>'+esc(s.id)+'</b> '+
+        (s.url?'<a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(s.title||s.url)+'</a>':esc(s.title||''))+
+        ' <span>'+esc(s.origin||'')+'</span></div>').join(''):'';
+    acts.style.display='flex';
+    st.textContent='Done in '+Math.round((d.ms||0)/1000)+'s — '+((d.queries||[]).length||1)+' searches, '+rsState.sources.length+' sources.';
+    arcLog('research','user',q);arcLog('research','assistant',rsState.report.slice(0,4000));
+  }catch(e){st.style.display='none';toast('Research: '+(e.message||e),true);}
+  clearInterval(tick);btn.disabled=false;btn.textContent='Research';
+}
+async function rsSave(){
+  if(!rsState.report)return;
+  const ns=rsState.ns||'cmm';
+  try{
+    const r=await fetch(csBase()+'/mind/ingest',{method:'POST',headers:axHeaders(),
+      body:JSON.stringify({namespace:ns,title:('Research: '+rsState.q).slice(0,200),kind:'research',
+        text:rsState.report+'\n\nSOURCES:\n'+rsState.sources.map(s=>s.id+' '+(s.title||'')+' '+(s.url||'')).join('\n')})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    toast('Saved to the Mind ✓ ('+ns+', '+(d.chunks||0)+' chunks)');
+  }catch(e){toast('Save: '+(e.message||e),true);}
+}
+function rsCopy(){if(!rsState.report)return;
+  navigator.clipboard.writeText(rsState.report).then(()=>toast('Dossier copied'),()=>toast('Copy failed',true));}
 
 /* ── COMMAND RENDERERS ── */
 function renderKpiStories(){
@@ -6166,6 +6238,7 @@ setTimeout(hideSplash,2600);
 document.querySelectorAll('.rbtn').forEach(b=>{if(!b.getAttribute('aria-label')){const t=b.querySelector('.rtip');if(t)b.setAttribute('aria-label',t.textContent);}});
 restoreChat();
 senInit();                       // the watch runs from boot, on every view
+rsNsFill();                      // research agent's client scope selector
 refreshAll().then(hideSplash);
 /* 3D globe removed from the sentiment gauge per design direction — heroBoot no longer runs. */
 setInterval(refreshAll,5*60e3);

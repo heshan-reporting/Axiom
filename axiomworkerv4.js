@@ -37,6 +37,10 @@
  * |                               states) for demographic grounding.        |
  * |  POST /clickup               Create a ClickUp task from a flagged story |
  * |                               (CLICKUP_TOKEN + CLICKUP_LIST_ID secrets).|
+ * |  POST /research {q,ns?,hours?} Deep research agent - Claude plans      |
+ * |                               queries, sweeps Google News, reads pages |
+ * |                               live, cross-refs archive + Mind, returns |
+ * |                               a cited dossier. Key-gated (full role).  |
  * |  GET /newsq?q=&hours=&max=    Topical Google News AU search - covers    |
  * |                               every outlet Google indexes, when: window,|
  * |                               outlet extraction, enrichment (KV 5min).  |
@@ -1806,6 +1810,131 @@ async function mindRetrieve(env, ns, q, topK = 5) {
   hits.sort((a, b) => b.score - a.score);
   return hits;
 }
+
+/* == THE RESEARCH AGENT ====================================================
+ * POST /research runs a bounded agentic loop entirely inside the worker:
+ * plan search queries with Claude, sweep Google News AU for each, read the
+ * strongest pages live, cross-reference the permanent archive and the Mind,
+ * then synthesise a fully cited dossier. Key-gated (full role) because it
+ * spends API tokens. Every helper fails soft - a dead page or an unbound
+ * Mind narrows the dossier, it never breaks the run.
+ * ========================================================================== */
+async function claudeMsg(env, system, user, maxTok, timeoutMs) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTok, system: system, messages: [{ role: 'user', content: user }] }),
+    signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (d.error) throw new Error(String(d.error.message || 'anthropic_error').slice(0, 160));
+  return (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+}
+async function gnewsSweep(qq, hours, max) {
+  try {
+    const when = hours <= 24 ? ('when:' + hours + 'h') : ('when:' + Math.ceil(hours / 24) + 'd');
+    const r = await fetch('https://news.google.com/rss/search?q=' + encodeURIComponent(qq + ' ' + when) + '&hl=en-AU&gl=AU&ceid=AU:en', {
+      headers: { 'User-Agent': BROWSER_UA, 'Accept': 'application/rss+xml,application/xml,text/xml,*/*' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+    });
+    if (!r.ok) return [];
+    return parseFeedXml(await r.text()).slice(0, max).map(it => {
+      const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,40})$/);
+      const outlet = m ? m[1].trim() : '';
+      return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', outlet: outlet, q: qq };
+    });
+  } catch (e) { return []; }
+}
+async function pageGrab(url) {
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
+      signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
+      cf: { cacheTtl: 600 },
+    });
+    if (!r.ok) return null;
+    const ctype = (r.headers.get('content-type') || '').toLowerCase();
+    if (ctype && !/html|text\/plain|xml/.test(ctype)) return null;
+    let html = await r.text();
+    if (html.length > 500000) html = html.slice(0, 500000);
+    const title = stripHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+    let body = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<(nav|header|footer|aside)[\s\S]*?<\/\1>/gi, ' ');
+    const art = (body.match(/<article[\s\S]*?<\/article>/i) || [])[0] || (body.match(/<main[\s\S]*?<\/main>/i) || [])[0] || body;
+    const text = stripHtml(art).slice(0, 3500);
+    if (!text.trim()) return null;
+    return { url: r.url || url, title: title, text: text };
+  } catch (e) { return null; }
+}
+async function researchRun(env, ctx, q, ns, hours) {
+  const t0 = Date.now();
+  // 1. Plan: turn the question into targeted news-search queries.
+  let queries = [q];
+  try {
+    const plan = await claudeMsg(env,
+      'You plan news research for an Australian political intelligence platform. Reply with ONLY a JSON array of 3 or 4 short Google News search queries (3-6 words each, no operators) that together cover the question from different angles: the core story, the political/policy angle, and key actors or reactions.',
+      'QUESTION: ' + q, 300, 20000);
+    const arr = JSON.parse((plan.match(/\[[\s\S]*\]/) || ['[]'])[0]);
+    if (Array.isArray(arr) && arr.length) queries = arr.slice(0, 4).map(x => String(x).slice(0, 80));
+  } catch (e) { /* fall back to the raw question */ }
+
+  // 2. Gather: news sweeps + archive + Mind, in parallel.
+  const [sweeps, mindHits] = await Promise.all([
+    Promise.all(queries.map(qq => gnewsSweep(qq, hours, 8))),
+    mindRetrieve(env, ns || 'cmm', q, 5).catch(() => []),
+  ]);
+  let news = [];
+  const seen = new Set();
+  sweeps.flat().forEach(n => {
+    const k = n.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 70);
+    if (!k || seen.has(k)) return; seen.add(k); news.push(n);
+  });
+  news.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+  news = news.slice(0, 14);
+  let arch = [];
+  try {
+    if (env.MIND_DB && (await ensureArchive(env))) {
+      const words = q.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3).slice(0, 3);
+      if (words.length) {
+        const cond = words.map(() => "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')").join(' AND ');
+        const binds = []; words.forEach(w => { const like = arcLike(w); binds.push(like, like); });
+        const rs = await env.MIND_DB.prepare('SELECT kind,src,title,body,url,ts FROM arc_items WHERE ' + cond + ' ORDER BY ts DESC LIMIT 10').bind(...binds).all();
+        arch = (rs.results || []);
+      }
+    }
+  } catch (e) { /* archive optional */ }
+
+  // 3. Read: fetch the strongest pages live (distinct outlets, max 3).
+  const picks = []; const outletsSeen = new Set();
+  for (const n of news) { const o = (n.outlet || '').toLowerCase(); if (o && outletsSeen.has(o)) continue; outletsSeen.add(o); picks.push(n); if (picks.length >= 3) break; }
+  const pages = (await Promise.all(picks.map(p => pageGrab(p.link)))).filter(Boolean);
+
+  // 4. Cite everything with stable ids.
+  const sources = []; const blocks = [];
+  pages.forEach((p, i) => { sources.push({ id: 'W' + (i + 1), title: p.title || 'page', url: p.url, origin: 'live page' }); blocks.push('[W' + (i + 1) + '] PAGE: ' + (p.title || p.url) + '\n' + p.text); });
+  news.forEach((n, i) => { sources.push({ id: 'N' + (i + 1), title: n.title, url: n.link, origin: 'news' + (n.outlet ? ': ' + n.outlet : '') }); blocks.push('[N' + (i + 1) + '] (' + (n.outlet || 'news') + ', ' + (n.date || '').slice(0, 10) + ') ' + n.title); });
+  arch.forEach((a, i) => { sources.push({ id: 'A' + (i + 1), title: a.title, url: a.url && a.url.indexOf('x:') !== 0 ? a.url : '', origin: 'archive: ' + a.kind }); blocks.push('[A' + (i + 1) + '] (archive ' + a.kind + '/' + (a.src || '') + ', ' + new Date(a.ts || 0).toISOString().slice(0, 10) + ') ' + a.title + (a.body ? ' - ' + String(a.body).slice(0, 160) : '')); });
+  (mindHits || []).forEach((h, i) => { sources.push({ id: 'S' + (i + 1), title: h.meta.title || 'doc', url: '', origin: (h.ns === 'cmm' ? 'CMM shared' : 'client KB') + (h.meta.kind ? ' - ' + h.meta.kind : '') }); blocks.push('[S' + (i + 1) + '] (' + (h.ns === 'cmm' ? 'CMM' : 'CLIENT') + ' ' + (h.meta.kind || 'doc') + ') ' + (h.meta.title || '') + ': ' + String(h.meta.snippet || '').slice(0, 250)); });
+
+  // 5. Synthesise the dossier.
+  const sys = 'You are the research desk of an Australian political intelligence platform serving a communications agency. '
+    + 'Write a research dossier answering the question below using ONLY the numbered sources provided. Never invent facts, numbers or quotes. '
+    + 'After every claim cite its source inline like [W1], [N3], [A2] or [S1]. If the sources are thin on part of the question, say so plainly. '
+    + 'Structure with #### headers: "The read" (3-4 sentence answer), "Key findings" (bulleted, each cited), "Implications" (what a campaign/comms team should take from it'
+    + (ns ? ', for the client namespace ' + ns : '') + '), and "Watch next" (2-3 concrete things to monitor). Australian English. Plain prose, no preamble.';
+  const report = await claudeMsg(env, sys,
+    'QUESTION: ' + q + '\n\nSOURCES:\n' + (blocks.join('\n\n').slice(0, 42000) || '(no sources found - say so and stop)'), 2600, 60000);
+
+  // 6. Remember the run: dossier into the archive, run into the ledger.
+  if (ctx) ctx.waitUntil((async () => {
+    try {
+      await archiveItems(env, 'research', [{ src: 'axiom', title: q.slice(0, 300), body: report.slice(0, 6000), url: 'x:research:' + t0, meta: { ns: ns || '', queries: queries } }]);
+      if (env.MIND_DB) await env.MIND_DB.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns || 'cmm', 'research', q.slice(0, 200), Date.now()).run();
+    } catch (e) {}
+  })());
+  return { ok: true, q: q, ns: ns || '', queries: queries, report: report, sources: sources, ms: Date.now() - t0 };
+}
+
 /** Ask Claude for the angle. Returns a JSON string, or '' when unavailable. */
 async function sentinelAngle(env, alert, items) {
   if (!env.ANTHROPIC_API_KEY) return '';
@@ -1968,7 +2097,8 @@ export default {
     const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load'];
     const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
-      || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/');
+      || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/')
+      || path === '/research';
     const auth = axAuth(req, env);
     if (gated && auth.enforced) {
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
@@ -2987,6 +3117,22 @@ export default {
     //   Covers every outlet Google indexes (not just the registry) for
     //   arbitrary topics - ideal for grounding Analyst answers. Uses the
     //   Google News RSS search endpoint with an AU locale + when: window.
+    // POST /research {q, ns?, hours?} - the in-worker deep research agent.
+    if (path === '/research' && req.method === 'POST') {
+      if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'research_not_configured', detail: 'Set ANTHROPIC_API_KEY as a Worker secret.' }, 501);
+      let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+      const q = String(b.q || '').trim().slice(0, 400);
+      if (!q) return jsonResp({ error: 'q_required', detail: 'Send {q:"your research question"}.' }, 400);
+      const ns = nsClean(b.ns || '') || '';
+      const hours = Math.min(parseInt(b.hours, 10) || 336, 720);
+      try {
+        const out = await researchRun(env, ctx, q, ns, hours);
+        return jsonResp(out);
+      } catch (e) {
+        return jsonResp({ error: 'research_failed', detail: String(e && e.message || e).slice(0, 200) }, 502);
+      }
+    }
+
     if (path === '/newsq') {
       const qq    = (reqUrl.searchParams.get('q') || '').trim();
       if (!qq) return jsonResp({ error: 'q_required' }, 400);

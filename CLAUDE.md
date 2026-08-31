@@ -55,6 +55,17 @@ notified -> acked -> drafted. Routes: `/sentinel/alerts|scan|ack|metrics`.
 In-app: the Sentinel view (nav badge counts what is unactioned) with
 Acknowledge (stops the clock) and Draft in Ad Lab (seeds the brief).
 
+## The research agent
+
+POST `/research {q, ns?, hours?}` (key-gated, full role — it spends API
+tokens): `researchRun()` plans 3-4 Google News queries with Claude, sweeps
+each, reads up to 3 pages live (`pageGrab`), cross-references `arc_items`
+(LIKE) and `mindRetrieve(ns||cmm)`, then synthesises a cited dossier
+([W#] pages, [N#] news, [A#] archive, [S#] Mind). The run is archived as
+kind `research` and logged to `mind_runs`. In-app: the Deep Research panel
+on the Analyst view (query + client scope, staged progress, rendered
+dossier, source list, Save to the Mind as kind `research`).
+
 ## Access roles
 
 Two optional worker secrets. `AXIOM_ACCESS_KEY` is a single full-access key.
