@@ -2920,6 +2920,8 @@ async function loadCore(){
   try{
     const d=await api('/allnews?max=110');
     state.news=d.items||[];
+    state.feedsTotal=d.feeds||state.feedsTotal||0;
+    state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
     clientEnrich();
     renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();renderClusters();
     if(!state.analysis||state.analysis._local)renderAnalysisLocal();
@@ -2989,7 +2991,8 @@ function renderKpiStories(){
   const srcs=new Set(state.news.map(n=>n.src)).size;
   let delta='';
   if(day&&prev){const pc=Math.round((day-prev)/prev*100);delta=' <span class="kdelta '+(pc>=0?'up':'dn')+'">'+(pc>=0?'▲':'▼')+Math.abs(pc)+'%</span>';}
-  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets · 24h'+delta;
+  const reg=state.feedsTotal?' · <b>'+(state.feedsLive||state.feedsTotal)+'/'+state.feedsTotal+'</b> feeds live':'';
+  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets · 24h'+reg+delta;
   // status + fill on the stories stat pill
   const pc=prev?Math.round((day-prev)/prev*100):0;
   const st=$('st-status');
@@ -3624,7 +3627,10 @@ async function loadNews(){
       renderNews(items);
     }else{
       const d=await api('/allnews?max=110');
-      state.news=d.items||[];renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();
+      state.news=d.items||[];
+      state.feedsTotal=d.feeds||state.feedsTotal||0;
+      state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
+      renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();
     }
   }catch(e){$('news-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
 }
@@ -6078,7 +6084,7 @@ function tick(){
   $('clock').textContent=d.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})+' · '+d.toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
 }
 tick();setInterval(tick,30e3);
-const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 66 NATIONAL & REGIONAL FEEDS','READING SEARCH, SOCIAL & FORUM SIGNALS'];
+const SPLASH_LINES=['CONNECTING TO THE INTELLIGENCE GRID','SYNCING 86 NATIONAL & REGIONAL FEEDS','READING SEARCH, SOCIAL & FORUM SIGNALS'];
 let _sl=0;const _slT=setInterval(()=>{_sl=(_sl+1)%SPLASH_LINES.length;const el=$('splash-line');if(el)el.textContent=SPLASH_LINES[_sl];},900);
 function hideSplash(){clearInterval(_slT);const s=$('splash');if(s)s.classList.add('off');}
 setTimeout(hideSplash,2600);
