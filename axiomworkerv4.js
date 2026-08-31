@@ -1531,11 +1531,13 @@ async function socialMastodon(tag) {
 
 /** Subreddit routing per pulse tag - falls back to the AU politics pair. */
 const REDDIT_SUBS = {
-  auspol:    'AustralianPolitics+australia+australian',
-  australia: 'australia+AustralianPolitics+australian',
+  // Verified live via rdt-cli field research 2026-08-31: AU politics
+  // discussion now also runs through AusPol, OpenAussie and AusNewsWire.
+  auspol:    'AustralianPolitics+australia+australian+AusPol+OpenAussie+AusNewsWire',
+  australia: 'australia+AustralianPolitics+australian+OpenAussie',
   economy:   'AusFinance+AusEcon+AustralianPolitics',
   housing:   'AusProperty+AusPropertyChat+AusFinance+shitrentals',
-  climate:   'AustralianPolitics+australia',
+  climate:   'AustralianPolitics+australia+OpenAussie',
 };
 async function socialReddit(tag) {
   const subs = REDDIT_SUBS[tag] || REDDIT_SUBS.auspol;
