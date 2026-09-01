@@ -37,6 +37,10 @@
  * |                               states) for demographic grounding.        |
  * |  POST /clickup               Create a ClickUp task from a flagged story |
  * |                               (CLICKUP_TOKEN + CLICKUP_LIST_ID secrets).|
+ * |  GET  /meta/status            Meta direct: configured accounts + last  |
+ * |  POST /meta/sync {since,until} sync. Campaign daily insights -> kind   |
+ * |                               'campaign'; Ad Library AU political ads  |
+ * |                               per client issue -> kind 'oppads'.       |
  * |  POST /research {q,ns?,hours?} Deep research agent - Claude plans      |
  * |                               queries, sweeps Google News, reads pages |
  * |                               live, cross-refs archive + Mind, returns |
@@ -1593,6 +1597,107 @@ async function socialRedditPoliticalAds() {
   return out;
 }
 
+/* == META, DIRECT (no third party) ==========================================
+ * Two independent feeds off Meta's Graph API:
+ *   1. Own-account performance: META_TOKEN (a Business System User token
+ *      with ads_read + read_insights) + META_AD_ACCOUNTS
+ *      ("act_123:mca,act_456:aep" - account to client namespace). Campaign
+ *      level, one row per campaign per day -> archive kind 'campaign'.
+ *   2. Opposition watch: META_USER_TOKEN (an ID-verified user's token with
+ *      ads_read) sweeps the Ad Library for AU political/issue ads matching
+ *      each client issue -> archive kind 'oppads', src 'meta'.
+ * Both are optional, both fail soft, both dedupe on url so re-runs are safe.
+ * ========================================================================== */
+const META_API = 'https://graph.facebook.com/v21.0';
+function metaAccounts(env) {
+  return String(env.META_AD_ACCOUNTS || '').split(/[,\s]+/).filter(Boolean).map(s => {
+    const [acct, ns] = s.split(':');
+    const clean = String(ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+    return { acct: /^act_/.test(acct) ? acct : 'act_' + acct, ns: clean || 'cmm' };
+  });
+}
+async function metaGet(url) {
+  const r = await fetch(url, { signal: abortAfter(20000) });
+  const d = await r.json().catch(() => ({}));
+  if (d.error) throw new Error(String(d.error.message || d.error.type || 'graph_error').slice(0, 160));
+  return d;
+}
+function metaActions(list, type) {
+  const a = (list || []).find(x => x.action_type === type);
+  return a ? Number(a.value) || 0 : 0;
+}
+/** Pull campaign-level daily insights for every configured account. */
+async function metaInsights(env, since, until) {
+  if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured' };
+  const accts = metaAccounts(env);
+  if (!accts.length) return { ok: false, error: 'no_ad_accounts' };
+  const fields = 'campaign_id,campaign_name,objective,spend,impressions,reach,clicks,cpc,cpm,ctr,frequency,actions,date_start,date_stop';
+  const range = since ? '&time_range=' + encodeURIComponent(JSON.stringify({ since: since, until: until || since })) : '&date_preset=last_7d';
+  const out = { ok: true, accounts: 0, rows: 0, errors: [] };
+  for (const a of accts) {
+    let url = META_API + '/' + a.acct + '/insights?level=campaign&time_increment=1&limit=500&fields=' + fields + range + '&access_token=' + encodeURIComponent(env.META_TOKEN);
+    let rows = [];
+    try {
+      for (let page = 0; url && page < 20; page++) {
+        const d = await metaGet(url);
+        (d.data || []).forEach(x => {
+          const spend = Number(x.spend) || 0, imp = Number(x.impressions) || 0, clicks = Number(x.clicks) || 0;
+          const leads = metaActions(x.actions, 'lead') + metaActions(x.actions, 'onsite_conversion.lead_grouped');
+          const lpv = metaActions(x.actions, 'landing_page_view');
+          rows.push({
+            src: 'meta', title: (x.campaign_name || x.campaign_id) + ' - ' + x.date_start,
+            body: 'Spend $' + spend.toFixed(2) + ', ' + imp + ' impressions, reach ' + (x.reach || 0) + ', ' + clicks + ' clicks (CTR ' + (Number(x.ctr) || 0).toFixed(2) + '%, CPC $' + (Number(x.cpc) || 0).toFixed(2) + ', CPM $' + (Number(x.cpm) || 0).toFixed(2) + ')' + (leads ? ', ' + leads + ' leads (CPL $' + (spend / leads).toFixed(2) + ')' : '') + (lpv ? ', ' + lpv + ' landing views' : '') + '. Objective ' + (x.objective || '') + '.',
+            url: 'x:campaign:meta:' + x.campaign_id + ':' + x.date_start, author: a.acct,
+            ts: Date.parse(x.date_start + 'T12:00:00Z') || Date.now(),
+            meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: x.campaign_name, campaign_id: x.campaign_id, day: x.date_start,
+              spend: spend, impressions: imp, reach: Number(x.reach) || 0, clicks: clicks, ctr: Number(x.ctr) || 0, cpc: Number(x.cpc) || 0, cpm: Number(x.cpm) || 0, leads: leads, lpv: lpv, objective: x.objective || '' },
+          });
+        });
+        url = d.paging && d.paging.next ? d.paging.next : null;
+      }
+      out.accounts++;
+      // archive in slices (archiveItems caps a batch at 150)
+      for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'campaign', rows.slice(i, i + 150));
+    } catch (e) { out.errors.push(a.acct + ': ' + String(e.message || e).slice(0, 120)); }
+  }
+  return out;
+}
+/** Sweep the Meta Ad Library for AU political/issue ads on each client issue. */
+async function metaAdLibrary(env) {
+  if (!env.META_USER_TOKEN) return { ok: false, error: 'meta_user_token_missing' };
+  const terms = {};
+  CLIENT_ISSUES.forEach(ci => { terms[ci.label] = ci.ns; });
+  const out = { ok: true, terms: 0, rows: 0, errors: [] };
+  for (const [label, ns] of Object.entries(terms)) {
+    try {
+      const url = META_API + '/ads_archive?ad_reached_countries=' + encodeURIComponent('["AU"]') + '&ad_type=POLITICAL_AND_ISSUE_ADS&ad_active_status=ALL&search_terms=' + encodeURIComponent(label)
+        + '&fields=id,page_name,bylines,ad_creative_bodies,ad_creative_link_titles,ad_delivery_start_time,ad_delivery_stop_time,spend,impressions,currency,ad_snapshot_url,publisher_platforms&limit=100&access_token=' + encodeURIComponent(env.META_USER_TOKEN);
+      const d = await metaGet(url);
+      const rows = (d.data || []).map(x => ({
+        src: 'meta', title: (x.page_name || 'unknown page') + ': ' + ((x.ad_creative_link_titles || [])[0] || (x.ad_creative_bodies || [''])[0] || 'ad').slice(0, 200),
+        body: ((x.ad_creative_bodies || []).join(' | ')).slice(0, 2000) + '\nSpend ' + (x.spend ? x.spend.lower_bound + '-' + (x.spend.upper_bound || '') + ' ' + (x.currency || '') : '?') + ', impressions ' + (x.impressions ? x.impressions.lower_bound + '-' + (x.impressions.upper_bound || '') : '?') + '. Paid for by: ' + (x.bylines || '?') + '. Platforms: ' + ((x.publisher_platforms || []).join(', ')) + '. Running ' + (x.ad_delivery_start_time || '?') + ' to ' + (x.ad_delivery_stop_time || 'now') + '.',
+        url: x.ad_snapshot_url || ('x:oppads:meta:' + x.id), author: x.page_name || '',
+        ts: Date.parse(x.ad_delivery_start_time || '') || Date.now(),
+        meta: { platform: 'meta', issue: label, ns: ns, page: x.page_name, funder: x.bylines || '', spend_lo: x.spend && x.spend.lower_bound, spend_hi: x.spend && x.spend.upper_bound, active: !x.ad_delivery_stop_time },
+      }));
+      out.terms++;
+      for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'oppads', rows.slice(i, i + 150));
+    } catch (e) { out.errors.push(label + ': ' + String(e.message || e).slice(0, 120)); }
+  }
+  return out;
+}
+/** Cron hook: both Meta feeds, at most every 6 hours. */
+async function metaCron(env) {
+  if (!env.META_TOKEN && !env.META_USER_TOKEN) return;
+  const last = Number(await kvGet(env.AXIOM_KV, 'meta_last_sync') || 0);
+  if (Date.now() - last < 6 * 3600000) return;
+  await kvPut(env.AXIOM_KV, 'meta_last_sync', String(Date.now()), 86400);
+  const r = {};
+  try { r.insights = await metaInsights(env); } catch (e) { r.insights = { error: String(e).slice(0, 100) }; }
+  try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 100) }; }
+  await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+}
+
 async function socialBsky(tag) {
   const posts = [];
   try {
@@ -2123,11 +2228,11 @@ export default {
     // one secret exists, so nothing breaks before they are configured.
     // /archive/stats stays public by design: aggregate counts only, so the map
     // shows presence of knowledge without revealing any of it.
-    const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load'];
+    const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load', '/meta/status'];
     const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/')
-      || path === '/research';
+      || path === '/research' || path.startsWith('/meta/');
     const auth = axAuth(req, env);
     if (gated && auth.enforced) {
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
@@ -3146,13 +3251,34 @@ export default {
     //   Covers every outlet Google indexes (not just the registry) for
     //   arbitrary topics - ideal for grounding Analyst answers. Uses the
     //   Google News RSS search endpoint with an AU locale + when: window.
+    // Meta, direct. GET /meta/status shows what is configured and the last
+    // sync; POST /meta/sync {since?, until?} backfills insights for a date
+    // range (chunk long ranges by month) and re-sweeps the Ad Library.
+    if (path === '/meta/status') {
+      let last = {}; try { last = JSON.parse(await kvGet(env.AXIOM_KV, 'meta_last_result') || '{}'); } catch (e) {}
+      return jsonResp({ ok: true, insights_configured: !!env.META_TOKEN, ad_library_configured: !!env.META_USER_TOKEN,
+        accounts: metaAccounts(env).map(a => ({ account: a.acct, ns: a.ns })),
+        last_sync: Number(await kvGet(env.AXIOM_KV, 'meta_last_sync') || 0) || null, last_result: last });
+    }
+    if (path === '/meta/sync' && req.method === 'POST') {
+      let b = {}; try { b = await req.json(); } catch (e) {}
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(b.since || '')) ? b.since : '';
+      const until = /^\d{4}-\d{2}-\d{2}$/.test(String(b.until || '')) ? b.until : '';
+      const r = {};
+      try { r.insights = await metaInsights(env, since, until); } catch (e) { r.insights = { error: String(e).slice(0, 120) }; }
+      if (!b.insightsOnly) { try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 120) }; } }
+      await kvPut(env.AXIOM_KV, 'meta_last_sync', String(Date.now()), 86400);
+      await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+      return jsonResp({ ok: true, ...r });
+    }
+
     // POST /research {q, ns?, hours?} - the in-worker deep research agent.
     if (path === '/research' && req.method === 'POST') {
       if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'research_not_configured', detail: 'Set ANTHROPIC_API_KEY as a Worker secret.' }, 501);
       let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
       const q = String(b.q || '').trim().slice(0, 400);
       if (!q) return jsonResp({ error: 'q_required', detail: 'Send {q:"your research question"}.' }, 400);
-      const ns = nsClean(b.ns || '') || '';
+      const ns = String(b.ns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
       const hours = Math.min(parseInt(b.hours, 10) || 336, 720);
       try {
         const out = await researchRun(env, ctx, q, ns, hours);
@@ -4205,6 +4331,8 @@ async function handleScheduled(env) {
   // Paid-political advertising disclosures (opposition watch). Reddit's own
   // transparency feed; Meta Ad Library and Google political-ads land here too.
   try { await archiveItems(env, 'oppads', await socialRedditPoliticalAds()); } catch (e) {}
+  // Meta direct: own campaign performance + Ad Library opposition sweep (6-hourly).
+  try { await metaCron(env); } catch (e) {}
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));

@@ -74,8 +74,20 @@ transparency bundle (public, daily), keeps the Australian rows and loads
 `oppads_gadv` (advertiser lifetime AUD), `oppads_gweek` (weekly AUD spend)
 and `oppads_gad` (creatives with targeting); re-runs are url-deduped. The
 cron sweeps Reddit's own disclosure feed (r/RedditPoliticalAds, AU-filtered)
-into kind `oppads` every tick. Meta Ad Library joins once the operator's
-Facebook identity verification is done. Map node: `x_oppads`.
+into kind `oppads` every tick. Map node: `x_oppads`.
+
+## Meta, direct (no third party)
+
+Worker secrets `META_TOKEN` (Business System User token, ads_read +
+read_insights) and text var `META_AD_ACCOUNTS` (`act_123:mca,act_456:aep`)
+turn on `metaInsights()`: campaign-level daily rows (spend, reach, clicks,
+CTR/CPC/CPM, leads, CPL) into archive kind `campaign`, src `meta`, deduped
+per campaign-day. Optional `META_USER_TOKEN` (an ID-verified user's token,
+~60-day expiry) turns on `metaAdLibrary()`: AU political/issue ads matching
+each `CLIENT_ISSUES` label into kind `oppads`, src `meta`, with funder,
+spend band and snapshot URL. `metaCron()` runs both at most 6-hourly;
+GET `/meta/status` (read) and POST `/meta/sync {since,until}` (full) for
+inspection and history backfill (chunk by month).
 
 ## Access roles
 

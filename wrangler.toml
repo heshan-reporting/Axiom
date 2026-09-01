@@ -67,6 +67,11 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   AXIOM_KEYS        (per-person keys with roles, JSON on one line:
 #                      {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
 #                      role "read" may only hit read routes; writes return 403)
+#   META_TOKEN        (Meta Business System User token: ads_read + read_insights;
+#                      pulls campaign-level daily insights -> archive kind 'campaign')
+#   META_AD_ACCOUNTS  (plain text var: "act_123:mca,act_456:aep" - ad account -> client ns)
+#   META_USER_TOKEN   (ID-verified user token with ads_read for the Ad Library
+#                      opposition sweep -> archive kind 'oppads'; expires ~60 days)
 #   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)
 #   GUARDIAN_KEY      (Guardian API, optional)
 #   TVFY_KEY          (They Vote For You, optional)
