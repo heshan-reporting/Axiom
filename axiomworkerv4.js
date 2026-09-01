@@ -1566,6 +1566,33 @@ async function socialReddit(tag) {
   return posts;
 }
 
+/* Reddit's own political-ads transparency feed (r/RedditPoliticalAds): every
+ * political ad Reddit runs is disclosed there as a post. Mostly US; the AU
+ * filter keeps only what touches Australian politics. Archived as kind
+ * 'oppads' (opposition/paid-political advertising) beside the Meta and
+ * Google sweeps. */
+const OPPADS_AU = /australia|australian|\bnsw\b|victoria|queensland|tasmania|canberra|\balp\b|\blabor\b|liberal party|the greens|one nation|teal|albanese|ley\b|littleproud|hanson|pocock|minerals council|fuel tax|gas industry|housing australia/i;
+async function socialRedditPoliticalAds() {
+  const out = [];
+  try {
+    const r = await fetch('https://api.reddit.com/r/RedditPoliticalAds/new?limit=100&raw_json=1',
+      { headers: { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' }, signal: abortAfter(6000) });
+    if (!r.ok) return out;
+    const d = await r.json();
+    ((d && d.data && d.data.children) || []).forEach((c) => {
+      const p = c && c.data; if (!p) return;
+      const text = (p.title || '') + (p.selftext ? ' - ' + p.selftext : '');
+      if (!OPPADS_AU.test(text)) return;
+      out.push({
+        src: 'reddit_ads', title: stripHtml(p.title || '').slice(0, 300), body: stripHtml(p.selftext || '').slice(0, 2000),
+        url: 'https://www.reddit.com' + (p.permalink || ''), author: p.author || '',
+        ts: (p.created_utc || 0) * 1000, meta: { platform: 'reddit', disclosed: true },
+      });
+    });
+  } catch (e) {}
+  return out;
+}
+
 async function socialBsky(tag) {
   const posts = [];
   try {
@@ -4175,6 +4202,9 @@ async function handleScheduled(env) {
       ts: Date.parse(p.date) || 0, meta: { tag: 'auspol', ups: p.ups },
     })));
   } catch (e) {}
+  // Paid-political advertising disclosures (opposition watch). Reddit's own
+  // transparency feed; Meta Ad Library and Google political-ads land here too.
+  try { await archiveItems(env, 'oppads', await socialRedditPoliticalAds()); } catch (e) {}
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));

@@ -66,6 +66,17 @@ kind `research` and logged to `mind_runs`. In-app: the Deep Research panel
 on the Analyst view (query + client scope, staged progress, rendered
 dossier, source list, Save to the Mind as kind `research`).
 
+## Opposition ad monitoring (paid political persuasion)
+
+Kinds `oppads*` in the archive hold disclosed political advertising.
+`python3 tools/oppads.py all --key KEY` streams Google's political-ads
+transparency bundle (public, daily), keeps the Australian rows and loads
+`oppads_gadv` (advertiser lifetime AUD), `oppads_gweek` (weekly AUD spend)
+and `oppads_gad` (creatives with targeting); re-runs are url-deduped. The
+cron sweeps Reddit's own disclosure feed (r/RedditPoliticalAds, AU-filtered)
+into kind `oppads` every tick. Meta Ad Library joins once the operator's
+Facebook identity verification is done. Map node: `x_oppads`.
+
 ## Access roles
 
 Two optional worker secrets. `AXIOM_ACCESS_KEY` is a single full-access key.

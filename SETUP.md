@@ -234,6 +234,14 @@ python3 tools/backfill.py polls --csv polls.csv --key KEY
 
 Re-runs are safe — every row is deduplicated by URL.
 
+**Opposition ads** (who is paying to shape which debate — Google's public
+political-ads data, Australian rows only, ~5 min):
+
+```bash
+python3 tools/oppads.py all --key KEY            # download + extract + load
+python3 tools/oppads.py report --in oppads-google-au.json   # read it
+```
+
 **Reviewed vault notes → the Mind:**
 
 ```bash
