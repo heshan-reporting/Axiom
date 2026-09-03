@@ -1686,6 +1686,49 @@ async function metaAdLibrary(env) {
   }
   return out;
 }
+/* Comment sentiment for audience replies (colloquial, unlike the headline
+ * lexicon in TONE_POS/TONE_NEG). -1 hostile, 1 supportive, 0 neutral. */
+const CMT_POS = /\b(agree|well said|spot on|100 ?%|thank you|thanks|love (this|it)|great|good on (you|them|ya)|exactly|so true|support(ed|ing)?|keep (it )?up|finally|about time|legend|onya|well done|fair enough|makes sense)\b|\+1|<3/i;
+const CMT_NEG = /\b(lies?|lying|liar|rubbish|garbage|\bbs\b|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds)\b/i;
+function commentTone(t) { const s = String(t || ''); if (CMT_NEG.test(s)) return -1; if (CMT_POS.test(s)) return 1; return 0; }
+/** Sweep comments on the posts behind each account's recent ads (needs a
+ * token with pages_read_engagement + pages_read_user_content on the pages).
+ * One row per comment, kind 'comments', deduped on comment id; the author's
+ * name is deliberately not stored - the text and its tone are the signal. */
+async function metaComments(env, perAccount = 40) {
+  if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured' };
+  const accts = metaAccounts(env);
+  if (!accts.length) return { ok: false, error: 'no_ad_accounts' };
+  const out = { ok: true, posts: 0, rows: 0, errors: [] };
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+  for (const a of accts) {
+    try {
+      const filt = encodeURIComponent(JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED'] }]));
+      const ads = await metaGet(META_API + '/' + a.acct + '/ads?fields=id,name,campaign{name},creative{effective_object_story_id}&filtering=' + filt + '&limit=200' + tok);
+      const posts = new Map();
+      (ads.data || []).forEach(ad => {
+        const sid = ad.creative && ad.creative.effective_object_story_id;
+        if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, campaign: (ad.campaign && ad.campaign.name) || '' });
+      });
+      let n = 0;
+      for (const [sid, ctx] of posts) {
+        if (n++ >= perAccount) break;
+        try {
+          const c = await metaGet(META_API + '/' + sid + '/comments?fields=id,message,created_time,like_count,comment_count&order=reverse_chronological&limit=100' + tok);
+          const rows = (c.data || []).filter(x => x.message && x.message.trim()).map(x => ({
+            src: 'meta', title: 'Comment on "' + String(ctx.ad).slice(0, 80) + '"', body: String(x.message).slice(0, 2000),
+            url: 'x:comment:meta:' + x.id, author: '', tone: commentTone(x.message),
+            ts: Date.parse(x.created_time || '') || Date.now(),
+            meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: ctx.campaign, ad: ctx.ad, post_id: sid, likes: x.like_count || 0, replies: x.comment_count || 0, tone: commentTone(x.message) },
+          }));
+          out.posts++;
+          for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'comments', rows.slice(i, i + 150));
+        } catch (e) { out.errors.push(sid + ': ' + String(e.message || e).slice(0, 100)); if (out.errors.length > 20) break; }
+      }
+    } catch (e) { out.errors.push(a.acct + ': ' + String(e.message || e).slice(0, 120)); }
+  }
+  return out;
+}
 /** Cron hook: both Meta feeds, at most every 6 hours. */
 async function metaCron(env) {
   if (!env.META_TOKEN && !env.META_USER_TOKEN) return;
@@ -1695,6 +1738,7 @@ async function metaCron(env) {
   const r = {};
   try { r.insights = await metaInsights(env); } catch (e) { r.insights = { error: String(e).slice(0, 100) }; }
   try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 100) }; }
+  try { r.comments = await metaComments(env); } catch (e) { r.comments = { error: String(e).slice(0, 100) }; }
   await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
 }
 
@@ -3266,7 +3310,10 @@ export default {
       const until = /^\d{4}-\d{2}-\d{2}$/.test(String(b.until || '')) ? b.until : '';
       const r = {};
       try { r.insights = await metaInsights(env, since, until); } catch (e) { r.insights = { error: String(e).slice(0, 120) }; }
-      if (!b.insightsOnly) { try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 120) }; } }
+      if (!b.insightsOnly) {
+        try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 120) }; }
+        try { r.comments = await metaComments(env, Math.min(parseInt(b.postsPerAccount, 10) || 40, 200)); } catch (e) { r.comments = { error: String(e).slice(0, 120) }; }
+      }
       await kvPut(env.AXIOM_KV, 'meta_last_sync', String(Date.now()), 86400);
       await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
       return jsonResp({ ok: true, ...r });

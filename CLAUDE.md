@@ -88,6 +88,21 @@ and loaded with `tools/archive-push.py rows.json --key KEY` (url-deduped,
 re-runs safe). The worker's Meta sync (`metaInsights`) keeps Meta current
 without a third party. Map node: `o_campaign`.
 
+## Social engagement and audience comments
+
+Beside `campaign` sit four more archive kinds: `engagement` (Meta campaign-
+day reactions/comments/shares/saves/video views), `adcreative` (each ad's
+copy plus lifetime engagement), `social_post` (organic Facebook/Instagram/
+LinkedIn post performance) and `comments` (comment text with `tone` -1/0/1
+from a colloquial lexicon; author names are never stored). Pull via the
+Supermetrics MCP (Meta Ads for ads; Facebook Insights, Instagram Insights
+and LinkedIn Pages for organic - those expose comment text as
+`post_comment_text`, `media_comment_text`, `share_comment`), convert with
+`tools/supermetrics2social.py <dataset>=<file> ...` and load with
+`tools/archive-push.py`. The worker's `metaComments()` sweeps comments on
+the posts behind each account's ads every 6h (needs pages_read_engagement
++ pages_read_user_content on the System User token).
+
 ## Meta, direct (no third party)
 
 Worker secrets `META_TOKEN` (Business System User token, ads_read +
