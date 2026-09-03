@@ -1689,7 +1689,7 @@ async function metaAdLibrary(env) {
 /* Comment sentiment for audience replies (colloquial, unlike the headline
  * lexicon in TONE_POS/TONE_NEG). -1 hostile, 1 supportive, 0 neutral. */
 const CMT_POS = /\b(agree|well said|spot on|100 ?%|thank you|thanks|love (this|it)|great|good on (you|them|ya)|exactly|so true|support(ed|ing)?|keep (it )?up|finally|about time|legend|onya|well done|fair enough|makes sense)\b|\+1|<3/i;
-const CMT_NEG = /\b(lies?|lying|liar|rubbish|garbage|\bbs\b|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds)\b/i;
+const CMT_NEG = /\b(lies?|lying|liar|rubbish|garbage|\bbs\b|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds|dishonest|disinformation|misinformation|lobby(ists?)?|at our expense|pay(ing)? (more|their|five|ten|double)|should be paying|billionaires?|pretend(ing)?|con job|another discount|tax the|rip(ping)? (us|off)|handouts?|subsid(y|ies|ised))\b/i;
 function commentTone(t) { const s = String(t || ''); if (CMT_NEG.test(s)) return -1; if (CMT_POS.test(s)) return 1; return 0; }
 /** Sweep comments on the posts behind each account's recent ads (needs a
  * token with pages_read_engagement + pages_read_user_content on the pages).

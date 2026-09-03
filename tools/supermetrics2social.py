@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover - fallback if run from elsewhere
         return ids, (rows[1:] if rows else [])
 
 CMT_POS = re.compile(r"\b(agree|well said|spot on|100 ?%|thank you|thanks|love (this|it)|great|good on (you|them|ya)|exactly|so true|support(ed|ing)?|keep (it )?up|finally|about time|legend|onya|well done|fair enough|makes sense)\b|\+1|<3", re.I)
-CMT_NEG = re.compile(r"\b(lies?|lying|liar|rubbish|garbage|bs|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds)\b", re.I)
+CMT_NEG = re.compile(r"\b(lies?|lying|liar|rubbish|garbage|bs|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds|dishonest|disinformation|misinformation|lobby(ists?)?|at our expense|pay(ing)? (more|their|five|ten|double)|should be paying|billionaires?|pretend(ing)?|con job|another discount|tax the|rip(ping)? (us|off)|handouts?|subsid(y|ies|ised))\b", re.I)
 def tone(t):
     s = str(t or '')
     return -1 if CMT_NEG.search(s) else (1 if CMT_POS.search(s) else 0)
@@ -129,7 +129,7 @@ def fb_comment(path):
         if not txt: continue
         pid = g(r, 'post_ID'); when = (g(r, 'post_comment_date') or '') + ' ' + (g(r, 'post_comment_time') or '')
         out.append({'src': 'facebook', 'title': 'Comment on: ' + str(g(r, 'post_message') or pid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
-            'url': 'x:comment:facebook:%s:%s' % (pid, abs(hash(txt + when)) % 10**10), 'ts': ts(when.strip()),
+            'url': 'x:comment:facebook:%s:%s' % (pid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when.strip()),
             'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'post_message')), 'platform': 'facebook', 'post_id': pid, 'tone': tone(txt)}})
     return out
 
@@ -152,7 +152,7 @@ def ig_comment(path):
         if not txt: continue
         mid = g(r, 'media_id'); when = (g(r, 'media_comment_date') or '') + ' ' + (g(r, 'media_comment_time') or '')
         out.append({'src': 'instagram', 'title': 'Comment on: ' + str(g(r, 'media_caption') or mid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
-            'url': 'x:comment:instagram:%s:%s' % (mid, abs(hash(txt + when)) % 10**10), 'ts': ts(when.strip()),
+            'url': 'x:comment:instagram:%s:%s' % (mid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when.strip()),
             'meta': {'ns': ns_for(g(r, 'username'), g(r, 'media_caption')), 'platform': 'instagram', 'media_id': mid, 'permalink': g(r, 'media_permalink'), 'tone': tone(txt)}})
     return out
 
@@ -175,7 +175,7 @@ def li_comment(path):
         if not txt: continue
         sid = g(r, 'share_id'); when = g(r, 'share_comment_date') or ''
         out.append({'src': 'linkedin', 'title': 'Comment on: ' + str(g(r, 'share_title') or sid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
-            'url': 'x:comment:linkedin:%s:%s' % (sid, abs(hash(txt + when)) % 10**10), 'ts': ts(when),
+            'url': 'x:comment:linkedin:%s:%s' % (sid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when),
             'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'share_title')), 'platform': 'linkedin', 'share_id': sid, 'tone': tone(txt)}})
     return out
 
