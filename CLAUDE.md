@@ -76,6 +76,18 @@ and `oppads_gad` (creatives with targeting); re-runs are url-deduped. The
 cron sweeps Reddit's own disclosure feed (r/RedditPoliticalAds, AU-filtered)
 into kind `oppads` every tick. Map node: `x_oppads`.
 
+## Campaign performance (the feedback loop)
+
+Archive kind `campaign` holds one row per campaign per day across Meta,
+LinkedIn, Google Ads, Reddit, Snapchat (and Pinterest/TikTok when pulled),
+`meta.ns` tagging the owning client (account-name rules in
+`tools/supermetrics2rows.py`). History is pulled through the Supermetrics
+MCP in this session (query per platform, results saved as tool-result
+files), converted with `tools/supermetrics2rows.py <platform>=<file> ...`
+and loaded with `tools/archive-push.py rows.json --key KEY` (url-deduped,
+re-runs safe). The worker's Meta sync (`metaInsights`) keeps Meta current
+without a third party. Map node: `o_campaign`.
+
 ## Meta, direct (no third party)
 
 Worker secrets `META_TOKEN` (Business System User token, ads_read +
