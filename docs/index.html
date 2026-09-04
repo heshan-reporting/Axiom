@@ -813,6 +813,8 @@ body.kiosk .kprog{display:block}
 .aud-strip{grid-template-columns:repeat(5,1fr)}
 .aud-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .aud-cbox{position:relative;height:220px}.aud-cbox.tall{height:260px}
+.aud-notice{padding:18px 20px;border:1px solid rgba(232,192,140,.35);border-radius:14px;background:rgba(232,192,140,.07);font-size:13.5px;line-height:1.6;color:var(--t1)}
+.aud-notice b{color:#E8C08C}.aud-notice code{font-family:var(--fm);font-size:11.5px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
 .aud-mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-family:var(--fm);font-size:10.5px;color:var(--t2)}
 .aud-mini b{color:var(--t1);font-weight:600}
 .aud-table{overflow-x:auto}
@@ -3259,8 +3261,17 @@ function audN(n){n=+n||0;return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?Math.round(
 function audMoney(n){n=+n||0;return n>=1e6?'$'+(n/1e6).toFixed(2)+'M':'$'+Math.round(n).toLocaleString();}
 function audStat(k,v,s,col){return '<div class="sen-stat"><div class="k">'+k+'</div><div class="v"'+(col?' style="color:'+col+'"':'')+'>'+v+'</div><div class="s">'+s+'</div></div>';}
 function audDay(d){const t=Date.parse(d);return isNaN(t)?String(d||''):new Date(t).toLocaleDateString('en-AU',{day:'numeric',month:'short'});}
-function audEmpty(msg){return '<div class="empty" style="grid-column:1/-1">'+esc(msg)+'</div>';}
-function audNo(){return aud.err?('Audience data needs the archive: '+aud.err):'Nothing archived for this scope yet. Load campaign and social rows with tools/archive-push.py, or widen the date range.';}
+function audEmpty(msg){return '<div class="aud-notice" style="grid-column:1/-1">'+msg+'</div>';}
+function audNo(){
+  const e=String(aud.err||'');
+  if(!e)return '<b>No rows in this scope.</b> Set the client to <i>All clients</i> and the range to <i>All history</i>. If it is still empty, the archive has no campaign or social rows yet - load them with <code>tools/archive-push.py</code>.';
+  if(/not_found|404/i.test(e))return '<b>The worker needs updating.</b> The Cloudflare worker that is live does not have the <code>/perf</code> routes this view reads. Cloudflare &rarr; Workers &amp; Pages &rarr; newsaus &rarr; Edit code &rarr; select all, delete, paste the latest <code>axiomworkerv4.js</code> &rarr; Deploy, then reload this page.';
+  if(/unauthorized|401/i.test(e))return '<b>No access key.</b> Open Settings &rarr; Access key, paste your key, save, then reload.';
+  if(/read_only|403/i.test(e))return '<b>Read-only key.</b> Viewing works with any key; if you see this, the key was rejected for reading - check Settings &rarr; Access key.';
+  if(/mind_unbound/i.test(e))return '<b>Database not bound.</b> Cloudflare &rarr; newsaus &rarr; Settings &rarr; Bindings must include the D1 database as <code>MIND_DB</code>.';
+  if(/Failed to fetch|NetworkError|Set the Worker URL/i.test(e))return '<b>Cannot reach the worker.</b> Check Settings &rarr; Worker URL (<code>https://newsaus.heshan-998.workers.dev</code>) and your connection.';
+  return '<b>The worker returned an error:</b> <code>'+esc(e)+'</code> - send this line to Claude.';
+}
 /* Ads */
 function audRenderAds(){
   const d=aud.data.ads,strip=$('aud-ads-strip'),camps=$('aud-camps'),pl=$('aud-plat-list');
