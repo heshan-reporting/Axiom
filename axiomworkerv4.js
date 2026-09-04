@@ -2287,7 +2287,7 @@ export default {
     const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET')
       || (path.startsWith('/perf/') && req.method === 'GET');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
-      || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/')
+      || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/');
     const auth = axAuth(req, env);
     if (gated && auth.enforced) {
@@ -2943,6 +2943,38 @@ export default {
         const tot = await env.MIND_DB.prepare('SELECT COUNT(*) c FROM arc_items WHERE kind=?').bind(kind).first();
         return jsonResp({ ok: true, added: n, kind, total: (tot && tot.c) || 0 });
       } catch (e) { return jsonResp({ ok: false, error: 'add_failed', detail: String(e && e.message || e).slice(0, 200) }, 500); }
+    }
+
+    // POST /archive/selftest - prove writes persist in the database this worker
+    // is actually bound to. Writes a canary row through the same helper the
+    // loaders use, reads it straight back, and reports what the table holds.
+    // Full-role only. Answers "did the rows land elsewhere, or not at all".
+    if (path === '/archive/selftest') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      const out = { ok: true, at: new Date().toISOString() };
+      try {
+        await ensureArchive(env);
+        const t = Date.now();
+        const curl = 'x:selftest:' + t;
+        out.canaryWritten = await archiveItems(env, 'selftest', [{ src: 'axiom', title: 'archive selftest', body: 'canary', url: curl, ts: t, meta: { ns: 'cmm' } }], true);
+        const back = await env.MIND_DB.prepare("SELECT id, ts FROM arc_items WHERE kind='selftest' AND url=?").bind(curl).first();
+        out.canaryReadBack = back ? { id: back.id, ts: back.ts } : null;
+        out.writesPersist = !!back;
+        const k = await env.MIND_DB.prepare('SELECT kind, COUNT(*) c FROM arc_items GROUP BY kind ORDER BY c DESC').all();
+        out.byKind = {}; (k.results || []).forEach(r => { out.byKind[r.kind] = r.c; });
+        out.table = await env.MIND_DB.prepare('SELECT COUNT(*) rows, MIN(id) minId, MAX(id) maxId, MIN(ts) oldest, MAX(ts) newest FROM arc_items').first();
+        out.audience = {};
+        for (const kk of ['campaign', 'engagement', 'adcreative', 'social_post', 'comments']) {
+          const c = await env.MIND_DB.prepare('SELECT COUNT(*) c, MAX(ts) newest FROM arc_items WHERE kind=?').bind(kk).first();
+          out.audience[kk] = { rows: (c && c.c) || 0, newest: (c && c.newest) || null };
+        }
+        // tidy: canaries older than an hour have served their purpose
+        await env.MIND_DB.prepare("DELETE FROM arc_items WHERE kind='selftest' AND ts<?").bind(t - 3600000).run();
+        return jsonResp(out);
+      } catch (e) {
+        out.ok = false; out.error = 'selftest_failed'; out.detail = String((e && e.message) || e).slice(0, 300);
+        return jsonResp(out, 500);
+      }
     }
 
     // GET /archive/search?q=&kind=&src=&days=&limit=  - query the permanent store

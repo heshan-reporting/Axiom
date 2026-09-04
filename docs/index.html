@@ -815,6 +815,8 @@ body.kiosk .kprog{display:block}
 .aud-cbox{position:relative;height:220px}.aud-cbox.tall{height:260px}
 .aud-notice{padding:18px 20px;border:1px solid rgba(232,192,140,.35);border-radius:14px;background:rgba(232,192,140,.07);font-size:13.5px;line-height:1.6;color:var(--t1)}
 .aud-notice b{color:#E8C08C}.aud-notice code{font-family:var(--fm);font-size:11.5px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
+.aud-diagwrap{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.aud-diagbox{flex:1 1 100%;max-height:280px;overflow:auto;margin:4px 0 0;padding:12px 14px;border:1px solid var(--ln);border-radius:10px;background:rgba(0,0,0,.28);font-family:var(--fm);font-size:11px;line-height:1.55;color:var(--t1);white-space:pre-wrap;word-break:break-word}
 .aud-mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-family:var(--fm);font-size:10.5px;color:var(--t2)}
 .aud-mini b{color:var(--t1);font-weight:600}
 .aud-table{overflow-x:auto}
@@ -3277,14 +3279,14 @@ function audNo(){
     if(total===0){
       const present=bk?Object.keys(bk).filter(k=>bk[k]>0).sort().join(', '):'unknown';
       return '<b>The archive at <code>'+esc(worker)+'</code> holds 0 <i>'+kind+'</i> rows.</b> Kinds present: '+esc(present)+'. '
-        +'The push did not land in this worker\'s database. On your Mac run<br><code>cd ~/Axiom &amp;&amp; python3 tools/archive-push.py '+(aud.tab==='ads'?'campaign-rows.json':'social-rows.json')+' --key $AXIOM_KEY --worker '+esc(worker)+'</code><br>'
-        +'then reload. If it prints "pushed" but this still says 0, the worker that is live is bound to a different D1 database than before (Cloudflare &rarr; newsaus &rarr; Settings &rarr; Bindings &rarr; MIND_DB).';
+        +'The push did not land in this worker\'s database. On your Mac run<br><code>cd ~/Axiom &amp;&amp; python3 tools/archive-push.py '+(aud.tab==='ads'?'campaign-rows.json':'social-rows.json')+' --key $AXIOM_KEY</code><br>'
+        +'The loader now reads the archive back and says whether the rows landed. '+audDiagBtn();
     }
     if(total>0){
       const span=have&&have.oldest&&have.newest?' spanning '+audDay(new Date(+have.oldest).toISOString())+' to '+audDay(new Date(+have.newest).toISOString()):'';
       const fixable=aud.ns||aud.days<730;
       return '<b>No rows for '+scope+'.</b> The archive holds '+total.toLocaleString()+' <i>'+kind+'</i> rows'+span+(have&&have.clients?' across '+have.clients+' client tag'+(have.clients>1?'s':''):'')+'. '
-        +(fixable?'Set the client to <i>All clients</i> and the range to <i>All history</i>.':'<b>That should not happen - send this line to Claude:</b> <code>'+esc(JSON.stringify({tab:aud.tab,ns:aud.ns,days:aud.days,have}))+'</code>');
+        +(fixable?'Set the client to <i>All clients</i> and the range to <i>All history</i>.':'<b>That should not happen - send this line to Claude:</b> <code>'+esc(JSON.stringify({tab:aud.tab,ns:aud.ns,days:aud.days,have}))+'</code> '+audDiagBtn());
     }
     return '<b>No rows in this scope.</b> Set the client to <i>All clients</i> and the range to <i>All history</i>. If it is still empty, the archive has no '+kind+' rows yet - load them with <code>tools/archive-push.py</code>'+(aud.stats&&aud.stats.error?' (archive stats unavailable: '+esc(aud.stats.error)+')':'')+'.';
   }
@@ -3294,6 +3296,39 @@ function audNo(){
   if(/mind_unbound/i.test(e))return '<b>Database not bound.</b> Cloudflare &rarr; newsaus &rarr; Settings &rarr; Bindings must include the D1 database as <code>MIND_DB</code>.';
   if(/Failed to fetch|NetworkError|Set the Worker URL/i.test(e))return '<b>Cannot reach the worker.</b> Check Settings &rarr; Worker URL (<code>https://newsaus.heshan-998.workers.dev</code>) and your connection.';
   return '<b>The worker returned an error:</b> <code>'+esc(e)+'</code> - send this line to Claude.';
+}
+/* Archive diagnostic: writes a canary row through the worker and reads it back,
+   so an empty panel can prove whether writes persist and what the table holds. */
+function audDiagBtn(){
+  return '<div class="aud-diagwrap"><button class="btn sm" onclick="audDiag(event)">Run archive diagnostic</button>'
+    +'<button class="btn sm ghost" id="aud-diag-copy-'+aud.tab+'" onclick="audDiagCopy(event)" hidden>Copy result</button>'
+    +'<pre class="aud-diagbox" id="aud-diag-'+aud.tab+'" hidden></pre></div>';
+}
+function audDiagBox(){return $('aud-diag-'+aud.tab);}
+async function audDiag(ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  const box=audDiagBox(),cp=$('aud-diag-copy-'+aud.tab);
+  if(box){box.hidden=false;box.textContent='Running the diagnostic...';}
+  try{
+    const r=await fetch(csBase()+'/archive/selftest',{method:'POST',headers:axHeaders()});
+    const d=await r.json();aud.diag=d;
+    let head;
+    if(d.error==='not_found'||r.status===404)head='This worker does not have the diagnostic yet. Paste the latest axiomworkerv4.js into Cloudflare and Deploy, then try again.';
+    else if(!d.ok)head='The worker could not write to its database: '+(d.detail||d.error||('HTTP '+r.status))+'\nThat is the real fault. Send this to Claude.';
+    else if(!d.writesPersist)head='Writes are NOT persisting: the canary row was written and could not be read back. Send this to Claude.';
+    else{
+      const a=d.audience||{},camp=(a.campaign||{}).rows||0,cm=(a.comments||{}).rows||0;
+      head=(camp||cm)?'Writes persist, and the archive does hold your rows ('+camp+' campaign, '+cm+' comments). Reload the page.'
+        :'Writes persist in this database, but none of the campaign or comment rows are here. The pushes went to a different worker or were never sent. Re-run the loader and read its last line.';
+    }
+    if(box)box.textContent=head+'\n\n'+JSON.stringify(d,null,1);
+    if(cp)cp.hidden=false;
+  }catch(e){if(box)box.textContent='Diagnostic could not reach the worker: '+(e.message||e);}
+}
+function audDiagCopy(ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  const box=audDiagBox();if(!box)return;
+  navigator.clipboard.writeText(box.textContent).then(()=>toast('Diagnostic copied'),()=>toast('Copy failed',true));
 }
 /* Ads */
 function audRenderAds(){
