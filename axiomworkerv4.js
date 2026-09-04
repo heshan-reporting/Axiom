@@ -37,6 +37,11 @@
  * |                               states) for demographic grounding.        |
  * |  POST /clickup               Create a ClickUp task from a flagged story |
  * |                               (CLICKUP_TOKEN + CLICKUP_LIST_ID secrets).|
+ * |  GET  /perf/ads|social|comments?ns=&days=  Audience view aggregates  |
+ * |                               from archive kinds campaign/engagement/  |
+ * |                               adcreative/social_post/comments (read).  |
+ * |  POST /perf/analyse {ns,days} Claude sentiment/theme analysis of the   |
+ * |                               recent comments (full role).             |
  * |  GET  /meta/status            Meta direct: configured accounts + last  |
  * |  POST /meta/sync {since,until} sync. Campaign daily insights -> kind   |
  * |                               'campaign'; Ad Library AU political ads  |
@@ -2273,10 +2278,11 @@ export default {
     // /archive/stats stays public by design: aggregate counts only, so the map
     // shows presence of knowledge without revealing any of it.
     const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load', '/meta/status'];
-    const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET');
+    const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET')
+      || (path.startsWith('/perf/') && req.method === 'GET');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path.startsWith('/sentinel/')
-      || path === '/research' || path.startsWith('/meta/');
+      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/');
     const auth = axAuth(req, env);
     if (gated && auth.enforced) {
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
@@ -2956,6 +2962,88 @@ export default {
     }
 
     // GET /archive/stats - totals by kind + last-7-day counts by source (map fuel)
+    // -- Audience: ads / social / comments aggregates straight from the archive
+    //    GET /perf/ads|social|comments?ns=&days=   POST /perf/analyse {ns,days}
+    if (path.startsWith('/perf/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      const pns = (reqUrl.searchParams.get('ns') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+      const pdays = Math.min(parseInt(reqUrl.searchParams.get('days') || '90', 10) || 90, 730);
+      const psince = Date.now() - pdays * 86400000;
+      const nsW = pns ? " AND json_extract(meta,'$.ns')=?" : '';
+      const nsB = pns ? [pns] : [];
+      const M = (k) => "SUM(COALESCE(json_extract(meta,'$." + k + "'),0))";
+      try {
+        await ensureArchive(env);
+        const db = env.MIND_DB;
+        if (path === '/perf/ads') {
+          const base = "FROM arc_items WHERE kind='campaign' AND ts>?" + nsW;
+          const r = await db.batch([
+            db.prepare('SELECT src platform, COUNT(*) days, ' + M('spend') + ' spend, ' + M('impressions') + ' impressions, ' + M('clicks') + ' clicks, ' + M('leads') + ' leads ' + base + ' GROUP BY src ORDER BY spend DESC').bind(psince, ...nsB),
+            db.prepare("SELECT json_extract(meta,'$.day') d, " + M('spend') + ' spend, ' + M('impressions') + ' impressions, ' + M('leads') + ' leads, ' + M('clicks') + ' clicks ' + base + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
+            db.prepare("SELECT json_extract(meta,'$.ns') ns, " + M('spend') + ' spend, ' + M('leads') + ' leads, ' + M('impressions') + ' impressions ' + base + ' GROUP BY ns ORDER BY spend DESC').bind(psince, ...nsB),
+            db.prepare("SELECT json_extract(meta,'$.campaign') campaign, src platform, json_extract(meta,'$.ns') ns, COUNT(*) days, " + M('spend') + ' spend, ' + M('impressions') + ' impressions, ' + M('clicks') + ' clicks, ' + M('leads') + ' leads, MAX(ts) last ' + base + ' GROUP BY campaign, src ORDER BY spend DESC LIMIT 20').bind(psince, ...nsB),
+          ]);
+          return jsonResp({ ok: true, ns: pns, days: pdays, byPlatform: r[0].results || [], byDay: r[1].results || [], byClient: r[2].results || [], topCampaigns: r[3].results || [] });
+        }
+        if (path === '/perf/social') {
+          const eb = "FROM arc_items WHERE kind='engagement' AND ts>?" + nsW;
+          const r = await db.batch([
+            db.prepare("SELECT json_extract(meta,'$.day') d, " + M('reactions') + ' reactions, ' + M('comments') + ' comments, ' + M('shares') + ' shares, ' + M('saves') + ' saves, ' + M('impressions') + ' impressions, ' + M('video_views_3s') + ' video_views ' + eb + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
+            db.prepare("SELECT title, url, src, ts, json_extract(meta,'$.reactions') reactions, json_extract(meta,'$.comments') comments, json_extract(meta,'$.shares') shares, json_extract(meta,'$.views') views, json_extract(meta,'$.ns') ns FROM arc_items WHERE kind='social_post' AND ts>?" + nsW + ' ORDER BY COALESCE(json_extract(meta,\'$.comments\'),0)+COALESCE(json_extract(meta,\'$.shares\'),0) DESC LIMIT 12').bind(psince, ...nsB),
+            db.prepare("SELECT title, body, src, json_extract(meta,'$.engagement_rate') rate, json_extract(meta,'$.impressions') impressions, json_extract(meta,'$.reactions') reactions, json_extract(meta,'$.comments') comments, json_extract(meta,'$.shares') shares, json_extract(meta,'$.spend') spend, json_extract(meta,'$.ns') ns FROM arc_items WHERE kind='adcreative' AND COALESCE(json_extract(meta,'$.impressions'),0)>=20000" + nsW + ' ORDER BY rate DESC LIMIT 10').bind(...nsB),
+            db.prepare("SELECT json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ns') ns, " + M('reactions') + ' reactions, ' + M('comments') + ' comments, ' + M('shares') + ' shares, ' + M('impressions') + ' impressions ' + eb + ' GROUP BY campaign ORDER BY comments DESC LIMIT 12').bind(psince, ...nsB),
+          ]);
+          return jsonResp({ ok: true, ns: pns, days: pdays, byDay: r[0].results || [], topPosts: r[1].results || [], topAds: r[2].results || [], topCampaigns: r[3].results || [] });
+        }
+        if (path === '/perf/comments') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '120', 10) || 120, 400);
+          const cb = "FROM arc_items WHERE kind='comments' AND ts>?" + nsW;
+          const r = await db.batch([
+            db.prepare('SELECT COALESCE(tone,0) tone, COUNT(*) c ' + cb + ' GROUP BY tone').bind(psince, ...nsB),
+            db.prepare("SELECT date(ts/1000,'unixepoch') d, SUM(tone=-1) hostile, SUM(COALESCE(tone,0)=0) neutral, SUM(tone=1) supportive " + cb + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
+            db.prepare("SELECT title, body, COALESCE(tone,0) tone, ts, src, json_extract(meta,'$.post_id') post_id, json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ns') ns " + cb + ' ORDER BY ts DESC LIMIT ?').bind(psince, ...nsB, lim),
+            db.prepare("SELECT MIN(title) title, json_extract(meta,'$.post_id') post_id, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) last " + cb + ' GROUP BY post_id ORDER BY n DESC LIMIT 10').bind(psince, ...nsB),
+            db.prepare('SELECT body ' + cb + ' AND tone=-1 ORDER BY ts DESC LIMIT 1500').bind(psince, ...nsB),
+          ]);
+          const tones = { hostile: 0, neutral: 0, supportive: 0 };
+          (r[0].results || []).forEach(x => { tones[x.tone < 0 ? 'hostile' : x.tone > 0 ? 'supportive' : 'neutral'] = x.c; });
+          const LINES = [
+            ['Subsidy / handout framing', /subsid|handout|freebie|welfare for/i],
+            ['Mining lobby / dishonest', /lobby|dishonest|disinformation|misinformation|propaganda|spin\b/i],
+            ['Pay more / at our expense', /at our expense|should be paying|pay more|pay their|billions|tax the/i],
+            ['The $50m cap only hits big miners', /50 ?m|cap\b|turnover|big miners|only (the )?big/i],
+            ['Not about farmers', /farmer.*(not|isn|aren|doesn)|not (about|affect) farmers|doesn.?t affect farmers/i],
+            ['Climate / pollution', /climate|pollut|emission|fossil|renewable/i],
+            ['Foreign owned / profits offshore', /foreign|offshore|overseas|multinational/i],
+          ];
+          const attack = LINES.map(([label, rx]) => ({ line: label, n: (r[4].results || []).filter(x => rx.test(x.body || '')).length })).filter(x => x.n).sort((a, b) => b.n - a.n);
+          return jsonResp({ ok: true, ns: pns, days: pdays, tones, byDay: r[1].results || [], latest: r[2].results || [], byPost: r[3].results || [], attack, hostileSample: (r[4].results || []).length });
+        }
+        if (path === '/perf/analyse' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          let b = {}; try { b = await req.json(); } catch (e) {}
+          const ans = String(b.ns || pns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
+          const adays = Math.min(parseInt(b.days, 10) || pdays, 730);
+          const rows = (await db.prepare("SELECT body, COALESCE(tone,0) tone, title, ts FROM arc_items WHERE kind='comments' AND ts>?" + (ans ? " AND json_extract(meta,'$.ns')=?" : '') + ' ORDER BY ts DESC LIMIT 300').bind(Date.now() - adays * 86400000, ...(ans ? [ans] : [])).all()).results || [];
+          if (!rows.length) return jsonResp({ ok: false, error: 'no_comments', detail: 'No comments in range.' }, 404);
+          const corpus = rows.map((x, i) => '[' + (i + 1) + '] (' + (x.tone < 0 ? 'hostile' : x.tone > 0 ? 'supportive' : 'neutral') + ', on: ' + String(x.title || '').replace(/^Comment on: ?/, '').slice(0, 60) + ') ' + String(x.body || '').replace(/\s+/g, ' ').slice(0, 280)).join('\n');
+          const sys = 'You are the audience-insight analyst for an Australian communications agency running political and advocacy campaigns' + (ans ? ' (client namespace ' + ans + ')' : '') + '. '
+            + 'You are given recent public comments left on the client\'s ads and page posts. Analyse them and reply with ONLY a JSON object: '
+            + '{"summary":"3-4 sentences on the overall mood and what is driving it","themes":[{"theme":"short label","stance":"hostile|supportive|mixed|question","share":"rough % of comments","quotes":["verbatim short example","another"],"read":"one sentence on what this theme means for the campaign"}],'
+            + '"risks":["specific risk, one sentence"],"opportunities":["specific opening, one sentence"],"responses":[{"to":"theme label","line":"a ready-to-use reply or rebuttal in the client voice, under 220 characters"}]}. '
+            + '5-8 themes, ordered by share. Quote comments verbatim (trim, never invent). Australian English. No preamble.';
+          try {
+            const txt = await claudeMsg(env, sys, 'COMMENTS (' + rows.length + ', newest first):\n' + corpus.slice(0, 60000), 2600, 60000);
+            let out = null; try { out = JSON.parse((txt.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) {}
+            if (!out || !out.summary) return jsonResp({ ok: false, error: 'analysis_unparsed', raw: txt.slice(0, 2000) }, 502);
+            try { await env.MIND_DB.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ans || 'cmm', 'sentiment', String(rows.length) + ' comments / ' + adays + 'd', Date.now()).run(); } catch (e) {}
+            return jsonResp({ ok: true, ns: ans, days: adays, comments: rows.length, analysis: out });
+          } catch (e) { return jsonResp({ ok: false, error: 'analysis_failed', detail: String(e && e.message || e).slice(0, 200) }, 502); }
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'perf_failed', detail: String(e).slice(0, 200) }, 500); }
+    }
+
     if (path === '/archive/stats') {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Create the D1 database and uncomment the MIND_DB binding in wrangler.toml.' }, 501);
       try {

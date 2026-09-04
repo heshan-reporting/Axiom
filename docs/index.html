@@ -805,6 +805,51 @@ body.kiosk .kprog{display:block}
 .sen-acts .done-tag{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#7BC89B;font-weight:600}
 .sen-acts .done-tag b{width:7px;height:7px;border-radius:50%;background:#57B98C;display:inline-block}
 @media(max-width:900px){.sen-strip{grid-template-columns:1fr 1fr}}
+/* audience view */
+.aud-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.aud-tabs{margin:0}
+.aud-ctl{display:flex;gap:8px}
+.aud-ctl .sel{padding:7px 11px;font-size:11.5px}
+.aud-strip{grid-template-columns:repeat(5,1fr)}
+.aud-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.aud-cbox{position:relative;height:220px}.aud-cbox.tall{height:260px}
+.aud-mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-family:var(--fm);font-size:10.5px;color:var(--t2)}
+.aud-mini b{color:var(--t1);font-weight:600}
+.aud-table{overflow-x:auto}
+.aud-table table{width:100%;border-collapse:collapse;font-size:12px;min-width:520px}
+.aud-table th{font-family:var(--fm);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line2)}
+.aud-table td{padding:8px 8px;border-bottom:1px solid var(--line);color:var(--t2);font-variant-numeric:tabular-nums;vertical-align:top}
+.aud-table td:first-child{color:var(--t1)}
+.aud-table tr:last-child td{border-bottom:none}
+.aud-list{display:flex;flex-direction:column;gap:10px}
+.aud-item{padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:rgba(226,238,255,.03)}
+.aud-item .t{font-size:12.5px;color:var(--t1);line-height:1.45}
+.aud-item .t a{color:inherit;text-decoration:none}.aud-item .t a:hover{text-decoration:underline}
+.aud-item .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
+.aud-item .m b{color:var(--t2);font-weight:600}
+.aud-item .copy{font-size:12px;color:var(--t2);font-style:italic;margin-top:4px;line-height:1.45}
+.aud-attack{display:flex;flex-direction:column;gap:9px;padding-top:4px}
+.aud-bar{display:grid;grid-template-columns:1fr 60px;align-items:center;gap:10px;font-size:12px;color:var(--t1)}
+.aud-bar .lab{display:flex;justify-content:space-between;gap:10px}
+.aud-bar .trk{height:6px;border-radius:3px;background:rgba(255,255,255,.07);grid-column:1/-1;overflow:hidden}
+.aud-bar .trk i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#B04A46,#E05A54)}
+.aud-cm{display:flex;flex-direction:column;gap:8px;max-height:560px;overflow-y:auto;padding-right:4px}
+.aud-c{padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(226,238,255,.025);border-left-width:3px}
+.aud-c.h{border-left-color:#E05A54}.aud-c.s{border-left-color:#22D993}.aud-c.n{border-left-color:rgba(255,255,255,.18)}
+.aud-c .b{font-size:12.5px;color:var(--t1);line-height:1.5;white-space:pre-wrap}
+.aud-c .m{font-family:var(--fm);font-size:9.5px;color:var(--t3);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.tn{display:inline-block;font-family:var(--fm);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;padding:2px 7px;border-radius:99px;border:1px solid}
+.tn.h{color:#F0908B;border-color:rgba(224,90,84,.4)}.tn.s{color:#7EE0AE;border-color:rgba(34,217,147,.4)}.tn.n{color:var(--t2);border-color:rgba(255,255,255,.18)}
+.aud-ai h4{font-family:var(--fm);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin:14px 0 6px}
+.aud-ai .sum{font-size:13.5px;color:var(--t1);line-height:1.6}
+.aud-theme{padding:10px 12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:rgba(226,238,255,.03)}
+.aud-theme .th{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--t1);font-weight:600}
+.aud-theme .th span{font-family:var(--fm);font-size:10px;color:var(--t3);font-weight:500}
+.aud-theme .q{font-size:12px;color:var(--t2);font-style:italic;margin-top:5px;line-height:1.45}
+.aud-theme .r{font-size:12px;color:var(--t2);margin-top:5px}
+.aud-resp{font-size:12.5px;color:var(--t1);padding:9px 12px;border-left:2px solid #6FE3F0;margin-bottom:7px;line-height:1.5}
+.aud-resp small{display:block;font-family:var(--fm);font-size:9.5px;color:var(--t3);margin-bottom:3px;letter-spacing:.1em;text-transform:uppercase}
+@media(max-width:900px){.aud-grid{grid-template-columns:1fr}.aud-strip{grid-template-columns:1fr 1fr}}
 
 /* knowledge map — map-of-science network */
 .kmwrap{position:relative;height:calc(100dvh - var(--mast, 64px) - 150px);min-height:420px;border:1px solid rgba(255,255,255,.1);
@@ -1347,6 +1392,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">Analyst</span></button>
         <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Briefing</span></button>
         <button class="rbtn" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rtip">Sentinel</span><span class="rdot" id="sen-dot" hidden></span></button>
+        <button class="rbtn" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span class="rtip">Audience</span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -1683,6 +1729,58 @@ body.kiosk .kprog{display:block}
         </div>
       </section>
 
+      <!-- ═══ AUDIENCE — ads · social · comments ═══ -->
+      <section class="view" id="v-audience">
+        <div class="aud-head">
+          <div class="modes aud-tabs" id="aud-tabs">
+            <button class="mode on" data-t="ads" onclick="audTab('ads')">Ads</button>
+            <button class="mode" data-t="social" onclick="audTab('social')">Social media</button>
+            <button class="mode" data-t="comments" onclick="audTab('comments')">Comments &amp; sentiment</button>
+          </div>
+          <div class="aud-ctl">
+            <select class="sel" id="aud-ns" onchange="aud.ns=this.value;audLoad()"><option value="">All clients</option></select>
+            <select class="sel" id="aud-days" onchange="aud.days=+this.value;audLoad()">
+              <option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">6 months</option><option value="365">12 months</option><option value="730">All history</option>
+            </select>
+          </div>
+        </div>
+        <div class="aud-pane" id="aud-ads">
+          <div class="sen-strip aud-strip" id="aud-ads-strip"></div>
+          <div class="aud-grid">
+            <div class="panel"><div class="phead"><div class="ptitle">Spend &amp; leads by day</div><span class="ptag" id="aud-ads-tag">CAMPAIGN PERFORMANCE</span></div><div class="aud-cbox"><canvas id="aud-spend"></canvas></div></div>
+            <div class="panel"><div class="phead"><div class="ptitle">By platform</div></div><div class="aud-cbox"><canvas id="aud-plat"></canvas></div><div class="aud-mini" id="aud-plat-list"></div></div>
+          </div>
+          <div class="panel"><div class="phead"><div class="ptitle">Top campaigns</div><span class="ptag">BY SPEND · WITH CPL</span></div><div class="aud-table" id="aud-camps"></div></div>
+        </div>
+        <div class="aud-pane" id="aud-social" hidden>
+          <div class="sen-strip aud-strip" id="aud-social-strip"></div>
+          <div class="panel"><div class="phead"><div class="ptitle">Engagement by day</div><span class="ptag">REACTIONS · COMMENTS · SHARES</span></div><div class="aud-cbox tall"><canvas id="aud-eng"></canvas></div></div>
+          <div class="aud-grid">
+            <div class="panel"><div class="phead"><div class="ptitle">Posts people talked about</div><span class="ptag">ORGANIC · BY COMMENTS + SHARES</span></div><div class="aud-list" id="aud-posts"></div></div>
+            <div class="panel"><div class="phead"><div class="ptitle">Ad copy that earned engagement</div><span class="ptag">REACTIONS+COMMENTS+SHARES PER IMPRESSION</span></div><div class="aud-list" id="aud-copy"></div></div>
+          </div>
+        </div>
+        <div class="aud-pane" id="aud-comments" hidden>
+          <div class="sen-strip aud-strip" id="aud-cm-strip"></div>
+          <div class="aud-grid">
+            <div class="panel"><div class="phead"><div class="ptitle">Sentiment by day</div><span class="ptag">HOSTILE · NEUTRAL · SUPPORTIVE</span></div><div class="aud-cbox"><canvas id="aud-tone"></canvas></div></div>
+            <div class="panel"><div class="phead"><div class="ptitle">Lines of attack</div><span class="ptag">WHAT HOSTILE COMMENTS ARGUE</span></div><div class="aud-attack" id="aud-attack"></div></div>
+          </div>
+          <div class="panel">
+            <div class="phead"><div class="ptitle">Sentiment analysis</div>
+              <button class="btn" style="padding:8px 16px;font-size:11.5px" id="aud-ai-btn" onclick="audAnalyse()">Analyse with Claude</button></div>
+            <div class="note" style="margin:0 0 10px">Reads the recent comments in this scope and returns the themes, their share, verbatim examples, the risks, the openings, and a ready reply for each theme.</div>
+            <div id="aud-ai" class="empty">Not run yet for this scope.</div>
+          </div>
+          <div class="aud-grid">
+            <div class="panel"><div class="phead"><div class="ptitle">Where the heat is</div><span class="ptag">COMMENTS PER POST</span></div><div class="aud-table" id="aud-bypost"></div></div>
+            <div class="panel"><div class="phead"><div class="ptitle">Latest comments</div>
+              <select class="sel" id="aud-cm-filter" onchange="audRenderComments()" style="padding:6px 10px;font-size:11px"><option value="all">All</option><option value="-1">Hostile</option><option value="1">Supportive</option><option value="0">Neutral</option></select></div>
+              <div class="aud-cm" id="aud-cm"></div></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ═══ SENTINEL ═══ -->
       <section class="view" id="v-sentinel">
         <div class="sen-strip" id="sen-strip"></div>
@@ -1984,6 +2082,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span>AI</span></button>
   <button class="tab" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Brief</span></button>
   <button class="tab" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span>Alerts</span></button>
+  <button class="tab" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span>Audience</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
@@ -2212,7 +2311,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2222,6 +2321,7 @@ function go(v){
   if(v==='radar')renderIssueStrip();
   if(v==='brief')renderBriefMem();
   if(v==='sentinel'){renderSentinel();senLoad();}
+  if(v==='audience')audInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */
@@ -3128,6 +3228,128 @@ async function rsSave(){
 }
 function rsCopy(){if(!rsState.report)return;
   navigator.clipboard.writeText(rsState.report).then(()=>toast('Dossier copied'),()=>toast('Copy failed',true));}
+
+/* ── AUDIENCE — ads · social · comments & sentiment (archive aggregates via /perf/*) ── */
+const aud={tab:'ads',ns:'',days:90,data:{},charts:{},err:null,busy:false};
+function audInit(){
+  const s=$('aud-ns');
+  if(s&&s.options.length===1)CC_CLIENTS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.short||c.name;s.appendChild(o);});
+  audLoad();
+}
+function audTab(t){
+  aud.tab=t;
+  document.querySelectorAll('#aud-tabs .mode').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  ['ads','social','comments'].forEach(k=>{const p=$('aud-'+k);if(p)p.hidden=k!==t;});
+  audLoad();
+}
+async function audLoad(){
+  try{aud.data[aud.tab]=await api('/perf/'+aud.tab+'?ns='+encodeURIComponent(aud.ns)+'&days='+aud.days);aud.err=null;}
+  catch(e){aud.data[aud.tab]=null;aud.err=e.message||String(e);}
+  audRender();
+}
+function audRender(){if(aud.tab==='ads')audRenderAds();else if(aud.tab==='social')audRenderSocial();else audRenderComments();}
+const AUD_AX={responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},
+  scales:{x:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8A95A8',maxTicksLimit:8,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#8A95A8',font:{size:10}}}}};
+function audChart(key,id,cfg){
+  if(typeof Chart==='undefined')return;const cv=$(id);if(!cv)return;
+  if(aud.charts[key]){try{aud.charts[key].destroy();}catch(e){}}
+  aud.charts[key]=new Chart(cv,cfg);
+}
+function audN(n){n=+n||0;return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?Math.round(n/1e3)+'K':n>=1e3?(n/1e3).toFixed(1)+'K':String(Math.round(n));}
+function audMoney(n){n=+n||0;return n>=1e6?'$'+(n/1e6).toFixed(2)+'M':'$'+Math.round(n).toLocaleString();}
+function audStat(k,v,s,col){return '<div class="sen-stat"><div class="k">'+k+'</div><div class="v"'+(col?' style="color:'+col+'"':'')+'>'+v+'</div><div class="s">'+s+'</div></div>';}
+function audDay(d){const t=Date.parse(d);return isNaN(t)?String(d||''):new Date(t).toLocaleDateString('en-AU',{day:'numeric',month:'short'});}
+function audEmpty(msg){return '<div class="empty" style="grid-column:1/-1">'+esc(msg)+'</div>';}
+function audNo(){return aud.err?('Audience data needs the archive: '+aud.err):'Nothing archived for this scope yet. Load campaign and social rows with tools/archive-push.py, or widen the date range.';}
+/* Ads */
+function audRenderAds(){
+  const d=aud.data.ads,strip=$('aud-ads-strip'),camps=$('aud-camps'),pl=$('aud-plat-list');
+  if(!d||!(d.byPlatform||[]).length){strip.innerHTML=audEmpty(audNo());camps.innerHTML='';pl.innerHTML='';return;}
+  const T=d.byPlatform.reduce((a,p)=>({spend:a.spend+(+p.spend||0),imp:a.imp+(+p.impressions||0),clicks:a.clicks+(+p.clicks||0),leads:a.leads+(+p.leads||0)}),{spend:0,imp:0,clicks:0,leads:0});
+  strip.innerHTML=audStat('Spend',audMoney(T.spend),d.byPlatform.length+' platform'+(d.byPlatform.length>1?'s':'')+' · '+aud.days+'d')
+    +audStat('Impressions',audN(T.imp),'CPM '+(T.imp?'$'+(T.spend/T.imp*1000).toFixed(2):'—'))
+    +audStat('Clicks',audN(T.clicks),'CTR '+(T.imp?(T.clicks/T.imp*100).toFixed(2)+'%':'—')+' · CPC '+(T.clicks?'$'+(T.spend/T.clicks).toFixed(2):'—'))
+    +audStat('Leads / conversions',audN(T.leads),'CPL '+(T.leads?'$'+(T.spend/T.leads).toFixed(2):'—'),T.leads?'#7EE0AE':'')
+    +audStat('Campaigns',(d.topCampaigns||[]).length+'<i>+</i>',(d.byClient||[]).map(c=>(c.ns||'?')+' '+audMoney(c.spend)).slice(0,3).join(' · '));
+  const days=d.byDay||[];
+  audChart('spend','aud-spend',{type:'bar',data:{labels:days.map(x=>audDay(x.d)),datasets:[
+    {type:'line',label:'Spend',data:days.map(x=>+x.spend||0),borderColor:'#6FE3F0',backgroundColor:'rgba(111,227,240,.12)',fill:true,tension:.3,pointRadius:0,borderWidth:2,yAxisID:'y'},
+    {type:'bar',label:'Leads',data:days.map(x=>+x.leads||0),backgroundColor:'rgba(126,224,174,.55)',borderRadius:2,yAxisID:'y1'}]},
+    options:Object.assign({},AUD_AX,{plugins:{legend:{display:true,labels:{color:'#8A95A8',boxWidth:10,font:{size:10}}}},scales:Object.assign({},AUD_AX.scales,{y1:{position:'right',grid:{display:false},ticks:{color:'#7EE0AE',font:{size:10}}}})})});
+  const P=d.byPlatform;
+  audChart('plat','aud-plat',{type:'bar',data:{labels:P.map(p=>p.platform),datasets:[{data:P.map(p=>+p.spend||0),backgroundColor:['#5B8CFF','#6FE3F0','#9C86D8','#E8C08C','#7EE0AE','#F0908B','#B8C4D6'],borderRadius:4}]},options:Object.assign({},AUD_AX,{indexAxis:'y'})});
+  pl.innerHTML=P.map(p=>'<span><b>'+esc(p.platform)+'</b> '+audMoney(p.spend)+' · '+audN(p.leads)+' leads'+(+p.leads?' · CPL $'+((+p.spend)/(+p.leads)).toFixed(2):'')+'</span>').join('');
+  camps.innerHTML='<table><tr><th>Campaign</th><th>Platform</th><th>Client</th><th>Spend</th><th>Impr.</th><th>Clicks</th><th>Leads</th><th>CPL</th><th>Days</th></tr>'+
+    (d.topCampaigns||[]).map(c=>'<tr><td>'+esc(String(c.campaign||'').slice(0,70))+'</td><td>'+esc(c.platform||'')+'</td><td>'+esc(c.ns||'')+'</td><td>'+audMoney(c.spend)+'</td><td>'+audN(c.impressions)+'</td><td>'+audN(c.clicks)+'</td><td>'+audN(c.leads)+'</td><td>'+(+c.leads?'$'+((+c.spend)/(+c.leads)).toFixed(2):'—')+'</td><td>'+(c.days||0)+'</td></tr>').join('')+'</table>';
+}
+/* Social */
+function audRenderSocial(){
+  const d=aud.data.social,strip=$('aud-social-strip'),posts=$('aud-posts'),copy=$('aud-copy');
+  if(!d||(!(d.byDay||[]).length&&!(d.topPosts||[]).length)){strip.innerHTML=audEmpty(audNo());posts.innerHTML='';copy.innerHTML='';return;}
+  const days=d.byDay||[];
+  const T=days.reduce((a,x)=>({r:a.r+(+x.reactions||0),c:a.c+(+x.comments||0),s:a.s+(+x.shares||0),sv:a.sv+(+x.saves||0),i:a.i+(+x.impressions||0),v:a.v+(+x.video_views||0)}),{r:0,c:0,s:0,sv:0,i:0,v:0});
+  const er=T.i?((T.r+T.c+T.s)/T.i*100):0;
+  strip.innerHTML=audStat('Reactions',audN(T.r),'on paid posts · '+aud.days+'d')+audStat('Comments',audN(T.c),(T.r?(T.c/T.r*100).toFixed(0):'—')+' per 100 reactions')
+    +audStat('Shares',audN(T.s),'amplification')+audStat('Saves',audN(T.sv),audN(T.v)+' video views')
+    +audStat('Engagement rate',er.toFixed(2)+'<i>%</i>','reactions+comments+shares ÷ impressions',er>1?'#7EE0AE':'');
+  audChart('eng','aud-eng',{type:'bar',data:{labels:days.map(x=>audDay(x.d)),datasets:[
+    {label:'Reactions',data:days.map(x=>+x.reactions||0),backgroundColor:'rgba(91,140,255,.75)',stack:'e'},
+    {label:'Comments',data:days.map(x=>+x.comments||0),backgroundColor:'rgba(232,192,140,.85)',stack:'e'},
+    {label:'Shares',data:days.map(x=>+x.shares||0),backgroundColor:'rgba(34,217,147,.75)',stack:'e'}]},
+    options:Object.assign({},AUD_AX,{plugins:{legend:{display:true,labels:{color:'#8A95A8',boxWidth:10,font:{size:10}}}},scales:{x:Object.assign({stacked:true},AUD_AX.scales.x),y:Object.assign({stacked:true},AUD_AX.scales.y)}})});
+  posts.innerHTML=(d.topPosts||[]).length?(d.topPosts||[]).map(p=>'<div class="aud-item"><div class="t">'+(/^https?:/.test(p.url||'')?'<a href="'+esc(p.url)+'" target="_blank" rel="noopener">'+esc(String(p.title||'').slice(0,160))+'</a>':esc(String(p.title||'').slice(0,160)))+'</div>'+
+    '<div class="m"><b>'+audN(p.reactions)+'</b> reactions <b>'+audN(p.comments)+'</b> comments <b>'+audN(p.shares)+'</b> shares <b>'+audN(p.views)+'</b> views <span>'+esc(p.src||'')+' · '+audDay(p.ts)+(p.ns?' · '+esc(p.ns):'')+'</span></div></div>').join('')
+    :'<div class="empty">No organic posts archived yet - connect Facebook, Instagram or LinkedIn page insights.</div>';
+  copy.innerHTML=(d.topAds||[]).length?(d.topAds||[]).map(a=>{const m=String(a.body||'').match(/^AD COPY: ([^\n]+)/);return '<div class="aud-item"><div class="t">'+esc(String(a.title||'').slice(0,120))+'</div>'+(m?'<div class="copy">"'+esc(m[1].slice(0,220))+(m[1].length>220?'…':'')+'"</div>':'')+
+    '<div class="m"><b>'+(+a.rate||0).toFixed(2)+'%</b> engagement <b>'+audN(a.impressions)+'</b> impr. <b>'+audN(a.reactions)+'</b> reactions <b>'+audN(a.comments)+'</b> comments <b>'+audN(a.shares)+'</b> shares'+(a.spend?' <span>'+audMoney(a.spend)+'</span>':'')+'</div></div>';}).join('')
+    :'<div class="empty">No ad creatives archived yet.</div>';
+}
+/* Comments & sentiment */
+function audRenderComments(){
+  const d=aud.data.comments,strip=$('aud-cm-strip'),att=$('aud-attack'),bp=$('aud-bypost'),list=$('aud-cm');
+  if(!d||!(d.latest||[]).length){strip.innerHTML=audEmpty(audNo());att.innerHTML='';bp.innerHTML='';list.innerHTML='';return;}
+  const t=d.tones||{},tot=(t.hostile||0)+(t.neutral||0)+(t.supportive||0);
+  const days=d.byDay||[];const recent=days.slice(-7),prev=days.slice(-14,-7);
+  const share=a=>{const h=a.reduce((s,x)=>s+(+x.hostile||0),0),n=a.reduce((s,x)=>s+(+x.hostile||0)+(+x.neutral||0)+(+x.supportive||0),0);return n?h/n*100:null;};
+  const hs=share(recent),ps=share(prev);
+  strip.innerHTML=audStat('Comments',audN(tot),aud.days+'d · '+(d.byPost||[]).length+' posts with comments')
+    +audStat('Hostile',(tot?(t.hostile/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.hostile)+' comments','#F0908B')
+    +audStat('Supportive',(tot?(t.supportive/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.supportive)+' comments','#7EE0AE')
+    +audStat('Neutral / questions',(tot?(t.neutral/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.neutral)+' comments')
+    +audStat('Hostility trend',hs==null?'—':(hs.toFixed(0)+'<i>%</i>'),ps==null||hs==null?'last 7 days':(hs-ps>=1?'▲ up from '+ps.toFixed(0)+'% the week before':hs-ps<=-1?'▼ down from '+ps.toFixed(0)+'%':'steady vs the week before'),hs!=null&&ps!=null&&hs-ps>=5?'#F0908B':'');
+  audChart('tone','aud-tone',{type:'bar',data:{labels:days.map(x=>audDay(x.d)),datasets:[
+    {label:'Hostile',data:days.map(x=>+x.hostile||0),backgroundColor:'rgba(224,90,84,.8)',stack:'t'},
+    {label:'Neutral',data:days.map(x=>+x.neutral||0),backgroundColor:'rgba(255,255,255,.22)',stack:'t'},
+    {label:'Supportive',data:days.map(x=>+x.supportive||0),backgroundColor:'rgba(34,217,147,.8)',stack:'t'}]},
+    options:Object.assign({},AUD_AX,{plugins:{legend:{display:true,labels:{color:'#8A95A8',boxWidth:10,font:{size:10}}}},scales:{x:Object.assign({stacked:true},AUD_AX.scales.x),y:Object.assign({stacked:true},AUD_AX.scales.y)}})});
+  const A=d.attack||[],mx=Math.max(1,...A.map(a=>a.n));
+  att.innerHTML=A.length?A.map(a=>'<div class="aud-bar"><div class="lab"><span>'+esc(a.line)+'</span><b>'+a.n+'</b></div><span></span><div class="trk"><i style="width:'+Math.round(a.n/mx*100)+'%"></i></div></div>').join('')+'<div class="note" style="margin-top:8px">Counted across '+(d.hostileSample||0)+' hostile comments in scope.</div>':'<div class="empty">No hostile comments in scope.</div>';
+  bp.innerHTML='<table><tr><th>Post</th><th>Comments</th><th>Hostile</th><th>Supportive</th><th>Last</th></tr>'+(d.byPost||[]).map(p=>'<tr><td>'+esc(String(p.title||'').replace(/^Comment on:? ?/,'').replace(/^"|"$/g,'').slice(0,80))+'</td><td>'+p.n+'</td><td style="color:'+(+p.hostile>0?'#F0908B':'inherit')+'">'+(p.hostile||0)+'</td><td style="color:'+(+p.supportive>0?'#7EE0AE':'inherit')+'">'+(p.supportive||0)+'</td><td>'+audDay(p.last)+'</td></tr>').join('')+'</table>';
+  const f=($('aud-cm-filter')&&$('aud-cm-filter').value)||'all';
+  const rows=(d.latest||[]).filter(c=>f==='all'||String(c.tone)===f);
+  list.innerHTML=rows.length?rows.map(c=>{const k=c.tone<0?'h':c.tone>0?'s':'n';return '<div class="aud-c '+k+'"><div class="b">'+esc(String(c.body||'').slice(0,600))+'</div><div class="m"><span class="tn '+k+'">'+(k==='h'?'hostile':k==='s'?'supportive':'neutral')+'</span><span>'+audDay(c.ts)+'</span><span>'+esc(String(c.title||'').replace(/^Comment on:? ?/,'').slice(0,70))+'</span><span>'+esc(c.src||'')+(c.ns?' · '+esc(c.ns):'')+'</span></div></div>';}).join('')
+    :'<div class="empty">No comments match this filter.</div>';
+}
+async function audAnalyse(){
+  const btn=$('aud-ai-btn'),out=$('aud-ai');if(aud.busy)return;aud.busy=true;
+  btn.disabled=true;btn.textContent='Reading comments…';out.className='';out.innerHTML='<div class="cc-thinking"><div class="cc-spin"></div>Claude is reading the recent comments in this scope and grouping them into themes…</div>';
+  try{
+    const r=await fetch(csBase()+'/perf/analyse?ns='+encodeURIComponent(aud.ns)+'&days='+aud.days,{method:'POST',headers:axHeaders(),body:JSON.stringify({ns:aud.ns,days:aud.days})});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===403)throw new Error('A full-access key is needed to run analysis.');
+    if(!r.ok||d.error)throw new Error(d.detail||d.error||('HTTP '+r.status));
+    const a=d.analysis||{};
+    out.className='aud-ai';
+    out.innerHTML='<div class="sum">'+esc(a.summary||'')+'</div>'+
+      '<h4>Themes · from '+(d.comments||0)+' comments</h4>'+(a.themes||[]).map(th=>'<div class="aud-theme"><div class="th"><div>'+esc(th.theme||'')+'</div><span>'+esc(th.stance||'')+' · '+esc(th.share||'')+'</span></div>'+
+        (th.quotes||[]).slice(0,2).map(q=>'<div class="q">"'+esc(q)+'"</div>').join('')+(th.read?'<div class="r">'+esc(th.read)+'</div>':'')+'</div>').join('')+
+      ((a.risks||[]).length?'<h4>Risks</h4><ul style="margin:0 0 6px 18px;font-size:12.5px;color:var(--t2)">'+(a.risks||[]).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+
+      ((a.opportunities||[]).length?'<h4>Openings</h4><ul style="margin:0 0 6px 18px;font-size:12.5px;color:var(--t2)">'+(a.opportunities||[]).map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+
+      ((a.responses||[]).length?'<h4>Ready replies</h4>'+(a.responses||[]).map(x=>'<div class="aud-resp"><small>'+esc(x.to||'')+'</small>'+esc(x.line||'')+'</div>').join(''):'');
+    arcLog('audience','assistant',('Sentiment analysis '+(aud.ns||'all')+': '+(a.summary||'')).slice(0,2000));
+  }catch(e){out.className='empty';out.textContent='Analysis: '+(e.message||e);}
+  aud.busy=false;btn.disabled=false;btn.textContent='Analyse with Claude';
+}
 
 /* ── COMMAND RENDERERS ── */
 function renderKpiStories(){
