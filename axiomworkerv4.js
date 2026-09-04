@@ -1862,10 +1862,14 @@ async function ensureArchive(env) {
   ARC_READY = true;
   return true;
 }
-async function archiveItems(env, kind, rows) {
+/** Insert up to 150 rows of one kind, deduped on (kind,url). Returns the number
+    of rows D1 actually wrote (falls back to the attempted count when the driver
+    reports no change counts). `strict` rethrows instead of swallowing errors so
+    bulk loaders hear about failures instead of a silent 0. */
+async function archiveItems(env, kind, rows, strict) {
   try {
     if (!rows || !rows.length) return 0;
-    if (!(await ensureArchive(env))) return 0;
+    if (!(await ensureArchive(env))) { if (strict) throw new Error('archive_unavailable'); return 0; }
     const now = Date.now();
     const stmt = env.MIND_DB.prepare(
       'INSERT INTO arc_items(kind,src,title,body,url,author,tone,meta,ts,seen) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(kind,url) DO NOTHING');
@@ -1880,9 +1884,10 @@ async function archiveItems(env, kind, rows) {
       r.meta ? JSON.stringify(r.meta).slice(0, 1500) : null,
       r.ts || now,
       now));
-    await env.MIND_DB.batch(batch);
-    return batch.length;
-  } catch (e) { return 0; }
+    const res = await env.MIND_DB.batch(batch);
+    const counted = Array.isArray(res) && res.some(r => r && r.meta && typeof r.meta.changes === 'number');
+    return counted ? res.reduce((a, r) => a + ((r && r.meta && r.meta.changes) || 0), 0) : batch.length;
+  } catch (e) { if (strict) throw e; return 0; }
 }
 /** Archive an /allnews snapshot (the JSON string buildAllNews returns). */
 async function arcNewsSnap(env, jsonStr) {
@@ -2931,9 +2936,12 @@ export default {
         const b = await req.json();
         const kind = (String(b.kind || 'hist').replace(/[^\w]/g, '').slice(0, 24)) || 'hist';
         const rows = Array.isArray(b.rows) ? b.rows : [];
-        const n = await archiveItems(env, kind, rows);
-        return jsonResp({ ok: true, added: n, kind });
-      } catch (e) { return jsonResp({ ok: false, error: 'add_failed', detail: String(e).slice(0, 140) }, 500); }
+        const n = await archiveItems(env, kind, rows, true);
+        // `added` is what D1 reports as written; `total` is the kind's row count
+        // read back afterwards so a loader can prove its rows landed.
+        const tot = await env.MIND_DB.prepare('SELECT COUNT(*) c FROM arc_items WHERE kind=?').bind(kind).first();
+        return jsonResp({ ok: true, added: n, kind, total: (tot && tot.c) || 0 });
+      } catch (e) { return jsonResp({ ok: false, error: 'add_failed', detail: String(e && e.message || e).slice(0, 200) }, 500); }
     }
 
     // GET /archive/search?q=&kind=&src=&days=&limit=  - query the permanent store
