@@ -2975,6 +2975,10 @@ export default {
       try {
         await ensureArchive(env);
         const db = env.MIND_DB;
+        // `have` tells the UI what the archive holds for this kind regardless of
+        // scope, so an empty panel can say "0 rows loaded" vs "none in range".
+        const HAVE = (k) => db.prepare("SELECT COUNT(*) total, MIN(ts) oldest, MAX(ts) newest, COUNT(DISTINCT json_extract(meta,'$.ns')) clients FROM arc_items WHERE kind='" + k + "'");
+        const have = (x) => Object.assign({ total: 0 }, ((x && x.results) || [])[0] || {});
         if (path === '/perf/ads') {
           const base = "FROM arc_items WHERE kind='campaign' AND ts>?" + nsW;
           const r = await db.batch([
@@ -2982,8 +2986,9 @@ export default {
             db.prepare("SELECT json_extract(meta,'$.day') d, " + M('spend') + ' spend, ' + M('impressions') + ' impressions, ' + M('leads') + ' leads, ' + M('clicks') + ' clicks ' + base + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
             db.prepare("SELECT json_extract(meta,'$.ns') ns, " + M('spend') + ' spend, ' + M('leads') + ' leads, ' + M('impressions') + ' impressions ' + base + ' GROUP BY ns ORDER BY spend DESC').bind(psince, ...nsB),
             db.prepare("SELECT json_extract(meta,'$.campaign') campaign, src platform, json_extract(meta,'$.ns') ns, COUNT(*) days, " + M('spend') + ' spend, ' + M('impressions') + ' impressions, ' + M('clicks') + ' clicks, ' + M('leads') + ' leads, MAX(ts) last ' + base + ' GROUP BY campaign, src ORDER BY spend DESC LIMIT 20').bind(psince, ...nsB),
+            HAVE('campaign'),
           ]);
-          return jsonResp({ ok: true, ns: pns, days: pdays, byPlatform: r[0].results || [], byDay: r[1].results || [], byClient: r[2].results || [], topCampaigns: r[3].results || [] });
+          return jsonResp({ ok: true, ns: pns, days: pdays, byPlatform: r[0].results || [], byDay: r[1].results || [], byClient: r[2].results || [], topCampaigns: r[3].results || [], have: have(r[4]) });
         }
         if (path === '/perf/social') {
           const eb = "FROM arc_items WHERE kind='engagement' AND ts>?" + nsW;
@@ -2992,8 +2997,9 @@ export default {
             db.prepare("SELECT title, url, src, ts, json_extract(meta,'$.reactions') reactions, json_extract(meta,'$.comments') comments, json_extract(meta,'$.shares') shares, json_extract(meta,'$.views') views, json_extract(meta,'$.ns') ns FROM arc_items WHERE kind='social_post' AND ts>?" + nsW + ' ORDER BY COALESCE(json_extract(meta,\'$.comments\'),0)+COALESCE(json_extract(meta,\'$.shares\'),0) DESC LIMIT 12').bind(psince, ...nsB),
             db.prepare("SELECT title, body, src, json_extract(meta,'$.engagement_rate') rate, json_extract(meta,'$.impressions') impressions, json_extract(meta,'$.reactions') reactions, json_extract(meta,'$.comments') comments, json_extract(meta,'$.shares') shares, json_extract(meta,'$.spend') spend, json_extract(meta,'$.ns') ns FROM arc_items WHERE kind='adcreative' AND COALESCE(json_extract(meta,'$.impressions'),0)>=20000" + nsW + ' ORDER BY rate DESC LIMIT 10').bind(...nsB),
             db.prepare("SELECT json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ns') ns, " + M('reactions') + ' reactions, ' + M('comments') + ' comments, ' + M('shares') + ' shares, ' + M('impressions') + ' impressions ' + eb + ' GROUP BY campaign ORDER BY comments DESC LIMIT 12').bind(psince, ...nsB),
+            HAVE('engagement'),
           ]);
-          return jsonResp({ ok: true, ns: pns, days: pdays, byDay: r[0].results || [], topPosts: r[1].results || [], topAds: r[2].results || [], topCampaigns: r[3].results || [] });
+          return jsonResp({ ok: true, ns: pns, days: pdays, byDay: r[0].results || [], topPosts: r[1].results || [], topAds: r[2].results || [], topCampaigns: r[3].results || [], have: have(r[4]) });
         }
         if (path === '/perf/comments') {
           const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '120', 10) || 120, 400);
@@ -3004,6 +3010,7 @@ export default {
             db.prepare("SELECT title, body, COALESCE(tone,0) tone, ts, src, json_extract(meta,'$.post_id') post_id, json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ns') ns " + cb + ' ORDER BY ts DESC LIMIT ?').bind(psince, ...nsB, lim),
             db.prepare("SELECT MIN(title) title, json_extract(meta,'$.post_id') post_id, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) last " + cb + ' GROUP BY post_id ORDER BY n DESC LIMIT 10').bind(psince, ...nsB),
             db.prepare('SELECT body ' + cb + ' AND tone=-1 ORDER BY ts DESC LIMIT 1500').bind(psince, ...nsB),
+            HAVE('comments'),
           ]);
           const tones = { hostile: 0, neutral: 0, supportive: 0 };
           (r[0].results || []).forEach(x => { tones[x.tone < 0 ? 'hostile' : x.tone > 0 ? 'supportive' : 'neutral'] = x.c; });
@@ -3017,7 +3024,7 @@ export default {
             ['Foreign owned / profits offshore', /foreign|offshore|overseas|multinational/i],
           ];
           const attack = LINES.map(([label, rx]) => ({ line: label, n: (r[4].results || []).filter(x => rx.test(x.body || '')).length })).filter(x => x.n).sort((a, b) => b.n - a.n);
-          return jsonResp({ ok: true, ns: pns, days: pdays, tones, byDay: r[1].results || [], latest: r[2].results || [], byPost: r[3].results || [], attack, hostileSample: (r[4].results || []).length });
+          return jsonResp({ ok: true, ns: pns, days: pdays, tones, byDay: r[1].results || [], latest: r[2].results || [], byPost: r[3].results || [], attack, hostileSample: (r[4].results || []).length, have: have(r[5]) });
         }
         if (path === '/perf/analyse' && req.method === 'POST') {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);

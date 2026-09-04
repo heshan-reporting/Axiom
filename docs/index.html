@@ -3247,8 +3247,13 @@ function audTab(t){
 async function audLoad(){
   try{aud.data[aud.tab]=await api('/perf/'+aud.tab+'?ns='+encodeURIComponent(aud.ns)+'&days='+aud.days);aud.err=null;}
   catch(e){aud.data[aud.tab]=null;aud.err=e.message||String(e);}
+  // empty panel: ask the public /archive/stats what the archive actually holds so the notice can say why
+  if(audIsEmpty()&&!aud.stats){try{aud.stats=await api('/archive/stats');}catch(e){aud.stats={error:e.message||String(e)};}}
   audRender();
 }
+const AUD_KIND={ads:'campaign',social:'engagement',comments:'comments'};
+function audIsEmpty(){const d=aud.data[aud.tab];if(!d)return true;
+  const k=aud.tab==='ads'?d.byPlatform:aud.tab==='social'?d.byDay:d.latest;return !(k||[]).length;}
 function audRender(){if(aud.tab==='ads')audRenderAds();else if(aud.tab==='social')audRenderSocial();else audRenderComments();}
 const AUD_AX={responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},
   scales:{x:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8A95A8',maxTicksLimit:8,font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#8A95A8',font:{size:10}}}}};
@@ -3264,7 +3269,25 @@ function audDay(d){const t=Date.parse(d);return isNaN(t)?String(d||''):new Date(
 function audEmpty(msg){return '<div class="aud-notice" style="grid-column:1/-1">'+msg+'</div>';}
 function audNo(){
   const e=String(aud.err||'');
-  if(!e)return '<b>No rows in this scope.</b> Set the client to <i>All clients</i> and the range to <i>All history</i>. If it is still empty, the archive has no campaign or social rows yet - load them with <code>tools/archive-push.py</code>.';
+  if(!e){
+    const kind=AUD_KIND[aud.tab],d=aud.data[aud.tab]||{},bk=(aud.stats&&aud.stats.byKind)||null,have=d.have||null;
+    const worker=(WORKER_URL||'').replace(/\/+$/,'');
+    const scope=(aud.ns?'client <i>'+esc(aud.ns)+'</i>':'<i>All clients</i>')+', last '+aud.days+' days';
+    const total=have?(+have.total||0):bk?(+bk[kind]||0):null;
+    if(total===0){
+      const present=bk?Object.keys(bk).filter(k=>bk[k]>0).sort().join(', '):'unknown';
+      return '<b>The archive at <code>'+esc(worker)+'</code> holds 0 <i>'+kind+'</i> rows.</b> Kinds present: '+esc(present)+'. '
+        +'The push did not land in this worker\'s database. On your Mac run<br><code>cd ~/Axiom &amp;&amp; python3 tools/archive-push.py '+(aud.tab==='ads'?'campaign-rows.json':'social-rows.json')+' --key $AXIOM_KEY --worker '+esc(worker)+'</code><br>'
+        +'then reload. If it prints "pushed" but this still says 0, the worker that is live is bound to a different D1 database than before (Cloudflare &rarr; newsaus &rarr; Settings &rarr; Bindings &rarr; MIND_DB).';
+    }
+    if(total>0){
+      const span=have&&have.oldest&&have.newest?' spanning '+audDay(new Date(+have.oldest).toISOString())+' to '+audDay(new Date(+have.newest).toISOString()):'';
+      const fixable=aud.ns||aud.days<730;
+      return '<b>No rows for '+scope+'.</b> The archive holds '+total.toLocaleString()+' <i>'+kind+'</i> rows'+span+(have&&have.clients?' across '+have.clients+' client tag'+(have.clients>1?'s':''):'')+'. '
+        +(fixable?'Set the client to <i>All clients</i> and the range to <i>All history</i>.':'<b>That should not happen - send this line to Claude:</b> <code>'+esc(JSON.stringify({tab:aud.tab,ns:aud.ns,days:aud.days,have}))+'</code>');
+    }
+    return '<b>No rows in this scope.</b> Set the client to <i>All clients</i> and the range to <i>All history</i>. If it is still empty, the archive has no '+kind+' rows yet - load them with <code>tools/archive-push.py</code>'+(aud.stats&&aud.stats.error?' (archive stats unavailable: '+esc(aud.stats.error)+')':'')+'.';
+  }
   if(/not_found|404/i.test(e))return '<b>The worker needs updating.</b> The Cloudflare worker that is live does not have the <code>/perf</code> routes this view reads. Cloudflare &rarr; Workers &amp; Pages &rarr; newsaus &rarr; Edit code &rarr; select all, delete, paste the latest <code>axiomworkerv4.js</code> &rarr; Deploy, then reload this page.';
   if(/unauthorized|401/i.test(e))return '<b>No access key.</b> Open Settings &rarr; Access key, paste your key, save, then reload.';
   if(/read_only|403/i.test(e))return '<b>Read-only key.</b> Viewing works with any key; if you see this, the key was rejected for reading - check Settings &rarr; Access key.';
