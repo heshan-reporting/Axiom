@@ -105,8 +105,13 @@ the posts behind each account's ads every 6h (needs pages_read_engagement
 
 ## The Audience view (Ads · Social · Comments & sentiment)
 
-In-app view `v-audience` with three tabs, a client-scope select and a
-date range. It reads aggregates the worker computes over the archive with
+In-app view `v-audience` with three tabs, a client-scope select, a date
+range, and a **Load data** button that pushes a prepared rows file
+(`campaign-rows.json`, `social-rows.json`) straight into the archive from
+the browser - same 150-row batches as the CLI, with progress and a verified
+count, so loading never needs a terminal. Empty panels diagnose themselves
+(what the archive holds, and a Run archive diagnostic button that calls
+`/archive/selftest`). It reads aggregates the worker computes over the archive with
 SQLite `json_extract`: GET `/perf/ads` (spend/impressions/clicks/leads by
 platform, day, client; top campaigns with CPL), `/perf/social` (engagement
 by day, most-discussed organic posts, ad copy ranked by engagement rate),
