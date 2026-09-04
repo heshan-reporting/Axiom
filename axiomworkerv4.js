@@ -2960,9 +2960,21 @@ export default {
         const back = await env.MIND_DB.prepare("SELECT id, ts FROM arc_items WHERE kind='selftest' AND url=?").bind(curl).first();
         out.canaryReadBack = back ? { id: back.id, ts: back.ts } : null;
         out.writesPersist = !!back;
-        const k = await env.MIND_DB.prepare('SELECT kind, COUNT(*) c FROM arc_items GROUP BY kind ORDER BY c DESC').all();
-        out.byKind = {}; (k.results || []).forEach(r => { out.byKind[r.kind] = r.c; });
-        out.table = await env.MIND_DB.prepare('SELECT COUNT(*) rows, MIN(id) minId, MAX(id) maxId, MIN(ts) oldest, MAX(ts) newest FROM arc_items').first();
+        // `seen` is insert time, so it dates the database itself: a table whose
+        // first write is days old cannot be the one an older load landed in.
+        const k = await env.MIND_DB.prepare('SELECT kind, COUNT(*) c, MIN(seen) firstSeen, MAX(seen) lastSeen FROM arc_items GROUP BY kind ORDER BY c DESC').all();
+        out.byKind = {}; out.timeline = [];
+        (k.results || []).forEach(r => {
+          out.byKind[r.kind] = r.c;
+          out.timeline.push({ kind: r.kind, rows: r.c, firstWritten: r.firstSeen ? new Date(r.firstSeen).toISOString() : null, lastWritten: r.lastSeen ? new Date(r.lastSeen).toISOString() : null });
+        });
+        out.table = await env.MIND_DB.prepare('SELECT COUNT(*) rows, MIN(id) minId, MAX(id) maxId, MIN(ts) oldest, MAX(ts) newest, MIN(seen) firstWrite, MAX(seen) lastWrite FROM arc_items').first();
+        if (out.table && out.table.firstWrite) out.databaseFirstWrite = new Date(out.table.firstWrite).toISOString();
+        try {
+          const sq = await env.MIND_DB.prepare("SELECT seq FROM sqlite_sequence WHERE name='arc_items'").first();
+          out.insertAttempts = sq ? sq.seq : null;
+        } catch (e) { out.insertAttempts = null; }
+        out.idNote = 'A deduped insert still consumes an id, so maxId counts insert attempts and is always far above the row count. Gaps are normal, not deletions.';
         out.audience = {};
         for (const kk of ['campaign', 'engagement', 'adcreative', 'social_post', 'comments']) {
           const c = await env.MIND_DB.prepare('SELECT COUNT(*) c, MAX(ts) newest FROM arc_items WHERE kind=?').bind(kk).first();

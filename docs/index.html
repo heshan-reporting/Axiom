@@ -3318,8 +3318,11 @@ async function audDiag(ev){
     else if(!d.writesPersist)head='Writes are NOT persisting: the canary row was written and could not be read back. Send this to Claude.';
     else{
       const a=d.audience||{},camp=(a.campaign||{}).rows||0,cm=(a.comments||{}).rows||0;
-      head=(camp||cm)?'Writes persist, and the archive does hold your rows ('+camp+' campaign, '+cm+' comments). Reload the page.'
-        :'Writes persist in this database, but none of the campaign or comment rows are here. The pushes went to a different worker or were never sent. Re-run the loader and read its last line.';
+      const fw=d.table&&d.table.firstWrite?+d.table.firstWrite:0;
+      const ageD=fw?Math.round((Date.now()-fw)/86400000):null;
+      if(camp||cm)head='Writes persist, and the archive does hold your rows ('+camp+' campaign, '+cm+' comments). Reload the page.';
+      else if(ageD!==null&&ageD<=21)head='Writes persist, but this database only started collecting '+ageD+' day'+(ageD===1?'':'s')+' ago (first write '+new Date(fw).toLocaleString()+'). It is newer than your load, so your rows are in the database this worker used to be bound to. Re-run the loader to fill this one, and check Cloudflare -> D1 for the older database if you want the earlier Mind and Sentinel history back.';
+      else head='Writes persist in this database and it has been collecting since '+(fw?new Date(fw).toLocaleDateString():'a while')+', but none of the campaign or comment rows are here. So the load never reached this worker. Re-run it - the loader now reads the archive back and will say whether the rows land.';
     }
     if(box)box.textContent=head+'\n\n'+JSON.stringify(d,null,1);
     if(cp)cp.hidden=false;
