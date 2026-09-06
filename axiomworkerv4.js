@@ -1701,6 +1701,19 @@ function commentTone(t) { const s = String(t || ''); if (CMT_NEG.test(s)) return
  * token with pages_read_engagement + pages_read_user_content on the pages).
  * One row per comment, kind 'comments', deduped on comment id; the author's
  * name is deliberately not stored - the text and its tone are the signal. */
+/** The distinct page posts behind an account's recent ads, each with the ad and
+ *  campaign that carried it. Shared by the comment and reaction sweeps. */
+async function metaAdPosts(env, acct) {
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+  const filt = encodeURIComponent(JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED'] }]));
+  const ads = await metaGet(META_API + '/' + acct + '/ads?fields=id,name,campaign{name},creative{effective_object_story_id}&filtering=' + filt + '&limit=200' + tok);
+  const posts = new Map();
+  (ads.data || []).forEach(ad => {
+    const sid = ad.creative && ad.creative.effective_object_story_id;
+    if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, campaign: (ad.campaign && ad.campaign.name) || '' });
+  });
+  return posts;
+}
 async function metaComments(env, perAccount = 40) {
   if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured' };
   const accts = metaAccounts(env);
@@ -1709,13 +1722,7 @@ async function metaComments(env, perAccount = 40) {
   const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
   for (const a of accts) {
     try {
-      const filt = encodeURIComponent(JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED'] }]));
-      const ads = await metaGet(META_API + '/' + a.acct + '/ads?fields=id,name,campaign{name},creative{effective_object_story_id}&filtering=' + filt + '&limit=200' + tok);
-      const posts = new Map();
-      (ads.data || []).forEach(ad => {
-        const sid = ad.creative && ad.creative.effective_object_story_id;
-        if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, campaign: (ad.campaign && ad.campaign.name) || '' });
-      });
+      const posts = await metaAdPosts(env, a.acct);
       let n = 0;
       for (const [sid, ctx] of posts) {
         if (n++ >= perAccount) break;
@@ -1735,7 +1742,58 @@ async function metaComments(env, perAccount = 40) {
   }
   return out;
 }
-/** Cron hook: both Meta feeds, at most every 6 hours. */
+/* Reaction mix on the posts behind the ads. On political advertising LIKE,
+ * LOVE and CARE read as agreement and ANGRY as hostility; HAHA is usually
+ * mockery, so it counts against. WOW and SAD are genuinely ambiguous - they
+ * are reported but kept out of the score. score = (like+love+care - angry -
+ * haha) / total, so +1 is unanimous agreement and -1 unanimous hostility. */
+const META_REACTIONS = ['LIKE', 'LOVE', 'CARE', 'WOW', 'HAHA', 'SAD', 'ANGRY'];
+function metaSummaryCount(x) { return (x && x.summary && Number(x.summary.total_count)) || 0; }
+/** One row per post per day, kind 'reactions', so the mix becomes a trend.
+ *  Re-running inside a day is a no-op (url carries the date). */
+async function metaReactions(env, perAccount = 40) {
+  if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured' };
+  const accts = metaAccounts(env);
+  if (!accts.length) return { ok: false, error: 'no_ad_accounts' };
+  const out = { ok: true, posts: 0, rows: 0, errors: [] };
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+  const day = new Date().toISOString().slice(0, 10);
+  const rfields = META_REACTIONS.map(t => 'reactions.type(' + t + ').limit(0).summary(1).as(' + t.toLowerCase() + ')').join(',');
+  for (const a of accts) {
+    try {
+      const posts = await metaAdPosts(env, a.acct);
+      const rows = [];
+      let n = 0;
+      for (const [sid, ctx] of posts) {
+        if (n++ >= perAccount) break;
+        try {
+          const p = await metaGet(META_API + '/' + sid + '?fields=message,permalink_url,created_time,shares,comments.limit(0).summary(1).as(cmt),' + rfields + tok);
+          const r = {}; let total = 0;
+          META_REACTIONS.forEach(t => { const v = metaSummaryCount(p[t.toLowerCase()]); r[t.toLowerCase()] = v; total += v; });
+          const comments = metaSummaryCount(p.cmt);
+          const shares = (p.shares && Number(p.shares.count)) || 0;
+          const agree = r.like + r.love + r.care, against = r.angry + r.haha;
+          const score = total ? Math.round(((agree - against) / total) * 1000) / 1000 : 0;
+          rows.push({
+            src: 'meta', title: 'Reactions on "' + String(ctx.ad).slice(0, 80) + '"',
+            body: total + ' reactions on ' + day + ': ' + r.like + ' like, ' + r.love + ' love, ' + r.care + ' care, ' + r.wow + ' wow, ' + r.haha + ' haha, ' + r.sad + ' sad, ' + r.angry + ' angry. '
+              + comments + ' comments, ' + shares + ' shares. Score ' + score.toFixed(3) + '. Post: ' + String(p.message || '').replace(/\s+/g, ' ').slice(0, 400),
+            url: 'x:reactions:meta:' + sid + ':' + day, author: '',
+            tone: against > agree ? -1 : agree > against * 4 ? 1 : 0,
+            ts: Date.now(),
+            meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: ctx.campaign, ad: ctx.ad, post_id: sid, day: day,
+              total: total, like: r.like, love: r.love, care: r.care, wow: r.wow, haha: r.haha, sad: r.sad, angry: r.angry,
+              agree: agree, against: against, score: score, comments: comments, shares: shares, permalink: p.permalink_url || '' },
+          });
+          out.posts++;
+        } catch (e) { out.errors.push(sid + ': ' + String(e.message || e).slice(0, 100)); if (out.errors.length > 20) break; }
+      }
+      for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'reactions', rows.slice(i, i + 150));
+    } catch (e) { out.errors.push(a.acct + ': ' + String(e.message || e).slice(0, 120)); }
+  }
+  return out;
+}
+/** Cron hook: every Meta feed, at most every 6 hours. */
 async function metaCron(env) {
   if (!env.META_TOKEN && !env.META_USER_TOKEN) return;
   const last = Number(await kvGet(env.AXIOM_KV, 'meta_last_sync') || 0);
@@ -1745,6 +1803,7 @@ async function metaCron(env) {
   try { r.insights = await metaInsights(env); } catch (e) { r.insights = { error: String(e).slice(0, 100) }; }
   try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 100) }; }
   try { r.comments = await metaComments(env); } catch (e) { r.comments = { error: String(e).slice(0, 100) }; }
+  try { r.reactions = await metaReactions(env); } catch (e) { r.reactions = { error: String(e).slice(0, 100) }; }
   await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
 }
 
@@ -3057,6 +3116,7 @@ export default {
         if (path === '/perf/comments') {
           const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '120', 10) || 120, 400);
           const cb = "FROM arc_items WHERE kind='comments' AND ts>?" + nsW;
+          const rb = "FROM arc_items WHERE kind='reactions' AND ts>?" + nsW;
           const r = await db.batch([
             db.prepare('SELECT COALESCE(tone,0) tone, COUNT(*) c ' + cb + ' GROUP BY tone').bind(psince, ...nsB),
             db.prepare("SELECT date(ts/1000,'unixepoch') d, SUM(tone=-1) hostile, SUM(COALESCE(tone,0)=0) neutral, SUM(tone=1) supportive " + cb + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
@@ -3064,6 +3124,10 @@ export default {
             db.prepare("SELECT MIN(title) title, json_extract(meta,'$.post_id') post_id, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) last " + cb + ' GROUP BY post_id ORDER BY n DESC LIMIT 10').bind(psince, ...nsB),
             db.prepare('SELECT body ' + cb + ' AND tone=-1 ORDER BY ts DESC LIMIT 1500').bind(psince, ...nsB),
             HAVE('comments'),
+            // reaction mix from the Meta sweep: one row per post per day
+            db.prepare('SELECT ' + M('total') + ' total, ' + M('like') + ' likes, ' + M('love') + ' love, ' + M('care') + ' care, ' + M('wow') + ' wow, ' + M('haha') + ' haha, ' + M('sad') + ' sad, ' + M('angry') + ' angry, ' + M('shares') + ' shares, COUNT(*) rows ' + rb).bind(psince, ...nsB),
+            db.prepare("SELECT json_extract(meta,'$.day') d, " + M('total') + ' total, ' + M('angry') + ' angry, ' + M('haha') + ' haha, ' + M('love') + ' love, ' + M('like') + ' likes ' + rb + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
+            db.prepare("SELECT MIN(json_extract(meta,'$.ad')) ad, json_extract(meta,'$.post_id') post_id, MAX(json_extract(meta,'$.total')) total, MAX(json_extract(meta,'$.angry')) angry, MAX(json_extract(meta,'$.haha')) haha, MAX(json_extract(meta,'$.score')) score, MAX(json_extract(meta,'$.permalink')) permalink " + rb + " GROUP BY post_id ORDER BY MAX(COALESCE(json_extract(meta,'$.angry'),0)) DESC LIMIT 10").bind(psince, ...nsB),
           ]);
           const tones = { hostile: 0, neutral: 0, supportive: 0 };
           (r[0].results || []).forEach(x => { tones[x.tone < 0 ? 'hostile' : x.tone > 0 ? 'supportive' : 'neutral'] = x.c; });
@@ -3077,7 +3141,11 @@ export default {
             ['Foreign owned / profits offshore', /foreign|offshore|overseas|multinational/i],
           ];
           const attack = LINES.map(([label, rx]) => ({ line: label, n: (r[4].results || []).filter(x => rx.test(x.body || '')).length })).filter(x => x.n).sort((a, b) => b.n - a.n);
-          return jsonResp({ ok: true, ns: pns, days: pdays, tones, byDay: r[1].results || [], latest: r[2].results || [], byPost: r[3].results || [], attack, hostileSample: (r[4].results || []).length, have: have(r[5]) });
+          const rx = ((r[6].results || [])[0]) || {};
+          const rTot = Number(rx.total) || 0;
+          const reactions = { totals: rx, rows: Number(rx.rows) || 0, byDay: r[7].results || [], byPost: r[8].results || [],
+            score: rTot ? Math.round((((Number(rx.likes) || 0) + (Number(rx.love) || 0) + (Number(rx.care) || 0) - (Number(rx.angry) || 0) - (Number(rx.haha) || 0)) / rTot) * 1000) / 1000 : null };
+          return jsonResp({ ok: true, ns: pns, days: pdays, tones, byDay: r[1].results || [], latest: r[2].results || [], byPost: r[3].results || [], attack, hostileSample: (r[4].results || []).length, have: have(r[5]), reactions });
         }
         if (path === '/perf/analyse' && req.method === 'POST') {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
@@ -3448,9 +3516,45 @@ export default {
     // range (chunk long ranges by month) and re-sweeps the Ad Library.
     if (path === '/meta/status') {
       let last = {}; try { last = JSON.parse(await kvGet(env.AXIOM_KV, 'meta_last_result') || '{}'); } catch (e) {}
-      return jsonResp({ ok: true, insights_configured: !!env.META_TOKEN, ad_library_configured: !!env.META_USER_TOKEN,
+      const st = { ok: true, insights_configured: !!env.META_TOKEN, ad_library_configured: !!env.META_USER_TOKEN,
         accounts: metaAccounts(env).map(a => ({ account: a.acct, ns: a.ns })),
-        last_sync: Number(await kvGet(env.AXIOM_KV, 'meta_last_sync') || 0) || null, last_result: last });
+        last_sync: Number(await kvGet(env.AXIOM_KV, 'meta_last_sync') || 0) || null, last_result: last };
+      // ?probe=1 walks the chain the sweeps need and names the first step that
+      // fails, so setting the token up does not need a round of guessing.
+      if (reqUrl.searchParams.get('probe') && env.META_TOKEN) {
+        st.probe = { steps: [] };
+        const step = async (name, fn) => {
+          try { st.probe.steps.push({ step: name, ok: true, detail: await fn() }); return true; }
+          catch (e) { st.probe.steps.push({ step: name, ok: false, detail: String((e && e.message) || e).slice(0, 200) }); return false; }
+        };
+        const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+        const a = metaAccounts(env)[0];
+        if (!a) { st.probe.steps.push({ step: 'ad accounts configured', ok: false, detail: 'Set META_AD_ACCOUNTS, e.g. act_123:mca,act_456:aep' }); }
+        else if (await step('token is valid (reads the ad account)', async () => {
+          const d = await metaGet(META_API + '/' + a.acct + '?fields=name,account_status' + tok);
+          return (d.name || a.acct) + ' (status ' + (d.account_status != null ? d.account_status : '?') + ')';
+        })) {
+          let firstPost = null;
+          if (await step('ads_read (lists ads and their posts)', async () => {
+            const posts = await metaAdPosts(env, a.acct);
+            firstPost = posts.keys().next().value || null;
+            return posts.size + ' distinct posts behind active or paused ads';
+          }) && firstPost) {
+            await step('pages_read_engagement (reads reactions on a post)', async () => {
+              const d = await metaGet(META_API + '/' + firstPost + '?fields=reactions.limit(0).summary(1).as(all)' + tok);
+              return metaSummaryCount(d.all) + ' reactions on the newest ad post';
+            });
+            await step('pages_read_user_content (reads comment text)', async () => {
+              const d = await metaGet(META_API + '/' + firstPost + '/comments?fields=id,message&limit=3' + tok);
+              return (d.data || []).length + ' comments readable on that post';
+            });
+          }
+        }
+        const bad = st.probe.steps.filter(s => !s.ok);
+        st.probe.ready = !bad.length;
+        st.probe.summary = bad.length ? 'Blocked at: ' + bad[0].step : 'Every permission the comment and reaction sweeps need is in place.';
+      }
+      return jsonResp(st);
     }
     if (path === '/meta/sync' && req.method === 'POST') {
       let b = {}; try { b = await req.json(); } catch (e) {}
@@ -3460,7 +3564,9 @@ export default {
       try { r.insights = await metaInsights(env, since, until); } catch (e) { r.insights = { error: String(e).slice(0, 120) }; }
       if (!b.insightsOnly) {
         try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 120) }; }
-        try { r.comments = await metaComments(env, Math.min(parseInt(b.postsPerAccount, 10) || 40, 200)); } catch (e) { r.comments = { error: String(e).slice(0, 120) }; }
+        const per = Math.min(parseInt(b.postsPerAccount, 10) || 40, 200);
+        try { r.comments = await metaComments(env, per); } catch (e) { r.comments = { error: String(e).slice(0, 120) }; }
+        try { r.reactions = await metaReactions(env, per); } catch (e) { r.reactions = { error: String(e).slice(0, 120) }; }
       }
       await kvPut(env.AXIOM_KV, 'meta_last_sync', String(Date.now()), 86400);
       await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);

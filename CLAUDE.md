@@ -130,9 +130,27 @@ CTR/CPC/CPM, leads, CPL) into archive kind `campaign`, src `meta`, deduped
 per campaign-day. Optional `META_USER_TOKEN` (an ID-verified user's token,
 ~60-day expiry) turns on `metaAdLibrary()`: AU political/issue ads matching
 each `CLIENT_ISSUES` label into kind `oppads`, src `meta`, with funder,
-spend band and snapshot URL. `metaCron()` runs both at most 6-hourly;
-GET `/meta/status` (read) and POST `/meta/sync {since,until}` (full) for
-inspection and history backfill (chunk by month).
+spend band and snapshot URL.
+
+Audience sentiment, straight from Meta, needs `pages_read_engagement` +
+`pages_read_user_content` on `META_TOKEN`. `metaAdPosts()` resolves the
+distinct page posts behind each account's active/paused ads, then
+`metaComments()` files each comment as kind `comments` (tone from the
+colloquial lexicon; author names never stored) and `metaReactions()` files
+one row per post per day as kind `reactions` with the full mix - like, love,
+care, wow, haha, sad, angry - plus comments, shares and a score:
+`(like+love+care - angry - haha) / total`, so +1 is unanimous agreement and
+-1 unanimous hostility. Haha counts against because on political advertising
+it reads as mockery; wow and sad are ambiguous and stay out of the score.
+`/perf/comments` returns those aggregates under `reactions` and the Audience
+Comments tab renders the mix and the posts drawing anger.
+
+`metaCron()` runs all four at most 6-hourly; GET `/meta/status` (read) and
+POST `/meta/sync {since,until,postsPerAccount}` (full) for inspection and
+history backfill (chunk by month). `GET /meta/status?probe=1` walks the whole
+chain live - token valid, ads_read, pages_read_engagement,
+pages_read_user_content - and names the first step that fails, which is the
+fastest way to debug a System User token.
 
 ## Access roles
 

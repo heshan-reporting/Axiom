@@ -1779,6 +1779,10 @@ body.kiosk .kprog{display:block}
             <div class="panel"><div class="phead"><div class="ptitle">Sentiment by day</div><span class="ptag">HOSTILE · NEUTRAL · SUPPORTIVE</span></div><div class="aud-cbox"><canvas id="aud-tone"></canvas></div></div>
             <div class="panel"><div class="phead"><div class="ptitle">Lines of attack</div><span class="ptag">WHAT HOSTILE COMMENTS ARGUE</span></div><div class="aud-attack" id="aud-attack"></div></div>
           </div>
+          <div class="aud-grid" id="aud-react-wrap" hidden>
+            <div class="panel"><div class="phead"><div class="ptitle">Reaction mix</div><span class="ptag">HOW PEOPLE REACT, NOT JUST WHAT THEY WRITE</span></div><div class="aud-attack" id="aud-react"></div></div>
+            <div class="panel"><div class="phead"><div class="ptitle">Posts drawing anger</div><span class="ptag">ANGRY + HAHA VS AGREEMENT</span></div><div class="aud-table" id="aud-react-posts"></div></div>
+          </div>
           <div class="panel">
             <div class="phead"><div class="ptitle">Sentiment analysis</div>
               <button class="btn" style="padding:8px 16px;font-size:11.5px" id="aud-ai-btn" onclick="audAnalyse()">Analyse with Claude</button></div>
@@ -3449,7 +3453,9 @@ function audRenderSocial(){
 /* Comments & sentiment */
 function audRenderComments(){
   const d=aud.data.comments,strip=$('aud-cm-strip'),att=$('aud-attack'),bp=$('aud-bypost'),list=$('aud-cm');
-  if(!d||!(d.latest||[]).length){strip.innerHTML=audEmpty(audNo());att.innerHTML='';bp.innerHTML='';list.innerHTML='';return;}
+  const RX=(d&&d.reactions)||null,rxOn=!!(RX&&RX.rows);
+  if($('aud-react-wrap'))$('aud-react-wrap').hidden=!rxOn;
+  if(!d||(!(d.latest||[]).length&&!rxOn)){strip.innerHTML=audEmpty(audNo());att.innerHTML='';bp.innerHTML='';list.innerHTML='';return;}
   const t=d.tones||{},tot=(t.hostile||0)+(t.neutral||0)+(t.supportive||0);
   const days=d.byDay||[];const recent=days.slice(-7),prev=days.slice(-14,-7);
   const share=a=>{const h=a.reduce((s,x)=>s+(+x.hostile||0),0),n=a.reduce((s,x)=>s+(+x.hostile||0)+(+x.neutral||0)+(+x.supportive||0),0);return n?h/n*100:null;};
@@ -3458,7 +3464,9 @@ function audRenderComments(){
     +audStat('Hostile',(tot?(t.hostile/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.hostile)+' comments','#F0908B')
     +audStat('Supportive',(tot?(t.supportive/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.supportive)+' comments','#7EE0AE')
     +audStat('Neutral / questions',(tot?(t.neutral/tot*100).toFixed(0):'0')+'<i>%</i>',audN(t.neutral)+' comments')
-    +audStat('Hostility trend',hs==null?'—':(hs.toFixed(0)+'<i>%</i>'),ps==null||hs==null?'last 7 days':(hs-ps>=1?'▲ up from '+ps.toFixed(0)+'% the week before':hs-ps<=-1?'▼ down from '+ps.toFixed(0)+'%':'steady vs the week before'),hs!=null&&ps!=null&&hs-ps>=5?'#F0908B':'');
+    +audStat('Hostility trend',hs==null?'—':(hs.toFixed(0)+'<i>%</i>'),ps==null||hs==null?'last 7 days':(hs-ps>=1?'▲ up from '+ps.toFixed(0)+'% the week before':hs-ps<=-1?'▼ down from '+ps.toFixed(0)+'%':'steady vs the week before'),hs!=null&&ps!=null&&hs-ps>=5?'#F0908B':'')
+    +(rxOn?audReactStats(RX):'');
+  if(rxOn)audRenderReactions(RX);
   audChart('tone','aud-tone',{type:'bar',data:{labels:days.map(x=>audDay(x.d)),datasets:[
     {label:'Hostile',data:days.map(x=>+x.hostile||0),backgroundColor:'rgba(224,90,84,.8)',stack:'t'},
     {label:'Neutral',data:days.map(x=>+x.neutral||0),backgroundColor:'rgba(255,255,255,.22)',stack:'t'},
@@ -3471,6 +3479,30 @@ function audRenderComments(){
   const rows=(d.latest||[]).filter(c=>f==='all'||String(c.tone)===f);
   list.innerHTML=rows.length?rows.map(c=>{const k=c.tone<0?'h':c.tone>0?'s':'n';return '<div class="aud-c '+k+'"><div class="b">'+esc(String(c.body||'').slice(0,600))+'</div><div class="m"><span class="tn '+k+'">'+(k==='h'?'hostile':k==='s'?'supportive':'neutral')+'</span><span>'+audDay(c.ts)+'</span><span>'+esc(String(c.title||'').replace(/^Comment on:? ?/,'').slice(0,70))+'</span><span>'+esc(c.src||'')+(c.ns?' · '+esc(c.ns):'')+'</span></div></div>';}).join('')
     :'<div class="empty">No comments match this filter.</div>';
+}
+/* Reactions: the mix Meta reports per post per day. Like, love and care read as
+   agreement; angry as hostility; haha as mockery on political advertising. Wow
+   and sad are ambiguous, so they are shown but excluded from the score. */
+const AUD_RX=[['angry','Angry','#E05A54'],['haha','Haha (mockery)','#E8A24A'],['sad','Sad','#8A95A8'],['wow','Wow','#8A95A8'],['care','Care','#22D993'],['love','Love','#22D993'],['likes','Like','#6FA8FF']];
+function audReactStats(RX){
+  const t=RX.totals||{},tot=+t.total||0,angry=+t.angry||0,haha=+t.haha||0;
+  const sc=RX.score;
+  return audStat('Reactions',audN(tot),(RX.rows||0)+' post-days from Meta')
+    +audStat('Angry',(tot?(angry/tot*100).toFixed(1):'0')+'<i>%</i>',audN(angry)+' angry reactions',angry/Math.max(1,tot)>=0.05?'#F0908B':'')
+    +audStat('Reaction score',sc==null?'—':(sc>0?'+':'')+sc.toFixed(2),sc==null?'no reactions yet':sc>=.5?'strong agreement':sc>=0?'mixed, leaning positive':'more hostile than supportive',sc==null?'':sc<0?'#F0908B':sc>=.5?'#7EE0AE':'');
+}
+function audRenderReactions(RX){
+  const box=$('aud-react'),tbl=$('aud-react-posts');if(!box)return;
+  const t=RX.totals||{},mx=Math.max(1,...AUD_RX.map(([k])=>+t[k]||0));
+  box.innerHTML=AUD_RX.map(([k,label,col])=>{const n=+t[k]||0;
+    return '<div class="aud-bar"><div class="lab"><span>'+label+'</span><b>'+audN(n)+'</b></div><span></span><div class="trk"><i style="width:'+Math.round(n/mx*100)+'%;background:'+col+'"></i></div></div>';}).join('')
+    +'<div class="note" style="margin-top:8px">Haha counts against on political advertising, where it usually reads as mockery. Wow and sad are ambiguous and stay out of the score.</div>';
+  const P=RX.byPost||[];
+  tbl.innerHTML=P.length?'<table><tr><th>Ad post</th><th>Reactions</th><th>Angry</th><th>Haha</th><th>Score</th></tr>'+P.map(p=>{
+    const nm=esc(String(p.ad||p.post_id||'').replace(/^Reactions on:? ?/,'').replace(/^"|"$/g,'').slice(0,70));
+    const sc=p.score==null?null:+p.score;
+    return '<tr><td>'+(p.permalink?'<a href="'+esc(p.permalink)+'" target="_blank" rel="noopener">'+nm+'</a>':nm)+'</td><td>'+audN(p.total)+'</td><td style="color:'+(+p.angry>0?'#F0908B':'inherit')+'">'+audN(p.angry)+'</td><td>'+audN(p.haha)+'</td><td style="color:'+(sc==null?'inherit':sc<0?'#F0908B':sc>=.5?'#7EE0AE':'inherit')+'">'+(sc==null?'—':(sc>0?'+':'')+sc.toFixed(2))+'</td></tr>';}).join('')+'</table>'
+    :'<div class="empty">No reaction rows in scope.</div>';
 }
 async function audAnalyse(){
   const btn=$('aud-ai-btn'),out=$('aud-ai');if(aud.busy)return;aud.busy=true;
