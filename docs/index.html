@@ -870,8 +870,11 @@ body.kiosk .kprog{display:block}
   padding:7px 11px;font-size:12px;color:#e8e8e8;display:none;max-width:280px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.6);z-index:5}
 .km-tip b{display:block}
 .km-tip span{font-family:var(--fm);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
-.km-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8b94a3;font-size:13px;padding:24px;text-align:center}
+.km-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#8b94a3;font-size:13px;line-height:1.65;padding:24px;text-align:center}
 .km-empty[hidden]{display:none}
+.km-empty b{color:var(--t0)}
+.km-empty code{font-family:var(--fm);font-size:11px;background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px}
+.km-empty .in{max-width:520px}
 /* knowledge-gain HUD — what the memory bank learned, live */
 .km-hud{position:absolute;top:14px;left:14px;z-index:6;width:212px;background:rgba(16,17,20,.9);border:1px solid rgba(255,255,255,.12);
   border-radius:13px;padding:13px 14px;backdrop-filter:blur(14px);box-shadow:0 10px 32px rgba(0,0,0,.5)}
@@ -2527,16 +2530,42 @@ const KM_SEAT={wire:[95,.92],indie:[125,.9],sweeps:[65,.95],regional:[150,.88],f
 const km={ready:false,loading:false,nodes:null,links:null,adj:null,byId:null,sim:null,hover:null,sel:null,
  W:0,H:0,cx:0,cy:0,R:0,dpr:1,cam:{x:0,y:0,k:1},camT:null,drag:null,pan:null,pinch:null,ptrs:new Map(),
  raf:0,t:0,still:false,liveTimer:0,liveCount:0,seen:null,sparks:[],matched:0,arc:null};
+/* d3 draws the graph and is fetched at first open. One CDN is a single point of
+   failure - ad blockers, VPNs and office networks routinely block one of these -
+   so try each mirror in turn, move on when one hangs, and say what happened. */
+const KM_D3=['https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js',
+             'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js',
+             'https://unpkg.com/d3@7.9.0/dist/d3.min.js'];
 function kmInit(){
   if(km.ready){kmSize();kmLive();kmLoopStart();kmDraw();return;}
   if(km.loading)return;
   km.loading=true;
+  const e=$('km-empty');if(e)e.hidden=true;
   if(window.d3){kmBuild();return;}
-  const s=document.createElement('script');
-  s.src='https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js';
-  s.onload=kmBuild;
-  s.onerror=()=>{km.loading=false;const e=$('km-empty');if(e)e.hidden=false;};
+  kmLoadD3(0);
+}
+function kmLoadD3(i){
+  if(window.d3){km.tried=null;kmBuild();return;}
+  if(i>=KM_D3.length){km.loading=false;kmFail();return;}
+  const s=document.createElement('script');let done=false;
+  const next=()=>{if(done)return;done=true;clearTimeout(t);try{s.remove();}catch(x){}kmLoadD3(i+1);};
+  const t=setTimeout(next,8000);            // a mirror that hangs must not strand the tab
+  s.src=KM_D3[i];s.async=true;
+  s.onload=()=>{if(done)return;done=true;clearTimeout(t);if(window.d3)kmBuild();else kmLoadD3(i+1);};
+  s.onerror=next;
   document.head.appendChild(s);
+}
+function kmFail(){
+  const e=$('km-empty');if(!e)return;e.hidden=false;
+  e.innerHTML='<div class="in"><b>The graph library did not load.</b><br>AXIOM draws the knowledge map with d3, fetched from a public CDN when you first open this tab. '
+    +'All three mirrors were blocked or unreachable: <code>cdnjs.cloudflare.com</code>, <code>cdn.jsdelivr.net</code>, <code>unpkg.com</code>.<br>'
+    +'An ad blocker, a privacy extension, a VPN or an office network blocking CDNs is the usual cause. Everything else in AXIOM keeps working.</div>'
+    +'<button class="btn sm" onclick="kmRetry(event)">Try again</button>';
+}
+function kmRetry(ev){
+  if(ev&&ev.preventDefault)ev.preventDefault();
+  const e=$('km-empty');if(e)e.hidden=true;
+  km.loading=false;kmInit();
 }
 function kmSize(){
   const cv=$('km-cv'),wrap=cv.parentElement;
