@@ -2482,18 +2482,36 @@ export default {
       const max      = Math.min(parseInt(reqUrl.searchParams.get('max') || '25', 10) || 25, 75);
       const gq = /sourcecountry:/.test(q) ? q : (q + ' sourcecountry:AS'); // AS = Australia (FIPS)
       const cacheKey = ('gdelt_' + mode + '_' + timespan + '_' + gq).slice(0, 240);
+      const staleKey = ('gs_' + cacheKey).slice(0, 240);
       const cached = await kvGet(env.AXIOM_KV, cacheKey);
       if (cached) return new Response(cached, { headers: CORS });
       const p = new URLSearchParams({ query: gq, mode, format: 'json', timespan });
       if (mode === 'artlist') { p.set('maxrecords', String(max)); p.set('sort', 'hybridrel'); }
       try {
-        const r = await fetch('https://api.gdeltproject.org/api/v2/doc/doc?' + p, { headers: { 'User-Agent': 'AXIOM/5.0' } });
-        const text = await r.text();
-        let d; try { d = JSON.parse(text); } catch { return jsonResp({ error: 'gdelt_bad_response', detail: text.slice(0, 160) }, 502); }
+        // GDELT allows one request every five seconds and answers a burst with
+        // plain text, not JSON. Absorb that here: back off, retry, and fall back
+        // to the last good answer rather than handing its notice to the user.
+        let text = '', d = null, limited = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const r = await fetch('https://api.gdeltproject.org/api/v2/doc/doc?' + p, { headers: { 'User-Agent': 'AXIOM/5.0' } });
+          text = await r.text();
+          try { d = JSON.parse(text); break; } catch (e) { d = null; }
+          limited = r.status === 429 || /limit requests to one every|rate limit|too many requests/i.test(text);
+          if (!limited) break;
+          await new Promise(res => setTimeout(res, 1600 * (attempt + 1)));
+        }
+        if (!d) {
+          const stale = await kvGet(env.AXIOM_KV, staleKey);
+          if (stale) return new Response(stale, { headers: CORS });
+          return limited
+            ? jsonResp({ error: 'gdelt_rate_limited', detail: 'GDELT allows one query every five seconds and is throttling us right now. Wait a few seconds and try again - nothing is wrong with your tracker.' }, 429)
+            : jsonResp({ error: 'gdelt_bad_response', detail: text.slice(0, 160) }, 502);
+        }
         const out = mode === 'artlist'
           ? JSON.stringify({ articles: (d.articles || []).map(a => ({ title: a.title, url: a.url, domain: a.domain, date: a.seendate, country: a.sourcecountry })) })
           : JSON.stringify({ timeline: d.timeline || [] });
         await kvPut(env.AXIOM_KV, cacheKey, out, 600);
+        await kvPut(env.AXIOM_KV, staleKey, out, 7 * 86400);   // last good answer, for a throttled retry
         return new Response(out, { headers: CORS });
       } catch (e) { return jsonResp({ error: 'gdelt_fetch_failed', detail: String(e) }, 502); }
     }

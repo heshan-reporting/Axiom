@@ -3167,10 +3167,9 @@ async function loadSocial(){
 }
 async function loadTone(){
   try{
-    const [tn,vol]=await Promise.all([
-      api('/gdelt?q='+encodeURIComponent('"australian politics"')+'&mode=timelinetone&timespan=7d'),
-      api('/gdelt?q='+encodeURIComponent('"australian politics"')+'&mode=timelinevol&timespan=7d')
-    ]);
+    // sequential: GDELT rate-limits parallel queries from the same caller
+    const tn=await api('/gdelt?q='+encodeURIComponent('"australian politics"')+'&mode=timelinetone&timespan=7d');
+    const vol=await api('/gdelt?q='+encodeURIComponent('"australian politics"')+'&mode=timelinevol&timespan=7d');
     state.tone=((tn.timeline&&tn.timeline[0]&&tn.timeline[0].data)||[]).map(p=>p.value);
     state.vol=((vol.timeline&&vol.timeline[0]&&vol.timeline[0].data)||[]).map(p=>p.value);
     if(state.tone.length){
@@ -4298,6 +4297,17 @@ function trackTopic(w){
   toast('Tracking “'+w+'” in Radar');
 }
 
+/* GDELT is a free public service that allows one query every five seconds and
+   answers a burst with a plain-text notice. Say what that means for the user
+   instead of showing them its message to operators. */
+function gdErr(e){
+  const m=String((e&&e.message)||e||'');
+  if(/rate_limited|limit requests to one every|429|too many requests/i.test(m))
+    return 'GDELT (the free global news index behind Media Pulse) allows one query every five seconds and is throttling us. Wait about five seconds and press Track again - your tracker is fine.';
+  if(/gdelt_bad_response/i.test(m))return 'GDELT returned something unreadable for that query. Try a simpler phrase, or try again shortly.';
+  if(/gdelt_fetch_failed/i.test(m))return 'Could not reach GDELT just now. It is a free service and occasionally drops requests - try again shortly.';
+  return m;
+}
 /* ── RADAR ── */
 async function loadRadar(){
   const q=$('mp-q').value.trim();if(!q){$('mp-q').focus();return;}
@@ -4305,11 +4315,12 @@ async function loadRadar(){
   $('mp-arts').innerHTML='<div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div>';
   try{
     const enc=encodeURIComponent('"'+q+'"');
-    const results=await Promise.all([
-      api('/gdelt?q='+enc+'&mode=timelinevol&timespan='+span),
-      api('/gdelt?q='+enc+'&mode=timelinetone&timespan='+span),
-      api('/gdelt?q='+enc+'&mode=artlist&timespan='+span+'&max=12')
-    ]);
+    // GDELT throttles to one query every five seconds, so ask in sequence
+    // rather than firing three at once and tripping its rate limiter.
+    const results=[];
+    for(const m of ['timelinevol','timelinetone','artlist']){
+      results.push(await api('/gdelt?q='+enc+'&mode='+m+'&timespan='+span+(m==='artlist'?'&max=12':'')));
+    }
     const vs=(results[0].timeline&&results[0].timeline[0]&&results[0].timeline[0].data)||[];
     const ts=(results[1].timeline&&results[1].timeline[0]&&results[1].timeline[0].data)||[];
     const lab=p=>{const s=String(p.date);return s.slice(4,6)+'/'+s.slice(6,8);};
@@ -4326,7 +4337,7 @@ async function loadRadar(){
     $('mp-arts').innerHTML=as.length?as.map(a=>
       '<a class="dcard" href="'+esc(a.url)+'" target="_blank" rel="noopener"><span class="wi-t">'+esc(a.title||a.url)+'</span><div class="sp-m" style="margin-top:4px">'+esc(a.domain||'')+(a.date?' · '+String(a.date).slice(0,4)+'-'+String(a.date).slice(4,6)+'-'+String(a.date).slice(6,8):'')+'</div></a>').join('')
       :'<div class="empty">No recent articles matched.</div>';
-  }catch(e){$('mp-arts').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
+  }catch(e){$('mp-arts').innerHTML='<div class="err">'+esc(gdErr(e))+'</div>';}
 }
 function renderAtChips(){
   $('at-chips').innerHTML=AT_PEOPLE.map((p,i)=>
