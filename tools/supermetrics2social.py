@@ -130,7 +130,8 @@ def fb_comment(path):
         pid = g(r, 'post_ID'); when = (g(r, 'post_comment_date') or '') + ' ' + (g(r, 'post_comment_time') or '')
         out.append({'src': 'facebook', 'title': 'Comment on: ' + str(g(r, 'post_message') or pid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
             'url': 'x:comment:facebook:%s:%s' % (pid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when.strip()),
-            'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'post_message')), 'platform': 'facebook', 'post_id': pid, 'tone': tone(txt)}})
+            'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'post_message')), 'platform': 'facebook', 'post_id': pid,
+                     'permalink': g(r, 'post_linkto') or ('https://www.facebook.com/' + str(pid)), 'tone': tone(txt)}})
     return out
 
 def ig_post(path):
@@ -153,7 +154,8 @@ def ig_comment(path):
         mid = g(r, 'media_id'); when = (g(r, 'media_comment_date') or '') + ' ' + (g(r, 'media_comment_time') or '')
         out.append({'src': 'instagram', 'title': 'Comment on: ' + str(g(r, 'media_caption') or mid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
             'url': 'x:comment:instagram:%s:%s' % (mid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when.strip()),
-            'meta': {'ns': ns_for(g(r, 'username'), g(r, 'media_caption')), 'platform': 'instagram', 'media_id': mid, 'permalink': g(r, 'media_permalink'), 'tone': tone(txt)}})
+            'meta': {'ns': ns_for(g(r, 'username'), g(r, 'media_caption')), 'platform': 'instagram', 'media_id': mid, 'post_id': mid,
+                     'permalink': g(r, 'media_permalink'), 'tone': tone(txt)}})
     return out
 
 def li_post(path):
@@ -176,7 +178,8 @@ def li_comment(path):
         sid = g(r, 'share_id'); when = g(r, 'share_comment_date') or ''
         out.append({'src': 'linkedin', 'title': 'Comment on: ' + str(g(r, 'share_title') or sid)[:100], 'body': txt[:2000], 'author': '', 'tone': tone(txt),
             'url': 'x:comment:linkedin:%s:%s' % (sid, __import__('hashlib').md5((txt + when).encode()).hexdigest()[:16]), 'ts': ts(when),
-            'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'share_title')), 'platform': 'linkedin', 'share_id': sid, 'tone': tone(txt)}})
+            'meta': {'ns': ns_for(g(r, 'profile'), g(r, 'share_title')), 'platform': 'linkedin', 'share_id': sid, 'post_id': sid,
+                     'permalink': 'https://www.linkedin.com/feed/update/' + str(sid), 'tone': tone(txt)}})
     return out
 
 KIND = {'fa_engagement': ('engagement', fa_engagement), 'fa_creative': ('adcreative', fa_creative),

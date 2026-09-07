@@ -1710,7 +1710,7 @@ async function metaAdPosts(env, acct) {
   const posts = new Map();
   (ads.data || []).forEach(ad => {
     const sid = ad.creative && ad.creative.effective_object_story_id;
-    if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, campaign: (ad.campaign && ad.campaign.name) || '' });
+    if (sid && !posts.has(sid)) posts.set(sid, { ad: ad.name || ad.id, id: ad.id || '', campaign: (ad.campaign && ad.campaign.name) || '' });
   });
   return posts;
 }
@@ -1732,7 +1732,8 @@ async function metaComments(env, perAccount = 40) {
             src: 'meta', title: 'Comment on "' + String(ctx.ad).slice(0, 80) + '"', body: String(x.message).slice(0, 2000),
             url: 'x:comment:meta:' + x.id, author: '', tone: commentTone(x.message),
             ts: Date.parse(x.created_time || '') || Date.now(),
-            meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: ctx.campaign, ad: ctx.ad, post_id: sid, likes: x.like_count || 0, replies: x.comment_count || 0, tone: commentTone(x.message) },
+            meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: ctx.campaign, ad: ctx.ad, ad_id: ctx.id || '', post_id: sid,
+              permalink: 'https://www.facebook.com/' + sid, likes: x.like_count || 0, replies: x.comment_count || 0, tone: commentTone(x.message) },
           }));
           out.posts++;
           for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'comments', rows.slice(i, i + 150));
@@ -3120,8 +3121,8 @@ export default {
           const r = await db.batch([
             db.prepare('SELECT COALESCE(tone,0) tone, COUNT(*) c ' + cb + ' GROUP BY tone').bind(psince, ...nsB),
             db.prepare("SELECT date(ts/1000,'unixepoch') d, SUM(tone=-1) hostile, SUM(COALESCE(tone,0)=0) neutral, SUM(tone=1) supportive " + cb + ' GROUP BY d ORDER BY d').bind(psince, ...nsB),
-            db.prepare("SELECT title, body, COALESCE(tone,0) tone, ts, src, json_extract(meta,'$.post_id') post_id, json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ns') ns " + cb + ' ORDER BY ts DESC LIMIT ?').bind(psince, ...nsB, lim),
-            db.prepare("SELECT MIN(title) title, json_extract(meta,'$.post_id') post_id, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) last " + cb + ' GROUP BY post_id ORDER BY n DESC LIMIT 10').bind(psince, ...nsB),
+            db.prepare("SELECT title, body, COALESCE(tone,0) tone, ts, src, json_extract(meta,'$.post_id') post_id, json_extract(meta,'$.campaign') campaign, json_extract(meta,'$.ad') ad, json_extract(meta,'$.permalink') permalink, json_extract(meta,'$.platform') platform, json_extract(meta,'$.ns') ns " + cb + ' ORDER BY ts DESC LIMIT ?').bind(psince, ...nsB, lim),
+            db.prepare("SELECT MIN(title) title, json_extract(meta,'$.post_id') post_id, MAX(json_extract(meta,'$.permalink')) permalink, MAX(json_extract(meta,'$.platform')) platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) last " + cb + ' GROUP BY post_id ORDER BY n DESC LIMIT 10').bind(psince, ...nsB),
             db.prepare('SELECT body ' + cb + ' AND tone=-1 ORDER BY ts DESC LIMIT 1500').bind(psince, ...nsB),
             HAVE('comments'),
             // reaction mix from the Meta sweep: one row per post per day

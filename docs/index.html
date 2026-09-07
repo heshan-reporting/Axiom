@@ -848,6 +848,8 @@ body.kiosk .kprog{display:block}
 .aud-c.h{border-left-color:#E05A54}.aud-c.s{border-left-color:#22D993}.aud-c.n{border-left-color:rgba(255,255,255,.18)}
 .aud-c .b{font-size:12.5px;color:var(--t1);line-height:1.5;white-space:pre-wrap}
 .aud-c .m{font-family:var(--fm);font-size:9.5px;color:var(--t3);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.aud-src{margin-left:auto;color:var(--ac);text-decoration:none;white-space:nowrap;border-bottom:1px solid transparent}
+.aud-src:hover{border-bottom-color:currentColor}
 .tn{display:inline-block;font-family:var(--fm);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;padding:2px 7px;border-radius:99px;border:1px solid}
 .tn.h{color:#F0908B;border-color:rgba(224,90,84,.4)}.tn.s{color:#7EE0AE;border-color:rgba(34,217,147,.4)}.tn.n{color:var(--t2);border-color:rgba(255,255,255,.18)}
 .aud-ai h4{font-family:var(--fm);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin:14px 0 6px}
@@ -3503,11 +3505,32 @@ function audRenderComments(){
     options:Object.assign({},AUD_AX,{plugins:{legend:{display:true,labels:{color:'#8A95A8',boxWidth:10,font:{size:10}}}},scales:{x:Object.assign({stacked:true},AUD_AX.scales.x),y:Object.assign({stacked:true},AUD_AX.scales.y)}})});
   const A=d.attack||[],mx=Math.max(1,...A.map(a=>a.n));
   att.innerHTML=A.length?A.map(a=>'<div class="aud-bar"><div class="lab"><span>'+esc(a.line)+'</span><b>'+a.n+'</b></div><span></span><div class="trk"><i style="width:'+Math.round(a.n/mx*100)+'%"></i></div></div>').join('')+'<div class="note" style="margin-top:8px">Counted across '+(d.hostileSample||0)+' hostile comments in scope.</div>':'<div class="empty">No hostile comments in scope.</div>';
-  bp.innerHTML='<table><tr><th>Post</th><th>Comments</th><th>Hostile</th><th>Supportive</th><th>Last</th></tr>'+(d.byPost||[]).map(p=>'<tr><td>'+esc(String(p.title||'').replace(/^Comment on:? ?/,'').replace(/^"|"$/g,'').slice(0,80))+'</td><td>'+p.n+'</td><td style="color:'+(+p.hostile>0?'#F0908B':'inherit')+'">'+(p.hostile||0)+'</td><td style="color:'+(+p.supportive>0?'#7EE0AE':'inherit')+'">'+(p.supportive||0)+'</td><td>'+audDay(p.last)+'</td></tr>').join('')+'</table>';
+  bp.innerHTML='<table><tr><th>Post</th><th>Comments</th><th>Hostile</th><th>Supportive</th><th>Last</th></tr>'+(d.byPost||[]).map(p=>{
+    const nm=esc(String(p.title||'').replace(/^Comment on:? ?/,'').replace(/^"|"$/g,'').slice(0,80)),u=audPostUrl(p);
+    return '<tr><td>'+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener">'+nm+'</a>':nm)+'</td><td>'+p.n+'</td><td style="color:'+(+p.hostile>0?'#F0908B':'inherit')+'">'+(p.hostile||0)+'</td><td style="color:'+(+p.supportive>0?'#7EE0AE':'inherit')+'">'+(p.supportive||0)+'</td><td>'+audDay(p.last)+'</td></tr>';}).join('')+'</table>';
   const f=($('aud-cm-filter')&&$('aud-cm-filter').value)||'all';
   const rows=(d.latest||[]).filter(c=>f==='all'||String(c.tone)===f);
-  list.innerHTML=rows.length?rows.map(c=>{const k=c.tone<0?'h':c.tone>0?'s':'n';return '<div class="aud-c '+k+'"><div class="b">'+esc(String(c.body||'').slice(0,600))+'</div><div class="m"><span class="tn '+k+'">'+(k==='h'?'hostile':k==='s'?'supportive':'neutral')+'</span><span>'+audDay(c.ts)+'</span><span>'+esc(String(c.title||'').replace(/^Comment on:? ?/,'').slice(0,70))+'</span><span>'+esc(c.src||'')+(c.ns?' · '+esc(c.ns):'')+'</span></div></div>';}).join('')
+  list.innerHTML=rows.length?rows.map(c=>{const k=c.tone<0?'h':c.tone>0?'s':'n';
+    const on=String(c.ad||c.title||'').replace(/^Comment on:? ?/,'').replace(/^"|"$/g,'').slice(0,70);
+    return '<div class="aud-c '+k+'"><div class="b">'+esc(String(c.body||'').slice(0,600))+'</div><div class="m"><span class="tn '+k+'">'+(k==='h'?'hostile':k==='s'?'supportive':'neutral')+'</span><span>'+audDay(c.ts)+'</span><span>'+esc(on)+'</span><span>'+esc(c.src||'')+(c.ns?' · '+esc(c.ns):'')+'</span>'+audPostLink(c)+'</div></div>';}).join('')
     :'<div class="empty">No comments match this filter.</div>';
+}
+/* The post a comment sits under. Rows swept by the worker carry a permalink;
+   rows converted from Supermetrics carry only the post id, so rebuild the URL
+   from the id and platform. Returns '' when nothing can be linked. */
+function audPostUrl(c){
+  if(!c)return '';
+  const p=String(c.permalink||'');
+  if(/^https?:\/\//.test(p))return p;
+  const id=String(c.post_id||''),plat=String(c.platform||c.src||'').toLowerCase();
+  if(!id)return '';
+  if(plat==='facebook'||plat==='meta')return 'https://www.facebook.com/'+encodeURIComponent(id).replace(/%5F/g,'_');
+  if(plat==='linkedin')return 'https://www.linkedin.com/feed/update/'+encodeURIComponent(id);
+  return '';
+}
+function audPostLink(c,label){
+  const u=audPostUrl(c);
+  return u?'<a href="'+esc(u)+'" target="_blank" rel="noopener" class="aud-src">'+(label||'View the ad post')+' &#8599;</a>':'';
 }
 /* Reactions: the mix Meta reports per post per day. Like, love and care read as
    agreement; angry as hostility; haha as mockery on political advertising. Wow
