@@ -1967,16 +1967,26 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 // ==============================================================================
 // ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
 // ==============================================================================
+/** Compare in time that does not depend on where the first difference falls,
+ *  so a wrong key cannot be walked one character at a time. */
+function ctEq(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 function axAuth(req, env) {
   const supplied = req.headers.get('X-Axiom-Key') || '';
   let roster = null;
   if (env.AXIOM_KEYS) { try { roster = JSON.parse(env.AXIOM_KEYS); } catch (e) { roster = null; } }
   const enforced = !!(env.AXIOM_ACCESS_KEY || (roster && Object.keys(roster).length));
   if (!enforced) return { enforced: false, ok: true, role: 'full', name: 'open' };
-  if (env.AXIOM_ACCESS_KEY && supplied === env.AXIOM_ACCESS_KEY) {
+  if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) {
     return { enforced: true, ok: true, role: 'full', name: 'admin' };
   }
-  const who = roster && Object.prototype.hasOwnProperty.call(roster, supplied) ? roster[supplied] : null;
+  let who = null;
+  if (roster) for (const k of Object.keys(roster)) { if (ctEq(supplied, k)) { who = roster[k]; break; } }
   if (who) {
     return { enforced: true, ok: true, role: (who.r === 'read' ? 'read' : 'full'), name: String(who.n || 'user').slice(0, 40) };
   }
@@ -2350,6 +2360,15 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/');
     const auth = axAuth(req, env);
+    // A key is only as good as the number of guesses allowed against it: lock an
+    // address out for ten minutes after a dozen failures.
+    if (gated && auth.enforced && env.AXIOM_KV) {
+      const fk = 'af_' + (req.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 60);
+      const fails = Number(await kvGet(env.AXIOM_KV, fk) || 0);
+      if (fails >= 12) return jsonResp({ error: 'too_many_attempts', detail: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 429);
+      if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
+      else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
+    }
     if (gated && auth.enforced) {
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (auth.role === 'read' && !isRead) {

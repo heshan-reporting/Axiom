@@ -2265,12 +2265,21 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 function toast(msg,err){const o=document.querySelector('.toast');if(o)o.remove();const t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3200);}
 function ago(d){const s=(Date.now()-(Date.parse(d)||Date.now()))/1000;if(s<90)return 'now';if(s<3600)return Math.round(s/60)+'m';if(s<86400)return Math.round(s/3600)+'h';return Math.round(s/86400)+'d';}
+/* Upstream services sometimes answer with notices addressed to their own
+   operators. Never put another party's contact details in front of our people:
+   the only address AXIOM ever shows is ours. */
+const AX_CONTACT='heshan@wearecuriousminds.com';
+function axScrub(s){
+  return String(s==null?'':s)
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,m=>m.toLowerCase()===AX_CONTACT?m:'[external contact removed]')
+    .slice(0,600);
+}
 async function api(path){
   const base=(WORKER_URL||'').replace(/\/+$/,'');
   if(!base)throw new Error('Set the Worker URL in Settings');
   const r=await fetch(base+path,AX_KEY?{headers:{'X-Axiom-Key':AX_KEY}}:undefined);
   let d;try{d=await r.json();}catch(e){d={};}
-  if(!r.ok||d.error)throw new Error(d.hint||d.detail||d.error||('HTTP '+r.status));
+  if(!r.ok||d.error)throw new Error(axScrub(d.hint||d.detail||d.error||('HTTP '+r.status)));
   return d;
 }
 /* ── permanent archive logging — fire-and-forget; silent no-op until D1 is bound ── */
@@ -4306,7 +4315,8 @@ function gdErr(e){
     return 'GDELT (the free global news index behind Media Pulse) allows one query every five seconds and is throttling us. Wait about five seconds and press Track again - your tracker is fine.';
   if(/gdelt_bad_response/i.test(m))return 'GDELT returned something unreadable for that query. Try a simpler phrase, or try again shortly.';
   if(/gdelt_fetch_failed/i.test(m))return 'Could not reach GDELT just now. It is a free service and occasionally drops requests - try again shortly.';
-  return m;
+  if(/too_many_attempts/i.test(m))return 'Too many failed access-key attempts from this network. Wait ten minutes, then check Settings, Access key.';
+  return axScrub(m);
 }
 /* ── RADAR ── */
 async function loadRadar(){
