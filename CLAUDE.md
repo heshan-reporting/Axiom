@@ -138,6 +138,21 @@ Access: with secrets `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` (a Reddit
 which Reddit often refuses from cloud networks. `GET /reddit/status?probe=1`
 walks credentials, token and one listing live and names the failing step;
 the in-app sweep result quotes Reddit's errors and offers the probe.
+
+**The desktop bridge (agent-reach).** Reddit closed self-service API
+registration in late 2025 and refuses anonymous reads from cloud networks, so
+the reliable collector runs where a logged-in session exists:
+`python3 tools/reach-reddit.py --key $AXIOM_KEY` on a Mac with agent-reach's
+`rdt` (`rdt login`, or a cookie file) sweeps the same subs through
+`rdt sub ... --json` / `rdt read ... --json`, writes rows in exactly the
+worker's shape (kinds `reddit_thread` / `reddit_comment`, `meta.via: reach`,
+no usernames) and pushes them through `/archive/add` with a before/after
+count. `--out rows.json --dry-run` produces a file for the in-app Load data
+button; `--install-launchd` schedules it 3-hourly via a LaunchAgent that runs
+`zsh -lc` so `$AXIOM_KEY` comes from `~/.zshrc` and never touches the plist.
+The same pattern is the template for any source the worker cannot reach
+(Twitter via cookies, LinkedIn via the MCP): collect on the desktop, file
+through `/archive/add`, let the app and the Mind do the rest.
 Routes under `/reddit/` (gated; GETs read-role unless `live=1`):
 `threads?sub=&days=&issue=&q=` (with tone of held comments per thread),
 `comments?thread=<id>[&live=1]`, `status`, POST `sweep`, POST `analyse

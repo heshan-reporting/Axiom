@@ -3334,7 +3334,7 @@ export default {
             catch (e) { steps.push({ step: 'listing r/AustralianPolitics/hot', ok: false, detail: String((e && e.message) || e).slice(0, 160) }); }
             const bad = steps.filter(s => !s.ok);
             const fix = bad.length && !authed && /reddit_403|reddit_unreachable|reddit_rate|reddit_5\d\d/.test(bad[0].detail)
-              ? ' Reddit is refusing anonymous reads from this network. Create a script app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets.'
+              ? ' Reddit refuses anonymous reads from cloud networks and closed self-service API registration in late 2025. Run the sweep from a machine that is logged in instead: on a Mac with agent-reach, python3 tools/reach-reddit.py --install-launchd files threads and comments here every three hours. If you already hold Reddit app credentials, REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets also work.'
               : bad.length && /reddit_oauth/.test(bad[0].detail) ? ' Reddit rejected the app credentials. Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET, and that the app type is script.' : '';
             st.probe = { steps, ready: !bad.length, authenticated: authed, summary: bad.length ? 'Blocked at: ' + bad[0].step + ' (' + bad[0].detail + ').' + fix : 'Reddit is reachable' + (authed ? ' with your app credentials.' : ' without credentials.') };
           }
@@ -3439,7 +3439,7 @@ export default {
         if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
         if (/reddit_rate_limited/.test(m)) return jsonResp({ ok: false, error: 'reddit_rate_limited', detail: 'Reddit is throttling us. Wait a minute and try again.' }, 429);
         if (/reddit_oauth/.test(m)) return jsonResp({ ok: false, error: 'reddit_oauth_failed', detail: 'Reddit rejected the app credentials (' + m.slice(0, 60) + '). Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.' }, 502);
-        if (/reddit_403|reddit_unreachable/.test(m)) return jsonResp({ ok: false, error: 'reddit_blocked', detail: 'Reddit is refusing anonymous reads from this network (' + m.slice(0, 40) + '). Create a script app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets.' }, 502);
+        if (/reddit_403|reddit_unreachable/.test(m)) return jsonResp({ ok: false, error: 'reddit_blocked', detail: 'Reddit is refusing anonymous reads from this network (' + m.slice(0, 40) + '). Collect from a logged-in machine instead: tools/reach-reddit.py on a Mac with agent-reach. If you already hold Reddit app credentials, REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets also work.' }, 502);
         return jsonResp({ ok: false, error: 'reddit_failed', detail: m.slice(0, 200) }, 500);
       }
     }

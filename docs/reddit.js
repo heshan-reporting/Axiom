@@ -125,7 +125,7 @@
     else if (err && (code === 'unauthorized' || err.status === 401)) body = html`<b>No access key.</b> Open Settings, paste your key, save, then reload.`;
     else if (err && code === 'mind_unbound') body = html`<b>Database not bound.</b> Cloudflare, newsaus, Settings, Bindings must include the D1 database as <code>MIND_DB</code>.`;
     else if (err) body = html`<b>The worker returned an error:</b> <code>${e}</code>`;
-    else if (!have || !have.total) body = html`<b>Nothing collected yet.</b> The worker sweeps r/AustralianPolitics, r/australia, r/AusPol, r/AusFinance and r/AusEcon every three hours once deployed. ${canWrite ? html`Press <b>Sweep now</b> to collect the first threads and comments.` : 'Ask a full-access user to run the first sweep.'}`;
+    else if (!have || !have.total) body = html`<b>Nothing collected yet.</b> Two collectors feed this view: the worker sweeps r/AustralianPolitics, r/australia, r/AusPol, r/AusFinance and r/AusEcon every three hours where Reddit lets it, and <code>tools/reach-reddit.py</code> does the same from a Mac where agent-reach is logged in, which is the reliable path because Reddit refuses anonymous reads from cloud networks. ${canWrite ? html`Press <b>Sweep now</b> to try from the worker; if it collects nothing, run the bridge on your Mac.` : 'Ask a full-access user to run the first sweep.'}`;
     else body = html`<b>No threads match this scope.</b> The archive holds ${fmtN(have.total)} Reddit threads. Widen the window, clear the issue filter, or clear the search.`;
     return html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}>${body}${!err && canWrite ? html`<div class="aud-diagwrap"><button class="btn sm" disabled=${busy} onClick=${onSweep}>${busy ? 'Sweeping...' : 'Sweep now'}</button></div>` : null}</div>`;
   }
@@ -158,7 +158,7 @@
       m = String(m || '');
       if (/reddit_oauth/.test(m)) return 'Reddit rejected the app credentials. Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in Cloudflare, and that the app type is "script".';
       if (/rate_limited|429/.test(m)) return 'Reddit is rate-limiting us. The sweep paces itself now; wait a minute and try again' + (authed ? '.' : ', or add Reddit app credentials to lift the limit from ten requests a minute to sixty.');
-      if (/reddit_403|reddit_unreachable|reddit_5\d\d|reddit_blocked/.test(m)) return authed ? 'Reddit refused the request even with credentials. Run the probe for the exact step.' : 'Reddit is refusing anonymous reads from Cloudflare\'s network. Fix: create a "script" app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets. Two minutes, no approval needed.';
+      if (/reddit_403|reddit_unreachable|reddit_5\d\d|reddit_blocked/.test(m)) return authed ? 'Reddit refused the request even with credentials. Run the probe for the exact step.' : 'Reddit is refusing anonymous reads from Cloudflare\'s network, and it closed self-service API registration in 2025. Collect from your Mac instead, where agent-reach is logged in: in Terminal, cd ~/Axiom && python3 tools/reach-reddit.py --key $AXIOM_KEY. Run it once with --install-launchd and it repeats every three hours. What it files appears here. If you already hold Reddit app credentials, REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets also work.';
       if (/abort|timeout/i.test(m)) return 'Reddit did not answer in time. Try again; if it persists, add Reddit app credentials.';
       return 'Run the probe to see which step fails.';
     };
