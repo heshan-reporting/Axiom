@@ -68,12 +68,15 @@ def run_rdt(args, timeout=90):
     except subprocess.TimeoutExpired:
         raise RuntimeError('rdt timed out after %ds on: %s' % (timeout, ' '.join(args)))
     out = (p.stdout or '').strip()
+    starts = [i for i in (out.find('{'), out.find('[')) if i >= 0]
     try:
-        d = json.loads(out[out.index('{'):]) if '{' in out else {}
+        d = json.loads(out[min(starts):]) if starts else {}
     except Exception:
         d = {}
     if not d:
         raise RuntimeError('rdt returned no JSON for: %s%s' % (' '.join(args), (' - ' + (p.stderr or '').strip()[-200:]) if p.stderr else ''))
+    if isinstance(d, list):
+        return d  # a bare payload, already unwrapped
     if not d.get('ok', False):
         err = d.get('error') or {}
         msg = err.get('message') or str(err) or 'unknown error'
@@ -115,10 +118,17 @@ def posts_from(payload):
 
 
 def listing(sub, sort, n):
-    # --compact makes rdt emit the parsed post list rather than Reddit's raw listing
-    args = ['sub', sub, '-s', sort, '-n', str(n), '-c']
+    """Posts for one sub+sort. rdt's plain --json is Reddit's raw listing, which
+    carries every field we weight on (num_comments, selftext, stickied); -c
+    returns a parsed post list on the versions that have the flag. Read raw
+    first, fall back to compact only if raw gives us nothing."""
+    args = ['sub', sub, '-s', sort, '-n', str(n)]
     if sort == 'top': args += ['-t', 'day']
-    return [p for p in posts_from(run_rdt(args)) if not p.get('stickied')]
+    posts = posts_from(run_rdt(args))
+    if not posts:
+        try: posts = posts_from(run_rdt(args + ['-c']))
+        except RuntimeError: pass
+    return [p for p in posts if not p.get('stickied')]
 
 
 def detail_from(payload):
