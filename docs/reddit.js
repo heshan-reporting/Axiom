@@ -125,7 +125,7 @@
     else if (err && (code === 'unauthorized' || err.status === 401)) body = html`<b>No access key.</b> Open Settings, paste your key, save, then reload.`;
     else if (err && code === 'mind_unbound') body = html`<b>Database not bound.</b> Cloudflare, newsaus, Settings, Bindings must include the D1 database as <code>MIND_DB</code>.`;
     else if (err) body = html`<b>The worker returned an error:</b> <code>${e}</code>`;
-    else if (!have || !have.total) body = html`<b>Nothing collected yet.</b> Two collectors feed this view: the worker sweeps r/AustralianPolitics, r/australia, r/AusPol, r/AusFinance and r/AusEcon every three hours where Reddit lets it, and <code>tools/reach-reddit.py</code> does the same from a Mac where agent-reach is logged in, which is the reliable path because Reddit refuses anonymous reads from cloud networks. ${canWrite ? html`Press <b>Sweep now</b> to try from the worker; if it collects nothing, run the bridge on your Mac.` : 'Ask a full-access user to run the first sweep.'}`;
+    else if (!have || !have.total) body = html`<b>Nothing collected yet.</b> Two collectors feed this view: the worker sweeps the watched Australian subs every three hours where Reddit lets it, and searches a rotating slice of the client keywords across the rest of Reddit, and <code>tools/reach-reddit.py</code> does the same from a Mac where agent-reach is logged in, which is the reliable path because Reddit refuses anonymous reads from cloud networks. ${canWrite ? html`Press <b>Sweep now</b> to try from the worker; if it collects nothing, run the bridge on your Mac.` : 'Ask a full-access user to run the first sweep.'}`;
     else body = html`<b>No threads match this scope.</b> The archive holds ${fmtN(have.total)} Reddit threads. Widen the window, clear the issue filter, or clear the search.`;
     return html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}>${body}${!err && canWrite ? html`<div class="aud-diagwrap"><button class="btn sm" disabled=${busy} onClick=${onSweep}>${busy ? 'Sweeping...' : 'Sweep now'}</button></div>` : null}</div>`;
   }
@@ -173,13 +173,16 @@
     const sweep = async () => {
       setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null);
       try {
-        const r = await call('/reddit/sweep', { subs: f.sub ? [f.sub] : undefined });
+        // the keyword pass rides along: every client issue's search terms, or
+        // just this issue's when the view is filtered
+        const r = await call('/reddit/sweep', { subs: f.sub ? [f.sub] : undefined, queries: 'auto', issue: f.issue || undefined });
         const errs = r.errors || [];
         if (!r.threads && errs.length) {
           setResult({ ok: false, probe: true, text: 'Every fetch failed. Reddit said: ' + errs.slice(0, 2).join(' | ') + '. ' + redditHint(errs[0], r.authenticated) });
           toastMsg('Sweep collected nothing', true);
         } else {
-          setResult({ ok: true, text: 'Swept ' + r.threads + ' threads and ' + r.comments + ' comments across ' + (r.subs || []).map(s => 'r/' + s).join(', ') + '. ' + r.threadRows + ' new threads and ' + r.commentRows + ' new comments filed.' + (errs.length ? ' ' + errs.length + ' fetch' + (errs.length === 1 ? '' : 'es') + ' failed: ' + errs[0] + '.' : '') + (r.authenticated ? '' : ' Reading anonymously; add Reddit app credentials for a fuller sweep.') });
+          const kw = (r.queries || []).length ? ' plus ' + r.queries.length + ' client keywords (' + (r.found || 0) + ' hits)' : '';
+          setResult({ ok: true, text: 'Swept ' + r.threads + ' threads and ' + r.comments + ' comments across ' + (r.subs || []).map(s => 'r/' + s).join(', ') + kw + '. ' + r.threadRows + ' new threads and ' + r.commentRows + ' new comments filed.' + (errs.length ? ' ' + errs.length + ' fetch' + (errs.length === 1 ? '' : 'es') + ' failed: ' + errs[0] + '.' : '') + (r.authenticated ? '' : ' Reading anonymously; add Reddit app credentials for a fuller sweep.') });
           toastMsg('Reddit sweep done');
         }
         await load();

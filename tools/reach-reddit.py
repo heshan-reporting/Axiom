@@ -12,35 +12,88 @@ written: kind `reddit_thread` (url = permalink) and kind `reddit_comment`
 (url = x:rcmt:<id>), issue-tagged and tone-read. The Reddit view, Analyse and
 Send to the Mind all work on them unchanged. Usernames are never stored.
 
+Two passes each run. The watched subreddits (national politics and money, the
+state and city subs, the trades), and then the client keywords - every term in
+CLIENT_ISSUES - searched across all of Reddit, so the argument is found wherever
+it happens. Threads that match a client issue or a keyword are the ones whose
+comment trees get read.
+
 Usage (on the Mac, from the repo):
   python3 tools/reach-reddit.py --key $AXIOM_KEY               # sweep and file now
+  python3 tools/reach-reddit.py --key $AXIOM_KEY --issue pharmacy,activism   # only those issues' keywords
+  python3 tools/reach-reddit.py --key $AXIOM_KEY --issue vicnats --time month # a client's keywords, wider window
   python3 tools/reach-reddit.py --out reddit-rows.json --dry-run # write a rows file for the in-app Load data button
   python3 tools/reach-reddit.py --install-launchd               # run every 3 hours in the background
   python3 tools/reach-reddit.py --uninstall-launchd
 
-Options: --subs A,B,C  --per-sub 25  --threads 20  --comments 40  --worker URL
+Options: --subs A,B,C  --per-sub 25  --threads 30  --comments 80  --worker URL
+         --queries auto|off|"term,term"  --per-query 25  --time day|week|month
+         --issue <issue ids or client namespaces>  (narrows the keyword pass)
 Stdlib only. Needs `rdt` on PATH (pipx install 'git+https://github.com/public-clis/rdt-cli.git').
 """
 import argparse, datetime, json, os, re, subprocess, sys, time, urllib.request
 
 WORKER = 'https://newsaus.heshan-998.workers.dev'
-SUBS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon']
+# Where our clients get argued about: national politics and money, the state and
+# city subs where planning, power bills, mining towns and pharmacies come up,
+# and the trade subs.
+SUBS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
+        'melbourne', 'victoria', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs']
 LABEL = 'com.curiousminds.axiom.reach-reddit'
 
 # The client issues, mirrored from CLIENT_ISSUES in the worker so tags match.
+# These are the WIDE matchers - collection tags broadly on purpose; the tight
+# Sentinel triggers stay in the worker. At runtime the live lexicon is fetched
+# from GET /reddit/issues so this copy can never drift; it is the fallback.
 ISSUES = [
-    ('ftc', re.compile(r'fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit|hands off our fuel|\bhoof\b', re.I)),
-    ('cm', re.compile(r'critical minerals?|rare earths?|gallium|antimony|strategic reserve', re.I)),
-    ('mining', re.compile(r'mining (tax|royalt|approval|jobs)|resources (sector|industry|policy)|royalties', re.I)),
-    ('gas', re.compile(r'gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b', re.I)),
-    ('energy', re.compile(r'energy (policy|prices|bills|transition|security)|electricity price|power bill', re.I)),
-    ('vicelection', re.compile(r'victorian? (state )?election|victorian (government|premier|parliament)|spring street', re.I)),
-    ('regional', re.compile(r'regional victoria|country victoria|regional (rail|road|health|hospital|service)', re.I)),
-    ('housing', re.compile(r'housing (policy|supply|crisis|target|approval)|planning reform|build-to-rent|negative gearing', re.I)),
-    ('construction', re.compile(r'construction (industry|sector|union|cost)|\bcfmeu\b|building (industry|code|approvals)', re.I)),
-    ('col', re.compile(r'cost of living|inflation|interest rates?|rba (decision|hold|cut|rise|board)', re.I)),
-    ('gov', re.compile(r'newspoll|primary vote|preferred prime minister|approval rating|by-?election|leadership spill', re.I)),
+    ('ftc', re.compile(r'fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)', re.I)),
+    ('cm', re.compile(r'critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora', re.I)),
+    ('mining', re.compile(r'\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure', re.I)),
+    ('gas', re.compile(r'\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough|barossa|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b', re.I)),
+    ('energy', re.compile(r'energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery', re.I)),
+    ('vicelection', re.compile(r'victorian? (state )?election|victoria(n)? (government|premier|parliament|labor|liberals?|nationals|budget|opposition|treasurer|minister|debt|taxes?)|spring street|allan government|jacinta allan|brad battin|daniel andrews|premier of victoria|state election 2026|\bvic\b (politics|labor|libs|budget)|state of victoria|upper house region|preference deal', re.I)),
+    ('regional', re.compile(r'regional victoria|country victoria|regional (rail|road|health|hospital|service|town|jobs|communit|victorians?)|\bgippsland\b|\bmallee\b|\bwimmera\b|ballarat|bendigo|shepparton|mildura|wangaratta|warrnambool|latrobe valley|wodonga|horsham|v ?/ ?line|country roads?|native timber|duck (hunting|season)|\bfarmers?\b|agricultur|\bdrought\b|\bvff\b|dairy (farm|industry|price)|irrigat|murray[- ]darling|ambulance ramping|\bcfa\b|country fire|regional (uni|tafe)|freight rail', re.I)),
+    ('housing', re.compile(r'\bhousing\b|home ?buyers?|first home|\brents?\b|\brental\b|planning (reform|law|scheme|minister|approval|system)|build-?to-?rent|negative gearing|capital gains (tax )?discount|property (market|prices|council|developer|investor)|apartments?|\bmortgages?\b|housing (accord|target|australia future fund)|social housing|affordable housing|stamp duty|developer contributions|\bnimby\b|granny flat|rezoning|density|homelessness|construction of homes', re.I)),
+    ('construction', re.compile(r'construction (industry|sector|union|cost|worker|site|company|firm|jobs)|\bcfmeu\b|building (industry|code|approvals|commission|sector|costs?|company|site)|tradies?|master builders|industrial relations|enterprise agreement|same job,? same pay|wage theft|right of entry|apprentic|subcontractor|builder (collapse|insolvenc)|insolvenc|infrastructure (project|spend|pipeline|cost)|big build|cost overrun|\bcbus\b|\bawu\b|\betu\b|labour shortage|building materials?', re.I)),
+    ('pharmacy', re.compile(r'pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic', re.I)),
+    ('col', re.compile(r'cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budget|petrol price|\bcpi\b|price gouging|bill relief|insurance premium|childcare (cost|fee)', re.I)),
+    ('econ', re.compile(r'\beconomy\b|economic (growth|outlook|data|policy|reform)|\bgdp\b|recession|unemployment|jobless|productivity|\bbudget\b|deficit|surplus|treasury|tax (reform|cuts?|hike|policy|system|break)|income tax|company tax|\bgst\b|superannuation|super (tax|cap|change)|tariffs?|trade (war|deal)|\basx\b|australian dollar|cost base|business (confidence|investment)', re.I)),
+    ('gov', re.compile(r'newspoll|resolve poll|essential poll|primary vote|two-?party|approval rating|preferred (pm|prime minister)|by-?election|leadership (spill|challenge)|question time|prime minister|albanese|sussan ley|\bdutton\b|treasurer|chalmers|\bcanberra\b|federal (government|election|budget|parliament|labor|minister|court)|\bcoalition\b|\bnationals\b|\bgreens\b|\bsenate\b|crossbench|\bteals?\b|one nation|\bhanson\b|preselection|lobby(ing|ist)|donations? disclosure', re.I)),
+    ('activism', re.compile(r'market forces|rising tide|lock the gate|extinction rebellion|blockade australia|\bgetup\b|sunrise project|environment victoria|environmental defenders office|australian conservation foundation|greenpeace|350\.org|climate ?200|\baycc\b|school strike|knitting nannas|move beyond coal|friends of the earth|bob brown foundation|wilderness society|tomorrow movement|shareholder resolution|divest(ed|ment|ing)?|greenwash|protest(er|ers|ing)?|blockad(e|ed|ing)|activists?|climate camp|direct action|chained (themselves|to)|court challenge|class action against|lock-?on|picket|rally (against|outside)|occupy(ing)? the', re.I)),
 ]
+# Which client owns each issue, and the keywords searched across Reddit for it -
+# both mirrored from the worker's CLIENT_ISSUES (ns and q).
+ISSUE_NS = {'ftc': 'mca', 'cm': 'mca', 'mining': 'mca', 'gas': 'aep', 'energy': 'aep',
+            'vicelection': 'vicnats', 'regional': 'vicnats', 'housing': 'pca', 'construction': 'mba',
+            'pharmacy': 'pharm', 'col': 'cmm', 'econ': 'cmm', 'gov': 'cmm', 'activism': 'cmm'}
+ISSUE_Q = {
+    'ftc': ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'],
+    'cm': ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'],
+    'mining': ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'],
+    'gas': ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo'],
+    'energy': ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism'],
+    'vicelection': ['victorian election', 'jacinta allan', 'victorian budget', 'victorian government', 'victorian nationals'],
+    'regional': ['regional victoria', 'gippsland', 'v/line regional rail', 'victorian farmers', 'native timber logging', 'duck hunting victoria'],
+    'housing': ['housing crisis', 'housing supply', 'negative gearing', 'planning reform', 'build to rent', 'rental crisis'],
+    'construction': ['cfmeu', 'construction costs', 'building approvals', 'tradies shortage', 'construction insolvency', 'master builders'],
+    'pharmacy': ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'],
+    'col': ['cost of living', 'interest rates', 'grocery prices', 'energy bill relief'],
+    'econ': ['tax reform', 'productivity commission', 'federal budget', 'unemployment rate'],
+    'gov': ['newspoll', 'federal election', 'question time', 'political donations'],
+    'activism': ['rising tide protest', 'market forces campaign', 'lock the gate', 'climate protest australia',
+                 'environmental defenders office', 'coal port blockade'],
+}
+
+
+def queries_for(sel=()):
+    """Every client keyword, or only those of the issues (or clients) named."""
+    want = [str(s).strip().lower() for s in sel if str(s).strip()]
+    out = []
+    for iid, qs in ISSUE_Q.items():
+        if want and iid.lower() not in want and ISSUE_NS.get(iid, '') not in want: continue
+        for q in qs:
+            if q not in out: out.append(q)
+    return out
 # Comment tone, mirrored from CMT_POS / CMT_NEG in the worker.
 CMT_POS = re.compile(r"\b(agree|well said|spot on|100 ?%|thank you|thanks|love (this|it)|great|good on (you|them|ya)|exactly|so true|support(ed|ing)?|keep (it )?up|finally|about time|legend|onya|well done|fair enough|makes sense)\b|\+1|<3", re.I)
 CMT_NEG = re.compile(r"\b(lies?|lying|liar|rubbish|garbage|\bbs\b|bullshit|scam|greedy?|greed|disgrace(ful)?|disgusting|joke|pathetic|propaganda|shame(ful)?|corrupt(ion)?|hypocri\w*|nonsense|rort|polluters?|wrong|nobody believes|sick of|fed up|rip ?off|dodgy|spin|misleading|shill|paid for|who funds|dishonest|disinformation|misinformation|lobby(ists?)?|at our expense|pay(ing)? (more|their|five|ten|double)|should be paying|billionaires?|pretend(ing)?|con job|another discount|tax the|rip(ping)? (us|off)|handouts?|subsid(y|ies|ised))\b", re.I)
@@ -56,6 +109,40 @@ def tone(text):
 def issues_of(text):
     s = str(text or '')
     return [i for i, rx in ISSUES if rx.search(s)]
+
+
+def merge_issues(own, inherited):
+    """A comment carries its own tags and the thread's: an argument under a fuel
+    tax credit thread is about fuel tax credits even when it says 'farmers'."""
+    out = []
+    for i in list(own or []) + list(inherited or []):
+        if i and i not in out: out.append(i)
+    return out
+
+
+def load_lexicon(worker, key, log=None):
+    """Take the live lexicon from the worker (GET /reddit/issues) so tags and
+    keywords match the app exactly. Falls back to the copy above, silently:
+    a collector that cannot reach AXIOM should still collect."""
+    global ISSUES, ISSUE_Q, ISSUE_NS, SUBS
+    try:
+        d = http_json(worker.rstrip('/') + '/reddit/issues', key, timeout=20)
+    except Exception:
+        return False
+    got, qmap, nsmap = [], {}, {}
+    for it in (d.get('issues') or []):
+        try:
+            got.append((str(it['id']), re.compile(it.get('wide') or it.get('rx'), re.I)))
+        except Exception:
+            continue
+        qmap[str(it['id'])] = [str(q) for q in (it.get('q') or [])]
+        nsmap[str(it['id'])] = str(it.get('ns') or '')
+    if not got: return False
+    ISSUES = got
+    if any(qmap.values()): ISSUE_Q, ISSUE_NS = qmap, nsmap
+    if d.get('subs'): SUBS = [str(s) for s in d['subs']]
+    if log: log('lexicon: %d client issues, %d keywords, %d subs (live from the worker)' % (len(ISSUES), len(queries_for()), len(SUBS)))
+    return True
 
 
 # ---- rdt (agent-reach's Reddit backend) -------------------------------------
@@ -131,6 +218,18 @@ def listing(sub, sort, n):
     return [p for p in posts if not p.get('stickied')]
 
 
+def search(q, n, when='week'):
+    """One keyword across all of Reddit, newest first. This is how the client's
+    language finds the argument in subs we do not watch."""
+    args = ['search', q, '-s', 'new', '-t', when, '-n', str(n)]
+    posts = posts_from(run_rdt(args))
+    if not posts:
+        try: posts = posts_from(run_rdt(args + ['-c']))
+        except RuntimeError: pass
+    for p in posts: p['_q'] = q
+    return [p for p in posts if not p.get('stickied')]
+
+
 def detail_from(payload):
     """(post, comments) out of rdt's PostDetail {post, comments} or Reddit's raw
     [post_listing, comment_listing]; raw comment nodes are unwrapped to the
@@ -202,7 +301,7 @@ def thread_row(p):
         'body': body[:3000] + '\n%d points, %d comments' % (score, ncom) + ('\nLink: ' + link if link and 'reddit.com' not in domain else ''),
         'url': permalink_of(p), 'author': '', 'tone': tone(title + ' ' + body), 'ts': int(created or time.time() * 1000),
         'meta': {'sub': sub, 'id': str(p.get('id') or ''), 'score': score, 'ratio': 0, 'comments': ncom, 'flair': '', 'domain': domain,
-                 'link': link[:300], 'issues': isu, 'issue': isu[0] if isu else '', 'via': 'reach'},
+                 'link': link[:300], 'issues': isu, 'issue': isu[0] if isu else '', 'q': str(p.get('_q') or ''), 'via': 'reach'},
     }
 
 
@@ -212,7 +311,7 @@ def comment_rows(post, comments):
     tid = str(post.get('id') or ''); sub = str(post.get('subreddit') or ''); pl = permalink_of(post)
     rows = []
     for c in flatten(comments):
-        own = issues_of(c['body']); allis = own if own else t_issues
+        allis = merge_issues(issues_of(c['body']), t_issues)
         rows.append({
             'src': 'reddit', 'title': 'Comment on: ' + title[:120], 'body': c['body'], 'url': 'x:rcmt:' + c['id'], 'author': '',
             'tone': tone(c['body']), 'ts': int(c['created'] or time.time() * 1000),
@@ -261,20 +360,39 @@ def push(worker, key, kind, rows):
 
 
 # ---- the sweep ---------------------------------------------------------------------
-def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print):
+def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(), per_query=25, when='week'):
     seen = {}; errors = []
+    def take(posts):
+        for p in posts:
+            pid = str(p.get('id') or '')
+            if not pid: continue
+            if pid in seen:
+                # a thread the subs already gave us, now also matched by a keyword
+                if p.get('_q') and not seen[pid].get('_q'): seen[pid]['_q'] = p['_q']
+            else:
+                seen[pid] = p
     for sub in subs:
         for sort in ('hot', 'top'):
             try:
-                for p in listing(sub, sort, per_sub):
-                    pid = str(p.get('id') or '')
-                    if pid and pid not in seen: seen[pid] = p
+                take(listing(sub, sort, per_sub))
             except RuntimeError as e:
                 errors.append('r/%s/%s: %s' % (sub, sort, e))
                 if 'login' in str(e).lower(): raise
             time.sleep(pace)
+    found = 0
+    for q in queries:
+        try:
+            hits = search(q, per_query, when); found += len(hits); take(hits)
+        except RuntimeError as e:
+            errors.append('search "%s": %s' % (q, e))
+            if 'login' in str(e).lower(): raise
+        time.sleep(pace)
+    if queries: log('keywords: %d terms searched, %d hits' % (len(queries), found))
     threads = list(seen.values())
-    weight = lambda p: len(issues_of(str(p.get('title') or '') + ' ' + str(p.get('selftext') or ''))) * 1000 + int(p.get('num_comments') or 0)
+    # read the comments where the client is actually being argued about: issue
+    # tags first, then a keyword hit, then how busy the thread is
+    weight = lambda p: (len(issues_of(str(p.get('title') or '') + ' ' + str(p.get('selftext') or ''))) * 1000
+                        + (500 if p.get('_q') else 0) + int(p.get('num_comments') or 0))
     pick = sorted(threads, key=weight, reverse=True)[:n_threads]
     trows = [thread_row(p) for p in threads]
     crows = []
@@ -332,10 +450,14 @@ def uninstall_launchd():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--subs', default=','.join(SUBS), help='comma-separated subreddits')
+    ap.add_argument('--subs', default='', help='comma-separated subreddits (default: the watched list)')
     ap.add_argument('--per-sub', type=int, default=25)
-    ap.add_argument('--threads', type=int, default=20, help='threads whose comments to fetch')
-    ap.add_argument('--comments', type=int, default=40, help='comments per thread')
+    ap.add_argument('--threads', type=int, default=30, help='threads whose comments to fetch')
+    ap.add_argument('--comments', type=int, default=80, help='comments per thread')
+    ap.add_argument('--queries', default='auto', help="client keywords searched across Reddit: 'auto' (all), 'off', or a comma-separated list")
+    ap.add_argument('--per-query', type=int, default=25, help='results per keyword')
+    ap.add_argument('--time', dest='when', default='week', choices=['day', 'week', 'month', 'year', 'all'], help='keyword search window')
+    ap.add_argument('--issue', default='', help='limit the keyword sweep to these issue ids (comma-separated)')
     ap.add_argument('--key', default=os.environ.get('AXIOM_KEY', ''))
     ap.add_argument('--worker', default=WORKER)
     ap.add_argument('--out', help='also write the rows to this JSON file ({batches:[...]}, loadable in-app)')
@@ -355,11 +477,18 @@ def main(argv=None):
         log('rdt: %s' % (st.get('message') or st.get('status') or json.dumps(st)[:120]))
     except RuntimeError as e:
         print('Reddit session check failed: %s' % e, file=sys.stderr); return 2
-    subs = [s.strip().lstrip('r/') for s in a.subs.split(',') if s.strip()]
+    # take the live lexicon first, so tags and keywords match the app exactly
+    load_lexicon(a.worker, a.key, log)
+    subs = [s.strip().lstrip('r/') for s in (a.subs or ','.join(SUBS)).split(',') if s.strip()]
+    sel = [s for s in a.issue.split(',') if s.strip()]
+    if a.queries.strip().lower() in ('off', 'none', ''): queries = []
+    elif a.queries.strip().lower() == 'auto': queries = queries_for(sel)
+    else: queries = [q.strip() for q in a.queries.split(',') if q.strip()]
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     log('%s  sweeping %s' % (stamp, ', '.join('r/' + s for s in subs)))
     try:
-        trows, crows, errors = sweep(subs, a.per_sub, a.threads, a.comments, log=log)
+        trows, crows, errors = sweep(subs, a.per_sub, a.threads, a.comments, log=log,
+                                     queries=queries, per_query=a.per_query, when=a.when)
     except RuntimeError as e:
         print('Sweep stopped: %s' % e, file=sys.stderr); return 2
     log('collected %d threads, %d comments%s' % (len(trows), len(crows), (' (%d fetch errors)' % len(errors)) if errors else ''))
@@ -374,6 +503,11 @@ def main(argv=None):
     tagged = sum(1 for r in trows if r['meta']['issues'])
     hostile = sum(1 for r in crows if r['tone'] < 0)
     log('on our issues: %d threads; hostile comments: %d of %d' % (tagged, hostile, len(crows)))
+    per = {}
+    for r in trows + crows:
+        for i in r['meta'].get('issues') or []: per[i] = per.get(i, 0) + 1
+    if per:
+        log('  ' + ', '.join('%s %d' % (i, n) for i, n in sorted(per.items(), key=lambda x: -x[1])[:8]))
     if a.out:
         with open(a.out, 'w') as f:
             json.dump({'generated': stamp, 'batches': [{'kind': 'reddit_thread', 'rows': trows}, {'kind': 'reddit_comment', 'rows': crows}]}, f)

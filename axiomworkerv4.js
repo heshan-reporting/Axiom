@@ -1733,7 +1733,9 @@ async function metaComments(env, perAccount = 40) {
             url: 'x:comment:meta:' + x.id, author: '', tone: commentTone(x.message),
             ts: Date.parse(x.created_time || '') || Date.now(),
             meta: { ns: a.ns, platform: 'meta', account: a.acct, campaign: ctx.campaign, ad: ctx.ad, ad_id: ctx.id || '', post_id: sid,
-              permalink: 'https://www.facebook.com/' + sid, likes: x.like_count || 0, replies: x.comment_count || 0, tone: commentTone(x.message) },
+              permalink: 'https://www.facebook.com/' + sid, likes: x.like_count || 0, replies: x.comment_count || 0, tone: commentTone(x.message),
+              // which client issue the audience is arguing about, same lexicon as everywhere else
+              issues: issueTag(String(ctx.ad || '') + ' ' + x.message), issue: issueTag(String(ctx.ad || '') + ' ' + x.message)[0] || '' },
           }));
           out.posts++;
           for (let i = 0; i < rows.length; i += 150) out.rows += await archiveItems(env, 'comments', rows.slice(i, i + 150));
@@ -1817,7 +1819,11 @@ async function metaCron(env) {
 // api.reddit.com with a descriptive UA, as Reddit asks of unauthenticated
 // clients; www.reddit.com 403s generic cloud user agents.
 // ==============================================================================
-const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon'];
+// Where the arguments our clients care about actually happen: national politics
+// and economics, the state and city subs where planning, energy bills, mining
+// towns and pharmacies come up, and the trade subs.
+const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
+  'melbourne', 'victoria', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
 const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
 // Public hosts tried in turn when no app credentials are set. Reddit allows
 // unauthenticated clients about ten requests a minute and blocks many
@@ -1868,7 +1874,9 @@ async function redditGet(env, path, timeoutMs) {
   throw new Error(last);
 }
 function redditSubClean(s) { return String(s || '').replace(/^r\//i, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40); }
-function redditIssues(text) { const t = String(text || ''); return CLIENT_ISSUES.filter(ci => ci.rx.test(t)).map(ci => ci.id); }
+// Collection tags with the wide matcher: the Sentinel's tight triggers decide
+// what is a spike, not what is worth keeping.
+function redditIssues(text) { return issueTag(text); }
 /** One subreddit listing, normalised. Stickied and pinned posts are skipped. */
 async function redditListing(env, sub, sort, limit) {
   const d = await redditGet(env, '/r/' + sub + '/' + (sort || 'hot') + '?limit=' + (limit || 25) + (sort === 'top' ? '&t=day' : ''));
@@ -1877,6 +1885,22 @@ async function redditListing(env, sub, sort, limit) {
     score: p.score || 0, ratio: p.upvote_ratio || 0, comments: p.num_comments || 0, flair: p.link_flair_text || '',
     permalink: 'https://www.reddit.com' + (p.permalink || ''), link: p.url_overridden_by_dest || p.url || '', domain: p.domain || '',
     created: (p.created_utc || 0) * 1000,
+  }));
+}
+/** Reddit search, normalised to the same thread shape as a listing. This is how
+ *  the client keywords find the argument outside the subs we watch. */
+async function redditSearch(env, q, opts) {
+  opts = opts || {};
+  const sub = opts.sub ? redditSubClean(opts.sub) : '';
+  const path = (sub ? '/r/' + sub + '/search' : '/search') + '?q=' + encodeURIComponent(q)
+    + '&sort=' + (opts.sort || 'new') + '&t=' + (opts.time || 'week') + '&limit=' + (opts.limit || 25)
+    + (sub ? '&restrict_sr=on' : '');
+  const d = await redditGet(env, path);
+  return ((d && d.data && d.data.children) || []).map(c => c && c.data).filter(p => p && !p.stickied).map(p => ({
+    id: String(p.id || ''), sub: p.subreddit || '', title: String(p.title || '').slice(0, 400), body: String(p.selftext || '').slice(0, 4000),
+    score: p.score || 0, ratio: p.upvote_ratio || 0, comments: p.num_comments || 0, flair: p.link_flair_text || '',
+    permalink: 'https://www.reddit.com' + (p.permalink || ''), link: p.url_overridden_by_dest || p.url || '', domain: p.domain || '',
+    created: (p.created_utc || 0) * 1000, found: q,
   }));
 }
 /** A thread's comment tree flattened to a depth-limited list. No usernames. */
@@ -1897,11 +1921,17 @@ async function redditThreadComments(env, sub, id, limit, depth) {
  *  comments on the most-discussed threads, issue-tagged threads first. */
 async function redditSweep(env, opts) {
   opts = opts || {};
-  const subs = ((Array.isArray(opts.subs) && opts.subs.length) ? opts.subs : REDDIT_POLITICS).map(redditSubClean).filter(Boolean).slice(0, 8);
+  const subs = ((Array.isArray(opts.subs) && opts.subs.length) ? opts.subs : REDDIT_POLITICS).map(redditSubClean).filter(Boolean).slice(0, 16);
   const perSub = Math.min(Math.max(parseInt(opts.perSub, 10) || 25, 5), 100);
   const threadsForComments = Math.min(Math.max(parseInt(opts.threads, 10) || 20, 0), 60);
   const commentsPer = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 40, 5), 200);
-  const out = { ok: true, subs: subs, authenticated: redditAuthed(env), threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  // Keyword pass: 'auto' means every client issue's search terms. Anonymous
+  // reads are rationed, so a caller can hand in the slice it wants instead.
+  const only = opts.issue ? [String(opts.issue)] : null;
+  const queries = (opts.queries === 'auto' ? issueQueries(only) : (Array.isArray(opts.queries) ? opts.queries : []))
+    .map(s => String(s || '').slice(0, 80)).filter(Boolean).slice(0, 40);
+  const qTime = String(opts.qTime || 'week'), qLimit = Math.min(Math.max(parseInt(opts.qLimit, 10) || 25, 5), 100);
+  const out = { ok: true, subs: subs, queries: queries, authenticated: redditAuthed(env), threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
   const seen = new Map();
   const take = list => list.forEach(t => { if (t.id && !seen.has(t.id)) seen.set(t.id, t); });
   const pace = redditPace(env);
@@ -1919,6 +1949,14 @@ async function redditSweep(env, opts) {
       await rdSleep(pace);
     }
   }
+  // The keyword pass: our clients' language, searched across Reddit rather than
+  // waited for in the subs we watch.
+  out.found = 0;
+  for (const q of queries) {
+    try { const hits = await redditSearch(env, q, { time: qTime, limit: qLimit }); out.found += hits.length; take(hits); }
+    catch (e) { out.errors.push('search "' + q + '": ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+    await rdSleep(pace);
+  }
   const threads = [...seen.values()];
   out.threads = threads.length;
   const trows = threads.map(t => {
@@ -1927,11 +1965,13 @@ async function redditSweep(env, opts) {
       src: 'reddit', title: t.title,
       body: (t.body || '').slice(0, 3000) + '\n' + t.score + ' points, ' + t.comments + ' comments, upvote ratio ' + t.ratio + (t.flair ? ', flair ' + t.flair : '') + (t.link && t.domain !== 'self.' + t.sub ? '\nLink: ' + t.link : ''),
       url: t.permalink, author: '', tone: commentTone(t.title + ' ' + t.body), ts: t.created || Date.now(),
-      meta: { sub: t.sub, id: t.id, score: t.score, ratio: t.ratio, comments: t.comments, flair: t.flair, domain: t.domain, link: (t.link || '').slice(0, 300), issues: issues, issue: issues[0] || '' },
+      meta: { sub: t.sub, id: t.id, score: t.score, ratio: t.ratio, comments: t.comments, flair: t.flair, domain: t.domain, link: (t.link || '').slice(0, 300), issues: issues, issue: issues[0] || '', q: t.found || '' },
     };
   });
   for (let i = 0; i < trows.length; i += 150) out.threadRows += await archiveItems(env, 'reddit_thread', trows.slice(i, i + 150));
-  const weight = t => redditIssues(t.title + ' ' + t.body).length * 1000 + (t.comments || 0);
+  // Read the comments where the client is actually being argued about: issue
+  // tags first, then a keyword hit, then how busy the thread is.
+  const weight = t => redditIssues(t.title + ' ' + t.body).length * 1000 + (t.found ? 500 : 0) + (t.comments || 0);
   const pick = threads.slice().sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
   for (const t of pick) {
     try {
@@ -1939,7 +1979,10 @@ async function redditSweep(env, opts) {
       await rdSleep(pace);
       const tIssues = redditIssues(t.title + ' ' + t.body);
       const rows = cs.map(c => {
-        const own = redditIssues(c.body); const all = own.length ? own : tIssues;
+        // a comment inherits the thread's issues and adds its own: an argument
+        // under a fuel tax credit thread is about fuel tax credits even when the
+        // words it uses are 'farmers' and 'diesel'
+        const all = issueMerge(redditIssues(c.body), tIssues);
         return {
           src: 'reddit', title: 'Comment on: ' + t.title.slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
           meta: { sub: t.sub, thread: t.id, thread_title: t.title.slice(0, 200), permalink: t.permalink, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) },
@@ -1957,7 +2000,14 @@ async function redditCron(env) {
   const last = Number(await kvGet(env.AXIOM_KV, 'reddit_last_sweep') || 0);
   if (Date.now() - last < 3 * 3600000) return;
   await kvPut(env.AXIOM_KV, 'reddit_last_sweep', String(Date.now()), 86400);
-  let r; try { r = await redditSweep(env, { threads: 15, commentsPer: 30 }); } catch (e) { r = { error: String(e).slice(0, 120) }; }
+  // Rotate through the client keywords a slice at a time: every term is swept
+  // within a day without spending the whole request ration in one tick.
+  const all = issueQueries();
+  const slice = redditAuthed(env) ? 12 : 5;
+  const cur = Number(await kvGet(env.AXIOM_KV, 'reddit_q_cursor') || 0) % Math.max(1, all.length);
+  const queries = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
+  await kvPut(env.AXIOM_KV, 'reddit_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
+  let r; try { r = await redditSweep(env, { threads: 15, commentsPer: 30, queries: queries }); } catch (e) { r = { error: String(e).slice(0, 120) }; }
   await kvPut(env.AXIOM_KV, 'reddit_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
 }
 /** File a document in the Mind from server-side code: the same chunking,
@@ -2183,31 +2233,92 @@ const SENTINEL = {
   COOLDOWN_H: 12,        // one alert per issue per this many hours...
   ESCALATE: 1.6,         // ...unless intensity grows by this factor
 };
-// The issues AXIOM's clients actually own. ns must match the Mind namespace.
+/* The issues AXIOM's clients actually own. ns must match the Mind namespace.
+ * Each issue carries three things, and the difference matters:
+ *   rx    - the tight trigger. What counts as a story about this issue when the
+ *           Sentinel decides whether volume has spiked. Kept narrow on purpose:
+ *           a loose trigger here means an alert every time someone says "gas".
+ *   wide  - the broad matcher used when COLLECTING and tagging (Reddit threads
+ *           and comments, Meta comments, the Command Center orbit). Sweeping
+ *           wide costs nothing but disk; missing the conversation costs the
+ *           client. Use issueTag() for this, never rx.
+ *   q     - Reddit search terms. The keyword sweep runs these across all of
+ *           Reddit, so we find the argument wherever it happens rather than
+ *           only in the subs we happen to watch.
+ */
 const CLIENT_ISSUES = [
-  { ns: 'mca', client: 'Minerals Council of Australia', id: 'ftc', label: 'Fuel tax credits',
-    map: 'i_ftc', rx: /fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit/i },
-  { ns: 'mca', client: 'Minerals Council of Australia', id: 'cm', label: 'Critical minerals',
-    map: 'i_cm', rx: /critical minerals?|rare earths?|gallium|antimony|strategic reserve/i },
-  { ns: 'mca', client: 'Minerals Council of Australia', id: 'mining', label: 'Mining policy',
-    rx: /mining (tax|royalt|approval|jobs)|resources (sector|industry|policy)|royalties/i },
-  { ns: 'aep', client: 'Australian Energy Producers', id: 'gas', label: 'Gas supply & reservation',
-    rx: /gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b/i },
-  { ns: 'aep', client: 'Australian Energy Producers', id: 'energy', label: 'Energy policy',
-    rx: /energy (policy|prices|bills|transition|security)|electricity price|power bill/i },
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'ftc', label: 'Fuel tax credits', map: 'i_ftc',
+    rx: /fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit/i,
+    wide: /fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel|diesel (tax|price|cost|subsid)|fuel (levy|subsid)/i,
+    q: ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'] },
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'cm', label: 'Critical minerals', map: 'i_cm',
+    rx: /critical minerals?|rare earths?|gallium|antimony|strategic reserve/i,
+    wide: /critical minerals?|rare earths?|gallium|antimony|\blithium\b|\bnickel\b|\bcobalt\b|graphite|vanadium|\btungsten\b|strategic reserve|minerals? (strategy|processing|refinery|reserve|facility)|downstream processing|\blynas\b|\biluka\b|arafura|pilgangoora/i,
+    q: ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'] },
+  { ns: 'mca', client: 'Minerals Council of Australia', id: 'mining', label: 'Mining and resources',
+    rx: /mining (tax|royalt|approval|jobs)|resources (sector|industry|policy)|royalties/i,
+    wide: /\bmining\b|\bminers?\b|minerals council|iron ore|coal (mine|mining|export|industry|seam)|royalt(y|ies)|resources (sector|industry|policy|tax|minister|company|state)|\bbhp\b|rio tinto|fortescue|glencore|whitehaven|yancoal|\bpilbara\b|bowen basin|hunter valley (coal|mine)|super ?profits tax|minerals? tax|mine (approval|closure|rehabilitation|site|worker)|same job,? same pay|nature positive|\bepbc\b|uranium|\bfifo\b|smelter|alumina|refinery closure/i,
+    q: ['mining royalties', 'iron ore', 'coal mine approval', 'minerals council', 'nature positive laws', 'same job same pay mining'] },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'gas', label: 'Gas supply and reservation',
+    rx: /gas (supply|reservation|shortfall|market|price)|domestic gas|\blng\b/i,
+    wide: /\bgas\b|\blng\b|gas (supply|reservation|shortfall|market|price|field|project|export|import|ban|connection|network|plant)|domestic gas|east coast gas|\bsantos\b|woodside|beach energy|\bshell\b|petroleum|offshore (gas|drilling|exploration)|north ?west shelf|scarborough|barossa|narrabri|beetaloo|browse basin|\baemo\b|gas-?fired|fracking|coal seam gas|\bcsg\b/i,
+    q: ['gas reservation', 'gas prices', 'north west shelf', 'offshore gas project', 'gas shortfall', 'fracking beetaloo'] },
+  { ns: 'aep', client: 'Australian Energy Producers', id: 'energy', label: 'Energy and climate policy',
+    rx: /energy (policy|prices|bills|transition|security)|electricity price|power bill/i,
+    wide: /energy (policy|prices?|bills?|transition|security|market|minister|crisis|rebate)|electricity (price|bill|market|grid|supply)|power (bills?|prices?|grid|station|outage)|net zero|renewables?|\bsolar\b|wind farm|offshore wind|nuclear (power|energy|plant|reactor|option)|coal-?fired|transmission (line|project)|capacity investment|safeguard mechanism|emissions? (target|reduction|trading|cut)|climate (policy|target|bill|wars)|eraring|yallourn|loy yang|batteries? (rollout|scheme)|home battery/i,
+    q: ['electricity prices', 'energy transition', 'nuclear power australia', 'renewable energy target', 'power bills', 'safeguard mechanism'] },
   { ns: 'vicnats', client: 'The Nationals Victoria', id: 'vicelection', label: 'Victorian election',
-    rx: /victorian? (state )?election|victorian (government|premier|parliament)|spring street/i },
+    rx: /victorian? (state )?election|victorian (government|premier|parliament)|spring street/i,
+    wide: /victorian? (state )?election|victoria(n)? (government|premier|parliament|labor|liberals?|nationals|budget|opposition|treasurer|minister|debt|taxes?)|spring street|allan government|jacinta allan|brad battin|daniel andrews|premier of victoria|state election 2026|\bvic\b (politics|labor|libs|budget)|state of victoria|upper house region|preference deal/i,
+    q: ['victorian election', 'jacinta allan', 'victorian budget', 'victorian government', 'victorian nationals'] },
   { ns: 'vicnats', client: 'The Nationals Victoria', id: 'regional', label: 'Regional Victoria',
-    rx: /regional victoria|country victoria|regional (rail|road|health|hospital|service)/i },
-  { ns: 'pca', client: 'Property Council of Australia', id: 'housing', label: 'Housing & planning',
-    rx: /housing (policy|supply|crisis|target|approval)|planning reform|build-to-rent|negative gearing/i },
-  { ns: 'mba', client: 'Master Builders', id: 'construction', label: 'Construction & IR',
-    rx: /construction (industry|sector|union|cost)|\bcfmeu\b|building (industry|code|approvals)/i },
-  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'col', label: 'Cost of living',
-    map: 'i_col', rx: /cost of living|inflation|interest rates?|rba (decision|hold|cut|rise|board)/i },
-  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'gov', label: 'Federal politics',
-    map: 'i_gov', rx: /newspoll|primary vote|preferred prime minister|approval rating|by-?election|leadership spill/i },
+    rx: /regional victoria|country victoria|regional (rail|road|health|hospital|service)/i,
+    wide: /regional victoria|country victoria|regional (rail|road|health|hospital|service|town|jobs|communit|victorians?)|\bgippsland\b|\bmallee\b|\bwimmera\b|ballarat|bendigo|shepparton|mildura|wangaratta|warrnambool|latrobe valley|wodonga|horsham|v ?\/ ?line|country roads?|native timber|duck (hunting|season)|\bfarmers?\b|agricultur|\bdrought\b|\bvff\b|dairy (farm|industry|price)|irrigat|murray[- ]darling|ambulance ramping|\bcfa\b|country fire|regional (uni|tafe)|freight rail/i,
+    q: ['regional victoria', 'gippsland', 'v/line regional rail', 'victorian farmers', 'native timber logging', 'duck hunting victoria'] },
+  { ns: 'pca', client: 'Property Council of Australia', id: 'housing', label: 'Housing and planning',
+    rx: /housing (policy|supply|crisis|target|approval)|planning reform|build-to-rent|negative gearing/i,
+    wide: /\bhousing\b|home ?buyers?|first home|\brents?\b|\brental\b|planning (reform|law|scheme|minister|approval|system)|build-?to-?rent|negative gearing|capital gains (tax )?discount|property (market|prices|council|developer|investor)|apartments?|\bmortgages?\b|housing (accord|target|australia future fund)|social housing|affordable housing|stamp duty|developer contributions|\bnimby\b|granny flat|rezoning|density|homelessness|construction of homes/i,
+    q: ['housing crisis', 'housing supply', 'negative gearing', 'planning reform', 'build to rent', 'rental crisis'] },
+  { ns: 'mba', client: 'Master Builders', id: 'construction', label: 'Construction and IR',
+    rx: /construction (industry|sector|union|cost)|\bcfmeu\b|building (industry|code|approvals)/i,
+    wide: /construction (industry|sector|union|cost|worker|site|company|firm|jobs)|\bcfmeu\b|building (industry|code|approvals|commission|sector|costs?|company|site)|tradies?|master builders|industrial relations|enterprise agreement|same job,? same pay|wage theft|right of entry|apprentic|subcontractor|builder (collapse|insolvenc)|insolvenc|infrastructure (project|spend|pipeline|cost)|big build|cost overrun|\bcbus\b|\bawu\b|\betu\b|labour shortage|building materials?/i,
+    q: ['cfmeu', 'construction costs', 'building approvals', 'tradies shortage', 'construction insolvency', 'master builders'] },
+  { ns: 'pharm', client: 'Pharmacy Guild of Australia', id: 'pharmacy', label: 'Community pharmacy',
+    rx: /pharmacy guild|community pharmac(y|ies)|60-?day dispensing|pharmacist prescrib|dispensing fee/i,
+    wide: /pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic/i,
+    q: ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'] },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'col', label: 'Cost of living', map: 'i_col',
+    rx: /cost of living|inflation|interest rates?|rba (decision|hold|cut|rise|board)/i,
+    wide: /cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budget|petrol price|\bcpi\b|price gouging|bill relief|insurance premium|childcare (cost|fee)/i,
+    q: ['cost of living', 'interest rates', 'grocery prices', 'energy bill relief'] },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'econ', label: 'Economy and tax',
+    rx: /\bgdp\b|recession|unemployment rate|productivity (growth|commission)|tax reform|federal budget/i,
+    wide: /\beconomy\b|economic (growth|outlook|data|policy|reform)|\bgdp\b|recession|unemployment|jobless|productivity|\bbudget\b|deficit|surplus|treasury|tax (reform|cuts?|hike|policy|system|break)|income tax|company tax|\bgst\b|superannuation|super (tax|cap|change)|tariffs?|trade (war|deal)|\basx\b|australian dollar|cost base|business (confidence|investment)/i,
+    q: ['tax reform', 'productivity commission', 'federal budget', 'unemployment rate'] },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'gov', label: 'Federal politics', map: 'i_gov',
+    rx: /newspoll|primary vote|preferred prime minister|approval rating|by-?election|leadership spill/i,
+    wide: /newspoll|resolve poll|essential poll|primary vote|two-?party|approval rating|preferred (pm|prime minister)|by-?election|leadership (spill|challenge)|question time|prime minister|albanese|sussan ley|\bdutton\b|treasurer|chalmers|\bcanberra\b|federal (government|election|budget|parliament|labor|minister|court)|\bcoalition\b|\bnationals\b|\bgreens\b|\bsenate\b|crossbench|\bteals?\b|one nation|\bhanson\b|preselection|lobby(ing|ist)|donations? disclosure/i,
+    q: ['newspoll', 'federal election', 'question time', 'political donations'] },
+  { ns: 'cmm', client: 'Curious Minds (shared)', id: 'activism', label: 'Activist campaigns',
+    rx: /market forces|rising tide|lock the gate|extinction rebellion|blockade australia|stop adani|environmental defenders office/i,
+    wide: /market forces|rising tide|lock the gate|extinction rebellion|blockade australia|\bgetup\b|sunrise project|environment victoria|environmental defenders office|australian conservation foundation|greenpeace|350\.org|climate ?200|\baycc\b|school strike|knitting nannas|move beyond coal|friends of the earth|bob brown foundation|wilderness society|tomorrow movement|shareholder resolution|divest(ed|ment|ing)?|greenwash|protest(er|ers|ing)?|blockad(e|ed|ing)|activists?|climate camp|direct action|chained (themselves|to)|court challenge|class action against|lock-?on|picket|rally (against|outside)|occupy(ing)? the/i,
+    q: ['rising tide protest', 'market forces campaign', 'lock the gate', 'climate protest australia', 'environmental defenders office', 'coal port blockade'] },
 ];
+/** Broad, collection-side tagging: every issue whose wide matcher fires. */
+function issueTag(text) { const t = String(text || ''); return CLIENT_ISSUES.filter(ci => (ci.wide || ci.rx).test(t)).map(ci => ci.id); }
+/** Thread tags plus the comment's own, deduped: both, never one or the other. */
+function issueMerge(own, inherited) {
+  const out = [];
+  (own || []).concat(inherited || []).forEach(i => { if (i && out.indexOf(i) < 0) out.push(i); });
+  return out;
+}
+/** The keyword sweep's search terms, optionally narrowed to some issue ids. */
+function issueQueries(ids) {
+  const want = (Array.isArray(ids) && ids.length) ? ids.map(s => String(s).toLowerCase()) : null;
+  const out = [];
+  CLIENT_ISSUES.forEach(ci => { if (!want || want.indexOf(ci.id) >= 0) (ci.q || []).forEach(q => { if (out.indexOf(q) < 0) out.push(q); }); });
+  return out;
+}
 let SEN_READY = false;
 async function ensureSentinel(env) {
   if (!env.MIND_DB) return false;
@@ -3296,7 +3407,9 @@ export default {
     //    GET  /reddit/threads?sub=&days=&issue=&q=&limit=     archived threads + tone of held comments
     //    GET  /reddit/comments?thread=<id>[&live=1]          archived comments; live=1 fetches fresh (full role)
     //    GET  /reddit/status                                 last sweep, counts by sub
-    //    POST /reddit/sweep {subs,perSub,threads,commentsPer} collect now (full role)
+    //    GET  /reddit/issues                                 the client-issue lexicon (ids, matchers, search terms)
+    //    POST /reddit/sweep {subs,perSub,threads,commentsPer,queries}  collect now (full role)
+    //         queries: 'auto' sweeps every client keyword, or hand in the slice you want
     //    POST /reddit/analyse {threads:[ids]|sub, days, ns}   Claude reads the threads (full role)
     //    POST /reddit/mind {threads:[ids], ns, title}         file a digest in the Mind (full role)
     if (path.startsWith('/reddit/')) {
@@ -3371,7 +3484,7 @@ export default {
             if (!t) return jsonResp({ error: 'unknown_thread', detail: 'Sweep first so the thread is on file.' }, 404);
             const cs = await redditThreadComments(env, t.sub, tid, 120, 4);
             const tIssues = pj(t.issues);
-            const rows = cs.map(c => { const own = redditIssues(c.body); const all = own.length ? own : tIssues; return {
+            const rows = cs.map(c => { const all = issueMerge(redditIssues(c.body), tIssues); return {
               src: 'reddit', title: 'Comment on: ' + String(t.title).slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
               meta: { sub: t.sub, thread: tid, thread_title: String(t.title).slice(0, 200), permalink: t.url, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) } }; });
             let added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'reddit_comment', rows.slice(i, i + 150));
@@ -3379,6 +3492,14 @@ export default {
           }
           const rows = await commentRows(tid, 200);
           return jsonResp({ ok: true, thread: tid, live: false, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.score, depth: r.depth, issues: pj(r.issues) })) });
+        }
+        // The lexicon itself, so a collector on someone's desktop tags exactly
+        // as the worker does instead of drifting from its own copy.
+        if (path === '/reddit/issues') {
+          return jsonResp({ ok: true, issues: CLIENT_ISSUES.map(ci => ({
+            id: ci.id, ns: ci.ns, client: ci.client, label: ci.label,
+            rx: ci.rx.source, wide: (ci.wide || ci.rx).source, q: ci.q || [],
+          })), subs: REDDIT_POLITICS });
         }
         if (path === '/reddit/sweep' && req.method === 'POST') {
           const r = await redditSweep(env, rbody || {});

@@ -41,10 +41,20 @@ Ad Lab and Studio record approved/killed verdicts to the Mind as
 
 ## The Sentinel (rapid response — the agency's flagship loop)
 
-`CLIENT_ISSUES` in the worker maps each client namespace to the issues they
-own (mca: fuel tax credits / critical minerals / mining policy; aep: gas +
-energy; vicnats: VIC election + regional; pca: housing; mba: construction;
-cmm: cost of living + federal politics). Every cron tick `sentinelScan()`
+`CLIENT_ISSUES` in the worker is the one lexicon everything tags with: it maps
+each client namespace to the issues they own (mca: fuel tax credits / critical
+minerals / mining and resources; aep: gas / energy and climate; vicnats: VIC
+election + regional Victoria; pca: housing; mba: construction and IR; pharm:
+community pharmacy; cmm: cost of living / economy and tax / federal politics /
+activist campaigns). Each issue carries three things and the difference
+matters: `rx` is the **tight** Sentinel trigger (what counts as a spike),
+`wide` is the **broad** collection matcher used by `issueTag()` everywhere
+rows are tagged (Reddit threads and comments, Meta comments, the Command
+Center orbit), and `q` is the list of Reddit search terms for the keyword
+sweep. `GET /reddit/issues` publishes the lexicon (ids, matchers, terms) so a
+desktop collector tags exactly as the worker does; `docs/index.html`'s
+`AX_ISSUES` mirrors the wide matchers for the frontend. Every cron tick
+`sentinelScan()`
 counts matching stories in a 6h hot window against that issue's own 14-day
 baseline from the archive; a spike (>=2.5x, >=3 stories, 12h cooldown unless
 intensity grows 1.6x) fires an alert, drafts an angle with Claude grounded in
@@ -101,7 +111,9 @@ and LinkedIn Pages for organic - those expose comment text as
 `tools/supermetrics2social.py <dataset>=<file> ...` and load with
 `tools/archive-push.py`. The worker's `metaComments()` sweeps comments on
 the posts behind each account's ads every 6h (needs pages_read_engagement
-+ pages_read_user_content on the System User token).
++ pages_read_user_content on the System User token) and tags each one with
+`issueTag()`, so an audience comment is filed under the client issue it
+argues about, the same ids the Reddit rows and the Sentinel use.
 
 ## The Audience view (Ads · Social · Comments & sentiment)
 
@@ -123,13 +135,20 @@ results are logged to `mind_runs` as mode `sentiment`. Harness: `aud.js`.
 
 ## The Reddit signal (first React island)
 
-`REDDIT_POLITICS` in the worker names the AU political subreddits
-(AustralianPolitics, australia, AusPol, AusFinance, AusEcon). `redditSweep()`
-reads every thread on hot and top-of-day (one multi-subreddit listing per
-sort, paced), files them as kind `reddit_thread` (url =
-permalink) tagged with the `CLIENT_ISSUES` they touch, then flattens the
-comment trees of the most-discussed threads (issue-tagged first) into kind
-`reddit_comment` (url `x:rcmt:<id>`) with tone from the colloquial lexicon.
+`REDDIT_POLITICS` in the worker names the subs we watch - national politics
+and money (AustralianPolitics, australia, AusPol, AusFinance, AusEcon,
+auscorp), the state and city subs where planning, power bills, mining towns
+and pharmacies come up (melbourne, victoria, perth, brisbane, sydney), and the
+trades (AusPropertyChat, AusRenovation, ausjdocs). `redditSweep()` runs two
+passes: every thread on hot and top-of-day (one multi-subreddit listing per
+sort, paced), then a **keyword pass** - `redditSearch()` runs the client search
+terms (`CLIENT_ISSUES[].q`, ~70 of them) across all of Reddit so the argument
+is found wherever it happens, with `meta.q` recording the term that found the
+thread. Threads are filed as kind `reddit_thread` (url = permalink) tagged
+with `issueTag()`, then the comment trees of the threads that matter most
+(issue breadth first, then a keyword hit, then comment count) are flattened
+into kind `reddit_comment` (url `x:rcmt:<id>`) with tone from the colloquial
+lexicon; a comment carries its own tags **and** the thread's.
 **Usernames are never stored.** `redditCron()` runs it at most 3-hourly.
 Access: with secrets `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` (a Reddit
 "script" app) `redditGet()` uses application-only OAuth on `oauth.reddit.com`
@@ -143,17 +162,21 @@ the in-app sweep result quotes Reddit's errors and offers the probe.
 registration in late 2025 and refuses anonymous reads from cloud networks, so
 the reliable collector runs where a logged-in session exists:
 `python3 tools/reach-reddit.py --key $AXIOM_KEY` on a Mac with agent-reach's
-`rdt` (`rdt login`, or a cookie file) sweeps the same subs through
-`rdt sub ... --json` / `rdt read ... --json`, writes rows in exactly the
+`rdt` (`rdt login`, or a cookie file) sweeps the same subs and runs the same
+keyword pass through `rdt sub|search|read ... --json`, pulling the live
+lexicon from `GET /reddit/issues` first so its tags can never drift, writes
+rows in exactly the
 worker's shape (kinds `reddit_thread` / `reddit_comment`, `meta.via: reach`,
 no usernames) and pushes them through `/archive/add` with a before/after
 count. `--out rows.json --dry-run` produces a file for the in-app Load data
-button; `--install-launchd` schedules it 3-hourly via a LaunchAgent that runs
+button; `--issue pharmacy,activism` (issue ids or client namespaces) narrows
+the keyword pass, `--queries off` skips it, `--time month` widens the search
+window; `--install-launchd` schedules it 3-hourly via a LaunchAgent that runs
 `zsh -lc` so `$AXIOM_KEY` comes from `~/.zshrc` and never touches the plist.
 The same pattern is the template for any source the worker cannot reach
 (Twitter via cookies, LinkedIn via the MCP): collect on the desktop, file
 through `/archive/add`, let the app and the Mind do the rest.
-Routes under `/reddit/` (gated; GETs read-role unless `live=1`):
+Routes under `/reddit/` (gated; GETs read-role unless `live=1`): `issues`,
 `threads?sub=&days=&issue=&q=` (with tone of held comments per thread),
 `comments?thread=<id>[&live=1]`, `status`, POST `sweep`, POST `analyse
 {threads|sub|issue,days,ns}` (Claude: themes, attack and support lines, risks,
