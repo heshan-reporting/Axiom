@@ -89,17 +89,69 @@ def rdt_status():
     return d
 
 
+def posts_from(payload):
+    """Posts out of any shape rdt emits for a listing: a plain list of posts
+    (--compact), rdt's ListingPage {items:[...]}, or Reddit's raw
+    {kind:'Listing', data:{children:[{kind:'t3', data:{...}}]}}."""
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        if isinstance(payload.get('items'), list):
+            items = payload['items']
+        else:
+            inner = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+            items = inner.get('children') if isinstance(inner, dict) else None
+            if items is None and isinstance(payload.get('data'), dict) and isinstance(payload['data'].get('data'), dict):
+                items = payload['data']['data'].get('children')
+    else:
+        items = []
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict): continue
+        p = it.get('data') if isinstance(it.get('data'), dict) and 'title' not in it else it
+        if isinstance(p, dict) and (p.get('id') or p.get('title')):
+            out.append(p)
+    return out
+
+
 def listing(sub, sort, n):
-    args = ['sub', sub, '-s', sort, '-n', str(n)]
+    # --compact makes rdt emit the parsed post list rather than Reddit's raw listing
+    args = ['sub', sub, '-s', sort, '-n', str(n), '-c']
     if sort == 'top': args += ['-t', 'day']
-    d = run_rdt(args)
-    items = d.get('items') if isinstance(d, dict) else d
-    return [p for p in (items or []) if isinstance(p, dict) and not p.get('stickied')]
+    return [p for p in posts_from(run_rdt(args)) if not p.get('stickied')]
+
+
+def detail_from(payload):
+    """(post, comments) out of rdt's PostDetail {post, comments} or Reddit's raw
+    [post_listing, comment_listing]; raw comment nodes are unwrapped to the
+    same {id, author, body, score, created_utc, replies:[...]} shape."""
+    def node(n):
+        if not isinstance(n, dict): return None
+        if n.get('kind') == 'more': return {'author': '[more]', 'body': '', 'replies': []}
+        d = n.get('data') if isinstance(n.get('data'), dict) and 'body' not in n else n
+        if not isinstance(d, dict): return None
+        reps = d.get('replies')
+        if isinstance(reps, dict):
+            reps = [node(c) for c in (reps.get('data') or {}).get('children', [])]
+        elif isinstance(reps, list):
+            reps = [node(c) for c in reps]
+        else:
+            reps = []
+        return {'id': d.get('id'), 'author': d.get('author'), 'body': d.get('body'), 'score': d.get('score'), 'created_utc': d.get('created_utc'), 'replies': [r for r in reps if r]}
+    if isinstance(payload, list):
+        post = {}
+        if payload and isinstance(payload[0], dict):
+            ch = (payload[0].get('data') or {}).get('children') or []
+            if ch and isinstance(ch[0], dict): post = ch[0].get('data') or ch[0]
+        raw = (payload[1].get('data') or {}).get('children') if len(payload) > 1 and isinstance(payload[1], dict) else []
+        return post, [c for c in (node(x) for x in raw or []) if c]
+    if isinstance(payload, dict):
+        return payload.get('post') or {}, [c for c in (node(x) for x in payload.get('comments') or []) if c]
+    return {}, []
 
 
 def thread(post_id, n):
-    d = run_rdt(['read', post_id, '-n', str(n)])
-    return d.get('post') or {}, d.get('comments') or []
+    return detail_from(run_rdt(['read', post_id, '-n', str(n)]))
 
 
 def flatten(comments, depth=0, max_depth=3, out=None):
@@ -294,7 +346,7 @@ def main(argv=None):
     except RuntimeError as e:
         print('Reddit session check failed: %s' % e, file=sys.stderr); return 2
     subs = [s.strip().lstrip('r/') for s in a.subs.split(',') if s.strip()]
-    stamp = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     log('%s  sweeping %s' % (stamp, ', '.join('r/' + s for s in subs)))
     try:
         trows, crows, errors = sweep(subs, a.per_sub, a.threads, a.comments, log=log)
@@ -302,6 +354,13 @@ def main(argv=None):
         print('Sweep stopped: %s' % e, file=sys.stderr); return 2
     log('collected %d threads, %d comments%s' % (len(trows), len(crows), (' (%d fetch errors)' % len(errors)) if errors else ''))
     for e in errors[:3]: log('  ' + e)
+    if not trows and not errors:
+        # every listing answered but nothing parsed: show one raw answer so the shape can be seen, never a silent zero
+        try:
+            sample = run_rdt(['sub', subs[0], '-s', 'hot', '-n', '2', '-c'])
+            print('rdt answered but no posts were recognised. Raw sample from r/%s: %s' % (subs[0], json.dumps(sample)[:600]), file=sys.stderr)
+        except RuntimeError as e:
+            print('rdt sample failed: %s' % e, file=sys.stderr)
     tagged = sum(1 for r in trows if r['meta']['issues'])
     hostile = sum(1 for r in crows if r['tone'] < 0)
     log('on our issues: %d threads; hostile comments: %d of %d' % (tagged, hostile, len(crows)))
