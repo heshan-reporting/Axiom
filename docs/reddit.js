@@ -90,7 +90,7 @@
         </select>
         ${canWrite ? html`<button class="btn sm ghost" disabled=${state.busy} onClick=${() => load(true)} title="Fetch the current comment tree from Reddit and file it">${state.busy ? 'Fetching...' : 'Load live comments'}</button>` : null}
         ${state.live ? html`<span class="rd-chip">live</span>` : null}
-        <a class="aud-src" href=${thread.url} target="_blank" rel="noopener" style=${{ marginLeft: 'auto' }}>Open thread on Reddit &#8599;</a>
+        <a class="aud-src" href=${thread.url} target="_blank" rel="noopener" style=${{ marginLeft: 'auto' }}>Open thread on Reddit ${'↗'}</a>
       </div>
       ${state.err ? html`<div class="rd-res err">${state.err}</div>` : null}
       <div class="rd-cm">
