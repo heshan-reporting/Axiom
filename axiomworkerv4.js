@@ -1927,6 +1927,7 @@ async function redditSweep(env, opts) {
   const commentsPer = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 40, 5), 200);
   // Keyword pass: 'auto' means every client issue's search terms. Anonymous
   // reads are rationed, so a caller can hand in the slice it wants instead.
+  const log = opts.log || (async () => {});
   const only = opts.issue ? [String(opts.issue)] : null;
   const queries = (opts.queries === 'auto' ? issueQueries(only) : (Array.isArray(opts.queries) ? opts.queries : []))
     .map(s => String(s || '').slice(0, 80)).filter(Boolean).slice(0, 40);
@@ -1939,13 +1940,15 @@ async function redditSweep(env, opts) {
     // one multi-subreddit listing per sort keeps anonymous traffic under Reddit's limit
     let combined = false;
     if (subs.length > 1) {
-      try { take(await redditListing(env, subs.join('+'), sort, Math.min(100, perSub * subs.length))); combined = true; }
-      catch (e) { out.errors.push('r/' + subs.join('+') + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); }
+      await log('cmd', 'GET /r/' + subs.join('+') + '/' + sort + '?limit=' + Math.min(100, perSub * subs.length));
+      try { take(await redditListing(env, subs.join('+'), sort, Math.min(100, perSub * subs.length))); combined = true; await log('out', seen.size + ' threads held after ' + sort); }
+      catch (e) { const m = String(e.message || e).slice(0, 80); out.errors.push('r/' + subs.join('+') + '/' + sort + ': ' + m); await log('err', m); }
       await rdSleep(pace);
     }
     if (!combined) for (const sub of subs) {
-      try { take(await redditListing(env, sub, sort, perSub)); }
-      catch (e) { out.errors.push('r/' + sub + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+      await log('cmd', 'GET /r/' + sub + '/' + sort + '?limit=' + perSub);
+      try { take(await redditListing(env, sub, sort, perSub)); await log('out', 'r/' + sub + '/' + sort + ': ' + seen.size + ' held'); }
+      catch (e) { const m = String(e.message || e).slice(0, 80); out.errors.push('r/' + sub + '/' + sort + ': ' + m); await log('err', 'r/' + sub + '/' + sort + ': ' + m); if (/rate_limited/.test(m)) break; }
       await rdSleep(pace);
     }
   }
@@ -1953,8 +1956,9 @@ async function redditSweep(env, opts) {
   // waited for in the subs we watch.
   out.found = 0;
   for (const q of queries) {
-    try { const hits = await redditSearch(env, q, { time: qTime, limit: qLimit }); out.found += hits.length; take(hits); }
-    catch (e) { out.errors.push('search "' + q + '": ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+    await log('cmd', 'GET /search?q=' + q + '&sort=new&t=' + qTime);
+    try { const hits = await redditSearch(env, q, { time: qTime, limit: qLimit }); out.found += hits.length; take(hits); await log('out', '"' + q + '": ' + hits.length + ' hits'); }
+    catch (e) { const m = String(e.message || e).slice(0, 80); out.errors.push('search "' + q + '": ' + m); await log('err', '"' + q + '": ' + m); if (/rate_limited/.test(m)) break; }
     await rdSleep(pace);
   }
   const threads = [...seen.values()];
@@ -1969,13 +1973,16 @@ async function redditSweep(env, opts) {
     };
   });
   for (let i = 0; i < trows.length; i += 150) out.threadRows += await archiveItems(env, 'reddit_thread', trows.slice(i, i + 150));
+  await log('info', 'filed ' + out.threadRows + ' new threads of ' + trows.length + ' collected');
   // Read the comments where the client is actually being argued about: issue
   // tags first, then a keyword hit, then how busy the thread is.
   const weight = t => redditIssues(t.title + ' ' + t.body).length * 1000 + (t.found ? 500 : 0) + (t.comments || 0);
   const pick = threads.slice().sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
   for (const t of pick) {
     try {
+      await log('cmd', 'GET /r/' + t.sub + '/comments/' + t.id + '?limit=' + commentsPer);
       const cs = await redditThreadComments(env, t.sub, t.id, commentsPer, 3);
+      await log('out', t.id + ': ' + cs.length + ' comments - ' + t.title.slice(0, 70));
       await rdSleep(pace);
       const tIssues = redditIssues(t.title + ' ' + t.body);
       const rows = cs.map(c => {
@@ -1990,8 +1997,9 @@ async function redditSweep(env, opts) {
       });
       out.comments += rows.length;
       for (let i = 0; i < rows.length; i += 150) out.commentRows += await archiveItems(env, 'reddit_comment', rows.slice(i, i + 150));
-    } catch (e) { out.errors.push(t.id + ': ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+    } catch (e) { const m = String(e.message || e).slice(0, 80); out.errors.push(t.id + ': ' + m); await log('err', t.id + ': ' + m); if (/rate_limited/.test(m)) break; }
   }
+  await log('info', 'comments filed: ' + out.commentRows);
   return out;
 }
 /** Cron hook: a light sweep at most every 3 hours. */
@@ -2059,6 +2067,314 @@ async function socialBsky(tag) {
     });
   } catch {}
   return posts;
+}
+
+// ==============================================================================
+// THE SIGNAL BRIDGE - the portal's Sweep button, run where the access actually
+// is. A click in the app creates a JOB. The worker runs the sources it can
+// reach itself (Meta and LinkedIn through their APIs, Reddit when Reddit lets
+// it); the sources only a logged-in desktop can reach - X above all - are left
+// queued for tools/reach-agent.py running on a Mac, which claims the job,
+// executes it, and streams every command and its answer back here. Either way
+// the app tails the same log, so the operator watches the collection happen.
+// ==============================================================================
+let BRIDGE_READY = false;
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta'];
+const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
+const BRIDGE_LOG_KEEP = 400;            // lines kept per job
+async function ensureBridge(env) {
+  if (!env.MIND_DB) return false;
+  if (BRIDGE_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS bridge_jobs(id TEXT PRIMARY KEY, source TEXT, params TEXT, status TEXT, agent TEXT, who TEXT, created INTEGER, claimed INTEGER, finished INTEGER, ok INTEGER, result TEXT)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS bridge_jobs_st ON bridge_jobs(status, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS bridge_log(id INTEGER PRIMARY KEY AUTOINCREMENT, job TEXT, ts INTEGER, kind TEXT, text TEXT)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS bridge_log_job ON bridge_log(job, id)'),
+  ]);
+  BRIDGE_READY = true;
+  return true;
+}
+function sigSource(s) { const v = String(s || '').toLowerCase().replace(/[^a-z]/g, ''); return BRIDGE_SOURCES.indexOf(v) >= 0 ? v : ''; }
+function jobId() { return 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+/** Append log lines. Kinds: cmd (a command being run), out (its answer),
+ *  err (a failure, kept verbatim), info (narration), done (the summary). */
+async function jobLog(env, id, lines) {
+  if (!env.MIND_DB || !lines || !lines.length) return;
+  const t = Date.now();
+  await env.MIND_DB.batch(lines.slice(0, 40).map(l => env.MIND_DB
+    .prepare('INSERT INTO bridge_log(job,ts,kind,text) VALUES(?,?,?,?)')
+    .bind(id, t, String(l.k || 'info').slice(0, 8), String(l.t == null ? '' : l.t).slice(0, 1200))));
+}
+/** A buffered logger: collectors call log('cmd', 'twitter search ...') freely
+ *  and lines reach D1 in small batches so a long sweep stays cheap. */
+function mkJobLog(env, id) {
+  let buf = [];
+  const flush = async () => { if (!buf.length) return; const b = buf; buf = []; try { await jobLog(env, id, b); } catch (e) {} };
+  const log = async (k, t) => { buf.push({ k, t }); if (buf.length >= 4) await flush(); };
+  log.flush = flush;
+  return log;
+}
+async function jobCreate(env, source, params, who) {
+  await ensureBridge(env);
+  const id = jobId();
+  const desktopOnly = BRIDGE_DESKTOP_ONLY.indexOf(source) >= 0;
+  const where = String((params && params.where) || 'auto');
+  const local = !desktopOnly && where !== 'desktop';
+  await env.MIND_DB.prepare('INSERT INTO bridge_jobs(id,source,params,status,agent,who,created,claimed,finished,ok,result) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(id, source, JSON.stringify(params || {}).slice(0, 4000), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
+  await jobLog(env, id, [{ k: 'info', t: 'job ' + id + ' created: ' + source + (local ? ' (running in the worker)' : ' (waiting for a desktop collector to claim it)') }]);
+  return { id, local };
+}
+async function jobFinish(env, id, ok, result) {
+  await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, finished=?, ok=?, result=? WHERE id=?')
+    .bind(ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, JSON.stringify(result || {}).slice(0, 4000), id).run();
+  await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + JSON.stringify(result || {}).slice(0, 600) }]);
+  // keep the log readable: trim to the most recent lines
+  try {
+    await env.MIND_DB.prepare('DELETE FROM bridge_log WHERE job=? AND id NOT IN (SELECT id FROM bridge_log WHERE job=? ORDER BY id DESC LIMIT ?)').bind(id, id, BRIDGE_LOG_KEEP).run();
+  } catch (e) {}
+}
+/** The desktop agent claims the oldest queued job it can handle. */
+async function jobClaim(env, agent, sources) {
+  await ensureBridge(env);
+  const want = (sources || []).map(sigSource).filter(Boolean);
+  const list = want.length ? want : BRIDGE_SOURCES;
+  const marks = list.map(() => '?').join(',');
+  const row = await env.MIND_DB.prepare('SELECT id,source,params FROM bridge_jobs WHERE status=? AND source IN (' + marks + ') ORDER BY created LIMIT 1')
+    .bind('queued', ...list).first();
+  if (!row) return null;
+  await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, agent=?, claimed=? WHERE id=?').bind('running', String(agent || 'agent').slice(0, 40), Date.now(), row.id).run();
+  await jobLog(env, row.id, [{ k: 'info', t: 'claimed by ' + String(agent || 'agent').slice(0, 40) }]);
+  let params = {}; try { params = JSON.parse(row.params || '{}'); } catch (e) {}
+  return { id: row.id, source: row.source, params };
+}
+async function jobTail(env, id, after) {
+  await ensureBridge(env);
+  const job = await env.MIND_DB.prepare('SELECT id,source,status,agent,who,created,claimed,finished,ok,result FROM bridge_jobs WHERE id=?').bind(id).first();
+  if (!job) return null;
+  const rows = await env.MIND_DB.prepare('SELECT id,ts,kind,text FROM bridge_log WHERE job=? AND id>? ORDER BY id LIMIT 200').bind(id, Number(after) || 0).all();
+  const lines = rows.results || [];
+  let result = null; try { result = job.result ? JSON.parse(job.result) : null; } catch (e) {}
+  return {
+    ok: true, id: job.id, source: job.source, status: job.status, agent: job.agent || '', started: job.created,
+    finished: job.finished || 0, success: !!job.ok, result: result,
+    lines: lines.map(l => ({ id: l.id, ts: l.ts, kind: l.kind, text: l.text })),
+    cursor: lines.length ? lines[lines.length - 1].id : (Number(after) || 0),
+  };
+}
+/** Agents announce themselves on every poll; the app shows who is connected. */
+async function agentBeat(env, agent, sources) {
+  if (!env.AXIOM_KV || !agent) return;
+  await kvPut(env.AXIOM_KV, 'bridge_agent_' + String(agent).replace(/[^\w-]/g, '').slice(0, 40),
+    JSON.stringify({ ts: Date.now(), sources: (sources || []).slice(0, 8) }), 3 * 86400);
+}
+async function agentsSeen(env) {
+  if (!env.AXIOM_KV || !env.AXIOM_KV.list) return [];
+  try {
+    const l = await env.AXIOM_KV.list({ prefix: 'bridge_agent_' });
+    const out = [];
+    for (const k of (l.keys || []).slice(0, 10)) {
+      const v = await kvGet(env.AXIOM_KV, k.name);
+      let d = {}; try { d = JSON.parse(v || '{}'); } catch (e) {}
+      out.push({ agent: k.name.replace('bridge_agent_', ''), last: d.ts || 0, sources: d.sources || [], live: Date.now() - (d.ts || 0) < 5 * 60000 });
+    }
+    return out.sort((a, b) => b.last - a.last);
+  } catch (e) { return []; }
+}
+
+// -- Signal rows: one shape for every platform, so the view and the Mind do not
+//    care where a comment came from. Author names are never stored. ----------
+function sigThreadRow(p) {
+  const text = (p.title || '') + ' ' + (p.body || '');
+  const issues = issueTag(text);
+  return {
+    src: p.platform, title: String(p.title || '').slice(0, 400),
+    body: String(p.body || '').slice(0, 3000) + '\n' + (p.score || 0) + ' reactions, ' + (p.comments || 0) + ' comments' + (p.link ? '\nLink: ' + p.link : ''),
+    url: p.url || ('x:sig:' + p.platform + ':' + p.id), author: '', tone: commentTone(text), ts: p.ts || Date.now(),
+    meta: { platform: p.platform, id: String(p.id || ''), page: p.page || '', page_name: p.page_name || '', score: p.score || 0,
+      comments: p.comments || 0, link: String(p.link || '').slice(0, 300), issues: issues, issue: issues[0] || '',
+      q: p.q || '', ns: p.ns || '', via: p.via || 'worker' },
+  };
+}
+function sigCommentRow(c, thread) {
+  const all = issueMerge(issueTag(c.body), (thread && thread.issues) || []);
+  return {
+    src: c.platform, title: 'Comment on: ' + String((thread && thread.title) || '').slice(0, 120), body: String(c.body || '').slice(0, 3000),
+    url: 'x:sigc:' + c.platform + ':' + c.id, author: '', tone: commentTone(c.body), ts: c.ts || Date.now(),
+    meta: { platform: c.platform, thread: String((thread && thread.id) || ''), thread_title: String((thread && thread.title) || '').slice(0, 200),
+      permalink: String((thread && thread.url) || '').slice(0, 300), score: c.score || 0, depth: c.depth || 0,
+      issues: all, issue: all[0] || '', tone: commentTone(c.body), ns: c.ns || (thread && thread.ns) || '', via: c.via || 'worker' },
+  };
+}
+async function sigFile(env, threads, comments) {
+  let t = 0, cm = 0;
+  for (let i = 0; i < threads.length; i += 150) t += await archiveItems(env, 'sig_thread', threads.slice(i, i + 150));
+  for (let i = 0; i < comments.length; i += 150) cm += await archiveItems(env, 'sig_comment', comments.slice(i, i + 150));
+  return { threadRows: t, commentRows: cm };
+}
+
+// -- LinkedIn: the client's own pages, through LinkedIn's own API. Needs the
+//    secret LINKEDIN_TOKEN (a member token with r_organization_social) and the
+//    text var LINKEDIN_ORGS ("urn:li:organization:123:mca,456:aep"). ---------
+const LI_API = 'https://api.linkedin.com/rest';
+function liOrgs(env) {
+  return String(env.LINKEDIN_ORGS || '').split(/[,\s]+/).filter(Boolean).map(s => {
+    const parts = String(s).split(':');
+    const ns = (parts.length > 1 ? parts[parts.length - 1] : 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cmm';
+    const idPart = parts.length > 1 ? parts.slice(0, -1).join(':') : s;
+    const id = /^urn:/.test(idPart) ? idPart : 'urn:li:organization:' + String(idPart).replace(/[^0-9]/g, '');
+    return { urn: id, ns: ns };
+  }).filter(o => /^urn:li:organization:\d+$/.test(o.urn));
+}
+async function liGet(env, path) {
+  const r = await fetch(LI_API + path, { headers: {
+    'Authorization': 'Bearer ' + env.LINKEDIN_TOKEN,
+    'LinkedIn-Version': String(env.LINKEDIN_VERSION || '202409'),
+    'X-Restli-Protocol-Version': '2.0.0',
+  }, signal: abortAfter(20000) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error('linkedin_' + r.status + (d && d.message ? ': ' + String(d.message).slice(0, 120) : ''));
+  return d;
+}
+async function linkedinSweep(env, opts) {
+  opts = opts || {};
+  const log = opts.log || (async () => {});
+  if (!env.LINKEDIN_TOKEN) return { ok: false, error: 'linkedin_not_configured', detail: 'Set the worker secret LINKEDIN_TOKEN (a LinkedIn token with r_organization_social for the pages you administer) and the var LINKEDIN_ORGS, e.g. "urn:li:organization:123:mca,456:aep".' };
+  const orgs = liOrgs(env);
+  if (!orgs.length) return { ok: false, error: 'linkedin_no_orgs', detail: 'Set LINKEDIN_ORGS to your organisation URNs with their client namespace, e.g. "urn:li:organization:123:mca".' };
+  const perOrg = Math.min(Math.max(parseInt(opts.posts, 10) || 20, 1), 50);
+  const perPost = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 50, 5), 100);
+  const out = { ok: true, platform: 'linkedin', orgs: orgs.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const trows = [], crows = [];
+  for (const org of orgs) {
+    const q = '/posts?author=' + encodeURIComponent(org.urn) + '&q=author&count=' + perOrg + '&sortBy=LAST_MODIFIED';
+    await log('cmd', 'GET api.linkedin.com/rest' + q);
+    let posts = [];
+    try {
+      const d = await liGet(env, q);
+      posts = d.elements || [];
+      await log('out', org.urn + ': ' + posts.length + ' posts');
+    } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(org.urn + ': ' + m); await log('err', m); continue; }
+    for (const p of posts) {
+      const urn = String(p.id || '');
+      const body = String((p.commentary != null ? p.commentary : (p.specificContent && JSON.stringify(p.specificContent))) || '').slice(0, 4000);
+      const thread = { platform: 'linkedin', id: urn, title: body.split('\n')[0].slice(0, 200) || 'LinkedIn post',
+        body: body, page: org.urn, page_name: '', score: 0, comments: 0, ns: org.ns,
+        url: 'https://www.linkedin.com/feed/update/' + urn, ts: Number(p.createdAt || p.firstPublishedAt || 0) || Date.now() };
+      thread.issues = issueTag(thread.title + ' ' + thread.body);
+      trows.push(sigThreadRow(thread));
+      out.threads++;
+      const cq = '/socialActions/' + encodeURIComponent(urn) + '/comments?count=' + perPost;
+      await log('cmd', 'GET api.linkedin.com/rest/socialActions/' + urn.slice(0, 40) + '/comments');
+      try {
+        const cd = await liGet(env, cq);
+        const els = cd.elements || [];
+        await log('out', els.length + ' comments on ' + urn.slice(-12));
+        els.forEach(c => {
+          const text = String((c.message && c.message.text) || '').trim();
+          if (!text) return;
+          crows.push(sigCommentRow({ platform: 'linkedin', id: String(c.id || c.$URN || Math.random().toString(36).slice(2)), body: text,
+            score: (c.likesSummary && c.likesSummary.totalLikes) || 0, ts: (c.created && c.created.time) || Date.now(), ns: org.ns }, thread));
+          out.comments++;
+        });
+      } catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(urn + ': ' + m); await log('err', m); }
+    }
+  }
+  const filed = await sigFile(env, trows, crows);
+  out.threadRows = filed.threadRows; out.commentRows = filed.commentRows;
+  await log('info', 'filed ' + out.threadRows + ' posts and ' + out.commentRows + ' comments');
+  return out;
+}
+
+// -- Meta, organic: the client's own Facebook and Instagram pages. The ad-side
+//    comment sweep (metaComments) is untouched; this reads the page's own
+//    posts, which is where most of the argument happens. -----------------------
+function metaPages(env) {
+  return String(env.META_PAGES || '').split(/[,\s]+/).filter(Boolean).map(s => {
+    const [id, ns] = String(s).split(':');
+    return { id: String(id || '').replace(/[^0-9]/g, ''), ns: (ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'cmm' };
+  }).filter(p => p.id);
+}
+async function metaOrganicSweep(env, opts) {
+  opts = opts || {};
+  const log = opts.log || (async () => {});
+  if (!env.META_TOKEN) return { ok: false, error: 'meta_not_configured', detail: 'Set META_TOKEN (a System User token with pages_read_engagement and pages_read_user_content, with the pages assigned).' };
+  const pages = metaPages(env);
+  if (!pages.length) return { ok: false, error: 'meta_no_pages', detail: 'Set the text var META_PAGES to the page ids with their client namespace, e.g. "123456:mca,789012:aep". GET /meta/status?probe=1 checks the token.' };
+  const perPage = Math.min(Math.max(parseInt(opts.posts, 10) || 25, 1), 100);
+  const perPost = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 50, 5), 100);
+  const tok = '&access_token=' + encodeURIComponent(env.META_TOKEN);
+  const out = { ok: true, platform: 'meta', pages: pages.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const trows = [], crows = [];
+  for (const pg of pages) {
+    const url = META_API + '/' + pg.id + '/posts?fields=id,message,created_time,permalink_url,shares,comments.limit(' + perPost + '){id,message,created_time,like_count},reactions.summary(true).limit(0)&limit=' + perPage + tok;
+    await log('cmd', 'GET graph.facebook.com/' + pg.id + '/posts?fields=message,comments{...}&limit=' + perPage);
+    let posts = [];
+    try { const d = await metaGet(url); posts = d.data || []; await log('out', 'page ' + pg.id + ': ' + posts.length + ' posts'); }
+    catch (e) { const m = String(e.message || e).slice(0, 160); out.errors.push(pg.id + ': ' + m); await log('err', m); continue; }
+    for (const p of posts) {
+      const body = String(p.message || '').slice(0, 4000);
+      const cs = ((p.comments || {}).data || []).filter(c => c.message && c.message.trim());
+      const thread = { platform: 'meta', id: String(p.id || ''), title: body.split('\n')[0].slice(0, 200) || 'Facebook post', body: body,
+        page: pg.id, ns: pg.ns, score: ((p.reactions || {}).summary || {}).total_count || 0, comments: cs.length,
+        url: p.permalink_url || ('https://www.facebook.com/' + p.id), ts: Date.parse(p.created_time || '') || Date.now() };
+      thread.issues = issueTag(thread.title + ' ' + thread.body);
+      trows.push(sigThreadRow(thread)); out.threads++;
+      cs.forEach(c => {
+        crows.push(sigCommentRow({ platform: 'meta', id: String(c.id || ''), body: String(c.message), score: c.like_count || 0,
+          ts: Date.parse(c.created_time || '') || Date.now(), ns: pg.ns }, thread));
+        out.comments++;
+      });
+      await log('out', String(p.id).slice(-10) + ': ' + cs.length + ' comments');
+    }
+  }
+  const filed = await sigFile(env, trows, crows);
+  out.threadRows = filed.threadRows; out.commentRows = filed.commentRows;
+  await log('info', 'filed ' + out.threadRows + ' posts and ' + out.commentRows + ' comments');
+  return out;
+}
+
+/** Cron hook: the two platforms the worker can read on its own, at most
+ *  6-hourly, and only when they are configured. */
+async function signalsCron(env) {
+  if (!env.MIND_DB) return;
+  const last = Number(await kvGet(env.AXIOM_KV, 'signals_last_sweep') || 0);
+  if (Date.now() - last < 6 * 3600000) return;
+  await kvPut(env.AXIOM_KV, 'signals_last_sweep', String(Date.now()), 86400);
+  const out = {};
+  if (env.LINKEDIN_TOKEN && liOrgs(env).length) { try { out.linkedin = await linkedinSweep(env, {}); } catch (e) { out.linkedin = { error: String(e).slice(0, 120) }; } }
+  if (env.META_TOKEN && metaPages(env).length) { try { out.meta = await metaOrganicSweep(env, {}); } catch (e) { out.meta = { error: String(e).slice(0, 120) }; } }
+  await kvPut(env.AXIOM_KV, 'signals_last_result', JSON.stringify(out).slice(0, 4000), 7 * 86400);
+}
+/** Run a job here, in the worker, narrating every step into its log. */
+async function jobRunLocal(env, job) {
+  const log = mkJobLog(env, job.id);
+  let out = null, ok = false;
+  try {
+    if (job.source === 'reddit') {
+      await log('info', 'sweeping Reddit from the worker (Reddit often refuses cloud networks; the desktop collector is the reliable path)');
+      out = await redditSweep(env, Object.assign({ queries: 'auto' }, job.params, { log: log }));
+      // a sweep that collected nothing and hit errors is a failure, whatever
+      // the shape of the return: the console should say so in red
+      ok = !!(out && out.ok) && (out.threads > 0 || !(out.errors || []).length);
+      if (!ok && out) out.detail = 'Nothing was collected. ' + ((out.errors || [])[0] || '') + ' Reddit refuses cloud networks; run tools/reach-agent.py on your Mac and press Sweep again.';
+    } else if (job.source === 'linkedin') {
+      out = await linkedinSweep(env, Object.assign({}, job.params, { log: log }));
+      ok = !!(out && out.ok);
+    } else if (job.source === 'meta') {
+      out = await metaOrganicSweep(env, Object.assign({}, job.params, { log: log }));
+      ok = !!(out && out.ok);
+    } else {
+      out = { ok: false, error: 'desktop_only', detail: job.source + ' can only be collected from a logged-in desktop. Run tools/reach-agent.py on your Mac and it will claim this job.' };
+    }
+    if (!ok && out && out.error) await log('err', out.error + (out.detail ? ': ' + out.detail : ''));
+  } catch (e) {
+    out = { ok: false, error: 'sweep_failed', detail: String((e && e.message) || e).slice(0, 300) };
+    await log('err', out.detail);
+  }
+  await log.flush();
+  await jobFinish(env, job.id, ok, out);
+  return out;
 }
 
 // ==============================================================================
@@ -2644,10 +2960,15 @@ export default {
     const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load', '/meta/status'];
     const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET')
       || (path.startsWith('/perf/') && req.method === 'GET')
-      || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'));
+      || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
+      || (path.startsWith('/signals/') && req.method === 'GET')
+      // the console must be readable by anyone who can see the view; claiming
+      // and reporting jobs is a write and stays full-role
+      || (path === '/bridge/job' || path === '/bridge/status');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
-      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/');
+      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
+      || path.startsWith('/signals/') || path.startsWith('/bridge/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -3562,6 +3883,215 @@ export default {
         if (/reddit_oauth/.test(m)) return jsonResp({ ok: false, error: 'reddit_oauth_failed', detail: 'Reddit rejected the app credentials (' + m.slice(0, 60) + '). Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.' }, 502);
         if (/reddit_403|reddit_unreachable/.test(m)) return jsonResp({ ok: false, error: 'reddit_blocked', detail: 'Reddit is refusing anonymous reads from this network (' + m.slice(0, 40) + '). Collect from a logged-in machine instead: tools/reach-reddit.py on a Mac with agent-reach. If you already hold Reddit app credentials, REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets also work.' }, 502);
         return jsonResp({ ok: false, error: 'reddit_failed', detail: m.slice(0, 200) }, 500);
+      }
+    }
+
+    // -- The Signal Bridge: jobs the portal starts and the desktop finishes ----
+    //    POST /bridge/run {source,params}  start a sweep; returns {id} to tail
+    //    GET  /bridge/job?id=&after=       the live log (read role - this is what the console polls)
+    //    GET  /bridge/status               connected collectors, queue, recent jobs
+    //    GET  /bridge/next?agent=&sources= a desktop collector claims a job (full role)
+    //    POST /bridge/log {job,lines}      the collector streams its commands and answers
+    //    POST /bridge/done {job,ok,result} the collector reports the outcome
+    if (path.startsWith('/bridge/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let bbody = {}; if (req.method === 'POST') { try { bbody = await req.json(); } catch (e) { bbody = {}; } }
+      try {
+        await ensureArchive(env); await ensureBridge(env);
+        if (path === '/bridge/run' && req.method === 'POST') {
+          const source = sigSource(bbody.source);
+          if (!source) return jsonResp({ error: 'unknown_source', detail: 'source must be one of ' + BRIDGE_SOURCES.join(', ') + '.' }, 400);
+          const params = (bbody.params && typeof bbody.params === 'object') ? bbody.params : {};
+          const job = await jobCreate(env, source, Object.assign({}, params, { where: bbody.where || 'auto' }), auth.name);
+          if (job.local) {
+            // run it after the response so the console can start tailing at once
+            ctx.waitUntil(jobRunLocal(env, { id: job.id, source, params }));
+          }
+          return jsonResp({ ok: true, id: job.id, source, where: job.local ? 'worker' : 'desktop',
+            note: job.local ? 'Running in the worker. Tail /bridge/job?id=' + job.id : 'Queued for a desktop collector. Start it with: python3 tools/reach-agent.py --key $AXIOM_KEY' });
+        }
+        if (path === '/bridge/job') {
+          const id = String(reqUrl.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const t = await jobTail(env, id, reqUrl.searchParams.get('after'));
+          return t ? jsonResp(t) : jsonResp({ error: 'unknown_job' }, 404);
+        }
+        if (path === '/bridge/status') {
+          const jobs = (await env.MIND_DB.prepare('SELECT id,source,status,agent,created,finished,ok FROM bridge_jobs ORDER BY created DESC LIMIT 12').all()).results || [];
+          const q = (await env.MIND_DB.prepare("SELECT COUNT(*) n FROM bridge_jobs WHERE status='queued'").first()) || {};
+          return jsonResp({ ok: true, agents: await agentsSeen(env), queued: q.n || 0, jobs,
+            sources: BRIDGE_SOURCES.map(sc => ({ source: sc, desktopOnly: BRIDGE_DESKTOP_ONLY.indexOf(sc) >= 0,
+              ready: sc === 'reddit' ? true : sc === 'meta' ? !!(env.META_TOKEN && metaPages(env).length) : sc === 'linkedin' ? !!(env.LINKEDIN_TOKEN && liOrgs(env).length) : true })) });
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Collector routes need a full-access key.' }, 403);
+        if (path === '/bridge/next') {
+          const agent = String(reqUrl.searchParams.get('agent') || 'agent').slice(0, 40);
+          const sources = String(reqUrl.searchParams.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);
+          await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES);
+          const job = await jobClaim(env, agent, sources);
+          return jsonResp({ ok: true, job: job, lexicon: job ? { issues: CLIENT_ISSUES.map(ci => ({ id: ci.id, ns: ci.ns, wide: (ci.wide || ci.rx).source, q: ci.q || [] })), subs: REDDIT_POLITICS } : null });
+        }
+        if (path === '/bridge/log' && req.method === 'POST') {
+          const id = String(bbody.job || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const lines = (Array.isArray(bbody.lines) ? bbody.lines : []).map(l => ({ k: (l && (l.k || l.kind)) || 'info', t: (l && (l.t || l.text)) || '' }));
+          if (!id || !lines.length) return jsonResp({ error: 'missing_job_or_lines' }, 400);
+          await jobLog(env, id, lines);
+          return jsonResp({ ok: true, wrote: Math.min(lines.length, 40) });
+        }
+        if (path === '/bridge/done' && req.method === 'POST') {
+          const id = String(bbody.job || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          if (!id) return jsonResp({ error: 'missing_job' }, 400);
+          await jobFinish(env, id, bbody.ok !== false, bbody.result || {});
+          return jsonResp({ ok: true });
+        }
+        if (path === '/bridge/cancel' && req.method === 'POST') {
+          const id = String(bbody.job || bbody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          if (!id) return jsonResp({ error: 'missing_job' }, 400);
+          await env.MIND_DB.prepare("UPDATE bridge_jobs SET status='cancelled', finished=? WHERE id=? AND status IN ('queued','running')").bind(Date.now(), id).run();
+          await jobLog(env, id, [{ k: 'info', t: 'cancelled by ' + (auth.name || 'user') }]);
+          return jsonResp({ ok: true });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'bridge_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
+    // -- Signals: what LinkedIn, Meta, X and Reddit are saying, one shape ------
+    //    GET  /signals/threads?platform=&days=&issue=&q=&limit=
+    //    GET  /signals/comments?thread=&platform=
+    //    GET  /signals/status                   counts and tone per platform
+    //    POST /signals/analyse {platform,threads|days,ns}   Claude reads them (full role)
+    //    POST /signals/mind {platform,threads,ns,title}     file a digest in the Mind (full role)
+    if (path.startsWith('/signals/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let sbody = {}; if (req.method === 'POST') { try { sbody = await req.json(); } catch (e) { sbody = {}; } }
+      const db = env.MIND_DB;
+      const pj = s2 => { if (Array.isArray(s2)) return s2; try { const v = JSON.parse(s2); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+      let plat = String(reqUrl.searchParams.get('platform') || sbody.platform || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (plat === 'all') plat = '';   // 'all' means every signal platform, not a platform called all
+      const isReddit = plat === 'reddit';
+      const tKind = isReddit ? 'reddit_thread' : 'sig_thread';
+      const cKind = isReddit ? 'reddit_comment' : 'sig_comment';
+      const days = Math.min(parseInt(reqUrl.searchParams.get('days') || sbody.days || '14', 10) || 14, 365);
+      const since = Date.now() - days * 86400000;
+      const issue = String(reqUrl.searchParams.get('issue') || sbody.issue || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24);
+      const qs = String(reqUrl.searchParams.get('q') || sbody.q || '').slice(0, 120);
+      // reddit rows carry meta.sub, the others meta.page/page_name: one column either way
+      const chan = isReddit ? "json_extract(meta,'$.sub')" : "COALESCE(json_extract(meta,'$.page_name'), json_extract(meta,'$.page'))";
+      const platCol = isReddit ? "'reddit'" : "json_extract(meta,'$.platform')";
+      try {
+        await ensureArchive(env);
+        const threadRows = async (ids) => {
+          if (!ids.length) return [];
+          const ph = ids.map(() => '?').join(',');
+          return (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='" + tKind + "' AND json_extract(meta,'$.id') IN (" + ph + ')').bind(...ids).all()).results || [];
+        };
+        const commentRows = async (id, lim) => (await db.prepare("SELECT body, COALESCE(tone,0) tone, ts, json_extract(meta,'$.score') score, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='" + cKind + "' AND json_extract(meta,'$.thread')=? ORDER BY COALESCE(json_extract(meta,'$.score'),0) DESC LIMIT ?").bind(id, lim || 200).all()).results || [];
+        if (path === '/signals/status') {
+          const rows = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, MAX(ts) newest FROM arc_items WHERE kind='sig_thread' GROUP BY platform").all()).results || [];
+          const cs = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='sig_comment' GROUP BY platform").all()).results || [];
+          const rd = (await db.batch([
+            db.prepare("SELECT COUNT(*) n, MAX(ts) newest FROM arc_items WHERE kind='reddit_thread'"),
+            db.prepare("SELECT COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='reddit_comment'"),
+          ]));
+          const byPlatform = {};
+          rows.forEach(r => { byPlatform[r.platform || 'unknown'] = { threads: r.n || 0, newest: r.newest || 0, comments: 0, hostile: 0, supportive: 0 }; });
+          cs.forEach(c => { const k = c.platform || 'unknown'; byPlatform[k] = byPlatform[k] || { threads: 0, newest: 0 }; byPlatform[k].comments = c.n || 0; byPlatform[k].hostile = c.hostile || 0; byPlatform[k].supportive = c.supportive || 0; });
+          const r0 = (rd[0].results || [])[0] || {}, r1 = (rd[1].results || [])[0] || {};
+          byPlatform.reddit = { threads: r0.n || 0, newest: r0.newest || 0, comments: r1.n || 0, hostile: r1.hostile || 0, supportive: r1.supportive || 0 };
+          return jsonResp({ ok: true, byPlatform, configured: {
+            linkedin: { ready: !!(env.LINKEDIN_TOKEN && liOrgs(env).length), orgs: liOrgs(env).length,
+              detail: env.LINKEDIN_TOKEN ? (liOrgs(env).length ? '' : 'Set LINKEDIN_ORGS, e.g. "urn:li:organization:123:mca".') : 'Set the worker secret LINKEDIN_TOKEN (r_organization_social on the pages you administer) and the var LINKEDIN_ORGS.' },
+            meta: { ready: !!(env.META_TOKEN && metaPages(env).length), pages: metaPages(env).length,
+              detail: env.META_TOKEN ? (metaPages(env).length ? '' : 'Set the var META_PAGES, e.g. "123456:mca,789012:aep".') : 'Set META_TOKEN with pages_read_engagement and pages_read_user_content.' },
+            x: { ready: true, desktopOnly: true, detail: 'X is collected from a logged-in desktop: install twitter-cli, then run python3 tools/reach-agent.py --key $AXIOM_KEY on that machine.' },
+            reddit: { ready: true, desktopOnly: false, detail: redditAuthed(env) ? '' : 'The worker reads Reddit anonymously and is often refused; the desktop collector is the reliable path.' },
+          }, agents: await agentsSeen(env) });
+        }
+        if (path === '/signals/threads') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60, 200);
+          const w = ["kind='" + tKind + "'", 'ts>?']; const b = [since];
+          if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
+          if (issue) { w.push('meta LIKE ?'); b.push('%"' + issue + '"%'); }
+          // one channel filter for all four: a subreddit on Reddit, a page elsewhere
+          const chq = String(reqUrl.searchParams.get('channel') || '').slice(0, 80);
+          if (chq) { w.push('LOWER(' + chan + ')=?'); b.push(chq.toLowerCase()); }
+          if (qs) { w.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')"); const l = arcLike(qs); b.push(l, l); }
+          const rows = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.q') q, json_extract(meta,'$.issues') issues FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
+          const ids = rows.map(r => r.id).filter(Boolean).slice(0, 200);
+          const held = {};
+          if (ids.length) {
+            const ph = ids.map(() => '?').join(',');
+            ((await db.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='" + cKind + "' AND json_extract(meta,'$.thread') IN (" + ph + ') GROUP BY t').bind(...ids).all()).results || []).forEach(x => { held[x.t] = { n: x.n || 0, hostile: x.hostile || 0, supportive: x.supportive || 0 }; });
+          }
+          const have = (await db.prepare("SELECT COUNT(*) total, MAX(ts) newest FROM arc_items WHERE kind='" + tKind + "'" + (!isReddit && plat ? " AND json_extract(meta,'$.platform')='" + plat + "'" : '')).first()) || { total: 0 };
+          // the channels this platform has, so the view can offer them
+          const chans = (await db.prepare('SELECT ' + chan + " channel, COUNT(*) n FROM arc_items WHERE kind='" + tKind + "' AND ts>?" + (!isReddit && plat ? " AND json_extract(meta,'$.platform')='" + plat + "'" : '') + ' GROUP BY channel ORDER BY n DESC LIMIT 20').bind(since).all()).results || [];
+          return jsonResp({ ok: true, platform: plat || 'all', days, issue, q: qs, channels: chans.filter(c => c.channel),
+            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, channel: r.channel || '', platform: r.platform || plat, id: r.id, score: r.score, comments: r.comments, q: r.q || '', issues: pj(r.issues), excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: held[r.id] || null })),
+            have });
+        }
+        if (path === '/signals/comments') {
+          const tid = String(reqUrl.searchParams.get('thread') || '').slice(0, 60);
+          if (!tid) return jsonResp({ error: 'missing_thread' }, 400);
+          const rows = await commentRows(tid, 200);
+          return jsonResp({ ok: true, thread: tid, platform: plat, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.score, issues: pj(r.issues) })) });
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Analysis and filing need a full-access key.' }, 403);
+        if (path === '/signals/analyse' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          const ns = String(sbody.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
+          let ids = Array.isArray(sbody.threads) ? sbody.threads.map(x => String(x).slice(0, 60)).filter(Boolean).slice(0, 12) : [];
+          if (!ids.length) {
+            const w = ["kind='" + tKind + "'", 'ts>?']; const b = [since];
+            if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
+            if (issue) { w.push('meta LIKE ?'); b.push('%"' + issue + '"%'); }
+            ids = ((await db.prepare("SELECT json_extract(meta,'$.id') id FROM arc_items WHERE " + w.join(' AND ') + " ORDER BY COALESCE(json_extract(meta,'$.comments'),0) DESC LIMIT 12").bind(...b).all()).results || []).map(r => r.id).filter(Boolean);
+          }
+          const threads = await threadRows(ids);
+          if (!threads.length) return jsonResp({ ok: false, error: 'no_threads', detail: 'Nothing on file for that scope. Sweep first.' }, 404);
+          let corpus = ''; let nC = 0;
+          for (const t of threads) {
+            const cs = await commentRows(t.id, 25); nC += cs.length;
+            corpus += '\n## [' + (t.platform || plat) + (t.channel ? ' / ' + t.channel : '') + '] ' + String(t.title).slice(0, 200) + ' (' + (t.score || 0) + ' reactions, ' + (t.comments || 0) + ' comments)\n' + String(t.body || '').split('\n')[0].slice(0, 500) + '\n'
+              + cs.map(c => '- [' + (c.tone < 0 ? 'hostile' : c.tone > 0 ? 'supportive' : 'neutral') + ', ' + (c.score || 0) + '] ' + String(c.body || '').replace(/\s+/g, ' ').slice(0, 320)).join('\n') + '\n';
+          }
+          const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || 'Curious Minds';
+          const where = plat === 'linkedin' ? 'LinkedIn, where the audience is professional, named and often industry-adjacent, so hostility is rarer and more consequential'
+            : plat === 'meta' ? 'Facebook and Instagram, where the audience is the general public and comments are emotive and fast'
+            : plat === 'x' ? 'X, where political argument is fastest and most adversarial and where journalists watch'
+            : 'Reddit, which skews young and progressive and runs ahead of mainstream comment sections';
+          const sys = 'You are a senior Australian political communications analyst working for ' + client + '. You are reading public posts and comments from ' + where + '. This is internal agency analysis: read it as an early-warning channel for the arguments that will reach the wider public, not as a poll. Never invent quotes. Return strict JSON only, no prose outside it: {"summary":"two or three sentences","themes":[{"theme":"","stance":"hostile|supportive|mixed|neutral","share":"approx %","quotes":["verbatim comment"],"read":"what it means for us"}],"attackLines":["the arguments used against our client, in the words used"],"supportLines":["arguments made in our favour"],"risks":["what could cross into mainstream media"],"openings":["where a well-placed fact or line would land"],"replies":[{"to":"theme","line":"a ready reply in plain Australian English, no jargon"}]}';
+          const txt = await claudeMsg(env, sys, 'Posts and comments:\n' + corpus.slice(0, 60000), 2600, 75000);
+          const s2 = typeof txt === 'string' ? txt : (txt && (txt.text || JSON.stringify(txt))) || '';
+          let a = null; try { a = JSON.parse((s2.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) { a = null; }
+          if (!a) return jsonResp({ ok: false, error: 'analysis_unparseable', detail: s2.slice(0, 200) }, 502);
+          try { await db.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run(); await db.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, 'signals_' + (plat || 'all'), threads.length + ' threads / ' + nC + ' comments', Date.now()).run(); } catch (e) {}
+          return jsonResp({ ok: true, ns, platform: plat || 'all', threads: threads.length, comments: nC, analysis: a });
+        }
+        if (path === '/signals/mind' && req.method === 'POST') {
+          const ns = String(sbody.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
+          const ids = (Array.isArray(sbody.threads) ? sbody.threads : []).map(x => String(x).slice(0, 60)).filter(Boolean).slice(0, 25);
+          if (!ids.length) return jsonResp({ error: 'missing_threads', detail: 'Pick at least one post.' }, 400);
+          const threads = await threadRows(ids);
+          if (!threads.length) return jsonResp({ ok: false, error: 'no_threads', detail: 'None of those posts are on file.' }, 404);
+          const day = new Date().toISOString().slice(0, 10);
+          let text = '# ' + (plat ? plat.toUpperCase() : 'Social') + ' signal - ' + day + '\n\nSource: public posts and comments via AXIOM. Comment authors are not recorded.\n';
+          let nC = 0; const chans = new Set();
+          for (const t of threads) {
+            if (t.channel) chans.add(t.channel);
+            const cs = await commentRows(t.id, 30); nC += cs.length;
+            text += '\n## ' + String(t.title).slice(0, 200) + '\n' + (t.platform || plat) + (t.channel ? ' / ' + t.channel : '') + ' - ' + (t.score || 0) + ' reactions, ' + (t.comments || 0) + ' comments - ' + t.url + '\nIssues: ' + (pj(t.issues).join(', ') || 'none tagged') + '\n' + String(t.body || '').split('\n')[0].slice(0, 800) + '\n\n### Top comments\n'
+              + cs.map(c => '- (' + (c.tone < 0 ? 'hostile' : c.tone > 0 ? 'supportive' : 'neutral') + ', ' + (c.score || 0) + ') ' + String(c.body || '').replace(/\s+/g, ' ').slice(0, 600)).join('\n') + '\n';
+          }
+          const title = String(sbody.title || ((plat ? plat.toUpperCase() : 'Social') + ' signal ' + day + (chans.size ? ' - ' + [...chans].join(', ') : ''))).slice(0, 200);
+          const r = await mindIngestDoc(env, { ns, title, text, kind: 'signal', source: (plat || 'social') + ':' + [...chans].join(','), date: day });
+          try { await db.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, 'signals_ingest', threads.length + ' threads / ' + nC + ' comments', Date.now()).run(); } catch (e) {}
+          return jsonResp({ ok: true, ns, platform: plat || 'all', docId: r.docId, chunks: r.chunks, threads: threads.length, comments: nC, title });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
+        return jsonResp({ ok: false, error: 'signals_failed', detail: m.slice(0, 200) }, 500);
       }
     }
 
@@ -5124,6 +5654,9 @@ async function handleScheduled(env) {
   // Meta direct: own campaign performance + Ad Library opposition sweep (6-hourly).
   try { await metaCron(env); } catch (e) {}
   try { await redditCron(env); } catch (e) {}
+  // Signals: the clients' own LinkedIn and Meta pages, 6-hourly, so the view is
+  // never empty when someone opens it. X and Reddit come from the desktop agent.
+  try { await signalsCron(env); } catch (e) {}
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));

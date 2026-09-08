@@ -133,7 +133,52 @@ attack-line counts over hostile comments) - all read-role. POST
 into themes with verbatim quotes, risks, openings and ready replies;
 results are logged to `mind_runs` as mode `sentiment`. Harness: `aud.js`.
 
-## The Reddit signal (first React island)
+## Signals: Reddit, X, LinkedIn and Meta (internal agency sentiment)
+
+The `v-signals` view (React island, `docs/signals.js`) holds public conversation
+about our clients in one shape across four platforms, with a **live console**
+that shows the collection happening. Pressing **Sweep** does not fetch in the
+browser: it creates a JOB (`POST /bridge/run {source,params}`). Sources the
+worker can reach run there and narrate into the job log; sources that need a
+logged-in machine are left queued for `tools/reach-agent.py` on a Mac, which
+claims them (`GET /bridge/next`), runs the collector, and streams every command
+and its answer back (`POST /bridge/log`) before reporting the outcome
+(`POST /bridge/done`). The view tails `GET /bridge/job?id=&after=` either way,
+so `$ twitter search "fuel tax credit" ...` and its answer appear as they run.
+Tables `bridge_jobs` and `bridge_log` in D1; `GET /bridge/status` lists the
+connected collectors (KV heartbeats) and which sources are configured.
+
+Per platform:
+- **Reddit** - the sweep described below; worker-side where Reddit allows it,
+  desktop-side reliably (`tools/reach-reddit.py`). Kinds `reddit_thread` /
+  `reddit_comment`.
+- **X** - desktop only. `tools/reach-x.py` drives `twitter` (public-clis/
+  twitter-cli) with the client keywords, reads the replies under the posts that
+  drew argument, and files kinds `sig_thread` / `sig_comment` with
+  `meta.platform: x`. Handles and display names are never stored; permalinks use
+  the `x.com/i/web/status/<id>` form, which carries no handle.
+- **LinkedIn** - the clients' own pages through LinkedIn's own API:
+  `linkedinSweep()` reads `/rest/posts?author=<org urn>` and
+  `/rest/socialActions/<urn>/comments`. Needs the secret `LINKEDIN_TOKEN`
+  (r_organization_social) and the var `LINKEDIN_ORGS`
+  (`urn:li:organization:123:mca,456:aep`). There is no scraping path and none
+  is wanted; without the token the view says exactly what to set.
+- **Meta, organic** - `metaOrganicSweep()` reads each page's own posts and their
+  comments through the Graph API (`META_PAGES` = `123456:mca,789012:aep`), which
+  is where most of the argument happens. The ad-side sweep (`metaComments`) and
+  the whole Supermetrics path are untouched - **ad comments and campaign
+  performance stay in the Audience view**.
+
+Read routes (read role): `/signals/threads?platform=&days=&issue=&q=`,
+`/signals/comments?thread=&platform=`, `/signals/status` (counts and tone per
+platform, what is configured, who is connected). Full role: `/signals/analyse`
+(Claude reads the platform in its own register - LinkedIn is professional and
+named, X is fast and adversarial, Meta is emotive, Reddit runs ahead of
+mainstream) and `/signals/mind` (a digest into the Mind, kind `signal`).
+Harnesses: `signals-worker.js` (33 route tests), `signals.js` (24 browser
+tests), `reach-agent-test.py` (17 collector tests).
+
+## The Reddit signal (the first React island)
 
 `REDDIT_POLITICS` in the worker names the subs we watch - national politics
 and money (AustralianPolitics, australia, AusPol, AusFinance, AusEcon,
@@ -173,9 +218,10 @@ button; `--issue pharmacy,activism` (issue ids or client namespaces) narrows
 the keyword pass, `--queries off` skips it, `--time month` widens the search
 window; `--install-launchd` schedules it 3-hourly via a LaunchAgent that runs
 `zsh -lc` so `$AXIOM_KEY` comes from `~/.zshrc` and never touches the plist.
-The same pattern is the template for any source the worker cannot reach
-(Twitter via cookies, LinkedIn via the MCP): collect on the desktop, file
-through `/archive/add`, let the app and the Mind do the rest.
+The same pattern now carries X as well: `tools/reach-agent.py` is the always-on
+version - it claims Sweep jobs from the portal and runs whichever collector the
+job names (`reach-reddit.py`, `reach-x.py`), streaming its commands and answers
+into the Signals console. `--install-launchd` keeps it connected.
 Routes under `/reddit/` (gated; GETs read-role unless `live=1`): `issues`,
 `threads?sub=&days=&issue=&q=` (with tone of held comments per thread),
 `comments?thread=<id>[&live=1]`, `status`, POST `sweep`, POST `analyse
@@ -185,14 +231,14 @@ openings, ready replies; logged to `mind_runs` mode `reddit`) and POST `mind
 comments and files it in the Mind through `mindIngestDoc()` - the module-level
 twin of `/mind/ingest`, usable from any server-side code.
 
-In-app: the Reddit view (`#v-reddit`) is built with **React as an island**:
-`docs/reddit.js` mounts `RedditApp` into `#reddit-root` on first open, using
+In-app: Reddit is the first tab of the Signals view, built with **React as an
+island**: `docs/signals.js` mounts `SignalsApp` into `#signals-root` on first open, using
 `htm` for JSX-shaped templates with no build step. React, ReactDOM and htm are
 vendored under `docs/vendor/` (never a CDN). New sections should follow this
 pattern - a component file under `docs/`, a `<section class="view">` shell in
 `index.html`, `go()` title + init hook - rather than growing the inline script.
 Components read `AX_ISSUES`, `CC_CLIENTS`, `csBase()`, `axHeaders()`,
-`axScrub()` and `toast()` from the page. Harnesses: `reddit.js` (browser) and
+`axScrub()` and `toast()` from the page. Harnesses: `signals.js` (browser) and
 `reddit-worker.js` (routes driven through the handler with stubbed Reddit, D1,
 KV, AI and Vectorize).
 

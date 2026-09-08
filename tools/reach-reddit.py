@@ -360,7 +360,11 @@ def push(worker, key, kind, rows):
 
 
 # ---- the sweep ---------------------------------------------------------------------
-def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(), per_query=25, when='week'):
+def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(), per_query=25, when='week', cmdlog=None):
+    """Collect. `cmdlog(kind, text)`, when given, is called with every command
+    run and every answer received - that is what AXIOM's Signals console shows
+    while the sweep is happening."""
+    say = cmdlog or (lambda k, t: None)
     seen = {}; errors = []
     def take(posts):
         for p in posts:
@@ -373,18 +377,23 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
                 seen[pid] = p
     for sub in subs:
         for sort in ('hot', 'top'):
+            say('cmd', 'rdt sub %s -s %s -n %d' % (sub, sort, per_sub))
             try:
-                take(listing(sub, sort, per_sub))
+                got = listing(sub, sort, per_sub)
+                take(got)
+                say('out', 'r/%s/%s: %d posts, %d held' % (sub, sort, len(got), len(seen)))
             except RuntimeError as e:
-                errors.append('r/%s/%s: %s' % (sub, sort, e))
+                errors.append('r/%s/%s: %s' % (sub, sort, e)); say('err', 'r/%s/%s: %s' % (sub, sort, e))
                 if 'login' in str(e).lower(): raise
             time.sleep(pace)
     found = 0
     for q in queries:
+        say('cmd', 'rdt search "%s" -s new -t %s -n %d' % (q, when, per_query))
         try:
             hits = search(q, per_query, when); found += len(hits); take(hits)
+            say('out', '"%s": %d hits' % (q, len(hits)))
         except RuntimeError as e:
-            errors.append('search "%s": %s' % (q, e))
+            errors.append('search "%s": %s' % (q, e)); say('err', '"%s": %s' % (q, e))
             if 'login' in str(e).lower(): raise
         time.sleep(pace)
     if queries: log('keywords: %d terms searched, %d hits' % (len(queries), found))
@@ -397,11 +406,15 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
     trows = [thread_row(p) for p in threads]
     crows = []
     for p in pick:
+        pid = str(p.get('id'))
+        say('cmd', 'rdt read %s -n %d' % (pid, n_comments))
         try:
-            post, comments = thread(str(p.get('id')), n_comments)
-            crows.extend(comment_rows(post or p, comments))
+            post, comments = thread(pid, n_comments)
+            rows = comment_rows(post or p, comments)
+            crows.extend(rows)
+            say('out', '%s: %d comments - %s' % (pid, len(rows), str(p.get('title') or '')[:70]))
         except RuntimeError as e:
-            errors.append('%s: %s' % (p.get('id'), e))
+            errors.append('%s: %s' % (pid, e)); say('err', '%s: %s' % (pid, e))
         time.sleep(pace)
     return trows, crows, errors
 

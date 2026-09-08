@@ -80,6 +80,13 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      sweep from anonymous reads, refused from cloud networks,
 #                      into OAuth reads at 60/min. Without it, collect from a Mac
 #                      with tools/reach-reddit.py. Check GET /reddit/status?probe=1)
+#   META_PAGES        (plain text var: "123456:mca,789012:aep" - the pages whose
+#                      OWN posts and comments the Signals view sweeps; the ad-side
+#                      comment sweep needs no page list)
+#   LINKEDIN_TOKEN    (LinkedIn token with r_organization_social for the pages you
+#                      administer; turns on the Signals LinkedIn tab)
+#   LINKEDIN_ORGS     (plain text var: "urn:li:organization:123:mca,456:aep")
+#   LINKEDIN_VERSION  (optional, defaults to 202409 - LinkedIn's API version header)
 #   META_USER_TOKEN   (ID-verified user token with ads_read for the Ad Library
 #                      opposition sweep -> archive kind 'oppads'; expires ~60 days)
 #   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)
