@@ -13,6 +13,11 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js';document.head.appendChild(s)"></script>
 <!-- GSAP — the single motion library; every transition below degrades to CSS if it fails to load -->
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" onerror="void 0"></script>
+<!-- React islands: vendored (docs/vendor) so no CDN can take a view down. New sections are component files like reddit.js. -->
+<script src="vendor/react.production.min.js"></script>
+<script src="vendor/react-dom.production.min.js"></script>
+<script src="vendor/htm.umd.js"></script>
+<script src="reddit.js" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -821,6 +826,29 @@ body.kiosk .kprog{display:block}
 .aud-push code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px}
 .aud-pbar{height:4px;border-radius:3px;background:rgba(255,255,255,.09);margin-top:8px;overflow:hidden}
 .aud-pbar i{display:block;height:100%;background:var(--acg);transition:width .2s}
+/* Reddit signal (React island, docs/reddit.js) */
+.rd-wrap{display:grid;grid-template-columns:1fr;gap:14px}
+.rd-ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.rd-ctl .sel{min-width:150px}
+.rd-ctl input.fi{flex:1 1 200px;min-width:160px}
+.rd-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:1100px){.rd-grid{grid-template-columns:1fr}}
+.rd-th{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:12px 10px;border-bottom:1px solid var(--ln);cursor:pointer}
+.rd-th:hover{background:rgba(255,255,255,.03)}
+.rd-th.on{background:rgba(63,140,255,.08)}
+.rd-th input{margin-top:3px}
+.rd-th .t{font-size:13.5px;line-height:1.4;color:var(--t0)}
+.rd-th .t a{color:inherit;text-decoration:none}.rd-th .t a:hover{text-decoration:underline}
+.rd-th .m{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px;font-family:var(--fm);font-size:10px;color:var(--t3);align-items:center}
+.rd-sub{color:#FF6314;font-weight:600}
+.rd-chip{display:inline-flex;align-items:center;padding:1px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.14);font-family:var(--fm);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--t2)}
+.rd-chip.i{border-color:rgba(63,140,255,.4);color:#8FB6FF}
+.rd-tone{display:inline-flex;height:6px;width:70px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.08)}
+.rd-tone i{display:block;height:100%}
+.rd-list{max-height:680px;overflow:auto}
+.rd-cm{max-height:600px;overflow:auto}
+.rd-res{font-family:var(--fm);font-size:11px;color:var(--t2);line-height:1.6;padding:10px 14px;border:1px solid var(--ln);border-radius:10px;background:rgba(255,255,255,.03)}
+.rd-res.err{color:#F0908B;border-color:rgba(255,107,107,.35)}.rd-res.ok{color:#7EE0AE;border-color:rgba(184,224,74,.3)}
 .aud-diagwrap{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
 .aud-diagbox{flex:1 1 100%;max-height:280px;overflow:auto;margin:4px 0 0;padding:12px 14px;border:1px solid var(--ln);border-radius:10px;background:rgba(0,0,0,.28);font-family:var(--fm);font-size:11px;line-height:1.55;color:var(--t1);white-space:pre-wrap;word-break:break-word}
 .aud-mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-family:var(--fm);font-size:10.5px;color:var(--t2)}
@@ -1408,6 +1436,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Briefing</span></button>
         <button class="rbtn" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rtip">Sentinel</span><span class="rdot" id="sen-dot" hidden></span></button>
         <button class="rbtn" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span class="rtip">Audience</span></button>
+        <button class="rbtn" data-v="reddit" onclick="go('reddit')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7"/><circle cx="9.3" cy="12.5" r="1"/><circle cx="14.7" cy="12.5" r="1"/><path d="M9.5 15.5c1.5 1 3.5 1 5 0"/><path d="M12 6l1.5-3 3 .8"/><circle cx="17" cy="3.6" r="1"/></svg><span class="rtip">Reddit</span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -1823,6 +1852,11 @@ body.kiosk .kprog{display:block}
       </section>
 
       <!-- KNOWLEDGE MAP -->
+      <!-- ═══ REDDIT SIGNAL — the AU political subreddits, threads and comments (React island, docs/reddit.js) ═══ -->
+      <section class="view" id="v-reddit">
+        <div class="note" style="margin:0 0 14px">Threads and comments from r/AustralianPolitics, r/australia, r/AusPol, r/AusFinance and r/AusEcon, tagged with the issues our clients own and read for tone. Reddit is an early-warning channel: the arguments here reach mainstream comment sections weeks later. Select threads to file them in the Mind, or let Claude read what is being argued.</div>
+        <div id="reddit-root"><div class="empty" style="padding:40px 0">Loading the Reddit signal…</div></div>
+      </section>
       <section class="view" id="v-map">
         <div class="kmwrap">
           <canvas id="km-cv"></canvas>
@@ -2105,6 +2139,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Brief</span></button>
   <button class="tab" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span>Alerts</span></button>
   <button class="tab" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span>Audience</span></button>
+  <button class="tab" data-v="reddit" onclick="go('reddit')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7"/><circle cx="9.3" cy="12.5" r="1"/><circle cx="14.7" cy="12.5" r="1"/><path d="M9.5 15.5c1.5 1 3.5 1 5 0"/><path d="M12 6l1.5-3 3 .8"/><circle cx="17" cy="3.6" r="1"/></svg><span>Reddit</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
@@ -2384,7 +2419,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',reddit:'Reddit Signal',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2395,6 +2430,7 @@ function go(v){
   if(v==='brief')renderBriefMem();
   if(v==='sentinel'){renderSentinel();senLoad();}
   if(v==='audience')audInit();
+  if(v==='reddit'&&typeof redditInit==='function')redditInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */

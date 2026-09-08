@@ -1808,6 +1808,130 @@ async function metaCron(env) {
   await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
 }
 
+// ==============================================================================
+// REDDIT SIGNAL - the Australian political subreddits, threads and comments.
+// Threads land as kind 'reddit_thread' (url = permalink) and comments as kind
+// 'reddit_comment' (url = x:rcmt:<id>), each tagged with the client issues it
+// touches and a tone read from the colloquial lexicon. Usernames are never
+// stored: the argument is the signal, not the person. All reads go through
+// api.reddit.com with a descriptive UA, as Reddit asks of unauthenticated
+// clients; www.reddit.com 403s generic cloud user agents.
+// ==============================================================================
+const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon'];
+const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
+async function redditGet(path, timeoutMs) {
+  const r = await fetch('https://api.reddit.com' + path + (path.indexOf('?') < 0 ? '?' : '&') + 'raw_json=1', { headers: REDDIT_UA, signal: abortAfter(timeoutMs || 9000) });
+  if (r.status === 429) throw new Error('reddit_rate_limited');
+  if (!r.ok) throw new Error('reddit_' + r.status);
+  return r.json();
+}
+function redditSubClean(s) { return String(s || '').replace(/^r\//i, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40); }
+function redditIssues(text) { const t = String(text || ''); return CLIENT_ISSUES.filter(ci => ci.rx.test(t)).map(ci => ci.id); }
+/** One subreddit listing, normalised. Stickied and pinned posts are skipped. */
+async function redditListing(sub, sort, limit) {
+  const d = await redditGet('/r/' + sub + '/' + (sort || 'hot') + '?limit=' + (limit || 25) + (sort === 'top' ? '&t=day' : ''));
+  return ((d && d.data && d.data.children) || []).map(c => c && c.data).filter(p => p && !p.stickied && !p.pinned).map(p => ({
+    id: String(p.id || ''), sub: p.subreddit || sub, title: String(p.title || '').slice(0, 400), body: String(p.selftext || '').slice(0, 4000),
+    score: p.score || 0, ratio: p.upvote_ratio || 0, comments: p.num_comments || 0, flair: p.link_flair_text || '',
+    permalink: 'https://www.reddit.com' + (p.permalink || ''), link: p.url_overridden_by_dest || p.url || '', domain: p.domain || '',
+    created: (p.created_utc || 0) * 1000,
+  }));
+}
+/** A thread's comment tree flattened to a depth-limited list. No usernames. */
+async function redditThreadComments(sub, id, limit, depth) {
+  const d = await redditGet('/r/' + sub + '/comments/' + id + '?limit=' + (limit || 60) + '&depth=' + (depth || 3) + '&sort=top');
+  const out = [];
+  const walk = (kids, dep) => {
+    (kids || []).forEach(c => {
+      const x = c && c.data; if (!x || c.kind !== 't1' || !x.body || x.body === '[deleted]' || x.body === '[removed]') return;
+      out.push({ id: String(x.id || ''), body: String(x.body).slice(0, 3000), score: x.score || 0, depth: dep, created: (x.created_utc || 0) * 1000 });
+      if (x.replies && x.replies.data) walk(x.replies.data.children, dep + 1);
+    });
+  };
+  walk(((d && d[1] && d[1].data && d[1].data.children) || []), 0);
+  return out;
+}
+/** Sweep the politics subs: every thread on hot and top-of-day, then the
+ *  comments on the most-discussed threads, issue-tagged threads first. */
+async function redditSweep(env, opts) {
+  opts = opts || {};
+  const subs = ((Array.isArray(opts.subs) && opts.subs.length) ? opts.subs : REDDIT_POLITICS).map(redditSubClean).filter(Boolean).slice(0, 8);
+  const perSub = Math.min(Math.max(parseInt(opts.perSub, 10) || 25, 5), 100);
+  const threadsForComments = Math.min(Math.max(parseInt(opts.threads, 10) || 20, 0), 60);
+  const commentsPer = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 40, 5), 200);
+  const out = { ok: true, subs: subs, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const seen = new Map();
+  for (const sub of subs) {
+    for (const sort of ['hot', 'top']) {
+      try { (await redditListing(sub, sort, perSub)).forEach(t => { if (t.id && !seen.has(t.id)) seen.set(t.id, t); }); }
+      catch (e) { out.errors.push('r/' + sub + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); }
+    }
+  }
+  const threads = [...seen.values()];
+  out.threads = threads.length;
+  const trows = threads.map(t => {
+    const issues = redditIssues(t.title + ' ' + t.body);
+    return {
+      src: 'reddit', title: t.title,
+      body: (t.body || '').slice(0, 3000) + '\n' + t.score + ' points, ' + t.comments + ' comments, upvote ratio ' + t.ratio + (t.flair ? ', flair ' + t.flair : '') + (t.link && t.domain !== 'self.' + t.sub ? '\nLink: ' + t.link : ''),
+      url: t.permalink, author: '', tone: commentTone(t.title + ' ' + t.body), ts: t.created || Date.now(),
+      meta: { sub: t.sub, id: t.id, score: t.score, ratio: t.ratio, comments: t.comments, flair: t.flair, domain: t.domain, link: (t.link || '').slice(0, 300), issues: issues, issue: issues[0] || '' },
+    };
+  });
+  for (let i = 0; i < trows.length; i += 150) out.threadRows += await archiveItems(env, 'reddit_thread', trows.slice(i, i + 150));
+  const weight = t => redditIssues(t.title + ' ' + t.body).length * 1000 + (t.comments || 0);
+  const pick = threads.slice().sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
+  for (const t of pick) {
+    try {
+      const cs = await redditThreadComments(t.sub, t.id, commentsPer, 3);
+      const tIssues = redditIssues(t.title + ' ' + t.body);
+      const rows = cs.map(c => {
+        const own = redditIssues(c.body); const all = own.length ? own : tIssues;
+        return {
+          src: 'reddit', title: 'Comment on: ' + t.title.slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
+          meta: { sub: t.sub, thread: t.id, thread_title: t.title.slice(0, 200), permalink: t.permalink, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) },
+        };
+      });
+      out.comments += rows.length;
+      for (let i = 0; i < rows.length; i += 150) out.commentRows += await archiveItems(env, 'reddit_comment', rows.slice(i, i + 150));
+    } catch (e) { out.errors.push(t.id + ': ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+  }
+  return out;
+}
+/** Cron hook: a light sweep at most every 3 hours. */
+async function redditCron(env) {
+  if (!env.MIND_DB) return;
+  const last = Number(await kvGet(env.AXIOM_KV, 'reddit_last_sweep') || 0);
+  if (Date.now() - last < 3 * 3600000) return;
+  await kvPut(env.AXIOM_KV, 'reddit_last_sweep', String(Date.now()), 86400);
+  let r; try { r = await redditSweep(env, { threads: 15, commentsPer: 30 }); } catch (e) { r = { error: String(e).slice(0, 120) }; }
+  await kvPut(env.AXIOM_KV, 'reddit_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+}
+/** File a document in the Mind from server-side code: the same chunking,
+ *  embedding and bookkeeping /mind/ingest performs for an upload. */
+async function mindIngestDoc(env, doc) {
+  const missing = [];
+  if (!env.MIND_VECTORS) missing.push('MIND_VECTORS'); if (!env.AI) missing.push('AI'); if (!env.MIND_DB) missing.push('MIND_DB'); if (!env.MIND_DOCS) missing.push('MIND_DOCS');
+  if (missing.length) throw new Error('mind_not_configured: bind ' + missing.join(', '));
+  const ns = String(doc.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32) || 'cmm';
+  const text = String(doc.text || '').slice(0, 200000);
+  if (!text.trim()) throw new Error('empty_document');
+  const docId = ns + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const title = String(doc.title || 'Untitled').slice(0, 200), kind = String(doc.kind || 'doc').slice(0, 40);
+  const chunks = []; for (let i = 0; i < text.length && chunks.length < 120; i += 1050) chunks.push(text.slice(i, i + 1200));
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_docs(id TEXT PRIMARY KEY, ns TEXT, title TEXT, kind TEXT, source TEXT, dt TEXT, chunks INTEGER, created INTEGER)').run();
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
+  for (let i = 0; i < chunks.length; i += 20) {
+    const batch = chunks.slice(i, i + 20);
+    const vecs = (await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: batch })).data;
+    await env.MIND_VECTORS.insert(batch.map((c, j) => ({ id: docId + '_' + (i + j), values: vecs[j], namespace: ns,
+      metadata: { docId, title, kind, source: String(doc.source || '').slice(0, 300), dt: String(doc.date || '').slice(0, 20), snippet: c.slice(0, 900) } })));
+  }
+  await env.MIND_DOCS.put('mind/' + ns + '/' + docId + '.txt', text);
+  await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created) VALUES(?,?,?,?,?,?,?,?)').bind(docId, ns, title, kind, String(doc.source || ''), String(doc.date || ''), chunks.length, Date.now()).run();
+  return { docId, chunks: chunks.length, ns };
+}
+
 async function socialBsky(tag) {
   const posts = [];
   try {
@@ -2355,10 +2479,11 @@ export default {
     // shows presence of knowledge without revealing any of it.
     const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load', '/meta/status'];
     const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET')
-      || (path.startsWith('/perf/') && req.method === 'GET');
+      || (path.startsWith('/perf/') && req.method === 'GET')
+      || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'));
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
-      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/');
+      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -3114,6 +3239,141 @@ export default {
     // GET /archive/stats - totals by kind + last-7-day counts by source (map fuel)
     // -- Audience: ads / social / comments aggregates straight from the archive
     //    GET /perf/ads|social|comments?ns=&days=   POST /perf/analyse {ns,days}
+    // -- Reddit signal: the AU political subreddits, threads and comments ----
+    //    GET  /reddit/threads?sub=&days=&issue=&q=&limit=     archived threads + tone of held comments
+    //    GET  /reddit/comments?thread=<id>[&live=1]          archived comments; live=1 fetches fresh (full role)
+    //    GET  /reddit/status                                 last sweep, counts by sub
+    //    POST /reddit/sweep {subs,perSub,threads,commentsPer} collect now (full role)
+    //    POST /reddit/analyse {threads:[ids]|sub, days, ns}   Claude reads the threads (full role)
+    //    POST /reddit/mind {threads:[ids], ns, title}         file a digest in the Mind (full role)
+    if (path.startsWith('/reddit/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      const rsub = redditSubClean(reqUrl.searchParams.get('sub') || '');
+      const rdays = Math.min(parseInt(reqUrl.searchParams.get('days') || '7', 10) || 7, 365);
+      const rsince = Date.now() - rdays * 86400000;
+      const rissue = String(reqUrl.searchParams.get('issue') || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24);
+      const rq = String(reqUrl.searchParams.get('q') || '').slice(0, 120);
+      const pj = s => { if (Array.isArray(s)) return s; try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+      let rbody = {}; if (req.method === 'POST') { try { rbody = await req.json(); } catch (e) { rbody = {}; } }
+      try {
+        await ensureArchive(env);
+        const db = env.MIND_DB;
+        const threadRows = async (ids) => {
+          if (!ids.length) return [];
+          const ph = ids.map(() => '?').join(',');
+          return (await db.prepare("SELECT title, body, url, ts, json_extract(meta,'$.sub') sub, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.id') IN (" + ph + ')').bind(...ids).all()).results || [];
+        };
+        const commentRows = async (id, lim) => (await db.prepare("SELECT body, COALESCE(tone,0) tone, ts, json_extract(meta,'$.score') score, json_extract(meta,'$.depth') depth, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_comment' AND json_extract(meta,'$.thread')=? ORDER BY COALESCE(json_extract(meta,'$.score'),0) DESC LIMIT ?").bind(id, lim || 200).all()).results || [];
+        if (path === '/reddit/status') {
+          let last = {}; try { last = JSON.parse(await kvGet(env.AXIOM_KV, 'reddit_last_result') || '{}'); } catch (e) {}
+          const c = await db.batch([
+            db.prepare("SELECT json_extract(meta,'$.sub') sub, COUNT(*) n, MAX(ts) newest FROM arc_items WHERE kind='reddit_thread' GROUP BY sub ORDER BY n DESC"),
+            db.prepare("SELECT COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) newest FROM arc_items WHERE kind='reddit_comment'"),
+          ]);
+          return jsonResp({ ok: true, subs: REDDIT_POLITICS, bySub: c[0].results || [], comments: (c[1].results || [])[0] || {}, last_sweep: Number(await kvGet(env.AXIOM_KV, 'reddit_last_sweep') || 0) || null, last_result: last });
+        }
+        if (path === '/reddit/threads') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60, 200);
+          const w = ["kind='reddit_thread'", 'ts>?']; const b = [rsince];
+          if (rsub) { w.push("LOWER(json_extract(meta,'$.sub'))=?"); b.push(rsub.toLowerCase()); }
+          if (rissue) { w.push('meta LIKE ?'); b.push('%"' + rissue + '"%'); }
+          if (rq) { w.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')"); const l = arcLike(rq); b.push(l, l); }
+          const rows = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.sub') sub, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.ratio') ratio, json_extract(meta,'$.comments') comments, json_extract(meta,'$.flair') flair, json_extract(meta,'$.domain') domain, json_extract(meta,'$.link') link, json_extract(meta,'$.issues') issues FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
+          const ids = rows.map(r => r.id).filter(Boolean).slice(0, 200);
+          const held = {};
+          if (ids.length) {
+            const ph = ids.map(() => '?').join(',');
+            ((await db.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='reddit_comment' AND json_extract(meta,'$.thread') IN (" + ph + ') GROUP BY t').bind(...ids).all()).results || []).forEach(x => { held[x.t] = { n: x.n || 0, hostile: x.hostile || 0, supportive: x.supportive || 0 }; });
+          }
+          const agg = await db.batch([
+            db.prepare("SELECT json_extract(meta,'$.sub') sub, COUNT(*) n FROM arc_items WHERE kind='reddit_thread' AND ts>? GROUP BY sub ORDER BY n DESC").bind(rsince),
+            db.prepare("SELECT COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='reddit_comment' AND ts>?").bind(rsince),
+            db.prepare("SELECT COUNT(*) total, MAX(ts) newest FROM arc_items WHERE kind='reddit_thread'"),
+          ]);
+          return jsonResp({ ok: true, days: rdays, sub: rsub, issue: rissue, q: rq,
+            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, sub: r.sub, id: r.id, score: r.score, ratio: r.ratio, comments: r.comments, flair: r.flair, domain: r.domain, link: r.link, issues: pj(r.issues), excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: held[r.id] || null })),
+            bySub: agg[0].results || [], commentTone: (agg[1].results || [])[0] || {}, have: (agg[2].results || [])[0] || { total: 0 } });
+        }
+        if (path === '/reddit/comments') {
+          const tid = String(reqUrl.searchParams.get('thread') || '').replace(/[^a-z0-9_]/gi, '').slice(0, 20);
+          if (!tid) return jsonResp({ error: 'missing_thread' }, 400);
+          if (reqUrl.searchParams.get('live')) {
+            if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'A live fetch writes to the archive and needs a full-access key.' }, 403);
+            const t = (await threadRows([tid]))[0];
+            if (!t) return jsonResp({ error: 'unknown_thread', detail: 'Sweep first so the thread is on file.' }, 404);
+            const cs = await redditThreadComments(t.sub, tid, 120, 4);
+            const tIssues = pj(t.issues);
+            const rows = cs.map(c => { const own = redditIssues(c.body); const all = own.length ? own : tIssues; return {
+              src: 'reddit', title: 'Comment on: ' + String(t.title).slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
+              meta: { sub: t.sub, thread: tid, thread_title: String(t.title).slice(0, 200), permalink: t.url, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) } }; });
+            let added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'reddit_comment', rows.slice(i, i + 150));
+            return jsonResp({ ok: true, thread: tid, live: true, fetched: cs.length, added, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.meta.score, depth: r.meta.depth, issues: r.meta.issues })) });
+          }
+          const rows = await commentRows(tid, 200);
+          return jsonResp({ ok: true, thread: tid, live: false, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.score, depth: r.depth, issues: pj(r.issues) })) });
+        }
+        if (path === '/reddit/sweep' && req.method === 'POST') {
+          const r = await redditSweep(env, rbody || {});
+          await kvPut(env.AXIOM_KV, 'reddit_last_sweep', String(Date.now()), 86400);
+          await kvPut(env.AXIOM_KV, 'reddit_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+          return jsonResp(r);
+        }
+        if (path === '/reddit/analyse' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          const ns = String(rbody.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
+          let ids = Array.isArray(rbody.threads) ? rbody.threads.map(x => String(x).replace(/[^a-z0-9_]/gi, '').slice(0, 20)).filter(Boolean).slice(0, 12) : [];
+          if (!ids.length) {
+            const w = ["kind='reddit_thread'", 'ts>?']; const b = [Date.now() - (Math.min(parseInt(rbody.days, 10) || rdays, 365)) * 86400000];
+            const s2 = redditSubClean(rbody.sub || ''); if (s2) { w.push("LOWER(json_extract(meta,'$.sub'))=?"); b.push(s2.toLowerCase()); }
+            const is2 = String(rbody.issue || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 24); if (is2) { w.push('meta LIKE ?'); b.push('%"' + is2 + '"%'); }
+            ids = ((await db.prepare("SELECT json_extract(meta,'$.id') id FROM arc_items WHERE " + w.join(' AND ') + " ORDER BY COALESCE(json_extract(meta,'$.comments'),0) DESC LIMIT 12").bind(...b).all()).results || []).map(r => r.id).filter(Boolean);
+          }
+          const threads = await threadRows(ids);
+          if (!threads.length) return jsonResp({ ok: false, error: 'no_threads', detail: 'Nothing on file for that scope. Sweep first.' }, 404);
+          let corpus = ''; let nC = 0;
+          for (const t of threads) {
+            const cs = await commentRows(t.id, 25); nC += cs.length;
+            corpus += '\n## r/' + t.sub + ' - ' + String(t.title).slice(0, 200) + ' (' + (t.score || 0) + ' points, ' + (t.comments || 0) + ' comments)\n' + String(t.body || '').split('\n')[0].slice(0, 500) + '\n'
+              + cs.map(c => '- [' + (c.tone < 0 ? 'hostile' : c.tone > 0 ? 'supportive' : 'neutral') + ', ' + (c.score || 0) + ' pts] ' + String(c.body || '').replace(/\s+/g, ' ').slice(0, 320)).join('\n') + '\n';
+          }
+          const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || 'Curious Minds';
+          const sys = 'You are a senior Australian political communications analyst working for ' + client + '. You are reading Reddit threads and comments from Australian political subreddits. Reddit skews young, progressive and hostile to industry, so read it as an early-warning channel for the arguments that will reach mainstream comment sections, not as a poll. Return strict JSON only, no prose outside it, with this shape: {"summary":"two or three sentences","themes":[{"theme":"","stance":"hostile|supportive|mixed|neutral","share":"approx %","quotes":["verbatim comment"],"read":"what it means for us"}],"attackLines":["the arguments used against our client, in the words used"],"supportLines":["arguments made in our favour"],"risks":["what could cross into mainstream media"],"openings":["where a well-placed fact or line would land"],"replies":[{"to":"theme","line":"a ready reply in plain Australian English, no jargon"}]}';
+          const txt = await claudeMsg(env, sys, 'Threads and comments:\n' + corpus.slice(0, 60000), 2600, 75000);
+          const s = typeof txt === 'string' ? txt : (txt && (txt.text || JSON.stringify(txt))) || '';
+          let a = null; try { a = JSON.parse((s.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) { a = null; }
+          if (!a) return jsonResp({ ok: false, error: 'analysis_unparseable', detail: s.slice(0, 200) }, 502);
+          try { await db.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run(); await db.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, 'reddit', threads.length + ' threads / ' + nC + ' comments', Date.now()).run(); } catch (e) {}
+          return jsonResp({ ok: true, ns, threads: threads.length, comments: nC, analysis: a });
+        }
+        if (path === '/reddit/mind' && req.method === 'POST') {
+          const ns = String(rbody.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
+          const ids = (Array.isArray(rbody.threads) ? rbody.threads : []).map(x => String(x).replace(/[^a-z0-9_]/gi, '').slice(0, 20)).filter(Boolean).slice(0, 25);
+          if (!ids.length) return jsonResp({ error: 'missing_threads', detail: 'Pick at least one thread.' }, 400);
+          const threads = await threadRows(ids);
+          if (!threads.length) return jsonResp({ ok: false, error: 'no_threads', detail: 'None of those threads are on file.' }, 404);
+          const day = new Date().toISOString().slice(0, 10);
+          let text = '# Reddit signal - ' + day + '\n\nSource: Australian political subreddits via AXIOM. Comment authors are not recorded.\n';
+          let nC = 0; const subs = new Set();
+          for (const t of threads) {
+            subs.add(t.sub);
+            const cs = await commentRows(t.id, 30); nC += cs.length;
+            text += '\n## ' + String(t.title).slice(0, 200) + '\nr/' + t.sub + ' - ' + (t.score || 0) + ' points, ' + (t.comments || 0) + ' comments - ' + t.url + '\nIssues: ' + (pj(t.issues).join(', ') || 'none tagged') + '\n' + String(t.body || '').split('\n')[0].slice(0, 800) + '\n\n### Top comments\n'
+              + cs.map(c => '- (' + (c.tone < 0 ? 'hostile' : c.tone > 0 ? 'supportive' : 'neutral') + ', ' + (c.score || 0) + ' pts) ' + String(c.body || '').replace(/\s+/g, ' ').slice(0, 600)).join('\n') + '\n';
+          }
+          const title = String(rbody.title || ('Reddit signal ' + day + ' - ' + [...subs].map(s => 'r/' + s).join(', '))).slice(0, 200);
+          const r = await mindIngestDoc(env, { ns, title, text, kind: 'reddit', source: 'reddit:' + [...subs].join(','), date: day });
+          try { await db.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, 'reddit_ingest', threads.length + ' threads / ' + nC + ' comments', Date.now()).run(); } catch (e) {}
+          return jsonResp({ ok: true, ns, docId: r.docId, chunks: r.chunks, threads: threads.length, comments: nC, title });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
+        if (/reddit_rate_limited/.test(m)) return jsonResp({ ok: false, error: 'reddit_rate_limited', detail: 'Reddit is throttling us. Wait a minute and try again.' }, 429);
+        return jsonResp({ ok: false, error: 'reddit_failed', detail: m.slice(0, 200) }, 500);
+      }
+    }
+
     if (path.startsWith('/perf/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       const pns = (reqUrl.searchParams.get('ns') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
@@ -4672,6 +4932,7 @@ async function handleScheduled(env) {
   try { await archiveItems(env, 'oppads', await socialRedditPoliticalAds()); } catch (e) {}
   // Meta direct: own campaign performance + Ad Library opposition sweep (6-hourly).
   try { await metaCron(env); } catch (e) {}
+  try { await redditCron(env); } catch (e) {}
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));

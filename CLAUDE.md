@@ -121,6 +121,36 @@ attack-line counts over hostile comments) - all read-role. POST
 into themes with verbatim quotes, risks, openings and ready replies;
 results are logged to `mind_runs` as mode `sentiment`. Harness: `aud.js`.
 
+## The Reddit signal (first React island)
+
+`REDDIT_POLITICS` in the worker names the AU political subreddits
+(AustralianPolitics, australia, AusPol, AusFinance, AusEcon). `redditSweep()`
+reads every thread on hot and top-of-day via `api.reddit.com` (descriptive UA;
+the www host 403s cloud clients), files them as kind `reddit_thread` (url =
+permalink) tagged with the `CLIENT_ISSUES` they touch, then flattens the
+comment trees of the most-discussed threads (issue-tagged first) into kind
+`reddit_comment` (url `x:rcmt:<id>`) with tone from the colloquial lexicon.
+**Usernames are never stored.** `redditCron()` runs it at most 3-hourly.
+Routes under `/reddit/` (gated; GETs read-role unless `live=1`):
+`threads?sub=&days=&issue=&q=` (with tone of held comments per thread),
+`comments?thread=<id>[&live=1]`, `status`, POST `sweep`, POST `analyse
+{threads|sub|issue,days,ns}` (Claude: themes, attack and support lines, risks,
+openings, ready replies; logged to `mind_runs` mode `reddit`) and POST `mind
+{threads,ns,title}` which builds a digest of the chosen threads plus their top
+comments and files it in the Mind through `mindIngestDoc()` - the module-level
+twin of `/mind/ingest`, usable from any server-side code.
+
+In-app: the Reddit view (`#v-reddit`) is built with **React as an island**:
+`docs/reddit.js` mounts `RedditApp` into `#reddit-root` on first open, using
+`htm` for JSX-shaped templates with no build step. React, ReactDOM and htm are
+vendored under `docs/vendor/` (never a CDN). New sections should follow this
+pattern - a component file under `docs/`, a `<section class="view">` shell in
+`index.html`, `go()` title + init hook - rather than growing the inline script.
+Components read `AX_ISSUES`, `CC_CLIENTS`, `csBase()`, `axHeaders()`,
+`axScrub()` and `toast()` from the page. Harnesses: `reddit.js` (browser) and
+`reddit-worker.js` (routes driven through the handler with stubbed Reddit, D1,
+KV, AI and Vectorize).
+
 ## Meta, direct (no third party)
 
 Worker secrets `META_TOKEN` (Business System User token, ads_read +
