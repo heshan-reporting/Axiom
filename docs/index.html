@@ -1424,7 +1424,7 @@ body.kiosk .kprog{display:block}
           <div class="hcol">
             <div>
               <div class="htitle">Attention on our issues</div>
-              <div class="hdesc" style="margin-top:6px">How the last 24 hours of coverage splits across the issues our clients own. Click an issue to track it in Radar.</div>
+              <div class="hdesc" id="orbit-desc" style="margin-top:6px">How coverage in the last 24 hours splits across the issues our clients own. Click an issue to track it in Radar.</div>
             </div>
             <svg class="hexr" viewBox="0 0 220 220" role="img" aria-label="Six-signal attention radar">
               <polygon points="110,30 179.3,70 179.3,150 110,190 40.7,150 40.7,70" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="1"/>
@@ -2300,22 +2300,43 @@ function arcLog(surface,role,text){
    the attention index, the six-signal radar and the orbit count only stories
    that touch one of them. `q` is the phrase Radar tracks when clicked. */
 const AX_ISSUES=[
- {id:'ftc',ns:'mca',client:'Minerals Council',label:'Fuel tax credits',q:'fuel tax credit',rx:/fuel tax credits?|diesel (fuel )?rebate|fuel excise credit|hands off our fuel|\bhoof\b|fuel tax/i},
- {id:'cm',ns:'mca',client:'Minerals Council',label:'Critical minerals',q:'critical minerals',rx:/critical minerals?|rare earths?|gallium|antimony|lithium|strategic reserve/i},
- {id:'mining',ns:'mca',client:'Minerals Council',label:'Mining policy',q:'mining royalties',rx:/mining (tax|royalt|approval|jobs|sector|industry)|resources (sector|industry|policy|tax)|royalt(y|ies)|minerals council|iron ore|coal (mine|export|price)/i},
- {id:'gas',ns:'aep',client:'Energy Producers',label:'Gas supply',q:'gas supply',rx:/gas (supply|reservation|shortfall|market|price|project|export)|domestic gas|\blng\b|east coast gas/i},
- {id:'energy',ns:'aep',client:'Energy Producers',label:'Energy policy',q:'energy prices',rx:/energy (policy|prices|bills|transition|security|market)|electricity price|power (bill|price)|net zero|renewables?/i},
- {id:'vicelection',ns:'vicnats',client:'Nationals Victoria',label:'Victorian election',q:'victorian election',rx:/victorian? (state )?election|victorian (government|premier|parliament|labor|liberals?)|spring street|allan government/i},
- {id:'regional',ns:'vicnats',client:'Nationals Victoria',label:'Regional Victoria',q:'regional victoria',rx:/regional victoria|country victoria|regional (rail|road|health|hospital|service)|gippsland|\bmallee\b|\bwimmera\b/i},
- {id:'housing',ns:'pca',client:'Property Council',label:'Housing & planning',q:'housing supply',rx:/housing (policy|supply|crisis|target|approval|affordab)|planning reform|build-to-rent|negative gearing|home ?buyers?|rent(al)? crisis/i},
- {id:'construction',ns:'mba',client:'Master Builders',label:'Construction & IR',q:'construction industry',rx:/construction (industry|sector|union|cost|worker)|\bcfmeu\b|building (industry|code|approvals)|tradies?/i},
- {id:'col',ns:'cmm',client:'Curious Minds',label:'Cost of living',q:'cost of living',rx:/cost of living|inflation|interest rates?|\brba\b|rate (rise|cut|hold)|grocery|supermarket|\brents?\b/i},
- {id:'gov',ns:'cmm',client:'Curious Minds',label:'Federal politics',q:'federal politics',rx:/newspoll|resolve poll|primary vote|approval rating|preferred (pm|prime minister)|by-?election|leadership spill|question time|prime minister|treasurer/i},
+ {id:'ftc',ns:'mca',client:'Minerals Council',label:'Fuel tax credits',q:'fuel tax credit',rx:/fuel tax credits?|fuel tax|diesel (fuel )?rebate|fuel excise|excise credit|hands off our fuel|\bhoof\b|off-?road diesel/i},
+ {id:'cm',ns:'mca',client:'Minerals Council',label:'Critical minerals',q:'critical minerals',rx:/critical minerals?|rare earths?|gallium|antimony|lithium|nickel|cobalt|graphite|strategic reserve|minerals? (strategy|processing|reserve)/i},
+ {id:'mining',ns:'mca',client:'Minerals Council',label:'Mining & resources',q:'mining industry',rx:/\bmining\b|\bminers?\b|minerals council|iron ore|\bcoal\b|royalt(y|ies)|resources (sector|industry|policy|tax|minister)|\bbhp\b|rio tinto|fortescue|pilbara|super ?profits tax|minerals? tax/i},
+ {id:'gas',ns:'aep',client:'Energy Producers',label:'Gas supply',q:'gas supply',rx:/\bgas\b|\blng\b|gas reservation|\bsantos\b|woodside|petroleum|offshore (drilling|exploration|gas)|gas shortfall|\baemo\b/i},
+ {id:'energy',ns:'aep',client:'Energy Producers',label:'Energy & climate',q:'energy prices',rx:/energy (policy|prices?|bills?|transition|security|market|minister|crisis)|electricity|power (bills?|prices?|grid|station)|net zero|renewables?|\bsolar\b|wind farm|nuclear|climate (policy|target|change|action)|emissions?|coal-fired|transmission lines?/i},
+ {id:'vicelection',ns:'vicnats',client:'Nationals Victoria',label:'Victorian election',q:'victorian election',rx:/victorian? (state )?election|victorian (government|premier|parliament|labor|liberals?|budget|opposition|nationals)|spring street|allan government|jacinta allan|brad battin|premier of victoria/i},
+ {id:'regional',ns:'vicnats',client:'Nationals Victoria',label:'Regional Victoria',q:'regional victoria',rx:/regional victoria|country victoria|regional (rail|road|health|hospital|service|communit|australia|towns?)|gippsland|\bmallee\b|\bwimmera\b|\bballarat\b|\bbendigo\b|\bshepparton\b|\bmildura\b|\bfarmers?\b|agricultur|\bdrought\b|\bnff\b/i},
+ {id:'housing',ns:'pca',client:'Property Council',label:'Housing & planning',q:'housing supply',rx:/\bhousing\b|home ?buyers?|first home|\brents?\b|\brental\b|planning (reform|law|minister)|build-to-rent|negative gearing|property (market|prices|council|developers?)|apartments?|\bmortgages?\b|housing accord|social housing/i},
+ {id:'construction',ns:'mba',client:'Master Builders',label:'Construction & IR',q:'construction industry',rx:/construction (industry|sector|union|cost|worker|site)|\bcfmeu\b|building (industry|code|approvals|commission|sector)|tradies?|master builders|industrial relations|infrastructure (project|spend|pipeline)|apprentic/i},
+ {id:'col',ns:'cmm',client:'Curious Minds',label:'Cost of living',q:'cost of living',rx:/cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budgets?|petrol prices?|\bcpi\b|price gouging/i},
+ {id:'econ',ns:'cmm',client:'Curious Minds',label:'Economy & tax',q:'australian economy',rx:/\beconomy\b|economic (growth|outlook|data|policy|reform)|\bgdp\b|recession|unemployment|jobs (figures|data|report)|jobless|productivity|\bbudget\b|deficit|surplus|treasury|tax (reform|cuts?|hike|policy|system|break)|income tax|company tax|\bgst\b|superannuation|super (tax|cap|changes)|tariffs?|trade (war|deal)|\basx\b|australian dollar/i},
+ {id:'gov',ns:'cmm',client:'Curious Minds',label:'Federal politics',q:'federal politics',rx:/newspoll|resolve poll|essential poll|primary vote|two-?party|approval rating|preferred (pm|prime minister)|by-?election|leadership (spill|challenge)|question time|prime minister|albanese|sussan ley|dutton|treasurer|chalmers|\bcanberra\b|federal (government|election|budget|parliament|labor|minister)|\bcoalition\b|\bliberals?\b|\blabor\b|\bgreens\b|\bsenate\b|parliament|\bminister\b|opposition leader|\bcabinet\b|\bteals?\b|one nation|hanson/i},
 ];
 function issueText(it){return (it.title||'')+' '+(it.desc||'');}
 function issueHit(text){const t=String(text||'');return AX_ISSUES.some(i=>i.rx.test(t));}
 function issueItems(items){return (items||[]).filter(it=>issueHit(issueText(it)));}
 function issueMix(items){return AX_ISSUES.map(i=>({i,n:(items||[]).filter(it=>i.rx.test(issueText(it))).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);}
+/* Fill the orbit: the issues a client owns take the slots before the shared
+   categories, so Hands Off Our Fuel shows up with two stories even when
+   federal politics has forty. Then widen the window from 24h to three and
+   seven days until at least four issues have coverage, so the hero is never
+   half empty on a quiet day. */
+function issuePick(items,n){
+  const mix=issueMix(items);
+  const own=mix.filter(x=>x.i.ns!=='cmm'),shared=mix.filter(x=>x.i.ns==='cmm');
+  return own.concat(shared).slice(0,n).sort((a,b)=>b.n-a.n);
+}
+function issueWindow(){
+  const now=Date.now();
+  const within=h=>state.news.filter(n=>(now-(Date.parse(n.date)||0))<h*3600e3);
+  for(const [h,label] of [[24,'the last 24 hours'],[72,'the last three days'],[168,'the last seven days']]){
+    const items=issueItems(within(h));
+    if(issueMix(items).length>=4)return {items,label,h};
+  }
+  const items=issueItems(state.news);
+  return {items,label:items.length?'everything on the wire':'the last 24 hours',h:0};
+}
 const KM_ISSUES=[
  ['i_ftc','ftc','Fuel tax fight',/fuel tax|diesel rebate|excise credit|fuel credit/i],
  ['i_cm','cm','Critical minerals',/critical minerals?|rare earths?|gallium|antimony|lithium|strategic reserve/i],
@@ -3006,17 +3027,16 @@ function renderIntel(){
     // needle caret rides the fill tip, pointing outward along the arc radius
     const gn=$('gneedle');if(gn)gn.setAttribute('transform','translate('+gx+','+gy+') rotate('+(90-180*th/Math.PI).toFixed(1)+') translate(0,-14)');
     countUp($('gnum'),pulse);
-    const mix=issueMix(iday);
-    const drivers=[['coverage volume',volR/2],['social velocity',velN],['tone intensity',toneI]].sort((a,b)=>b[1]-a[1]);
-    $('gsub').textContent=mix.length?'Attention on our issues · led by '+mix[0].i.label
-      :(iday.length?'Attention on our issues · led by '+drivers[0][0]:'No coverage on our issues in the last 24 hours');
+    const win=issueWindow(),lead=issuePick(win.items,6)[0];
+    $('gsub').textContent=lead?'Attention on our issues · led by '+lead.i.label+(win.h!==24?' · '+win.label:'')
+      :'No coverage on our issues yet';
     state.pulseTag=pulse>=66?'Running hot':pulse>=40?'Elevated':'Steady';
     const vt=$('vtag');if(vt&&state.view==='command')vt.textContent=state.pulseTag;
     // six-signal attention radar (left column of the hero), all at issue scope except search
     const srcs=new Set(iday.map(n=>n.src)).size;
     renderHex([volR/2,toneI,state.trends.length?Math.min(trafficNum(state.trends[0].traffic)/80e3,1):0,
       velN,Math.min(srcs/12,1),Math.min(clusterNews(iday).length/5,1)]);
-    renderTopics(iday.length?iday:issueItems(state.news));
+    renderTopics(win.items,win.label);
     renderPressure();renderVolLine();
   }
 
@@ -3078,14 +3098,16 @@ const TC_POS=[['left:6%;top:44%'],['left:11%;top:22%'],['left:31%;top:8%'],['rig
 const TC_COL=['#D96A66','#D98E4A','#3F8CFF','#57B98C','#7D9DC4','#8B94A3'];
 /* The orbit: how the last 24 hours of coverage splits across our clients'
    issues. Share is of issue-tagged stories, so the six add to 100. */
-function renderTopics(items){
+function renderTopics(items,label){
   const el=$('tcalls');if(!el)return;
-  const mix=issueMix(items).slice(0,6);
+  label=label||'the last 24 hours';
+  const desc=$('orbit-desc');if(desc)desc.textContent='How coverage in '+label+' splits across the issues our clients own. Click an issue to track it in Radar.';
+  const mix=issuePick(items,6);
   const tot=mix.reduce((a,x)=>a+x.n,0);
-  if(!tot){el.innerHTML='<div class="tc-none" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 72px;color:var(--t3);font-size:12.5px;line-height:1.6">No coverage on our issues in the last 24 hours. The wire is quiet where it matters to us.</div>';return;}
+  if(!tot){el.innerHTML='<div class="tc-none" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 72px;color:var(--t3);font-size:12.5px;line-height:1.6">No coverage on our issues yet. The wire is quiet where it matters to us.</div>';return;}
   el.innerHTML=mix.map((x,k)=>{
     const pct=(x.n/tot*100).toFixed(1);
-    return '<button class="tcall" style="'+TC_POS[k][0]+'" onclick="trackTopic(\''+esc(x.i.q)+'\')" title="'+x.n+' stor'+(x.n===1?'y':'ies')+' in 24h · '+esc(x.i.client)+' · track in Radar">'+
+    return '<button class="tcall" style="'+TC_POS[k][0]+'" onclick="trackTopic(\''+esc(x.i.q)+'\')" title="'+x.n+' stor'+(x.n===1?'y':'ies')+' in '+esc(label)+' · '+esc(x.i.client)+' · track in Radar">'+
       '<span class="tc-i" style="background:'+TC_COL[k]+'29"><span style="background:'+TC_COL[k]+'"></span></span>'+
       '<span><span class="tc-n">'+pct+'<i>%</i></span><span class="tc-l" style="display:block">'+esc(x.i.label)+'</span></span></button>';
   }).join('');
