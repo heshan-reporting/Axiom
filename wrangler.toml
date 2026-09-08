@@ -74,6 +74,11 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      -> kind 'comments' and the reaction mix -> kind 'reactions'.
 #                      Check it live with GET /meta/status?probe=1)
 #   META_AD_ACCOUNTS  (plain text var: "act_123:mca,act_456:aep" - ad account -> client ns)
+#   REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET
+#                     (a Reddit "script" app from reddit.com/prefs/apps; turns the
+#                      Reddit signal sweep from anonymous reads - ~10/min and often
+#                      refused from cloud networks - into OAuth reads at 60/min.
+#                      Check with GET /reddit/status?probe=1)
 #   META_USER_TOKEN   (ID-verified user token with ads_read for the Ad Library
 #                      opposition sweep -> archive kind 'oppads'; expires ~60 days)
 #   CLICKUP_TOKEN     (create tasks)     CLICKUP_LIST_ID (optional default list)

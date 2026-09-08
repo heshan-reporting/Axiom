@@ -125,12 +125,19 @@ results are logged to `mind_runs` as mode `sentiment`. Harness: `aud.js`.
 
 `REDDIT_POLITICS` in the worker names the AU political subreddits
 (AustralianPolitics, australia, AusPol, AusFinance, AusEcon). `redditSweep()`
-reads every thread on hot and top-of-day via `api.reddit.com` (descriptive UA;
-the www host 403s cloud clients), files them as kind `reddit_thread` (url =
+reads every thread on hot and top-of-day (one multi-subreddit listing per
+sort, paced), files them as kind `reddit_thread` (url =
 permalink) tagged with the `CLIENT_ISSUES` they touch, then flattens the
 comment trees of the most-discussed threads (issue-tagged first) into kind
 `reddit_comment` (url `x:rcmt:<id>`) with tone from the colloquial lexicon.
 **Usernames are never stored.** `redditCron()` runs it at most 3-hourly.
+Access: with secrets `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` (a Reddit
+"script" app) `redditGet()` uses application-only OAuth on `oauth.reddit.com`
+(token cached in KV, 60 req/min); without them it reads anonymously through
+`api.reddit.com`, `old.reddit.com` and `www.reddit.com` in turn at ~10/min,
+which Reddit often refuses from cloud networks. `GET /reddit/status?probe=1`
+walks credentials, token and one listing live and names the failing step;
+the in-app sweep result quotes Reddit's errors and offers the probe.
 Routes under `/reddit/` (gated; GETs read-role unless `live=1`):
 `threads?sub=&days=&issue=&q=` (with tone of held comments per thread),
 `comments?thread=<id>[&live=1]`, `status`, POST `sweep`, POST `analyse

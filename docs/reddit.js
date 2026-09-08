@@ -153,10 +153,38 @@
     }, [f.sub, f.days, f.issue, f.q]);
     useEffect(() => { load(); }, [load]);
 
+    /* What a Reddit error means for the person reading it, and what fixes it. */
+    const redditHint = (m, authed) => {
+      m = String(m || '');
+      if (/reddit_oauth/.test(m)) return 'Reddit rejected the app credentials. Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in Cloudflare, and that the app type is "script".';
+      if (/rate_limited|429/.test(m)) return 'Reddit is rate-limiting us. The sweep paces itself now; wait a minute and try again' + (authed ? '.' : ', or add Reddit app credentials to lift the limit from ten requests a minute to sixty.');
+      if (/reddit_403|reddit_unreachable|reddit_5\d\d|reddit_blocked/.test(m)) return authed ? 'Reddit refused the request even with credentials. Run the probe for the exact step.' : 'Reddit is refusing anonymous reads from Cloudflare\'s network. Fix: create a "script" app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets. Two minutes, no approval needed.';
+      if (/abort|timeout/i.test(m)) return 'Reddit did not answer in time. Try again; if it persists, add Reddit app credentials.';
+      return 'Run the probe to see which step fails.';
+    };
+    const probe = async () => {
+      setBusy(b => Object.assign({}, b, { sweep: true }));
+      try {
+        const d = await call('/reddit/status?probe=1'); const p = d.probe || {};
+        setResult({ ok: !!p.ready, probe: !p.ready, text: (p.summary || 'No probe result.') + ' Steps: ' + (p.steps || []).map(s => (s.ok ? 'ok' : 'FAIL') + ' ' + s.step + ' (' + s.detail + ')').join(' | ') });
+      } catch (e) { setResult({ ok: false, probe: true, text: 'Probe: ' + e.message }); }
+      setBusy(b => Object.assign({}, b, { sweep: false }));
+    };
     const sweep = async () => {
       setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null);
-      try { const r = await call('/reddit/sweep', { subs: f.sub ? [f.sub] : undefined }); setResult({ ok: true, text: 'Swept ' + r.threads + ' threads and ' + r.comments + ' comments across ' + (r.subs || []).map(s => 'r/' + s).join(', ') + '. ' + r.threadRows + ' new threads and ' + r.commentRows + ' new comments filed.' + (r.errors && r.errors.length ? ' ' + r.errors.length + ' fetches failed.' : '') }); toastMsg('Reddit sweep done'); await load(); }
-      catch (e) { setResult({ ok: false, text: e.message }); toastMsg('Sweep failed', true); }
+      try {
+        const r = await call('/reddit/sweep', { subs: f.sub ? [f.sub] : undefined });
+        const errs = r.errors || [];
+        if (!r.threads && errs.length) {
+          setResult({ ok: false, probe: true, text: 'Every fetch failed. Reddit said: ' + errs.slice(0, 2).join(' | ') + '. ' + redditHint(errs[0], r.authenticated) });
+          toastMsg('Sweep collected nothing', true);
+        } else {
+          setResult({ ok: true, text: 'Swept ' + r.threads + ' threads and ' + r.comments + ' comments across ' + (r.subs || []).map(s => 'r/' + s).join(', ') + '. ' + r.threadRows + ' new threads and ' + r.commentRows + ' new comments filed.' + (errs.length ? ' ' + errs.length + ' fetch' + (errs.length === 1 ? '' : 'es') + ' failed: ' + errs[0] + '.' : '') + (r.authenticated ? '' : ' Reading anonymously; add Reddit app credentials for a fuller sweep.') });
+          toastMsg('Reddit sweep done');
+        }
+        await load();
+      }
+      catch (e) { setResult({ ok: false, probe: true, text: e.message + ' ' + redditHint(e.code || e.message, false) }); toastMsg('Sweep failed', true); }
       setBusy(b => Object.assign({}, b, { sweep: false }));
     };
     const analyse = async () => {
@@ -202,7 +230,7 @@
         <${Stat} k="Busiest sub" v=${topSub ? 'r/' + topSub.sub : '—'} s=${topSub ? topSub.n + ' threads' : 'no threads in scope'} />
       </div>
       ${(err || !threads.length) && !busy.load ? html`<${Notice} err=${err} have=${data && data.have} canWrite=${canWrite} onSweep=${sweep} busy=${busy.sweep} />` : null}
-      ${result ? html`<div class=${'rd-res ' + (result.ok ? 'ok' : 'err')}>${result.text}</div>` : null}
+      ${result ? html`<div class=${'rd-res ' + (result.ok ? 'ok' : 'err')}>${result.text}${result.probe && canWrite ? html` <button class="btn sm ghost" style=${{ marginLeft: 8 }} disabled=${busy.sweep} onClick=${probe}>Run Reddit probe</button>` : null}</div>` : null}
       ${threads.length ? html`<div class="rd-grid">
         <div class="panel">
           <div class="phead"><div class="ptitle">Threads</div>

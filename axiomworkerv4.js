@@ -1819,17 +1819,59 @@ async function metaCron(env) {
 // ==============================================================================
 const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon'];
 const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
-async function redditGet(path, timeoutMs) {
-  const r = await fetch('https://api.reddit.com' + path + (path.indexOf('?') < 0 ? '?' : '&') + 'raw_json=1', { headers: REDDIT_UA, signal: abortAfter(timeoutMs || 9000) });
-  if (r.status === 429) throw new Error('reddit_rate_limited');
-  if (!r.ok) throw new Error('reddit_' + r.status);
-  return r.json();
+// Public hosts tried in turn when no app credentials are set. Reddit allows
+// unauthenticated clients about ten requests a minute and blocks many
+// datacenter ranges outright, so the reliable path is a script app:
+// secrets REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET turn on OAuth below.
+const REDDIT_HOSTS = ['https://api.reddit.com', 'https://old.reddit.com', 'https://www.reddit.com'];
+const rdSleep = ms => (ms > 0 ? new Promise(res => setTimeout(res, ms)) : Promise.resolve());
+function redditAuthed(env) { return !!(env && env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET); }
+/** Gap between requests: authenticated clients get 60/min, anonymous ~10/min. */
+function redditPace(env) {
+  if (env && env.REDDIT_PACE_MS != null && env.REDDIT_PACE_MS !== '') return Math.max(0, parseInt(env.REDDIT_PACE_MS, 10) || 0);
+  return redditAuthed(env) ? 650 : 1100;
+}
+/** Application-only OAuth token for a script app, cached in KV until it expires. */
+async function redditToken(env) {
+  if (!redditAuthed(env)) return null;
+  const cached = await kvGet(env.AXIOM_KV, 'reddit_token');
+  if (cached) return cached;
+  const r = await fetch('https://www.reddit.com/api/v1/access_token', { method: 'POST',
+    headers: Object.assign({ 'Authorization': 'Basic ' + btoa(env.REDDIT_CLIENT_ID + ':' + env.REDDIT_CLIENT_SECRET), 'Content-Type': 'application/x-www-form-urlencoded' }, REDDIT_UA),
+    body: 'grant_type=client_credentials', signal: abortAfter(9000) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.access_token) throw new Error('reddit_oauth_' + (r.status || 'failed') + (d.error ? ':' + String(d.error).slice(0, 40) : ''));
+  await kvPut(env.AXIOM_KV, 'reddit_token', d.access_token, Math.max(300, (Number(d.expires_in) || 3600) - 120));
+  return d.access_token;
+}
+async function redditGet(env, path, timeoutMs) {
+  const q = path + (path.indexOf('?') < 0 ? '?' : '&') + 'raw_json=1';
+  const tok = await redditToken(env);
+  if (tok) {
+    const r = await fetch('https://oauth.reddit.com' + q, { headers: Object.assign({ 'Authorization': 'Bearer ' + tok }, REDDIT_UA), signal: abortAfter(timeoutMs || 9000) });
+    if (r.status === 401) { try { await env.AXIOM_KV.delete('reddit_token'); } catch (e) {} throw new Error('reddit_oauth_401'); }
+    if (r.status === 429) throw new Error('reddit_rate_limited');
+    if (!r.ok) throw new Error('reddit_' + r.status);
+    return r.json();
+  }
+  let last = 'reddit_unreachable';
+  for (const host of REDDIT_HOSTS) {
+    try {
+      // the reddit.com hosts want an explicit .json suffix; api.reddit.com does not
+      const url = host + (host.indexOf('api.') > 0 ? q : q.replace('?', '.json?'));
+      const r = await fetch(url, { headers: REDDIT_UA, signal: abortAfter(timeoutMs || 9000) });
+      if (r.status === 429) { last = 'reddit_rate_limited'; break; }
+      if (!r.ok) { last = 'reddit_' + r.status; continue; }
+      return await r.json();
+    } catch (e) { last = String((e && e.message) || e).slice(0, 60); }
+  }
+  throw new Error(last);
 }
 function redditSubClean(s) { return String(s || '').replace(/^r\//i, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40); }
 function redditIssues(text) { const t = String(text || ''); return CLIENT_ISSUES.filter(ci => ci.rx.test(t)).map(ci => ci.id); }
 /** One subreddit listing, normalised. Stickied and pinned posts are skipped. */
-async function redditListing(sub, sort, limit) {
-  const d = await redditGet('/r/' + sub + '/' + (sort || 'hot') + '?limit=' + (limit || 25) + (sort === 'top' ? '&t=day' : ''));
+async function redditListing(env, sub, sort, limit) {
+  const d = await redditGet(env, '/r/' + sub + '/' + (sort || 'hot') + '?limit=' + (limit || 25) + (sort === 'top' ? '&t=day' : ''));
   return ((d && d.data && d.data.children) || []).map(c => c && c.data).filter(p => p && !p.stickied && !p.pinned).map(p => ({
     id: String(p.id || ''), sub: p.subreddit || sub, title: String(p.title || '').slice(0, 400), body: String(p.selftext || '').slice(0, 4000),
     score: p.score || 0, ratio: p.upvote_ratio || 0, comments: p.num_comments || 0, flair: p.link_flair_text || '',
@@ -1838,8 +1880,8 @@ async function redditListing(sub, sort, limit) {
   }));
 }
 /** A thread's comment tree flattened to a depth-limited list. No usernames. */
-async function redditThreadComments(sub, id, limit, depth) {
-  const d = await redditGet('/r/' + sub + '/comments/' + id + '?limit=' + (limit || 60) + '&depth=' + (depth || 3) + '&sort=top');
+async function redditThreadComments(env, sub, id, limit, depth) {
+  const d = await redditGet(env, '/r/' + sub + '/comments/' + id + '?limit=' + (limit || 60) + '&depth=' + (depth || 3) + '&sort=top');
   const out = [];
   const walk = (kids, dep) => {
     (kids || []).forEach(c => {
@@ -1859,12 +1901,22 @@ async function redditSweep(env, opts) {
   const perSub = Math.min(Math.max(parseInt(opts.perSub, 10) || 25, 5), 100);
   const threadsForComments = Math.min(Math.max(parseInt(opts.threads, 10) || 20, 0), 60);
   const commentsPer = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 40, 5), 200);
-  const out = { ok: true, subs: subs, threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
+  const out = { ok: true, subs: subs, authenticated: redditAuthed(env), threads: 0, comments: 0, threadRows: 0, commentRows: 0, errors: [] };
   const seen = new Map();
-  for (const sub of subs) {
-    for (const sort of ['hot', 'top']) {
-      try { (await redditListing(sub, sort, perSub)).forEach(t => { if (t.id && !seen.has(t.id)) seen.set(t.id, t); }); }
-      catch (e) { out.errors.push('r/' + sub + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); }
+  const take = list => list.forEach(t => { if (t.id && !seen.has(t.id)) seen.set(t.id, t); });
+  const pace = redditPace(env);
+  for (const sort of ['hot', 'top']) {
+    // one multi-subreddit listing per sort keeps anonymous traffic under Reddit's limit
+    let combined = false;
+    if (subs.length > 1) {
+      try { take(await redditListing(env, subs.join('+'), sort, Math.min(100, perSub * subs.length))); combined = true; }
+      catch (e) { out.errors.push('r/' + subs.join('+') + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); }
+      await rdSleep(pace);
+    }
+    if (!combined) for (const sub of subs) {
+      try { take(await redditListing(env, sub, sort, perSub)); }
+      catch (e) { out.errors.push('r/' + sub + '/' + sort + ': ' + String(e.message || e).slice(0, 80)); if (/rate_limited/.test(String(e.message || e))) break; }
+      await rdSleep(pace);
     }
   }
   const threads = [...seen.values()];
@@ -1883,7 +1935,8 @@ async function redditSweep(env, opts) {
   const pick = threads.slice().sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
   for (const t of pick) {
     try {
-      const cs = await redditThreadComments(t.sub, t.id, commentsPer, 3);
+      const cs = await redditThreadComments(env, t.sub, t.id, commentsPer, 3);
+      await rdSleep(pace);
       const tIssues = redditIssues(t.title + ' ' + t.body);
       const rows = cs.map(c => {
         const own = redditIssues(c.body); const all = own.length ? own : tIssues;
@@ -3270,7 +3323,22 @@ export default {
             db.prepare("SELECT json_extract(meta,'$.sub') sub, COUNT(*) n, MAX(ts) newest FROM arc_items WHERE kind='reddit_thread' GROUP BY sub ORDER BY n DESC"),
             db.prepare("SELECT COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive, MAX(ts) newest FROM arc_items WHERE kind='reddit_comment'"),
           ]);
-          return jsonResp({ ok: true, subs: REDDIT_POLITICS, bySub: c[0].results || [], comments: (c[1].results || [])[0] || {}, last_sweep: Number(await kvGet(env.AXIOM_KV, 'reddit_last_sweep') || 0) || null, last_result: last });
+          const st = { ok: true, subs: REDDIT_POLITICS, authenticated: redditAuthed(env), bySub: c[0].results || [], comments: (c[1].results || [])[0] || {}, last_sweep: Number(await kvGet(env.AXIOM_KV, 'reddit_last_sweep') || 0) || null, last_result: last };
+          // ?probe=1 walks the chain live and names the first step that fails,
+          // so "0 threads" never has to be guessed at.
+          if (reqUrl.searchParams.get('probe')) {
+            const steps = []; const authed = redditAuthed(env);
+            steps.push({ step: 'Reddit app credentials', ok: true, detail: authed ? 'REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are set: requests go through oauth.reddit.com at 60 a minute' : 'not set: reading anonymously through api.reddit.com, old.reddit.com and www.reddit.com in turn, about 10 a minute' });
+            if (authed) { try { await redditToken(env); steps.push({ step: 'OAuth token', ok: true, detail: 'issued and cached' }); } catch (e) { steps.push({ step: 'OAuth token', ok: false, detail: String((e && e.message) || e).slice(0, 160) }); } }
+            try { const l = await redditListing(env, 'AustralianPolitics', 'hot', 5); steps.push({ step: 'listing r/AustralianPolitics/hot', ok: true, detail: l.length + ' threads returned' + (l[0] ? ', top: ' + l[0].title.slice(0, 80) : '') }); }
+            catch (e) { steps.push({ step: 'listing r/AustralianPolitics/hot', ok: false, detail: String((e && e.message) || e).slice(0, 160) }); }
+            const bad = steps.filter(s => !s.ok);
+            const fix = bad.length && !authed && /reddit_403|reddit_unreachable|reddit_rate|reddit_5\d\d/.test(bad[0].detail)
+              ? ' Reddit is refusing anonymous reads from this network. Create a script app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets.'
+              : bad.length && /reddit_oauth/.test(bad[0].detail) ? ' Reddit rejected the app credentials. Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET, and that the app type is script.' : '';
+            st.probe = { steps, ready: !bad.length, authenticated: authed, summary: bad.length ? 'Blocked at: ' + bad[0].step + ' (' + bad[0].detail + ').' + fix : 'Reddit is reachable' + (authed ? ' with your app credentials.' : ' without credentials.') };
+          }
+          return jsonResp(st);
         }
         if (path === '/reddit/threads') {
           const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60, 200);
@@ -3301,7 +3369,7 @@ export default {
             if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'A live fetch writes to the archive and needs a full-access key.' }, 403);
             const t = (await threadRows([tid]))[0];
             if (!t) return jsonResp({ error: 'unknown_thread', detail: 'Sweep first so the thread is on file.' }, 404);
-            const cs = await redditThreadComments(t.sub, tid, 120, 4);
+            const cs = await redditThreadComments(env, t.sub, tid, 120, 4);
             const tIssues = pj(t.issues);
             const rows = cs.map(c => { const own = redditIssues(c.body); const all = own.length ? own : tIssues; return {
               src: 'reddit', title: 'Comment on: ' + String(t.title).slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
@@ -3370,6 +3438,8 @@ export default {
         const m = String((e && e.message) || e);
         if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
         if (/reddit_rate_limited/.test(m)) return jsonResp({ ok: false, error: 'reddit_rate_limited', detail: 'Reddit is throttling us. Wait a minute and try again.' }, 429);
+        if (/reddit_oauth/.test(m)) return jsonResp({ ok: false, error: 'reddit_oauth_failed', detail: 'Reddit rejected the app credentials (' + m.slice(0, 60) + '). Check REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET.' }, 502);
+        if (/reddit_403|reddit_unreachable/.test(m)) return jsonResp({ ok: false, error: 'reddit_blocked', detail: 'Reddit is refusing anonymous reads from this network (' + m.slice(0, 40) + '). Create a script app at reddit.com/prefs/apps and add REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets.' }, 502);
         return jsonResp({ ok: false, error: 'reddit_failed', detail: m.slice(0, 200) }, 500);
       }
     }
