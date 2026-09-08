@@ -1423,8 +1423,8 @@ body.kiosk .kprog{display:block}
         <div class="hgrid">
           <div class="hcol">
             <div>
-              <div class="htitle">Attention profile</div>
-              <div class="hdesc" style="margin-top:6px">How the national conversation is distributed across the six signals AXIOM tracks.</div>
+              <div class="htitle">Attention on our issues</div>
+              <div class="hdesc" style="margin-top:6px">How the last 24 hours of coverage splits across the issues our clients own. Click an issue to track it in Radar.</div>
             </div>
             <svg class="hexr" viewBox="0 0 220 220" role="img" aria-label="Six-signal attention radar">
               <polygon points="110,30 179.3,70 179.3,150 110,190 40.7,150 40.7,70" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="1"/>
@@ -2295,6 +2295,27 @@ function arcLog(surface,role,text){
 /* ── knowledge-map correlation — which live issue a headline feeds ────────
    The same issue nodes that sit on the Knowledge Map; a chip on any story
    jumps straight to that node with the story listed in its dossier. */
+/* The issues our clients own - the frontend twin of CLIENT_ISSUES in the worker.
+   The Command Center hero is scoped to these, not to everything on the wire:
+   the attention index, the six-signal radar and the orbit count only stories
+   that touch one of them. `q` is the phrase Radar tracks when clicked. */
+const AX_ISSUES=[
+ {id:'ftc',ns:'mca',client:'Minerals Council',label:'Fuel tax credits',q:'fuel tax credit',rx:/fuel tax credits?|diesel (fuel )?rebate|fuel excise credit|hands off our fuel|\bhoof\b|fuel tax/i},
+ {id:'cm',ns:'mca',client:'Minerals Council',label:'Critical minerals',q:'critical minerals',rx:/critical minerals?|rare earths?|gallium|antimony|lithium|strategic reserve/i},
+ {id:'mining',ns:'mca',client:'Minerals Council',label:'Mining policy',q:'mining royalties',rx:/mining (tax|royalt|approval|jobs|sector|industry)|resources (sector|industry|policy|tax)|royalt(y|ies)|minerals council|iron ore|coal (mine|export|price)/i},
+ {id:'gas',ns:'aep',client:'Energy Producers',label:'Gas supply',q:'gas supply',rx:/gas (supply|reservation|shortfall|market|price|project|export)|domestic gas|\blng\b|east coast gas/i},
+ {id:'energy',ns:'aep',client:'Energy Producers',label:'Energy policy',q:'energy prices',rx:/energy (policy|prices|bills|transition|security|market)|electricity price|power (bill|price)|net zero|renewables?/i},
+ {id:'vicelection',ns:'vicnats',client:'Nationals Victoria',label:'Victorian election',q:'victorian election',rx:/victorian? (state )?election|victorian (government|premier|parliament|labor|liberals?)|spring street|allan government/i},
+ {id:'regional',ns:'vicnats',client:'Nationals Victoria',label:'Regional Victoria',q:'regional victoria',rx:/regional victoria|country victoria|regional (rail|road|health|hospital|service)|gippsland|\bmallee\b|\bwimmera\b/i},
+ {id:'housing',ns:'pca',client:'Property Council',label:'Housing & planning',q:'housing supply',rx:/housing (policy|supply|crisis|target|approval|affordab)|planning reform|build-to-rent|negative gearing|home ?buyers?|rent(al)? crisis/i},
+ {id:'construction',ns:'mba',client:'Master Builders',label:'Construction & IR',q:'construction industry',rx:/construction (industry|sector|union|cost|worker)|\bcfmeu\b|building (industry|code|approvals)|tradies?/i},
+ {id:'col',ns:'cmm',client:'Curious Minds',label:'Cost of living',q:'cost of living',rx:/cost of living|inflation|interest rates?|\brba\b|rate (rise|cut|hold)|grocery|supermarket|\brents?\b/i},
+ {id:'gov',ns:'cmm',client:'Curious Minds',label:'Federal politics',q:'federal politics',rx:/newspoll|resolve poll|primary vote|approval rating|preferred (pm|prime minister)|by-?election|leadership spill|question time|prime minister|treasurer/i},
+];
+function issueText(it){return (it.title||'')+' '+(it.desc||'');}
+function issueHit(text){const t=String(text||'');return AX_ISSUES.some(i=>i.rx.test(t));}
+function issueItems(items){return (items||[]).filter(it=>issueHit(issueText(it)));}
+function issueMix(items){return AX_ISSUES.map(i=>({i,n:(items||[]).filter(it=>i.rx.test(issueText(it))).length})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n);}
 const KM_ISSUES=[
  ['i_ftc','ftc','Fuel tax fight',/fuel tax|diesel rebate|excise credit|fuel credit/i],
  ['i_cm','cm','Critical minerals',/critical minerals?|rare earths?|gallium|antimony|lithium|strategic reserve/i],
@@ -2962,14 +2983,20 @@ function renderIntel(){
   const now=Date.now();
   const day=state.news.filter(n=>(now-(Date.parse(n.date)||0))<86400e3);
   const prev=state.news.filter(n=>{const a=now-(Date.parse(n.date)||0);return a>=86400e3&&a<172800e3;});
-  const vel=state.social.filter(p=>(now-Date.parse(p.date))<3600e3).length;
+  // Scope: the issues our clients own (AX_ISSUES), not the whole wire.
+  const iday=issueItems(day),iprev=issueItems(prev);
+  const hour=state.social.filter(p=>(now-Date.parse(p.date))<3600e3);
+  const vel=hour.filter(p=>issueHit(p.text||p.title||'')).length;
+  // share of issue stories carrying charged language - the tone signal at issue scope
+  const toneI=iday.length?iday.reduce((a,it)=>a+Math.abs(clientTone(it)),0)/iday.length:0;
   const toneAvg=state.tone.length?state.tone.reduce((a,b)=>a+b,0)/state.tone.length:0;
 
-  // ── National Pulse: 0-100 composite of volume momentum, social velocity, tone intensity
-  const volR=prev.length?Math.min(day.length/prev.length,2):(day.length?1:0);
-  const pulse=Math.max(0,Math.min(100,Math.round(volR/2*38+Math.min(vel,30)/30*32+Math.min(Math.abs(toneAvg),6)/6*30)));
+  // ── Pulse: 0-100 composite of issue volume momentum, issue social velocity, issue tone intensity
+  const volR=iprev.length?Math.min(iday.length/iprev.length,2):(iday.length?1:0);
+  const velN=Math.min(vel,12)/12;
+  const pulse=Math.max(0,Math.min(100,Math.round(volR/2*38+velN*32+toneI*30)));
   const gf=$('gfill');
-  if(gf&&(day.length||state.tone.length||vel)){
+  if(gf&&(day.length||state.tone.length||hour.length)){
     state.pulse=pulse;
     // arc: 120-radius half circle, length ≈ 377; endpoint dot rides the fill
     gf.setAttribute('stroke-dasharray',(pulse/100*377).toFixed(1)+' 377');
@@ -2979,15 +3006,17 @@ function renderIntel(){
     // needle caret rides the fill tip, pointing outward along the arc radius
     const gn=$('gneedle');if(gn)gn.setAttribute('transform','translate('+gx+','+gy+') rotate('+(90-180*th/Math.PI).toFixed(1)+') translate(0,-14)');
     countUp($('gnum'),pulse);
-    const drivers=[['coverage volume',volR/2],['social velocity',Math.min(vel,30)/30],['tone intensity',Math.min(Math.abs(toneAvg),6)/6]].sort((a,b)=>b[1]-a[1]);
-    $('gsub').textContent='Your national attention index · led by '+drivers[0][0];
+    const mix=issueMix(iday);
+    const drivers=[['coverage volume',volR/2],['social velocity',velN],['tone intensity',toneI]].sort((a,b)=>b[1]-a[1]);
+    $('gsub').textContent=mix.length?'Attention on our issues · led by '+mix[0].i.label
+      :(iday.length?'Attention on our issues · led by '+drivers[0][0]:'No coverage on our issues in the last 24 hours');
     state.pulseTag=pulse>=66?'Running hot':pulse>=40?'Elevated':'Steady';
     const vt=$('vtag');if(vt&&state.view==='command')vt.textContent=state.pulseTag;
-    // six-signal attention radar (left column of the hero)
-    const srcs=new Set(state.news.map(n=>n.src)).size;
-    renderHex([volR/2,Math.min(Math.abs(toneAvg),6)/6,state.trends.length?Math.min(trafficNum(state.trends[0].traffic)/80e3,1):0,
-      Math.min(vel,30)/30,Math.min(srcs/40,1),Math.min(clusterNews(state.news).length/8,1)]);
-    renderTopics(day.length?day:state.news);
+    // six-signal attention radar (left column of the hero), all at issue scope except search
+    const srcs=new Set(iday.map(n=>n.src)).size;
+    renderHex([volR/2,toneI,state.trends.length?Math.min(trafficNum(state.trends[0].traffic)/80e3,1):0,
+      velN,Math.min(srcs/12,1),Math.min(clusterNews(iday).length/5,1)]);
+    renderTopics(iday.length?iday:issueItems(state.news));
     renderPressure();renderVolLine();
   }
 
@@ -3047,16 +3076,18 @@ function renderHex(vals){
 /* floating topic callouts — top headline frames with share of keyword mentions */
 const TC_POS=[['left:6%;top:44%'],['left:11%;top:22%'],['left:31%;top:8%'],['right:26%;top:12%'],['right:4%;top:30%'],['right:3%;top:52%']];
 const TC_COL=['#D96A66','#D98E4A','#3F8CFF','#57B98C','#7D9DC4','#8B94A3'];
+/* The orbit: how the last 24 hours of coverage splits across our clients'
+   issues. Share is of issue-tagged stories, so the six add to 100. */
 function renderTopics(items){
   const el=$('tcalls');if(!el)return;
-  const kw=keywords(items,6);
-  const tot=kw.reduce((a,[,n])=>a+n,0);
-  if(!kw.length||!tot){el.innerHTML='';return;}
-  el.innerHTML=kw.map(([w,n],i)=>{
-    const pct=(n/tot*100).toFixed(1);
-    return '<button class="tcall" style="'+TC_POS[i][0]+'" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar">'+
-      '<span class="tc-i" style="background:'+TC_COL[i]+'29"><span style="background:'+TC_COL[i]+'"></span></span>'+
-      '<span><span class="tc-n">'+pct+'<i>%</i></span><span class="tc-l" style="display:block">'+esc(w)+'</span></span></button>';
+  const mix=issueMix(items).slice(0,6);
+  const tot=mix.reduce((a,x)=>a+x.n,0);
+  if(!tot){el.innerHTML='<div class="tc-none" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 72px;color:var(--t3);font-size:12.5px;line-height:1.6">No coverage on our issues in the last 24 hours. The wire is quiet where it matters to us.</div>';return;}
+  el.innerHTML=mix.map((x,k)=>{
+    const pct=(x.n/tot*100).toFixed(1);
+    return '<button class="tcall" style="'+TC_POS[k][0]+'" onclick="trackTopic(\''+esc(x.i.q)+'\')" title="'+x.n+' stor'+(x.n===1?'y':'ies')+' in 24h · '+esc(x.i.client)+' · track in Radar">'+
+      '<span class="tc-i" style="background:'+TC_COL[k]+'29"><span style="background:'+TC_COL[k]+'"></span></span>'+
+      '<span><span class="tc-n">'+pct+'<i>%</i></span><span class="tc-l" style="display:block">'+esc(x.i.label)+'</span></span></button>';
   }).join('');
 }
 /* masthead media-pressure pill — GDELT 7d volume intensity vs its own mean */
@@ -3595,7 +3626,7 @@ function renderKpiStories(){
   let delta='';
   if(day&&prev){const pc=Math.round((day-prev)/prev*100);delta=' <span class="kdelta '+(pc>=0?'up':'dn')+'">'+(pc>=0?'▲':'▼')+Math.abs(pc)+'%</span>';}
   const reg=state.feedsTotal?' · <b class="fh-link" onclick="openFeedHealth(event)" title="Click to test every feed and see what is quiet, resting or down">'+(state.feedsLive||state.feedsTotal)+'/'+state.feedsTotal+'</b> feeds live':'';
-  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets · 24h'+reg+delta;
+  $('k-stories-s').innerHTML='from <b>'+srcs+'</b> AU outlets · 24h · <b>'+issueItems(state.news.filter(n=>(Date.now()-(Date.parse(n.date)||0))<86400e3)).length+'</b> on our issues'+reg+delta;
   // status + fill on the stories stat pill
   const pc=prev?Math.round((day-prev)/prev*100):0;
   const st=$('st-status');
