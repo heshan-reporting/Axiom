@@ -147,6 +147,13 @@ and its answer back (`POST /bridge/log`) before reporting the outcome
 so `$ twitter search "fuel tax credit" ...` and its answer appear as they run.
 Tables `bridge_jobs` and `bridge_log` in D1; `GET /bridge/status` lists the
 connected collectors (KV heartbeats) and which sources are configured.
+`jobRoute()` decides where a job runs **by capability, not by category**: X
+always goes to the desktop; Reddit goes there too whenever a live collector
+offers it, because Reddit 403s Cloudflare's whole network - the worker keeps
+Reddit only when `REDDIT_CLIENT_ID`/`SECRET` are set, since OAuth reads do work
+from the cloud. A worker-side Reddit job probes one listing before sweeping and
+fails immediately with the fix if that probe is refused, instead of spending
+three minutes being refused thirty more times.
 
 Per platform:
 - **Reddit** - the sweep described below; worker-side where Reddit allows it,

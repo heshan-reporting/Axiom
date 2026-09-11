@@ -163,17 +163,16 @@
     </div>`;
   }
 
-  function Notice({ err, have, plat, cfg, agents, canWrite, onSweep, busy }) {
+  function Notice({ err, have, plat, cfg, needsAgent, agentHere, canWrite, onSweep, busy }) {
     const e = String((err && err.message) || '');
     const code = (err && err.code) || '';
-    const liveAgent = (agents || []).some(a => a.live);
     let body;
     if (err && (code === 'not_found' || err.status === 404)) body = html`<b>The worker needs updating.</b> The live Cloudflare worker does not have the <code>/signals</code> and <code>/bridge</code> routes. Paste the latest <code>axiomworkerv4.js</code> into newsaus and Deploy, then reload.`;
     else if (err && (code === 'unauthorized' || err.status === 401)) body = html`<b>No access key.</b> Open Settings, paste your key, save, then reload.`;
     else if (err && code === 'mind_unbound') body = html`<b>Database not bound.</b> Cloudflare, newsaus, Settings, Bindings must include the D1 database as <code>MIND_DB</code>.`;
     else if (err) body = html`<b>The worker returned an error:</b> <code>${e}</code>`;
     else if (cfg && cfg.ready === false && cfg.detail) body = html`<b>${plat.label} is not connected yet.</b> ${cfg.detail}`;
-    else if (plat.desktop && !liveAgent) body = html`<b>${plat.label} is collected from your Mac.</b> Nothing is connected right now. In Terminal: <code>cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY</code>. Leave it running (or install it with <code>--install-launchd</code>) and the Sweep button here will drive it, with every command shown live.`;
+    else if (needsAgent && !agentHere) body = html`<b>${plat.label} is collected from your Mac.</b> Nothing is connected right now. In Terminal: <code>cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY</code>. Leave it running (or install it with <code>--install-launchd</code>) and the Sweep button here will drive it, with every command shown live.`;
     else if (!have || !have.total) body = html`<b>Nothing collected yet.</b> ${plat.about} ${canWrite ? html`Press <b>Sweep</b> and watch the console.` : 'Ask a full-access user to run the first sweep.'}`;
     else body = html`<b>No posts match this scope.</b> ${fmtN(have.total)} ${plat.label} ${plat.unit}s are on file. Widen the window, clear the issue filter, or clear the search.`;
     return html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}>${body}${!err && canWrite ? html`<div class="aud-diagwrap"><button class="btn sm" disabled=${busy} onClick=${onSweep}>${busy ? 'Sweeping...' : 'Sweep ' + plat.label}</button></div>` : null}</div>`;
@@ -303,6 +302,10 @@
     const cfg = (status && status.configured && status.configured[tab]) || null;
     const agents = (status && status.agents) || [];
     const liveAgent = agents.filter(a => a.live);
+    // Reddit is nominally worker-side, but it refuses Cloudflare's network: with
+    // no app credentials it needs the Mac just as much as X does
+    const wantsAgent = plat.desktop || (tab === 'reddit' && !!(cfg && cfg.detail));
+    const agentFor = liveAgent.filter(a => (a.sources || []).indexOf(tab) >= 0);
     const clientOpts = useMemo(() => [{ id: 'cmm', name: 'Curious Minds (shared)' }].concat(clients().filter(c => c.id !== 'cmm').map(c => ({ id: c.id, name: c.short || c.name }))), []);
 
     return html`<div class="rd-wrap">
@@ -331,7 +334,8 @@
         </select>
         <input class="fi" ref=${qRef} placeholder=${'Search ' + plat.label + ' ' + plat.unit + 's...'} defaultValue=${f.q} onKeyDown=${e => { if (e.key === 'Enter') setF(x => Object.assign({}, x, { q: e.target.value.trim() })); }} aria-label="Search" />
         ${canWrite ? html`<button class="btn sm ghost" disabled=${busy.sweep} onClick=${sweep} title=${plat.desktop ? 'Queue a sweep for the collector on your Mac and watch it run' : 'Collect from ' + plat.label + ' now and watch it run'}>${busy.sweep ? 'Sweeping...' : 'Sweep ' + plat.label}</button>` : null}
-        ${plat.desktop && !liveAgent.length ? html`<span class="sig-warn" title="A sweep will sit in the queue until a collector connects">no collector connected - run <code>python3 tools/reach-agent.py --key $AXIOM_KEY</code> on your Mac</span>` : null}
+        ${wantsAgent && !agentFor.length ? html`<span class="sig-warn" title=${plat.desktop ? 'A sweep will sit in the queue until a collector connects' : 'The worker can try, but ' + plat.label + ' usually refuses it'}>no ${plat.label} collector connected - run <code>python3 tools/reach-agent.py --key $AXIOM_KEY</code> on your Mac</span>` : null}
+        ${wantsAgent && agentFor.length ? html`<span class="sig-agent on" style=${{ marginLeft: 0 }} title=${'This sweep will run on ' + agentFor.map(a => a.agent).join(', ')}>runs on ${agentFor[0].agent}</span>` : null}
       </div>
       <div class="sen-strip aud-strip">
         <${Stat} k=${plat.unit === 'thread' ? 'Threads' : 'Posts'} v=${fmtN(threads.length)} s=${f.days + 'd in scope · ' + fmtN(mine.threads || 0) + ' on file'} />
@@ -341,7 +345,7 @@
         <${Stat} k=${plat.id === 'reddit' ? 'Busiest sub' : 'Busiest page'} v=${chanTop ? plat.prefix + chanTop.name : '—'} s=${chanTop ? chanTop.n + ' in scope' : 'nothing in scope'} />
       </div>
       <${Console} job=${job} onCancel=${cancel} canWrite=${canWrite} />
-      ${(err || !threads.length) && !busy.load ? html`<${Notice} err=${err} have=${data && data.have} plat=${plat} cfg=${cfg} agents=${agents} canWrite=${canWrite} onSweep=${sweep} busy=${busy.sweep} />` : null}
+      ${(err || !threads.length) && !busy.load ? html`<${Notice} err=${err} have=${data && data.have} plat=${plat} cfg=${cfg} needsAgent=${wantsAgent} agentHere=${!!agentFor.length} canWrite=${canWrite} onSweep=${sweep} busy=${busy.sweep} />` : null}
       ${result ? html`<div class=${'rd-res ' + (result.ok ? 'ok' : 'err')}>${result.text}</div>` : null}
       ${threads.length ? html`<div class="rd-grid">
         <div class="panel">

@@ -2114,12 +2114,25 @@ function mkJobLog(env, id) {
   log.flush = flush;
   return log;
 }
+/** Where should this job run? A desktop collector that offers the source beats
+ *  a worker path the platform will refuse: Reddit 403s Cloudflare's whole
+ *  network, so when a Mac is connected the job belongs there. The worker keeps
+ *  Reddit only when it holds app credentials (OAuth reads work from cloud). */
+async function jobRoute(env, source, where) {
+  if (where === 'desktop') return 'desktop';
+  if (where === 'worker') return 'worker';
+  if (BRIDGE_DESKTOP_ONLY.indexOf(source) >= 0) return 'desktop';
+  if (source === 'reddit' && !redditAuthed(env)) {
+    const agents = await agentsSeen(env);
+    if (agents.some(a => a.live && (a.sources || []).indexOf('reddit') >= 0)) return 'desktop';
+  }
+  return 'worker';
+}
 async function jobCreate(env, source, params, who) {
   await ensureBridge(env);
   const id = jobId();
-  const desktopOnly = BRIDGE_DESKTOP_ONLY.indexOf(source) >= 0;
   const where = String((params && params.where) || 'auto');
-  const local = !desktopOnly && where !== 'desktop';
+  const local = (await jobRoute(env, source, where)) === 'worker';
   await env.MIND_DB.prepare('INSERT INTO bridge_jobs(id,source,params,status,agent,who,created,claimed,finished,ok,result) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
     .bind(id, source, JSON.stringify(params || {}).slice(0, 4000), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
   await jobLog(env, id, [{ k: 'info', t: 'job ' + id + ' created: ' + source + (local ? ' (running in the worker)' : ' (waiting for a desktop collector to claim it)') }]);
@@ -2352,7 +2365,23 @@ async function jobRunLocal(env, job) {
   let out = null, ok = false;
   try {
     if (job.source === 'reddit') {
-      await log('info', 'sweeping Reddit from the worker (Reddit often refuses cloud networks; the desktop collector is the reliable path)');
+      await log('info', 'sweeping Reddit from the worker' + (redditAuthed(env) ? ' with your app credentials' : ' anonymously (Reddit often refuses cloud networks)'));
+      // one probe before the full sweep: if Reddit refuses this network there is
+      // no point spending three minutes proving it thirty more times
+      await log('cmd', 'GET /r/AustralianPolitics/hot?limit=5  (reachability probe)');
+      try {
+        const probe = await redditListing(env, 'AustralianPolitics', 'hot', 5);
+        await log('out', 'Reddit answered: ' + probe.length + ' threads');
+      } catch (e) {
+        const m = String((e && e.message) || e).slice(0, 80);
+        await log('err', m);
+        out = { ok: false, platform: 'reddit', error: 'reddit_blocked', threads: 0, comments: 0, threadRows: 0, commentRows: 0,
+          detail: 'Reddit refused this network (' + m + '). It blocks Cloudflare IPs and closed self-service API registration in late 2025, so the worker cannot collect it. Run the collector on your Mac - cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY - and press Sweep again: the job will go there and this console will show it. If you hold Reddit app credentials, REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET as worker secrets also fix it.' };
+        await log('err', out.detail);
+        await log.flush();
+        await jobFinish(env, job.id, false, out);
+        return out;
+      }
       out = await redditSweep(env, Object.assign({ queries: 'auto' }, job.params, { log: log }));
       // a sweep that collected nothing and hit errors is a failure, whatever
       // the shape of the return: the console should say so in red
