@@ -141,15 +141,29 @@ SUMMARY="$(node -e '
   // secrets and plain vars are always kept, even if the settings call ever omitted them
   const types = [...new Set(b.map(x => x.type).concat(["secret_text", "plain_text"]))].sort();
   const names = b.map(x => x.name).sort();
-  const meta = {
+  const min = {
     main_module: "index.js",
     compatibility_date: r.compatibility_date || "2025-01-01",
     compatibility_flags: r.compatibility_flags || [],
-    keep_bindings: types,
-    keep_assets: true
+    keep_bindings: types
   };
-  if (r.observability) meta.observability = r.observability;
+  const meta = Object.assign({}, min);
+  if (types.includes("assets")) meta.keep_assets = true;
+  if (r.observability) {
+    // only the fields the upload schema accepts; the settings call returns extras
+    const o = r.observability, ob = {};
+    if ("enabled" in o) ob.enabled = !!o.enabled;
+    if (o.head_sampling_rate != null) ob.head_sampling_rate = o.head_sampling_rate;
+    if (o.logs && typeof o.logs === "object") {
+      ob.logs = {};
+      if ("enabled" in o.logs) ob.logs.enabled = !!o.logs.enabled;
+      if (o.logs.head_sampling_rate != null) ob.logs.head_sampling_rate = o.logs.head_sampling_rate;
+      if ("invocation_logs" in o.logs) ob.logs.invocation_logs = !!o.logs.invocation_logs;
+    }
+    meta.observability = ob;
+  }
   fs.writeFileSync(process.argv[2], JSON.stringify(meta, null, 2));
+  fs.writeFileSync(process.argv[2].replace(/\.json$/, ".min.json"), JSON.stringify(min, null, 2));
   console.log("compatibility_date: " + meta.compatibility_date + (meta.compatibility_flags.length ? "  flags: " + meta.compatibility_flags.join(",") : ""));
   console.log("bindings (" + b.length + "): " + names.join(" "));
   console.log("binding types kept: " + types.join(" "));
@@ -177,15 +191,31 @@ fi
 
 step "deploying '$NAME' ($(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'working copy'))"
 RESP="$WORK/$NAME.upload.json"
-auth -X PUT "$API/accounts/$ACC/workers/scripts/$NAME" \
-  -F "metadata=@$META;type=application/json" \
-  -F "index.js=@$SRC;type=application/javascript+module" > "$RESP" || die "upload request failed"
-node -e '
-  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-  if (!j.success) { console.error("upload rejected: " + JSON.stringify(j.errors || j, null, 1)); process.exit(3); }
-  const r = j.result || {};
-  console.log("uploaded: " + (r.id || process.argv[2]) + "  modified " + (r.modified_on || "") + (r.etag ? "  etag " + r.etag.slice(0, 12) : ""));
-' "$RESP" "$NAME" || die "Cloudflare rejected the upload (details above; full response in $RESP)"
+upload() {  # $1 = metadata file
+  auth -X PUT "$API/accounts/$ACC/workers/scripts/$NAME" \
+    -F "metadata=@$1;type=application/json" \
+    -F "index.js=@$SRC;type=application/javascript+module" > "$RESP" || die "upload request failed"
+  node -e '
+    const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    if (!j.success) {
+      const errs = j.errors || [];
+      console.error("Cloudflare rejected the upload:");
+      for (const e of errs) console.error("  [" + e.code + "] " + (e.message || "") + (e.documentation_url ? "  " + e.documentation_url : ""));
+      if (!errs.length) console.error("  " + JSON.stringify(j).slice(0, 600));
+      for (const m of (j.messages || [])) console.error("  note: " + (m.message || JSON.stringify(m)));
+      process.exit(3);
+    }
+    const r = j.result || {};
+    console.log("uploaded: " + (r.id || process.argv[2]) + "  modified " + (r.modified_on || "") + (r.etag ? "  etag " + r.etag.slice(0, 12) : ""));
+  ' "$RESP" "$NAME"
+}
+if ! upload "$META"; then
+  MIN="${META%.json}.min.json"
+  echo "retrying with the minimal metadata (module, compatibility, keep_bindings only):" >&2
+  cat "$MIN" >&2; echo >&2
+  upload "$MIN" || die "Cloudflare rejected the upload twice (full response in $RESP). Paste the lines above into the session."
+  echo "deployed with minimal metadata; check the Observability toggle in the dashboard is still as you want it"
+fi
 
 step "checking the live worker"
 sleep 3
