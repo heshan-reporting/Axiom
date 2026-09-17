@@ -2407,6 +2407,237 @@ async function jobRunLocal(env, job) {
 }
 
 // ==============================================================================
+// THE RELEASE DESK - a media release in, a pack of social tiles out.
+// Paste a release; the Desk extracts what it actually says (claims, numbers,
+// quotes, who is speaking), composes a set of tiles in the client's voice
+// using the playbook held in the Mind, then renders each one through the
+// image engine with the client's stored brand kit. Every number on a tile is
+// checked back against the release text, every pack is archived with its
+// source and its author, and every render is logged to the job the app tails.
+// Nothing here touches the Audience or Supermetrics paths.
+// ==============================================================================
+let RELEASE_READY = false;
+const RELEASE_KINDS = ['lead', 'stat', 'people', 'proof', 'warning', 'quote', 'cta'];
+const RELEASE_FORMATS = { square: '1:1', portrait: '4:5', story: '9:16', landscape: '16:9' };
+async function ensureRelease(env) {
+  if (!env.MIND_DB) return false;
+  if (RELEASE_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS release_packs(id TEXT PRIMARY KEY, ns TEXT, title TEXT, source TEXT, extract TEXT, tiles TEXT, status TEXT, job TEXT, who TEXT, format TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS release_packs_ns ON release_packs(ns, created)'),
+  ]);
+  RELEASE_READY = true;
+  return true;
+}
+function relNs(v) { return String(v || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm'; }
+function relId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function relJson(txt) {
+  const s2 = typeof txt === 'string' ? txt : (txt && (txt.text || JSON.stringify(txt))) || '';
+  try { return JSON.parse((s2.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) { return null; }
+}
+
+// -- Brand kit: one per client, set once, used by every render ----------------
+async function brandKit(env, ns) {
+  let kit = null;
+  try { kit = JSON.parse(await kvGet(env.AXIOM_KV, 'brand_' + ns) || 'null'); } catch (e) { kit = null; }
+  return kit && typeof kit === 'object' ? kit : null;
+}
+async function brandLogo(env, ns) {
+  if (!env.MIND_DOCS) return null;
+  try {
+    const obj = await env.MIND_DOCS.get('brand/' + ns + '/logo');
+    if (!obj) return null;
+    const buf = await obj.arrayBuffer();
+    return { bytes: buf, mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png' };
+  } catch (e) { return null; }
+}
+function b64FromBuf(buf) {
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function bufFromB64(b64) {
+  const bin = atob(String(b64 || '').replace(/^data:[^;]+;base64,/, ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+async function brandSave(env, ns, body, who) {
+  const cur = (await brandKit(env, ns)) || {};
+  const pick = (v, n) => String(v == null ? '' : v).slice(0, n);
+  const pal = Object.assign({}, cur.palette || {});
+  if (body.palette && typeof body.palette === 'object') {
+    ['primary', 'secondary', 'bg', 'text'].forEach(k => { const v = String(body.palette[k] || '').trim(); if (/^#[0-9a-fA-F]{3,8}$/.test(v)) pal[k] = v; else if (v === '') delete pal[k]; });
+  }
+  const kit = {
+    ns, name: pick(body.name != null ? body.name : cur.name, 80), palette: pal,
+    fonts: { display: pick(body.fonts && body.fonts.display != null ? body.fonts.display : (cur.fonts || {}).display, 60), body: pick(body.fonts && body.fonts.body != null ? body.fonts.body : (cur.fonts || {}).body, 60) },
+    voice: pick(body.voice != null ? body.voice : cur.voice, 4000),
+    rules: pick(body.rules != null ? body.rules : cur.rules, 2000),
+    logoMime: cur.logoMime || '', hasLogo: !!cur.hasLogo, updated: Date.now(), by: String(who || '').slice(0, 40),
+  };
+  if (body.logoB64) {
+    if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo');
+    const mime = String(body.logoMime || 'image/png');
+    if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
+    const buf = bufFromB64(body.logoB64);
+    if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
+    if (buf.byteLength < 64) throw new Error('logo file is empty');
+    await env.MIND_DOCS.put('brand/' + ns + '/logo', buf, { httpMetadata: { contentType: mime } });
+    kit.logoMime = mime; kit.hasLogo = true;
+  }
+  if (body.removeLogo && env.MIND_DOCS) { try { await env.MIND_DOCS.delete('brand/' + ns + '/logo'); } catch (e) {} kit.hasLogo = false; kit.logoMime = ''; }
+  await kvPut(env.AXIOM_KV, 'brand_' + ns, JSON.stringify(kit), 10 * 365 * 86400);
+  return kit;
+}
+
+// -- Compose: the release, read properly, then the tiles -------------------------
+async function releaseExtract(env, text, log) {
+  const sys = 'You read Australian media releases for a political communications agency. Return strict JSON only, no prose: '
+    + '{"headline":"","subhead":"","org":"","spokesperson":{"name":"","title":""},"date":"","topic":"","claims":["the release\'s own assertions, one per string, in its words"],'
+    + '"numbers":[{"value":"exact figure as written","context":"what it measures"}],"quotes":[{"text":"verbatim sentence from the release","who":""}],'
+    + '"asks":["what the release wants to happen"],"tone":"","risks":["how an opponent would attack this"]}. '
+    + 'Copy figures and quotes exactly as written. Never add a number the release does not contain.';
+  await log('cmd', 'claude: extract claims, numbers, quotes and speaker from the release (' + text.length + ' chars)');
+  const raw = await claudeMsg(env, sys, 'MEDIA RELEASE:\n\n' + text.slice(0, 24000), 2200, 60000);
+  const j = relJson(raw);
+  if (!j) throw new Error('extract_unparseable');
+  j.numbers = Array.isArray(j.numbers) ? j.numbers.slice(0, 20) : [];
+  j.quotes = Array.isArray(j.quotes) ? j.quotes.slice(0, 12) : [];
+  j.claims = Array.isArray(j.claims) ? j.claims.slice(0, 20) : [];
+  await log('out', (j.headline || 'no headline') + ' - ' + j.claims.length + ' claims, ' + j.numbers.length + ' numbers, ' + j.quotes.length + ' quotes' + (j.spokesperson && j.spokesperson.name ? ', speaker ' + j.spokesperson.name : ''));
+  return j;
+}
+/** Every digit-bearing token on a tile must appear in the release. */
+function relNumberCheck(text, source) {
+  const src = String(source || '').replace(/[\s,]/g, '').toLowerCase();
+  const toks = String(text || '').match(/\d[\d.,%]*/g) || [];
+  const missing = toks.map(t => t.replace(/[,]/g, '').replace(/[.%]+$/, '')).filter(t => t && src.indexOf(t.replace(/%/g, '')) < 0);
+  return { ok: !missing.length, missing };
+}
+async function releaseCompose(env, pack, opts, log) {
+  const ns = pack.ns;
+  const kit = (await brandKit(env, ns)) || {};
+  let playbook = '';
+  try {
+    const hits = await mindRetrieve(env, ns, 'brand voice tone wording style rules messaging pillars design guidelines policy positions ' + (pack.extract.topic || ''), 6);
+    playbook = hits.slice(0, 8).map(h => '[' + String(h.meta.kind || 'doc').toUpperCase() + ' - ' + (h.meta.title || '') + '] ' + (h.meta.snippet || '')).join('\n').slice(0, 3500);
+    await log('out', 'Mind: ' + hits.length + ' playbook notes for ' + ns);
+  } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); }
+  const n = Math.min(Math.max(parseInt(opts.tiles, 10) || 6, 3), 8);
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || kit.name || 'the client';
+  const ex = pack.extract;
+  const sys = 'You are the creative director of an Australian political communications agency, turning a client media release into social media tiles. Client: ' + client + '.'
+    + (kit.voice ? '\n\nCLIENT VOICE:\n' + kit.voice : '') + (opts.brief ? '\n\nCLIENT BRIEF:\n' + String(opts.brief).slice(0, 3000) : '')
+    + (kit.rules ? '\n\nSTANDING RULES:\n' + kit.rules : '') + (playbook ? '\n\nPLAYBOOK (from the client knowledge base):\n' + playbook : '')
+    + '\n\nRULES. Use only facts, figures and quotes that appear in the release - never invent a number or a quotation. Australian English. Plain, confident, human; no jargon, no exclamation marks, no hashtags in headlines.'
+    + ' Each tile does one job. Headline max 60 characters, support line max 120, CTA max 28 or empty. A "stat" tile only if the release contains a real figure; its headline is the figure itself.'
+    + ' A "quote" tile uses a verbatim sentence from the release with attribution. Captions: LinkedIn up to 600 chars (professional, one line break allowed), X up to 270, Facebook up to 400; captions may add one relevant hashtag at most.'
+    + ' Return strict JSON only: {"tiles":[{"kind":"lead|stat|people|proof|warning|quote|cta","headline":"","support":"","cta":"","caption":{"linkedin":"","x":"","facebook":""},"alt":"<=140 chars image description for accessibility","visual":"<=200 chars art direction: subject, mood, composition; no text instructions"}]}.'
+    + ' Produce exactly ' + n + ' tiles, ordered lead first, quote last if present, no duplicate kinds unless there are more tiles than kinds.';
+  const user = 'RELEASE EXTRACT:\n' + JSON.stringify(ex).slice(0, 12000) + '\n\nFULL RELEASE TEXT:\n' + pack.source.slice(0, 16000);
+  await log('cmd', 'claude: compose ' + n + ' tiles in the ' + client + ' voice');
+  const raw = await claudeMsg(env, sys, user, 4000, 90000);
+  const j = relJson(raw);
+  if (!j || !Array.isArray(j.tiles) || !j.tiles.length) throw new Error('compose_unparseable');
+  const tiles = j.tiles.slice(0, n).map((t, i) => {
+    const kind = RELEASE_KINDS.indexOf(String(t.kind || '').toLowerCase()) >= 0 ? String(t.kind).toLowerCase() : 'lead';
+    const headline = String(t.headline || '').trim().slice(0, 90), support = String(t.support || '').trim().slice(0, 180), cta = String(t.cta || '').trim().slice(0, 40);
+    const chk = relNumberCheck(headline + ' ' + support + ' ' + cta, pack.source);
+    const cap = t.caption && typeof t.caption === 'object' ? t.caption : {};
+    return { n: i, kind, headline, support, cta,
+      caption: { linkedin: String(cap.linkedin || '').slice(0, 700), x: String(cap.x || '').slice(0, 280), facebook: String(cap.facebook || '').slice(0, 500) },
+      alt: String(t.alt || '').slice(0, 160), visual: String(t.visual || '').slice(0, 240),
+      check: chk, image: null };
+  });
+  const warn = tiles.filter(t => !t.check.ok);
+  await log('out', tiles.length + ' tiles: ' + tiles.map(t => t.kind).join(', ') + (warn.length ? ' - ' + warn.length + ' carry a figure not found in the release (flagged, not blocked)' : ' - every figure traced to the release'));
+  return tiles;
+}
+/** The whole compose stage, run after POST /release/pack has answered. */
+async function releaseBuild(env, packId, opts) {
+  const log = mkJobLog(env, opts.job);
+  let pack = await env.MIND_DB.prepare('SELECT id,ns,title,source,who,format FROM release_packs WHERE id=?').bind(packId).first();
+  if (!pack) return;
+  try {
+    pack.extract = await releaseExtract(env, pack.source, log);
+    const tiles = await releaseCompose(env, pack, opts, log);
+    const title = String(pack.extract.headline || pack.title || 'Release').slice(0, 200);
+    await env.MIND_DB.prepare('UPDATE release_packs SET title=?, extract=?, tiles=?, status=?, updated=? WHERE id=?')
+      .bind(title, JSON.stringify(pack.extract).slice(0, 60000), JSON.stringify(tiles), 'composed', Date.now(), packId).run();
+    // provenance: the release itself is archived with the pack it produced
+    try {
+      await archiveItems(env, 'release', [{ src: 'release', title, body: pack.source.slice(0, 20000), url: 'x:release:' + packId, author: '',
+        meta: { ns: pack.ns, packId, who: pack.who, tiles: tiles.length, spokesperson: (pack.extract.spokesperson || {}).name || '', format: pack.format } }]);
+    } catch (e) {}
+    await log('info', 'pack ' + packId + ' composed: "' + title + '" - ' + tiles.length + ' tiles ready to render');
+    await log.flush();
+    await jobFinish(env, opts.job, true, { ok: true, packId, title, tiles: tiles.length, flagged: tiles.filter(t => !t.check.ok).length });
+  } catch (e) {
+    const m = String((e && e.message) || e).slice(0, 200);
+    await log('err', m);
+    await log.flush();
+    await env.MIND_DB.prepare('UPDATE release_packs SET status=?, updated=? WHERE id=?').bind('failed', Date.now(), packId).run();
+    await jobFinish(env, opts.job, false, { ok: false, error: 'compose_failed', detail: m });
+  }
+}
+/** One tile, rendered in the brand, text baked, logo placed. */
+function releasePrompt(tile, kit, client, format) {
+  const pal = kit.palette || {};
+  const dir = {
+    lead: 'Bold, editorial lead tile. The headline dominates; the support line sits beneath it.',
+    stat: 'A single large figure dominates the tile (the headline IS the figure); the support line explains it in smaller type.',
+    people: 'Human scale: Australian workers in an industrial or regional setting, photographic, dignified, no faces in sharp focus.',
+    proof: 'Substantial and credible: infrastructure, industry, the scale of what the sector does; confident composition.',
+    warning: 'Urgent but composed: a sense of time and competition; darker palette, strong contrast.',
+    quote: 'A pull-quote tile: large opening quotation mark, the quote as the headline, attribution as the support line.',
+    cta: 'A clear action tile: the CTA is the most prominent element after the headline.',
+  }[tile.kind] || 'Clean, confident social tile.';
+  return 'Design a premium social media tile for ' + client + '. Format: ' + (RELEASE_FORMATS[format] ? format : 'square') + '.\n'
+    + dir + (tile.visual ? '\nArt direction: ' + tile.visual : '') + '\n'
+    + (pal.primary ? 'Brand palette: primary ' + pal.primary + (pal.secondary ? ', secondary ' + pal.secondary : '') + (pal.bg ? ', background ' + pal.bg : '') + (pal.text ? ', text ' + pal.text : '') + '. Use these colours faithfully.\n' : '')
+    + (kit.fonts && (kit.fonts.display || kit.fonts.body) ? 'Typography: headlines in ' + (kit.fonts.display || 'a bold grotesque') + ', body in ' + (kit.fonts.body || 'a clean sans') + '.\n' : '')
+    + '\nPlace THIS text on the tile, spelled EXACTLY as written, clearly legible with generous margins:\n- HEADLINE (dominant): ' + tile.headline
+    + (tile.support ? '\n- SUPPORTING LINE: ' + tile.support : '') + (tile.cta ? '\n- CTA BUTTON: ' + tile.cta : '')
+    + (kit.hasLogo ? '\n\nThe attached image is the client logo: reproduce it exactly, unaltered, small, in the bottom-right corner on a clear background area.' : '\n\nDo not draw a logo.')
+    + '\n\nStrict: render ONLY the exact text above - no other words, letters, gibberish or watermarks. One finished graphic.';
+}
+async function releaseRender(env, packId, n, patch, who) {
+  const row = await env.MIND_DB.prepare('SELECT id,ns,title,tiles,job,format FROM release_packs WHERE id=?').bind(packId).first();
+  if (!row) return { ok: false, error: 'unknown_pack', status: 404 };
+  let tiles = []; try { tiles = JSON.parse(row.tiles || '[]'); } catch (e) { tiles = []; }
+  const tile = tiles[n];
+  if (!tile) return { ok: false, error: 'unknown_tile', status: 404 };
+  if (patch && typeof patch === 'object') {
+    ['headline', 'support', 'cta'].forEach(k => { if (patch[k] != null) tile[k] = String(patch[k]).slice(0, k === 'headline' ? 90 : k === 'support' ? 180 : 40); });
+    if (patch.visual != null) tile.visual = String(patch.visual).slice(0, 240);
+    const src = (await env.MIND_DB.prepare('SELECT source FROM release_packs WHERE id=?').bind(packId).first()) || {};
+    tile.check = relNumberCheck(tile.headline + ' ' + tile.support + ' ' + tile.cta, src.source || '');
+  }
+  const kit = (await brandKit(env, row.ns)) || {};
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === row.ns) || {}).client || kit.name || 'the client';
+  const refs = [];
+  if (kit.hasLogo) { const lg = await brandLogo(env, row.ns); if (lg) refs.push({ data: b64FromBuf(lg.bytes), mime: lg.mime }); }
+  const log = mkJobLog(env, row.job);
+  await log('cmd', 'gemini: render tile ' + (n + 1) + ' (' + tile.kind + ') - "' + tile.headline.slice(0, 60) + '"' + (refs.length ? ' with the brand logo' : ''));
+  const out = await nanoRender(env, { prompt: releasePrompt(tile, kit, client, row.format), references: refs, aspect: RELEASE_FORMATS[row.format] || '1:1', size: '1K' });
+  if (!out.ok) { await log('err', 'tile ' + (n + 1) + ': ' + out.error + (out.detail ? ' - ' + out.detail : '')); await log.flush(); return { ok: false, error: out.error, detail: out.detail, status: 502 }; }
+  if (!env.MIND_DOCS) { await log.flush(); return { ok: false, error: 'mind_not_configured', detail: 'Bind MIND_DOCS (R2) to store rendered tiles.', status: 501 }; }
+  const key = 'packs/' + packId + '/' + n + '.png';
+  await env.MIND_DOCS.put(key, bufFromB64(out.imageB64), { httpMetadata: { contentType: out.mime || 'image/png' } });
+  tile.image = { key, mime: out.mime || 'image/png', model: out.model, rendered: Date.now(), by: String(who || '').slice(0, 40), ver: ((tile.image && tile.image.ver) || 0) + 1 };
+  tiles[n] = tile;
+  const allDone = tiles.every(t => t.image);
+  await env.MIND_DB.prepare('UPDATE release_packs SET tiles=?, status=?, updated=? WHERE id=?').bind(JSON.stringify(tiles), allDone ? 'rendered' : 'composed', Date.now(), packId).run();
+  await log('out', 'tile ' + (n + 1) + ' rendered by ' + out.model + (allDone ? ' - pack complete' : ''));
+  await log.flush();
+  return { ok: true, n, tile, url: '/release/tile?id=' + packId + '&n=' + n + '&v=' + tile.image.ver, model: out.model, complete: allDone };
+}
+function relTileView(packId, t) {
+  return Object.assign({}, t, { image: t.image ? { url: '/release/tile?id=' + packId + '&n=' + t.n + '&v=' + (t.image.ver || 1), model: t.image.model, rendered: t.image.rendered, ver: t.image.ver || 1 } : null });
+}
+
+// ==============================================================================
 // FORUM PULSE - one-call aggregate of the AU political forum scrapers.
 // Lean primary-strategy fetchers (the per-site routes keep their full
 // multi-fallback versions); everything fails soft with per-source status.
@@ -2711,6 +2942,58 @@ async function mindRetrieve(env, ns, q, topK = 5) {
  * spends API tokens. Every helper fails soft - a dead page or an unbound
  * Mind narrows the dossier, it never breaks the run.
  * ========================================================================== */
+/** The image engine. Gemini image models, tried in a chain (requested or the
+ *  Pro default, then the flash models) with per-model retries on transient
+ *  errors. Returns {ok, imageB64, mime, model} or {ok:false, error, detail,
+ *  model}. Used by POST /nano and by the Release Desk. */
+async function nanoRender(env, opts) {
+  opts = opts || {};
+  const key = env.GEMINI_KEY;
+  if (!key) return { ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY as a Worker secret.', model: '' };
+  const clean = m => String(m || '').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
+  const chain = [];
+  [clean(opts.model) || 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image']
+    .forEach(m => { if (m && chain.indexOf(m) === -1) chain.push(m); });
+  const parts = [{ text: String(opts.prompt || '').slice(0, 8000) }];
+  (Array.isArray(opts.references) ? opts.references : []).slice(0, 6).forEach(rf => {
+    if (rf && rf.data) parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } });
+  });
+  const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+  const SIZES = ['1K', '2K', '4K'];
+  const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
+  const imgCfg = {};
+  if (ASPECTS.indexOf(opts.aspect) !== -1) imgCfg.aspectRatio = opts.aspect;
+  if (SIZES.indexOf(opts.size) !== -1) imgCfg.imageSize = opts.size;
+  let lastDetail = '', lastModel = chain[0];
+  for (const model of chain) {
+    lastModel = model;
+    const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length) ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
+    const payload = JSON.stringify({ contents: [{ parts }], generationConfig: cfg });
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt) await new Promise(res => setTimeout(res, 700 * attempt));
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined });
+        const data = await r.json().catch(() => ({}));
+        if (data.error) {
+          lastDetail = String(data.error.message || '').slice(0, 200);
+          const code = data.error.code || r.status;
+          if (code === 500 || code === 503 || code === 429) continue;
+          if (code === 404 || code === 400 || code === 403) break;
+          return { ok: false, error: 'gemini_' + code, detail: lastDetail, model };
+        }
+        const cand = (data.candidates || [])[0] || {};
+        const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
+        const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
+        if (inl && inl.data) return { ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model };
+        lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
+        if (cand.finishReason && cand.finishReason !== 'STOP') continue;
+      } catch (e) { lastDetail = String((e && e.name) || e).slice(0, 60); }
+    }
+  }
+  return { ok: false, error: 'no_image', detail: lastDetail || 'all image models failed', model: lastModel };
+}
 async function claudeMsg(env, system, user, maxTok, timeoutMs) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -2991,13 +3274,14 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
-      || path.startsWith('/signals/') || path.startsWith('/bridge/');
+      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -3408,70 +3692,15 @@ export default {
     // Returns { imageB64, mime, model }.
     if (path === '/nano') {
       if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
-      const key = env.GEMINI_KEY;
-      if (!key) return jsonResp({ error: 'gemini_not_configured', detail: 'Set GEMINI_KEY as a Worker secret: wrangler secret put GEMINI_KEY' }, 501);
+      if (!env.GEMINI_KEY) return jsonResp({ error: 'gemini_not_configured', detail: 'Set GEMINI_KEY as a Worker secret: wrangler secret put GEMINI_KEY' }, 501);
       let body = {};
       try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
       if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
-      const clean = m => String(m || '').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
-      // Model chain: requested (or Pro default) first, then fallbacks. Dedupe.
-      const chain = [];
-      [clean(body.model) || 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image']
-        .forEach(m => { if (m && chain.indexOf(m) === -1) chain.push(m); });
-      const parts = [];
-      // Prompt first, then the reference image(s) (matches Gemini image-edit ordering).
-      parts.push({ text: String(body.prompt).slice(0, 8000) });
       const refs = Array.isArray(body.references) ? body.references
         : (body.referenceB64 ? [{ data: body.referenceB64, mime: body.mime }] : []);
-      refs.slice(0, 6).forEach(rf => { if (rf && rf.data) parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } }); });
-      // responseModalities is still required; imageConfig is the current way to
-      // request exact aspect ratio / resolution (gemini-3 image models).
-      const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-      const SIZES = ['1K', '2K', '4K'];
-      const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
-      const imgCfg = {};
-      if (ASPECTS.indexOf(body.aspect) !== -1) imgCfg.aspectRatio = body.aspect;
-      if (SIZES.indexOf(body.size) !== -1) imgCfg.imageSize = body.size;
-      let lastDetail = '', lastModel = chain[0];
-      for (const model of chain) {
-        lastModel = model;
-        // gemini-2.5-flash-image predates imageConfig - send it a bare config.
-        const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length)
-          ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
-        const payload = JSON.stringify({ contents: [{ parts }], generationConfig: cfg });
-        const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
-        // 500s from the image models are frequently transient - retry per model.
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            if (attempt) await new Promise(res => setTimeout(res, 700 * attempt));
-            const r = await fetch(url, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: payload,
-              signal: AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined,
-            });
-            const data = await r.json().catch(() => ({}));
-            if (data.error) {
-              lastDetail = String(data.error.message || '').slice(0, 200);
-              const code = data.error.code || r.status;
-              if (code === 500 || code === 503 || code === 429) continue;      // transient - retry this model
-              if (code === 404 || code === 400 || code === 403) break;         // model unavailable to this key - next model
-              return jsonResp({ error: 'gemini_' + code, detail: lastDetail, model }, 502);
-            }
-            const cand = (data.candidates || [])[0] || {};
-            const imgPart = ((cand.content && cand.content.parts) || []).find(p => p.inline_data || p.inlineData);
-            const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
-            if (inl && inl.data) return jsonResp({ ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model });
-            lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
-            if (cand.finishReason && cand.finishReason !== 'STOP') continue;   // blocked/transient - retry
-          } catch (e) {
-            lastDetail = String(e && e.name || e).slice(0, 60);
-          }
-        }
-        // Fall through to the next model in the chain (unavailable OR exhausted
-        // retries) - resilience beats strict model pinning; the response's
-        // `model` field always reports which one actually produced the image.
-      }
-      return jsonResp({ error: 'no_image', detail: lastDetail || 'all image models failed', model: lastModel }, 502);
+      const out = await nanoRender(env, { prompt: body.prompt, references: refs, aspect: body.aspect, size: body.size, model: body.model });
+      if (!out.ok) return jsonResp({ error: out.error, detail: out.detail, model: out.model }, 502);
+      return jsonResp({ ok: true, imageB64: out.imageB64, mime: out.mime, model: out.model });
     }
 
     // -- Reference link reader: fetch a public URL for grounding copy --------
@@ -3981,6 +4210,98 @@ export default {
         }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) { return jsonResp({ ok: false, error: 'bridge_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
+    // -- The Release Desk ---------------------------------------------------------
+    //    GET  /brand/kit?ns=                 the client's brand kit (palette, fonts, voice, rules, hasLogo)
+    //    GET  /brand/logo?ns=                the logo bytes
+    //    POST /brand/kit {ns,palette,fonts,voice,rules,logoB64,logoMime,removeLogo}   (full role)
+    //    POST /release/pack {ns,text,tiles,format,brief}   paste a release; returns {id, job} to tail (full role)
+    //    POST /release/render {id,n,patch}                  render one tile in the brand (full role)
+    //    POST /release/update {id,n,patch}                  save edited copy without re-rendering (full role)
+    //    GET  /release/pack?id=   GET /release/list?ns=   GET /release/tile?id=&n=
+    if (path.startsWith('/brand/') || path.startsWith('/release/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let rbody2 = {}; if (req.method === 'POST') { try { rbody2 = await req.json(); } catch (e) { rbody2 = {}; } }
+      const ns2 = relNs(reqUrl.searchParams.get('ns') || rbody2.ns);
+      try {
+        await ensureArchive(env); await ensureBridge(env); await ensureRelease(env);
+        if (path === '/brand/kit' && req.method === 'GET') {
+          const kit = await brandKit(env, ns2);
+          return jsonResp({ ok: true, ns: ns2, kit: kit || null, hasLogo: !!(kit && kit.hasLogo), logoUrl: kit && kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + (kit.updated || 0) : '' });
+        }
+        if (path === '/brand/logo') {
+          const lg = await brandLogo(env, ns2);
+          if (!lg) return jsonResp({ error: 'no_logo' }, 404);
+          return new Response(lg.bytes, { headers: Object.assign({}, CORS, { 'Content-Type': lg.mime, 'Cache-Control': 'private, max-age=300' }) });
+        }
+        if (path === '/release/tile') {
+          const id = String(reqUrl.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const n = Math.max(0, parseInt(reqUrl.searchParams.get('n') || '0', 10) || 0);
+          if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured' }, 501);
+          const obj = await env.MIND_DOCS.get('packs/' + id + '/' + n + '.png');
+          if (!obj) return jsonResp({ error: 'not_rendered' }, 404);
+          return new Response(obj.body, { headers: Object.assign({}, CORS, { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', 'Cache-Control': 'private, max-age=3600' }) });
+        }
+        if (path === '/release/pack' && req.method === 'GET') {
+          const id = String(reqUrl.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const row = await env.MIND_DB.prepare('SELECT id,ns,title,source,extract,tiles,status,job,who,format,created,updated FROM release_packs WHERE id=?').bind(id).first();
+          if (!row) return jsonResp({ error: 'unknown_pack' }, 404);
+          let tiles = [], extract = null; try { tiles = JSON.parse(row.tiles || '[]'); } catch (e) {} try { extract = JSON.parse(row.extract || 'null'); } catch (e) {}
+          return jsonResp({ ok: true, pack: { id: row.id, ns: row.ns, title: row.title, status: row.status, job: row.job, who: row.who, format: row.format, created: row.created, updated: row.updated,
+            source: row.source, extract, tiles: tiles.map(t => relTileView(row.id, t)) } });
+        }
+        if (path === '/release/list') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '20', 10) || 20, 100);
+          const rows = (await env.MIND_DB.prepare('SELECT id,ns,title,status,who,format,created,updated,tiles FROM release_packs WHERE ns=? ORDER BY created DESC LIMIT ?').bind(ns2, lim).all()).results || [];
+          return jsonResp({ ok: true, ns: ns2, packs: rows.map(r => { let t = []; try { t = JSON.parse(r.tiles || '[]'); } catch (e) {}
+            return { id: r.id, title: r.title, status: r.status, who: r.who, format: r.format, created: r.created, updated: r.updated, tiles: t.length, rendered: t.filter(x => x.image).length,
+              cover: (t.find(x => x.image) ? '/release/tile?id=' + r.id + '&n=' + t.find(x => x.image).n + '&v=' + (t.find(x => x.image).image.ver || 1) : '') }; }) });
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Building packs, rendering tiles and editing the brand kit need a full-access key.' }, 403);
+        if (path === '/brand/kit' && req.method === 'POST') {
+          const kit = await brandSave(env, ns2, rbody2, auth.name);
+          return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
+        }
+        if (path === '/release/pack' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          const text = String(rbody2.text || '').replace(/\r/g, '').trim();
+          if (text.length < 200) return jsonResp({ error: 'release_too_short', detail: 'Paste the whole release - at least a few paragraphs.' }, 400);
+          if (text.length > 40000) return jsonResp({ error: 'release_too_long', detail: 'That is over 40,000 characters. Paste the release, not the attachments.' }, 400);
+          const format = RELEASE_FORMATS[String(rbody2.format || '')] ? String(rbody2.format) : 'square';
+          const id = relId();
+          const job = await jobCreate(env, 'release', { packId: id, ns: ns2, where: 'worker' }, auth.name);
+          await env.MIND_DB.prepare('INSERT INTO release_packs(id,ns,title,source,extract,tiles,status,job,who,format,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(id, ns2, String(rbody2.title || text.split('\n')[0]).slice(0, 200), text, '', '[]', 'composing', job.id, auth.name || '', format, Date.now(), Date.now()).run();
+          ctx.waitUntil(releaseBuild(env, id, { job: job.id, tiles: rbody2.tiles, brief: rbody2.brief }));
+          return jsonResp({ ok: true, id, job: job.id, ns: ns2, format });
+        }
+        if (path === '/release/render' && req.method === 'POST') {
+          const id = String(rbody2.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const n = Math.max(0, parseInt(rbody2.n, 10) || 0);
+          const r = await releaseRender(env, id, n, rbody2.patch, auth.name);
+          return jsonResp(r, r.ok ? 200 : (r.status || 500));
+        }
+        if (path === '/release/update' && req.method === 'POST') {
+          const id = String(rbody2.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const n = Math.max(0, parseInt(rbody2.n, 10) || 0);
+          const row = await env.MIND_DB.prepare('SELECT tiles,source FROM release_packs WHERE id=?').bind(id).first();
+          if (!row) return jsonResp({ error: 'unknown_pack' }, 404);
+          let tiles = []; try { tiles = JSON.parse(row.tiles || '[]'); } catch (e) {}
+          if (!tiles[n]) return jsonResp({ error: 'unknown_tile' }, 404);
+          const patch = rbody2.patch && typeof rbody2.patch === 'object' ? rbody2.patch : {};
+          ['headline', 'support', 'cta', 'alt', 'visual'].forEach(k => { if (patch[k] != null) tiles[n][k] = String(patch[k]).slice(0, k === 'headline' ? 90 : k === 'support' ? 180 : k === 'cta' ? 40 : 240); });
+          if (patch.caption && typeof patch.caption === 'object') { tiles[n].caption = tiles[n].caption || {}; ['linkedin', 'x', 'facebook'].forEach(k => { if (patch.caption[k] != null) tiles[n].caption[k] = String(patch.caption[k]).slice(0, k === 'x' ? 280 : 700); }); }
+          tiles[n].check = relNumberCheck(tiles[n].headline + ' ' + tiles[n].support + ' ' + tiles[n].cta, row.source || '');
+          await env.MIND_DB.prepare('UPDATE release_packs SET tiles=?, updated=? WHERE id=?').bind(JSON.stringify(tiles), Date.now(), id).run();
+          return jsonResp({ ok: true, tile: relTileView(id, tiles[n]) });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
+        return jsonResp({ ok: false, error: 'release_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|too/.test(m) ? 400 : 500);
+      }
     }
 
     // -- Signals: what LinkedIn, Meta, X and Reddit are saying, one shape ------

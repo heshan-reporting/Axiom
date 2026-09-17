@@ -185,6 +185,48 @@ mainstream) and `/signals/mind` (a digest into the Mind, kind `signal`).
 Harnesses: `signals-worker.js` (33 route tests), `signals.js` (24 browser
 tests), `reach-agent-test.py` (17 collector tests).
 
+## The Release Desk (a media release in, a pack of social tiles out)
+
+The `v-release` view (React island, `docs/release.js`, shared pieces in
+`docs/ax-ui.js`) is the rapid-response desk clients like MCA will use daily:
+paste a release, pick the client, press Build. `POST /release/pack
+{ns,text,tiles,format,brief}` creates a bridge job and runs `releaseBuild()`
+after the response - `releaseExtract()` (Claude: headline, spokesperson,
+claims, numbers, quotes, asks, risks, strict JSON) then `releaseCompose()`
+(Claude as creative director with the client voice from the brand kit, the
+Client Central brief, and the playbook retrieved from the Mind) - narrating
+every step into the job log the view tails with `AXUI.tailJob`. Tiles carry
+`kind` (lead, stat, people, proof, warning, quote, cta), headline/support/cta,
+captions for LinkedIn, X and Facebook, alt text and art direction. **Every
+figure on a tile is checked back against the release text**
+(`relNumberCheck`) and flagged amber if it is not there - flagged, never
+silently dropped. The release itself is archived as kind `release` with the
+pack id and the author (provenance).
+
+Rendering is one tile per request - `POST /release/render {id,n,patch}` -
+so each stays inside worker limits and the grid fills in as it goes; the view
+auto-renders in order and can be stopped. `releasePrompt()` bakes the exact
+copy, the brand palette and fonts, a kind-specific art direction, and places
+the client logo (attached as a reference) bottom-right. Images live in R2
+(`packs/<id>/<n>.png`, served by `GET /release/tile?id=&n=` behind the key -
+the island fetches them with the key and shows blob URLs, never a bare
+`<img src>`). `POST /release/update` edits copy and captions without
+spending a render. `GET /release/pack?id=`, `GET /release/list?ns=`.
+
+**Brand kit**, one per client, set once: `GET/POST /brand/kit?ns=` (name,
+palette primary/secondary/bg/text, display and body fonts, voice, standing
+rules) in KV `brand_<ns>`; the logo (PNG/JPEG/WebP, 2 MB cap) in R2
+`brand/<ns>/logo`, served by `GET /brand/logo?ns=`. The panel prefills from
+Client Central (accent colours, the client brief as the voice).
+
+**Open in canvas** hands a rendered tile to Ad Lab: `alSeedFromDesk()` in
+`index.html` switches client, sets the art as the canvas base, the copy as
+editable layers (overlay mode) and the kit logo, then opens the canvas.
+`nanoRender()` is the image engine factored out of `POST /nano` (unchanged for
+Ad Lab and Studio). Roles: viewing packs and kits is read-role; building,
+rendering and editing the kit are full. Harnesses: `release-worker.js` (34
+route tests), `release.js` (26 browser tests).
+
 ## The Reddit signal (the first React island)
 
 `REDDIT_POLITICS` in the worker names the subs we watch - national politics
