@@ -194,7 +194,7 @@ RESP="$WORK/$NAME.upload.json"
 upload() {  # $1 = metadata file
   auth -X PUT "$API/accounts/$ACC/workers/scripts/$NAME" \
     -F "metadata=@$1;type=application/json" \
-    -F "index.js=@$SRC;type=application/javascript+module" > "$RESP" || die "upload request failed"
+    -F "index.js=@$SRC;filename=index.js;type=application/javascript+module" > "$RESP" || die "upload request failed"
   node -e '
     const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     if (!j.success) {
