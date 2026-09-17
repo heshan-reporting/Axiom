@@ -83,28 +83,46 @@ if [ -z "$TOKEN" ] || [ -z "$ACC" ]; then
     fi
   fi
 fi
-if [ -z "$TOKEN" ]; then
-  for f in "${XDG_CONFIG_HOME:-$HOME/.config}/.wrangler/config/default.toml" \
-           "$HOME/Library/Preferences/.wrangler/config/default.toml" \
+AUTH_KEY=""; AUTH_EMAIL=""; TOKEN_SRC="CLOUDFLARE_API_TOKEN"
+if [ -z "$TOKEN" ] && command -v npx >/dev/null 2>&1; then
+  # wrangler 4 keeps the login session in the OS keychain; `auth token` is the
+  # supported way to read it (the on-disk default.toml is often stale).
+  CRED="$(npx wrangler auth token --json 2>/dev/null | node -e '
+    let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+      const a=s.indexOf("{"), b=s.lastIndexOf("}"); if (a<0||b<0) return;
+      try { const j=JSON.parse(s.slice(a,b+1)); process.stdout.write([j.type||"", j.token||"", j.key||"", j.email||""].join("\t")); } catch(e){} });' || true)"
+  TYPE="$(printf '%s' "$CRED" | cut -f1)"
+  case "$TYPE" in
+    api_key) AUTH_KEY="$(printf '%s' "$CRED" | cut -f3)"; AUTH_EMAIL="$(printf '%s' "$CRED" | cut -f4)"; TOKEN_SRC="wrangler (global API key)" ;;
+    ?*) TOKEN="$(printf '%s' "$CRED" | cut -f2)"; TOKEN_SRC="wrangler session ($TYPE)" ;;
+  esac
+fi
+if [ -z "$TOKEN" ] && [ -z "$AUTH_KEY" ]; then
+  for f in "$HOME/Library/Preferences/.wrangler/config/default.toml" \
+           "${XDG_CONFIG_HOME:-$HOME/.config}/.wrangler/config/default.toml" \
            "$HOME/.wrangler/config/default.toml"; do
     if [ -f "$f" ]; then
       TOKEN="$(sed -nE 's/^oauth_token[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$f" | head -1)"
-      [ -n "$TOKEN" ] && break
+      [ -n "$TOKEN" ] && { TOKEN_SRC="$f"; break; }
     fi
   done
 fi
-[ -n "$TOKEN" ] || die "no Cloudflare credentials: run 'npx wrangler login' or export CLOUDFLARE_API_TOKEN (dash.cloudflare.com/profile/api-tokens, template 'Edit Cloudflare Workers')"
+[ -n "$TOKEN" ] || [ -n "$AUTH_KEY" ] || die "no Cloudflare credentials: run 'npx wrangler login' or export CLOUDFLARE_API_TOKEN (dash.cloudflare.com/profile/api-tokens, template 'Edit Cloudflare Workers')"
+echo "credentials from $TOKEN_SRC"
 if [ -z "$ACC" ]; then
   ACC="$(printf '%s' "$WHO" | grep -oE '[0-9a-f]{32}' | head -1 || true)"
 fi
+if [ -n "$AUTH_KEY" ]; then
+  auth() { curl -sS -m 60 -H "X-Auth-Key: $AUTH_KEY" -H "X-Auth-Email: $AUTH_EMAIL" "$@"; }
+else
+  auth() { curl -sS -m 60 -H "Authorization: Bearer $TOKEN" "$@"; }
+fi
 if [ -z "$ACC" ]; then
-  ACC="$(curl -sS -m 30 -H "Authorization: Bearer $TOKEN" "$API/accounts?per_page=5" | node -e '
+  ACC="$(auth "$API/accounts?per_page=5" | node -e '
     let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try { const j=JSON.parse(s); const r=(j.result||[]); if (r.length===1) process.stdout.write(r[0].id); else if (r.length>1) { console.error("several accounts: " + r.map(a=>a.name+" "+a.id).join("; ")); } } catch(e){} });' || true)"
 fi
 [ -n "$ACC" ] || die "could not determine the account id; export CLOUDFLARE_ACCOUNT_ID (Workers & Pages overview, right-hand column)"
 echo "account $ACC, worker '$NAME'"
-
-auth() { curl -sS -m 60 -H "Authorization: Bearer $TOKEN" "$@"; }
 
 step "reading the live settings of '$NAME'"
 SETTINGS="$WORK/$NAME.settings.json"
@@ -113,7 +131,11 @@ auth "$API/accounts/$ACC/workers/scripts/$NAME/settings" > "$SETTINGS" || die "c
 SUMMARY="$(node -e '
   const fs = require("fs");
   const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  if (!j.success) { console.error("API error: " + JSON.stringify(j.errors || j)); process.exit(2); }
+  if (!j.success) {
+    console.error("API error: " + JSON.stringify(j.errors || j));
+    if ((j.errors || []).some(e => e.code === 10000)) console.error("Cloudflare did not accept the credentials. Run npx wrangler login again, or export CLOUDFLARE_API_TOKEN from a token made with the Edit Cloudflare Workers template.");
+    process.exit(2);
+  }
   const r = j.result || {};
   const b = r.bindings || [];
   // secrets and plain vars are always kept, even if the settings call ever omitted them
