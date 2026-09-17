@@ -90,18 +90,42 @@
     </div>`;
   }
   function Comments({ thread, platform, canWrite }) {
-    const [state, set] = useState({ rows: null, err: '', busy: false, live: false, filter: 'all' });
-    const load = useCallback(async (live) => {
+    const [state, set] = useState({ rows: null, err: '', busy: false, live: false, filter: 'all', progress: '' });
+    const stopRef = useRef(null);
+    const load = useCallback(async () => {
       if (!thread) return;
       set(s => Object.assign({}, s, { busy: true, err: '' }));
       try {
-        const d = live && platform === 'reddit'
-          ? await call('/reddit/comments?thread=' + encodeURIComponent(thread.id) + '&live=1')
-          : await call('/signals/comments?platform=' + platform + '&thread=' + encodeURIComponent(thread.id));
-        set(s => Object.assign({}, s, { rows: d.comments || [], live: !!d.live, busy: false }));
+        const d = await call('/signals/comments?platform=' + platform + '&thread=' + encodeURIComponent(thread.id));
+        set(s => Object.assign({}, s, { rows: d.comments || [], busy: false }));
       } catch (e) { set(s => Object.assign({}, s, { err: e.message, busy: false, rows: s.rows || [] })); }
     }, [thread && thread.id, platform]);
-    useEffect(() => { set({ rows: null, err: '', busy: false, live: false, filter: 'all' }); load(false); }, [load]);
+    useEffect(() => { if (stopRef.current) stopRef.current(); set({ rows: null, err: '', busy: false, live: false, filter: 'all', progress: '' }); load(); }, [load]);
+    useEffect(() => () => { if (stopRef.current) stopRef.current(); }, []);
+    /* Live fetch is a JOB like a sweep: Reddit refuses Cloudflare's network, so
+       the worker routes it to the Mac collector when one is connected, and the
+       same console line shows where it is running and what came back. */
+    const fetchLive = async () => {
+      if (!thread) return;
+      set(s => Object.assign({}, s, { busy: true, err: '', progress: 'starting...' }));
+      try {
+        const d = await call('/bridge/run', { source: 'reddit', params: { thread: thread.id, sub: thread.channel || '', title: thread.title || '', permalink: thread.url || '', commentsPer: 120 } });
+        const where = d.where === 'desktop' ? 'waiting for the Mac collector' : 'fetching in the worker';
+        set(s => Object.assign({}, s, { progress: where }));
+        const tail = (window.AXUI && AXUI.tailJob) || null;
+        if (!tail) throw new Error('ax-ui.js did not load');
+        stopRef.current = tail(d.id, job => {
+          const last = (job.lines || []).slice(-1)[0];
+          set(s => Object.assign({}, s, { progress: (job.status === 'queued' ? 'waiting for the Mac collector' : job.agent ? 'fetching on ' + job.agent : 'fetching in the worker') + (last ? ' - ' + last.text : '') }));
+        }, async job => {
+          stopRef.current = null;
+          if (job.timedOut) { set(s => Object.assign({}, s, { busy: false, progress: '', err: 'No collector picked this up. On your Mac: cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY, then try again.' })); return; }
+          const r = job.result || {};
+          if (job.success) { await load(); set(s => Object.assign({}, s, { live: true, progress: '', busy: false })); toastMsg((r.comments || 0) + ' comments read' + (job.agent ? ' on ' + job.agent : '')); }
+          else set(s => Object.assign({}, s, { busy: false, progress: '', err: scrub(r.detail || r.error || (job.error && job.error.message) || 'the fetch failed; see the console') }));
+        });
+      } catch (e) { set(s => Object.assign({}, s, { err: e.message, busy: false, progress: '' })); }
+    };
     if (!thread) return html`<div class="empty">Pick a post to read its comments.</div>`;
     const rows = (state.rows || []).filter(c => state.filter === 'all' || String(c.tone) === state.filter);
     const tot = (state.rows || []).length, hos = (state.rows || []).filter(c => c.tone < 0).length, sup = (state.rows || []).filter(c => c.tone > 0).length;
@@ -110,8 +134,9 @@
         <select class="sel" value=${state.filter} onChange=${e => set(s => Object.assign({}, s, { filter: e.target.value }))} style=${{ padding: '6px 10px', fontSize: 11 }}>
           <option value="all">All (${tot})</option><option value="-1">Hostile (${hos})</option><option value="1">Supportive (${sup})</option><option value="0">Neutral (${tot - hos - sup})</option>
         </select>
-        ${canWrite && platform === 'reddit' ? html`<button class="btn sm ghost" disabled=${state.busy} onClick=${() => load(true)} title="Fetch the current comment tree from Reddit and file it">${state.busy ? 'Fetching...' : 'Load live comments'}</button>` : null}
+        ${canWrite && platform === 'reddit' ? html`<button class="btn sm ghost" disabled=${state.busy} onClick=${fetchLive} title="Read the current comment tree from Reddit (on your Mac collector when one is connected) and file it">${state.busy ? 'Fetching...' : 'Load live comments'}</button>` : null}
         ${state.live ? html`<span class="rd-chip">live</span>` : null}
+        ${state.progress ? html`<span class="rd-chip sig-progress" title="Where the fetch is running and its last line">${state.progress.slice(0, 120)}</span>` : null}
         <a class="aud-src" href=${thread.url} target="_blank" rel="noopener" style=${{ marginLeft: 'auto' }}>Open on ${P(platform).label} ${'↗'}</a>
       </div>
       ${state.err ? html`<div class="rd-res err">${state.err}</div>` : null}

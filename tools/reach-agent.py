@@ -21,7 +21,7 @@ Usage (on the Mac, from the repo):
 Needs: rdt (Reddit) and/or twitter (X) on PATH, signed in. It reports which
 collectors are available when it connects, and AXIOM shows that in Signals.
 """
-import argparse, datetime, importlib.util, json, os, shutil, subprocess, sys, time, urllib.error, urllib.request
+import argparse, datetime, importlib.util, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LABEL = 'com.curiousminds.axiom.reach-agent'
@@ -81,6 +81,19 @@ def collectors():
 
 # ---- the jobs ---------------------------------------------------------------
 def job_reddit(worker, key, params, log):
+    if params.get('thread'):
+        # one thread's comment tree - the Load live comments button in Signals
+        tid = re.sub(r'[^A-Za-z0-9_]', '', str(params['thread']))[:20]
+        n = int(params.get('commentsPer') or 120)
+        log('cmd', 'rdt read %s -n %d' % (tid, n))
+        post, comments = rr.thread(tid, n)
+        base = {'id': tid, 'title': params.get('title') or '', 'subreddit': params.get('sub') or '', 'permalink': params.get('permalink') or '', 'selftext': ''}
+        post = dict(base, **{k: v for k, v in (post or {}).items() if v not in (None, '')})
+        rows = rr.comment_rows(post, comments)
+        log('out', '%s: %d comments - %s' % (tid, len(rows), str(post.get('title') or '')[:70]))
+        n_c, tot_c = rr.push(worker, key, 'reddit_comment', rows)
+        return {'ok': True, 'platform': 'reddit', 'thread': tid, 'threads': 0, 'threadRows': 0, 'comments': len(rows),
+                'commentRows': n_c, 'hostile': sum(1 for r in rows if r['tone'] < 0), 'errors': [], 'holds': {'comments': tot_c}}
     sel = [s for s in str(params.get('issue') or '').split(',') if s.strip()]
     q = params.get('queries', 'auto')
     queries = rr.queries_for(sel) if q == 'auto' else ([str(x) for x in q] if isinstance(q, list) else [])

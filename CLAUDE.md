@@ -190,6 +190,12 @@ counts them) and deleted by `POST /signals/prune {platform:'reddit'}` (full
 role) with their comments. In the view: an order select, an "N off-topic
 hidden" toggle and a Prune button on the Reddit tab. The desktop collector reads
 comment trees for the 60 highest-weight threads by default (`--threads`).
+**Load live comments** on a Reddit thread is a job too: `POST /bridge/run
+{source:'reddit', params:{thread,sub,title,permalink,commentsPer}}` - routed by
+`jobRoute()` like a sweep, so it runs on the Mac collector (`job_reddit` with a
+`thread` param runs `rdt read`) whenever Reddit refuses the worker, and the
+Comments panel tails the job and shows where it ran. `/reddit/comments?live=1`
+remains for a worker that holds Reddit app credentials.
 
 Read routes (read role): `/signals/threads?platform=&days=&issue=&q=&sort=&all=`,
 `/signals/comments?thread=&platform=`, `/signals/status` (counts and tone per

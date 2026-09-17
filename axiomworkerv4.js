@@ -2389,11 +2389,50 @@ async function signalsCron(env) {
   await kvPut(env.AXIOM_KV, 'signals_last_result', JSON.stringify(out).slice(0, 4000), 7 * 86400);
 }
 /** Run a job here, in the worker, narrating every step into its log. */
+/** Comment rows for one Reddit thread, in the sweep's exact shape: a comment
+ *  carries its own issue tags and the thread's. No usernames. */
+function redditCommentRowsFor(t, tid, cs) {
+  let tIssues = [];
+  try { tIssues = Array.isArray(t.issues) ? t.issues : JSON.parse(t.issues || '[]'); } catch (e) { tIssues = []; }
+  if (!Array.isArray(tIssues)) tIssues = [];
+  const title = String(t.title || '');
+  return cs.map(c => {
+    const all = issueMerge(redditIssues(c.body), tIssues);
+    return {
+      src: 'reddit', title: 'Comment on: ' + title.slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
+      meta: { sub: t.sub || '', thread: tid, thread_title: title.slice(0, 200), permalink: t.url || '', score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) },
+    };
+  });
+}
 async function jobRunLocal(env, job) {
   const log = mkJobLog(env, job.id);
   let out = null, ok = false;
   try {
-    if (job.source === 'reddit') {
+    if (job.source === 'reddit' && job.params && job.params.thread) {
+      // One thread's comment tree - the Load live comments button. Same job
+      // bus as a sweep, so it runs on the Mac whenever Reddit refuses us here.
+      const tid = String(job.params.thread).replace(/[^a-z0-9_]/gi, '').slice(0, 20);
+      const t = (await env.MIND_DB.prepare("SELECT title, url, json_extract(meta,'$.sub') sub, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.id')=?").bind(tid).first()) || {};
+      const sub = String(t.sub || job.params.sub || '').replace(/[^\w]/g, '').slice(0, 40);
+      const n = Math.min(Math.max(parseInt(job.params.commentsPer, 10) || 120, 5), 300);
+      await log('info', 'reading one thread from the worker' + (redditAuthed(env) ? ' with your app credentials' : ' anonymously (Reddit often refuses cloud networks)'));
+      await log('cmd', 'GET /r/' + sub + '/comments/' + tid + '?limit=' + n);
+      try {
+        const cs = await redditThreadComments(env, sub, tid, n, 4);
+        await log('out', tid + ': ' + cs.length + ' comments');
+        const rows = redditCommentRowsFor({ sub, title: t.title || job.params.title || '', url: t.url || job.params.permalink || '', issues: t.issues }, tid, cs);
+        let added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'reddit_comment', rows.slice(i, i + 150));
+        await log('info', 'filed ' + added + ' new comments');
+        out = { ok: true, platform: 'reddit', thread: tid, threads: 0, threadRows: 0, comments: cs.length, commentRows: added, hostile: rows.filter(r => r.tone < 0).length };
+        ok = true;
+      } catch (e) {
+        const m = String((e && e.message) || e).slice(0, 80);
+        const throttled = /rate_limited/.test(m);
+        out = { ok: false, platform: 'reddit', thread: tid, error: throttled ? 'reddit_rate_limited' : 'reddit_blocked', comments: 0, commentRows: 0,
+          detail: (throttled ? 'Reddit is throttling the worker (' + m + ').' : 'Reddit refused this network (' + m + ').') + ' Run the collector on your Mac - cd ~/Axiom && python3 tools/reach-agent.py --key $AXIOM_KEY - and press Load live comments again: the fetch will go there and show here.' };
+        await log('err', m);
+      }
+    } else if (job.source === 'reddit') {
       await log('info', 'sweeping Reddit from the worker' + (redditAuthed(env) ? ' with your app credentials' : ' anonymously (Reddit often refuses cloud networks)'));
       // one probe before the full sweep: if Reddit refuses this network there is
       // no point spending three minutes proving it thirty more times
