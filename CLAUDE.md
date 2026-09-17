@@ -185,6 +185,55 @@ mainstream) and `/signals/mind` (a digest into the Mind, kind `signal`).
 Harnesses: `signals-worker.js` (33 route tests), `signals.js` (24 browser
 tests), `reach-agent-test.py` (17 collector tests).
 
+## The Engine (the memory the model cannot work without, and how it learns)
+
+The Engine is not a fine-tune. Claude and Gemini stay the reasoning muscle;
+the Engine is the memory around them, the watchers that feed it, the
+corrections that shape it, and the record of what worked. Namespaces stay
+walls: a client's corrections and exemplars never reach another client.
+
+- **Corrections (Teach mode).** `POST /engine/fix {ns,task,scope,wrong,right,
+  why,source}` turns one correction into a standing rule - Claude compiles it
+  (`engineCompileFix`, plain fallback if Claude is down) - stored in D1
+  `engine_fixes` with who taught it and when, `scope` client or all, `task`
+  tiles / copy / analysis / any, switchable (`/engine/fix/update`) and
+  deletable. `engineRules(env, ns, task)` builds the prompt block ("LEARNED
+  CORRECTIONS - N in force; these outrank taste") and counts hits;
+  `releaseCompose()` includes it on every build (the console logs "applying N
+  learned corrections"), and Ad Lab / Studio append the `task=copy` rules to
+  the client playbook via `ccPlaybook()`. In the Release Desk every tile has
+  **Fix this** (what it wrote, prefilled; what it should have been; why; scope;
+  reach) and the **N learned** panel lists, switches off and deletes rules.
+- **Outcomes.** `POST /engine/outcome {ns,surface,ref,n,verdict,why,...}`
+  records **Approve** / **Kill** on a tile in `engine_outcomes` and files a
+  WIN/LOSS exemplar in the Mind (kind `outcome`) so future briefs retrieve the
+  wins and learn from the losses. This is also the approved corpus a future
+  per-client style adapter would train on.
+- **Artwork memory.** `POST /engine/artwork {ns,title,imageB64,mime,meta}`
+  has a vision model (`engineDescribe`, gemini-2.5-flash) catalogue a past
+  creative - layout, palette, typography, every word on it, tags - stores the
+  image in R2 `art/<ns>/<id>` (served by `GET /engine/art?id=`), files the
+  description in the Mind as kind `artwork`, and records it in `engine_art`.
+  `GET /engine/artworks?ns=` lists them.
+- **Ingest.** `python3 tools/engine-ingest.py <folder> --ns mca --key
+  $AXIOM_KEY` walks an export folder: .txt .md .html .csv .json .docx (native)
+  .pdf (pdftotext) go to `/mind/ingest` with kind guessed from the path
+  (release / brief / slack / copy / doc) and date from the filename; images go
+  to `/engine/artwork` with the folder as campaign. A state file in the folder
+  (content hashes) makes re-runs pick up only what is new or changed;
+  `--dry-run`, `--kinds`, `--force`, `--max`.
+- `GET /engine/status?ns=` sums what the Engine holds: fixes in force and
+  applied, outcomes, artworks, Mind docs by kind. Roles: reading is read-role;
+  teaching, approving and filing are full. Harnesses: `engine-worker.js` (29),
+  `engine-ingest-test.py` (12), and the Teach / Approve / Learned cases in
+  `release.js`.
+
+Next slices, in order: the golden set (past releases and the tiles the team
+approved, re-run on every prompt or model change and scored), the entity
+graph (people, organisations, issues, opponents, journalists - a claims ledger
+with sources), watchers writing to that graph, then per-client style adapters
+once the approved corpus is large enough.
+
 ## The Release Desk (a media release in, a pack of social tiles out)
 
 The `v-release` view (React island, `docs/release.js`, shared pieces in

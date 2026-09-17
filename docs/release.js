@@ -47,9 +47,38 @@
       : html`<span class="rel-chk warn" title="These figures do not appear in the release text - check before publishing">not in release: ${(check.missing || []).join(', ')}</span>`;
   }
 
-  function Tile({ tile, pack, canWrite, busy, onRender, onSave, onCanvas }) {
+  /* Teach mode: what the model wrote, what it should have been, why, and how
+     far the lesson reaches. One form, one post, in force on the next build. */
+  function TeachForm({ tile, ns, onTeach, onClose }) {
+    const [f, setF] = useState({ wrong: [tile.headline, tile.support, tile.cta].filter(Boolean).join(' / '), right: '', why: '', scope: 'client', task: 'tiles' });
+    const [busy, setBusy] = useState(false);
+    const c = clientOf(ns) || {};
+    const submit = async () => {
+      if (!f.wrong.trim() && !f.right.trim()) return;
+      setBusy(true);
+      try { await onTeach(Object.assign({}, f, { source: 'tile ' + (tile.n + 1) })); onClose(); } catch (e) {}
+      setBusy(false);
+    };
+    return html`<div class="rel-teach">
+      <div class="rel-lbl">What it wrote</div>
+      <textarea class="fi" rows="2" value=${f.wrong} onInput=${e => setF(x => Object.assign({}, x, { wrong: e.target.value }))} aria-label="What it wrote"></textarea>
+      <div class="rel-lbl">What it should have been</div>
+      <textarea class="fi" rows="2" value=${f.right} placeholder="The wording you would have signed off" onInput=${e => setF(x => Object.assign({}, x, { right: e.target.value }))} aria-label="What it should have been"></textarea>
+      <div class="rel-lbl">Why (optional, but this is what makes the rule general)</div>
+      <input class="fi" value=${f.why} placeholder=${'e.g. "subsidy" is the opposition\'s word for the fuel tax credit'} onInput=${e => setF(x => Object.assign({}, x, { why: e.target.value }))} aria-label="Why" />
+      <div class="rd-ctl" style=${{ marginTop: 6 }}>
+        <select class="sel" value=${f.scope} onChange=${e => setF(x => Object.assign({}, x, { scope: e.target.value }))} aria-label="Scope" style=${{ padding: '6px 10px', fontSize: 11 }}><option value="client">${c.short || ns.toUpperCase()} only</option><option value="all">Every client</option></select>
+        <select class="sel" value=${f.task} onChange=${e => setF(x => Object.assign({}, x, { task: e.target.value }))} aria-label="Applies to" style=${{ padding: '6px 10px', fontSize: 11 }}><option value="tiles">Tile packs</option><option value="copy">All copy</option><option value="any">Everything</option></select>
+        <button class="btn sm" disabled=${busy || (!f.wrong.trim() && !f.right.trim())} onClick=${submit}>${busy ? 'Teaching...' : 'Teach the Engine'}</button>
+        <button class="btn sm ghost" onClick=${onClose}>Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  function Tile({ tile, pack, canWrite, busy, verdict, onRender, onSave, onCanvas, onTeach, onVerdict }) {
     const img = useTileImage(tile.image ? tile.image.url : '');
     const [edit, setEdit] = useState(false);
+    const [teach, setTeach] = useState(false);
     const [draft, setDraft] = useState({ headline: tile.headline, support: tile.support, cta: tile.cta });
     const [cap, setCap] = useState('linkedin');
     useEffect(() => { setDraft({ headline: tile.headline, support: tile.support, cta: tile.cta }); }, [tile.headline, tile.support, tile.cta]);
@@ -73,8 +102,9 @@
           <textarea class="fi" rows="2" maxLength="180" value=${draft.support} onInput=${e => setDraft(d => Object.assign({}, d, { support: e.target.value }))} aria-label="Support line"></textarea>
           <input class="fi" value=${draft.cta} maxLength="40" placeholder="CTA (optional)" onInput=${e => setDraft(d => Object.assign({}, d, { cta: e.target.value }))} aria-label="Call to action" />`
         : html`<div class="hl">${tile.headline}</div>${tile.support ? html`<div class="sp">${tile.support}</div>` : null}${tile.cta ? html`<div class="cta">${tile.cta}</div>` : null}`}
-        <div class="rel-meta"><${Check} check=${tile.check} />${tile.image ? html`<span class="rd-chip">${ago(tile.image.rendered)} ago</span>` : null}</div>
+        <div class="rel-meta"><${Check} check=${tile.check} />${verdict ? html`<span class=${'rel-chk ' + (verdict === 'approved' ? 'ok' : 'warn')}>${verdict}</span>` : null}${tile.image ? html`<span class="rd-chip">${ago(tile.image.rendered)} ago</span>` : null}</div>
       </div>
+      ${teach ? html`<${TeachForm} tile=${tile} ns=${pack.ns} onTeach=${onTeach} onClose=${() => setTeach(false)} />` : null}
       <div class="rel-caps">
         <div class="rel-captabs">${CAPTIONS.map(([k, l]) => html`<button key=${k} class=${'rel-captab' + (cap === k ? ' on' : '')} onClick=${() => setCap(k)}>${l}</button>`)}<button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${copyCap}>Copy</button></div>
         <div class="rel-capbody">${(tile.caption && tile.caption[cap]) || html`<i>no ${cap} caption</i>`}</div>
@@ -85,8 +115,11 @@
                  <button class="btn sm ghost" onClick=${() => { setDraft({ headline: tile.headline, support: tile.support, cta: tile.cta }); setEdit(false); }}>Cancel</button>`
         : html`<button class="btn sm ghost" disabled=${busy} onClick=${() => setEdit(true)}>Edit copy</button>
                <button class="btn sm ghost" disabled=${busy} onClick=${() => onRender(tile.n, null)} title=${tile.image ? 'Render a fresh version in the brand' : 'Render this tile in the brand'}>${tile.image ? 'Re-render' : 'Render'}</button>
+               <button class=${'btn sm ghost' + (teach ? ' on' : '')} onClick=${() => setTeach(t => !t)} title="Teach the Engine what this should have been - it applies to every build from now on">Fix this</button>
                ${tile.image ? html`<button class="btn sm ghost" onClick=${download}>Download PNG</button>
-               <button class="btn sm ghost" onClick=${() => onCanvas(tile, img)} title="Open the artwork in the Ad Lab canvas with the copy as editable layers">Open in canvas</button>` : null}`}
+               <button class="btn sm ghost" onClick=${() => onCanvas(tile, img)} title="Open the artwork in the Ad Lab canvas with the copy as editable layers">Open in canvas</button>
+               <button class=${'btn sm' + (verdict === 'approved' ? '' : ' ghost')} onClick=${() => onVerdict(tile, 'approved')} title="Record this as approved: the Engine keeps it as an example of what works">${verdict === 'approved' ? 'Approved' : 'Approve'}</button>
+               <button class="btn sm ghost" onClick=${() => { const why = window.prompt('Why is this one killed? (one line, optional)') || ''; onVerdict(tile, 'killed', why); }} title="Record this as killed, with the reason">Kill</button>` : null}`}
       </div>` : null}
     </div>`;
   }
@@ -145,6 +178,21 @@
     </div>`;
   }
 
+  /* What the Engine has been taught for this client: switch off, delete. */
+  function LearnedPanel({ ns, fixes, canWrite, onToggle, onDelete, onClose }) {
+    const c = clientOf(ns) || {};
+    return html`<div class="panel rel-brand">
+      <div class="phead"><div class="ptitle">What the Engine has learned - ${c.short || ns.toUpperCase()}</div><span class="ptag">${fixes.filter(f => f.active).length} IN FORCE</span></div>
+      ${!fixes.length ? html`<div class="empty">Nothing taught yet. Press <b>Fix this</b> on any tile that is not quite right; the correction becomes a standing rule for the next build.</div>`
+        : html`<div class="rel-hist">${fixes.map(f => html`<div key=${f.id} class=${'rel-fix' + (f.active ? '' : ' off')}>
+            <div class="r">${f.rule}</div>
+            <div class="m">${f.scope === 'all' ? 'every client' : (c.short || ns)} - ${f.task === 'any' ? 'everything' : f.task} - applied ${f.hits} time${f.hits === 1 ? '' : 's'} - ${ago(f.created)} ago${f.who ? ' - ' + f.who : ''}${f.wrong ? html`<div class="w">was: "${f.wrong.slice(0, 140)}"</div>` : null}${f.right ? html`<div class="w">should be: "${f.right.slice(0, 140)}"</div>` : null}</div>
+            ${canWrite ? html`<div class="rd-ctl" style=${{ margin: 0 }}><button class="btn sm ghost" onClick=${() => onToggle(f)}>${f.active ? 'Switch off' : 'Switch on'}</button><button class="btn sm ghost" onClick=${() => { if (window.confirm('Delete this correction? The Engine will forget it.')) onDelete(f); }}>Delete</button></div>` : null}
+          </div>`)}</div>`}
+      <div class="rd-ctl" style=${{ marginTop: 10 }}><button class="btn sm ghost" onClick=${onClose}>Close</button><span class="sig-where">Corrections are in the prompt within the minute. Switched-off ones stay on record.</span></div>
+    </div>`;
+  }
+
   function Notice({ err, plat }) {
     const e = String((err && err.message) || ''); const code = (err && err.code) || '';
     let body;
@@ -173,6 +221,9 @@
     const [showBrand, setShowBrand] = useState(false);
     const [history, setHistory] = useState([]);
     const [result, setResult] = useState(null);
+    const [fixes, setFixes] = useState([]);
+    const [showLearned, setShowLearned] = useState(false);
+    const [verdicts, setVerdicts] = useState({});
     const stopRef = useRef(null);
     const autoRef = useRef(true);
     const canWrite = !(window.AX_ROLE === 'read');
@@ -184,14 +235,35 @@
     const loadHistory = useCallback(async () => {
       try { const d = await call('/release/list?ns=' + ns + '&limit=12'); setHistory(d.packs || []); } catch (e) { /* the kit call reports */ }
     }, [ns]);
-    useEffect(() => { loadKit(); loadHistory(); setPack(null); setJob(null); setResult(null); }, [loadKit, loadHistory]);
+    const loadFixes = useCallback(async () => {
+      try { const d = await call('/engine/fixes?ns=' + ns + '&all=1'); setFixes(d.fixes || []); } catch (e) { setFixes([]); }
+    }, [ns]);
+    const loadVerdicts = useCallback(async (packId) => {
+      try { const d = await call('/engine/outcomes?ns=' + ns + '&limit=200'); const m = {}; (d.outcomes || []).filter(o => o.ref === packId).forEach(o => { m[o.n] = m[o.n] || o.verdict; }); setVerdicts(m); } catch (e) { setVerdicts({}); }
+    }, [ns]);
+    useEffect(() => { loadKit(); loadHistory(); loadFixes(); setPack(null); setJob(null); setResult(null); setVerdicts({}); }, [loadKit, loadHistory, loadFixes]);
     useEffect(() => () => { if (stopRef.current) stopRef.current(); }, []);
     useEffect(() => { autoRef.current = autoRender; }, [autoRender]);
 
     const openPack = useCallback(async (id) => {
       const d = await call('/release/pack?id=' + encodeURIComponent(id));
-      setPack(d.pack); return d.pack;
-    }, []);
+      setPack(d.pack); loadVerdicts(id); return d.pack;
+    }, [loadVerdicts]);
+    const onTeach = async (f) => {
+      const d = await call('/engine/fix', { ns, task: f.task, scope: f.scope, wrong: f.wrong, right: f.right, why: f.why, source: (pack ? pack.id + ' ' : '') + (f.source || '') });
+      setFixes(x => [d.fix].concat(x));
+      setResult({ ok: true, text: 'Learned: "' + d.fix.rule + '" - in force for ' + (f.scope === 'all' ? 'every client' : client.short) + ' from the next build.' });
+      toastMsg('The Engine learned it');
+    };
+    const onVerdict = async (tile, verdict, why) => {
+      try {
+        await call('/engine/outcome', { ns, surface: 'release', ref: pack.id, n: tile.n, verdict, why: why || '', headline: tile.headline, support: tile.support, cta: tile.cta });
+        setVerdicts(v => Object.assign({}, v, { [tile.n]: verdict }));
+        toastMsg(verdict === 'approved' ? 'Approved - kept as an example of what works' : 'Killed - kept as an example of what does not');
+      } catch (e) { toastMsg('Could not record it: ' + e.message, true); }
+    };
+    const onToggleFix = async (f) => { try { await call('/engine/fix/update', { id: f.id, active: !f.active }); setFixes(x => x.map(y => y.id === f.id ? Object.assign({}, y, { active: !f.active }) : y)); } catch (e) { toastMsg(e.message, true); } };
+    const onDeleteFix = async (f) => { try { await call('/engine/fix/delete', { id: f.id }); setFixes(x => x.filter(y => y.id !== f.id)); } catch (e) { toastMsg(e.message, true); } };
 
     /* Render tiles one after another so each request stays short and the grid
        fills in as it goes. Stops if the operator turns auto-render off. */
@@ -279,8 +351,10 @@
         <select class="sel" value=${count} onChange=${e => setCount(+e.target.value)} aria-label="Tiles"><option value="3">3 tiles</option><option value="4">4 tiles</option><option value="5">5 tiles</option><option value="6">6 tiles</option><option value="8">8 tiles</option></select>
         <select class="sel" value=${format} onChange=${e => setFormat(e.target.value)} aria-label="Format">${FORMATS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select>
         <button class=${'btn sm ghost' + (kit ? '' : ' rel-attn')} onClick=${() => setShowBrand(s => !s)} title=${kit ? 'Colours, fonts, voice and logo used for every render' : 'No brand kit yet - tiles will render without the logo and palette'}>${kit ? 'Brand kit' : 'Set up brand kit'}</button>
+        <button class="btn sm ghost" onClick=${() => setShowLearned(s => !s)} title="Corrections the team has taught the Engine for this client">${fixes.filter(f => f.active).length} learned</button>
         <label class="rd-chip" style=${{ cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked=${autoRender} onChange=${e => setAutoRender(e.target.checked)} style=${{ marginRight: 6 }} />render automatically</label>
       </div>
+      ${showLearned ? html`<${LearnedPanel} ns=${ns} fixes=${fixes} canWrite=${canWrite} onToggle=${onToggleFix} onDelete=${onDeleteFix} onClose=${() => setShowLearned(false)} />` : null}
       ${showBrand ? html`<${BrandPanel} key=${ns} ns=${ns} kit=${kit} logoUrl=${logoUrl} canWrite=${canWrite} onSaved=${d => { setKit(d.kit); setLogoUrl(d.logoUrl || ''); }} onClose=${() => setShowBrand(false)} />` : null}
       <${Notice} err=${err} />
       <div class="rel-paste panel">
@@ -303,7 +377,7 @@
             ${rendered ? html`<button class="btn sm ghost" onClick=${downloadAll}>Download all</button>` : null}
           </div>
         </div>
-        <div class=${'rel-grid ' + pack.format}>${pack.tiles.map(t => html`<${Tile} key=${t.n} tile=${t} pack=${pack} canWrite=${canWrite} busy=${rendering.has(t.n)} onRender=${onRender} onSave=${onSave} onCanvas=${onCanvas} />`)}</div>
+        <div class=${'rel-grid ' + pack.format}>${pack.tiles.map(t => html`<${Tile} key=${t.n} tile=${t} pack=${pack} canWrite=${canWrite} busy=${rendering.has(t.n)} verdict=${verdicts[t.n] || ''} onRender=${onRender} onSave=${onSave} onCanvas=${onCanvas} onTeach=${onTeach} onVerdict=${onVerdict} />`)}</div>
       </div>` : null}
       ${history.length ? html`<div class="panel">
         <div class="phead"><div class="ptitle">Recent packs - ${client.short}</div><span class="ptag">${history.length}</span></div>

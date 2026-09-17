@@ -928,6 +928,14 @@ body.kiosk .kprog{display:block}
 .rel-histrow:hover{background:rgba(255,255,255,.03)}.rel-histrow.on{background:rgba(63,140,255,.08)}
 .rel-histrow .t{font-size:13px;color:var(--t0)}.rel-histrow .m{font-family:var(--fm);font-size:10px;color:var(--t3)}
 @media(prefers-reduced-motion:reduce){.rel-shimmer{animation:none}}
+.rel-teach{border-top:1px solid var(--ln);padding:10px 14px;background:rgba(245,185,66,.05)}
+.rel-teach .fi{width:100%;box-sizing:border-box;font-size:12.5px}
+.rel-fix{border-bottom:1px solid var(--ln);padding:10px 8px;display:flex;flex-direction:column;gap:5px}
+.rel-fix.off{opacity:.55}
+.rel-fix .r{font-size:13px;color:var(--t0);line-height:1.45}
+.rel-fix .m{font-family:var(--fm);font-size:10px;color:var(--t3);line-height:1.6}
+.rel-fix .w{color:var(--t2);font-family:inherit;font-size:11.5px}
+.btn.sm.on{border-color:#F5B942;color:#F5B942}
 @media(prefers-reduced-motion:reduce){.sig-dot.run{animation:none}}
 .aud-diagwrap{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
 .aud-diagbox{flex:1 1 100%;max-height:280px;overflow:auto;margin:4px 0 0;padding:12px 14px;border:1px solid var(--ln);border-radius:10px;background:rgba(0,0,0,.28);font-family:var(--fm);font-size:11px;line-height:1.55;color:var(--t1);white-space:pre-wrap;word-break:break-word}
@@ -6377,6 +6385,14 @@ async function ccPlaybook(){
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok&&(d.hits||[]).length)
       ccState.playbooks[ns]=d.hits.map(h=>'['+String(h.kind||'doc').toUpperCase()+' · '+(h.title||'')+']\n'+(h.snippet||'')).join('\n\n').slice(0,3200);
+  }catch(e){}
+  // What the team has taught the Engine reaches Ad Lab and the Studio too, not
+  // only the Release Desk: the corrections in force for this client's copy.
+  try{
+    const r2=await fetch(csBase()+'/engine/fixes?ns='+encodeURIComponent(ns)+'&task=copy',{headers:axHeaders()});
+    const d2=await r2.json().catch(()=>({}));
+    if(r2.ok&&d2.ok&&(d2.fixes||[]).length)
+      ccState.playbooks[ns]+=(ccState.playbooks[ns]?'\n\n':'')+'LEARNED CORRECTIONS ('+d2.fixes.length+' in force, taught by the team; these outrank taste):\n'+d2.fixes.slice(0,40).map(f=>'- '+f.rule).join('\n');
   }catch(e){}
   return ccState.playbooks[ns];
 }

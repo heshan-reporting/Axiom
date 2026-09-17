@@ -2536,8 +2536,12 @@ async function releaseCompose(env, pack, opts, log) {
     + ' Return strict JSON only: {"tiles":[{"kind":"lead|stat|people|proof|warning|quote|cta","headline":"","support":"","cta":"","caption":{"linkedin":"","x":"","facebook":""},"alt":"<=140 chars image description for accessibility","visual":"<=200 chars art direction: subject, mood, composition; no text instructions"}]}.'
     + ' Produce exactly ' + n + ' tiles, ordered lead first, quote last if present, no duplicate kinds unless there are more tiles than kinds.';
   const user = 'RELEASE EXTRACT:\n' + JSON.stringify(ex).slice(0, 12000) + '\n\nFULL RELEASE TEXT:\n' + pack.source.slice(0, 16000);
+  // what the team has taught the Engine, for this client and for everyone
+  let learned = { text: '', count: 0 };
+  try { learned = await engineRules(env, ns, 'tiles'); } catch (e) {}
+  if (learned.count) await log('info', 'applying ' + learned.count + ' learned correction' + (learned.count === 1 ? '' : 's') + ' for ' + ns);
   await log('cmd', 'claude: compose ' + n + ' tiles in the ' + client + ' voice');
-  const raw = await claudeMsg(env, sys, user, 4000, 90000);
+  const raw = await claudeMsg(env, sys + learned.text, user, 4000, 90000);
   const j = relJson(raw);
   if (!j || !Array.isArray(j.tiles) || !j.tiles.length) throw new Error('compose_unparseable');
   const tiles = j.tiles.slice(0, n).map((t, i) => {
@@ -2635,6 +2639,146 @@ async function releaseRender(env, packId, n, patch, who) {
 }
 function relTileView(packId, t) {
   return Object.assign({}, t, { image: t.image ? { url: '/release/tile?id=' + packId + '&n=' + t.n + '&v=' + (t.image.ver || 1), model: t.image.model, rendered: t.image.rendered, ver: t.image.ver || 1 } : null });
+}
+
+// ==============================================================================
+// THE ENGINE - the memory the model cannot work without, and the loop that
+// makes it learn. Not a fine-tune: corrections the team teaches become rules
+// that are in the prompt within the minute, scoped to a client or to everyone,
+// switchable and deletable. Approved and killed outputs become exemplars.
+// Past artwork is described by a vision model and remembered so "make it like
+// the March creative" means something. Every piece carries who taught it and
+// when. Namespaces stay walls: a client's corrections never reach another.
+// ==============================================================================
+let ENGINE_READY = false;
+const ENGINE_TASKS = ['tiles', 'copy', 'analysis', 'any'];
+async function ensureEngine(env) {
+  if (!env.MIND_DB) return false;
+  if (ENGINE_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS engine_fixes(id TEXT PRIMARY KEY, ns TEXT, task TEXT, scope TEXT, wrong TEXT, rightt TEXT, why TEXT, rule TEXT, exemplar TEXT, source TEXT, who TEXT, created INTEGER, active INTEGER, hits INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS engine_fixes_ns ON engine_fixes(ns, active, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS engine_outcomes(id TEXT PRIMARY KEY, ns TEXT, surface TEXT, ref TEXT, n INTEGER, verdict TEXT, why TEXT, headline TEXT, support TEXT, cta TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS engine_outcomes_ns ON engine_outcomes(ns, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS engine_art(id TEXT PRIMARY KEY, ns TEXT, title TEXT, key TEXT, mime TEXT, description TEXT, meta TEXT, docId TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS engine_art_ns ON engine_art(ns, created)'),
+  ]);
+  ENGINE_READY = true;
+  return true;
+}
+function engTask(v) { const t = String(v || 'any').toLowerCase(); return ENGINE_TASKS.indexOf(t) >= 0 ? t : 'any'; }
+function engId(pfx) { return pfx + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+/** Turn a correction into a rule the model can follow. Claude writes it when it
+ *  can; a plain fallback keeps the loop working when it cannot. */
+async function engineCompileFix(env, fix) {
+  const fallback = {
+    rule: (fix.wrong ? 'Do not write "' + fix.wrong.slice(0, 160) + '". ' : '') + (fix.right ? 'Write "' + fix.right.slice(0, 160) + '" instead.' : '') + (fix.why ? ' ' + fix.why.slice(0, 200) : ''),
+    exemplar: fix.right ? fix.right.slice(0, 300) : '',
+  };
+  if (!env.ANTHROPIC_API_KEY) return fallback;
+  try {
+    const sys = 'You turn a single correction from a communications team into one standing rule for a copywriting model. Return strict JSON only: {"rule":"one imperative sentence, max 40 words, general enough to apply next time but no broader than the correction supports","exemplar":"the corrected wording verbatim, or empty"}. Never soften the correction. Never invent facts.';
+    const user = 'WHAT THE MODEL WROTE:\n' + (fix.wrong || '(not given)') + '\n\nWHAT IT SHOULD HAVE BEEN:\n' + (fix.right || '(not given)') + '\n\nWHY:\n' + (fix.why || '(not given)') + '\n\nTASK: ' + fix.task + '. SCOPE: ' + (fix.scope === 'all' ? 'every client' : 'this client only') + '.';
+    const raw = await claudeMsg(env, sys, user, 400, 30000);
+    const j = relJson(raw);
+    if (j && j.rule) return { rule: String(j.rule).slice(0, 400), exemplar: String(j.exemplar || '').slice(0, 300) };
+  } catch (e) {}
+  return fallback;
+}
+async function engineAddFix(env, body, who) {
+  await ensureEngine(env);
+  const ns = relNs(body.ns);
+  const fix = { id: engId('f'), ns, task: engTask(body.task), scope: body.scope === 'all' ? 'all' : 'client',
+    wrong: String(body.wrong || '').trim().slice(0, 1200), right: String(body.right || '').trim().slice(0, 1200), why: String(body.why || '').trim().slice(0, 600),
+    source: String(body.source || '').slice(0, 120), who: String(who || '').slice(0, 40), created: Date.now() };
+  if (!fix.wrong && !fix.right) throw new Error('a correction needs what was wrong or what it should be');
+  const c = body.rule ? { rule: String(body.rule).slice(0, 400), exemplar: String(body.exemplar || fix.right).slice(0, 300) } : await engineCompileFix(env, fix);
+  fix.rule = c.rule; fix.exemplar = c.exemplar;
+  await env.MIND_DB.prepare('INSERT INTO engine_fixes(id,ns,task,scope,wrong,rightt,why,rule,exemplar,source,who,created,active,hits) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,0)')
+    .bind(fix.id, fix.ns, fix.task, fix.scope, fix.wrong, fix.right, fix.why, fix.rule, fix.exemplar, fix.source, fix.who, fix.created).run();
+  return fix;
+}
+async function engineFixes(env, ns, task, all) {
+  await ensureEngine(env);
+  const rows = (await env.MIND_DB.prepare("SELECT id,ns,task,scope,wrong,rightt,why,rule,exemplar,source,who,created,active,hits FROM engine_fixes WHERE (ns=? OR scope='all') " + (all ? '' : 'AND active=1 ') + 'ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
+  const t = engTask(task);
+  return rows.filter(r => !task || t === 'any' || r.task === t || r.task === 'any').map(r => ({ id: r.id, ns: r.ns, task: r.task, scope: r.scope, wrong: r.wrong, right: r.rightt, why: r.why, rule: r.rule, exemplar: r.exemplar, source: r.source, who: r.who, created: r.created, active: !!r.active, hits: r.hits || 0 }));
+}
+/** The block that goes into a prompt: the team's standing corrections for this
+ *  client and task, newest first, and a note of how many are in force. */
+async function engineRules(env, ns, task, limit) {
+  const fixes = (await engineFixes(env, ns, task, false)).slice(0, limit || 60);
+  if (!fixes.length) return { text: '', count: 0, ids: [] };
+  const lines = fixes.map(f => '- ' + f.rule + (f.exemplar && f.exemplar !== f.rule ? ' (e.g. "' + f.exemplar.slice(0, 140) + '")' : ''));
+  const text = '\n\nLEARNED CORRECTIONS - taught by the team, ' + fixes.length + ' in force; these outrank taste and any generic guideline:\n' + lines.join('\n');
+  try { await env.MIND_DB.batch(fixes.map(f => env.MIND_DB.prepare('UPDATE engine_fixes SET hits=hits+1 WHERE id=?').bind(f.id))); } catch (e) {}
+  return { text, count: fixes.length, ids: fixes.map(f => f.id) };
+}
+async function engineOutcome(env, body, who) {
+  await ensureEngine(env);
+  const ns = relNs(body.ns);
+  const verdict = body.verdict === 'killed' ? 'killed' : 'approved';
+  const o = { id: engId('o'), ns, surface: String(body.surface || 'release').slice(0, 40), ref: String(body.ref || '').slice(0, 60), n: parseInt(body.n, 10) || 0, verdict,
+    why: String(body.why || '').slice(0, 600), headline: String(body.headline || '').slice(0, 200), support: String(body.support || '').slice(0, 300), cta: String(body.cta || '').slice(0, 60),
+    who: String(who || '').slice(0, 40), created: Date.now() };
+  await env.MIND_DB.prepare('INSERT INTO engine_outcomes(id,ns,surface,ref,n,verdict,why,headline,support,cta,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(o.id, o.ns, o.surface, o.ref, o.n, o.verdict, o.why, o.headline, o.support, o.cta, o.who, o.created).run();
+  // an exemplar in the Mind, so future briefs retrieve the wins and learn from the losses
+  let docId = '';
+  try {
+    const text = 'VERDICT: ' + verdict.toUpperCase() + '\nSurface: ' + o.surface + (o.ref ? ' ' + o.ref + ' tile ' + (o.n + 1) : '') + '\nDate: ' + new Date().toISOString().slice(0, 10)
+      + (o.headline ? '\nHeadline: ' + o.headline : '') + (o.support ? '\nSupport: ' + o.support : '') + (o.cta ? '\nCTA: ' + o.cta : '') + (o.why ? '\nWhy: ' + o.why : '');
+    const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: new Date().toISOString().slice(0, 10) });
+    docId = r.docId;
+  } catch (e) {}
+  return Object.assign(o, { docId });
+}
+/** Describe a piece of artwork with a vision model so it can be remembered and
+ *  retrieved. Text only comes back; the image itself goes to R2. */
+async function engineDescribe(env, imageB64, mime, hint) {
+  if (!env.GEMINI_KEY) return { ok: false, error: 'gemini_not_configured' };
+  const prompt = 'You are a creative director cataloguing a political communications agency\'s past artwork so it can be found and reused. Describe this creative in 90-140 words for a colleague who cannot see it: format and layout, dominant colours as hex guesses, typography style, imagery and mood, every word of text that appears (verbatim), and what kind of message it carries. Then on a final line write TAGS: followed by 6-10 comma-separated tags (issue, tone, format, style).' + (hint ? '\n\nContext from the file: ' + String(hint).slice(0, 400) : '');
+  const parts = [{ text: prompt }, { inline_data: { mime_type: mime || 'image/png', data: String(imageB64) } }];
+  let last = '';
+  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(env.GEMINI_KEY), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }] }), signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (d.error) { last = String(d.error.message || '').slice(0, 160); continue; }
+      const txt = (((d.candidates || [])[0] || {}).content || {}).parts;
+      const out = (txt || []).filter(p => p.text).map(p => p.text).join('').trim();
+      if (out) return { ok: true, description: out.slice(0, 2500), model };
+      last = 'no description returned';
+    } catch (e) { last = String((e && e.message) || e).slice(0, 80); }
+  }
+  return { ok: false, error: 'describe_failed', detail: last };
+}
+async function engineArtwork(env, body, who) {
+  await ensureEngine(env);
+  const ns = relNs(body.ns);
+  if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store artwork');
+  const mime = String(body.mime || 'image/png');
+  if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('artwork must be PNG, JPEG or WebP');
+  const buf = bufFromB64(body.imageB64);
+  if (buf.byteLength > 6 * 1024 * 1024) throw new Error('artwork larger than 6 MB');
+  if (buf.byteLength < 64) throw new Error('artwork file is empty');
+  const id = engId('a');
+  const title = String(body.title || 'Artwork').slice(0, 200);
+  const meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
+  const d = await engineDescribe(env, body.imageB64, mime, title + ' ' + JSON.stringify(meta).slice(0, 300));
+  if (!d.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''));
+  const key = 'art/' + ns + '/' + id;
+  await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+  let docId = '';
+  try {
+    const text = '# Artwork: ' + title + '\n\n' + d.description + '\n\nSource: ' + (meta.path || meta.source || 'upload') + (meta.date ? '\nDate: ' + meta.date : '') + (meta.campaign ? '\nCampaign: ' + meta.campaign : '') + '\nImage: ' + key;
+    const r = await mindIngestDoc(env, { ns, title: 'Artwork: ' + title, text, kind: 'artwork', source: String(meta.path || meta.source || 'upload').slice(0, 300), date: String(meta.date || '').slice(0, 20) });
+    docId = r.docId;
+  } catch (e) {}
+  await env.MIND_DB.prepare('INSERT INTO engine_art(id,ns,title,key,mime,description,meta,docId,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .bind(id, ns, title, key, mime, d.description, JSON.stringify(meta).slice(0, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
+  return { id, ns, title, key, description: d.description, model: d.model, docId, url: '/engine/art?id=' + id };
 }
 
 // ==============================================================================
@@ -3274,14 +3418,14 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
-      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/');
+      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -4301,6 +4445,85 @@ export default {
         const m = String((e && e.message) || e);
         if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
         return jsonResp({ ok: false, error: 'release_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|too/.test(m) ? 400 : 500);
+      }
+    }
+
+    // -- The Engine: what the team teaches it, what it approved, what it remembers --
+    //    POST /engine/fix {ns,task,scope,wrong,right,why,source}   teach a correction (full)
+    //    GET  /engine/fixes?ns=&task=&all=1                         what is in force (read)
+    //    POST /engine/fix/update {id,active,rule}   POST /engine/fix/delete {id}
+    //    POST /engine/outcome {ns,surface,ref,n,verdict,why,headline,support,cta}   approve / kill (full)
+    //    GET  /engine/outcomes?ns=
+    //    POST /engine/artwork {ns,title,imageB64,mime,meta}         remember a piece of past artwork (full)
+    //    GET  /engine/art?id=   GET /engine/artworks?ns=   GET /engine/status?ns=
+    if (path.startsWith('/engine/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let ebody = {}; if (req.method === 'POST') { try { ebody = await req.json(); } catch (e) { ebody = {}; } }
+      const ens = relNs(reqUrl.searchParams.get('ns') || ebody.ns);
+      try {
+        await ensureArchive(env); await ensureEngine(env);
+        if (path === '/engine/fixes') {
+          const fixes = await engineFixes(env, ens, reqUrl.searchParams.get('task') || '', !!reqUrl.searchParams.get('all'));
+          return jsonResp({ ok: true, ns: ens, fixes, inForce: fixes.filter(f => f.active).length });
+        }
+        if (path === '/engine/outcomes') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '50', 10) || 50, 200);
+          const rows = (await env.MIND_DB.prepare('SELECT id,ns,surface,ref,n,verdict,why,headline,support,cta,who,created FROM engine_outcomes WHERE ns=? ORDER BY created DESC LIMIT ?').bind(ens, lim).all()).results || [];
+          return jsonResp({ ok: true, ns: ens, outcomes: rows, approved: rows.filter(r => r.verdict === 'approved').length, killed: rows.filter(r => r.verdict === 'killed').length });
+        }
+        if (path === '/engine/artworks') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '50', 10) || 50, 200);
+          const rows = (await env.MIND_DB.prepare('SELECT id,ns,title,mime,description,meta,who,created FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT ?').bind(ens, lim).all()).results || [];
+          return jsonResp({ ok: true, ns: ens, artworks: rows.map(r => ({ id: r.id, title: r.title, mime: r.mime, description: r.description, meta: (() => { try { return JSON.parse(r.meta || '{}'); } catch (e) { return {}; } })(), who: r.who, created: r.created, url: '/engine/art?id=' + r.id })) });
+        }
+        if (path === '/engine/art') {
+          const id = String(reqUrl.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const row = await env.MIND_DB.prepare('SELECT key,mime FROM engine_art WHERE id=?').bind(id).first();
+          if (!row || !env.MIND_DOCS) return jsonResp({ error: 'unknown_artwork' }, 404);
+          const obj = await env.MIND_DOCS.get(row.key);
+          if (!obj) return jsonResp({ error: 'unknown_artwork' }, 404);
+          return new Response(obj.body, { headers: Object.assign({}, CORS, { 'Content-Type': row.mime || 'image/png', 'Cache-Control': 'private, max-age=3600' }) });
+        }
+        if (path === '/engine/status') {
+          const fx = (await env.MIND_DB.prepare("SELECT COUNT(*) n, SUM(active) live, SUM(hits) hits FROM engine_fixes WHERE ns=? OR scope='all'").bind(ens).first()) || {};
+          const oc = (await env.MIND_DB.prepare("SELECT SUM(verdict='approved') approved, SUM(verdict='killed') killed FROM engine_outcomes WHERE ns=?").bind(ens).first()) || {};
+          const ar = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM engine_art WHERE ns=?').bind(ens).first()) || {};
+          let docs = [];
+          try { docs = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) n FROM mind_docs WHERE ns=? GROUP BY kind ORDER BY n DESC').bind(ens).all()).results || []; } catch (e) {}
+          return jsonResp({ ok: true, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Teaching the Engine, approving and filing artwork need a full-access key.' }, 403);
+        if (path === '/engine/fix' && req.method === 'POST') {
+          const fix = await engineAddFix(env, ebody, auth.name);
+          return jsonResp({ ok: true, fix: Object.assign({}, fix, { active: true, hits: 0 }) });
+        }
+        if (path === '/engine/fix/update' && req.method === 'POST') {
+          const id = String(ebody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          if (!id) return jsonResp({ error: 'missing_id' }, 400);
+          if (ebody.active != null) await env.MIND_DB.prepare('UPDATE engine_fixes SET active=? WHERE id=?').bind(ebody.active ? 1 : 0, id).run();
+          if (ebody.rule != null) await env.MIND_DB.prepare('UPDATE engine_fixes SET rule=? WHERE id=?').bind(String(ebody.rule).slice(0, 400), id).run();
+          return jsonResp({ ok: true, id });
+        }
+        if (path === '/engine/fix/delete' && req.method === 'POST') {
+          const id = String(ebody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          if (!id) return jsonResp({ error: 'missing_id' }, 400);
+          await env.MIND_DB.prepare('DELETE FROM engine_fixes WHERE id=?').bind(id).run();
+          return jsonResp({ ok: true, id });
+        }
+        if (path === '/engine/outcome' && req.method === 'POST') {
+          const o = await engineOutcome(env, ebody, auth.name);
+          return jsonResp({ ok: true, outcome: o });
+        }
+        if (path === '/engine/artwork' && req.method === 'POST') {
+          const a = await engineArtwork(env, ebody, auth.name);
+          return jsonResp({ ok: true, artwork: a });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
+        if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
+        return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
     }
 
