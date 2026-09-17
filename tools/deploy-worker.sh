@@ -75,11 +75,15 @@ ACC="${CLOUDFLARE_ACCOUNT_ID:-}"
 WHO=""
 if [ -z "$TOKEN" ] || [ -z "$ACC" ]; then
   if command -v npx >/dev/null 2>&1; then
-    WHO="$(npx wrangler whoami 2>/dev/null || true)"
+    # --yes: npx must never stop to ask "Ok to proceed?" inside a captured
+    # command, where the question is invisible and looks like a hang. wrangler's
+    # own messages stay on the terminal so a Keychain or login prompt is seen.
+    echo "asking wrangler who you are (if this pauses, look for a macOS Keychain dialog and choose Always Allow)"
+    WHO="$(npx --yes wrangler whoami || true)"
     if ! printf '%s' "$WHO" | grep -qiE 'account id|logged in'; then
       echo "not logged in to wrangler; opening the browser login"
-      npx wrangler login
-      WHO="$(npx wrangler whoami 2>/dev/null || true)"
+      npx --yes wrangler login
+      WHO="$(npx --yes wrangler whoami || true)"
     fi
   fi
 fi
@@ -87,7 +91,7 @@ AUTH_KEY=""; AUTH_EMAIL=""; TOKEN_SRC="CLOUDFLARE_API_TOKEN"
 if [ -z "$TOKEN" ] && command -v npx >/dev/null 2>&1; then
   # wrangler 4 keeps the login session in the OS keychain; `auth token` is the
   # supported way to read it (the on-disk default.toml is often stale).
-  CRED="$(npx wrangler auth token --json 2>/dev/null | node -e '
+  CRED="$(npx --yes wrangler auth token --json 2>/dev/null | node -e '
     let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
       const a=s.indexOf("{"), b=s.lastIndexOf("}"); if (a<0||b<0) return;
       try { const j=JSON.parse(s.slice(a,b+1)); process.stdout.write([j.type||"", j.token||"", j.key||"", j.email||""].join("\t")); } catch(e){} });' || true)"
