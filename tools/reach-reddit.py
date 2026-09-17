@@ -37,8 +37,10 @@ WORKER = 'https://newsaus.heshan-998.workers.dev'
 # Where our clients get argued about: national politics and money, the state and
 # city subs where planning, power bills, mining towns and pharmacies come up,
 # and the trade subs.
+# (r/victoria is Victoria, British Columbia - and refuses us; r/melbourne is
+# where the state's argument happens.)
 SUBS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
-        'melbourne', 'victoria', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs']
+        'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs']
 LABEL = 'com.curiousminds.axiom.reach-reddit'
 
 # The client issues, mirrored from CLIENT_ISSUES in the worker so tags match.
@@ -125,7 +127,7 @@ AU_RX = re.compile(
     r'|centrelink|medicare|\bpbs\b|\baemo\b|\baccc\b|\bato\b|\bnbn\b|\bcfmeu\b|fair work|\bapra\b|\basic\b|productivity commission'
     r'|woolworths|\bcoles\b|bunnings|\bafr\b|abc news|the age\b|\bsmh\b|news\.com\.au|9news|7news|sky news australia|the australian\b|guardian australia|newspoll|crikey'
     r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line', re.I)
-AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|victoria|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)', re.I)
+AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)', re.I)
 
 
 def au_relevant(sub, text, watched=()):
@@ -172,8 +174,22 @@ def load_lexicon(worker, key, log=None):
 
 
 # ---- rdt (agent-reach's Reddit backend) -------------------------------------
-def run_rdt(args, timeout=90):
-    """Run `rdt ... --json` and return its data payload. Raises RuntimeError with rdt's own message on failure."""
+def run_rdt(args, timeout=90, retries=2):
+    """Run `rdt ... --json` and return its data payload. Raises RuntimeError with
+    rdt's own message on failure. When Reddit rate-limits us it says how long to
+    wait ("retry after 5s"): wait that long and try again, up to `retries` times,
+    instead of losing the thread."""
+    for attempt in range(retries + 1):
+        try:
+            return _run_rdt_once(args, timeout)
+        except RuntimeError as e:
+            msg = str(e)
+            if 'rate_limited' not in msg or attempt >= retries: raise
+            m = re.search(r'retry after (\d+)', msg)
+            time.sleep(min(int(m.group(1)) if m else 5, 30) + 1)
+
+
+def _run_rdt_once(args, timeout=90):
     try:
         p = subprocess.run(['rdt'] + list(args) + ['--json'], capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
@@ -431,7 +447,8 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
     # tags first, then a keyword hit, then how busy the thread is
     weight = lambda p: (len(issues_of(str(p.get('title') or '') + ' ' + str(p.get('selftext') or ''))) * 1000
                         + (500 if p.get('_q') else 0) + int(p.get('num_comments') or 0))
-    pick = sorted(threads, key=weight, reverse=True)[:n_threads]
+    # a thread with no comments has nothing to read: never spend a call on it
+    pick = sorted((p for p in threads if int(p.get('num_comments') or 0) > 0), key=weight, reverse=True)[:n_threads]
     trows = [thread_row(p) for p in threads]
     crows = []
     for p in pick:

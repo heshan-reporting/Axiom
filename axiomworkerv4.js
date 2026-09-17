@@ -1822,8 +1822,10 @@ async function metaCron(env) {
 // Where the arguments our clients care about actually happen: national politics
 // and economics, the state and city subs where planning, energy bills, mining
 // towns and pharmacies come up, and the trade subs.
+// (r/victoria is Victoria, British Columbia, and refuses us anyway; r/melbourne
+// is where the state's argument happens.)
 const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
-  'melbourne', 'victoria', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
+  'melbourne', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
 // The keyword pass searches all of Reddit, so a generic client term - 'interest
 // rates', 'gas prices', 'question time' - also finds American and British
 // threads, and the wide matchers tag them. A hit outside the watched subs is
@@ -1839,7 +1841,7 @@ const AU_RX = new RegExp([
   'woolworths|\\bcoles\\b|bunnings|\\bafr\\b|abc news|the age\\b|\\bsmh\\b|news\\.com\\.au|9news|7news|sky news australia|the australian\\b|guardian australia|newspoll|crikey',
   'minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line',
 ].join('|'), 'i');
-const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|victoria|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)/i;
+const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)/i;
 /** Is this thread about Australia? Watched sub, Australian-looking sub, or a marker in the text. */
 function auRelevant(sub, text) {
   const s = String(sub || '');
@@ -2006,7 +2008,8 @@ async function redditSweep(env, opts) {
   // Read the comments where the client is actually being argued about: issue
   // tags first, then a keyword hit, then how busy the thread is.
   const weight = t => redditIssues(t.title + ' ' + t.body).length * 1000 + (t.found ? 500 : 0) + (t.comments || 0);
-  const pick = threads.slice().sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
+  // a thread with no comments has nothing to read: never spend a call on it
+  const pick = threads.filter(t => (t.comments || 0) > 0).sort((a, b) => weight(b) - weight(a)).slice(0, threadsForComments);
   for (const t of pick) {
     try {
       await log('cmd', 'GET /r/' + t.sub + '/comments/' + t.id + '?limit=' + commentsPer);

@@ -302,7 +302,8 @@ route tests), `release.js` (26 browser tests).
 `REDDIT_POLITICS` in the worker names the subs we watch - national politics
 and money (AustralianPolitics, australia, AusPol, AusFinance, AusEcon,
 auscorp), the state and city subs where planning, power bills, mining towns
-and pharmacies come up (melbourne, victoria, perth, brisbane, sydney), and the
+and pharmacies come up (melbourne, perth, brisbane, sydney - not r/victoria,
+which is Victoria, British Columbia), and the
 trades (AusPropertyChat, AusRenovation, ausjdocs). `redditSweep()` runs two
 passes: every thread on hot and top-of-day (one multi-subreddit listing per
 sort, paced), then a **keyword pass** - `redditSearch()` runs the client search

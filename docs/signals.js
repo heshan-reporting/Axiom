@@ -369,7 +369,14 @@
         <select class="sel" value=${f.sort} onChange=${e => setF(x => Object.assign({}, x, { sort: e.target.value }))} aria-label="Order">
           <option value="relevance">Most relevant</option><option value="new">Newest</option>
         </select>
-        <input class="fi" ref=${qRef} placeholder=${'Search ' + plat.label + ' ' + plat.unit + 's...'} defaultValue=${f.q} onKeyDown=${e => { if (e.key === 'Enter') setF(x => Object.assign({}, x, { q: e.target.value.trim() })); }} aria-label="Search" />
+        <input class="fi" ref=${qRef} placeholder=${'Search ' + plat.label + ' ' + plat.unit + ' text...'} defaultValue=${f.q} onKeyDown=${e => {
+          if (e.key !== 'Enter') return;
+          const v = e.target.value.trim();
+          // "r/australia" typed into the search is a subreddit, not words to find
+          const m = tab === 'reddit' && v.match(/^\/?r\/([A-Za-z0-9_]{2,40})\/?$/);
+          if (m) { e.target.value = ''; setF(x => Object.assign({}, x, { q: '', channel: m[1] })); }
+          else setF(x => Object.assign({}, x, { q: v }));
+        }} aria-label="Search" />
         ${data && data.noise ? html`<label class="rd-chip sig-noise" style=${{ cursor: 'pointer' }} title="Threads a generic keyword found outside Australia. Hidden by default; tick to see them."><input type="checkbox" checked=${!!f.all} onChange=${e => setF(x => Object.assign({}, x, { all: e.target.checked }))} style=${{ marginRight: 6 }} />${fmtN(data.noise)} off-topic ${f.all ? 'shown' : 'hidden'}</label>
           ${canWrite && tab === 'reddit' ? html`<button class="btn sm ghost" disabled=${busy.prune} onClick=${prune} title="Delete the off-topic Reddit threads and their comments from the archive">${busy.prune ? 'Pruning...' : 'Prune'}</button>` : null}` : null}
         ${canWrite ? html`<button class="btn sm ghost" disabled=${busy.sweep} onClick=${sweep} title=${plat.desktop ? 'Queue a sweep for the collector on your Mac and watch it run' : 'Collect from ' + plat.label + ' now and watch it run'}>${busy.sweep ? 'Sweeping...' : 'Sweep ' + plat.label}</button>` : null}
