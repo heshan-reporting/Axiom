@@ -86,7 +86,7 @@ def job_reddit(worker, key, params, log):
     queries = rr.queries_for(sel) if q == 'auto' else ([str(x) for x in q] if isinstance(q, list) else [])
     subs = params.get('subs') or rr.SUBS
     log('info', 'Reddit: %d subs, %d client keywords' % (len(subs), len(queries)))
-    trows, crows, errors = rr.sweep(subs, int(params.get('perSub') or 25), int(params.get('threads') or 30),
+    trows, crows, errors = rr.sweep(subs, int(params.get('perSub') or 25), int(params.get('threads') or 60),
                                     int(params.get('commentsPer') or 80), pace=float(params.get('pace') or 1.2),
                                     log=lambda *a: log('info', a[0] if len(a) == 1 else ' '.join(str(x) for x in a)),
                                     queries=queries, per_query=int(params.get('perQuery') or 25),

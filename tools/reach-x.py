@@ -164,9 +164,12 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
     for q in queries:
         log('cmd', 'twitter search "%s" -t Latest -n %d --exclude retweets' % (q, per_query))
         try:
-            hits = search(q, per_query, when)
+            got = search(q, per_query, when)
+            # X search is worldwide: keep the posts that say Australia (the term
+            # that found them counts, so 'nuclear power australia' hits all stay)
+            hits = [t for t in got if rr.au_relevant('', '%s %s' % (t.get('text') or '', q), ())]
             found += len(hits)
-            log('out', '"%s": %d posts' % (q, len(hits)))
+            log('out', '"%s": %d posts, %d Australian kept' % (q, len(got), len(hits)))
             for t in hits:
                 tid = str(t.get('id') or '')
                 if tid and tid not in seen: seen[tid] = t

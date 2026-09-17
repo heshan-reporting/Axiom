@@ -1824,6 +1824,29 @@ async function metaCron(env) {
 // towns and pharmacies come up, and the trade subs.
 const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinance', 'AusEcon', 'auscorp',
   'melbourne', 'victoria', 'perth', 'brisbane', 'sydney', 'AusPropertyChat', 'AusRenovation', 'ausjdocs'];
+// The keyword pass searches all of Reddit, so a generic client term - 'interest
+// rates', 'gas prices', 'question time' - also finds American and British
+// threads, and the wide matchers tag them. A hit outside the watched subs is
+// kept only when something on it says Australia: the sub, a place, an
+// institution, a politician, a masthead, or one of our clients' own terms.
+// tools/reach-reddit.py carries the same expression (AU_RX) for the desktop.
+const AU_RX = new RegExp([
+  'austral|aussie|straya|\\bauspol\\b|ausvotes|springst|nswpol|qldpol|wapol|\\bnsw\\b|\\bqld\\b|queensland|victoria|tasmania|canberra',
+  'adelaide|hobart|darwin|northern territory|perth|brisbane|sydney|melbourne|geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns',
+  'hunter valley|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling',
+  '\\brba\\b|albanese|dutton|sussan ley|littleproud|chalmers|chris bowen|plibersek|jacinta allan|brad battin|\\balp\\b|the nationals|\\bnats\\b|the coalition|the greens|one nation|teal independent|senate estimates',
+  'centrelink|medicare|\\bpbs\\b|\\baemo\\b|\\baccc\\b|\\bato\\b|\\bnbn\\b|\\bcfmeu\\b|fair work|\\bapra\\b|\\basic\\b|productivity commission',
+  'woolworths|\\bcoles\\b|bunnings|\\bafr\\b|abc news|the age\\b|\\bsmh\\b|news\\.com\\.au|9news|7news|sky news australia|the australian\\b|guardian australia|newspoll|crikey',
+  'minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line',
+].join('|'), 'i');
+const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|victoria|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)/i;
+/** Is this thread about Australia? Watched sub, Australian-looking sub, or a marker in the text. */
+function auRelevant(sub, text) {
+  const s = String(sub || '');
+  if (s && REDDIT_POLITICS.some(w => w.toLowerCase() === s.toLowerCase())) return true;
+  if (s && AU_SUB_RX.test(s)) return true;
+  return AU_RX.test(String(text || ''));
+}
 const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
 // Public hosts tried in turn when no app credentials are set. Reddit allows
 // unauthenticated clients about ten requests a minute and blocks many
@@ -1954,10 +1977,16 @@ async function redditSweep(env, opts) {
   }
   // The keyword pass: our clients' language, searched across Reddit rather than
   // waited for in the subs we watch.
-  out.found = 0;
+  out.found = 0; out.dropped = 0;
   for (const q of queries) {
     await log('cmd', 'GET /search?q=' + q + '&sort=new&t=' + qTime);
-    try { const hits = await redditSearch(env, q, { time: qTime, limit: qLimit }); out.found += hits.length; take(hits); await log('out', '"' + q + '": ' + hits.length + ' hits'); }
+    try {
+      const hits = await redditSearch(env, q, { time: qTime, limit: qLimit });
+      // a search runs across every subreddit on earth: keep the Australian ones
+      const keep = hits.filter(h => auRelevant(h.sub, h.sub + ' ' + h.title + ' ' + h.body + ' ' + q));
+      out.found += keep.length; out.dropped += hits.length - keep.length; take(keep);
+      await log('out', '"' + q + '": ' + hits.length + ' hits, ' + keep.length + ' Australian kept');
+    }
     catch (e) { const m = String(e.message || e).slice(0, 80); out.errors.push('search "' + q + '": ' + m); await log('err', '"' + q + '": ' + m); if (/rate_limited/.test(m)) break; }
     await rdSleep(pace);
   }
@@ -4579,27 +4608,54 @@ export default {
             reddit: { ready: true, desktopOnly: false, detail: redditAuthed(env) ? '' : 'The worker reads Reddit anonymously and is often refused; the desktop collector is the reliable path.' },
           }, agents: await agentsSeen(env) });
         }
-        if (path === '/signals/threads') {
-          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60, 200);
-          const w = ["kind='" + tKind + "'", 'ts>?']; const b = [since];
+        // Candidates in the window, then relevance in JS. Reddit rows from the
+        // keyword pass can be American or British threads found by a generic
+        // term; here they are noise, hidden unless asked for. The other
+        // platforms are our clients' own pages, so everything is relevant.
+        const relevant = r => !isReddit || auRelevant(r.channel, (r.channel || '') + ' ' + (r.title || '') + ' ' + (r.body || '') + ' ' + (r.q || ''));
+        const candidates = async (extraW, extraB, lim) => {
+          const w = ["kind='" + tKind + "'", 'ts>?'].concat(extraW || []); const b = [since].concat(extraB || []);
           if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
           if (issue) { w.push('meta LIKE ?'); b.push('%"' + issue + '"%'); }
+          return (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.q') q, json_extract(meta,'$.issues') issues FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
+        };
+        // comment tone held per thread, in chunks D1 accepts
+        const heldFor = async (ids) => {
+          const held = {};
+          for (let i = 0; i < ids.length; i += 90) {
+            const part = ids.slice(i, i + 90); const ph = part.map(() => '?').join(',');
+            ((await db.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='" + cKind + "' AND json_extract(meta,'$.thread') IN (" + ph + ') GROUP BY t').bind(...part).all()).results || []).forEach(x => { held[x.t] = { n: x.n || 0, hostile: x.hostile || 0, supportive: x.supportive || 0 }; });
+          }
+          return held;
+        };
+        if (path === '/signals/threads') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60, 200);
+          const sort = reqUrl.searchParams.get('sort') === 'new' ? 'new' : 'relevance';
+          const showAll = reqUrl.searchParams.get('all') === '1';
+          const extraW = [], extraB = [];
           // one channel filter for all four: a subreddit on Reddit, a page elsewhere
           const chq = String(reqUrl.searchParams.get('channel') || '').slice(0, 80);
-          if (chq) { w.push('LOWER(' + chan + ')=?'); b.push(chq.toLowerCase()); }
-          if (qs) { w.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')"); const l = arcLike(qs); b.push(l, l); }
-          const rows = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, " + chan + " channel, " + platCol + " platform, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.q') q, json_extract(meta,'$.issues') issues FROM arc_items WHERE " + w.join(' AND ') + ' ORDER BY ts DESC LIMIT ' + lim).bind(...b).all()).results || [];
-          const ids = rows.map(r => r.id).filter(Boolean).slice(0, 200);
-          const held = {};
-          if (ids.length) {
-            const ph = ids.map(() => '?').join(',');
-            ((await db.prepare("SELECT json_extract(meta,'$.thread') t, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind='" + cKind + "' AND json_extract(meta,'$.thread') IN (" + ph + ') GROUP BY t').bind(...ids).all()).results || []).forEach(x => { held[x.t] = { n: x.n || 0, hostile: x.hostile || 0, supportive: x.supportive || 0 }; });
+          if (chq) { extraW.push('LOWER(' + chan + ')=?'); extraB.push(chq.toLowerCase()); }
+          if (qs) { extraW.push("(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')"); const l = arcLike(qs); extraB.push(l, l); }
+          const pool = await candidates(extraW, extraB, Math.max(lim * 5, 400));
+          const held = await heldFor(pool.map(r => r.id).filter(Boolean));
+          let rows = pool.map(r => Object.assign(r, { issuesArr: pj(r.issues), held: held[r.id] || null, rel: relevant(r) }));
+          const noise = rows.filter(r => !r.rel).length;
+          if (!showAll) rows = rows.filter(r => r.rel);
+          if (sort === 'relevance') {
+            // what the client is argued about first: issue breadth, then the
+            // comments we hold, then how busy the thread is; ties by recency
+            const wt = r => r.issuesArr.length * 1000 + (r.held ? r.held.n * 20 : 0) + Math.min(Number(r.comments) || 0, 500) + (r.rel ? 0 : -5000);
+            rows.sort((a, b) => (wt(b) - wt(a)) || ((b.ts || 0) - (a.ts || 0)));
           }
+          rows = rows.slice(0, lim);
+          // the channels in scope, from the relevant set, so a noise sub never shows
+          const chanPool = (chq || qs) ? await candidates([], [], 400) : pool;
+          const cm = {}; chanPool.filter(relevant).forEach(r => { if (r.channel) cm[r.channel] = (cm[r.channel] || 0) + 1; });
+          const chans = Object.keys(cm).map(c => ({ channel: c, n: cm[c] })).sort((a, b) => b.n - a.n).slice(0, 20);
           const have = (await db.prepare("SELECT COUNT(*) total, MAX(ts) newest FROM arc_items WHERE kind='" + tKind + "'" + (!isReddit && plat ? " AND json_extract(meta,'$.platform')='" + plat + "'" : '')).first()) || { total: 0 };
-          // the channels this platform has, so the view can offer them
-          const chans = (await db.prepare('SELECT ' + chan + " channel, COUNT(*) n FROM arc_items WHERE kind='" + tKind + "' AND ts>?" + (!isReddit && plat ? " AND json_extract(meta,'$.platform')='" + plat + "'" : '') + ' GROUP BY channel ORDER BY n DESC LIMIT 20').bind(since).all()).results || [];
-          return jsonResp({ ok: true, platform: plat || 'all', days, issue, q: qs, channels: chans.filter(c => c.channel),
-            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, channel: r.channel || '', platform: r.platform || plat, id: r.id, score: r.score, comments: r.comments, q: r.q || '', issues: pj(r.issues), excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: held[r.id] || null })),
+          return jsonResp({ ok: true, platform: plat || 'all', days, issue, q: qs, sort, all: showAll, noise, channels: chans,
+            threads: rows.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, channel: r.channel || '', platform: r.platform || plat, id: r.id, score: r.score, comments: r.comments, q: r.q || '', issues: r.issuesArr, relevant: r.rel, excerpt: String(r.body || '').split('\n')[0].slice(0, 500), held: r.held })),
             have });
         }
         if (path === '/signals/comments') {
@@ -4609,15 +4665,41 @@ export default {
           return jsonResp({ ok: true, thread: tid, platform: plat, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.score, issues: pj(r.issues) })) });
         }
         if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Analysis and filing need a full-access key.' }, 403);
+        // POST /signals/prune {platform:'reddit'} - delete the off-topic threads
+        // the keyword pass filed before the Australian gate, and their comments.
+        // Reddit only: the other platforms are the clients' own pages.
+        if (path === '/signals/prune' && req.method === 'POST') {
+          if (!isReddit) return jsonResp({ error: 'reddit_only', detail: 'Only the Reddit keyword pass collects off-topic threads; the other platforms read our own pages.' }, 400);
+          const out = { ok: true, platform: 'reddit', scanned: 0, removedThreads: 0, removedComments: 0, more: false };
+          const urls = [], tids = [];
+          for (let off = 0; off < 10000; off += 500) {
+            const page = (await db.prepare("SELECT url, title, body, json_extract(meta,'$.sub') sub, json_extract(meta,'$.id') tid, json_extract(meta,'$.q') q FROM arc_items WHERE kind='reddit_thread' ORDER BY ts DESC LIMIT 500 OFFSET ?").bind(off).all()).results || [];
+            out.scanned += page.length;
+            page.forEach(r => { if (!auRelevant(r.sub, (r.sub || '') + ' ' + (r.title || '') + ' ' + (r.body || '') + ' ' + (r.q || ''))) { urls.push(r.url); if (r.tid) tids.push(r.tid); } });
+            if (page.length < 500) break;
+            if (off + 500 >= 10000) out.more = true;
+          }
+          const changes = r => (r && r.meta && typeof r.meta.changes === 'number') ? r.meta.changes : null;
+          for (let i = 0; i < urls.length; i += 90) {
+            const part = urls.slice(i, i + 90);
+            const r = await db.prepare("DELETE FROM arc_items WHERE kind='reddit_thread' AND url IN (" + part.map(() => '?').join(',') + ')').bind(...part).run();
+            out.removedThreads += changes(r) === null ? part.length : changes(r);
+          }
+          for (let i = 0; i < tids.length; i += 90) {
+            const part = tids.slice(i, i + 90);
+            const r = await db.prepare("DELETE FROM arc_items WHERE kind='reddit_comment' AND json_extract(meta,'$.thread') IN (" + part.map(() => '?').join(',') + ')').bind(...part).run();
+            out.removedComments += changes(r) || 0;
+          }
+          return jsonResp(out);
+        }
         if (path === '/signals/analyse' && req.method === 'POST') {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
           const ns = String(sbody.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
           let ids = Array.isArray(sbody.threads) ? sbody.threads.map(x => String(x).slice(0, 60)).filter(Boolean).slice(0, 12) : [];
           if (!ids.length) {
-            const w = ["kind='" + tKind + "'", 'ts>?']; const b = [since];
-            if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
-            if (issue) { w.push('meta LIKE ?'); b.push('%"' + issue + '"%'); }
-            ids = ((await db.prepare("SELECT json_extract(meta,'$.id') id FROM arc_items WHERE " + w.join(' AND ') + " ORDER BY COALESCE(json_extract(meta,'$.comments'),0) DESC LIMIT 12").bind(...b).all()).results || []).map(r => r.id).filter(Boolean);
+            // the busiest relevant threads in scope: never an off-topic keyword hit
+            const pool = await candidates([], [], 300);
+            ids = pool.filter(relevant).sort((a, b) => (Number(b.comments) || 0) - (Number(a.comments) || 0)).slice(0, 12).map(r => r.id).filter(Boolean);
           }
           const threads = await threadRows(ids);
           if (!threads.length) return jsonResp({ ok: false, error: 'no_threads', detail: 'Nothing on file for that scope. Sweep first.' }, 404);

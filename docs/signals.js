@@ -180,7 +180,7 @@
 
   function SignalsApp() {
     const [tab, setTab] = useState('reddit');
-    const [f, setF] = useState({ days: 7, issue: '', q: '', channel: '' });
+    const [f, setF] = useState({ days: 7, issue: '', q: '', channel: '', sort: 'relevance', all: false });
     const [data, setData] = useState(null);
     const [err, setErr] = useState(null);
     const [status, setStatus] = useState(null);
@@ -199,11 +199,11 @@
     const load = useCallback(async () => {
       setBusy(b => Object.assign({}, b, { load: true }));
       try {
-        const d = await call('/signals/threads?platform=' + tab + '&days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&channel=' + encodeURIComponent(f.channel) + '&q=' + encodeURIComponent(f.q) + '&limit=80');
+        const d = await call('/signals/threads?platform=' + tab + '&days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&channel=' + encodeURIComponent(f.channel) + '&q=' + encodeURIComponent(f.q) + '&sort=' + f.sort + (f.all ? '&all=1' : '') + '&limit=80');
         setData(d); setErr(null);
       } catch (e) { setData(null); setErr(e); }
       setBusy(b => Object.assign({}, b, { load: false }));
-    }, [tab, f.days, f.issue, f.channel, f.q]);
+    }, [tab, f.days, f.issue, f.channel, f.q, f.sort, f.all]);
     useEffect(() => { setOpen(null); setSel(new Set()); setAnalysis(null); load(); }, [load]);
     // a platform change is a different set of channels: never carry one across
     useEffect(() => { setF(x => (x.channel ? Object.assign({}, x, { channel: '' }) : x)); }, [tab]);
@@ -287,6 +287,15 @@
       setBusy(b => Object.assign({}, b, { mind: false }));
     };
     const toggle = id => setSel(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    /* Off-topic Reddit threads (a generic keyword's American and British hits)
+       are hidden by the worker; prune deletes them and their comments for good. */
+    const prune = async () => {
+      if (!window.confirm('Delete the off-topic Reddit threads (nothing on them says Australia) and their comments from the archive? ' + fmtN((data && data.noise) || 0) + ' are hidden in this window; the whole Reddit archive is checked.')) return;
+      setBusy(b => Object.assign({}, b, { prune: true })); setResult(null);
+      try { const r = await call('/signals/prune', { platform: tab }); setResult({ ok: true, text: 'Pruned ' + fmtN(r.removedThreads) + ' off-topic threads and ' + fmtN(r.removedComments) + ' comments from ' + fmtN(r.scanned) + ' checked' + (r.more ? ' (run again for the rest)' : '') + '.' }); toastMsg('Pruned'); await load(); await refreshStatus(); }
+      catch (e) { setResult({ ok: false, text: 'Prune: ' + e.message }); toastMsg('Could not prune', true); }
+      setBusy(b => Object.assign({}, b, { prune: false }));
+    };
 
     const threads = (data && data.threads) || [];
     const allSel = threads.length && threads.every(t => sel.has(t.id));
@@ -332,7 +341,12 @@
         <select class="sel" value=${f.issue} onChange=${e => setF(x => Object.assign({}, x, { issue: e.target.value }))} aria-label="Issue">
           <option value="">All issues</option>${issues().map(i => html`<option key=${i.id} value=${i.id}>${i.label}</option>`)}
         </select>
+        <select class="sel" value=${f.sort} onChange=${e => setF(x => Object.assign({}, x, { sort: e.target.value }))} aria-label="Order">
+          <option value="relevance">Most relevant</option><option value="new">Newest</option>
+        </select>
         <input class="fi" ref=${qRef} placeholder=${'Search ' + plat.label + ' ' + plat.unit + 's...'} defaultValue=${f.q} onKeyDown=${e => { if (e.key === 'Enter') setF(x => Object.assign({}, x, { q: e.target.value.trim() })); }} aria-label="Search" />
+        ${data && data.noise ? html`<label class="rd-chip sig-noise" style=${{ cursor: 'pointer' }} title="Threads a generic keyword found outside Australia. Hidden by default; tick to see them."><input type="checkbox" checked=${!!f.all} onChange=${e => setF(x => Object.assign({}, x, { all: e.target.checked }))} style=${{ marginRight: 6 }} />${fmtN(data.noise)} off-topic ${f.all ? 'shown' : 'hidden'}</label>
+          ${canWrite && tab === 'reddit' ? html`<button class="btn sm ghost" disabled=${busy.prune} onClick=${prune} title="Delete the off-topic Reddit threads and their comments from the archive">${busy.prune ? 'Pruning...' : 'Prune'}</button>` : null}` : null}
         ${canWrite ? html`<button class="btn sm ghost" disabled=${busy.sweep} onClick=${sweep} title=${plat.desktop ? 'Queue a sweep for the collector on your Mac and watch it run' : 'Collect from ' + plat.label + ' now and watch it run'}>${busy.sweep ? 'Sweeping...' : 'Sweep ' + plat.label}</button>` : null}
         ${wantsAgent && !agentFor.length ? html`<span class="sig-warn" title=${plat.desktop ? 'A sweep will sit in the queue until a collector connects' : 'The worker can try, but ' + plat.label + ' usually refuses it'}>no ${plat.label} collector connected - run <code>python3 tools/reach-agent.py --key $AXIOM_KEY</code> on your Mac</span>` : null}
         ${wantsAgent && agentFor.length ? html`<span class="sig-agent on" style=${{ marginLeft: 0 }} title=${'This sweep will run on ' + agentFor.map(a => a.agent).join(', ')}>runs on ${agentFor[0].agent}</span>` : null}

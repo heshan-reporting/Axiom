@@ -176,7 +176,22 @@ Per platform:
   the whole Supermetrics path are untouched - **ad comments and campaign
   performance stay in the Audience view**.
 
-Read routes (read role): `/signals/threads?platform=&days=&issue=&q=`,
+**The Australian gate.** The keyword pass searches all of Reddit (and X), so a
+generic client term - "interest rates", "gas prices", "question time" - also
+finds American and British threads, and the wide matchers tag them. A hit
+outside the watched subs is kept only when something on it says Australia
+(`AU_RX` in the worker, mirrored in `tools/reach-reddit.py`: sub name, place,
+institution, politician, masthead, or one of our clients' own terms; the term
+that found it counts, so "nuclear power australia" hits all stay). The console
+logs "N hits, M Australian kept". Threads filed before the gate are hidden by
+`/signals/threads` (default `sort=relevance`: issue breadth, comments held,
+busyness; `sort=new` for time order; `all=1` shows the off-topic rows, `noise`
+counts them) and deleted by `POST /signals/prune {platform:'reddit'}` (full
+role) with their comments. In the view: an order select, an "N off-topic
+hidden" toggle and a Prune button on the Reddit tab. The desktop collector reads
+comment trees for the 60 highest-weight threads by default (`--threads`).
+
+Read routes (read role): `/signals/threads?platform=&days=&issue=&q=&sort=&all=`,
 `/signals/comments?thread=&platform=`, `/signals/status` (counts and tone per
 platform, what is configured, who is connected). Full role: `/signals/analyse`
 (Claude reads the platform in its own register - LinkedIn is professional and

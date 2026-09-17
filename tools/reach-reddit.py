@@ -111,6 +111,32 @@ def issues_of(text):
     return [i for i, rx in ISSUES if rx.search(s)]
 
 
+# The keyword pass searches ALL of Reddit (and X), so a generic client term -
+# 'interest rates', 'gas prices', 'question time' - finds American and British
+# threads too, and the wide matchers happily tag them. A hit outside the subs we
+# watch is kept only when something on it says Australia: the sub name, a
+# place, an institution, a politician, a masthead, or one of our clients' own
+# terms. Mirrors AU_RX in the worker.
+AU_RX = re.compile(
+    r'austral|aussie|straya|\bauspol\b|ausvotes|springst|nswpol|qldpol|wapol|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra'
+    r'|adelaide|hobart|darwin|northern territory|perth|brisbane|sydney|melbourne|geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns'
+    r'|hunter valley|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling'
+    r'|\brba\b|albanese|dutton|sussan ley|littleproud|chalmers|chris bowen|plibersek|jacinta allan|brad battin|\balp\b|the nationals|\bnats\b|the coalition|the greens|one nation|teal independent|senate estimates'
+    r'|centrelink|medicare|\bpbs\b|\baemo\b|\baccc\b|\bato\b|\bnbn\b|\bcfmeu\b|fair work|\bapra\b|\basic\b|productivity commission'
+    r'|woolworths|\bcoles\b|bunnings|\bafr\b|abc news|the age\b|\bsmh\b|news\.com\.au|9news|7news|sky news australia|the australian\b|guardian australia|newspoll|crikey'
+    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line', re.I)
+AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|victoria|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)', re.I)
+
+
+def au_relevant(sub, text, watched=()):
+    """Is this hit about Australia? Watched sub, Australian-looking sub, or an
+    Australian marker anywhere in the text (which includes the term that found it)."""
+    s = str(sub or '')
+    if s.lower() in {w.lower() for w in (watched or SUBS)}: return True
+    if s and AU_SUB_RX.search(s): return True
+    return bool(AU_RX.search(str(text or '')))
+
+
 def merge_issues(own, inherited):
     """A comment carries its own tags and the thread's: an argument under a fuel
     tax credit thread is about fuel tax credits even when it says 'farmers'."""
@@ -386,17 +412,20 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
                 errors.append('r/%s/%s: %s' % (sub, sort, e)); say('err', 'r/%s/%s: %s' % (sub, sort, e))
                 if 'login' in str(e).lower(): raise
             time.sleep(pace)
-    found = 0
+    found = dropped = 0
     for q in queries:
         say('cmd', 'rdt search "%s" -s new -t %s -n %d' % (q, when, per_query))
         try:
-            hits = search(q, per_query, when); found += len(hits); take(hits)
-            say('out', '"%s": %d hits' % (q, len(hits)))
+            hits = search(q, per_query, when)
+            # a search runs across every subreddit on earth: keep the Australian ones
+            keep = [p for p in hits if au_relevant(p.get('subreddit'), '%s %s %s %s' % (p.get('subreddit') or '', p.get('title') or '', p.get('selftext') or '', q), subs)]
+            found += len(keep); dropped += len(hits) - len(keep); take(keep)
+            say('out', '"%s": %d hits, %d Australian kept' % (q, len(hits), len(keep)))
         except RuntimeError as e:
             errors.append('search "%s": %s' % (q, e)); say('err', '"%s": %s' % (q, e))
             if 'login' in str(e).lower(): raise
         time.sleep(pace)
-    if queries: log('keywords: %d terms searched, %d hits' % (len(queries), found))
+    if queries: log('keywords: %d terms searched, %d Australian hits kept, %d off-topic dropped' % (len(queries), found, dropped))
     threads = list(seen.values())
     # read the comments where the client is actually being argued about: issue
     # tags first, then a keyword hit, then how busy the thread is
@@ -465,7 +494,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--subs', default='', help='comma-separated subreddits (default: the watched list)')
     ap.add_argument('--per-sub', type=int, default=25)
-    ap.add_argument('--threads', type=int, default=30, help='threads whose comments to fetch')
+    ap.add_argument('--threads', type=int, default=60, help='threads whose comments to fetch')
     ap.add_argument('--comments', type=int, default=80, help='comments per thread')
     ap.add_argument('--queries', default='auto', help="client keywords searched across Reddit: 'auto' (all), 'off', or a comma-separated list")
     ap.add_argument('--per-query', type=int, default=25, help='results per keyword')
