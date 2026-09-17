@@ -409,8 +409,11 @@ writes return 403. The app hides mutating buttons for read-only keys.
   in Cloudflare — never in the repo.
 - Ship flow: commit on `claude/…` branch → push → fast-forward merge to
   `main` (GitHub Pages serves `main` **/docs**). The worker ships from the
-  laptop with `tools/deploy-worker.sh` (pulls the live bindings with
-  `wrangler init --from-dash newsaus`, checks syntax and ASCII, deploys with
-  `--keep-vars`, proves the new code answers). Never `wrangler deploy` from
-  the repo root: `wrangler.toml` is a template whose Mind bindings are
-  placeholders, so that would detach D1/Vectorize/AI/R2 from the live worker.
+  laptop with `tools/deploy-worker.sh` (checks syntax and ASCII, reads the
+  live settings through the Workers API, uploads the module with
+  `keep_bindings` for every binding type plus secrets and vars, proves the
+  new code answers on `/engine/status`; auth from the `wrangler login`
+  session or `CLOUDFLARE_API_TOKEN`). Never `wrangler deploy` from the repo
+  root: `wrangler.toml` is a template whose Mind bindings are placeholders,
+  so that would detach D1/Vectorize/AI/R2 from the live worker. Secrets:
+  `npx wrangler secret put NAME --name newsaus`.
