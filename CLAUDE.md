@@ -408,4 +408,9 @@ writes return 403. The app hides mutating buttons for read-only keys.
 - Worker secrets (ANTHROPIC_API_KEY, GEMINI_KEY, CLICKUP_TOKEN, …) exist only
   in Cloudflare — never in the repo.
 - Ship flow: commit on `claude/…` branch → push → fast-forward merge to
-  `main` (GitHub Pages serves `main` **/docs**).
+  `main` (GitHub Pages serves `main` **/docs**). The worker ships from the
+  laptop with `tools/deploy-worker.sh` (pulls the live bindings with
+  `wrangler init --from-dash newsaus`, checks syntax and ASCII, deploys with
+  `--keep-vars`, proves the new code answers). Never `wrangler deploy` from
+  the repo root: `wrangler.toml` is a template whose Mind bindings are
+  placeholders, so that would detach D1/Vectorize/AI/R2 from the live worker.

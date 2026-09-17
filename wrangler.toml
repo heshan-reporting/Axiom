@@ -1,6 +1,11 @@
-# AXIOM worker deploy config.
+# AXIOM worker deploy config (TEMPLATE - do not `wrangler deploy` from it).
 #
-# Deploy:  wrangler deploy
+# Deploy from a laptop:  tools/deploy-worker.sh
+#   It pulls the live worker's real bindings with `wrangler init --from-dash
+#   newsaus`, drops axiomworkerv4.js into that checkout and runs
+#   `wrangler deploy --keep-vars`, so KV / D1 / Vectorize / AI / R2 bindings,
+#   dashboard vars and secrets all survive. Deploying from THIS file as-is
+#   would detach the Mind (its bindings below are placeholders / commented out).
 #
 # IMPORTANT — preserving your existing KV data:
 #   The KV *namespace ID* is NOT stored in the worker .js. It lives on your
