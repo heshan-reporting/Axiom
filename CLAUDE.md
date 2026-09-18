@@ -241,7 +241,12 @@ for SIFA's developers: `SIFA-INTEGRATION.md` at the repo root.
   (`hansardSearch`); the archive across every kind; the Mind for the client
   namespace; then two child jobs - X restricted to the MPs' own accounts
   (`from:` handles from the register, replies included) and the Reddit keyword
-  pass with `listings:false` - both stamped `meta.topic`. Hits are filed as
+  pass with `listings:false` - both stamped `meta.topic`. SIFA sends generic
+  nouns ("guns", "shooting"), which searched worldwide return American
+  discussion that the Australian gate then throws away, so `auQualify()`
+  appends "australia" to the open search unless the keyword already names it;
+  the X `from:` account searches keep the bare term (`fromQueries`), those
+  accounts being Australian by definition. Hits are filed as
   kind `topic_hit` (`meta.source` news|statement|hansard), the full brief goes
   to KV `topic_brief_<id>` with a pointer row of kind `topic_brief`, and the
   brief is strict JSON from Claude: summary, volume, positions (who, role,

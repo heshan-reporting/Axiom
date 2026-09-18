@@ -131,7 +131,8 @@ def job_x(worker, key, params, log):
     rx.assert_searchable()
     trows, crows, errors, found = rx.sweep(queries, int(params.get('perQuery') or 25), int(params.get('threads') or 20),
                                            int(params.get('commentsPer') or 40), str(params.get('time') or 'week'),
-                                           pace=float(params.get('pace') or 1.5), log=log, handles=handles, mps=mps, topic=topic)
+                                           pace=float(params.get('pace') or 1.5), log=log, handles=handles, mps=mps, topic=topic,
+                                           from_terms=[str(x) for x in (params.get('fromQueries') or [])] or None)
     n_t, tot_t = rr.push(worker, key, 'sig_thread', trows)
     n_c, tot_c = rr.push(worker, key, 'sig_comment', crows)
     return {'ok': True, 'platform': 'x', 'found': found, 'threads': len(trows), 'comments': len(crows),

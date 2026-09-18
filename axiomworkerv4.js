@@ -1845,7 +1845,8 @@ const AU_RX = new RegExp([
   '\\balp\\b|federal labor|labor government|australian greens|greens (senator|mp)|the nationals|nationals (mp|senator|leader)|teal independent|senate estimates|coalition (frontbench|opposition)',
   // institutions and things only Australia has
   '\\brba\\b|reserve bank of australia|centrelink|medicare (levy|rebate|card)|bulk.bill|\\bpbs (script|medicine|listing|co-?payment)|\\baemo\\b|\\baccc\\b|\\bato\\b|\\bnbn\\b|\\bcfmeu\\b|fair work (commission|ombudsman|act)|\\bapra\\b|productivity commission',
-  'superannuation|negative gearing|\\bhecs\\b|\\banzac\\b|\\bafl\\b|\\bnrl\\b|state of origin|triple j|\\baud\\b|australian dollars?',
+  // AUD only as money (game traders and forex quote it bare, everywhere)
+  'superannuation|negative gearing|\\bhecs\\b|\\banzac\\b|\\bafl\\b|\\bnrl\\b|state of origin|triple j|australian dollars?|\\baud\\s?[$\\d]|[$\\d]\\s?aud\\b|\\ba\\$\\d',
   // brands and mastheads
   'woolworths|\\bwoolies\\b|\\bcoles\\b|bunnings|\\bqantas\\b|\\btelstra\\b|\\boptus\\b|\\bwestpac\\b|commbank|commonwealth bank|\\bafr\\b|abc\\.net\\.au|abc news australia|sydney morning herald|news\\.com\\.au|sky news australia|the australian\\b|guardian australia|newspoll|crikey|9news\\.com\\.au|7news\\.com\\.au',
   // our clients and their opponents, by their own names
@@ -2560,6 +2561,13 @@ async function hansardSearch(env, kw, max) {
     })).filter(x => x.text) };
   } catch (e) { return { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
 }
+/** SIFA sends generic nouns - "guns", "shooting", "weapon". Searched across all
+ *  of Reddit or X those return American discussion almost exclusively, which the
+ *  Australian gate then throws away: a wasted call per keyword. Ask for the
+ *  Australian conversation instead, unless the keyword already names Australia.
+ *  The MP account searches on X keep the bare keyword: those accounts are
+ *  Australian by definition and the qualifier would only narrow them. */
+function auQualify(kw) { return AU_QUERY_RX.test(String(kw)) ? String(kw) : String(kw) + ' australia'; }
 /** One keyword research run: the job the Topics view and SIFA both wait on. */
 async function topicRun(env, job, log) {
   const p = job.params || {};
@@ -2608,16 +2616,16 @@ async function topicRun(env, job, log) {
   // 4. MPs on X, from their own accounts - a desktop job; replies included
   const mps = p.mps === false ? [] : await mpsList(env, { withX: true, limit: 400 });
   if (mps.length) {
-    const child = await jobCreate(env, 'x', { queries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
+    const child = await jobCreate(env, 'x', { queries: [auQualify(keyword)], fromQueries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
     out.children.x = child.id;
     await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included');
   } else await log('info', 'no MP register yet (Sync MPs builds it from Wikidata), so no MP account sweep this run');
   // 5. the Reddit keyword pass - the Mac collector when one is connected, the worker otherwise
   {
-    const params = { queries: [keyword], listings: false, topic: id, time: win, threads: 20, commentsPer: 60 };
+    const params = { queries: [auQualify(keyword)], listings: false, topic: id, time: win, threads: 20, commentsPer: 60 };
     const child = await jobCreate(env, 'reddit', params, 'topic:' + id);
     out.children.reddit = child.id;
-    await log('info', 'queued Reddit job ' + child.id + (child.local ? ' (worker)' : ' (Mac collector)') + ': "' + keyword + '" across Reddit');
+    await log('info', 'queued Reddit job ' + child.id + (child.local ? ' (worker)' : ' (Mac collector)') + ': "' + auQualify(keyword) + '" across Reddit');
     if (child.local) out.childLocal = { id: child.id, params };
   }
   // 6. file the hits under the topic

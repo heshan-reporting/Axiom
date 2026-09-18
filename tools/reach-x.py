@@ -249,14 +249,16 @@ def from_queries(queries, handles, per=12):
     return out
 
 
-def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1.5, log=print, handles=(), mps=None, topic=''):
+def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1.5, log=print, handles=(), mps=None, topic='', from_terms=None):
     """Search every client keyword, then read the replies under the posts that
     matter most: issue breadth first, then how much reply traffic they drew.
     With `handles`, the keyword is also searched restricted to those accounts
     (MPs and senators), and `mps` (handle -> {name, party, house}) names them."""
     seen, errors, found = {}, [], 0
     mpmap = {str(k).lstrip('@').lower(): v for k, v in (mps or {}).items()}
-    all_queries = list(queries) + from_queries(queries, handles)
+    # the open search may carry an "australia" qualifier the account searches
+    # must not: an MP's own account is Australian already
+    all_queries = list(queries) + from_queries(list(from_terms) if from_terms else queries, handles)
     if handles: log('info', '%d MP and senator accounts: %d account-restricted searches added' % (len(handles), len(all_queries) - len(queries)))
     for q in all_queries:
         log('cmd', 'twitter search "%s" -t Latest -n %d --exclude retweets' % (q[:160], per_query))

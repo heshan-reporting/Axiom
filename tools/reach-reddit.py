@@ -132,7 +132,8 @@ AU_RX = re.compile(
     r'|\balp\b|federal labor|labor government|australian greens|greens (senator|mp)|the nationals|nationals (mp|senator|leader)|teal independent|senate estimates|coalition (frontbench|opposition)'
     # institutions and things only Australia has
     r'|\brba\b|reserve bank of australia|centrelink|medicare (levy|rebate|card)|bulk.bill|\bpbs (script|medicine|listing|co-?payment)|\baemo\b|\baccc\b|\bato\b|\bnbn\b|\bcfmeu\b|fair work (commission|ombudsman|act)|\bapra\b|productivity commission'
-    r'|superannuation|negative gearing|\bhecs\b|\banzac\b|\bafl\b|\bnrl\b|state of origin|triple j|\baud\b|australian dollars?'
+    # AUD only as money (game traders and forex quote it bare, everywhere)
+    r'|superannuation|negative gearing|\bhecs\b|\banzac\b|\bafl\b|\bnrl\b|state of origin|triple j|australian dollars?|\baud\s?[$\d]|[$\d]\s?aud\b|\ba\$\d'
     # brands and mastheads
     r'|woolworths|\bwoolies\b|\bcoles\b|bunnings|\bqantas\b|\btelstra\b|\boptus\b|\bwestpac\b|commbank|commonwealth bank|\bafr\b|abc\.net\.au|abc news australia|sydney morning herald|news\.com\.au|sky news australia|the australian\b|guardian australia|newspoll|crikey|9news\.com\.au|7news\.com\.au'
     # our clients and their opponents, by their own names
