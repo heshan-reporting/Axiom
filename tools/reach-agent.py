@@ -97,13 +97,15 @@ def job_reddit(worker, key, params, log):
     sel = [s for s in str(params.get('issue') or '').split(',') if s.strip()]
     q = params.get('queries', 'auto')
     queries = rr.queries_for(sel) if q == 'auto' else ([str(x) for x in q] if isinstance(q, list) else [])
-    subs = params.get('subs') or rr.SUBS
-    log('info', 'Reddit: %d subs, %d client keywords' % (len(subs), len(queries)))
+    # listings:false is a keyword research run: the search terms only, no sub listings
+    subs = [] if params.get('listings') is False else (params.get('subs') or rr.SUBS)
+    topic = str(params.get('topic') or '')
+    log('info', 'Reddit: %d subs, %d keywords%s' % (len(subs), len(queries), (' for topic ' + topic) if topic else ''))
     trows, crows, errors = rr.sweep(subs, int(params.get('perSub') or 25), int(params.get('threads') or 60),
                                     int(params.get('commentsPer') or 80), pace=float(params.get('pace') or 1.2),
                                     log=lambda *a: log('info', a[0] if len(a) == 1 else ' '.join(str(x) for x in a)),
                                     queries=queries, per_query=int(params.get('perQuery') or 25),
-                                    when=str(params.get('time') or 'week'), cmdlog=log)
+                                    when=str(params.get('time') or 'week'), cmdlog=log, topic=topic)
     n_t, tot_t = rr.push(worker, key, 'reddit_thread', trows)
     n_c, tot_c = rr.push(worker, key, 'reddit_comment', crows)
     return {'ok': True, 'platform': 'reddit', 'threads': len(trows), 'comments': len(crows),
@@ -115,12 +117,16 @@ def job_x(worker, key, params, log):
     sel = [s for s in str(params.get('issue') or '').split(',') if s.strip()]
     q = params.get('queries', 'auto')
     queries = rr.queries_for(sel) if q == 'auto' else ([str(x) for x in q] if isinstance(q, list) else [])
-    log('info', 'X: %d client keywords, %s window' % (len(queries), params.get('time') or 'week'))
+    # a topic run adds the MP and senator accounts: the keyword from their own mouths
+    handles = [str(h) for h in (params.get('from') or []) if str(h).strip()]
+    mps = {str(m.get('x') or '').lstrip('@').lower(): m for m in (params.get('mps') or []) if isinstance(m, dict) and m.get('x')}
+    topic = str(params.get('topic') or '')
+    log('info', 'X: %d keywords, %s window%s%s' % (len(queries), params.get('time') or 'week', (', %d MP accounts' % len(handles)) if handles else '', (' for topic ' + topic) if topic else ''))
     st = rx.status()
     log('out', 'twitter session: %s' % ('signed in' if (st or {}).get('authenticated', True) else 'not signed in'))
     trows, crows, errors, found = rx.sweep(queries, int(params.get('perQuery') or 25), int(params.get('threads') or 20),
                                            int(params.get('commentsPer') or 40), str(params.get('time') or 'week'),
-                                           pace=float(params.get('pace') or 1.5), log=log)
+                                           pace=float(params.get('pace') or 1.5), log=log, handles=handles, mps=mps, topic=topic)
     n_t, tot_t = rr.push(worker, key, 'sig_thread', trows)
     n_c, tot_c = rr.push(worker, key, 'sig_comment', crows)
     return {'ok': True, 'platform': 'x', 'found': found, 'threads': len(trows), 'comments': len(crows),

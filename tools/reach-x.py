@@ -116,7 +116,26 @@ def ts_of(t):
     return int(time.time() * 1000)
 
 
-def thread_row(t):
+def handle_of(t):
+    """The author's handle, used only to recognise a sitting MP or senator."""
+    a = t.get('author') or t.get('user') or {}
+    if isinstance(a, dict):
+        h = a.get('username') or a.get('screenName') or a.get('screen_name') or a.get('handle') or ''
+    else:
+        h = str(a or '')
+    return str(h or t.get('username') or t.get('screenName') or '').lstrip('@').lower()
+
+
+def mp_of(t, mps):
+    """The MP record when this post is from a registered MP or senator account.
+    Public officials speaking in office: their name and party are the story,
+    so they are kept. Everyone else stays anonymous."""
+    if not mps: return None
+    h = handle_of(t)
+    return mps.get(h) if h else None
+
+
+def thread_row(t, topic='', mps=None):
     """kind sig_thread, exactly as the worker's sigThreadRow writes it."""
     text = str(t.get('text') or '')[:4000]
     title = text.split('\n')[0][:200] or 'Post on X'
@@ -125,17 +144,21 @@ def thread_row(t):
     ncom = metric(t, 'replies')
     # the /i/web/ form resolves without carrying the author's handle
     url = 'https://x.com/i/web/status/%s' % t.get('id')
+    mp = mp_of(t, mps)
+    meta = {'platform': PLATFORM, 'id': str(t.get('id') or ''), 'page': '', 'page_name': '', 'score': score,
+            'comments': ncom, 'link': url, 'issues': isu, 'issue': isu[0] if isu else '',
+            'q': str(t.get('_q') or ''), 'ns': '', 'via': 'reach'}
+    if topic: meta['topic'] = topic
+    if mp: meta['mp'] = {'name': mp.get('name', ''), 'party': mp.get('party', ''), 'house': mp.get('house', ''), 'x': mp.get('x', '')}
     return {
-        'src': PLATFORM, 'title': title,
+        'src': PLATFORM, 'title': ((mp.get('name') + ': ') if mp and mp.get('name') else '') + title,
         'body': text[:3000] + '\n%d reactions, %d comments' % (score, ncom),
         'url': url, 'author': '', 'tone': rr.tone(text), 'ts': ts_of(t),
-        'meta': {'platform': PLATFORM, 'id': str(t.get('id') or ''), 'page': '', 'page_name': '', 'score': score,
-                 'comments': ncom, 'link': url, 'issues': isu, 'issue': isu[0] if isu else '',
-                 'q': str(t.get('_q') or ''), 'ns': '', 'via': 'reach'},
+        'meta': meta,
     }
 
 
-def comment_rows(post, reps):
+def comment_rows(post, reps, topic=''):
     """kind sig_comment for each reply, tagged with its own issues and the post's."""
     text = str(post.get('text') or '')
     title = text.split('\n')[0][:200] or 'Post on X'
@@ -152,43 +175,64 @@ def comment_rows(post, reps):
             'url': 'x:sigc:%s:%s' % (PLATFORM, c.get('id')), 'author': '', 'tone': rr.tone(body), 'ts': ts_of(c),
             'meta': {'platform': PLATFORM, 'thread': tid, 'thread_title': title[:200], 'permalink': permalink,
                      'score': metric(c, 'likes'), 'depth': 0, 'issues': allis, 'issue': allis[0] if allis else '',
-                     'tone': rr.tone(body), 'ns': '', 'via': 'reach'},
+                     'tone': rr.tone(body), 'ns': '', 'via': 'reach', **({'topic': topic} if topic else {})},
         })
     return rows
 
 
-def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1.5, log=print):
-    """Search every client keyword, then read the replies under the posts that
-    matter most: issue breadth first, then how much reply traffic they drew."""
-    seen, errors, found = {}, [], 0
+def from_queries(queries, handles, per=12):
+    """`kw (from:a OR from:b ...)` for each keyword and each chunk of handles:
+    the keyword in the mouths of the MPs themselves. X accepts about a dozen
+    from: operators per query."""
+    hs = [str(h).lstrip('@') for h in (handles or []) if str(h).strip()]
+    out = []
     for q in queries:
-        log('cmd', 'twitter search "%s" -t Latest -n %d --exclude retweets' % (q, per_query))
+        for i in range(0, len(hs), per):
+            out.append('%s (%s)' % (q, ' OR '.join('from:' + h for h in hs[i:i + per])))
+    return out
+
+
+def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1.5, log=print, handles=(), mps=None, topic=''):
+    """Search every client keyword, then read the replies under the posts that
+    matter most: issue breadth first, then how much reply traffic they drew.
+    With `handles`, the keyword is also searched restricted to those accounts
+    (MPs and senators), and `mps` (handle -> {name, party, house}) names them."""
+    seen, errors, found = {}, [], 0
+    mpmap = {str(k).lstrip('@').lower(): v for k, v in (mps or {}).items()}
+    all_queries = list(queries) + from_queries(queries, handles)
+    if handles: log('info', '%d MP and senator accounts: %d account-restricted searches added' % (len(handles), len(all_queries) - len(queries)))
+    for q in all_queries:
+        log('cmd', 'twitter search "%s" -t Latest -n %d --exclude retweets' % (q[:160], per_query))
         try:
             got = search(q, per_query, when)
             # X search is worldwide: keep the posts that say Australia (the term
-            # that found them counts, so 'nuclear power australia' hits all stay)
-            hits = [t for t in got if rr.au_relevant('', '%s %s' % (t.get('text') or '', q), ())]
+            # that found them counts, so 'nuclear power australia' hits all stay;
+            # a post from a registered MP account is Australian by definition)
+            hits = [t for t in got if mp_of(t, mpmap) or 'from:' in q or rr.au_relevant('', '%s %s' % (t.get('text') or '', q), ())]
             found += len(hits)
-            log('out', '"%s": %d posts, %d Australian kept' % (q, len(got), len(hits)))
+            log('out', '"%s": %d posts, %d kept' % (q[:80], len(got), len(hits)))
             for t in hits:
                 tid = str(t.get('id') or '')
-                if tid and tid not in seen: seen[tid] = t
+                if tid and tid not in seen:
+                    t['_q'] = q.split(' (from:')[0]
+                    seen[tid] = t
         except RuntimeError as e:
             errors.append('search "%s": %s' % (q, e)); log('err', str(e))
             if 'logged-in' in str(e) or 'not installed' in str(e): raise
             if 'rate-limiting' in str(e): break
         time.sleep(pace)
     posts = list(seen.values())
-    weight = lambda t: len(rr.issues_of(str(t.get('text') or ''))) * 1000 + metric(t, 'replies') + metric(t, 'likes') // 10
-    pick = sorted(posts, key=weight, reverse=True)[:n_threads]
-    trows = [thread_row(t) for t in posts]
+    # an MP's own post on the topic is what a research run is after: read its replies first
+    weight = lambda t: (2000 if mp_of(t, mpmap) else 0) + len(rr.issues_of(str(t.get('text') or ''))) * 1000 + metric(t, 'replies') + metric(t, 'likes') // 10
+    pick = [t for t in sorted(posts, key=weight, reverse=True) if metric(t, 'replies') > 0][:n_threads]
+    trows = [thread_row(t, topic, mpmap) for t in posts]
     crows = []
     for t in pick:
         tid = str(t.get('id'))
         log('cmd', 'twitter tweet %s -n %d' % (tid, n_replies))
         try:
             post, reps = replies(tid, n_replies)
-            rows = comment_rows(post or t, reps)
+            rows = comment_rows(post or t, reps, topic)
             crows.extend(rows)
             log('out', '%s: %d replies - %s' % (tid, len(rows), str(t.get('text') or '')[:70].replace('\n', ' ')))
         except RuntimeError as e:

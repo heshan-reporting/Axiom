@@ -206,6 +206,52 @@ mainstream) and `/signals/mind` (a digest into the Mind, kind `signal`).
 Harnesses: `signals-worker.js` (33 route tests), `signals.js` (24 browser
 tests), `reach-agent-test.py` (17 collector tests).
 
+## Topics (keyword research for SIFA and for us)
+
+SIFA, the partner system, hands AXIOM keywords and topics; AXIOM researches
+each one across everything it can reach and hands the results back. Contract
+for SIFA's developers: `SIFA-INTEGRATION.md` at the repo root.
+
+- **Keywords in.** `sifaPull()` GETs `SIFA_URL` (default
+  `https://sifa.wearecuriousminds.com/api/keywords`) with the secret
+  `SIFA_TOKEN` as bearer; `topicNormalize()` reads any shape (array of strings,
+  array of objects under data/keywords/items, fields keyword|term|name,
+  topic|category, client|ns, priority) into D1 `topics`. SIFA may also push:
+  `POST /sifa/keywords` gated by **its own** bearer, the secret
+  `SIFA_INBOUND_KEY` (`sifaInbound()`, timing-safe), never the AXIOM key.
+  `topicsCron()` pulls hourly and researches the two stalest active topics per
+  tick; `POST /topics/sync`, `/topics/add|update|delete` and `GET /topics/probe`
+  (raw SIFA answer) are the manual path.
+- **The research job** (`topicRun`, bridge source `topic`, worker-side):
+  Google News for the keyword, for the keyword with MP/minister/opposition, and
+  for the keyword on government and party sites (`TOPIC_STATEMENT_SITES`);
+  Hansard through OpenAustralia when `OPENAUSTRALIA_KEY` is set
+  (`hansardSearch`); the archive across every kind; the Mind for the client
+  namespace; then two child jobs - X restricted to the MPs' own accounts
+  (`from:` handles from the register, replies included) and the Reddit keyword
+  pass with `listings:false` - both stamped `meta.topic`. Hits are filed as
+  kind `topic_hit` (`meta.source` news|statement|hansard), the full brief goes
+  to KV `topic_brief_<id>` with a pointer row of kind `topic_brief`, and the
+  brief is strict JSON from Claude: summary, volume, positions (who, role,
+  stance, evidence, source), coverage, statements, changes, risks, openings,
+  watch, gaps - every item cited by source id.
+- **The MP register** (`mps`): every sitting member and senator from Wikidata
+  (`mpsSync`, SPARQL on P39 without an end date; X P2002, Facebook P2013,
+  Instagram P2003, party P102, electorate P768). `GET /mps`, `POST /mps/sync`.
+  **MPs are public officials speaking in office: their name, party and house
+  are kept on their own posts (`meta.mp`); replies and everyone else stay
+  anonymous.** Meta pages of MPs cannot be read through the Graph API without
+  Page Public Content Access, so Facebook stays a register field for now.
+- **Results out.** `GET /topics/results?id=&days=` and, for SIFA,
+  `GET /sifa/results?keyword=` / `GET /sifa/topics` / `POST /sifa/run` -
+  brief, news, statements, hansard, MP posts on X, Reddit threads, comment
+  tone, and the child job states.
+- In-app: the Topics view (`docs/topics.js`): SIFA and register status chips,
+  Sync from SIFA, Probe, Sync MPs, add a keyword with a client, the keyword
+  list with client select, active toggle and Run (job console), and results by
+  tab with the brief first. Harnesses: `topics-worker.js`, `topics.js`
+  (browser), and the topic cases in `reach-agent-test.py`.
+
 ## The Engine (the memory the model cannot work without, and how it learns)
 
 The Engine is not a fine-tune. Claude and Gemini stay the reasoning muscle;

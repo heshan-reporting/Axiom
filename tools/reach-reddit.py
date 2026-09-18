@@ -341,7 +341,7 @@ def domain_of(url):
     return (m.group(1).lower().replace('www.', '') if m else '')
 
 
-def thread_row(p):
+def thread_row(p, topic=''):
     title = str(p.get('title') or '')[:400]
     body = str(p.get('selftext') or '')[:4000]
     sub = str(p.get('subreddit') or '')
@@ -355,11 +355,12 @@ def thread_row(p):
         'body': body[:3000] + '\n%d points, %d comments' % (score, ncom) + ('\nLink: ' + link if link and 'reddit.com' not in domain else ''),
         'url': permalink_of(p), 'author': '', 'tone': tone(title + ' ' + body), 'ts': int(created or time.time() * 1000),
         'meta': {'sub': sub, 'id': str(p.get('id') or ''), 'score': score, 'ratio': 0, 'comments': ncom, 'flair': '', 'domain': domain,
-                 'link': link[:300], 'issues': isu, 'issue': isu[0] if isu else '', 'q': str(p.get('_q') or ''), 'via': 'reach'},
+                 'link': link[:300], 'issues': isu, 'issue': isu[0] if isu else '', 'q': str(p.get('_q') or ''), 'via': 'reach',
+                 **({'topic': topic} if topic else {})},
     }
 
 
-def comment_rows(post, comments):
+def comment_rows(post, comments, topic=''):
     title = str(post.get('title') or '')
     t_issues = issues_of(title + ' ' + str(post.get('selftext') or ''))
     tid = str(post.get('id') or ''); sub = str(post.get('subreddit') or ''); pl = permalink_of(post)
@@ -370,7 +371,8 @@ def comment_rows(post, comments):
             'src': 'reddit', 'title': 'Comment on: ' + title[:120], 'body': c['body'], 'url': 'x:rcmt:' + c['id'], 'author': '',
             'tone': tone(c['body']), 'ts': int(c['created'] or time.time() * 1000),
             'meta': {'sub': sub, 'thread': tid, 'thread_title': title[:200], 'permalink': pl, 'score': c['score'], 'depth': c['depth'],
-                     'issues': allis, 'issue': allis[0] if allis else '', 'tone': tone(c['body']), 'via': 'reach'},
+                     'issues': allis, 'issue': allis[0] if allis else '', 'tone': tone(c['body']), 'via': 'reach',
+                     **({'topic': topic} if topic else {})},
         })
     return rows
 
@@ -414,10 +416,11 @@ def push(worker, key, kind, rows):
 
 
 # ---- the sweep ---------------------------------------------------------------------
-def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(), per_query=25, when='week', cmdlog=None):
+def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(), per_query=25, when='week', cmdlog=None, topic=''):
     """Collect. `cmdlog(kind, text)`, when given, is called with every command
     run and every answer received - that is what AXIOM's Signals console shows
-    while the sweep is happening."""
+    while the sweep is happening. `topic` stamps every row with the topic id a
+    keyword research run is collecting for (subs may then be empty: keywords only)."""
     say = cmdlog or (lambda k, t: None)
     seen = {}; errors = []
     def take(posts):
@@ -461,14 +464,14 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
                         + (500 if p.get('_q') else 0) + int(p.get('num_comments') or 0))
     # a thread with no comments has nothing to read: never spend a call on it
     pick = sorted((p for p in threads if int(p.get('num_comments') or 0) > 0), key=weight, reverse=True)[:n_threads]
-    trows = [thread_row(p) for p in threads]
+    trows = [thread_row(p, topic) for p in threads]
     crows = []
     for p in pick:
         pid = str(p.get('id'))
         say('cmd', 'rdt read %s -n %d' % (pid, n_comments))
         try:
             post, comments = thread(pid, n_comments)
-            rows = comment_rows(post or p, comments)
+            rows = comment_rows(post or p, comments, topic)
             crows.extend(rows)
             say('out', '%s: %d comments - %s' % (pid, len(rows), str(p.get('title') or '')[:70]))
         except RuntimeError as e:

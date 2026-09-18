@@ -1958,7 +1958,9 @@ async function redditThreadComments(env, sub, id, limit, depth) {
  *  comments on the most-discussed threads, issue-tagged threads first. */
 async function redditSweep(env, opts) {
   opts = opts || {};
-  const subs = ((Array.isArray(opts.subs) && opts.subs.length) ? opts.subs : REDDIT_POLITICS).map(redditSubClean).filter(Boolean).slice(0, 16);
+  // listings:false is a keyword research run: the search terms only, no sub listings
+  const subs = opts.listings === false ? [] : ((Array.isArray(opts.subs) && opts.subs.length) ? opts.subs : REDDIT_POLITICS).map(redditSubClean).filter(Boolean).slice(0, 16);
+  const topicId = String(opts.topic || '').replace(/[^\w.-]/g, '').slice(0, 60);
   const perSub = Math.min(Math.max(parseInt(opts.perSub, 10) || 25, 5), 100);
   const threadsForComments = Math.min(Math.max(parseInt(opts.threads, 10) || 20, 0), 60);
   const commentsPer = Math.min(Math.max(parseInt(opts.commentsPer, 10) || 40, 5), 200);
@@ -2012,7 +2014,7 @@ async function redditSweep(env, opts) {
       src: 'reddit', title: t.title,
       body: (t.body || '').slice(0, 3000) + '\n' + t.score + ' points, ' + t.comments + ' comments, upvote ratio ' + t.ratio + (t.flair ? ', flair ' + t.flair : '') + (t.link && t.domain !== 'self.' + t.sub ? '\nLink: ' + t.link : ''),
       url: t.permalink, author: '', tone: commentTone(t.title + ' ' + t.body), ts: t.created || Date.now(),
-      meta: { sub: t.sub, id: t.id, score: t.score, ratio: t.ratio, comments: t.comments, flair: t.flair, domain: t.domain, link: (t.link || '').slice(0, 300), issues: issues, issue: issues[0] || '', q: t.found || '' },
+      meta: Object.assign({ sub: t.sub, id: t.id, score: t.score, ratio: t.ratio, comments: t.comments, flair: t.flair, domain: t.domain, link: (t.link || '').slice(0, 300), issues: issues, issue: issues[0] || '', q: t.found || '' }, topicId ? { topic: topicId } : {}),
     };
   });
   for (let i = 0; i < trows.length; i += 150) out.threadRows += await archiveItems(env, 'reddit_thread', trows.slice(i, i + 150));
@@ -2036,7 +2038,7 @@ async function redditSweep(env, opts) {
         const all = issueMerge(redditIssues(c.body), tIssues);
         return {
           src: 'reddit', title: 'Comment on: ' + t.title.slice(0, 120), body: c.body, url: 'x:rcmt:' + c.id, author: '', tone: commentTone(c.body), ts: c.created || Date.now(),
-          meta: { sub: t.sub, thread: t.id, thread_title: t.title.slice(0, 200), permalink: t.permalink, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) },
+          meta: Object.assign({ sub: t.sub, thread: t.id, thread_title: t.title.slice(0, 200), permalink: t.permalink, score: c.score, depth: c.depth, issues: all, issue: all[0] || '', tone: commentTone(c.body) }, topicId ? { topic: topicId } : {}),
         };
       });
       out.comments += rows.length;
@@ -2123,7 +2125,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta'];
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic'];   // topic: a keyword research run (worker-side)
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2393,6 +2395,329 @@ async function metaOrganicSweep(env, opts) {
 
 /** Cron hook: the two platforms the worker can read on its own, at most
  *  6-hourly, and only when they are configured. */
+// ==============================================================================
+// TOPICS - keyword research on demand. SIFA (the partner system) hands us
+// keywords and topics; for each one a research job gathers the news, the
+// government and party statements, Hansard where a key exists, what the
+// archive and the Mind already hold, then queues the MP-account sweep on X and
+// the Reddit keyword pass for the collectors, and writes a cited brief. SIFA
+// reads the results back through /sifa/*, gated by its own bearer key.
+// MPs and senators are public officials speaking in office: their names and
+// parties are kept on their own posts. Everyone else stays anonymous.
+// ==============================================================================
+const SIFA_URL_DEFAULT = 'https://sifa.wearecuriousminds.com/api/keywords';
+const TOPIC_STATEMENT_SITES = ['pm.gov.au', 'ministers.treasury.gov.au', 'minister.gov.au', 'aph.gov.au', 'alp.org.au', 'liberal.org.au', 'nationals.org.au', 'greens.org.au'];
+let TOPICS_READY = false;
+async function ensureTopics(env) {
+  if (TOPICS_READY) return true;
+  if (!env.MIND_DB) return false;
+  try {
+    await env.MIND_DB.batch([
+      env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS topics(id TEXT PRIMARY KEY, keyword TEXT, topic TEXT, ns TEXT, source TEXT, priority INTEGER, active INTEGER, created INTEGER, updated INTEGER, last_run INTEGER, last_job TEXT, hits INTEGER, extra TEXT)'),
+      env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mps(id TEXT PRIMARY KEY, name TEXT, party TEXT, house TEXT, electorate TEXT, x TEXT, facebook TEXT, instagram TEXT, updated INTEGER)'),
+    ]);
+    TOPICS_READY = true; return true;
+  } catch (e) { return false; }
+}
+function topicSlug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60); }
+/** Whatever shape the keywords arrive in - a bare array of strings, an array of
+ *  objects, or any of those under data/keywords/items/results/topics - out come
+ *  {id, keyword, topic, ns, priority, extra}. Field names are read leniently. */
+function topicNormalize(raw) {
+  let list = raw;
+  if (list && !Array.isArray(list) && typeof list === 'object') {
+    list = list.data || list.keywords || list.items || list.results || list.topics || [];
+    if (list && !Array.isArray(list) && typeof list === 'object') list = Object.values(list);
+  }
+  if (!Array.isArray(list)) return [];
+  const out = []; const seen = new Set();
+  list.forEach(it => {
+    let kw = '', topic = '', ns = '', id = '', pri = 0, extra = null;
+    if (typeof it === 'string') kw = it;
+    else if (it && typeof it === 'object') {
+      kw = it.keyword || it.term || it.name || it.title || it.q || it.text || it.value || '';
+      topic = it.topic || it.category || it.group || it.theme || it.type || '';
+      ns = it.client || it.ns || it.namespace || '';
+      id = it.id || it.slug || it.key || '';
+      pri = parseInt(it.priority || it.weight || it.rank || 0, 10) || 0;
+      extra = it;
+    }
+    kw = String(kw || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!kw) return;
+    const key = topicSlug(kw); if (!key || seen.has(key)) return; seen.add(key);
+    out.push({ id: String(id || key).replace(/[^\w.-]/g, '').slice(0, 60) || key, keyword: kw, topic: String(topic || '').slice(0, 80),
+      ns: String(ns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24), priority: pri, extra: extra ? JSON.stringify(extra).slice(0, 1500) : '' });
+  });
+  return out;
+}
+/** GET the keywords from SIFA with the bearer token it issued. */
+async function sifaPull(env) {
+  if (!env.SIFA_TOKEN) return { ok: false, error: 'sifa_not_configured', detail: 'Set the worker secret SIFA_TOKEN (the bearer token SIFA issued) and, if the address differs, the var SIFA_URL.' };
+  const url = env.SIFA_URL || SIFA_URL_DEFAULT;
+  try {
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + env.SIFA_TOKEN, 'Accept': 'application/json', 'User-Agent': 'AXIOM/5.0 (topics)' }, signal: abortAfter(15000) });
+    const text = await r.text();
+    let raw = null; try { raw = JSON.parse(text); } catch (e) { raw = null; }
+    if (!r.ok) return { ok: false, error: 'sifa_' + r.status, status: r.status, detail: 'SIFA answered HTTP ' + r.status + ': ' + text.slice(0, 200) };
+    if (raw === null) return { ok: false, error: 'sifa_not_json', detail: 'SIFA did not return JSON: ' + text.slice(0, 200) };
+    return { ok: true, url, keywords: topicNormalize(raw), sample: text.slice(0, 1200), status: r.status };
+  } catch (e) { return { ok: false, error: 'sifa_unreachable', detail: String((e && e.message) || e).slice(0, 200) }; }
+}
+async function topicsUpsert(env, list, source) {
+  if (!(await ensureTopics(env))) return { added: 0, updated: 0, total: 0 };
+  const now = Date.now(); let added = 0, updated = 0;
+  for (const k of list) {
+    const ex = await env.MIND_DB.prepare('SELECT id FROM topics WHERE id=? OR keyword=?').bind(k.id, k.keyword).first();
+    if (ex) {
+      await env.MIND_DB.prepare("UPDATE topics SET keyword=?, topic=COALESCE(NULLIF(?,''),topic), ns=COALESCE(NULLIF(?,''),ns), source=?, priority=?, active=1, updated=?, extra=? WHERE id=?")
+        .bind(k.keyword, k.topic || '', k.ns || '', source, k.priority || 0, now, k.extra || '', ex.id).run();
+      updated++;
+    } else {
+      await env.MIND_DB.prepare("INSERT INTO topics(id,keyword,topic,ns,source,priority,active,created,updated,last_run,last_job,hits,extra) VALUES(?,?,?,?,?,?,1,?,?,0,'',0,?)")
+        .bind(k.id, k.keyword, k.topic || '', k.ns || 'cmm', source, k.priority || 0, now, now, k.extra || '').run();
+      added++;
+    }
+  }
+  const tot = await env.MIND_DB.prepare('SELECT COUNT(*) c FROM topics WHERE active=1').first();
+  return { added, updated, total: (tot && tot.c) || 0 };
+}
+async function topicsList(env) {
+  if (!(await ensureTopics(env))) return [];
+  return (await env.MIND_DB.prepare('SELECT id, keyword, topic, ns, source, priority, active, created, updated, last_run, last_job, hits FROM topics ORDER BY active DESC, priority DESC, updated DESC LIMIT 300').all()).results || [];
+}
+async function topicGet(env, idOrKeyword) {
+  if (!idOrKeyword || !(await ensureTopics(env))) return null;
+  const v = String(idOrKeyword).slice(0, 120);
+  return (await env.MIND_DB.prepare('SELECT * FROM topics WHERE id=? OR keyword=? OR id=?').bind(v, v, topicSlug(v)).first()) || null;
+}
+// The MP register: every sitting member and senator, with the X, Facebook and
+// Instagram accounts Wikidata records for them. Public data about public office.
+const WD_MP_QUERY = 'SELECT ?p ?pLabel ?posLabel ?partyLabel ?electLabel ?x ?fb ?ig WHERE { VALUES ?pos { wd:Q18912794 wd:Q6814428 } ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS { ?st pq:P582 ?end } OPTIONAL { ?p wdt:P102 ?party } OPTIONAL { ?st pq:P768 ?elect } OPTIONAL { ?p wdt:P2002 ?x } OPTIONAL { ?p wdt:P2013 ?fb } OPTIONAL { ?p wdt:P2003 ?ig } SERVICE wikibase:label { bd:serviceParam wikibase:language "en". } }';
+async function mpsSync(env) {
+  if (!(await ensureTopics(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  let d;
+  try {
+    const r = await fetch('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(WD_MP_QUERY), {
+      headers: { 'Accept': 'application/sparql-results+json', 'User-Agent': 'AXIOM/5.0 (Australian political intelligence; wearecuriousminds.com)' }, signal: abortAfter(25000) });
+    if (!r.ok) return { ok: false, error: 'wikidata_' + r.status, detail: 'Wikidata answered HTTP ' + r.status };
+    d = await r.json();
+  } catch (e) { return { ok: false, error: 'wikidata_unreachable', detail: String((e && e.message) || e).slice(0, 160) }; }
+  const by = {};
+  (((d || {}).results || {}).bindings || []).forEach(b => {
+    const v = k => (b[k] && b[k].value) || '';
+    const id = v('p').split('/').pop(); if (!id) return;
+    const row = by[id] || (by[id] = { id, name: v('pLabel'), party: '', house: '', electorate: '', x: '', facebook: '', instagram: '' });
+    const pos = v('posLabel');
+    if (/senate/i.test(pos)) row.house = 'senate'; else if (/representatives/i.test(pos)) row.house = 'representatives';
+    if (v('partyLabel') && !row.party) row.party = v('partyLabel');
+    if (v('electLabel') && !row.electorate) row.electorate = v('electLabel');
+    if (v('x') && !row.x) row.x = v('x').replace(/^@/, '');
+    if (v('fb') && !row.facebook) row.facebook = v('fb');
+    if (v('ig') && !row.instagram) row.instagram = v('ig');
+  });
+  const rows = Object.values(by).filter(m => m.name && !/^Q\d+$/.test(m.name));
+  if (!rows.length) return { ok: false, error: 'wikidata_empty', detail: 'Wikidata returned no sitting members.' };
+  const now = Date.now();
+  for (let i = 0; i < rows.length; i += 40) {
+    await env.MIND_DB.batch(rows.slice(i, i + 40).map(m => env.MIND_DB.prepare(
+      "INSERT INTO mps(id,name,party,house,electorate,x,facebook,instagram,updated) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, party=excluded.party, house=excluded.house, electorate=excluded.electorate, x=CASE WHEN excluded.x<>'' THEN excluded.x ELSE mps.x END, facebook=CASE WHEN excluded.facebook<>'' THEN excluded.facebook ELSE mps.facebook END, instagram=CASE WHEN excluded.instagram<>'' THEN excluded.instagram ELSE mps.instagram END, updated=excluded.updated")
+      .bind(m.id, m.name, m.party, m.house, m.electorate, m.x, m.facebook, m.instagram, now)));
+  }
+  await kvPut(env.AXIOM_KV, 'mps_synced', String(now), 30 * 86400);
+  return { ok: true, total: rows.length, withX: rows.filter(m => m.x).length, withFacebook: rows.filter(m => m.facebook).length,
+    senate: rows.filter(m => m.house === 'senate').length, representatives: rows.filter(m => m.house === 'representatives').length };
+}
+async function mpsList(env, opts) {
+  opts = opts || {};
+  if (!(await ensureTopics(env))) return [];
+  const w = []; const b = [];
+  if (opts.q) { w.push('(LOWER(name) LIKE ? OR LOWER(electorate) LIKE ? OR LOWER(party) LIKE ?)'); const l = '%' + String(opts.q).toLowerCase().slice(0, 60) + '%'; b.push(l, l, l); }
+  if (opts.house) { w.push('house=?'); b.push(String(opts.house)); }
+  if (opts.withX) w.push("x<>''");
+  return (await env.MIND_DB.prepare('SELECT id, name, party, house, electorate, x, facebook, instagram, updated FROM mps' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY name LIMIT ' + (Math.min(parseInt(opts.limit, 10) || 400, 600))).bind(...b).all()).results || [];
+}
+/** What was said in parliament: OpenAustralia's Hansard search (free key). */
+async function hansardSearch(env, kw, max) {
+  if (!env.OPENAUSTRALIA_KEY) return { ok: false, items: [], detail: 'set OPENAUSTRALIA_KEY (free, openaustralia.org.au/api) to search Hansard' };
+  try {
+    const r = await fetch('https://www.openaustralia.org.au/api/getHansard?key=' + encodeURIComponent(env.OPENAUSTRALIA_KEY) + '&search=' + encodeURIComponent(kw) + '&num=' + (max || 20) + '&order=d&output=js',
+      { headers: { 'User-Agent': 'AXIOM/5.0' }, signal: abortAfter(12000) });
+    if (!r.ok) return { ok: false, items: [], detail: 'OpenAustralia HTTP ' + r.status };
+    const d = await r.json();
+    const rows = (d && d.rows) || [];
+    return { ok: true, items: rows.map(x => ({
+      speaker: (((x.speaker || {}).first_name || '') + ' ' + ((x.speaker || {}).last_name || '')).trim(), party: (x.speaker || {}).party || '',
+      house: x.major === 1 ? 'representatives' : x.major === 101 ? 'senate' : '', date: x.hdate || '',
+      text: stripHtml(x.body || x.extract || '').slice(0, 1500), url: x.listurl ? 'https://www.openaustralia.org.au' + x.listurl : '', id: String(x.gid || ''),
+    })).filter(x => x.text) };
+  } catch (e) { return { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
+}
+/** One keyword research run: the job the Topics view and SIFA both wait on. */
+async function topicRun(env, job, log) {
+  const p = job.params || {};
+  const t0 = Date.now();
+  if (!(await ensureTopics(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  let topic = await topicGet(env, p.id || p.keyword);
+  const keyword = (topic && topic.keyword) || String(p.keyword || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!keyword) return { ok: false, error: 'missing_keyword', detail: 'Give a topic id or a keyword.' };
+  if (!topic) { await topicsUpsert(env, topicNormalize([{ keyword, ns: p.ns || 'cmm', topic: p.topic || '' }]), 'manual'); topic = await topicGet(env, keyword); }
+  const id = (topic && topic.id) || topicSlug(keyword);
+  const ns = String(p.ns || (topic && topic.ns) || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24) || 'cmm';
+  const hours = Math.min(Math.max(parseInt(p.hours, 10) || 168, 24), 24 * 90);
+  const days = Math.round(hours / 24);
+  const win = hours <= 24 ? 'day' : hours <= 168 ? 'week' : 'month';
+  const out = { ok: true, topic: id, keyword, ns, hours, counts: {}, children: {}, filed: 0 };
+  await log('info', 'topic "' + keyword + '" (' + id + ') for ' + ns + ', last ' + days + ' days');
+  // 1. news: the keyword, and the keyword in the mouths of MPs and ministers;
+  //    statements: the same keyword on government and party sites
+  const qNews = [keyword, keyword + ' (minister OR MP OR senator OR opposition)'];
+  const qState = keyword + ' (' + TOPIC_STATEMENT_SITES.map(s => 'site:' + s).join(' OR ') + ')';
+  await log('cmd', 'GET news.google.com/rss/search?q="' + keyword + '" when:' + days + 'd  (+ MP/minister angle, + government and party sites)');
+  const [n1, n2, st, hz] = await Promise.all([gnewsSweep(qNews[0], hours, 30), gnewsSweep(qNews[1], hours, 20), gnewsSweep(qState, hours, 20), hansardSearch(env, keyword, 20)]);
+  const key = n => n.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 70);
+  const seen = new Set(); const news = [];
+  [...n1, ...n2].forEach(n => { const k = key(n); if (!k || seen.has(k)) return; seen.add(k); news.push(n); });
+  news.sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+  const seenS = new Set(); const statements = [];
+  st.forEach(n => { const k = key(n); if (!k || seenS.has(k)) return; seenS.add(k); statements.push(n); });
+  await log('out', news.length + ' news items, ' + statements.length + ' government and party statements' + (hz.ok ? ', ' + hz.items.length + ' Hansard speeches' : ' (Hansard: ' + hz.detail + ')'));
+  out.counts.news = news.length; out.counts.statements = statements.length; out.counts.hansard = hz.items.length;
+  // 2. what the archive already holds on it, across every kind
+  let arch = []; const archBy = {};
+  try {
+    const words = keyword.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 3);
+    if (words.length && (await ensureArchive(env))) {
+      const cond = words.map(() => "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')").join(' AND ');
+      const binds = [Date.now() - hours * 3600000]; words.forEach(w => { const l = arcLike(w); binds.push(l, l); });
+      arch = (await env.MIND_DB.prepare("SELECT kind, src, title, body, url, ts, COALESCE(tone,0) tone FROM arc_items WHERE ts>? AND " + cond + " AND kind NOT IN ('topic_hit','topic_brief','research') ORDER BY ts DESC LIMIT 60").bind(...binds).all()).results || [];
+      arch.forEach(a => { archBy[a.kind] = (archBy[a.kind] || 0) + 1; });
+    }
+  } catch (e) { /* archive optional */ }
+  await log('out', 'archive: ' + arch.length + ' items already on file' + (arch.length ? ' (' + Object.keys(archBy).map(k => k + ' ' + archBy[k]).join(', ') + ')' : ''));
+  out.counts.archive = arch.length; out.archiveByKind = archBy;
+  // 3. the Mind: what this client already knows
+  let mind = []; try { mind = await mindRetrieve(env, ns, keyword, 5); } catch (e) { mind = []; }
+  // 4. MPs on X, from their own accounts - a desktop job; replies included
+  const mps = p.mps === false ? [] : await mpsList(env, { withX: true, limit: 400 });
+  if (mps.length) {
+    const child = await jobCreate(env, 'x', { queries: [keyword], from: mps.map(m => m.x), mps: mps.map(m => ({ x: m.x, name: m.name, party: m.party, house: m.house })), topic: id, ns, time: win, perQuery: 30, threads: 15, commentsPer: 40 }, 'topic:' + id);
+    out.children.x = child.id;
+    await log('info', 'queued X job ' + child.id + ' for the Mac collector: "' + keyword + '" across ' + mps.length + ' MP and senator accounts, replies included');
+  } else await log('info', 'no MP register yet (Sync MPs builds it from Wikidata), so no MP account sweep this run');
+  // 5. the Reddit keyword pass - the Mac collector when one is connected, the worker otherwise
+  {
+    const params = { queries: [keyword], listings: false, topic: id, time: win, threads: 20, commentsPer: 60 };
+    const child = await jobCreate(env, 'reddit', params, 'topic:' + id);
+    out.children.reddit = child.id;
+    await log('info', 'queued Reddit job ' + child.id + (child.local ? ' (worker)' : ' (Mac collector)') + ': "' + keyword + '" across Reddit');
+    if (child.local) out.childLocal = { id: child.id, params };
+  }
+  // 6. file the hits under the topic
+  const rows = [];
+  news.forEach(n => rows.push({ src: n.outlet || 'news', title: n.title, body: '', url: n.link, ts: Date.parse(n.date) || Date.now(), meta: { topic: id, keyword, ns, source: 'news', outlet: n.outlet || '' } }));
+  statements.forEach(n => rows.push({ src: n.outlet || 'statement', title: n.title, body: '', url: n.link, ts: Date.parse(n.date) || Date.now(), meta: { topic: id, keyword, ns, source: 'statement', outlet: n.outlet || '' } }));
+  hz.items.forEach(h => rows.push({ src: 'hansard', title: (h.speaker || 'Speech') + (h.party ? ' (' + h.party + ')' : '') + ': ' + h.text.slice(0, 120), body: h.text, url: h.url || ('x:hansard:' + h.id), ts: Date.parse(h.date) || Date.now(), tone: commentTone(h.text), meta: { topic: id, keyword, ns, source: 'hansard', mp: { name: h.speaker, party: h.party, house: h.house } } }));
+  for (let i = 0; i < rows.length; i += 150) out.filed += await archiveItems(env, 'topic_hit', rows.slice(i, i + 150));
+  await log('info', 'filed ' + out.filed + ' new items under topic ' + id);
+  // 7. read the strongest pages, then the brief
+  const picks = []; const outlets = new Set();
+  for (const n of [...statements.slice(0, 2), ...news]) { const o = (n.outlet || '').toLowerCase(); if (o && outlets.has(o)) continue; outlets.add(o); picks.push(n); if (picks.length >= 4) break; }
+  for (const pk of picks) await log('cmd', 'GET ' + String(pk.link || '').slice(0, 110));
+  const pages = (await Promise.all(picks.map(pk => pageGrab(pk.link)))).filter(Boolean);
+  await log('out', pages.length + ' pages read');
+  const sources = []; const blocks = [];
+  pages.forEach((pg, i) => { sources.push({ id: 'W' + (i + 1), title: pg.title || pg.url, url: pg.url, origin: 'live page' }); blocks.push('[W' + (i + 1) + '] PAGE: ' + (pg.title || pg.url) + '\n' + pg.text); });
+  news.slice(0, 25).forEach((n, i) => { sources.push({ id: 'N' + (i + 1), title: n.title, url: n.link, origin: 'news: ' + (n.outlet || '') }); blocks.push('[N' + (i + 1) + '] (' + (n.outlet || 'news') + ', ' + (n.date || '').slice(0, 16) + ') ' + n.title); });
+  statements.slice(0, 15).forEach((n, i) => { sources.push({ id: 'G' + (i + 1), title: n.title, url: n.link, origin: 'statement: ' + (n.outlet || '') }); blocks.push('[G' + (i + 1) + '] (' + (n.outlet || 'statement') + ', ' + (n.date || '').slice(0, 16) + ') ' + n.title); });
+  hz.items.slice(0, 12).forEach((h, i) => { sources.push({ id: 'H' + (i + 1), title: h.speaker + ' in the ' + (h.house || 'parliament'), url: h.url, origin: 'Hansard ' + h.date }); blocks.push('[H' + (i + 1) + '] (Hansard ' + h.date + ', ' + h.speaker + (h.party ? ', ' + h.party : '') + ') ' + h.text.slice(0, 600)); });
+  arch.slice(0, 20).forEach((a, i) => { sources.push({ id: 'A' + (i + 1), title: a.title, url: a.url && a.url.indexOf('x:') !== 0 ? a.url : '', origin: 'archive: ' + a.kind }); blocks.push('[A' + (i + 1) + '] (' + a.kind + '/' + (a.src || '') + ', ' + new Date(a.ts || 0).toISOString().slice(0, 10) + ') ' + a.title + (a.body ? ' - ' + String(a.body).slice(0, 160) : '')); });
+  (mind || []).forEach((h, i) => { sources.push({ id: 'S' + (i + 1), title: (h.meta && h.meta.title) || 'doc', url: '', origin: h.ns === 'cmm' ? 'CMM shared' : 'client KB' }); blocks.push('[S' + (i + 1) + '] (' + ((h.meta && h.meta.kind) || 'doc') + ') ' + ((h.meta && h.meta.title) || '') + ': ' + String((h.meta && h.meta.snippet) || '').slice(0, 250)); });
+  let brief = null;
+  if (env.ANTHROPIC_API_KEY && sources.length) {
+    const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || 'Curious Minds';
+    const sys = 'You are the research desk of an Australian political intelligence platform, briefing ' + client + '. Using ONLY the numbered sources, write a keyword brief as strict JSON and nothing else: '
+      + '{"summary":"3-4 sentences on where this topic stands right now","volume":"one sentence on how much coverage there is and where",'
+      + '"positions":[{"who":"name","role":"party and role","stance":"one line","evidence":"short verbatim or close paraphrase","source":"[N1]"}],'
+      + '"coverage":[{"outlet":"","angle":"","source":"[N2]"}],"statements":[{"who":"","what":"","source":"[G1]"}],'
+      + '"changes":["what is new, cited"],"risks":["for the client, cited"],"openings":["for the client, cited"],"watch":["2-3 concrete things to monitor"],"gaps":["what the sources do not cover"]}. '
+      + 'Cite with the source ids given. Never invent names, numbers or quotes; a field with no support is an empty array. Australian English.';
+    await log('cmd', 'claude: synthesise the brief from ' + sources.length + ' sources');
+    try {
+      const txt = await claudeMsg(env, sys, 'KEYWORD: ' + keyword + '\nCLIENT NAMESPACE: ' + ns + '\n\nSOURCES:\n' + blocks.join('\n\n').slice(0, 60000), 3000, 90000);
+      const s2 = typeof txt === 'string' ? txt : (txt && (txt.text || JSON.stringify(txt))) || '';
+      brief = JSON.parse((s2.match(/\{[\s\S]*\}/) || ['{}'])[0]);
+      await log('out', 'brief: ' + (brief.positions || []).length + ' positions, ' + (brief.coverage || []).length + ' outlets, ' + (brief.risks || []).length + ' risks');
+    } catch (e) { await log('err', 'brief failed: ' + String((e && e.message) || e).slice(0, 120)); brief = null; }
+  } else await log('info', env.ANTHROPIC_API_KEY ? 'nothing found to brief on' : 'ANTHROPIC_API_KEY not set: hits filed, no brief written');
+  // 8. remember the run: the full brief in KV, a pointer in the archive, the ledger
+  const briefDoc = { topic: id, keyword, ns, at: t0, job: job.id, hours, counts: out.counts, archiveByKind: archBy, children: out.children, brief, sources };
+  try { await kvPut(env.AXIOM_KV, 'topic_brief_' + id, JSON.stringify(briefDoc), 90 * 86400); } catch (e) {}
+  await archiveItems(env, 'topic_brief', [{ src: 'axiom', title: keyword, body: String((brief && brief.summary) || '').slice(0, 2000), url: 'x:topic:' + id + ':' + t0, ts: t0, meta: { topic: id, keyword, ns, counts: out.counts, children: out.children, hasBrief: !!brief } }]);
+  out.hasBrief = !!brief; out.sources = sources.length;
+  try {
+    await env.MIND_DB.prepare('UPDATE topics SET last_run=?, last_job=?, hits=COALESCE(hits,0)+? WHERE id=?').bind(t0, job.id, out.filed, id).run();
+    await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
+    await env.MIND_DB.prepare('INSERT INTO mind_runs(ns,mode,q,created) VALUES(?,?,?,?)').bind(ns, 'topic', keyword.slice(0, 200), Date.now()).run();
+  } catch (e) {}
+  out.ms = Date.now() - t0;
+  return out;
+}
+/** Everything on file for one topic, for the view and for SIFA. */
+async function topicResults(env, idOrKeyword, days) {
+  const topic = await topicGet(env, idOrKeyword);
+  const id = (topic && topic.id) || topicSlug(idOrKeyword);
+  if (!id) return null;
+  const since = Date.now() - (Math.min(Math.max(parseInt(days, 10) || 30, 1), 365)) * 86400000;
+  const db = env.MIND_DB;
+  const pj = s => { try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } };
+  const hits = (await db.prepare("SELECT src, title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.source') source, json_extract(meta,'$.outlet') outlet, json_extract(meta,'$.mp') mp FROM arc_items WHERE kind='topic_hit' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 300").bind(id, since).all()).results || [];
+  const x = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.mp') mp, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='x' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
+  const reddit = (await db.prepare("SELECT title, body, url, ts, COALESCE(tone,0) tone, json_extract(meta,'$.id') id, json_extract(meta,'$.sub') sub, json_extract(meta,'$.score') score, json_extract(meta,'$.comments') comments, json_extract(meta,'$.issues') issues FROM arc_items WHERE kind='reddit_thread' AND json_extract(meta,'$.topic')=? AND ts>? ORDER BY ts DESC LIMIT 80").bind(id, since).all()).results || [];
+  const cm = (await db.prepare("SELECT json_extract(meta,'$.platform') platform, COUNT(*) n, SUM(tone=-1) hostile, SUM(tone=1) supportive FROM arc_items WHERE kind IN ('sig_comment','reddit_comment') AND json_extract(meta,'$.topic')=? AND ts>? GROUP BY platform").bind(id, since).all()).results || [];
+  const jobs = (await db.prepare('SELECT id,source,status,agent,created,finished,ok FROM bridge_jobs WHERE who=? ORDER BY created DESC LIMIT 12').bind('topic:' + id).all()).results || [];
+  let brief = null; try { brief = JSON.parse((await kvGet(env.AXIOM_KV, 'topic_brief_' + id)) || 'null'); } catch (e) { brief = null; }
+  const strip = r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, source: r.source || '', outlet: r.outlet || r.src || '', mp: pj(r.mp), excerpt: String(r.body || '').split('\n')[0].slice(0, 400) });
+  return {
+    ok: true, topic: topic || { id, keyword: idOrKeyword }, days: Math.round((Date.now() - since) / 86400000), brief,
+    news: hits.filter(h => h.source === 'news').map(strip), statements: hits.filter(h => h.source === 'statement').map(strip), hansard: hits.filter(h => h.source === 'hansard').map(strip),
+    x: x.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, score: r.score, comments: r.comments, mp: pj(r.mp), issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
+    reddit: reddit.map(r => ({ title: r.title, url: r.url, ts: r.ts, tone: r.tone, id: r.id, sub: r.sub || '', score: r.score, comments: r.comments, issues: pj(r.issues) || [], excerpt: String(r.body || '').split('\n')[0].slice(0, 400) })),
+    comments: cm.map(c => ({ platform: c.platform || 'reddit', n: c.n || 0, hostile: c.hostile || 0, supportive: c.supportive || 0 })),
+    jobs,
+  };
+}
+/** Every tick: pull SIFA's list hourly, then run the two stalest active topics. */
+async function topicsCron(env) {
+  if (!env.MIND_DB || !(await ensureTopics(env))) return { ok: false };
+  const now = Date.now();
+  const out = { ok: true, synced: false, ran: [] };
+  const last = Number((await kvGet(env.AXIOM_KV, 'topics_synced')) || 0);
+  if (env.SIFA_TOKEN && now - last > 3600000) {
+    const r = await sifaPull(env);
+    let up = null;
+    if (r.ok) up = await topicsUpsert(env, r.keywords, 'sifa');
+    await kvPut(env.AXIOM_KV, 'topics_synced', String(now), 86400);
+    await kvPut(env.AXIOM_KV, 'topics_sync_result', JSON.stringify({ at: now, ok: r.ok, n: (r.keywords || []).length, error: r.error || '', detail: r.detail || '', added: up ? up.added : 0, updated: up ? up.updated : 0 }), 7 * 86400);
+    out.synced = r.ok;
+  }
+  const due = (await env.MIND_DB.prepare('SELECT id FROM topics WHERE active=1 AND COALESCE(last_run,0)<? ORDER BY priority DESC, COALESCE(last_run,0) ASC LIMIT 2').bind(now - 6 * 3600000).all()).results || [];
+  for (const t of due) {
+    const params = { id: t.id, hours: 168 };
+    const job = await jobCreate(env, 'topic', params, 'cron');
+    await jobRunLocal(env, { id: job.id, source: 'topic', params });
+    out.ran.push(t.id);
+  }
+  return out;
+}
+/** SIFA's own bearer key on the inbound routes; never the AXIOM access key. */
+function sifaInbound(req, env) {
+  if (!env.SIFA_INBOUND_KEY) return { ok: false, status: 503, error: 'inbound_not_configured', detail: 'Set the worker secret SIFA_INBOUND_KEY and give that value to SIFA as its bearer token for AXIOM.' };
+  const h = req.headers.get('Authorization') || '';
+  const tok = /^Bearer\s+(.+)$/i.test(h) ? h.replace(/^Bearer\s+/i, '').trim() : '';
+  if (!tok || !ctEq(tok, env.SIFA_INBOUND_KEY)) return { ok: false, status: 401, error: 'unauthorized', detail: 'Send Authorization: Bearer <the key AXIOM issued to SIFA>.' };
+  return { ok: true };
+}
+
 async function signalsCron(env) {
   if (!env.MIND_DB) return;
   const last = Number(await kvGet(env.AXIOM_KV, 'signals_last_sweep') || 0);
@@ -2470,6 +2795,17 @@ async function jobRunLocal(env, job) {
       // the shape of the return: the console should say so in red
       ok = !!(out && out.ok) && (out.threads > 0 || !(out.errors || []).length);
       if (!ok && out) out.detail = 'Nothing was collected. ' + ((out.errors || [])[0] || '') + ' Reddit refuses cloud networks; run tools/reach-agent.py on your Mac and press Sweep again.';
+    } else if (job.source === 'topic') {
+      out = await topicRun(env, job, log);
+      ok = !!(out && out.ok);
+      if (ok && out.childLocal) {
+        // the Reddit keyword pass was routed to the worker: run it once this job is closed
+        const child = out.childLocal; delete out.childLocal;
+        await log('info', 'running Reddit job ' + child.id + ' in the worker next');
+        await log.flush(); await jobFinish(env, job.id, ok, out);
+        await jobRunLocal(env, { id: child.id, source: 'reddit', params: child.params });
+        return out;
+      }
     } else if (job.source === 'linkedin') {
       out = await linkedinSweep(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
@@ -3501,14 +3837,15 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/topics') || path.startsWith('/mps')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
     const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
-      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/');
+      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
+      || path.startsWith('/topics') || path.startsWith('/mps');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -4616,6 +4953,113 @@ export default {
     //    GET  /signals/status                   counts and tone per platform
     //    POST /signals/analyse {platform,threads|days,ns}   Claude reads them (full role)
     //    POST /signals/mind {platform,threads,ns,title}     file a digest in the Mind (full role)
+    // ==========================================================================
+    // TOPICS - keyword research for SIFA and for us
+    //    GET  /topics                        the keyword list and status (read)
+    //    GET  /topics/results?id=&days=      everything on file for a topic (read)
+    //    GET  /topics/probe                  what SIFA answers right now (full)
+    //    POST /topics/sync                   pull SIFA's list into the table (full)
+    //    POST /topics/add {keyword,topic,ns} | /topics/update {id,active,ns,topic} | /topics/delete {id}
+    //    POST /topics/run {id|keyword,ns,hours,mps}   start a research job (full)
+    //    GET  /mps?q=&house=&x=1             the MP register (read); POST /mps/sync rebuilds it from Wikidata
+    // SIFA's side, gated by its own bearer key (SIFA_INBOUND_KEY), never the AXIOM key:
+    //    POST /sifa/keywords {keywords:[...]}   push keywords in
+    //    GET  /sifa/topics                      the list with run status
+    //    GET  /sifa/results?keyword=&days=      results and the brief
+    //    POST /sifa/run {keyword,client,hours}  ask for a fresh run
+    if (path.startsWith('/sifa/')) {
+      const g = sifaInbound(req, env);
+      if (!g.ok) return jsonResp({ error: g.error, detail: g.detail }, g.status);
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let b = {}; if (req.method === 'POST') { try { b = await req.json(); } catch (e) { b = {}; } }
+      if (path === '/sifa/keywords' && req.method === 'POST') {
+        const list = topicNormalize(b.keywords || b.data || b.items || b);
+        if (!list.length) return jsonResp({ ok: false, error: 'no_keywords', detail: 'Send {"keywords":[{"keyword":"critical minerals","topic":"resources","client":"mca"}, ...]} or a plain array of strings.' }, 400);
+        const r = await topicsUpsert(env, list, 'sifa-push');
+        return jsonResp({ ok: true, received: list.length, added: r.added, updated: r.updated, active: r.total, keywords: list.map(k => ({ id: k.id, keyword: k.keyword, topic: k.topic, client: k.ns })) });
+      }
+      if (path === '/sifa/topics') {
+        const list = await topicsList(env);
+        return jsonResp({ ok: true, topics: list.map(t => ({ id: t.id, keyword: t.keyword, topic: t.topic, client: t.ns, active: !!t.active, lastRun: t.last_run || 0, hits: t.hits || 0, results: '/sifa/results?keyword=' + encodeURIComponent(t.keyword) })) });
+      }
+      if (path === '/sifa/results') {
+        const kw = String(reqUrl.searchParams.get('keyword') || reqUrl.searchParams.get('id') || '').slice(0, 120);
+        if (!kw) return jsonResp({ error: 'missing_keyword' }, 400);
+        const r = await topicResults(env, kw, reqUrl.searchParams.get('days') || 30);
+        if (!r) return jsonResp({ error: 'unknown_topic' }, 404);
+        return jsonResp(r);
+      }
+      if (path === '/sifa/run' && req.method === 'POST') {
+        const kw = String(b.keyword || b.id || '').slice(0, 120);
+        if (!kw) return jsonResp({ error: 'missing_keyword' }, 400);
+        const params = { keyword: kw, ns: String(b.client || b.ns || '').slice(0, 24), hours: parseInt(b.hours, 10) || 168 };
+        const job = await jobCreate(env, 'topic', params, 'sifa');
+        if (job.local) ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'topic', params }));
+        return jsonResp({ ok: true, job: job.id, keyword: kw, poll: '/sifa/results?keyword=' + encodeURIComponent(kw) });
+      }
+      return jsonResp({ error: 'not_found' }, 404);
+    }
+    if (path.startsWith('/topics') || path.startsWith('/mps')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let tb = {}; if (req.method === 'POST') { try { tb = await req.json(); } catch (e) { tb = {}; } }
+      await ensureTopics(env);
+      if (path === '/topics' && req.method === 'GET') {
+        const list = await topicsList(env);
+        let sync = null; try { sync = JSON.parse((await kvGet(env.AXIOM_KV, 'topics_sync_result')) || 'null'); } catch (e) { sync = null; }
+        const mpc = (await env.MIND_DB.prepare("SELECT COUNT(*) n, SUM(x<>'') withX FROM mps").first()) || {};
+        return jsonResp({ ok: true, topics: list,
+          sifa: { configured: !!env.SIFA_TOKEN, inbound: !!env.SIFA_INBOUND_KEY, url: env.SIFA_URL || SIFA_URL_DEFAULT, last: sync },
+          mps: { total: mpc.n || 0, withX: mpc.withX || 0, synced: Number((await kvGet(env.AXIOM_KV, 'mps_synced')) || 0) },
+          hansard: !!env.OPENAUSTRALIA_KEY, agents: await agentsSeen(env) });
+      }
+      if (path === '/topics/results') {
+        const id = String(reqUrl.searchParams.get('id') || reqUrl.searchParams.get('keyword') || '').slice(0, 120);
+        if (!id) return jsonResp({ error: 'missing_id' }, 400);
+        const r = await topicResults(env, id, reqUrl.searchParams.get('days') || 30);
+        if (!r) return jsonResp({ error: 'unknown_topic' }, 404);
+        return jsonResp(r);
+      }
+      if (path === '/mps' && req.method === 'GET') {
+        const list = await mpsList(env, { q: reqUrl.searchParams.get('q') || '', house: reqUrl.searchParams.get('house') || '', withX: reqUrl.searchParams.get('x') === '1', limit: reqUrl.searchParams.get('limit') || 400 });
+        return jsonResp({ ok: true, mps: list, total: list.length, synced: Number((await kvGet(env.AXIOM_KV, 'mps_synced')) || 0) });
+      }
+      if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Syncing, adding and running topics need a full-access key.' }, 403);
+      if (path === '/topics/probe') { const r = await sifaPull(env); return jsonResp(r, r.ok ? 200 : (r.error === 'sifa_not_configured' ? 501 : 502)); }
+      if (path === '/topics/sync' && req.method === 'POST') {
+        const r = await sifaPull(env);
+        if (!r.ok) return jsonResp(r, r.error === 'sifa_not_configured' ? 501 : 502);
+        const up = await topicsUpsert(env, r.keywords, 'sifa');
+        await kvPut(env.AXIOM_KV, 'topics_synced', String(Date.now()), 86400);
+        await kvPut(env.AXIOM_KV, 'topics_sync_result', JSON.stringify({ at: Date.now(), ok: true, n: r.keywords.length, added: up.added, updated: up.updated }), 7 * 86400);
+        return jsonResp({ ok: true, received: r.keywords.length, added: up.added, updated: up.updated, active: up.total, url: r.url });
+      }
+      if (path === '/topics/add' && req.method === 'POST') {
+        const list = topicNormalize([{ keyword: tb.keyword, topic: tb.topic, client: tb.ns || tb.client }]);
+        if (!list.length) return jsonResp({ error: 'missing_keyword', detail: 'Give a keyword.' }, 400);
+        const up = await topicsUpsert(env, list, 'manual');
+        return jsonResp({ ok: true, topic: await topicGet(env, list[0].id), added: up.added, updated: up.updated });
+      }
+      if (path === '/topics/update' && req.method === 'POST') {
+        const t = await topicGet(env, tb.id); if (!t) return jsonResp({ error: 'unknown_topic' }, 404);
+        await env.MIND_DB.prepare("UPDATE topics SET active=?, ns=COALESCE(NULLIF(?,''),ns), topic=COALESCE(NULLIF(?,''),topic), updated=? WHERE id=?")
+          .bind(tb.active === undefined ? t.active : (tb.active ? 1 : 0), String(tb.ns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24), String(tb.topic || '').slice(0, 80), Date.now(), t.id).run();
+        return jsonResp({ ok: true, topic: await topicGet(env, t.id) });
+      }
+      if (path === '/topics/delete' && req.method === 'POST') {
+        const t = await topicGet(env, tb.id); if (!t) return jsonResp({ error: 'unknown_topic' }, 404);
+        await env.MIND_DB.prepare('DELETE FROM topics WHERE id=?').bind(t.id).run();
+        return jsonResp({ ok: true, deleted: t.id });
+      }
+      if (path === '/topics/run' && req.method === 'POST') {
+        const params = { id: String(tb.id || '').slice(0, 60), keyword: String(tb.keyword || '').slice(0, 120), ns: String(tb.ns || '').slice(0, 24), hours: parseInt(tb.hours, 10) || 168, mps: tb.mps !== false };
+        if (!params.id && !params.keyword) return jsonResp({ error: 'missing_keyword', detail: 'Give a topic id or a keyword.' }, 400);
+        const job = await jobCreate(env, 'topic', params, auth.name);
+        if (job.local) ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'topic', params }));
+        return jsonResp({ ok: true, id: job.id, where: job.local ? 'worker' : 'desktop' });
+      }
+      if (path === '/mps/sync' && req.method === 'POST') { const r = await mpsSync(env); return jsonResp(r, r.ok ? 200 : 502); }
+      return jsonResp({ error: 'not_found' }, 404);
+    }
     if (path.startsWith('/signals/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sbody = {}; if (req.method === 'POST') { try { sbody = await req.json(); } catch (e) { sbody = {}; } }
@@ -6367,6 +6811,8 @@ async function handleScheduled(env) {
   // Signals: the clients' own LinkedIn and Meta pages, 6-hourly, so the view is
   // never empty when someone opens it. X and Reddit come from the desktop agent.
   try { await signalsCron(env); } catch (e) {}
+  // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
+  try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));
