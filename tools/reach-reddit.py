@@ -119,15 +119,27 @@ def issues_of(text):
 # watch is kept only when something on it says Australia: the sub name, a
 # place, an institution, a politician, a masthead, or one of our clients' own
 # terms. Mirrors AU_RX in the worker.
+# Every marker must mean Australia and nothing else. Not "smh" (Reddit slang),
+# "the age" (a phrase), Medicare, PBS or ABC News (American too), "rising tide"
+# or "market forces" (idioms), Darwin (the naturalist), Victoria (also BC).
 AU_RX = re.compile(
-    r'austral|aussie|straya|\bauspol\b|ausvotes|springst|nswpol|qldpol|wapol|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra'
-    r'|adelaide|hobart|darwin|northern territory|perth|brisbane|sydney|melbourne|geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns'
-    r'|hunter valley|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling'
-    r'|\brba\b|albanese|dutton|sussan ley|littleproud|chalmers|chris bowen|plibersek|jacinta allan|brad battin|\balp\b|the nationals|\bnats\b|the coalition|the greens|one nation|teal independent|senate estimates'
-    r'|centrelink|medicare|\bpbs\b|\baemo\b|\baccc\b|\bato\b|\bnbn\b|\bcfmeu\b|fair work|\bapra\b|\basic\b|productivity commission'
-    r'|woolworths|\bcoles\b|bunnings|\bafr\b|abc news|the age\b|\bsmh\b|news\.com\.au|9news|7news|sky news australia|the australian\b|guardian australia|newspoll|crikey'
-    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line', re.I)
-AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)', re.I)
+    # places
+    r'austral|aussie|straya|\bauspol\b|ausvotes|springst|nswpol|qldpol|wapol|\bnsw\b|\bqld\b|queensland|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne'
+    r'|geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns|toowoomba|launceston|northern territory|\bperth\b(?! and kinross)|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling|hunter valley (coal|mine|mining)'
+    r'|regional victoria|victorian? (government|premier|parliament|election|budget|labor|liberals?|nationals|treasurer|opposition)|victoria police|premier of victoria'
+    # people and parties
+    r'|albanese|peter dutton|sussan ley|littleproud|jim chalmers|chris bowen|plibersek|penny wong|jacinta allan|brad battin|chris minns|crisafulli|malinauskas|pauline hanson|barnaby joyce|jacqui lambie|david pocock|bob katter|michele bullock|angus taylor'
+    r'|\balp\b|federal labor|labor government|australian greens|greens (senator|mp)|the nationals|nationals (mp|senator|leader)|teal independent|senate estimates|coalition (frontbench|opposition)'
+    # institutions and things only Australia has
+    r'|\brba\b|reserve bank of australia|centrelink|medicare (levy|rebate|card)|bulk.bill|\bpbs (script|medicine|listing|co-?payment)|\baemo\b|\baccc\b|\bato\b|\bnbn\b|\bcfmeu\b|fair work (commission|ombudsman|act)|\bapra\b|productivity commission'
+    r'|superannuation|negative gearing|\bhecs\b|\banzac\b|\bafl\b|\bnrl\b|state of origin|triple j|\baud\b|australian dollars?'
+    # brands and mastheads
+    r'|woolworths|\bwoolies\b|\bcoles\b|bunnings|\bqantas\b|\btelstra\b|\boptus\b|\bwestpac\b|commbank|commonwealth bank|\bafr\b|abc\.net\.au|abc news australia|sydney morning herald|news\.com\.au|sky news australia|the australian\b|guardian australia|newspoll|crikey|9news\.com\.au|7news\.com\.au'
+    # our clients and their opponents, by their own names
+    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line'
+    # the vernacular
+    r'|\bservo\b|\barvo\b|\bmaccas\b|\bbogan\b|\btradies?\b|\butes?\b|fair dinkum', re.I)
+AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)', re.I)
 
 
 def au_relevant(sub, text, watched=()):

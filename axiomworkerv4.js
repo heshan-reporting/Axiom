@@ -1832,16 +1832,28 @@ const REDDIT_POLITICS = ['AustralianPolitics', 'australia', 'AusPol', 'AusFinanc
 // kept only when something on it says Australia: the sub, a place, an
 // institution, a politician, a masthead, or one of our clients' own terms.
 // tools/reach-reddit.py carries the same expression (AU_RX) for the desktop.
+// Every marker must mean Australia and nothing else. Not "smh" (Reddit slang),
+// "the age" (a phrase), Medicare, PBS or ABC News (American too), "rising tide"
+// or "market forces" (idioms), Darwin (the naturalist), Victoria (also BC).
 const AU_RX = new RegExp([
-  'austral|aussie|straya|\\bauspol\\b|ausvotes|springst|nswpol|qldpol|wapol|\\bnsw\\b|\\bqld\\b|queensland|victoria|tasmania|canberra',
-  'adelaide|hobart|darwin|northern territory|perth|brisbane|sydney|melbourne|geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns',
-  'hunter valley|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling',
-  '\\brba\\b|albanese|dutton|sussan ley|littleproud|chalmers|chris bowen|plibersek|jacinta allan|brad battin|\\balp\\b|the nationals|\\bnats\\b|the coalition|the greens|one nation|teal independent|senate estimates',
-  'centrelink|medicare|\\bpbs\\b|\\baemo\\b|\\baccc\\b|\\bato\\b|\\bnbn\\b|\\bcfmeu\\b|fair work|\\bapra\\b|\\basic\\b|productivity commission',
-  'woolworths|\\bcoles\\b|bunnings|\\bafr\\b|abc news|the age\\b|\\bsmh\\b|news\\.com\\.au|9news|7news|sky news australia|the australian\\b|guardian australia|newspoll|crikey',
-  'minerals council|pharmacy guild|master builders|lock the gate|rising tide|market forces|hands off our fuel|fuel tax credit|60.day dispensing|bulk billing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line',
+  // places
+  'austral|aussie|straya|\\bauspol\\b|ausvotes|springst|nswpol|qldpol|wapol|\\bnsw\\b|\\bqld\\b|queensland|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne',
+  'geelong|gippsland|ballarat|bendigo|wollongong|townsville|cairns|toowoomba|launceston|northern territory|\\bperth\\b(?! and kinross)|pilbara|bowen basin|beetaloo|narrabri|north ?west shelf|latrobe valley|murray.darling|hunter valley (coal|mine|mining)',
+  'regional victoria|victorian? (government|premier|parliament|election|budget|labor|liberals?|nationals|treasurer|opposition)|victoria police|premier of victoria',
+  // people and parties
+  'albanese|peter dutton|sussan ley|littleproud|jim chalmers|chris bowen|plibersek|penny wong|jacinta allan|brad battin|chris minns|crisafulli|malinauskas|pauline hanson|barnaby joyce|jacqui lambie|david pocock|bob katter|michele bullock|angus taylor',
+  '\\balp\\b|federal labor|labor government|australian greens|greens (senator|mp)|the nationals|nationals (mp|senator|leader)|teal independent|senate estimates|coalition (frontbench|opposition)',
+  // institutions and things only Australia has
+  '\\brba\\b|reserve bank of australia|centrelink|medicare (levy|rebate|card)|bulk.bill|\\bpbs (script|medicine|listing|co-?payment)|\\baemo\\b|\\baccc\\b|\\bato\\b|\\bnbn\\b|\\bcfmeu\\b|fair work (commission|ombudsman|act)|\\bapra\\b|productivity commission',
+  'superannuation|negative gearing|\\bhecs\\b|\\banzac\\b|\\bafl\\b|\\bnrl\\b|state of origin|triple j|\\baud\\b|australian dollars?',
+  // brands and mastheads
+  'woolworths|\\bwoolies\\b|\\bcoles\\b|bunnings|\\bqantas\\b|\\btelstra\\b|\\boptus\\b|\\bwestpac\\b|commbank|commonwealth bank|\\bafr\\b|abc\\.net\\.au|abc news australia|sydney morning herald|news\\.com\\.au|sky news australia|the australian\\b|guardian australia|newspoll|crikey|9news\\.com\\.au|7news\\.com\\.au',
+  // our clients and their opponents, by their own names
+  'minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line',
+  // the vernacular
+  '\\bservo\\b|\\barvo\\b|\\bmaccas\\b|\\bbogan\\b|\\btradies?\\b|\\butes?\\b|fair dinkum',
 ].join('|'), 'i');
-const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|newcastle|geelong|goldcoast|wollongong)/i;
+const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)/i;
 /** Is this thread about Australia? Watched sub, Australian-looking sub, or a marker in the text. */
 function auRelevant(sub, text) {
   const s = String(sub || '');
@@ -4687,7 +4699,8 @@ export default {
           if (sort === 'relevance') {
             // what the client is argued about first: issue breadth, then the
             // comments we hold, then how busy the thread is; ties by recency
-            const wt = r => r.issuesArr.length * 1000 + (r.held ? r.held.n * 20 : 0) + Math.min(Number(r.comments) || 0, 500) + (r.rel ? 0 : -5000);
+            const watched = r => isReddit && REDDIT_POLITICS.some(w => w.toLowerCase() === String(r.channel || '').toLowerCase());
+            const wt = r => (watched(r) ? 1500 : 0) + r.issuesArr.length * 1000 + (r.held ? r.held.n * 20 : 0) + Math.min(Number(r.comments) || 0, 500) + (r.rel ? 0 : -5000);
             rows.sort((a, b) => (wt(b) - wt(a)) || ((b.ts || 0) - (a.ts || 0)));
           }
           rows = rows.slice(0, lim);
