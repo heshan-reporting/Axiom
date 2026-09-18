@@ -32,6 +32,46 @@ _spec.loader.exec_module(rr)
 WORKER = rr.WORKER
 PLATFORM = 'x'
 
+# What a 404 from twitter-cli actually means, written out because working it
+# out from scratch costs an hour (18 September 2026, and it was not the first
+# time). X requires an `x-client-transaction-id` header on search and ignores
+# it on `status`, so a broken generator looks exactly like a bad query: the
+# session authenticates, `twitter status` prints the account, and every search
+# returns a bare 404 with no message.
+TRANSACTION_HINT = (
+    '. X requires an x-client-transaction-id header on search and ignores it on status, '
+    'which is why the session authenticates and every search still 404s. twitter-cli builds '
+    'that header by scraping x.com, and its generator failed to start '
+    '(x_client_transaction/utils.py calls .search(...).group(1) without checking for a match, '
+    'so X changing the page raises "NoneType has no attribute group"). '
+    'No local flag or reinstall fixes it - the tool needs an upstream patch. '
+    'Until there is one, X search is unavailable; the paid X API and the Apify actor both still work.'
+)
+NOT_FOUND_HINT = (
+    '. X answered 404. If `twitter status` works but every search 404s, it is the '
+    'client-transaction generator rather than the query - run this again and read the '
+    'stderr for "Failed to init ClientTransaction".'
+)
+# twitter-cli logs this to stderr and carries on, so the failure is silent
+# until a search fails much later with an error that names none of it.
+TRANSACTION_BROKEN = 'Failed to init ClientTransaction'
+
+
+class XUnavailable(RuntimeError):
+    """Signed in, and still unable to search.
+
+    Its own type because the two outcomes need different handling: a
+    collector that crashed should be retried and looked at, while X being
+    unreadable is a standing condition that no retry helps and that the
+    operator has to see named in the job log.
+    """
+
+
+def assert_searchable():
+    """Raise before a sweep that would return nothing and look successful."""
+    if transaction_generator_broken():
+        raise XUnavailable('X search is unavailable' + TRANSACTION_HINT)
+
 
 def run_twitter(args, timeout=90):
     """Run `twitter ... --json` and return its data payload."""
@@ -59,8 +99,25 @@ def run_twitter(args, timeout=90):
             msg += '. X needs a logged-in browser session: sign in to x.com in Chrome, Arc, Edge, Firefox or Brave on this Mac, then run `twitter status`.'
         if 'rate' in (msg + code).lower() or '429' in msg:
             msg += '. X is rate-limiting; wait 15 minutes.'
+        # A 404 here is almost never a missing object. Say which it is, and say
+        # it from the evidence: the warning twitter-cli printed to stderr.
+        if '404' in (msg + code) or 'not_found' in (msg + code).lower():
+            msg += TRANSACTION_HINT if TRANSACTION_BROKEN in (p.stderr or '') else NOT_FOUND_HINT
         raise RuntimeError('twitter %s: %s' % (code, msg))
     return d.get('data', d)
+
+
+def transaction_generator_broken():
+    """True when twitter-cli cannot build the header X requires on search.
+
+    Checked separately from the payload because twitter-cli treats it as a
+    warning: it authenticates, returns ok, and only search fails, much later.
+    """
+    try:
+        p = subprocess.run(['twitter', 'status', '--json'], capture_output=True, text=True, timeout=45)
+    except Exception:
+        return False
+    return TRANSACTION_BROKEN in (p.stderr or '')
 
 
 def status():
@@ -218,7 +275,10 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
                     seen[tid] = t
         except RuntimeError as e:
             errors.append('search "%s": %s' % (q, e)); log('err', str(e))
+            # Conditions that will not change between keywords: stop, rather
+            # than log the same failure once per keyword and return nothing.
             if 'logged-in' in str(e) or 'not installed' in str(e): raise
+            if 'x-client-transaction-id' in str(e): raise XUnavailable(str(e))
             if 'rate-limiting' in str(e): break
         time.sleep(pace)
     posts = list(seen.values())
@@ -267,6 +327,14 @@ def main(argv=None):
         log('info', 'twitter: %s' % (st.get('user', {}).get('screenName') and 'signed in' or json.dumps(st)[:100]))
     except RuntimeError as e:
         print('X session check failed: %s' % e, file=sys.stderr); return 2
+    # Signed in is not the same as able to search. Stop here rather than run
+    # every keyword into the same 404 and file the result as "no results",
+    # which is what happened before this check existed.
+    try:
+        assert_searchable()
+    except XUnavailable as e:
+        print(str(e), file=sys.stderr)
+        return 3
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     log('info', '%s  searching X for %d client keywords' % (stamp, len(queries)))
     try:

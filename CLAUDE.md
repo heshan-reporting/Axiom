@@ -162,7 +162,14 @@ Per platform:
 - **X** - desktop only. `tools/reach-x.py` drives `twitter` (public-clis/
   twitter-cli) with the client keywords, reads the replies under the posts that
   drew argument, and files kinds `sig_thread` / `sig_comment` with
-  `meta.platform: x`. Handles and display names are never stored; permalinks use
+  `meta.platform: x`. **Signed in is not the same as able to search:** X needs
+  an `x-client-transaction-id` header on search and ignores it on `status`, so
+  when twitter-cli's generator breaks upstream (`Failed to init
+  ClientTransaction` on stderr) the session authenticates and every search 404s.
+  `assert_searchable()` raises `XUnavailable` before a sweep that would return
+  nothing and look successful; the agent reports it as `x_unavailable` so the
+  job log names the platform rather than blaming the collector, and a 404 from
+  any call carries the explanation. Handles and display names are never stored; permalinks use
   the `x.com/i/web/status/<id>` form, which carries no handle.
 - **LinkedIn** - the clients' own pages through LinkedIn's own API:
   `linkedinSweep()` reads `/rest/posts?author=<org urn>` and

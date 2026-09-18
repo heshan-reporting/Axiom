@@ -124,6 +124,11 @@ def job_x(worker, key, params, log):
     log('info', 'X: %d keywords, %s window%s%s' % (len(queries), params.get('time') or 'week', (', %d MP accounts' % len(handles)) if handles else '', (' for topic ' + topic) if topic else ''))
     st = rx.status()
     log('out', 'twitter session: %s' % ('signed in' if (st or {}).get('authenticated', True) else 'not signed in'))
+    # Signed in is not the same as able to search, and this path does not go
+    # through reach-x's own preflight. Without this the sweep 404s on every
+    # keyword and reports a successful job with nothing found, which is worse
+    # than a failure because nobody goes looking.
+    rx.assert_searchable()
     trows, crows, errors, found = rx.sweep(queries, int(params.get('perQuery') or 25), int(params.get('threads') or 20),
                                            int(params.get('commentsPer') or 40), str(params.get('time') or 'week'),
                                            pace=float(params.get('pace') or 1.5), log=log, handles=handles, mps=mps, topic=topic)
@@ -147,6 +152,13 @@ def run_job(worker, key, job, echo=True):
             raise RuntimeError('this collector cannot run "%s" - it handles %s' % (src, ', '.join(sorted(JOBS))))
         result = fn(worker, key, job.get('params') or {}, log)
         ok = True
+    except rx.XUnavailable as e:
+        # Not a broken collector: the platform cannot be read from here. Its
+        # own error code so the job log says which, and so a retry is not
+        # the obvious response.
+        result = {'ok': False, 'error': 'x_unavailable', 'detail': str(e)[:400]}
+        log('err', str(e)[:400])
+        ok = False
     except Exception as e:
         result = {'ok': False, 'error': 'collector_failed', 'detail': str(e)[:300]}
         log('err', str(e)[:300])
