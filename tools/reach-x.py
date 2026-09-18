@@ -57,6 +57,22 @@ NOT_FOUND_HINT = (
 TRANSACTION_BROKEN = 'Failed to init ClientTransaction'
 
 
+class XUnavailable(RuntimeError):
+    """Signed in, and still unable to search.
+
+    Its own type because the two outcomes need different handling: a
+    collector that crashed should be retried and looked at, while X being
+    unreadable is a standing condition that no retry helps and that the
+    operator has to see named in the job log.
+    """
+
+
+def assert_searchable():
+    """Raise before a sweep that would return nothing and look successful."""
+    if transaction_generator_broken():
+        raise XUnavailable('X search is unavailable' + TRANSACTION_HINT)
+
+
 def run_twitter(args, timeout=90):
     """Run `twitter ... --json` and return its data payload."""
     try:
@@ -259,7 +275,10 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
                     seen[tid] = t
         except RuntimeError as e:
             errors.append('search "%s": %s' % (q, e)); log('err', str(e))
+            # Conditions that will not change between keywords: stop, rather
+            # than log the same failure once per keyword and return nothing.
             if 'logged-in' in str(e) or 'not installed' in str(e): raise
+            if 'x-client-transaction-id' in str(e): raise XUnavailable(str(e))
             if 'rate-limiting' in str(e): break
         time.sleep(pace)
     posts = list(seen.values())
@@ -311,8 +330,10 @@ def main(argv=None):
     # Signed in is not the same as able to search. Stop here rather than run
     # every keyword into the same 404 and file the result as "no results",
     # which is what happened before this check existed.
-    if transaction_generator_broken():
-        print('X search is unavailable%s' % TRANSACTION_HINT, file=sys.stderr)
+    try:
+        assert_searchable()
+    except XUnavailable as e:
+        print(str(e), file=sys.stderr)
         return 3
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     log('info', '%s  searching X for %d client keywords' % (stamp, len(queries)))
