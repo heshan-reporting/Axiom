@@ -208,7 +208,7 @@ def sweep(queries, per_query=25, n_threads=20, n_replies=40, when='week', pace=1
             # X search is worldwide: keep the posts that say Australia (the term
             # that found them counts, so 'nuclear power australia' hits all stay;
             # a post from a registered MP account is Australian by definition)
-            hits = [t for t in got if mp_of(t, mpmap) or 'from:' in q or rr.au_relevant('', '%s %s' % (t.get('text') or '', q), ())]
+            hits = [t for t in got if mp_of(t, mpmap) or 'from:' in q or rr.au_relevant('', t.get('text') or '', (), q)]
             found += len(hits)
             log('out', '"%s": %d posts, %d kept' % (q[:80], len(got), len(hits)))
             for t in hits:

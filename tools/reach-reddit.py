@@ -140,15 +140,22 @@ AU_RX = re.compile(
     # the vernacular
     r'|\bservo\b|\barvo\b|\bmaccas\b|\bbogan\b|\btradies?\b|\butes?\b|fair dinkum', re.I)
 AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)', re.I)
+# The search term that found a thread is NOT evidence on its own: most client
+# terms ("fuel tax credit", "gas prices", "rising tide protest") are ordinary
+# English elsewhere, and AU_RX contains those very terms, so folding the query
+# into the checked text passed every American hit. A query vouches for a thread
+# only when the query itself names Australia.
+AU_QUERY_RX = re.compile(r'austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v/line|duck hunting', re.I)
 
 
-def au_relevant(sub, text, watched=()):
-    """Is this hit about Australia? Watched sub, Australian-looking sub, or an
-    Australian marker anywhere in the text (which includes the term that found it)."""
+def au_relevant(sub, text, watched=(), q=''):
+    """Is this hit about Australia? Watched sub, Australian-looking sub, a marker
+    in its own text, or a search term that itself names Australia."""
     s = str(sub or '')
     if s.lower() in {w.lower() for w in (watched or SUBS)}: return True
     if s and AU_SUB_RX.search(s): return True
-    return bool(AU_RX.search(str(text or '')))
+    if AU_RX.search(str(text or '')): return True
+    return bool(q) and bool(AU_QUERY_RX.search(str(q)))
 
 
 def merge_issues(own, inherited):
@@ -449,7 +456,7 @@ def sweep(subs, per_sub, n_threads, n_comments, pace=1.2, log=print, queries=(),
         try:
             hits = search(q, per_query, when)
             # a search runs across every subreddit on earth: keep the Australian ones
-            keep = [p for p in hits if au_relevant(p.get('subreddit'), '%s %s %s %s' % (p.get('subreddit') or '', p.get('title') or '', p.get('selftext') or '', q), subs)]
+            keep = [p for p in hits if au_relevant(p.get('subreddit'), '%s %s %s' % (p.get('subreddit') or '', p.get('title') or '', p.get('selftext') or ''), subs, q)]
             found += len(keep); dropped += len(hits) - len(keep); take(keep)
             say('out', '"%s": %d hits, %d Australian kept' % (q, len(hits), len(keep)))
         except RuntimeError as e:

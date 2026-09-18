@@ -1854,12 +1854,20 @@ const AU_RX = new RegExp([
   '\\bservo\\b|\\barvo\\b|\\bmaccas\\b|\\bbogan\\b|\\btradies?\\b|\\butes?\\b|fair dinkum',
 ].join('|'), 'i');
 const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)/i;
-/** Is this thread about Australia? Watched sub, Australian-looking sub, or a marker in the text. */
-function auRelevant(sub, text) {
+// The search term that found a thread is NOT evidence on its own: most client
+// terms ("fuel tax credit", "gas prices", "rising tide protest") are ordinary
+// English elsewhere, and AU_RX contains those very terms, so folding the query
+// into the checked text passed every American hit. A query vouches for a thread
+// only when the query itself names Australia.
+const AU_QUERY_RX = /austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v\/line|duck hunting/i;
+/** Is this thread about Australia? Watched sub, Australian-looking sub, a marker
+ *  in its own text, or a search term that itself names Australia. */
+function auRelevant(sub, text, q) {
   const s = String(sub || '');
   if (s && REDDIT_POLITICS.some(w => w.toLowerCase() === s.toLowerCase())) return true;
   if (s && AU_SUB_RX.test(s)) return true;
-  return AU_RX.test(String(text || ''));
+  if (AU_RX.test(String(text || ''))) return true;
+  return !!q && AU_QUERY_RX.test(String(q));
 }
 const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
 // Public hosts tried in turn when no app credentials are set. Reddit allows
@@ -1999,7 +2007,7 @@ async function redditSweep(env, opts) {
     try {
       const hits = await redditSearch(env, q, { time: qTime, limit: qLimit });
       // a search runs across every subreddit on earth: keep the Australian ones
-      const keep = hits.filter(h => auRelevant(h.sub, h.sub + ' ' + h.title + ' ' + h.body + ' ' + q));
+      const keep = hits.filter(h => auRelevant(h.sub, h.sub + ' ' + h.title + ' ' + h.body, q));
       out.found += keep.length; out.dropped += hits.length - keep.length; take(keep);
       await log('out', '"' + q + '": ' + hits.length + ' hits, ' + keep.length + ' Australian kept');
     }
@@ -5110,7 +5118,7 @@ export default {
         // keyword pass can be American or British threads found by a generic
         // term; here they are noise, hidden unless asked for. The other
         // platforms are our clients' own pages, so everything is relevant.
-        const relevant = r => !isReddit || auRelevant(r.channel, (r.channel || '') + ' ' + (r.title || '') + ' ' + (r.body || '') + ' ' + (r.q || ''));
+        const relevant = r => !isReddit || auRelevant(r.channel, (r.channel || '') + ' ' + (r.title || '') + ' ' + (r.body || ''), r.q || '');
         const candidates = async (extraW, extraB, lim) => {
           const w = ["kind='" + tKind + "'", 'ts>?'].concat(extraW || []); const b = [since].concat(extraB || []);
           if (!isReddit && plat) { w.push("json_extract(meta,'$.platform')=?"); b.push(plat); }
@@ -5174,7 +5182,7 @@ export default {
           for (let off = 0; off < 10000; off += 500) {
             const page = (await db.prepare("SELECT url, title, body, json_extract(meta,'$.sub') sub, json_extract(meta,'$.id') tid, json_extract(meta,'$.q') q FROM arc_items WHERE kind='reddit_thread' ORDER BY ts DESC LIMIT 500 OFFSET ?").bind(off).all()).results || [];
             out.scanned += page.length;
-            page.forEach(r => { if (!auRelevant(r.sub, (r.sub || '') + ' ' + (r.title || '') + ' ' + (r.body || '') + ' ' + (r.q || ''))) { urls.push(r.url); if (r.tid) tids.push(r.tid); } });
+            page.forEach(r => { if (!auRelevant(r.sub, (r.sub || '') + ' ' + (r.title || '') + ' ' + (r.body || ''), r.q || '')) { urls.push(r.url); if (r.tid) tids.push(r.tid); } });
             if (page.length < 500) break;
             if (off + 500 >= 10000) out.more = true;
           }

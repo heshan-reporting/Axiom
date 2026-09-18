@@ -181,8 +181,13 @@ generic client term - "interest rates", "gas prices", "question time" - also
 finds American and British threads, and the wide matchers tag them. A hit
 outside the watched subs is kept only when something on it says Australia
 (`AU_RX` in the worker, mirrored in `tools/reach-reddit.py`: sub name, place,
-institution, politician, masthead, or one of our clients' own terms; the term
-that found it counts, so "nuclear power australia" hits all stay). The console
+institution, politician, masthead, or one of our clients' own terms). **The
+search term that found a thread is not evidence on its own** - most client terms
+are ordinary English elsewhere and `AU_RX` contains those very terms, so folding
+the query into the checked text passed every American hit; a query vouches for a
+thread only when the query itself names Australia (`AU_QUERY_RX`), so
+"nuclear power australia" and "v/line regional rail" hits stay while
+"fuel tax credit" and "rising tide protest" hits must earn it. The console
 logs "N hits, M Australian kept". Threads filed before the gate are hidden by
 `/signals/threads` (default `sort=relevance`: issue breadth, comments held,
 busyness; `sort=new` for time order; `all=1` shows the off-topic rows, `noise`
