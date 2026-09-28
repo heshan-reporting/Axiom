@@ -18,10 +18,13 @@ Usage (on the Mac, from the repo):
   python3 tools/reach-agent.py --install-launchd           # keep it running in the background
   python3 tools/reach-agent.py --uninstall-launchd
 
-Needs: rdt (Reddit) and/or twitter (X) on PATH, signed in. It reports which
+Needs: rdt (Reddit) and/or twitter (X) on PATH, signed in. With Playwright
+installed (pip install playwright && playwright install chromium) it also takes
+`render` jobs: a source's listing page, or one article, read through a real
+browser for the sites that build their pages in JavaScript. It reports which
 collectors are available when it connects, and AXIOM shows that in Signals.
 """
-import argparse, datetime, importlib.util, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
+import argparse, datetime, html as htmlmod, importlib.util, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LABEL = 'com.curiousminds.axiom.reach-agent'
@@ -71,12 +74,108 @@ def have(binary):
     return shutil.which(binary) is not None
 
 
+def have_playwright():
+    try:
+        import playwright.sync_api  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def collectors():
     """Which sources this machine can actually collect, checked not assumed."""
     out = []
     if have('rdt'): out.append('reddit')
     if have('twitter'): out.append('x')
+    if have_playwright(): out.append('render')
     return out
+
+
+# ---- a real browser, for pages built in JavaScript --------------------------
+UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+FT_MIN = 600
+
+
+def render_html(url, wait_ms=2500):
+    """Load a page in headless Chromium and return (html, final_url)."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page(user_agent=UA, viewport={'width': 1280, 'height': 2200})
+            page.route('**/*', lambda route: route.abort() if route.request.resource_type in ('image', 'media', 'font') else route.continue_())
+            page.goto(url, wait_until='domcontentloaded', timeout=45000)
+            try:
+                page.wait_for_load_state('networkidle', timeout=15000)
+            except Exception:
+                pass
+            page.wait_for_timeout(wait_ms)
+            return page.content(), page.url
+        finally:
+            browser.close()
+
+
+def strip_tags(s):
+    s = re.sub(r'<br\s*/?>', ' ', s or '', flags=re.I)
+    s = re.sub(r'<[^>]*>', '', s)
+    return re.sub(r'\s+', ' ', htmlmod.unescape(s)).strip()
+
+
+def listing_links(html_text, base):
+    """The worker's listingLinks, in Python: article-shaped links on a listing page."""
+    out, seen = [], set()
+    host = re.sub(r'^www\.', '', urllib.parse.urlparse(base).netloc)
+    for m in re.finditer(r'<a\b[^>]*href=["\']([^"\'#?]+)[^"\']*["\'][^>]*>(.*?)</a>', html_text, flags=re.I | re.S):
+        text = strip_tags(m.group(2))
+        if len(text) < 28 or len(text) > 220: continue
+        u = urllib.parse.urlparse(urllib.parse.urljoin(base, m.group(1)))
+        if re.sub(r'^www\.', '', u.netloc) != host: continue
+        segs = [s for s in u.path.split('/') if s]
+        slug = segs[-1] if segs else ''
+        arty = (len(slug.split('-')) >= 4 or re.search(r'\d{4}/\d{2}', u.path) or re.search(r'/\d{5,}', u.path)
+                or re.search(r'/(news|story|stories|article|articles|politics|media-releases?|media_releases?|statements?|releases?|speech|speeches|opinion|analysis|latest_news|latest-news|newsroom)/', u.path + '/', flags=re.I))
+        if not arty or len(segs) < 2: continue
+        key = u.scheme + '://' + u.netloc + u.path
+        if key in seen: continue
+        seen.add(key)
+        out.append({'title': text, 'link': key})
+        if len(out) >= 60: break
+    return out
+
+
+def extract_article(html_text):
+    """Title and body text: JSON-LD articleBody, then <article> paragraphs, then the page's paragraphs."""
+    title = strip_tags((re.search(r'<title[^>]*>(.*?)</title>', html_text, flags=re.I | re.S) or [None, ''])[1] if re.search(r'<title', html_text, flags=re.I) else '')
+    for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html_text, flags=re.I | re.S):
+        try:
+            d = json.loads(m.group(1).strip())
+        except Exception:
+            continue
+        stack = [d]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, list): stack.extend(x); continue
+            if not isinstance(x, dict): continue
+            if x.get('@graph'): stack.append(x['@graph'])
+            body = x.get('articleBody')
+            if isinstance(body, str) and len(strip_tags(body)) >= FT_MIN:
+                return str(x.get('headline') or title), strip_tags(body)[:12000]
+    body = re.sub(r'<(script|style|nav|header|footer|aside|form|figure|figcaption|button|noscript|iframe|svg)\b.*?</\1>', ' ', html_text, flags=re.I | re.S)
+    def paras(frag):
+        ps = [strip_tags(p) for p in re.findall(r'<p\b[^>]*>(.*?)</p>', frag, flags=re.I | re.S)]
+        return '\n\n'.join(p for p in ps if len(p) >= 40)[:12000]
+    best = ''
+    for art in re.findall(r'<article\b.*?</article>', body, flags=re.I | re.S):
+        t = paras(art)
+        if len(t) > len(best): best = t
+    if len(best) < FT_MIN:
+        t = paras(body)
+        if len(t) > len(best): best = t
+    return title, best
+
+
+def tag_issues(text):
+    return [i for i, rx in (getattr(rr, 'ISSUES', None) or []) if rx.search(text or '')]
 
 
 # ---- the jobs ---------------------------------------------------------------
@@ -140,7 +239,50 @@ def job_x(worker, key, params, log):
             'errors': errors[:5], 'holds': {'threads': tot_t, 'comments': tot_c}}
 
 
-JOBS = {'reddit': job_reddit, 'x': job_x}
+def job_render(worker, key, params, log):
+    """A source's listing page (files what it finds, reports the probe) or one
+    article (writes its text back onto the archive row), through Chromium."""
+    if not have_playwright():
+        raise RuntimeError('render needs Playwright on this machine: pip install playwright && playwright install chromium')
+    base = worker.rstrip('/')
+    url = str(params.get('url') or '')
+    src = str(params.get('source') or '')
+    t0 = time.time()
+    if src:
+        lst = rr.http_json(base + '/sources?q=' + urllib.parse.quote(src), key, timeout=30)
+        s = next((x for x in (lst.get('sources') or []) if x.get('id') == src), None)
+        if not s: raise RuntimeError('no source with id %s' % src)
+        url = url or (s.get('urls') or {}).get('home') or ''
+        if not url: raise RuntimeError('%s has no listing page to render' % src)
+        log('cmd', 'chromium goto %s' % url)
+        html_text, final = render_html(url)
+        items = listing_links(html_text, final or url)
+        ms = int((time.time() - t0) * 1000)
+        log('out', '%d article-shaped links on the rendered page (%dms)' % (len(items), ms))
+        now = int(time.time() * 1000)
+        rows = [{'src': src, 'title': it['title'][:500], 'body': '', 'url': it['link'], 'ts': now,
+                 'meta': {'reg': 1, 'source': src, 'tier': s.get('tier'), 'juris': s.get('juris'), 'method': 'render', 'issues': tag_issues(it['title']), 'dated': 0, 'via': 'reach'}}
+                for it in items]
+        n, tot = rr.push(worker, key, 'news', rows) if rows else (0, 0)
+        log('info', 'filed %d new rows for %s' % (n, src))
+        rr.http_json(base + '/sources/report', key, {'id': src, 'ok': bool(items), 'method': 'render', 'n': len(items), 'added': n, 'ms': ms,
+                                                    'detail': '' if items else 'rendered page had no article-shaped links'}, timeout=30)
+        return {'ok': bool(items), 'source': src, 'url': url, 'items': len(items), 'added': n, 'method': 'render', 'holds': {'news': tot}}
+    if not re.match(r'^https?://', url):
+        raise RuntimeError('render needs a url or a source id')
+    log('cmd', 'chromium goto %s' % url)
+    html_text, final = render_html(url)
+    title, text = extract_article(html_text)
+    log('out', '%d chars of body text (%dms)' % (len(text), int((time.time() - t0) * 1000)))
+    filed = None
+    if params.get('id') and len(text) >= FT_MIN:
+        filed = rr.http_json(base + '/fulltext/save', key, {'id': params['id'], 'text': text[:6000], 'title': title, 'method': 'render', 'link': final}, timeout=30)
+        log('info', 'archive row %s now carries the article' % params['id'])
+    return {'ok': len(text) >= FT_MIN, 'url': url, 'final': final, 'title': title, 'chars': len(text), 'method': 'render',
+            'filed': (filed or {}).get('id', 0), 'text': text[:2000]}
+
+
+JOBS = {'reddit': job_reddit, 'x': job_x, 'render': job_render}
 
 
 def run_job(worker, key, job, echo=True):
@@ -255,6 +397,7 @@ def main(argv=None):
         datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'), a.agent, a.worker, ', '.join(sources)))
     if 'reddit' not in sources: say('  (rdt not installed: Reddit jobs will wait for another machine)')
     if 'x' not in sources: say('  (twitter not installed: X jobs will wait for another machine)')
+    if 'render' not in sources: say('  (Playwright not installed: render jobs will wait for another machine - pip install playwright && playwright install chromium)')
     while True:
         try:
             r = poll_once(a.worker, a.key, a.agent, sources, echo=not a.quiet)

@@ -281,7 +281,8 @@ function parseFeedXml(xml = '') {
   return blocks.map(m => {
     const b = m[1];
     const title = stripHtml((b.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/)?.[1] || ''));
-    const link  = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || [])[1]?.trim();
+    // podcast and some CMS feeds carry no <link>: fall back to a permalink guid, then the enclosure
+    const link  = (b.match(/<link[^>]*href="([^"]+)"/) || b.match(/<link[^>]*>(https?[^<]+)<\/link>/) || b.match(/<guid[^>]*>\s*(https?[^<\s]+)\s*<\/guid>/) || b.match(/<enclosure[^>]*url="([^"]+)"/) || [])[1]?.trim();
     const date  = (b.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || b.match(/<published>([\s\S]*?)<\/published>/) || b.match(/<updated>([\s\S]*?)<\/updated>/) || [])[1]?.trim();
     const descRaw = (b.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/) || b.match(/<summary[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/summary>/) || [])[1] || '';
     return { title, link, date, desc: stripHtml(descRaw).slice(0, 240) };
@@ -371,11 +372,13 @@ const FEED_TIMEOUT = 5000;  // per-feed abort; repeat offenders get circuit-brok
  * stale-while-revalidate background refresh, and the cron pre-warm.
  * Returns the JSON string (and writes it to KV unless debug).
  */
-async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false } = {}) {
+async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false, onHealth = null } = {}) {
   const qw  = q.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 3);
   const cacheKey = `allnews2_${q || 'all'}_${max}_${hours}`;
   const now  = Date.now();
-  const keys = Object.keys(AU_FEEDS);
+  // core feeds the operator switched off in the Sources view stay off here too
+  const off  = env.MIND_DB ? await sourcesCoreOff(env) : new Set();
+  const keys = Object.keys(AU_FEEDS).filter(k => !off.has(k));
   const cb   = await cbLoad(env.AXIOM_KV);
   const health = [];
 
@@ -412,9 +415,26 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
     else { cb[h.src] = { n: ((cb[h.src] || {}).n || 0) + 1, t: now }; cbChanged = true; }
   });
   if (cbChanged) await cbSave(env.AXIOM_KV, cb);
+  // the cron passes a reporter so the Source Registry mirrors each core feed's health
+  if (onHealth) { try { await onHealth(health); } catch (e) {} }
 
   let items = [];
   results.forEach((v) => { if (Array.isArray(v)) items.push(...v); });
+  // The registry's sources (mastheads without a working feed, official offices,
+  // sector press, podcasts...) are swept by the cron into the archive; merge
+  // their recent rows here so /allnews is the whole estate, not just the core.
+  let registry = 0;
+  if (env.MIND_DB) {
+    try {
+      const since = now - Math.min(hours, 72) * 3600000;
+      const rs = await env.MIND_DB.prepare("SELECT src,title,body,url,ts,meta FROM arc_items WHERE kind='news' AND ts>? AND json_extract(meta,'$.reg')=1 ORDER BY ts DESC LIMIT 400").bind(since).all();
+      (rs.results || []).forEach(r => {
+        let m = {}; try { m = JSON.parse(r.meta || '{}') || {}; } catch (e) { m = {}; }
+        items.push({ src: r.src, title: r.title || '', link: r.url, date: r.ts ? new Date(r.ts).toISOString() : '', desc: String(r.body || '').slice(0, 240), reg: 1, tier: m.tier || '', method: m.method || '', issues: m.issues || [] });
+        registry++;
+      });
+    } catch (e) {}
+  }
 
   // Normalise dates -> ISO + age (minutes). Undated items keep '' and rank last.
   items.forEach(it => {
@@ -449,7 +469,7 @@ async function buildAllNews(env, { q = '', max = 60, hours = 72, debug = false }
   items.forEach(it => { delete it._t; enrichItem(it); });
 
   const sources = health.filter(h => h.ok).map(h => ({ src: h.src, count: h.count || 0 }));
-  const payload = { items, sources, feeds: keys.length, generated: new Date(now).toISOString(), window_hours: hours };
+  const payload = { items, sources, feeds: keys.length, registry, generated: new Date(now).toISOString(), window_hours: hours };
   if (debug) payload.health = health.sort((a, b) => (b.ok ? 1 : 0) - (a.ok ? 1 : 0) || (b.count || 0) - (a.count || 0));
   const out = JSON.stringify(payload);
   if (!debug) await kvPut(env.AXIOM_KV, cacheKey, out, 240);
@@ -2134,7 +2154,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic'];   // topic: a keyword research run (worker-side)
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2177,6 +2197,9 @@ async function jobRoute(env, source, where) {
   if (where === 'desktop') return 'desktop';
   if (where === 'worker') return 'worker';
   if (BRIDGE_DESKTOP_ONLY.indexOf(source) >= 0) return 'desktop';
+  // rendering needs a browser: the worker has one only through a configured
+  // render back end; otherwise a Mac with Playwright takes the job
+  if (source === 'render' && !renderConfigured(env)) return 'desktop';
   if (source === 'reddit' && !redditAuthed(env)) {
     const agents = await agentsSeen(env);
     if (agents.some(a => a.live && (a.sources || []).indexOf('reddit') >= 0)) return 'desktop';
@@ -2827,6 +2850,12 @@ async function jobRunLocal(env, job) {
       ok = !!(out && out.ok);
     } else if (job.source === 'meta') {
       out = await metaOrganicSweep(env, Object.assign({}, job.params, { log: log }));
+      ok = !!(out && out.ok);
+    } else if (job.source === 'sources') {
+      out = await sourceSweep(env, Object.assign({}, job.params, { log: log }));
+      ok = !!(out && out.ok);
+    } else if (job.source === 'render') {
+      out = await renderJob(env, job, log);
       ok = !!(out && out.ok);
     } else {
       out = { ok: false, error: 'desktop_only', detail: job.source + ' can only be collected from a logged-in desktop. Run tools/reach-agent.py on your Mac and it will claim this job.' };
@@ -3650,7 +3679,8 @@ async function archiveItems(env, kind, rows, strict) {
 async function arcNewsSnap(env, jsonStr) {
   try {
     const d = JSON.parse(jsonStr);
-    return archiveItems(env, 'news', (d.items || []).map(it => ({
+    // registry rows came out of the archive; only the core feeds' items go back in
+    return archiveItems(env, 'news', (d.items || []).filter(it => !it.reg).map(it => ({
       src: it.src, title: it.title, body: it.desc, url: it.link, tone: it.tone,
       meta: it.parties && it.parties.length ? { parties: it.parties } : null,
       ts: Date.parse(it.date) || 0,
@@ -3659,6 +3689,1073 @@ async function arcNewsSnap(env, jsonStr) {
 }
 /** Escape LIKE wildcards in user queries. */
 function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) + '%'; }
+
+// ==============================================================================
+// THE SOURCE REGISTRY - every outlet, office, party, pollster, sector title and
+// podcast AXIOM reads, held as data rather than code. Each source carries an
+// ordered list of collection methods and the sweep tries them in turn - the
+// feed, the WordPress API, a JSON feed, the news sitemap (found through
+// robots.txt), the podcast directory, the listing page, Google News' index of
+// the site, a rendered page - keeps what works, logs what failed, and records
+// which method delivers. A source that fails six sweeps in a row is reported
+// to Slack once. The feeds in AU_FEEDS stay the fast core (fetched by
+// buildAllNews every tick); the registry mirrors their health so the Sources
+// view is one table. Nothing is skipped silently: every attempt lands in
+// source_health with the reason.
+// ==============================================================================
+let SOURCES_READY = false;
+const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'sweep'];
+const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'sitemap', 'podcast', 'html', 'gnews', 'render'];
+const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
+const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
+const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
+const SOURCE_FETCH_MS = 7000;       // per-request abort
+const SOURCE_HEALTH_KEEP = 4000;    // rows kept in source_health
+const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, sweep: 60 };
+/* Names, tiers and jurisdictions for the AU_FEEDS core (keys not listed here
+ * are Google News sweeps, named from their key). */
+const CORE_META = {
+  abc: ['ABC News', 'broadcaster'], abc_top: ['ABC Top Stories', 'broadcaster'], sbs: ['SBS News', 'broadcaster'], abc_business: ['ABC Business', 'broadcaster'],
+  ninenews: ['9News', 'broadcaster'], sevennews_pol: ['7News Politics', 'broadcaster'],
+  smh: ['Sydney Morning Herald', 'metro', 'nsw'], smh_pol: ['SMH Federal Politics', 'national'], theage: ['The Age', 'metro', 'vic'], brisbanetimes: ['Brisbane Times', 'metro', 'qld'],
+  watoday: ['WAtoday', 'metro', 'wa'], afr: ['Australian Financial Review', 'national'], canberratimes: ['Canberra Times', 'metro', 'act'], indaily: ['InDaily', 'metro', 'sa'],
+  guardian: ['Guardian Australia', 'national'], guardian_pol: ['Guardian Australia Politics', 'national'], guardian_biz: ['Guardian Australian Economy', 'national'],
+  newscomau: ['news.com.au', 'national'], aap: ['AAP', 'wire'], miragenews: ['Mirage News', 'wire'],
+  conversation: ['The Conversation', 'independent'], convo_pol: ['The Conversation Politics', 'independent'], convo_business: ['The Conversation Business', 'independent'],
+  crikey: ['Crikey', 'independent'], newdaily: ['The New Daily', 'independent'], michaelwest: ['Michael West Media', 'independent'], independentau: ['Independent Australia', 'independent'],
+  menadue: ['Pearls and Irritations', 'independent'], saturdaypaper: ['The Saturday Paper', 'independent'], junkee: ['Junkee', 'independent'], mandarin: ['The Mandarin', 'independent'],
+  theshot: ['The Shot', 'independent'], womensagenda: ['Womens Agenda', 'independent'], theklaxon: ['The Klaxon', 'independent'], monthly: ['The Monthly', 'independent'],
+  macrobusiness: ['MacroBusiness', 'independent'], johnquiggin: ['John Quiggin', 'independent'], tastimes: ['Tasmanian Times', 'independent', 'tas'], ozbargain: ['OzBargain deals', 'independent'],
+  smartcompany: ['SmartCompany', 'sector'], investordaily: ['InvestorDaily', 'sector'],
+  rba: ['RBA media releases', 'official'], rba_speeches: ['RBA speeches', 'official'], pmo: ['Prime Minister', 'official'], health_gov: ['Department of Health', 'official'],
+  industry_gov: ['Department of Industry', 'official'], act_ministers: ['ACT ministers', 'official', 'act'], act_pettersson: ['Michael Pettersson MLA', 'official', 'act'], flagpost: ['Parliamentary Library FlagPost', 'official'],
+  lowy: ['Lowy Institute Interpreter', 'thinktank'], grattan: ['Grattan Institute', 'thinktank'], ausinstitute: ['The Australia Institute', 'thinktank'], insidestory: ['Inside Story', 'thinktank'], apo: ['Analysis and Policy Observatory', 'thinktank'],
+  pollbludger: ['Poll Bludger', 'polling'], tallyroom: ['The Tally Room', 'polling'], kevinbonham: ['Kevin Bonham', 'polling'],
+  newcastleher: ['Newcastle Herald', 'regional', 'nsw'], illawarramerc: ['Illawarra Mercury', 'regional', 'nsw'], examiner: ['The Examiner', 'regional', 'tas'], bordermail: ['Border Mail', 'regional', 'vic'], bendigoadv: ['Bendigo Advertiser', 'regional', 'vic'],
+};
+const CORE_ISSUES = { gnews_fueltax: ['ftc'], gnews_minerals: ['cm'], gnews_mining: ['mining'], gnews_energy: ['energy'], gnews_housing: ['housing'], gnews_ir: ['construction'], gnews_col: ['col'], gnews_rates: ['col'],
+  gnews_econ: ['econ'], gnews_tax: ['econ', 'ftc'], gnews_super: ['econ'], gnews_election: ['gov'], gnews_auspol: ['gov'], gnews_parl: ['gov'], gnews_states: ['vicelection'], gnews_health: ['pharmacy'], gnews_regions: ['regional'], gnews_jobs: ['econ'] };
+/* The extension seed: [id, name, tier, juris, issues, urls, schedule?]. urls:
+ * r feed, w WordPress site root, j JSON feed, m news sitemap, p podcast search
+ * term, h listing page, s site for Google News (site:), g explicit Google News
+ * query. Every masthead carries s so Google News is the guaranteed fallback;
+ * the health table shows which method actually delivers. */
+const SOURCE_SEED_EXT = [
+  // -- national and metro mastheads (News Corp and Seven West) --
+  ['theaustralian', 'The Australian', 'national', 'au', 'gov,econ', { r: 'https://www.theaustralian.com.au/feed', s: 'theaustralian.com.au', h: 'https://www.theaustralian.com.au/nation/politics' }],
+  ['heraldsun', 'Herald Sun', 'metro', 'vic', 'vicelection,regional', { r: 'https://www.heraldsun.com.au/rss', s: 'heraldsun.com.au', h: 'https://www.heraldsun.com.au/news/victoria' }],
+  ['dailytelegraph', 'The Daily Telegraph', 'metro', 'nsw', 'gov', { r: 'https://www.dailytelegraph.com.au/rss', s: 'dailytelegraph.com.au', h: 'https://www.dailytelegraph.com.au/news/nsw' }],
+  ['couriermail', 'The Courier-Mail', 'metro', 'qld', '', { r: 'https://www.couriermail.com.au/rss', s: 'couriermail.com.au', h: 'https://www.couriermail.com.au/news/queensland' }],
+  ['adelaidenow', 'The Advertiser', 'metro', 'sa', '', { r: 'https://www.adelaidenow.com.au/rss', s: 'adelaidenow.com.au', h: 'https://www.adelaidenow.com.au/news/south-australia' }],
+  ['themercury', 'The Mercury', 'metro', 'tas', '', { r: 'https://www.themercury.com.au/rss', s: 'themercury.com.au', h: 'https://www.themercury.com.au/news/tasmania' }],
+  ['ntnews', 'NT News', 'metro', 'nt', '', { r: 'https://www.ntnews.com.au/rss', s: 'ntnews.com.au', h: 'https://www.ntnews.com.au/news/northern-territory' }],
+  ['thewest', 'The West Australian', 'metro', 'wa', 'mining,gas', { r: 'https://thewest.com.au/politics/feed', s: 'thewest.com.au', h: 'https://thewest.com.au/politics' }],
+  ['perthnow', 'PerthNow', 'metro', 'wa', '', { r: 'https://www.perthnow.com.au/news/feed', s: 'perthnow.com.au' }],
+  ['thenightly', 'The Nightly', 'national', 'au', 'gov', { r: 'https://thenightly.com.au/politics/feed', s: 'thenightly.com.au' }],
+  ['skynews', 'Sky News Australia', 'broadcaster', 'au', 'gov', { r: 'https://www.skynews.com.au/feed', s: 'skynews.com.au', h: 'https://www.skynews.com.au/australia-news/politics' }],
+  ['newscomau_fin', 'news.com.au Finance', 'national', 'au', 'col,econ', { r: 'https://www.news.com.au/content-feeds/latest-news-finance/', s: 'news.com.au/finance' }],
+  ['dailymailau', 'Daily Mail Australia', 'national', 'au', '', { r: 'https://www.dailymail.co.uk/auhome/index.rss', s: 'dailymail.co.uk/auhome' }],
+  ['capitalbrief', 'Capital Brief', 'national', 'au', 'gov,econ', { s: 'capitalbrief.com' }],
+  ['geelongadv', 'Geelong Advertiser', 'regional', 'vic', 'regional', { r: 'https://www.geelongadvertiser.com.au/rss', s: 'geelongadvertiser.com.au' }],
+  ['weeklytimes', 'The Weekly Times', 'regional', 'vic', 'regional', { r: 'https://www.weeklytimesnow.com.au/rss', s: 'weeklytimesnow.com.au' }],
+  ['goldcoastbulletin', 'Gold Coast Bulletin', 'regional', 'qld', '', { r: 'https://www.goldcoastbulletin.com.au/rss', s: 'goldcoastbulletin.com.au' }],
+  ['townsvillebulletin', 'Townsville Bulletin', 'regional', 'qld', 'mining', { r: 'https://www.townsvillebulletin.com.au/rss', s: 'townsvillebulletin.com.au' }],
+  ['cairnspost', 'Cairns Post', 'regional', 'qld', '', { r: 'https://www.cairnspost.com.au/rss', s: 'cairnspost.com.au' }],
+  ['thechronicle', 'The Chronicle (Toowoomba)', 'regional', 'qld', 'regional', { r: 'https://www.thechronicle.com.au/rss', s: 'thechronicle.com.au' }],
+  // -- ABC by state and rural (listing pages plus Google News' index of each section) --
+  ['abc_rural', 'ABC Rural', 'broadcaster', 'au', 'regional', { h: 'https://www.abc.net.au/news/rural', g: 'site:abc.net.au/news/rural' }],
+  ['abc_nsw', 'ABC News NSW', 'broadcaster', 'nsw', '', { h: 'https://www.abc.net.au/news/nsw', g: 'site:abc.net.au nsw' }],
+  ['abc_vic', 'ABC News Victoria', 'broadcaster', 'vic', 'vicelection,regional', { h: 'https://www.abc.net.au/news/vic', g: 'site:abc.net.au victoria' }],
+  ['abc_qld', 'ABC News Queensland', 'broadcaster', 'qld', '', { h: 'https://www.abc.net.au/news/qld', g: 'site:abc.net.au queensland' }],
+  ['abc_wa', 'ABC News WA', 'broadcaster', 'wa', 'mining,gas', { h: 'https://www.abc.net.au/news/wa', g: 'site:abc.net.au "western australia" OR perth' }],
+  ['abc_sa', 'ABC News SA', 'broadcaster', 'sa', '', { h: 'https://www.abc.net.au/news/sa', g: 'site:abc.net.au "south australia" OR adelaide' }],
+  ['abc_tas', 'ABC News Tasmania', 'broadcaster', 'tas', '', { h: 'https://www.abc.net.au/news/tas', g: 'site:abc.net.au tasmania' }],
+  ['abc_nt', 'ABC News NT', 'broadcaster', 'nt', '', { h: 'https://www.abc.net.au/news/nt', g: 'site:abc.net.au "northern territory" OR darwin' }],
+  ['abc_act', 'ABC News Canberra', 'broadcaster', 'act', '', { h: 'https://www.abc.net.au/news/act', g: 'site:abc.net.au canberra' }],
+  // -- regional dailies: ACM titles publish /rss.xml; the others ride Google News --
+  ['thecourier', 'The Courier (Ballarat)', 'regional', 'vic', 'regional', { r: 'https://www.thecourier.com.au/rss.xml', s: 'thecourier.com.au' }],
+  ['standard', 'The Standard (Warrnambool)', 'regional', 'vic', 'regional', { r: 'https://www.standard.net.au/rss.xml', s: 'standard.net.au' }],
+  ['latrobevalley', 'Latrobe Valley Express', 'regional', 'vic', 'regional,energy', { r: 'https://www.latrobevalleyexpress.com.au/rss.xml', s: 'latrobevalleyexpress.com.au' }],
+  ['mailtimes', 'Wimmera Mail-Times', 'regional', 'vic', 'regional', { r: 'https://www.mailtimes.com.au/rss.xml', s: 'mailtimes.com.au' }],
+  ['sheppnews', 'Shepparton News', 'regional', 'vic', 'regional', { s: 'sheppnews.com.au' }],
+  ['sunraysiadaily', 'Sunraysia Daily', 'regional', 'vic', 'regional', { s: 'sunraysiadaily.com.au' }],
+  ['wangarattachronicle', 'Wangaratta Chronicle', 'regional', 'vic', 'regional', { s: 'wangarattachronicle.com.au' }],
+  ['gippslandtimes', 'Gippsland Times', 'regional', 'vic', 'regional', { s: 'gippslandtimes.com.au' }],
+  ['dailyadvertiser', 'The Daily Advertiser (Wagga)', 'regional', 'nsw', 'regional', { r: 'https://www.dailyadvertiser.com.au/rss.xml', s: 'dailyadvertiser.com.au' }],
+  ['westernadvocate', 'Western Advocate (Bathurst)', 'regional', 'nsw', 'regional', { r: 'https://www.westernadvocate.com.au/rss.xml', s: 'westernadvocate.com.au' }],
+  ['centralwesterndaily', 'Central Western Daily (Orange)', 'regional', 'nsw', 'regional', { r: 'https://www.centralwesterndaily.com.au/rss.xml', s: 'centralwesterndaily.com.au' }],
+  ['dailyliberal', 'Daily Liberal (Dubbo)', 'regional', 'nsw', 'regional', { r: 'https://www.dailyliberal.com.au/rss.xml', s: 'dailyliberal.com.au' }],
+  ['northerndailyleader', 'Northern Daily Leader (Tamworth)', 'regional', 'nsw', 'regional', { r: 'https://www.northerndailyleader.com.au/rss.xml', s: 'northerndailyleader.com.au' }],
+  ['maitlandmercury', 'Maitland Mercury', 'regional', 'nsw', 'mining', { r: 'https://www.maitlandmercury.com.au/rss.xml', s: 'maitlandmercury.com.au' }],
+  ['portnews', 'Port Macquarie News', 'regional', 'nsw', 'regional', { r: 'https://www.portnews.com.au/rss.xml', s: 'portnews.com.au' }],
+  ['theadvocate', 'The Advocate (Burnie)', 'regional', 'tas', 'regional', { r: 'https://www.theadvocate.com.au/rss.xml', s: 'theadvocate.com.au' }],
+  ['mandurahmail', 'Mandurah Mail', 'regional', 'wa', '', { r: 'https://www.mandurahmail.com.au/rss.xml', s: 'mandurahmail.com.au' }],
+  ['kalminer', 'Kalgoorlie Miner', 'regional', 'wa', 'mining,cm', { s: 'kalminer.com.au' }],
+  ['northwesttelegraph', 'North West Telegraph (Pilbara)', 'regional', 'wa', 'mining,gas', { s: 'northwesttelegraph.com.au' }],
+  // -- agricultural press --
+  ['theland', 'The Land', 'sector', 'nsw', 'regional', { r: 'https://www.theland.com.au/rss.xml', s: 'theland.com.au' }],
+  ['qcl', 'Queensland Country Life', 'sector', 'qld', 'regional', { r: 'https://www.queenslandcountrylife.com.au/rss.xml', s: 'queenslandcountrylife.com.au' }],
+  ['stockandland', 'Stock and Land', 'sector', 'vic', 'regional', { r: 'https://www.stockandland.com.au/rss.xml', s: 'stockandland.com.au' }],
+  ['farmweekly', 'Farm Weekly', 'sector', 'wa', 'regional', { r: 'https://www.farmweekly.com.au/rss.xml', s: 'farmweekly.com.au' }],
+  ['stockjournal', 'Stock Journal', 'sector', 'sa', 'regional', { r: 'https://www.stockjournal.com.au/rss.xml', s: 'stockjournal.com.au' }],
+  ['nqregister', 'North Queensland Register', 'sector', 'qld', 'regional', { r: 'https://www.northqueenslandregister.com.au/rss.xml', s: 'northqueenslandregister.com.au' }],
+  ['farmonline', 'Farm Online', 'sector', 'au', 'regional', { r: 'https://www.farmonline.com.au/rss.xml', s: 'farmonline.com.au' }],
+  ['beefcentral', 'Beef Central', 'sector', 'au', 'regional', { r: 'https://www.beefcentral.com/feed/', w: 'https://www.beefcentral.com', s: 'beefcentral.com' }],
+  ['graincentral', 'Grain Central', 'sector', 'au', 'regional', { r: 'https://www.graincentral.com/feed/', w: 'https://www.graincentral.com', s: 'graincentral.com' }],
+  ['sheepcentral', 'Sheep Central', 'sector', 'au', 'regional', { r: 'https://www.sheepcentral.com/feed/', w: 'https://www.sheepcentral.com', s: 'sheepcentral.com' }],
+  ['nff', 'National Farmers Federation', 'sector', 'au', 'regional', { r: 'https://nff.org.au/feed/', w: 'https://nff.org.au', s: 'nff.org.au' }],
+  ['vff', 'Victorian Farmers Federation', 'sector', 'vic', 'regional', { r: 'https://www.vff.org.au/feed/', w: 'https://www.vff.org.au', s: 'vff.org.au' }],
+  // -- Commonwealth: parliament, ministers, agencies --
+  ['aph_media', 'Parliament of Australia', 'official', 'au', 'gov', { h: 'https://www.aph.gov.au/News_and_Events/Media_Releases_and_Alerts', g: 'site:aph.gov.au' }],
+  ['parlinfo_pressrel', 'ParlInfo press releases', 'official', 'au', 'gov', { h: 'https://parlinfo.aph.gov.au/parlInfo/search/summary/summary.w3p;orderBy=date-eLast;query=Dataset%3Apressrel', g: 'site:parlinfo.aph.gov.au' }],
+  ['treasury', 'Treasury', 'official', 'au', 'econ', { r: 'https://treasury.gov.au/rss.xml', h: 'https://treasury.gov.au/media-releases', s: 'treasury.gov.au' }],
+  ['treasurer', 'Treasurer and Treasury ministers', 'official', 'au', 'econ,col', { r: 'https://ministers.treasury.gov.au/rss.xml', h: 'https://ministers.treasury.gov.au/media-releases', s: 'ministers.treasury.gov.au' }],
+  ['min_resources', 'Minister for Resources', 'official', 'au', 'mining,cm,gas', { h: 'https://www.minister.industry.gov.au/', s: 'minister.industry.gov.au' }],
+  ['min_energy', 'Minister for Climate Change and Energy', 'official', 'au', 'energy,gas', { h: 'https://minister.dcceew.gov.au/', s: 'minister.dcceew.gov.au' }],
+  ['min_health', 'Health ministers', 'official', 'au', 'pharmacy', { h: 'https://www.health.gov.au/ministers', g: 'site:health.gov.au/ministers' }],
+  ['min_ir', 'Minister for Employment and Workplace Relations', 'official', 'au', 'construction', { h: 'https://ministers.dewr.gov.au/', s: 'ministers.dewr.gov.au' }],
+  ['min_infrastructure', 'Infrastructure and Housing ministers', 'official', 'au', 'housing,construction', { h: 'https://minister.infrastructure.gov.au/', s: 'minister.infrastructure.gov.au' }],
+  ['min_homeaffairs', 'Home Affairs ministers', 'official', 'au', 'gov', { s: 'minister.homeaffairs.gov.au' }],
+  ['min_foreign', 'Foreign Minister', 'official', 'au', 'gov', { s: 'foreignminister.gov.au' }],
+  ['min_defence', 'Defence ministers', 'official', 'au', 'gov', { s: 'minister.defence.gov.au' }],
+  ['abs', 'Australian Bureau of Statistics', 'official', 'au', 'econ,col', { r: 'https://www.abs.gov.au/rss.xml', h: 'https://www.abs.gov.au/media-centre/media-releases', s: 'abs.gov.au' }],
+  ['pc', 'Productivity Commission', 'official', 'au', 'econ', { r: 'https://www.pc.gov.au/rss', h: 'https://www.pc.gov.au/media-speeches', s: 'pc.gov.au' }],
+  ['pbo', 'Parliamentary Budget Office', 'official', 'au', 'econ', { s: 'pbo.gov.au' }],
+  ['anao', 'Australian National Audit Office', 'official', 'au', 'gov', { r: 'https://www.anao.gov.au/rss.xml', s: 'anao.gov.au' }],
+  ['accc', 'ACCC', 'official', 'au', 'col', { r: 'https://www.accc.gov.au/rss/media-releases.xml', h: 'https://www.accc.gov.au/media', s: 'accc.gov.au' }],
+  ['aec', 'Australian Electoral Commission', 'official', 'au', 'gov', { h: 'https://www.aec.gov.au/media/', s: 'aec.gov.au' }],
+  ['ato', 'Australian Taxation Office', 'official', 'au', 'econ,ftc', { h: 'https://www.ato.gov.au/media-centre', s: 'ato.gov.au' }],
+  ['asic', 'ASIC', 'official', 'au', 'econ', { s: 'asic.gov.au' }],
+  ['fwc', 'Fair Work Commission', 'official', 'au', 'construction', { s: 'fwc.gov.au' }],
+  ['fwo', 'Fair Work Ombudsman', 'official', 'au', 'construction', { h: 'https://www.fairwork.gov.au/newsroom/media-releases', s: 'fairwork.gov.au' }],
+  ['aemo', 'AEMO', 'official', 'au', 'energy,gas', { h: 'https://aemo.com.au/newsroom', s: 'aemo.com.au' }],
+  ['aer', 'Australian Energy Regulator', 'official', 'au', 'energy', { s: 'aer.gov.au' }],
+  ['cer', 'Clean Energy Regulator', 'official', 'au', 'energy', { s: 'cleanenergyregulator.gov.au' }],
+  ['dcceew', 'DCCEEW', 'official', 'au', 'energy', { r: 'https://www.dcceew.gov.au/about/news/rss.xml', s: 'dcceew.gov.au' }],
+  ['tga', 'Therapeutic Goods Administration', 'official', 'au', 'pharmacy', { s: 'tga.gov.au' }],
+  ['pbs', 'PBS', 'official', 'au', 'pharmacy', { s: 'pbs.gov.au' }],
+  // -- state and territory governments, parliaments, electoral commissions --
+  ['nsw_gov', 'NSW Government', 'official', 'nsw', '', { r: 'https://www.nsw.gov.au/media-releases/rss', h: 'https://www.nsw.gov.au/media-releases', g: 'site:nsw.gov.au/media-releases' }],
+  ['vic_premier', 'Premier of Victoria', 'official', 'vic', 'vicelection,regional', { r: 'https://www.premier.vic.gov.au/rss.xml', h: 'https://www.premier.vic.gov.au/media-centre', s: 'premier.vic.gov.au' }],
+  ['qld_statements', 'Queensland Government statements', 'official', 'qld', 'mining', { r: 'https://statements.qld.gov.au/rss', h: 'https://statements.qld.gov.au/statements', s: 'statements.qld.gov.au' }],
+  ['wa_statements', 'WA Government media statements', 'official', 'wa', 'mining,gas', { h: 'https://www.wa.gov.au/government/media-statements', g: 'site:wa.gov.au/government/media-statements' }],
+  ['sa_premier', 'Premier of South Australia', 'official', 'sa', '', { h: 'https://www.premier.sa.gov.au/media-releases', s: 'premier.sa.gov.au' }],
+  ['tas_premier', 'Premier of Tasmania', 'official', 'tas', '', { h: 'https://www.premier.tas.gov.au/latest_news', s: 'premier.tas.gov.au' }],
+  ['nt_newsroom', 'NT Government newsroom', 'official', 'nt', 'gas', { r: 'https://newsroom.nt.gov.au/rss', h: 'https://newsroom.nt.gov.au/', s: 'newsroom.nt.gov.au' }],
+  ['vic_parliament', 'Parliament of Victoria', 'official', 'vic', 'vicelection', { s: 'parliament.vic.gov.au' }],
+  ['vec', 'Victorian Electoral Commission', 'official', 'vic', 'vicelection', { s: 'vec.vic.gov.au' }],
+  ['nswec', 'NSW Electoral Commission', 'official', 'nsw', 'gov', { s: 'elections.nsw.gov.au' }],
+  ['ecq', 'Electoral Commission of Queensland', 'official', 'qld', 'gov', { s: 'ecq.qld.gov.au' }],
+  // -- parties --
+  ['alp', 'Australian Labor Party', 'party', 'au', 'gov', { r: 'https://www.alp.org.au/news.rss', h: 'https://www.alp.org.au/news', s: 'alp.org.au' }],
+  ['liberal', 'Liberal Party of Australia', 'party', 'au', 'gov', { h: 'https://www.liberal.org.au/latest-news', s: 'liberal.org.au' }],
+  ['nationals', 'The Nationals', 'party', 'au', 'regional,gov', { r: 'https://nationals.org.au/feed/', w: 'https://nationals.org.au', s: 'nationals.org.au' }],
+  ['greens', 'Australian Greens', 'party', 'au', 'energy,activism,gov', { r: 'https://greens.org.au/rss.xml', h: 'https://greens.org.au/news', s: 'greens.org.au' }],
+  ['onenation', 'One Nation', 'party', 'au', 'gov', { h: 'https://www.onenation.org.au/news', s: 'onenation.org.au' }],
+  ['vicnats', 'The Nationals Victoria', 'party', 'vic', 'vicelection,regional', { r: 'https://vic.nationals.org.au/feed/', w: 'https://vic.nationals.org.au', s: 'vic.nationals.org.au' }],
+  ['viclibs', 'Liberal Victoria', 'party', 'vic', 'vicelection', { h: 'https://vic.liberal.org.au/News', s: 'vic.liberal.org.au' }],
+  ['viclabor', 'Victorian Labor', 'party', 'vic', 'vicelection', { h: 'https://www.viclabor.com.au/news/', s: 'viclabor.com.au' }],
+  ['vicgreens', 'Victorian Greens', 'party', 'vic', 'vicelection', { g: 'site:greens.org.au/vic' }],
+  ['climate200', 'Climate 200', 'party', 'au', 'gov', { s: 'climate200.com.au' }],
+  // -- polling and psephology --
+  ['essential', 'Essential Report', 'polling', 'au', 'gov', { r: 'https://essentialreport.com.au/feed', w: 'https://essentialreport.com.au', s: 'essentialreport.com.au' }],
+  ['roymorgan', 'Roy Morgan', 'polling', 'au', 'gov,col', { r: 'https://www.roymorgan.com/feed', w: 'https://www.roymorgan.com', s: 'roymorgan.com' }],
+  ['redbridge', 'RedBridge Group', 'polling', 'au', 'gov', { r: 'https://redbridgegroup.com.au/feed/', w: 'https://redbridgegroup.com.au', s: 'redbridgegroup.com.au' }],
+  ['resolve', 'Resolve Political Monitor', 'polling', 'au', 'gov', { g: '"resolve political monitor"' }],
+  ['newspoll', 'Newspoll', 'polling', 'au', 'gov', { g: 'newspoll' }],
+  ['freshwater', 'Freshwater Strategy', 'polling', 'au', 'gov', { g: '"freshwater strategy" poll' }],
+  ['yougov_au', 'YouGov Australia', 'polling', 'au', 'gov', { s: 'au.yougov.com' }],
+  ['jws', 'JWS Research', 'polling', 'au', 'gov', { r: 'https://jwsresearch.com/feed/', w: 'https://jwsresearch.com', s: 'jwsresearch.com' }],
+  ['antonygreen', 'Antony Green', 'polling', 'au', 'gov', { r: 'https://antonygreen.com.au/feed/', w: 'https://antonygreen.com.au', s: 'antonygreen.com.au' }],
+  ['demosau', 'DemosAU', 'polling', 'au', 'gov', { r: 'https://demosau.com/feed/', s: 'demosau.com' }],
+  // -- think tanks, peak bodies and the clients' own newsrooms --
+  ['cis', 'Centre for Independent Studies', 'thinktank', 'au', 'econ', { r: 'https://www.cis.org.au/feed/', w: 'https://www.cis.org.au', s: 'cis.org.au' }],
+  ['ipa', 'Institute of Public Affairs', 'thinktank', 'au', 'econ,energy', { r: 'https://ipa.org.au/feed', w: 'https://ipa.org.au', s: 'ipa.org.au' }],
+  ['percapita', 'Per Capita', 'thinktank', 'au', 'econ,col', { r: 'https://percapita.org.au/feed/', w: 'https://percapita.org.au', s: 'percapita.org.au' }],
+  ['mckell', 'McKell Institute', 'thinktank', 'au', 'econ,housing', { r: 'https://mckellinstitute.org.au/feed/', w: 'https://mckellinstitute.org.au', s: 'mckellinstitute.org.au' }],
+  ['cpd', 'Centre for Policy Development', 'thinktank', 'au', 'econ', { r: 'https://cpd.org.au/feed/', w: 'https://cpd.org.au', s: 'cpd.org.au' }],
+  ['chifley', 'Chifley Research Centre', 'thinktank', 'au', 'gov', { r: 'https://www.chifley.org.au/feed/', w: 'https://www.chifley.org.au', s: 'chifley.org.au' }],
+  ['menzies_rc', 'Menzies Research Centre', 'thinktank', 'au', 'gov', { r: 'https://www.menziesrc.org/feed', w: 'https://www.menziesrc.org', s: 'menziesrc.org' }],
+  ['climatecouncil', 'Climate Council', 'thinktank', 'au', 'energy,activism', { r: 'https://www.climatecouncil.org.au/feed/', w: 'https://www.climatecouncil.org.au', s: 'climatecouncil.org.au' }],
+  ['acoss', 'ACOSS', 'thinktank', 'au', 'col', { r: 'https://www.acoss.org.au/feed/', w: 'https://www.acoss.org.au', s: 'acoss.org.au' }],
+  ['bca', 'Business Council of Australia', 'thinktank', 'au', 'econ', { h: 'https://www.bca.com.au/media_releases', s: 'bca.com.au' }],
+  ['acci', 'Australian Chamber of Commerce and Industry', 'thinktank', 'au', 'econ,construction', { r: 'https://www.australianchamber.com.au/feed/', w: 'https://www.australianchamber.com.au', s: 'australianchamber.com.au' }],
+  ['aigroup', 'Ai Group', 'thinktank', 'au', 'construction,econ', { h: 'https://www.aigroup.com.au/news/', s: 'aigroup.com.au' }],
+  ['actu', 'ACTU', 'thinktank', 'au', 'construction,col', { h: 'https://www.actu.org.au/media/media-releases', s: 'actu.org.au' }],
+  ['e61', 'e61 Institute', 'thinktank', 'au', 'econ', { s: 'e61.in' }],
+  ['ceda', 'CEDA', 'thinktank', 'au', 'econ', { s: 'ceda.com.au' }],
+  ['mca_org', 'Minerals Council of Australia', 'sector', 'au', 'mining,ftc,cm', { r: 'https://minerals.org.au/feed/', w: 'https://minerals.org.au', s: 'minerals.org.au' }],
+  ['aep_org', 'Australian Energy Producers', 'sector', 'au', 'gas,energy', { r: 'https://energyproducers.au/feed/', w: 'https://energyproducers.au', s: 'energyproducers.au' }],
+  ['pca_org', 'Property Council of Australia', 'sector', 'au', 'housing', { r: 'https://www.propertycouncil.com.au/feed/', w: 'https://www.propertycouncil.com.au', s: 'propertycouncil.com.au' }],
+  ['mba_org', 'Master Builders Australia', 'sector', 'au', 'construction', { r: 'https://masterbuilders.com.au/feed/', w: 'https://masterbuilders.com.au', s: 'masterbuilders.com.au' }],
+  ['guild_org', 'Pharmacy Guild of Australia', 'sector', 'au', 'pharmacy', { h: 'https://www.guild.org.au/news-events/news', s: 'guild.org.au' }],
+  ['qrc', 'Queensland Resources Council', 'sector', 'qld', 'mining', { r: 'https://www.qrc.org.au/feed/', w: 'https://www.qrc.org.au', s: 'qrc.org.au' }],
+  ['cmewa', 'Chamber of Minerals and Energy WA', 'sector', 'wa', 'mining,gas', { s: 'cmewa.com.au' }],
+  ['amec', 'Association of Mining and Exploration Companies', 'sector', 'au', 'mining,cm', { r: 'https://amec.org.au/feed/', w: 'https://amec.org.au', s: 'amec.org.au' }],
+  ['cfmeu', 'CFMEU', 'sector', 'au', 'construction', { h: 'https://cfmeu.org/news/', s: 'cfmeu.org' }],
+  ['hia', 'Housing Industry Association', 'sector', 'au', 'housing,construction', { s: 'hia.com.au' }],
+  ['udia', 'Urban Development Institute of Australia', 'sector', 'au', 'housing', { r: 'https://udia.com.au/feed/', w: 'https://udia.com.au', s: 'udia.com.au' }],
+  // -- activist and campaign groups (the other side of the clients' fights) --
+  ['lockthegate', 'Lock the Gate', 'thinktank', 'au', 'activism,mining,gas', { r: 'https://www.lockthegate.org.au/news.rss', h: 'https://www.lockthegate.org.au/news', s: 'lockthegate.org.au' }],
+  ['acf', 'Australian Conservation Foundation', 'thinktank', 'au', 'activism,energy', { r: 'https://www.acf.org.au/news.rss', h: 'https://www.acf.org.au/news', s: 'acf.org.au' }],
+  ['marketforces', 'Market Forces', 'thinktank', 'au', 'activism,gas', { r: 'https://www.marketforces.org.au/feed/', w: 'https://www.marketforces.org.au', s: 'marketforces.org.au' }],
+  ['risingtide', 'Rising Tide', 'thinktank', 'au', 'activism,mining', { h: 'https://www.risingtide.org.au/', s: 'risingtide.org.au' }],
+  ['greenpeace_au', 'Greenpeace Australia Pacific', 'thinktank', 'au', 'activism,energy', { r: 'https://www.greenpeace.org.au/feed/', w: 'https://www.greenpeace.org.au', s: 'greenpeace.org.au' }],
+  ['edo', 'Environmental Defenders Office', 'thinktank', 'au', 'activism,mining', { r: 'https://www.edo.org.au/feed/', w: 'https://www.edo.org.au', s: 'edo.org.au' }],
+  ['getup', 'GetUp', 'thinktank', 'au', 'activism', { s: 'getup.org.au' }],
+  ['environmentvic', 'Environment Victoria', 'thinktank', 'vic', 'activism,energy', { r: 'https://environmentvictoria.org.au/feed/', w: 'https://environmentvictoria.org.au', s: 'environmentvictoria.org.au' }],
+  // -- sector press: resources and energy --
+  ['australianmining', 'Australian Mining', 'sector', 'au', 'mining,cm', { r: 'https://www.australianmining.com.au/feed/', w: 'https://www.australianmining.com.au', s: 'australianmining.com.au' }],
+  ['miningcomau', 'Mining.com.au', 'sector', 'au', 'mining,cm', { r: 'https://mining.com.au/feed/', w: 'https://mining.com.au', s: 'mining.com.au' }],
+  ['stockhead', 'Stockhead', 'sector', 'au', 'mining,cm,energy', { r: 'https://stockhead.com.au/feed/', w: 'https://stockhead.com.au', s: 'stockhead.com.au' }],
+  ['miningnews', 'MiningNews.net', 'sector', 'au', 'mining', { s: 'miningnews.net' }],
+  ['ausresources', 'Australian Resources and Investment', 'sector', 'au', 'mining,cm', { r: 'https://www.australianresourcesandinvestment.com.au/feed/', w: 'https://www.australianresourcesandinvestment.com.au', s: 'australianresourcesandinvestment.com.au' }],
+  ['energynewsbulletin', 'Energy News Bulletin', 'sector', 'au', 'gas', { s: 'energynewsbulletin.net' }],
+  ['reneweconomy', 'RenewEconomy', 'sector', 'au', 'energy', { r: 'https://reneweconomy.com.au/feed/', w: 'https://reneweconomy.com.au', s: 'reneweconomy.com.au' }],
+  ['pvmagazine', 'pv magazine Australia', 'sector', 'au', 'energy', { r: 'https://www.pv-magazine-australia.com/feed/', w: 'https://www.pv-magazine-australia.com', s: 'pv-magazine-australia.com' }],
+  ['wattclarity', 'WattClarity', 'sector', 'au', 'energy', { r: 'https://wattclarity.com.au/feed/', w: 'https://wattclarity.com.au', s: 'wattclarity.com.au' }],
+  ['energymag', 'Energy Magazine', 'sector', 'au', 'energy,gas', { r: 'https://www.energymagazine.com.au/feed/', w: 'https://www.energymagazine.com.au', s: 'energymagazine.com.au' }],
+  ['ecogeneration', 'EcoGeneration', 'sector', 'au', 'energy', { r: 'https://www.ecogeneration.com.au/feed/', w: 'https://www.ecogeneration.com.au', s: 'ecogeneration.com.au' }],
+  ['esdnews', 'Energy Source and Distribution', 'sector', 'au', 'energy', { r: 'https://esdnews.com.au/feed/', w: 'https://esdnews.com.au', s: 'esdnews.com.au' }],
+  ['gastoday', 'Gas Today', 'sector', 'au', 'gas', { r: 'https://gastoday.com.au/feed/', w: 'https://gastoday.com.au', s: 'gastoday.com.au' }],
+  ['cleanenergycouncil', 'Clean Energy Council', 'sector', 'au', 'energy', { s: 'cleanenergycouncil.org.au' }],
+  // -- sector press: construction, property and IR --
+  ['sourceable', 'Sourceable', 'sector', 'au', 'construction', { r: 'https://sourceable.net/feed/', w: 'https://sourceable.net', s: 'sourceable.net' }],
+  ['insideconstruction', 'Inside Construction', 'sector', 'au', 'construction', { r: 'https://www.insideconstruction.com.au/feed/', w: 'https://www.insideconstruction.com.au', s: 'insideconstruction.com.au' }],
+  ['buildaustralia', 'Build Australia', 'sector', 'au', 'construction', { r: 'https://www.buildaustralia.com.au/feed/', w: 'https://www.buildaustralia.com.au', s: 'buildaustralia.com.au' }],
+  ['roadsonline', 'Roads and Infrastructure', 'sector', 'au', 'construction', { r: 'https://roadsonline.com.au/feed/', w: 'https://roadsonline.com.au', s: 'roadsonline.com.au' }],
+  ['inframag', 'Infrastructure Magazine', 'sector', 'au', 'construction', { r: 'https://infrastructuremagazine.com.au/feed/', w: 'https://infrastructuremagazine.com.au', s: 'infrastructuremagazine.com.au' }],
+  ['urbandeveloper', 'The Urban Developer', 'sector', 'au', 'housing,construction', { h: 'https://www.theurbandeveloper.com/', s: 'theurbandeveloper.com' }],
+  ['workplaceexpress', 'Workplace Express', 'sector', 'au', 'construction', { s: 'workplaceexpress.com.au' }],
+  ['domain_news', 'Domain News', 'sector', 'au', 'housing', { r: 'https://www.domain.com.au/news/feed/', w: 'https://www.domain.com.au/news', s: 'domain.com.au/news' }],
+  ['rea_news', 'realestate.com.au News', 'sector', 'au', 'housing', { r: 'https://www.realestate.com.au/news/feed/', w: 'https://www.realestate.com.au/news', s: 'realestate.com.au/news' }],
+  ['reb', 'Real Estate Business', 'sector', 'au', 'housing', { r: 'https://www.realestatebusiness.com.au/feed', s: 'realestatebusiness.com.au' }],
+  ['corelogic', 'Cotality (CoreLogic)', 'sector', 'au', 'housing', { s: 'corelogic.com.au' }],
+  ['apimag', 'Australian Property Investor', 'sector', 'au', 'housing', { r: 'https://www.apimagazine.com.au/feed/', w: 'https://www.apimagazine.com.au', s: 'apimagazine.com.au' }],
+  // -- sector press: pharmacy and health --
+  ['ajp', 'Australian Journal of Pharmacy', 'sector', 'au', 'pharmacy', { r: 'https://ajp.com.au/feed/', w: 'https://ajp.com.au', s: 'ajp.com.au' }],
+  ['pharmacydaily', 'Pharmacy Daily', 'sector', 'au', 'pharmacy', { r: 'https://pharmacydaily.com.au/feed/', w: 'https://pharmacydaily.com.au', s: 'pharmacydaily.com.au' }],
+  ['auspharmacist', 'Australian Pharmacist', 'sector', 'au', 'pharmacy', { r: 'https://www.australianpharmacist.com.au/feed/', w: 'https://www.australianpharmacist.com.au', s: 'australianpharmacist.com.au' }],
+  ['psa', 'Pharmaceutical Society of Australia', 'sector', 'au', 'pharmacy', { r: 'https://www.psa.org.au/feed/', w: 'https://www.psa.org.au', s: 'psa.org.au' }],
+  ['croakey', 'Croakey Health Media', 'sector', 'au', 'pharmacy', { r: 'https://www.croakey.org/feed/', w: 'https://www.croakey.org', s: 'croakey.org' }],
+  ['medicalrepublic', 'The Medical Republic', 'sector', 'au', 'pharmacy', { r: 'https://www.medicalrepublic.com.au/feed', w: 'https://www.medicalrepublic.com.au', s: 'medicalrepublic.com.au' }],
+  ['newsgp', 'newsGP (RACGP)', 'sector', 'au', 'pharmacy', { g: 'site:racgp.org.au/newsgp' }],
+  ['ausdoc', 'Australian Doctor', 'sector', 'au', 'pharmacy', { s: 'ausdoc.com.au' }],
+  ['ama', 'Australian Medical Association', 'sector', 'au', 'pharmacy', { r: 'https://www.ama.com.au/rss.xml', h: 'https://www.ama.com.au/media', s: 'ama.com.au' }],
+  // -- sector press: education, firearms and sport, tax --
+  ['campusmorningmail', 'Campus Morning Mail', 'sector', 'au', '', { r: 'https://campusmorningmail.com.au/feed/', w: 'https://campusmorningmail.com.au', s: 'campusmorningmail.com.au' }],
+  ['educationhq', 'EducationHQ', 'sector', 'au', '', { s: 'educationhq.com' }],
+  ['theeducator', 'The Educator', 'sector', 'au', '', { s: 'theeducatoronline.com' }],
+  ['ssaa', 'Sporting Shooters Association of Australia', 'sector', 'au', '', { r: 'https://ssaa.org.au/feed/', w: 'https://ssaa.org.au', s: 'ssaa.org.au' }],
+  ['sportingshooter', 'Sporting Shooter', 'sector', 'au', '', { r: 'https://sportingshooter.com.au/feed/', w: 'https://sportingshooter.com.au', s: 'sportingshooter.com.au' }],
+  ['sifa_org', 'Shooting Industry Foundation Australia', 'sector', 'au', '', { h: 'https://www.sifa.net.au/', s: 'sifa.net.au' }],
+  ['shootingaus', 'Shooting Australia', 'sector', 'au', '', { r: 'https://shootingaustralia.org/feed/', w: 'https://shootingaustralia.org', s: 'shootingaustralia.org' }],
+  ['guncontrolau', 'Gun Control Australia', 'thinktank', 'au', 'activism', { s: 'guncontrol.org.au' }],
+  ['accountantsdaily', 'Accountants Daily', 'sector', 'au', 'econ', { r: 'https://www.accountantsdaily.com.au/feed', s: 'accountantsdaily.com.au' }],
+  ['taxinstitute', 'The Tax Institute', 'sector', 'au', 'econ', { s: 'taxinstitute.com.au' }],
+  // -- podcasts (found through the Apple Podcasts directory, then read as feeds) --
+  ['pod_partyroom', 'The Party Room (ABC)', 'podcast', 'au', 'gov', { p: 'The Party Room ABC' }],
+  ['pod_guardian_pol', 'Australian Politics (Guardian)', 'podcast', 'au', 'gov', { r: 'https://www.theguardian.com/australia-news/series/australian-politics-live/podcast.xml', p: 'Australian Politics Guardian' }],
+  ['pod_7am', '7am (Schwartz Media)', 'podcast', 'au', 'gov', { p: '7am Schwartz Media' }],
+  ['pod_fullstory', 'Full Story (Guardian Australia)', 'podcast', 'au', '', { p: 'Full Story Guardian Australia' }],
+  ['pod_abcnewsdaily', 'ABC News Daily', 'podcast', 'au', '', { p: 'ABC News Daily' }],
+  ['pod_pleaseexplain', 'Please Explain (SMH and The Age)', 'podcast', 'au', 'gov', { p: 'Please Explain Sydney Morning Herald' }],
+  ['pod_thefin', 'The Fin (AFR)', 'podcast', 'au', 'econ', { p: 'The Fin Australian Financial Review' }],
+  ['pod_chanticleer', 'Chanticleer (AFR)', 'podcast', 'au', 'econ', { p: 'Chanticleer AFR' }],
+  ['pod_democracysausage', 'Democracy Sausage', 'podcast', 'au', 'gov', { p: 'Democracy Sausage Mark Kenny' }],
+  ['pod_followthemoney', 'Follow the Money (Australia Institute)', 'podcast', 'au', 'econ', { p: 'Follow the Money Australia Institute' }],
+  ['pod_thebriefing', 'The Briefing (LiSTNR)', 'podcast', 'au', '', { p: 'The Briefing LiSTNR' }],
+  // -- Google News sweeps by jurisdiction and client fight (recall where no single outlet covers it) --
+  ['sweep_nsw', 'Sweep: NSW politics', 'sweep', 'nsw', 'gov', { g: '"nsw government" OR "nsw premier" OR "nsw parliament" OR macquarie street' }],
+  ['sweep_vic', 'Sweep: Victorian politics', 'sweep', 'vic', 'vicelection', { g: '"victorian government" OR "victorian premier" OR "spring street" OR "victorian parliament"' }],
+  ['sweep_regionalvic', 'Sweep: regional Victoria', 'sweep', 'vic', 'regional', { g: '"regional victoria" OR gippsland OR bendigo OR ballarat OR shepparton OR mildura' }],
+  ['sweep_qld', 'Sweep: Queensland politics', 'sweep', 'qld', 'gov', { g: '"queensland government" OR "queensland premier" OR "queensland parliament"' }],
+  ['sweep_wa', 'Sweep: WA politics', 'sweep', 'wa', 'gov,mining', { g: '"wa government" OR "western australian premier" OR "wa parliament" OR "wa budget"' }],
+  ['sweep_sa', 'Sweep: SA politics', 'sweep', 'sa', 'gov', { g: '"south australian government" OR "sa premier" OR "sa parliament" OR "sa budget"' }],
+  ['sweep_tas', 'Sweep: Tasmanian politics', 'sweep', 'tas', 'gov', { g: '"tasmanian government" OR "tasmanian premier" OR "tasmanian parliament"' }],
+  ['sweep_nt', 'Sweep: NT politics', 'sweep', 'nt', 'gov,gas', { g: '"northern territory government" OR "nt chief minister" OR "nt parliament"' }],
+  ['sweep_act', 'Sweep: ACT politics', 'sweep', 'act', 'gov', { g: '"act government" OR "act chief minister" OR "act legislative assembly"' }],
+  ['sweep_pharmacy', 'Sweep: community pharmacy', 'sweep', 'au', 'pharmacy', { g: '"pharmacy guild" OR "community pharmacy" OR "60-day dispensing" OR pharmacist prescribing' }],
+  ['sweep_construction', 'Sweep: construction and IR', 'sweep', 'au', 'construction', { g: 'australia cfmeu OR "master builders" OR "building approvals" OR "construction industry"' }],
+  ['sweep_gas', 'Sweep: gas', 'sweep', 'au', 'gas', { g: 'australia "gas reservation" OR "gas supply" OR "gas shortfall" OR lng export' }],
+  ['sweep_activism', 'Sweep: activist campaigns', 'sweep', 'au', 'activism', { g: 'australia "rising tide" OR "lock the gate" OR "market forces" OR "extinction rebellion" OR "blockade australia"' }],
+  ['sweep_firearms', 'Sweep: firearms policy', 'sweep', 'au', '', { g: 'australia firearms OR "gun laws" OR "national firearms register" OR "gun buyback"' }],
+  ['sweep_education', 'Sweep: education policy', 'sweep', 'au', '', { g: 'australia "education minister" OR "school funding" OR universities policy OR "early childhood education"' }],
+];
+function sourceMethods(urls, explicit) {
+  urls = urls || {};
+  if (Array.isArray(explicit) && explicit.length) { const e = explicit.map(String).filter(m => SOURCE_METHODS.indexOf(m) >= 0); if (e.length) return e; }
+  const m = [];
+  if (urls.rss) m.push('rss');
+  if (urls.wp) m.push('wp');
+  if (urls.json) m.push('json');
+  if (urls.sitemap || urls.site) m.push('sitemap');
+  if (urls.podcast) m.push('podcast');
+  if (urls.home) m.push('html');
+  if (urls.site || urls.gnews) m.push('gnews');
+  if (urls.home) m.push('render');
+  return m;
+}
+/** The whole seed: the AU_FEEDS core (fetched by buildAllNews, health mirrored
+ *  here) plus the extension list above. */
+function sourceSeed() {
+  const out = [];
+  Object.keys(AU_FEEDS).forEach(k => {
+    const m = CORE_META[k] || [];
+    const sweep = /^gnews_/.test(k);
+    out.push({ id: k, name: m[0] || (sweep ? 'Sweep: ' + k.replace(/^gnews_/, '').replace(/_/g, ' ') : k), tier: m[1] || (sweep ? 'sweep' : 'core'), juris: m[2] || 'au',
+      issues: CORE_ISSUES[k] || [], methods: ['rss'], urls: { rss: AU_FEEDS[k] }, schedule: SOURCE_SCHED.core, core: true });
+  });
+  SOURCE_SEED_EXT.forEach(r => {
+    const u = r[5] || {}; const urls = {};
+    if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
+    if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
+    out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
+  });
+  return out;
+}
+async function ensureSources(env) {
+  if (!env.MIND_DB) return false;
+  if (SOURCES_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, name TEXT, tier TEXT, juris TEXT, issues TEXT, methods TEXT, urls TEXT, schedule INTEGER, enabled INTEGER, core INTEGER, edited INTEGER, created INTEGER, updated INTEGER, last_try INTEGER, last_ok INTEGER, next_due INTEGER, fails INTEGER, method_ok TEXT, last_error TEXT, latest_ts INTEGER, note TEXT, alerted INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS sources_due ON sources(enabled, core, next_due)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS source_health(id INTEGER PRIMARY KEY AUTOINCREMENT, src TEXT, ts INTEGER, ok INTEGER, method TEXT, n INTEGER, ms INTEGER, detail TEXT)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS source_health_src ON source_health(src, id)'),
+  ]);
+  SOURCES_READY = true;
+  try { await sourcesSeed(env); } catch (e) {}
+  return true;
+}
+/** Seed once per seed version: insert what is missing, refresh the seed fields
+ *  of rows the operator has never edited, never touch an edited row. */
+async function sourcesSeed(env, force) {
+  const seed = sourceSeed();
+  const ver = arcHash(JSON.stringify(seed));
+  const n = ((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM sources').first()) || {}).n || 0;
+  if (!force && n > 0 && (await kvGet(env.AXIOM_KV, 'sources_seed_v')) === ver) return { ok: true, unchanged: true, n };
+  const now = Date.now();
+  const ins = env.MIND_DB.prepare("INSERT INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated,last_try,last_ok,next_due,fails,method_ok,last_error,latest_ts,note,alerted) VALUES(?,?,?,?,?,?,?,?,1,?,0,?,?,0,0,0,0,'','',0,'',0) ON CONFLICT(id) DO NOTHING");
+  const upd = env.MIND_DB.prepare('UPDATE sources SET name=?, tier=?, juris=?, issues=?, methods=?, urls=?, schedule=?, core=?, updated=? WHERE id=? AND edited=0');
+  const stmts = [];
+  seed.forEach(s => {
+    const j = [JSON.stringify(s.issues), JSON.stringify(s.methods), JSON.stringify(s.urls)];
+    stmts.push(ins.bind(s.id, s.name, s.tier, s.juris, j[0], j[1], j[2], s.schedule, s.core ? 1 : 0, now, now));
+    stmts.push(upd.bind(s.name, s.tier, s.juris, j[0], j[1], j[2], s.schedule, s.core ? 1 : 0, now, s.id));
+  });
+  for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  await kvPut(env.AXIOM_KV, 'sources_seed_v', ver, 30 * 86400);
+  return { ok: true, seeded: seed.length, had: n };
+}
+function pjs(v, d) { try { const x = JSON.parse(v || ''); return x == null ? d : x; } catch (e) { return d; } }
+function sourceRow(r) {
+  return { id: r.id, name: r.name || r.id, tier: r.tier || 'core', juris: r.juris || 'au', issues: pjs(r.issues, []), methods: pjs(r.methods, []), urls: pjs(r.urls, {}),
+    schedule: Number(r.schedule) || 60, enabled: !!r.enabled, core: !!r.core, edited: !!r.edited, created: r.created || 0, updated: r.updated || 0,
+    last_try: r.last_try || 0, last_ok: r.last_ok || 0, next_due: r.next_due || 0, fails: r.fails || 0, method_ok: r.method_ok || '', last_error: r.last_error || '',
+    latest_ts: r.latest_ts || 0, note: r.note || '', alerted: r.alerted || 0 };
+}
+function sourceStatus(s, now) {
+  if (!s.enabled) return 'off';
+  if ((s.fails || 0) >= SOURCE_DEAD_FAILS) return 'dead';
+  if (!s.last_try) return 'unverified';
+  if ((s.fails || 0) > 0) return 'failing';
+  if (s.last_ok && now - s.last_ok < 48 * 3600000) return 'ok';
+  return 'stale';
+}
+function sourceIdClean(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40); }
+function siteHost(s) { return String(s || '').replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, ''); }
+/** Operator input -> a clean source; `cur` is the stored row when editing. */
+function sourceSanitize(b, cur) {
+  b = b || {};
+  const u = (b.urls && typeof b.urls === 'object') ? b.urls : null;
+  let urls = cur ? Object.assign({}, cur.urls) : {};
+  if (u) {
+    urls = {};
+    ['rss', 'wp', 'json', 'sitemap', 'home'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    if (u.site) urls.site = String(u.site).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 120);
+    if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
+    if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
+  }
+  const name = String(b.name || (cur && cur.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const id = sourceIdClean(b.id || (cur && cur.id) || name.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  const tier = SOURCE_TIERS.indexOf(b.tier) >= 0 ? b.tier : ((cur && cur.tier) || 'independent');
+  const juris = SOURCE_JURIS.indexOf(b.juris) >= 0 ? b.juris : ((cur && cur.juris) || 'au');
+  const known = x => CLIENT_ISSUES.some(ci => ci.id === x);
+  const issues = Array.isArray(b.issues) ? b.issues.map(String).filter(known).slice(0, 12)
+    : typeof b.issues === 'string' ? b.issues.split(/[,\s]+/).filter(known).slice(0, 12) : ((cur && cur.issues) || []);
+  const methods = sourceMethods(urls, Array.isArray(b.methods) ? b.methods : (!u && cur ? cur.methods : null));
+  const schedule = Math.min(Math.max(parseInt(b.schedule, 10) || ((cur && cur.schedule) || SOURCE_SCHED[tier] || 60), 15), 1440);
+  return { id, name, tier, juris, issues, urls, methods, schedule, note: String(b.note != null ? b.note : ((cur && cur.note) || '')).slice(0, 300),
+    enabled: b.enabled == null ? (cur ? cur.enabled : true) : !!b.enabled };
+}
+async function sourceUpsert(env, s, now) {
+  await env.MIND_DB.prepare("INSERT INTO sources(id,name,tier,juris,issues,methods,urls,schedule,enabled,core,edited,created,updated,last_try,last_ok,next_due,fails,method_ok,last_error,latest_ts,note,alerted) VALUES(?,?,?,?,?,?,?,?,?,0,1,?,?,0,0,0,0,'','',0,?,0) ON CONFLICT(id) DO UPDATE SET name=excluded.name, tier=excluded.tier, juris=excluded.juris, issues=excluded.issues, methods=excluded.methods, urls=excluded.urls, schedule=excluded.schedule, enabled=excluded.enabled, edited=1, updated=excluded.updated, note=excluded.note, next_due=0, method_ok=CASE WHEN sources.urls=excluded.urls THEN sources.method_ok ELSE '' END, fails=CASE WHEN sources.urls=excluded.urls THEN sources.fails ELSE 0 END")
+    .bind(s.id, s.name, s.tier, s.juris, JSON.stringify(s.issues), JSON.stringify(s.methods), JSON.stringify(s.urls), s.schedule, s.enabled ? 1 : 0, now, now, s.note).run();
+}
+async function sourceGet(env, id) {
+  const r = await env.MIND_DB.prepare('SELECT * FROM sources WHERE id=?').bind(id).first();
+  return r ? sourceRow(r) : null;
+}
+/** Core feeds the operator switched off, so buildAllNews skips them. */
+async function sourcesCoreOff(env) {
+  try { const a = JSON.parse((await kvGet(env.AXIOM_KV, 'sources_core_off')) || '[]'); return new Set(Array.isArray(a) ? a : []); } catch (e) { return new Set(); }
+}
+async function sourcesCoreOffRefresh(env) {
+  const rows = (await env.MIND_DB.prepare('SELECT id FROM sources WHERE core=1 AND enabled=0').all()).results || [];
+  await kvPut(env.AXIOM_KV, 'sources_core_off', JSON.stringify(rows.map(r => r.id)), 90 * 86400);
+}
+
+// -- one fetch, never throws --------------------------------------------------
+async function srcFetch(url, accept, ms) {
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept': accept || '*/*', 'Accept-Language': 'en-AU,en;q=0.8' },
+      signal: abortAfter(ms || SOURCE_FETCH_MS), cf: { cacheTtl: 300, cacheEverything: true }, redirect: 'follow' });
+    const text = r.ok ? (await r.text()).slice(0, 1500000) : '';
+    return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, ctype: (r.headers.get('content-type') || '').toLowerCase(), url: r.url || url };
+  } catch (e) {
+    const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e);
+    return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out after ' + Math.round((ms || SOURCE_FETCH_MS) / 1000) + 's' : s.trim().slice(0, 90) };
+  }
+}
+function srcFail(f, what) { return { ok: false, items: [], status: f.status || 0, detail: f.error ? f.error : (f.status ? 'HTTP ' + f.status : (what || 'failed')) }; }
+/** Article-shaped links on a listing page: same host, a slug or a dated path,
+ *  anchor text long enough to be a headline. Undated - the sweep stamps the
+ *  first sighting. */
+function listingLinks(html, base) {
+  const out = []; const seen = new Set();
+  let host = ''; try { host = new URL(base).host.replace(/^www\./, ''); } catch (e) { return out; }
+  const re = /<a\b[^>]*href=["']([^"'#?]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) && out.length < 60) {
+    const text = stripHtml(m[2]);
+    if (!text || text.length < 28 || text.length > 220) continue;
+    let u; try { u = new URL(m[1], base); } catch (e) { continue; }
+    if (u.host.replace(/^www\./, '') !== host) continue;
+    const path = u.pathname;
+    const segs = path.split('/').filter(Boolean);
+    const slug = segs[segs.length - 1] || '';
+    const arty = slug.split('-').length >= 4 || /\d{4}\/\d{2}/.test(path) || /\/\d{5,}/.test(path)
+      || /\/(news|story|stories|article|articles|politics|media-releases?|media_releases?|statements?|releases?|speech|speeches|opinion|analysis|latest_news|latest-news|newsroom)\//i.test(path + '/');
+    if (!arty || segs.length < 2) continue;
+    const key = u.origin + path;
+    if (seen.has(key)) continue; seen.add(key);
+    out.push({ title: text, link: key, date: '', desc: '' });
+  }
+  return out;
+}
+function slugTitle(u) {
+  try {
+    const p = new URL(u).pathname.split('/').filter(Boolean);
+    let s = (p[p.length - 1] || '').replace(/\.(html?|php|aspx?)$/i, '').replace(/[-_]+/g, ' ').replace(/\b[a-f0-9]{8,}\b|\b\d{5,}\b/gi, '').replace(/\s+/g, ' ').trim();
+    return s.length >= 12 ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+  } catch (e) { return ''; }
+}
+function parseSitemap(xml) {
+  const out = [];
+  for (const m of xml.matchAll(/<url>([\s\S]*?)<\/url>/g)) {
+    const b = m[1];
+    const loc = (b.match(/<loc>\s*([^<\s]+)\s*<\/loc>/) || [])[1];
+    if (!loc) continue;
+    const title = stripHtml((b.match(/<news:title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/news:title>/) || [])[1] || '');
+    const date = ((b.match(/<news:publication_date>([^<]+)<\/news:publication_date>/) || b.match(/<lastmod>([^<]+)<\/lastmod>/) || [])[1] || '').trim();
+    out.push({ title: title || slugTitle(loc), link: loc.trim(), date, desc: '' });
+  }
+  return out;
+}
+
+// -- the methods: each returns { ok, items:[{title,link,date,desc,text?}], status, detail } --
+async function srcRss(env, src) {
+  const f = await srcFetch(src.urls.rss, 'application/rss+xml,application/atom+xml,application/xml,text/xml,*/*');
+  if (!f.ok) return srcFail(f);
+  const items = parseFeedXml(f.text);
+  if (!items.length) return { ok: false, items: [], status: f.status, detail: /<html[\s>]/i.test(f.text.slice(0, 3000)) ? 'HTTP 200 but an HTML page, not a feed' : 'HTTP 200 but no items parsed' };
+  return { ok: true, items, status: f.status };
+}
+async function srcWp(env, src) {
+  const base = String(src.urls.wp).replace(/\/+$/, '');
+  const f = await srcFetch(base + '/wp-json/wp/v2/posts?per_page=20&_fields=link,title,date_gmt,excerpt,content', 'application/json');
+  if (!f.ok) return srcFail(f);
+  let arr; try { arr = JSON.parse(f.text); } catch (e) { return { ok: false, items: [], status: f.status, detail: 'HTTP 200 but not JSON (REST API disabled?)' }; }
+  if (!Array.isArray(arr)) return { ok: false, items: [], status: f.status, detail: arr && arr.message ? String(arr.message).slice(0, 100) : 'unexpected JSON shape' };
+  const items = arr.map(p => ({ title: stripHtml((p.title && p.title.rendered) || ''), link: p.link || '',
+    date: p.date_gmt ? String(p.date_gmt).replace(/Z?$/, 'Z') : (p.date || ''),
+    desc: stripHtml((p.excerpt && p.excerpt.rendered) || '').slice(0, 240), text: stripHtml((p.content && p.content.rendered) || '').slice(0, 6000) })).filter(i => i.title && i.link);
+  return items.length ? { ok: true, items, status: f.status, full: true } : { ok: false, items: [], status: f.status, detail: 'REST API answered with no posts' };
+}
+async function srcJson(env, src) {
+  const f = await srcFetch(src.urls.json, 'application/feed+json,application/json,*/*');
+  if (!f.ok) return srcFail(f);
+  let d; try { d = JSON.parse(f.text); } catch (e) { return { ok: false, items: [], status: f.status, detail: 'HTTP 200 but not JSON' }; }
+  const items = (Array.isArray(d.items) ? d.items : []).map(i => ({ title: stripHtml(i.title || ''), link: i.url || i.external_url || i.id || '', date: i.date_published || i.date_modified || '',
+    desc: stripHtml(i.summary || i.content_text || i.content_html || '').slice(0, 240), text: stripHtml(i.content_text || i.content_html || '').slice(0, 6000) })).filter(i => i.title && /^https?:/.test(i.link));
+  return items.length ? { ok: true, items, status: f.status, full: items.some(i => i.text.length > 600) } : { ok: false, items: [], status: f.status, detail: 'JSON feed with no items' };
+}
+async function srcSitemap(env, src) {
+  let maps = [], status = 0, detail = '';
+  if (src.urls.sitemap) maps = [src.urls.sitemap];
+  else if (src.urls.site) {
+    const rb = await srcFetch('https://' + siteHost(src.urls.site) + '/robots.txt', 'text/plain,*/*', 5000);
+    if (!rb.ok) return srcFail(rb, 'no robots.txt');
+    const all = Array.from(rb.text.matchAll(/^\s*sitemap:\s*(\S+)/gim)).map(x => x[1]);
+    if (!all.length) return { ok: false, items: [], status: rb.status, detail: 'robots.txt lists no sitemap' };
+    const news = all.filter(u => /news|latest|recent|daily|article/i.test(u));
+    maps = (news.length ? news : all).slice(0, 2);
+  } else return { ok: false, items: [], skipped: true, detail: 'no sitemap or site given' };
+  let items = [];
+  for (const u of maps) {
+    const f = await srcFetch(u, 'application/xml,text/xml,*/*');
+    status = f.status;
+    if (!f.ok) { detail = f.error || ('HTTP ' + f.status); continue; }
+    let xml = f.text;
+    if (/<sitemapindex/i.test(xml)) {
+      const kids = Array.from(xml.matchAll(/<sitemap>[\s\S]*?<loc>\s*([^<\s]+)\s*<\/loc>[\s\S]*?<\/sitemap>/g)).map(x => x[1]);
+      const pick = kids.filter(k => /news|latest|recent|article/i.test(k)).concat(kids).slice(0, 1);
+      if (!pick.length) { detail = 'sitemap index with no children'; continue; }
+      const g = await srcFetch(pick[0], 'application/xml,text/xml,*/*');
+      if (!g.ok) { detail = g.error || ('HTTP ' + g.status); continue; }
+      xml = g.text;
+    }
+    items = items.concat(parseSitemap(xml));
+    if (items.length) break;
+  }
+  if (!items.length) return { ok: false, items: [], status, detail: detail || 'sitemap had no entries' };
+  const cut = Date.now() - 48 * 3600000;
+  const dated = items.filter(i => i.date && Date.parse(i.date) >= cut);
+  const use = (dated.length ? dated : items.filter(i => !i.date).slice(0, 30)).filter(i => i.title);
+  return use.length ? { ok: true, items: use.slice(0, 60), status } : { ok: false, items: [], status, detail: 'sitemap entries are all older than 48h or have no usable title' };
+}
+async function srcPodcast(env, src) {
+  const term = String(src.urls.podcast || '').trim();
+  if (!term) return { ok: false, items: [], skipped: true, detail: 'no podcast search term' };
+  const ck = 'pod_feed_' + src.id;
+  let feed = await kvGet(env.AXIOM_KV, ck);
+  if (!feed) {
+    const f = await srcFetch('https://itunes.apple.com/search?term=' + encodeURIComponent(term) + '&media=podcast&country=AU&limit=3', 'application/json,*/*');
+    if (!f.ok) return srcFail(f, 'podcast directory');
+    let d = {}; try { d = JSON.parse(f.text); } catch (e) { d = {}; }
+    const hit = (d.results || []).find(x => x && x.feedUrl);
+    if (!hit) return { ok: false, items: [], status: f.status, detail: 'no podcast matched "' + term.slice(0, 40) + '" in the Apple directory' };
+    feed = String(hit.feedUrl); await kvPut(env.AXIOM_KV, ck, feed, 7 * 86400);
+  }
+  const r = await srcRss(env, { urls: { rss: feed } });
+  if (r.ok) { r.feed = feed; r.items = r.items.map(i => Object.assign(i, { link: i.link || (feed + '#' + arcHash(i.title)) })); }
+  else r.detail = 'feed ' + feed.slice(0, 70) + ': ' + r.detail;
+  return r;
+}
+async function srcHtml(env, src) {
+  const f = await srcFetch(src.urls.home, 'text/html,application/xhtml+xml,*/*');
+  if (!f.ok) return srcFail(f);
+  const items = listingLinks(f.text, f.url || src.urls.home);
+  return items.length ? { ok: true, items, status: f.status, undated: true } : { ok: false, items: [], status: f.status, detail: 'page had no article-shaped links (built client-side? render would show)' };
+}
+async function srcGnews(env, src) {
+  const q = src.urls.gnews || ('site:' + String(src.urls.site || '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, ''));
+  const f = await srcFetch('https://news.google.com/rss/search?q=' + encodeURIComponent(q + ' when:2d') + '&hl=en-AU&gl=AU&ceid=AU:en', 'application/rss+xml,application/xml,text/xml,*/*', 8000);
+  if (!f.ok) return srcFail(f);
+  const items = parseFeedXml(f.text).map(it => {
+    const m = it.title.match(/\s[-\u2013\u2014]\s([^-\u2013\u2014]{2,60})$/);
+    return { title: m ? it.title.slice(0, m.index).trim() : it.title, link: it.link, date: it.date || '', desc: '', outlet: m ? m[1].trim() : '' };
+  });
+  return items.length ? { ok: true, items, status: f.status } : { ok: false, items: [], status: f.status, detail: 'Google News has nothing indexed for ' + q.slice(0, 60) + ' in 2 days' };
+}
+/** A rendered page, for sites built entirely in the browser. Two back ends:
+ *  RENDER_URL (an HTTP service that takes {url} and answers {html} - the AWS
+ *  or Mac Playwright service) or Cloudflare Browser Rendering (CF_ACCOUNT_ID
+ *  + CF_BROWSER_TOKEN). Neither set: skipped, and the reason says what to set. */
+function renderConfigured(env) { return !!(env && (env.RENDER_URL || (env.CF_ACCOUNT_ID && env.CF_BROWSER_TOKEN))); }
+async function renderFetch(env, url, ms) {
+  if (!renderConfigured(env)) return { ok: false, skipped: true, detail: 'render is not configured: set RENDER_URL (a Playwright render service) or CF_ACCOUNT_ID + CF_BROWSER_TOKEN (Cloudflare Browser Rendering), or probe from a Mac running tools/reach-agent.py' };
+  const t0 = Date.now();
+  try {
+    let html = '';
+    if (env.RENDER_URL) {
+      const r = await fetch(env.RENDER_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Axiom-Key': String(env.RENDER_KEY || '') }, body: JSON.stringify({ url, wait: 'networkidle' }), signal: abortAfter(ms || 35000) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.html) return { ok: false, status: r.status, detail: String(d.error || ('render service HTTP ' + r.status)).slice(0, 120), ms: Date.now() - t0 };
+      html = String(d.html);
+    } else {
+      const r = await fetch('https://api.cloudflare.com/client/v4/accounts/' + env.CF_ACCOUNT_ID + '/browser-rendering/content', { method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + env.CF_BROWSER_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, gotoOptions: { waitUntil: 'networkidle0', timeout: 20000 }, rejectResourceTypes: ['image', 'media', 'font'] }), signal: abortAfter(ms || 35000) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.success) return { ok: false, status: r.status, detail: String((((d.errors || [])[0] || {}).message) || ('Browser Rendering HTTP ' + r.status)).slice(0, 120), ms: Date.now() - t0 };
+      html = String(d.result || '');
+    }
+    return { ok: true, html: html.slice(0, 1500000), ms: Date.now() - t0 };
+  } catch (e) { return { ok: false, status: 0, detail: String((e && e.message) || e).slice(0, 100), ms: Date.now() - t0 }; }
+}
+async function srcRender(env, src) {
+  const r = await renderFetch(env, src.urls.home);
+  if (!r.ok) return { ok: false, items: [], skipped: !!r.skipped, status: r.status || 0, detail: r.detail };
+  const items = listingLinks(r.html, src.urls.home);
+  return items.length ? { ok: true, items, status: 200, undated: true } : { ok: false, items: [], status: 200, detail: 'rendered page had no article-shaped links' };
+}
+async function srcMethod(env, m, src) {
+  const u = src.urls || {};
+  if (m === 'rss') return u.rss ? srcRss(env, src) : { ok: false, items: [], skipped: true, detail: 'no feed url' };
+  if (m === 'wp') return u.wp ? srcWp(env, src) : { ok: false, items: [], skipped: true, detail: 'no WordPress root' };
+  if (m === 'json') return u.json ? srcJson(env, src) : { ok: false, items: [], skipped: true, detail: 'no JSON feed url' };
+  if (m === 'sitemap') return srcSitemap(env, src);
+  if (m === 'podcast') return srcPodcast(env, src);
+  if (m === 'html') return u.home ? srcHtml(env, src) : { ok: false, items: [], skipped: true, detail: 'no listing page' };
+  if (m === 'gnews') return (u.gnews || u.site) ? srcGnews(env, src) : { ok: false, items: [], skipped: true, detail: 'no site or query for Google News' };
+  if (m === 'render') return u.home ? srcRender(env, src) : { ok: false, items: [], skipped: true, detail: 'no page to render' };
+  return { ok: false, items: [], skipped: true, detail: 'unknown method ' + m };
+}
+function srcTarget(src, m) {
+  const u = src.urls || {};
+  if (m === 'rss') return u.rss || ''; if (m === 'wp') return String(u.wp || '').replace(/\/+$/, '') + '/wp-json/wp/v2/posts'; if (m === 'json') return u.json || '';
+  if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
+  if (m === 'html' || m === 'render') return u.home || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
+  return '';
+}
+/** Run one source through its method chain. Normally stops at the first method
+ *  that delivers (the last one that worked is tried first); `all` runs every
+ *  method and reports each - the Probe. */
+async function sourceRun(env, src, opts) {
+  opts = opts || {};
+  const log = opts.log || (async () => {});
+  const methods = (src.methods || []).filter(m => SOURCE_METHODS.indexOf(m) >= 0);
+  const chain = opts.all ? methods : (src.method_ok && methods.indexOf(src.method_ok) >= 0 ? [src.method_ok].concat(methods.filter(m => m !== src.method_ok)) : methods);
+  const tried = []; let hit = null;
+  for (const m of chain) {
+    const t0 = Date.now();
+    await log('cmd', src.id + ': ' + m + ' ' + srcTarget(src, m));
+    let r; try { r = await srcMethod(env, m, src); } catch (e) { r = { ok: false, items: [], detail: String((e && e.message) || e).slice(0, 120) }; }
+    const n = (r.items || []).length, ok = !!(r.ok && n), ms = r.ms || (Date.now() - t0);
+    const t = { method: m, ok, n, ms, status: r.status || 0, skipped: !!r.skipped, detail: ok ? '' : String(r.detail || 'failed').slice(0, 160) };
+    if (ok && r.full) t.full = true;
+    if (opts.all) t.sample = (r.items || []).slice(0, 3).map(i => ({ title: String(i.title || '').slice(0, 140), link: String(i.link || '').slice(0, 200), date: i.date || '' }));
+    tried.push(t);
+    if (ok) { await log('out', src.id + ': ' + n + ' items via ' + m + ' (' + ms + 'ms)'); if (!hit) { hit = r; hit.method = m; } if (!opts.all) break; }
+    else if (!r.skipped) await log('err', src.id + ': ' + m + ' - ' + t.detail);
+  }
+  return { src, hit, tried, ok: !!hit, method: hit ? hit.method : '', items: hit ? hit.items : [] };
+}
+/** Items -> archive rows of kind news. Every row carries the source, its tier
+ *  and jurisdiction, the method that found it, the client issues it speaks to
+ *  and whether it arrived with a date. WordPress and JSON feeds bring the full
+ *  article text; meta.ft records that so the full-text pass leaves them alone. */
+function sourceRows(src, hit, now) {
+  const cut = now - SOURCE_WINDOW_H * 3600000;
+  const seen = new Set(); const rows = [];
+  for (const it of (hit.items || [])) {
+    const title = String(it.title || '').replace(/\s+/g, ' ').trim(); const link = String(it.link || '').trim();
+    if (title.length < 8 || !/^https?:\/\//.test(link) || seen.has(link)) continue;
+    seen.add(link);
+    const t = Date.parse(it.date || '');
+    const dated = !isNaN(t) && t > 0;
+    if (dated && (t < cut || t > now + 86400000)) continue;
+    const e = enrichItem({ title, desc: it.desc || '' });
+    const text = String(it.text || '');
+    const meta = { reg: 1, source: src.id, tier: src.tier, juris: src.juris, method: hit.method, issues: issueTag(title + ' ' + (it.desc || '') + ' ' + text.slice(0, 1500)), dated: dated ? 1 : 0 };
+    if (e.parties) meta.parties = e.parties;
+    if (it.outlet) meta.outlet = String(it.outlet).slice(0, 60);
+    if (text.length > 600) { meta.full = 1; meta.ft = hit.method; }
+    rows.push({ src: src.id, title: title.slice(0, 500), body: (text.length > (it.desc || '').length ? text : String(it.desc || '')).slice(0, 6000), url: link, tone: e.tone, meta, ts: dated ? t : now });
+  }
+  return rows;
+}
+function sourceStmts(env, run, added, now) {
+  const s = run.src; const stmts = [];
+  const next = now + Math.max(15, Number(s.schedule) || 60) * 60000;
+  const short = run.tried.map(t => t.method + ':' + (t.ok ? t.n : (t.skipped ? 'skip' : 'x' + (t.status || '')))).join(' ');
+  const detail = run.ok ? short : (short + ' | ' + run.tried.filter(t => !t.skipped).map(t => t.method + ' ' + t.detail).join('; ')).slice(0, 400);
+  if (run.ok) {
+    const latest = (run.items || []).reduce((a, i) => Math.max(a, Date.parse(i.date || '') || 0), 0);
+    stmts.push(env.MIND_DB.prepare("UPDATE sources SET last_try=?, last_ok=?, next_due=?, fails=0, method_ok=?, last_error='', latest_ts=MAX(COALESCE(latest_ts,0),?), alerted=0, updated=? WHERE id=?").bind(now, now, next, run.method, latest, now, s.id));
+  } else {
+    stmts.push(env.MIND_DB.prepare('UPDATE sources SET last_try=?, next_due=?, fails=COALESCE(fails,0)+1, last_error=?, updated=? WHERE id=?').bind(now, next, detail.slice(0, 300), now, s.id));
+  }
+  stmts.push(env.MIND_DB.prepare('INSERT INTO source_health(src,ts,ok,method,n,ms,detail) VALUES(?,?,?,?,?,?,?)').bind(s.id, now, run.ok ? 1 : 0, run.method, added, run.tried.reduce((a, t) => a + (t.ms || 0), 0), detail));
+  return stmts;
+}
+async function slackPost(env, ns, text) {
+  let hooks = {};
+  try { hooks = JSON.parse((await kvGet(env.AXIOM_KV, 'slack_webhooks')) || '{}'); } catch (e) { hooks = {}; }
+  const url = hooks[ns] || hooks._default || env.SLACK_WEBHOOK_URL || '';
+  if (!url) return false;
+  try { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: abortAfter(10000) }); return r.ok; } catch (e) { return false; }
+}
+/** Sources that have failed SOURCE_DEAD_FAILS sweeps in a row and have not been
+ *  reported: one Slack message, then alerted=1 (2 when no webhook is set, so
+ *  it is not retried every tick). A later success resets it. */
+async function sourcesAlertDead(env) {
+  const rows = (await env.MIND_DB.prepare('SELECT id,name,tier,fails,last_error,last_ok FROM sources WHERE enabled=1 AND COALESCE(fails,0)>=? AND COALESCE(alerted,0)=0 ORDER BY fails DESC LIMIT 20').bind(SOURCE_DEAD_FAILS).all()).results || [];
+  if (!rows.length) return [];
+  const lines = [':no_entry: *' + rows.length + ' source' + (rows.length === 1 ? '' : 's') + ' stopped delivering* - ' + SOURCE_DEAD_FAILS + ' sweeps in a row failed'];
+  rows.forEach(r => lines.push('- *' + String(r.name || r.id).replace(/[<>|*]/g, ' ') + '* (' + r.id + ', ' + r.tier + '): ' + String(r.last_error || '').replace(/[<>|*]/g, ' ').slice(0, 140)
+    + (r.last_ok ? ' - last delivered ' + Math.round((Date.now() - r.last_ok) / 3600000) + 'h ago' : ' - never delivered')));
+  lines.push('_AXIOM Sources - probe or switch them off in the Sources view._');
+  const sent = await slackPost(env, '_default', lines.join('\n'));
+  await env.MIND_DB.batch(rows.map(r => env.MIND_DB.prepare('UPDATE sources SET alerted=? WHERE id=?').bind(sent ? 1 : 2, r.id)));
+  return rows.map(r => r.id);
+}
+/** The sweep. Default: the registry sources whose schedule has come round,
+ *  oldest first, SOURCES_PER_TICK of them. `ids` runs exactly those; `all`
+ *  runs every enabled registry source (a job). Core feeds are fetched by
+ *  buildAllNews and only mirrored here, unless named in `ids`. */
+async function sourceSweep(env, opts) {
+  opts = opts || {};
+  const log = opts.log || (async () => {});
+  if (!(await ensureSources(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const now = Date.now();
+  const ids = Array.isArray(opts.ids) ? opts.ids.map(sourceIdClean).filter(Boolean).slice(0, 150) : [];
+  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : SOURCES_PER_TICK), 1), 150);
+  let rows = [];
+  if (ids.length) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE id IN (' + ids.map(() => '?').join(',') + ')').bind(...ids).all()).results || [];
+  else if (opts.all) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 ORDER BY COALESCE(last_try,0) LIMIT ?').bind(limit).all()).results || [];
+  else rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 AND COALESCE(next_due,0)<=? ORDER BY COALESCE(next_due,0) LIMIT ?').bind(now, limit).all()).results || [];
+  const srcs = rows.map(sourceRow).filter(s => s.methods.length);
+  await log('info', 'sweeping ' + srcs.length + ' source' + (srcs.length === 1 ? '' : 's') + (ids.length ? '' : opts.all ? ' (every enabled registry source)' : ' (due now)'));
+  const out = { ok: true, ran: srcs.length, succeeded: 0, failed: 0, items: 0, added: 0, dead: [], results: [] };
+  const runs = await mapPool(srcs, 4, async (s) => {
+    const run = await sourceRun(env, s, { log, all: !!opts.probe });
+    let added = 0; run.rows = 0;
+    if (run.ok) {
+      const rws = sourceRows(s, run.hit, now);
+      run.rows = rws.length;
+      if (opts.file !== false) for (let i = 0; i < rws.length; i += 150) added += await archiveItems(env, 'news', rws.slice(i, i + 150));
+    }
+    run.added = added;
+    return run;
+  });
+  const stmts = [];
+  runs.forEach(run => {
+    stmts.push(...sourceStmts(env, run, run.added, now));
+    if (run.ok) { out.succeeded++; out.items += run.rows; out.added += run.added; } else out.failed++;
+    const r = { id: run.src.id, name: run.src.name, ok: run.ok, method: run.method, items: run.rows, added: run.added };
+    if (opts.detail) r.tried = run.tried; else if (!run.ok) r.error = (run.tried.filter(t => !t.skipped).map(t => t.method + ': ' + t.detail).join('; ')).slice(0, 200);
+    out.results.push(r);
+  });
+  for (let i = 0; i < stmts.length; i += 100) { try { await env.MIND_DB.batch(stmts.slice(i, i + 100)); } catch (e) { await log('err', 'health write failed: ' + String((e && e.message) || e).slice(0, 100)); } }
+  try { out.dead = await sourcesAlertDead(env); } catch (e) {}
+  try { await env.MIND_DB.prepare('DELETE FROM source_health WHERE id NOT IN (SELECT id FROM source_health ORDER BY id DESC LIMIT ?)').bind(SOURCE_HEALTH_KEEP).run(); } catch (e) {}
+  out.ms = Date.now() - now;
+  await log('info', out.succeeded + ' of ' + out.ran + ' delivered, ' + out.items + ' items seen, ' + out.added + ' new in the archive' + (out.dead.length ? ', ' + out.dead.length + ' reported dead' : '') + ' (' + out.ms + 'ms)');
+  if (!ids.length) await kvPut(env.AXIOM_KV, 'sources_last_sweep', JSON.stringify({ at: now, ran: out.ran, succeeded: out.succeeded, failed: out.failed, items: out.items, added: out.added, ms: out.ms, all: !!opts.all }), 7 * 86400);
+  return out;
+}
+/** buildAllNews reports how each core feed fared; mirror that into the
+ *  registry so one table shows the whole estate. Failures are logged; a
+ *  success only updates the row (78 rows a tick would drown the log). */
+async function sourcesCoreHealth(env, health) {
+  if (!env.MIND_DB || !Array.isArray(health) || !health.length) return;
+  if (!(await ensureSources(env))) return;
+  const now = Date.now(); const stmts = [];
+  health.forEach(h => {
+    if (h.skipped) return;
+    if (h.ok) stmts.push(env.MIND_DB.prepare("UPDATE sources SET last_try=?, last_ok=?, fails=0, method_ok='rss', last_error='', alerted=0, updated=? WHERE id=? AND core=1").bind(now, now, now, h.src));
+    else {
+      const d = h.error ? h.error : (h.status ? 'HTTP ' + h.status : 'HTTP 200 but no items parsed');
+      stmts.push(env.MIND_DB.prepare('UPDATE sources SET last_try=?, fails=COALESCE(fails,0)+1, last_error=?, updated=? WHERE id=? AND core=1').bind(now, d, now, h.src));
+      stmts.push(env.MIND_DB.prepare("INSERT INTO source_health(src,ts,ok,method,n,ms,detail) VALUES(?,?,0,'rss',0,?,?)").bind(h.src, now, h.ms || 0, d));
+    }
+  });
+  for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  try { await sourcesAlertDead(env); } catch (e) {}
+}
+async function sourcesList(env, filt) {
+  filt = filt || {};
+  const now = Date.now();
+  const rows = ((await env.MIND_DB.prepare('SELECT * FROM sources ORDER BY tier, name').all()).results || []).map(sourceRow);
+  const counts = {};
+  try { (((await env.MIND_DB.prepare("SELECT src, COUNT(*) n, MAX(ts) latest FROM arc_items WHERE kind='news' AND ts>? GROUP BY src").bind(now - 86400000).all()).results) || []).forEach(r => { counts[r.src] = { n: r.n || 0, latest: r.latest || 0 }; }); } catch (e) {}
+  let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'sources_last_sweep')) || 'null'); } catch (e) { last = null; }
+  const summary = { total: rows.length, enabled: 0, core: 0, ok: 0, failing: 0, dead: 0, stale: 0, unverified: 0, off: 0, items24: 0, byTier: {}, byMethod: {} };
+  rows.forEach(s => {
+    const c = counts[s.id] || { n: 0, latest: 0 };
+    s.items24 = c.n; s.latest_ts = Math.max(s.latest_ts || 0, c.latest || 0); s.status = sourceStatus(s, now);
+    summary[s.status] = (summary[s.status] || 0) + 1;
+    if (s.enabled) summary.enabled++; if (s.core) summary.core++;
+    summary.items24 += c.n; summary.byTier[s.tier] = (summary.byTier[s.tier] || 0) + 1;
+    if (s.method_ok && s.enabled) summary.byMethod[s.method_ok] = (summary.byMethod[s.method_ok] || 0) + 1;
+  });
+  const q = String(filt.q || '').toLowerCase();
+  const list = rows.filter(s => (!filt.tier || s.tier === filt.tier) && (!filt.juris || s.juris === filt.juris) && (!filt.status || s.status === filt.status)
+    && (!filt.issue || s.issues.indexOf(filt.issue) >= 0) && (!q || (s.name + ' ' + s.id + ' ' + JSON.stringify(s.urls)).toLowerCase().indexOf(q) >= 0));
+  return { ok: true, sources: list, summary, lastSweep: last, tiers: SOURCE_TIERS, juris: SOURCE_JURIS, methods: SOURCE_METHODS, deadAfter: SOURCE_DEAD_FAILS, perTick: SOURCES_PER_TICK, renderConfigured: renderConfigured(env) };
+}
+
+// ==============================================================================
+// FULL TEXT - the article behind the headline, through every public route in
+// turn: the page itself (JSON-LD articleBody, the <article> element, then the
+// page's paragraphs), its AMP version (the amphtml link, amp. subdomain, /amp,
+// ?outputType=amp), Google's AMP cache, the Wayback Machine (a snapshot, or
+// one taken now when asked), archive.today, and finally a real browser. A
+// Google News link is decoded to the article first. Every attempt is kept with
+// its reason so a failure says why. Nothing here logs in anywhere: paywalled
+// copy comes only from routes a publisher serves publicly, or not at all.
+// ==============================================================================
+const FT_MIN = 600;          // characters of body text before we call it the article
+const FT_PER_TICK = 40;      // archive rows given full text per cron tick
+function ldArticles(html) {
+  const out = [];
+  for (const m of String(html).matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let d; try { d = JSON.parse(m[1].trim()); } catch (e) { continue; }
+    const walk = (x, depth) => {
+      if (!x || depth > 4) return;
+      if (Array.isArray(x)) { x.forEach(y => walk(y, depth + 1)); return; }
+      if (typeof x !== 'object') return;
+      if (x['@graph']) walk(x['@graph'], depth + 1);
+      const t = String(Array.isArray(x['@type']) ? x['@type'].join(' ') : (x['@type'] || ''));
+      if (/Article|BlogPosting|Report/i.test(t)) out.push(x);
+    };
+    walk(d, 0);
+  }
+  return out;
+}
+function paragraphs(frag) {
+  const ps = Array.from(String(frag).matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)).map(m => stripHtml(m[1]))
+    .filter(t => t.length >= 40 && !/^(share|read more|subscribe|advertisement|sign up|follow us|copyright|all rights reserved|loading)/i.test(t));
+  return ps.join('\n\n').slice(0, 12000);
+}
+/** What a page says: title, body text and how it was found. `method` is empty
+ *  when the body fell short of FT_MIN; `paywall` when the page says so. */
+function extractArticle(html, url) {
+  html = String(html || '');
+  const res = { title: '', text: '', published: '', author: '', method: '', desc: '', paywall: false };
+  res.title = stripHtml((html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i) || [])[1] || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '').slice(0, 300);
+  res.desc = stripHtml((html.match(/<meta[^>]+(?:property=["']og:description["']|name=["']description["'])[^>]+content=["']([^"']+)/i) || [])[1] || '').slice(0, 400);
+  res.published = (html.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)/i) || [])[1] || '';
+  if (/isAccessibleForFree["']?\s*:\s*["']?false|class=["'][^"']*paywall|subscribe to (read|continue)|subscriber[- ]only|piano\.io|tp\.push\(|meter-?wall/i.test(html)) res.paywall = true;
+  for (const a of ldArticles(html)) {
+    const body = typeof a.articleBody === 'string' ? stripHtml(a.articleBody) : '';
+    if (!res.published && a.datePublished) res.published = String(a.datePublished).slice(0, 40);
+    if (!res.author && a.author) { const au = Array.isArray(a.author) ? a.author[0] : a.author; res.author = String((au && au.name) || (typeof au === 'string' ? au : '')).slice(0, 120); }
+    if (a.isAccessibleForFree === false || String(a.isAccessibleForFree).toLowerCase() === 'false') res.paywall = true;
+    if (body.length >= FT_MIN) { res.text = body.slice(0, 12000); res.method = 'jsonld'; if (a.headline) res.title = stripHtml(String(a.headline)).slice(0, 300); return res; }
+  }
+  const body = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(nav|header|footer|aside|form|figure|figcaption|button|noscript|iframe|svg)\b[\s\S]*?<\/\1>/gi, ' ');
+  const arts = Array.from(body.matchAll(/<article\b[\s\S]*?<\/article>/gi)).map(m => m[0]);
+  const main = (body.match(/<main\b[\s\S]*?<\/main>/i) || [])[0] || '';
+  let best = '', via = '';
+  arts.forEach(c => { const t = paragraphs(c); if (t.length > best.length) { best = t; via = 'article'; } });
+  if (best.length < FT_MIN && main) { const t = paragraphs(main); if (t.length > best.length) { best = t; via = 'main'; } }
+  if (best.length < FT_MIN) { const t = paragraphs(body); if (t.length > best.length) { best = t; via = 'paragraphs'; } }
+  res.text = best;
+  res.method = best.length >= FT_MIN ? via : '';
+  return res;
+}
+function ampVariants(url, html) {
+  const out = [];
+  let u; try { u = new URL(url); } catch (e) { return out; }
+  const m = (html && html.match(/<link[^>]+rel=["']amphtml["'][^>]+href=["']([^"']+)/i)) || (html && html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']amphtml["']/i));
+  if (m) { try { out.push(new URL(m[1], url).toString()); } catch (e) {} }
+  out.push(u.protocol + '//amp.' + u.host.replace(/^www\./, '') + u.pathname);
+  out.push(u.origin + u.pathname.replace(/\/$/, '') + '/amp' + u.search);
+  out.push(u.origin + u.pathname + (u.search ? u.search + '&' : '?') + 'outputType=amp');
+  return Array.from(new Set(out)).filter(v => v !== url).slice(0, 3);
+}
+function ampCacheUrl(url) {
+  try { const u = new URL(url); const sub = u.host.replace(/-/g, '--').replace(/\./g, '-'); return 'https://' + sub + '.cdn.ampproject.org/c/s/' + u.host + u.pathname + u.search; } catch (e) { return ''; }
+}
+function gnewsIsLink(url) { return /^https?:\/\/news\.google\.com\/(rss\/)?articles\//.test(String(url || '')); }
+/** Older Google News ids carry the article url in their base64; newer ones do
+ *  not, and the interstitial has to be asked (batchexecute) with the signature
+ *  and timestamp it embeds. */
+function gnewsDecodeB64(url) {
+  try {
+    const id = (String(url).match(/articles\/([^/?#]+)/) || [])[1] || '';
+    if (!id) return '';
+    let b = id.replace(/-/g, '+').replace(/_/g, '/'); while (b.length % 4) b += '=';
+    const bin = atob(b);
+    const m = bin.match(/https?:\/\/[\x21-\x7e]+/);
+    if (!m) return '';
+    const cand = m[0].replace(/[^\x21-\x7e].*$/, '');
+    return /news\.google\.com/.test(cand) || cand.length < 12 ? '' : cand;
+  } catch (e) { return ''; }
+}
+async function gnewsDecode(url) {
+  const t0 = Date.now();
+  const quick = gnewsDecodeB64(url);
+  if (quick) return { ok: true, url: quick, via: 'base64', ms: Date.now() - t0 };
+  const page = await srcFetch(url, 'text/html,*/*', 8000);
+  if (!page.ok) return { ok: false, detail: page.error || ('HTTP ' + page.status), ms: Date.now() - t0 };
+  const id = (String(url).match(/articles\/([^/?#]+)/) || [])[1] || '';
+  const sg = (page.text.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (page.text.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+  if (!sg || !ts) {
+    const a = (page.text.match(/href="(https?:\/\/(?!news\.google\.com|www\.google\.com|accounts\.google|policies\.google|support\.google|play\.google)[^"]+)"/) || [])[1];
+    return a ? { ok: true, url: a, via: 'interstitial', ms: Date.now() - t0 } : { ok: false, detail: 'the Google News page carried no signature and no target', ms: Date.now() - t0 };
+  }
+  try {
+    const inner = JSON.stringify(['garturlreq', [['X', 'X', ['X', 'X'], null, null, 1, 1, 'US:en', null, 1, null, null, null, null, null, 0, 1], 'X', 'X', 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0], id, Number(ts), sg]);
+    const body = 'f.req=' + encodeURIComponent(JSON.stringify([[['Fbv4je', inner, null, 'generic']]]));
+    const r = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'User-Agent': BROWSER_UA }, body, signal: abortAfter(8000) });
+    const txt = await r.text();
+    const line = txt.split('\n').find(l => l.indexOf('wrb.fr') >= 0);
+    if (!line) return { ok: false, detail: 'batchexecute answered without a result (HTTP ' + r.status + ')', ms: Date.now() - t0 };
+    const payload = JSON.parse(JSON.parse(line)[0][2]);
+    const target = payload && payload[1];
+    return /^https?:\/\//.test(String(target)) ? { ok: true, url: String(target), via: 'batchexecute', ms: Date.now() - t0 } : { ok: false, detail: 'no url in the decoded payload', ms: Date.now() - t0 };
+  } catch (e) { return { ok: false, detail: 'decode failed: ' + String((e && e.message) || e).slice(0, 80), ms: Date.now() - t0 }; }
+}
+async function waybackFind(url) {
+  const f = await srcFetch('https://archive.org/wayback/available?url=' + encodeURIComponent(url), 'application/json,*/*', 8000);
+  if (!f.ok) return { ok: false, detail: f.error || ('HTTP ' + f.status) };
+  let d = {}; try { d = JSON.parse(f.text); } catch (e) { d = {}; }
+  const c = d && d.archived_snapshots && d.archived_snapshots.closest;
+  if (!c || !c.url) return { ok: false, detail: 'no snapshot in the Wayback Machine' };
+  return { ok: true, url: String(c.url).replace(/^http:/, 'https:').replace(/\/web\/(\d+)\//, '/web/$1id_/'), ts: c.timestamp || '' };
+}
+async function waybackSave(url) {
+  const f = await srcFetch('https://web.archive.org/save/' + url, 'text/html,*/*', 25000);
+  return f.ok ? { ok: true, url: f.url } : { ok: false, detail: f.error || ('HTTP ' + f.status) };
+}
+/** The chain. opts.light skips archive.today and the browser (the cron's
+ *  setting); opts.save asks the Wayback Machine for a fresh snapshot when it
+ *  has none; opts.render forces the browser step. */
+async function fullText(env, url, opts) {
+  opts = opts || {};
+  const t0 = Date.now();
+  const attempts = [];
+  const out = { ok: false, url, final: url, title: '', desc: '', text: '', chars: 0, method: '', extract: '', attempts, paywall: false, published: '', author: '', ms: 0 };
+  const done = () => { attempts.forEach(a => { delete a.html; }); out.chars = out.text.length; out.text = out.text.slice(0, 12000); out.ms = Date.now() - t0; return out; };
+  const attempt = async (method, target, fetcher) => {
+    const a0 = Date.now();
+    const a = { method, target: String(target || '').slice(0, 220), ok: false, ms: 0, status: 0, chars: 0, detail: '' };
+    try {
+      const f = await (fetcher ? fetcher() : srcFetch(target, 'text/html,application/xhtml+xml,*/*', opts.ms || 8000));
+      a.status = f.status || 0;
+      if (!f.ok) { a.detail = f.error || (f.skipped ? String(f.detail || 'skipped') : ('HTTP ' + f.status)); if (f.skipped) a.skipped = true; }
+      else {
+        const html = f.text != null ? f.text : (f.html || '');
+        const ex = extractArticle(html, f.url || target);
+        a.chars = ex.text.length;
+        if (ex.paywall) { out.paywall = true; a.paywall = true; }
+        if (!out.title && ex.title) out.title = ex.title;
+        if (!out.desc && ex.desc) out.desc = ex.desc;
+        if (ex.text.length >= FT_MIN) {
+          a.ok = true; out.ok = true; out.text = ex.text; out.method = method; out.extract = ex.method; out.final = f.url || target;
+          if (ex.title) out.title = ex.title; out.published = ex.published || out.published; out.author = ex.author || out.author;
+        } else a.detail = (ex.paywall ? 'paywall signalled; ' : '') + 'only ' + ex.text.length + ' chars of body text';
+        a.html = html;
+      }
+    } catch (e) { a.detail = String((e && e.message) || e).slice(0, 100); }
+    a.ms = Date.now() - a0;
+    attempts.push(a);
+    return a;
+  };
+  if (gnewsIsLink(url)) {
+    const d = await gnewsDecode(url);
+    attempts.push({ method: 'gnews', target: url.slice(0, 220), ok: d.ok, ms: d.ms || 0, status: 0, chars: 0, detail: d.ok ? 'decoded via ' + d.via : d.detail });
+    if (!d.ok) { out.detail = 'could not resolve the Google News link to the article'; return done(); }
+    url = d.url; out.final = url; out.decoded = url;
+  }
+  const direct = await attempt('direct', url);
+  if (out.ok) return done();
+  for (const v of ampVariants(url, direct.html || '')) { await attempt('amp', v); if (out.ok) return done(); }
+  const cache = ampCacheUrl(url);
+  if (cache) { await attempt('ampcache', cache); if (out.ok) return done(); }
+  let wb = await waybackFind(url);
+  if (!wb.ok && opts.save) {
+    const sv = await waybackSave(url);
+    attempts.push({ method: 'wayback-save', target: url.slice(0, 220), ok: sv.ok, ms: 0, status: 0, chars: 0, detail: sv.ok ? 'snapshot requested' : sv.detail });
+    if (sv.ok) wb = await waybackFind(url);
+  }
+  if (wb.ok) { await attempt('wayback', wb.url); if (out.ok) return done(); }
+  else attempts.push({ method: 'wayback', target: url.slice(0, 220), ok: false, ms: 0, status: 0, chars: 0, detail: wb.detail });
+  if (!opts.light) { await attempt('archiveph', 'https://archive.ph/newest/' + url); if (out.ok) return done(); }
+  if (!opts.light || opts.render) { await attempt('render', url, () => renderFetch(env, url, 35000)); if (out.ok) return done(); }
+  out.detail = out.paywall ? 'paywalled: no public route carried the body text' : 'no route carried enough body text';
+  return done();
+}
+function metaJson(meta) {
+  let s = JSON.stringify(meta);
+  if (s.length > 2000) { delete meta.ft_err; delete meta.outlet; delete meta.published; s = JSON.stringify(meta); }
+  if (s.length > 2000 && Array.isArray(meta.issues)) { meta.issues = meta.issues.slice(0, 4); s = JSON.stringify(meta); }
+  return s.slice(0, 2400);
+}
+/** Write body text back onto an archive row (by id or url). Used by the
+ *  route, the cron, the render job and the desktop collector. */
+async function fulltextSave(env, b) {
+  b = b || {};
+  if (!env.MIND_DB || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const id = parseInt(b.id, 10) || 0; const url = String(b.url || '');
+  const row = id ? await env.MIND_DB.prepare('SELECT id,meta FROM arc_items WHERE id=?').bind(id).first()
+    : (url ? await env.MIND_DB.prepare("SELECT id,meta FROM arc_items WHERE kind='news' AND url=?").bind(url).first() : null);
+  if (!row) return { ok: false, error: 'unknown_row', detail: 'No archive row with that id or url.' };
+  const text = String(b.text || '').replace(/\s+\n/g, '\n').trim().slice(0, 6000);
+  if (text.length < 200) return { ok: false, error: 'too_short', detail: 'Body text under 200 characters is not filed as the article.' };
+  let meta = {}; try { meta = JSON.parse(row.meta || '{}') || {}; } catch (e) { meta = {}; }
+  meta.ft = String(b.method || 'desktop').slice(0, 20); meta.ft_chars = text.length; delete meta.ft_try; delete meta.ft_err;
+  if (b.link && /^https?:\/\//.test(String(b.link))) meta.link = String(b.link).slice(0, 300);
+  if (b.published) meta.published = String(b.published).slice(0, 40);
+  await env.MIND_DB.prepare('UPDATE arc_items SET body=?, meta=? WHERE id=?').bind(text, metaJson(meta), row.id).run();
+  return { ok: true, id: row.id, chars: text.length, method: meta.ft };
+}
+/** Every tick: the news of the last two days that arrived as a headline and a
+ *  blurb gets its body text. A row is tried twice, then marked so it is not
+ *  tried again; what stopped it is kept on the row. */
+async function fulltextCron(env, opts) {
+  opts = opts || {};
+  if (!env.MIND_DB || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const now = Date.now();
+  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || FT_PER_TICK, 1), 100);
+  const rows = (await env.MIND_DB.prepare("SELECT id,url,src,title,meta FROM arc_items WHERE kind='news' AND ts>? AND LENGTH(COALESCE(body,''))<? AND (meta IS NULL OR json_extract(meta,'$.ft') IS NULL OR (json_extract(meta,'$.ft')='retry' AND COALESCE(json_extract(meta,'$.ft_try'),0)<2)) ORDER BY ts DESC LIMIT ?")
+    .bind(now - 48 * 3600000, FT_MIN, limit).all()).results || [];
+  const out = { ok: true, tried: rows.length, got: 0, failed: 0, byMethod: {}, ms: 0 };
+  const stmts = [];
+  await mapPool(rows, 4, async (r) => {
+    const ft = await fullText(env, r.url, { light: true, ms: 7000, render: !!env.FULLTEXT_RENDER });
+    let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
+    if (ft.decoded) meta.link = String(ft.decoded).slice(0, 300);
+    if (ft.ok) {
+      meta.ft = ft.method; meta.ft_chars = ft.chars; delete meta.ft_try; delete meta.ft_err;
+      if (ft.published) meta.published = String(ft.published).slice(0, 40);
+      stmts.push(env.MIND_DB.prepare('UPDATE arc_items SET body=?, meta=? WHERE id=?').bind(ft.text.slice(0, 6000), metaJson(meta), r.id));
+      out.got++; out.byMethod[ft.method] = (out.byMethod[ft.method] || 0) + 1;
+    } else {
+      const n = (Number(meta.ft_try) || 0) + 1;
+      meta.ft = n >= 2 ? 'none' : 'retry'; meta.ft_try = n; meta.ft_err = String(ft.detail || '').slice(0, 80);
+      if (ft.paywall) meta.paywall = 1;
+      stmts.push(env.MIND_DB.prepare('UPDATE arc_items SET meta=? WHERE id=?').bind(metaJson(meta), r.id));
+      out.failed++;
+    }
+  });
+  for (let i = 0; i < stmts.length; i += 100) { try { await env.MIND_DB.batch(stmts.slice(i, i + 100)); } catch (e) {} }
+  out.ms = Date.now() - now;
+  if (rows.length) await kvPut(env.AXIOM_KV, 'fulltext_last', JSON.stringify(Object.assign({ at: now }, out)), 7 * 86400);
+  return out;
+}
+/** A render job in the worker: a listing page for a source (files what it
+ *  finds and records the health), or one article (writes its text back). */
+async function renderJob(env, job, log) {
+  const p = job.params || {};
+  if (!renderConfigured(env)) return { ok: false, error: 'render_not_configured', detail: 'Rendering runs where a browser is. Set RENDER_URL (a Playwright render service) or CF_ACCOUNT_ID + CF_BROWSER_TOKEN on the worker, or run tools/reach-agent.py on a Mac with Playwright (pip install playwright && playwright install chromium): the job will go there.' };
+  const now = Date.now();
+  if (p.source) {
+    if (!(await ensureSources(env))) return { ok: false, error: 'mind_unbound' };
+    const s = await sourceGet(env, sourceIdClean(p.source));
+    if (!s) return { ok: false, error: 'unknown_source', detail: 'No source with id ' + p.source + '.' };
+    const url = /^https?:\/\//.test(String(p.url || '')) ? String(p.url) : (s.urls.home || '');
+    if (!url) return { ok: false, error: 'missing_url', detail: s.id + ' has no listing page to render.' };
+    await log('cmd', 'render ' + url);
+    const r = await renderFetch(env, url, 35000);
+    if (!r.ok) { await log('err', r.detail); return { ok: false, error: 'render_failed', detail: r.detail }; }
+    const items = listingLinks(r.html, url);
+    await log('out', items.length + ' article-shaped links on the rendered page (' + r.ms + 'ms)');
+    const rows = sourceRows(s, { items, method: 'render' }, now);
+    let added = 0; for (let i = 0; i < rows.length; i += 150) added += await archiveItems(env, 'news', rows.slice(i, i + 150));
+    const run = { src: s, ok: items.length > 0, method: 'render', items, tried: [{ method: 'render', ok: items.length > 0, n: items.length, ms: r.ms, status: 200, skipped: false, detail: items.length ? '' : 'rendered page had no article-shaped links' }] };
+    try { await env.MIND_DB.batch(sourceStmts(env, run, added, now)); } catch (e) {}
+    await log('info', 'filed ' + added + ' new rows for ' + s.id);
+    return { ok: items.length > 0, source: s.id, url, items: items.length, added, method: 'render' };
+  }
+  const url = String(p.url || '');
+  if (!/^https?:\/\//.test(url)) return { ok: false, error: 'missing_url', detail: 'Give a url, or a source id.' };
+  await log('cmd', 'render ' + url);
+  const r = await renderFetch(env, url, 35000);
+  if (!r.ok) { await log('err', r.detail); return { ok: false, error: 'render_failed', detail: r.detail }; }
+  const ex = extractArticle(r.html, url);
+  await log('out', ex.text.length + ' chars of body text' + (ex.method ? ' via ' + ex.method : '') + ' (' + r.ms + 'ms)');
+  let filed = null;
+  if (p.id && ex.text.length >= FT_MIN) { filed = await fulltextSave(env, { id: p.id, text: ex.text, title: ex.title, method: 'render', published: ex.published }); if (filed.ok) await log('info', 'archive row ' + filed.id + ' now carries the article'); }
+  return { ok: ex.text.length >= FT_MIN, url, title: ex.title, chars: ex.text.length, method: 'render', extract: ex.method, paywall: ex.paywall, filed: filed && filed.ok ? filed.id : 0, text: ex.text.slice(0, 2000) };
+}
 
 // ==============================================================================
 // ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
@@ -4167,7 +5264,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext') && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -4175,7 +5272,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -5072,7 +6169,7 @@ export default {
           const q = (await env.MIND_DB.prepare("SELECT COUNT(*) n FROM bridge_jobs WHERE status='queued'").first()) || {};
           return jsonResp({ ok: true, agents: await agentsSeen(env), queued: q.n || 0, jobs,
             sources: BRIDGE_SOURCES.map(sc => ({ source: sc, desktopOnly: BRIDGE_DESKTOP_ONLY.indexOf(sc) >= 0,
-              ready: sc === 'reddit' ? true : sc === 'meta' ? !!(env.META_TOKEN && metaPages(env).length) : sc === 'linkedin' ? !!(env.LINKEDIN_TOKEN && liOrgs(env).length) : true })) });
+              ready: sc === 'reddit' ? true : sc === 'meta' ? !!(env.META_TOKEN && metaPages(env).length) : sc === 'linkedin' ? !!(env.LINKEDIN_TOKEN && liOrgs(env).length) : sc === 'render' ? renderConfigured(env) : true })) });
         }
         if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Collector routes need a full-access key.' }, 403);
         if (path === '/bridge/next') {
@@ -5275,6 +6372,147 @@ export default {
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
+    }
+
+    // -- Full text: the article behind a headline, through every public route --
+    //    GET  /fulltext?url=&save=1&light=1     (read) body text plus the attempt log; save=1 asks the Wayback Machine for a snapshot
+    //    GET  /fulltext?id=<archive row>         (read) the same for an archive row; a full-access key also files the result on the row
+    //    POST /fulltext/save {id|url, text, title?, method, link?, published?}   (full) a desktop collector writes back what it read
+    if (path === '/fulltext' || path.startsWith('/fulltext/')) {
+      if (path === '/fulltext/save') {
+        if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
+        if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Filing text needs a full-access key.' }, 403);
+        let fb = {}; try { fb = await req.json(); } catch (e) { fb = {}; }
+        const sv = await fulltextSave(env, fb);
+        return jsonResp(sv, sv.ok ? 200 : (sv.error === 'unknown_row' ? 404 : 400));
+      }
+      if (req.method !== 'GET') return jsonResp({ error: 'not_found' }, 404);
+      let url = String(reqUrl.searchParams.get('url') || '').trim();
+      const rowId = parseInt(reqUrl.searchParams.get('id') || '0', 10) || 0;
+      let row = null;
+      if (rowId) {
+        if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound' }, 501);
+        await ensureArchive(env);
+        row = await env.MIND_DB.prepare('SELECT id,url,meta FROM arc_items WHERE id=?').bind(rowId).first();
+        if (!row) return jsonResp({ error: 'unknown_row', detail: 'No archive row ' + rowId + '.' }, 404);
+        url = row.url;
+      }
+      if (!/^https?:\/\//.test(url)) return jsonResp({ error: 'missing_url', detail: 'Give url=https://... or id=<archive row>.' }, 400);
+      const ft = await fullText(env, url, { save: reqUrl.searchParams.get('save') === '1', light: reqUrl.searchParams.get('light') === '1', render: reqUrl.searchParams.get('light') !== '1' });
+      if (row && ft.ok && (!auth.enforced || auth.role === 'full')) { const sv = await fulltextSave(env, { id: row.id, text: ft.text, title: ft.title, method: ft.method, link: ft.decoded, published: ft.published }); ft.filed = !!sv.ok; }
+      ft.renderConfigured = renderConfigured(env);
+      return jsonResp(ft);
+    }
+
+    // -- The Source Registry: every outlet, office, party, pollster, sector title and podcast, as data --
+    //    GET  /sources?tier=&juris=&status=&issue=&q=      the table with health (read)
+    //    GET  /sources/health?id=&limit=                   recent attempts, per source or all (read)
+    //    GET  /sources/probe?id=                           run EVERY method live and report each (read; files nothing)
+    //    GET  /sources/export                              the registry as JSON (read)
+    //    POST /sources/add {id?,name,tier,juris,issues,urls:{rss,wp,json,sitemap,home,site,gnews,podcast},methods?,schedule?,note?}   (full)
+    //    POST /sources/update {id, ...patch}  POST /sources/delete {id}  POST /sources/import {sources:[...]}   (full)
+    //    POST /sources/sweep {ids?|all}                    a few ids run inline; more become a job the console tails (full)
+    if (path === '/sources' || path.startsWith('/sources/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
+      try {
+        await ensureArchive(env); await ensureSources(env);
+        if (path === '/sources' && req.method === 'GET') {
+          return jsonResp(await sourcesList(env, { tier: reqUrl.searchParams.get('tier') || '', juris: reqUrl.searchParams.get('juris') || '', status: reqUrl.searchParams.get('status') || '',
+            issue: reqUrl.searchParams.get('issue') || '', q: reqUrl.searchParams.get('q') || '' }));
+        }
+        if (path === '/sources/health' && req.method === 'GET') {
+          const id = sourceIdClean(reqUrl.searchParams.get('id'));
+          const limit = Math.min(Math.max(parseInt(reqUrl.searchParams.get('limit') || '100', 10) || 100, 1), 500);
+          const rows = id ? (await env.MIND_DB.prepare('SELECT id,src,ts,ok,method,n,ms,detail FROM source_health WHERE src=? ORDER BY id DESC LIMIT ?').bind(id, limit).all()).results
+            : (await env.MIND_DB.prepare('SELECT id,src,ts,ok,method,n,ms,detail FROM source_health ORDER BY id DESC LIMIT ?').bind(limit).all()).results;
+          const day = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ok) ok FROM source_health WHERE ts>?' + (id ? ' AND src=?' : '')).bind(...(id ? [Date.now() - 86400000, id] : [Date.now() - 86400000])).first()) || {};
+          return jsonResp({ ok: true, id, rows: rows || [], last24: { runs: day.n || 0, ok: day.ok || 0, failed: (day.n || 0) - (day.ok || 0) } });
+        }
+        if (path === '/sources/probe' && req.method === 'GET') {
+          const id = sourceIdClean(reqUrl.searchParams.get('id'));
+          const s = id ? await sourceGet(env, id) : null;
+          if (!s) return jsonResp({ error: 'unknown_source', detail: 'No source with id ' + id + '.' }, 404);
+          const run = await sourceRun(env, s, { all: true });
+          try { await env.MIND_DB.batch(sourceStmts(env, run, 0, Date.now())); } catch (e) {}
+          return jsonResp({ ok: true, id: s.id, name: s.name, methods: s.methods, best: run.method, delivering: run.tried.filter(t => t.ok).map(t => t.method), results: run.tried,
+            items: run.ok ? sourceRows(s, run.hit, Date.now()).length : 0, renderConfigured: renderConfigured(env) });
+        }
+        if (path === '/sources/export' && req.method === 'GET') {
+          const rows = ((await env.MIND_DB.prepare('SELECT * FROM sources ORDER BY tier, name').all()).results || []).map(sourceRow);
+          return jsonResp({ ok: true, exported: new Date().toISOString(), count: rows.length,
+            sources: rows.map(s => ({ id: s.id, name: s.name, tier: s.tier, juris: s.juris, issues: s.issues, urls: s.urls, methods: s.methods, schedule: s.schedule, enabled: s.enabled, core: s.core, note: s.note, method_ok: s.method_ok })) });
+        }
+        if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Changing the registry needs a full-access key.' }, 403);
+        if (path === '/sources/add') {
+          const s = sourceSanitize(sb, null);
+          if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the source a name.' }, 400);
+          if (!s.methods.length) return jsonResp({ error: 'missing_urls', detail: 'Give at least one way in: urls.rss, urls.wp, urls.json, urls.sitemap, urls.home, urls.site, urls.gnews or urls.podcast.' }, 400);
+          const had = await sourceGet(env, s.id);
+          if (had && had.core) return jsonResp({ error: 'core_source', detail: s.id + ' is a core feed; edit it with /sources/update.' }, 400);
+          await sourceUpsert(env, s, Date.now());
+          return jsonResp({ ok: true, added: !had, source: await sourceGet(env, s.id) });
+        }
+        if (path === '/sources/update') {
+          const id = sourceIdClean(sb.id);
+          const cur = id ? await sourceGet(env, id) : null;
+          if (!cur) return jsonResp({ error: 'unknown_source', detail: 'No source with id ' + id + '.' }, 404);
+          const patch = Object.assign({}, sb.patch && typeof sb.patch === 'object' ? sb.patch : sb, { id });
+          if (cur.core) { delete patch.urls; delete patch.methods; }   // core feeds are fetched from AU_FEEDS; their urls are code
+          const s = sourceSanitize(patch, cur);
+          const now = Date.now();
+          await env.MIND_DB.prepare("UPDATE sources SET name=?, tier=?, juris=?, issues=?, methods=?, urls=?, schedule=?, enabled=?, note=?, edited=1, updated=?, next_due=0, method_ok=CASE WHEN urls=? THEN method_ok ELSE '' END, fails=CASE WHEN urls=? THEN fails ELSE 0 END, alerted=CASE WHEN ?=1 THEN alerted ELSE 0 END WHERE id=?")
+            .bind(s.name, s.tier, s.juris, JSON.stringify(s.issues), JSON.stringify(s.methods), JSON.stringify(s.urls), s.schedule, s.enabled ? 1 : 0, s.note, now, JSON.stringify(s.urls), JSON.stringify(s.urls), s.enabled ? 1 : 0, id).run();
+          if (cur.core) await sourcesCoreOffRefresh(env);
+          return jsonResp({ ok: true, source: await sourceGet(env, id) });
+        }
+        if (path === '/sources/delete') {
+          const id = sourceIdClean(sb.id);
+          const cur = id ? await sourceGet(env, id) : null;
+          if (!cur) return jsonResp({ error: 'unknown_source' }, 404);
+          if (cur.core) return jsonResp({ error: 'core_source', detail: 'Core feeds are switched off, not deleted: POST /sources/update {id, enabled:false}.' }, 400);
+          await env.MIND_DB.batch([env.MIND_DB.prepare('DELETE FROM sources WHERE id=?').bind(id), env.MIND_DB.prepare('DELETE FROM source_health WHERE src=?').bind(id)]);
+          return jsonResp({ ok: true, deleted: id });
+        }
+        if (path === '/sources/import') {
+          const arr = (Array.isArray(sb.sources) ? sb.sources : (Array.isArray(sb) ? sb : [])).slice(0, 400);
+          const out = { ok: true, added: 0, updated: 0, skipped: [] };
+          const now = Date.now();
+          for (const b of arr) {
+            if (!b || typeof b !== 'object') { out.skipped.push({ reason: 'not an object' }); continue; }
+            const cur = b.id ? await sourceGet(env, sourceIdClean(b.id)) : null;
+            const s = sourceSanitize(b, cur);
+            if (!s.id || !s.name) { out.skipped.push({ id: b.id || '', reason: 'no name' }); continue; }
+            if (cur && cur.core) { out.skipped.push({ id: s.id, reason: 'core feed' }); continue; }
+            if (!s.methods.length) { out.skipped.push({ id: s.id, reason: 'no urls' }); continue; }
+            await sourceUpsert(env, s, now);
+            if (cur) out.updated++; else out.added++;
+          }
+          return jsonResp(out);
+        }
+        if (path === '/sources/report') {
+          // a desktop collector reports a probe it ran with a real browser
+          const id = sourceIdClean(sb.id);
+          const s = id ? await sourceGet(env, id) : null;
+          if (!s) return jsonResp({ error: 'unknown_source' }, 404);
+          const method = SOURCE_METHODS.indexOf(sb.method) >= 0 ? sb.method : 'render';
+          const n = Math.max(0, parseInt(sb.n, 10) || 0);
+          const run = { src: s, ok: !!sb.ok && n > 0, method, items: [], tried: [{ method, ok: !!sb.ok && n > 0, n, ms: parseInt(sb.ms, 10) || 0, status: 0, skipped: false, detail: String(sb.detail || '').slice(0, 160) }] };
+          await env.MIND_DB.batch(sourceStmts(env, run, parseInt(sb.added, 10) || 0, Date.now()));
+          return jsonResp({ ok: true, source: await sourceGet(env, id) });
+        }
+        if (path === '/sources/sweep') {
+          const ids = (Array.isArray(sb.ids) ? sb.ids : (sb.id ? [sb.id] : [])).map(sourceIdClean).filter(Boolean);
+          if (ids.length && ids.length <= 5) return jsonResp(await sourceSweep(env, { ids, detail: true }));
+          const params = { ids, all: !!sb.all || !ids.length, where: 'worker' };
+          const job = await jobCreate(env, 'sources', params, auth.name);
+          ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'sources', params }));
+          return jsonResp({ ok: true, job: job.id, note: 'Sweeping in the worker. Tail /bridge/job?id=' + job.id });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'sources_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
     // -- The Content Desk: copy for each client and each platform, edited by instruction --
@@ -7181,10 +8419,17 @@ async function handleScheduled(env) {
   // Pre-warm the default /allnews snapshot so dashboard loads are instant,
   // and append a pulse-history point (share-of-voice + tone time series).
   try {
-    const snap = await buildAllNews(env, { q: '', max: 120, hours: 24 });
+    // the reporter mirrors each core feed's result into the Source Registry
+    const snap = await buildAllNews(env, { q: '', max: 120, hours: 24, onHealth: h => sourcesCoreHealth(env, h) });
     await arcNewsSnap(env, snap); // hourly permanent archive - runs with nobody watching
   } catch (e) {}
   try { await snapshotPulse(env); } catch (e) {}
+  // The Source Registry: the sources beyond the core whose schedule has come
+  // round - feed, WordPress API, sitemap, listing page, Google News, in turn.
+  try { const sw = await sourceSweep(env); if (sw && sw.ran) console.log('Sources:', sw.succeeded, 'of', sw.ran, 'delivered,', sw.added, 'new rows'); } catch (e) { console.log('source sweep failed', String(e).slice(0, 120)); }
+  // Full text for the news of the last two days that arrived as a headline and
+  // a blurb: reader extraction, AMP, the archives, a rendered page.
+  try { const ft = await fulltextCron(env); if (ft && ft.tried) console.log('Full text:', ft.got, 'of', ft.tried); } catch (e) { console.log('fulltext cron failed', String(e).slice(0, 120)); }
   // The Sentinel runs every tick: detect spikes on client issues, draft the
   // angle, push it to Slack. This is the loop that makes response time small.
   try {

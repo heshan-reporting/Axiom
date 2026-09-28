@@ -22,6 +22,7 @@
 <script src="release.js" defer></script>
 <script src="topics.js" defer></script>
 <script src="content.js" defer></script>
+<script src="sources.js" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -972,6 +973,70 @@ body.kiosk .kprog{display:block}
 .rel-fix .w{color:var(--t2);font-family:inherit;font-size:11.5px}
 .btn.sm.on{border-color:#F5B942;color:#F5B942}
 @media(prefers-reduced-motion:reduce){.sig-dot.run{animation:none}}
+/* Sources (React island, docs/sources.js) */
+.src-strip{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.src-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;flex:1 1 640px}
+.src-stat{border:1px solid var(--ln);border-radius:12px;padding:10px 12px;background:rgba(255,255,255,.025)}
+.src-stat .k{font-family:var(--fm);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--t3)}
+.src-stat .v{font-family:var(--fd);font-size:24px;font-weight:750;letter-spacing:-.03em;margin-top:5px;font-variant-numeric:tabular-nums;color:var(--t0)}
+.src-stat .s{font-size:11px;color:var(--t2);margin-top:4px;line-height:1.4}
+.src-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.src-banner{border:1px solid rgba(240,144,139,.45);background:rgba(240,144,139,.08);border-radius:12px;padding:10px 14px;font-size:12.5px;color:var(--t1);line-height:1.5;margin-bottom:12px}
+.src-banner b{color:#F0908B}
+.src-banner-list{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:8px}
+.src-link{background:none;border:0;padding:0;color:#8FB6FF;cursor:pointer;font-size:12.5px;text-decoration:underline dotted}
+.src-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:12px 0 8px}
+.src-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 600px}
+.src-filters select,.src-q{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--ln);background:rgba(255,255,255,.03);color:var(--t1)}
+.src-q{min-width:200px}
+.src-count{font-family:var(--fm);font-size:10.5px;color:var(--t3);margin-left:4px}
+.src-toolbtns{display:flex;gap:6px;align-items:center}
+.src-main{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+.src-main.split{grid-template-columns:minmax(0,1fr) minmax(360px,480px)}
+@media(max-width:1200px){.src-main.split{grid-template-columns:1fr}}
+.src-tablewrap{border:1px solid var(--ln);border-radius:12px;overflow:auto;max-height:calc(100vh - 340px)}
+.src-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.src-table th{position:sticky;top:0;background:rgba(10,14,22,.96);text-align:left;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:9px 10px;border-bottom:1px solid var(--ln);z-index:1}
+.src-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top;color:var(--t1)}
+.src-table .num,.src-probe .num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--fm);font-size:11.5px}
+.src-row{cursor:pointer;transition:background .12s}
+.src-row:hover{background:rgba(255,255,255,.03)}
+.src-row.on{background:rgba(143,182,255,.08)}
+.src-row.off td{opacity:.55}
+.src-name .n{font-weight:600;color:var(--t0);line-height:1.3}
+.src-name .m,.src-route .m,.src-drawerhead .m,.src-form .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:2px}
+.src-tier{color:var(--t2);white-space:nowrap}
+.src-route{white-space:nowrap}
+.src-route .m{display:inline;margin-left:6px}
+.src-chip{display:inline-block;font-family:var(--fm);font-size:10px;letter-spacing:.04em;padding:3px 8px;border-radius:999px;border:1px solid var(--ln);color:var(--t2);background:transparent}
+.src-chip.on{border-color:rgba(126,224,174,.5);color:#7EE0AE;background:rgba(126,224,174,.08)}
+.src-chip.pick{cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:0;padding:5px 11px}
+.src-chip.pick.on{border-color:rgba(143,182,255,.7);background:rgba(143,182,255,.12);color:var(--t0)}
+.src-chips{display:flex;flex-wrap:wrap;gap:6px}
+.src-status{display:inline-flex;align-items:center;gap:6px;font-family:var(--fm);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.src-dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.src-drawer{border:1px solid var(--ln);border-radius:12px;padding:14px;background:rgba(255,255,255,.02);position:sticky;top:12px;max-height:calc(100vh - 120px);overflow:auto}
+.src-drawerhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:12px}
+.src-drawertitle{font-family:var(--fd);font-size:18px;font-weight:700;color:var(--t0);letter-spacing:-.02em;line-height:1.2}
+.src-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:12.5px;color:var(--t1)}
+.src-facts .k,.src-form .k,.src-urls .k{display:block;font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin-bottom:2px}
+.src-facts .wide,.src-form .wide{grid-column:1 / -1}
+.src-facts .err{color:#F5B942}
+.src-sub{font-family:var(--fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--ln)}
+.src-routes{display:flex;flex-wrap:wrap;gap:6px}
+.src-urls{margin-top:8px;font-size:11.5px;display:grid;gap:4px}
+.src-urls .u{font-family:var(--fm);font-size:10.5px;color:var(--t2);word-break:break-all}
+.src-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.src-probe{width:100%;border-collapse:collapse;font-size:12px}
+.src-probe th{text-align:left;font-family:var(--fm);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--ln)}
+.src-probe td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:top;color:var(--t1)}
+.src-probe tr.ok td:nth-child(2){color:#7EE0AE}
+.src-probe tr.bad td:nth-child(2){color:#F0908B}
+.src-probe tr.skip td{color:var(--t3)}
+.src-probe .det{font-size:11px;color:var(--t2);line-height:1.4;word-break:break-word}
+.src-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px}
+.src-form label{display:flex;flex-direction:column;gap:4px;font-family:var(--fm);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
+.src-form input,.src-form select{font-size:12.5px;padding:7px 9px;border-radius:8px;border:1px solid var(--ln);background:rgba(255,255,255,.03);color:var(--t0);font-family:inherit;letter-spacing:0;text-transform:none}
 /* Content Desk (React island, docs/content.js) */
 .cd-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--ln);border-radius:14px;background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.015));margin-bottom:12px}
 .cd-logo{width:64px;height:64px;border-radius:12px;border:1px solid var(--ln);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:13px;font-weight:700;color:var(--t1);overflow:hidden;flex:0 0 auto}
@@ -1632,6 +1697,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span class="rtip">Release Desk</span></button>
         <button class="rbtn" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span class="rtip">Topics</span></button>
         <button class="rbtn" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/><path d="M4 12H2M6 4l-1.5-1.5"/></svg><span class="rtip">Content Desk</span></button>
+        <button class="rbtn" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span class="rtip">Sources</span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -2067,6 +2133,11 @@ body.kiosk .kprog{display:block}
         <div class="note" style="margin:0 0 14px">Pick the client, the campaign and the platforms, write a one-line brief or paste source material, and the Desk writes in the client's own voice: the sign-offs, approved figures and banned words from the voice profile, the examples the client has approved before, and every correction the team has taught it. Then tell it what to change. One-off edits apply to this set; a standing instruction is remembered for the client and shown as a rule you can switch off. Every figure is checked against the approved facts and the source, and flagged, never dropped.</div>
         <div id="content-root"><div class="empty" style="padding:40px 0">Loading the Content Desk…</div></div>
       </section>
+      <!-- ═══ SOURCES — the registry of everything AXIOM reads, and which route delivers for each (React island, docs/sources.js) ═══ -->
+      <section class="view" id="v-sources">
+        <div class="note" style="margin:0 0 14px">Every outlet, office, party, pollster, sector title and podcast the platform reads, as one table. For each source the sweep tries its routes in order — the feed, the WordPress API, a JSON feed, the news sitemap, the podcast directory, the listing page, Google News, a rendered page — keeps what works and records which one delivered, when, how much, and what failed and why. Probe runs every route live. A source that fails six sweeps in a row turns red here and is reported to Slack once. Times are Australian Eastern.</div>
+        <div id="sources-root"><div class="empty" style="padding:40px 0">Loading the source registry…</div></div>
+      </section>
       <section class="view" id="v-map">
         <div class="kmwrap">
           <canvas id="km-cv"></canvas>
@@ -2352,6 +2423,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span>Signals</span></button>
   <button class="tab" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Desk</span></button>
   <button class="tab" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span>Topics</span></button>
+  <button class="tab" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span>Sources</span></button>
   <button class="tab" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg><span>Content</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
@@ -2633,7 +2705,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',sources:'Sources',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2648,6 +2720,7 @@ function go(v){
   if(v==='release'&&typeof releaseInit==='function')releaseInit();
   if(v==='topics'&&typeof topicsInit==='function')topicsInit();
   if(v==='content'&&typeof contentInit==='function')contentInit();
+  if(v==='sources'&&typeof sourcesInit==='function')sourcesInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */

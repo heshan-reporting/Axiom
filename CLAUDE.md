@@ -318,6 +318,99 @@ graph (people, organisations, issues, opponents, journalists - a claims ledger
 with sources), watchers writing to that graph, then per-client style adapters
 once the approved corpus is large enough.
 
+## The Source Registry and full text (Phase 1 of the intelligence expansion)
+
+Everything AXIOM reads is data in D1 `sources`, not code: id, name, `tier`
+(core / national / metro / regional / broadcaster / wire / independent /
+official / party / polling / thinktank / sector / podcast / sweep), `juris`
+(au or a state), the client `issues` it speaks to, ordered `methods`, `urls`
+(`rss`, `wp` WordPress root, `json`, `sitemap`, `home` listing page, `site`
+for Google News `site:`, `gnews` explicit query, `podcast` Apple-directory
+search term), `schedule` minutes, `enabled`, and the health columns
+(`last_try`, `last_ok`, `next_due`, `fails`, `method_ok`, `last_error`,
+`latest_ts`, `alerted`). `SOURCE_SEED_EXT` in the worker (about 200 rows) plus
+the `AU_FEEDS` core (mirrored as `core=1`, named by `CORE_META`) seed the
+table through `ensureSources()`; the seed refreshes rows the operator has never
+edited (`edited=0`) when its hash changes and never touches edited rows.
+**Seed URLs are unverified until a sweep proves them** - that is the point of
+the health table.
+
+`sourceRun(env, src, {all})` walks the method chain - `srcRss`, `srcWp`
+(`/wp-json/wp/v2/posts`, brings full text), `srcJson`, `srcSitemap`
+(`robots.txt` -> news sitemap, follows one index level), `srcPodcast`
+(iTunes search -> feedUrl cached in KV `pod_feed_<id>` -> feed; episodes
+without a link file under their enclosure), `srcHtml` (`listingLinks()`:
+article-shaped links on a listing page, undated, stamped at first sight),
+`srcGnews` (`site:` or the query, `when:2d`, outlet suffix stripped to
+`meta.outlet`), `srcRender` - and stops at the first that delivers, trying
+`method_ok` first; the Probe (`all`) runs every method and reports each.
+`sourceRows()` files kind `news` with `src` = source id and
+`meta {reg:1, source, tier, juris, method, issues: issueTag(), dated, full, ft}`.
+`sourceSweep(env, {ids|all|limit, log})` runs the due registry sources
+(`next_due<=now`, oldest first, `SOURCES_PER_TICK` = 50) every cron tick,
+writes one `source_health` row per attempt (kept to 4000) and updates the
+source; `sourcesAlertDead()` posts once to Slack (`_default` webhook) when a
+source reaches `SOURCE_DEAD_FAILS` = 6 consecutive failures (`alerted` 1, or 2
+when no webhook is set); a later success resets it. Core feeds are fetched by
+`buildAllNews` as before; the cron passes `onHealth` so `sourcesCoreHealth()`
+mirrors their result, and a core feed switched off in the view is skipped
+there too (KV `sources_core_off`). `/allnews` merges the registry's last-72h
+archive rows (`json_extract(meta,'$.reg')=1`, marked `reg:1`) so the newsroom
+shows the whole estate; `arcNewsSnap` does not re-file them.
+
+Routes (read role for GETs, full for POSTs): `GET /sources?tier=&juris=&status=
+&issue=&q=` (rows with `status` ok / failing / dead / stale / unverified / off,
+`items24` and `latest_ts` from the archive, a `summary`, `lastSweep`),
+`/sources/health?id=&limit=`, `/sources/probe?id=` (every method live; files
+nothing), `/sources/export`; `POST /sources/add|update|delete|import|sweep|
+report` (`sweep` with up to 5 ids runs inline with `tried` per source, more or
+`all` becomes a bridge job `sources` the console tails; `report` is how the
+Mac records a render probe; core feeds cannot be deleted or re-pointed, only
+switched off).
+
+**Full text.** `fullText(env, url, {light, save, render})` tries, in order:
+Google News link decode (`gnewsDecode`: base64 id, else the interstitial's
+`data-n-a-sg`/`data-n-a-ts` through `batchexecute`), the page itself
+(`extractArticle`: JSON-LD `articleBody`, then `<article>` paragraphs, then
+`<main>`, then the page's paragraphs; `FT_MIN` = 600 chars; paywall signals
+noted), AMP (`<link rel=amphtml>`, `amp.<host>`, `/amp`, `?outputType=amp`),
+Google's AMP cache (`cdn.ampproject.org/c/s/`), the Wayback Machine
+(`wayback/available`, `id_` snapshot; `save=1` requests a snapshot first),
+archive.today (`archive.ph/newest/`, fails soft), then a real browser. Every
+attempt is returned with its reason. `GET /fulltext?url=|id=&save=&light=`
+(read; a full key also files the result on the row), `POST /fulltext/save`
+(the Mac writes back). `fulltextCron()` gives `FT_PER_TICK` = 40 news rows
+under 48h with a body under 600 chars their text each tick (`light`: no
+archive.today, no render unless `FULLTEXT_RENDER=1`), marks `meta.ft` with the
+method, or `retry` then `none` after two failures with `meta.ft_err`. No
+credentialed access anywhere: paywalled copy comes only from routes a
+publisher serves publicly, or not at all.
+
+**Rendering.** `renderConfigured(env)` is true with `RENDER_URL` (an HTTP
+service taking `{url}` and answering `{html}` - a Playwright box on AWS or a
+Mac; `RENDER_KEY` sent as `X-Axiom-Key`) or `CF_ACCOUNT_ID` +
+`CF_BROWSER_TOKEN` (Cloudflare Browser Rendering `/content`). Bridge source
+`render` (`{source}` renders a listing page and files it; `{url,id}` reads an
+article and saves it) runs in the worker when configured, otherwise
+`jobRoute()` sends it to a Mac: `tools/reach-agent.py` offers `render` when
+Playwright imports (`pip install playwright && playwright install chromium`),
+`job_render` drives headless Chromium with `listing_links` / `extract_article`
+mirroring the worker's, files rows through `/archive/add` (`meta.via: reach`)
+and reports through `/sources/report` or `/fulltext/save`.
+
+In-app: the Sources view (`docs/sources.js`, `#v-sources`): the strip (sources,
+delivering by method, failing, dead, untried, items 24h, last sweep), a dead
+banner, filters (search, tier, jurisdiction, status, client issue, method,
+sort), the table (source, tier, jurisdiction, delivers via + fallbacks, latest
+item, 24h, fails, status), and a drawer per source (facts in Australian
+Eastern time, routes in order, urls, Probe every route with a per-method table,
+Sweep now, Probe with a browser, Switch off, Edit, Delete, recent attempts),
+Add source, Import / Export JSON. Harnesses in the session scratchpad:
+`sources-worker.mjs` (23 route tests over a real SQLite behind the D1 API,
+`d1lite.mjs`), `sources-browser.mjs` (13 browser tests), `reach-render-test.py`
+(16 agent tests). The sandbox has no egress, so live per-source results come
+from the first deployed sweep: read them at `/sources` or in the view.
+
 ## The Content Desk (copy for each client and platform, changed by instruction)
 
 The `v-content` view (React island, `docs/content.js`) writes social and

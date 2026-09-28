@@ -101,6 +101,17 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   SIFA_INBOUND_KEY  (a key YOU mint and give to SIFA: it sends it as
 #                      Authorization: Bearer on /sifa/* to push keywords and read
 #                      results; never the AXIOM access key)
+#   CF_ACCOUNT_ID + CF_BROWSER_TOKEN
+#                     (optional: Cloudflare Browser Rendering, a real browser for
+#                      the Source Registry's `render` route and the full-text
+#                      chain; the token needs the Browser Rendering permission.
+#                      Without them render jobs wait for a Mac running
+#                      tools/reach-agent.py with Playwright installed)
+#   RENDER_URL        (optional alternative: an HTTP render service that takes
+#                      POST {url} and answers {html} - an AWS or Mac Playwright
+#                      box; RENDER_KEY is sent as X-Axiom-Key if set)
+#   FULLTEXT_RENDER   (plain text var, optional: "1" lets the cron's full-text
+#                      pass spend a render on articles nothing else could read)
 #   OPENAUSTRALIA_KEY (free key from openaustralia.org.au/api: Hansard search in
 #                      topic research)
 #   META_USER_TOKEN   (ID-verified user token with ads_read for the Ad Library
