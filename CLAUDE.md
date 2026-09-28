@@ -479,7 +479,8 @@ archive item it came from; nothing is a model's impression of the whole.
   `none` so they are never looked at again; the rest are ordered by client
   issue tags, client mentions and engagement, and the top `SENT_PER_TICK` =
   80 go to Claude in batches of `SENT_BATCH` = 20 (`sentClassify`, model
-  `SENTIMENT_MODEL` or Haiku 4.5, one retry on invalid JSON). For each text
+  `SENTIMENT_MODEL` or Sonnet 4.6 by the operator's choice, one retry on
+  invalid JSON). For each text
   and each entity mentioned the model returns stance -1/0/1, intensity 1-3,
   sarcasm and a twelve-word `why`; for the text an overall tone -1..1 and a
   type news/opinion/question. Writes: `sent_items(item, kind, platform, src,
@@ -516,6 +517,77 @@ archive item it came from; nothing is a model's impression of the whole.
   sync MPs). Australian Eastern time. Harnesses in the session scratchpad:
   `sentiment-worker.mjs` (15 route and cron tests with a stub Claude),
   `sentiment-browser.mjs` (9 browser tests).
+
+## Narratives: the stories the conversation keeps telling (Phase 4)
+
+A narrative is a cluster of rows, across every channel, that say the same
+thing in different words. Everything known about one is a count over its
+rows (D1 `narrative_items`, each pointing at the archive item), so origin,
+spread, pace and split are all traceable to posts; only the name is Claude's.
+
+- **Placement.** `narrativesRun(env, {hours, scan, log})`: the oldest
+  unplaced rows of `SENT_KINDS` within `NARR_WINDOW_H` = 72h (`NARR_SCAN` =
+  300 a run) are embedded with Workers AI (`NARR_EMBED`, bge-base, 768 dims).
+  A row joins the live narrative (active within `NARR_LIVE_H` = 96h, not
+  muted) whose centroid is closest when the cosine is >= `NARR_SIM` = 0.80
+  and they share a client issue or an entity, or >= `NARR_SIM_STRICT` = 0.88
+  regardless; otherwise it starts one. Without AI bound the run falls back to
+  term vectors (`narrTokens`, stop list; thresholds 0.32 / 0.47). Rows under
+  20 characters are marked with narrative `''` so they are never looked at
+  again. Centroids are stored as base64 Float32 (`f32b64`/`b64f32`), term
+  counts in `terms`. `narrRefresh(env, id, now)` recounts a touched narrative
+  in seven batched queries: n / n24 / nprev; the channels in the order they
+  first carried it (`spread`); the channels by volume (subreddit, outlet,
+  page, YouTube channel); the loudest rows (score + 3 x comments); the
+  sentiment split from `sent_items`; where it stands toward the client (mean
+  stance of `sent_entities` rows on entities with `side='client'`: <= -0.25
+  hostile, >= 0.25 supportive, else mixed; unknown under two judgments); the
+  entities named. Status: new (< 3 rows), emerging (>= `NARR_ALERT_MIN` = 6
+  rows within 48h of first sight), growing, steady, fading; velocity is n24 /
+  nprev. Singletons older than seven days are pruned.
+- **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
+  `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
+  naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
+  at most twelve words as its proponents would put it, summary, claim,
+  counter-claim, proponents, up to three issue ids) - model `NARRATIVE_MODEL`
+  || `SENTIMENT_MODEL` || Sonnet 4.6, budget KV `narr_calls_<day>` against
+  `NARRATIVE_DAILY_CALLS` (default 60), one retry on invalid JSON; edited or
+  muted narratives are never renamed, and the first issue's client becomes
+  `ns`. `narrCounters()` makes two narratives on the same top issue facing
+  opposite ways each other's `counter`. `narrAlerts()` posts each emerging,
+  named narrative on a client issue once to that client's Slack (`slackPost`,
+  the `slack_webhooks` map, `_default` otherwise): label, client, where it was
+  first seen, rows across channels, stance, the spread order, the origin link
+  (`alerted` 1 sent, 2 no webhook). `narrativesCron()` runs every tick after
+  the sentiment pass. Day buckets follow Sydney days (`auOffsetMs`).
+- **Routes.** `GET /narratives?days=&issue=&ns=&platform=&status=&side=&q=
+  &sort=velocity|n|new|latest&all=1&muted=1` (pinned first; singletons hidden
+  unless `all`), `/narratives/one?id=` (summary, claim, counter-claim, the
+  counter-narrative, the spread timeline, rows a day by channel, channels,
+  amplifiers, top terms, every row newest first with fit and tone, the
+  origin), `/narratives/status` (live, emerging, growing, named, alerts, rows
+  placed today, backlog, budget, what is bound) - read-role. `POST
+  /narratives/run {hours, scan}` (a bridge job, source `narratives`,
+  worker-side, tailed by the console), `/narratives/update {id, label,
+  summary, claim, counter_claim, issues, muted, pinned}` (a text edit sets
+  `edited=1`, which stops renaming), `/narratives/merge {into, from}` (rows,
+  terms and the weighted centroid move across; the other row is deleted) -
+  full role.
+- **In-app.** The Narratives view (`docs/narratives.js`, `#v-narratives`):
+  the strip (live, emerging, growing, alerts sent, waiting, naming budget),
+  filters (window, client issue, channel, status, stance, sort, search), the
+  table (label with issues, client and proponents; stance toward the client;
+  rows; pace; the order the channels took it up; first seen; the split bar;
+  status) and a drawer per narrative: the claim and counter-claim with a link
+  to the counter-narrative, what changed (24h vs before, first seen, hostile
+  and warm shares, channels), how it spread in Australian Eastern time, rows a
+  day by channel, who carries it, the loudest rows, shared terms, every row
+  with the origin marked, and for full keys Edit / Pin / Mute / Merge into.
+  **Place and name now** runs the job with the console. Harnesses in the
+  session scratchpad: `narratives-worker.mjs` (12 placement, naming, counter,
+  alert, list, merge, fallback, budget and cron tests with a semantic stub
+  embedding, a stub Claude and a Slack recorder), `narratives-browser.mjs`
+  (9 browser tests).
 
 ## The Content Desk (copy for each client and platform, changed by instruction)
 

@@ -2159,7 +2159,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2864,6 +2864,9 @@ async function jobRunLocal(env, job) {
       ok = !!(out && out.ok);
     } else if (job.source === 'sentiment') {
       out = await sentimentRun(env, Object.assign({}, job.params, { log: log }));
+      ok = !!(out && out.ok);
+    } else if (job.source === 'narratives') {
+      out = await narrativesRun(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
     } else if (SOCIAL_PLATFORMS.indexOf(job.source) >= 0) {
       out = await socialSweep(env, Object.assign({}, job.params, { platform: job.source }), log);
@@ -5474,7 +5477,7 @@ const SENT_PER_TICK = 80;      // rows classified per cron tick
 const SENT_BATCH = 20;         // texts per Claude call
 const SENT_SCAN = 400;         // newest unclassified rows looked at per run
 const SENT_WINDOW_H = 72;      // rows older than this are left alone
-const SENT_MODEL = 'claude-haiku-4-5-20251001';
+const SENT_MODEL = 'claude-sonnet-4-6';   // the operator's choice: finer judgement; SENTIMENT_MODEL overrides (claude-haiku-4-5-20251001 is about a tenth of the price)
 const SENT_DAILY_CALLS = 300;  // Claude calls a day unless SENTIMENT_DAILY_CALLS says otherwise
 const ENTITY_KINDS = ['party', 'person', 'org', 'topic'];
 const ENTITY_SIDES = ['client', 'opponent', 'neutral'];
@@ -5903,6 +5906,352 @@ async function sentimentStatus(env) {
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'sent_last')) || 'null'); } catch (e) { last = null; }
   return { ok: true, configured: !!env.ANTHROPIC_API_KEY, budget: await sentBudget(env), classified24: c.c24 || 0, classified7: c.c7 || 0, skipped24: c.skipped24 || 0, total: c.total || 0, mentions7: m.n || 0, neg7: m.neg || 0, pos7: m.pos || 0,
     entities: { total: ents.n || 0, active: ents.active || 0, people: ents.people || 0, parties: ents.parties || 0, orgs: ents.orgs || 0, topics: ents.topics || 0 }, backlog, unclassifiedScanned: rows.length, perTick: SENT_PER_TICK, batch: SENT_BATCH, windowHours: SENT_WINDOW_H, last, regions: SOURCE_JURIS };
+}
+
+// ==============================================================================
+// NARRATIVES - the stories the conversation keeps telling. New rows are
+// embedded (Workers AI, the Mind's own model; term vectors when it is unbound)
+// and joined to a live narrative when they sit close to its centre and share
+// an issue or an entity with it, or start a new one. Each narrative keeps its
+// origin (the first row, where and when), the order the channels picked it up,
+// who carries it most, its pace against the previous day, the sentiment split
+// of its rows and where it stands toward the client. Claude names a narrative
+// once it has three rows - the claim as its proponents would put it, the
+// strongest counter-claim, who pushes it - within a daily budget. Narratives
+// that share an issue and face opposite ways are paired as counter-narratives.
+// One that is new, growing and touches a client issue is reported to Slack
+// once. Every figure is a count over narrative_items, each pointing at a row.
+// ==============================================================================
+let NARR_READY = false;
+const NARR_WINDOW_H = 72;       // rows this old are still placed
+const NARR_LIVE_H = 96;         // a narrative with nothing newer is asleep: not matched against
+const NARR_SCAN = 300;          // rows placed per run
+const NARR_SIM = 0.80;          // cosine to join, with a shared issue or entity...
+const NARR_SIM_STRICT = 0.88;   // ...or this close without one
+const NARR_TOKEN_SIM = 0.32;    // the term-vector fallback
+const NARR_LABEL_MIN = 3;       // rows before Claude names it
+const NARR_ALERT_MIN = 6;       // rows within 48h of first sight before an emergence alert
+const NARR_DAILY_CALLS = 60;    // naming calls a day unless NARRATIVE_DAILY_CALLS says otherwise
+const NARR_EMBED = '@cf/baai/bge-base-en-v1.5';
+const NARR_STOP = new Set(('the a an and or of to in on for with at by from as is are was were be been being it its this that these those i me my you your he him his she her we us our they them their who whom what which when where why how not no nor but so if then than too very can will would should could may might must just about into over under after before also more most less least such only own same other some any all each both few many much out up down off new old said says say one two three via amp rt https http com www').split(' '));
+async function ensureNarratives(env) {
+  if (!env.MIND_DB) return false;
+  if (NARR_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS narratives(id TEXT PRIMARY KEY, label TEXT, summary TEXT, claim TEXT, counter_claim TEXT, proponents TEXT, issues TEXT, entities TEXT, ns TEXT, side TEXT, n INTEGER, n24 INTEGER, nprev INTEGER, velocity REAL, first_ts INTEGER, first_item INTEGER, first_platform TEXT, first_channel TEXT, last_ts INTEGER, platforms TEXT, channels TEXT, spread TEXT, amplifiers TEXT, sentiment TEXT, counter TEXT, status TEXT, alerted INTEGER, alert_ts INTEGER, muted INTEGER, pinned INTEGER, edited INTEGER, terms TEXT, centroid TEXT, dim INTEGER, labelled_n INTEGER, model TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narratives_last ON narratives(last_ts)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS narrative_items(item INTEGER PRIMARY KEY, narrative TEXT, ts INTEGER, platform TEXT, channel TEXT, sim REAL)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_items_n ON narrative_items(narrative, ts)'),
+  ]);
+  NARR_READY = true;
+  return true;
+}
+function narrText(r) {
+  const title = String(r.title || '').replace(/^Comment on:\s*/i, '').trim();
+  const body = String(r.body || '').replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/comment/.test(r.kind)) return body.slice(0, 500);
+  if (r.kind === 'transcript') return (title + '. ' + body).slice(0, 700);
+  return (title + (body && body.indexOf(title.slice(0, 40)) < 0 ? '. ' + body : '')).slice(0, 600);
+}
+function narrTokens(text) {
+  return String(text || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[^a-z0-9$%'\s-]/g, ' ').split(/\s+/).map(w => w.replace(/^['-]+|['-]+$/g, '')).filter(w => w.length > 2 && !NARR_STOP.has(w) && !/^\d+$/.test(w));
+}
+function tokenVec(tokens) { const m = {}; tokens.forEach(t => { m[t] = (m[t] || 0) + 1; }); let n = 0; for (const k in m) n += m[k] * m[k]; n = Math.sqrt(n) || 1; for (const k in m) m[k] /= n; return m; }
+function tokenCos(a, b) { let s = 0; for (const k in a) if (b[k]) s += a[k] * b[k]; return s; }
+function vecCos(a, b) { let s = 0, na = 0, nb = 0; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; } return na && nb ? s / Math.sqrt(na * nb) : 0; }
+function f32b64(arr) { const f = new Float32Array(arr); const b = new Uint8Array(f.buffer); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
+function b64f32(s) { try { if (!s) return null; const bin = atob(s); const b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return Array.from(new Float32Array(b.buffer)); } catch (e) { return null; } }
+async function narrEmbed(env, texts) {
+  if (!env.AI || !texts.length) return null;
+  const out = [];
+  try { for (let i = 0; i < texts.length; i += 50) { const r = await env.AI.run(NARR_EMBED, { text: texts.slice(i, i + 50).map(t => String(t).slice(0, 1500)) }); ((r && r.data) || []).forEach(v => out.push(Array.from(v))); } } catch (e) { return null; }
+  return out.length === texts.length ? out : null;
+}
+function narrChannel(kind, meta, src) {
+  if (/^reddit_/.test(kind)) return meta.sub ? 'r/' + meta.sub : 'reddit';
+  if (/^sig_/.test(kind)) return String(meta.page_name || meta.page || meta.platform || 'post').slice(0, 80);
+  if (kind === 'comments') return 'meta' + (meta.ns ? ':' + meta.ns : '');
+  if (kind === 'transcript') return String(meta.page_name || 'youtube').slice(0, 80);
+  return String(src || 'news').slice(0, 60);
+}
+function narrId() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function narrTopTerms(tok, k) { return Object.keys(tok).sort((a, b) => tok[b] - tok[a]).slice(0, k || 40); }
+function narrRow(r) {
+  return { id: r.id, label: r.label || '', summary: r.summary || '', claim: r.claim || '', counter_claim: r.counter_claim || '', proponents: r.proponents || '', issues: pjs(r.issues, []), entities: pjs(r.entities, []), ns: r.ns || '', side: r.side || 'unknown',
+    n: r.n || 0, n24: r.n24 || 0, nprev: r.nprev || 0, velocity: Number(r.velocity) || 0, first_ts: r.first_ts || 0, first_item: r.first_item || 0, first_platform: r.first_platform || '', first_channel: r.first_channel || '', last_ts: r.last_ts || 0,
+    platforms: pjs(r.platforms, {}), channels: pjs(r.channels, []), spread: pjs(r.spread, []), amplifiers: pjs(r.amplifiers, []), sentiment: pjs(r.sentiment, {}), counter: r.counter || '', status: r.status || 'new',
+    alerted: !!r.alerted, alert_ts: r.alert_ts || 0, muted: !!r.muted, pinned: !!r.pinned, edited: !!r.edited, terms: pjs(r.terms, {}), labelled_n: r.labelled_n || 0, model: r.model || '', created: r.created || 0, updated: r.updated || 0 };
+}
+function narrDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
+async function narrBudget(env) {
+  const cap = Math.max(0, parseInt(env.NARRATIVE_DAILY_CALLS, 10) || NARR_DAILY_CALLS);
+  const used = Number(await kvGet(env.AXIOM_KV, 'narr_calls_' + narrDay()) || 0);
+  return { used, cap, left: Math.max(0, cap - used), model: env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || SENT_MODEL };
+}
+/** Recount one narrative from its rows: size, pace, where it is, the order
+ *  the channels took it up, who carries it, the sentiment split, and where it
+ *  stands toward the client. */
+async function narrRefresh(env, id, now) {
+  const db = env.MIND_DB;
+  const [tot, plats, chans, amps, sent, side, ents] = await db.batch([
+    db.prepare('SELECT COUNT(*) n, SUM(ts>?) n24, SUM(ts>? AND ts<=?) nprev, MIN(ts) first_ts, MAX(ts) last_ts FROM narrative_items WHERE narrative=?').bind(now - 86400000, now - 2 * 86400000, now - 86400000, id),
+    db.prepare('SELECT platform, COUNT(*) n, MIN(ts) first FROM narrative_items WHERE narrative=? GROUP BY platform ORDER BY first').bind(id),
+    db.prepare('SELECT channel, platform, COUNT(*) n FROM narrative_items WHERE narrative=? GROUP BY channel ORDER BY n DESC LIMIT 8').bind(id),
+    db.prepare("SELECT ni.channel, ni.platform, a.id, a.title, a.body, a.url, a.ts, COALESCE(json_extract(a.meta,'$.score'),0) score, COALESCE(json_extract(a.meta,'$.comments'),0) comments FROM narrative_items ni JOIN arc_items a ON a.id=ni.item WHERE ni.narrative=? ORDER BY COALESCE(json_extract(a.meta,'$.score'),0) + COALESCE(json_extract(a.meta,'$.comments'),0)*3 DESC, a.ts DESC LIMIT 6").bind(id),
+    db.prepare("SELECT SUM(s.tone<-0.2) neg, SUM(s.tone>0.2) pos, COUNT(*) judged, AVG(s.tone) tone FROM narrative_items ni JOIN sent_items s ON s.item=ni.item WHERE ni.narrative=? AND s.model<>'none'").bind(id),
+    db.prepare("SELECT AVG(e.stance) st, COUNT(*) k FROM narrative_items ni JOIN sent_entities e ON e.item=ni.item JOIN entities en ON en.id=e.entity WHERE ni.narrative=? AND en.side='client'").bind(id),
+    db.prepare('SELECT e.entity, COUNT(*) k FROM narrative_items ni JOIN sent_entities e ON e.item=ni.item WHERE ni.narrative=? GROUP BY e.entity ORDER BY k DESC LIMIT 6').bind(id),
+  ]);
+  const t = (tot.results || [])[0] || {};
+  if (!t.n) return null;
+  const platforms = {}; const spread = []; (plats.results || []).forEach(p => { platforms[p.platform || 'unknown'] = p.n; spread.push({ platform: p.platform || 'unknown', first: p.first, n: p.n }); });
+  const channels = (chans.results || []).map(c => ({ channel: c.channel || '', platform: c.platform || '', n: c.n }));
+  const amplifiers = (amps.results || []).map(a => ({ channel: a.channel || '', platform: a.platform || '', title: String(a.title || a.body || '').replace(/^Comment on:\s*/i, '').slice(0, 160), url: a.url, ts: a.ts, score: Number(a.score) || 0, comments: Number(a.comments) || 0, item: a.id }));
+  const s = (sent.results || [])[0] || {}; const sd = (side.results || [])[0] || {};
+  const judged = s.judged || 0;
+  const sentiment = { judged, neg: s.neg || 0, pos: s.pos || 0, neu: judged - (s.neg || 0) - (s.pos || 0), tone: judged ? Math.round((Number(s.tone) || 0) * 100) / 100 : null };
+  const st = sd.k ? Number(sd.st) : null;
+  const stand = st == null || sd.k < 2 ? 'unknown' : st <= -0.25 ? 'hostile' : st >= 0.25 ? 'supportive' : 'mixed';
+  const entities = (ents.results || []).map(e => e.entity);
+  const n24 = t.n24 || 0, nprev = t.nprev || 0;
+  const velocity = nprev ? Math.round((n24 / nprev) * 100) / 100 : (n24 ? n24 : 0);
+  const fresh = (t.first_ts || 0) > now - 48 * 3600000;
+  const status = t.n < NARR_LABEL_MIN ? 'new' : (fresh && t.n >= NARR_ALERT_MIN) ? 'emerging' : (t.last_ts < now - 36 * 3600000 || (nprev && n24 < nprev / 2)) ? 'fading' : (n24 > nprev && n24 >= 3) ? 'growing' : 'steady';
+  await db.prepare('UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=?, status=?, updated=? WHERE id=?')
+    .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, now, id).run();
+  return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts };
+}
+const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"]}]}.';
+async function narrLabelBatch(env, clusters, log) {
+  const issuesList = CLIENT_ISSUES.map(ci => ci.id + ' = ' + ci.label).join('; ');
+  const user = 'ISSUES: ' + issuesList + '\n\n' + clusters.map((c, i) => '[' + (i + 1) + '] shared terms: ' + c.terms.join(', ') + '; channels: ' + c.chan + '; ' + c.n + ' rows\n' + c.samples.map(s => '- ' + s.replace(/\s+/g, ' ').slice(0, 320)).join('\n')).join('\n\n');
+  const model = (await narrBudget(env)).model;
+  let parsed = null;
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    const txt = await claudeMsg(env, NARR_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 300 + clusters.length * 260, 45000, model);
+    parsed = relJson(txt); if (!parsed || !Array.isArray(parsed.clusters)) parsed = null;
+  }
+  if (!parsed) throw new Error('the naming model answered without valid JSON');
+  const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
+  const out = [];
+  parsed.clusters.forEach(cl => { const c = clusters[parseInt(cl.n, 10) - 1]; if (!c) return; out.push({ id: c.id, label: String(cl.label || '').replace(/^["']|["']$/g, '').slice(0, 140), summary: String(cl.summary || '').slice(0, 600), claim: String(cl.claim || '').slice(0, 300), counter: String(cl.counter || '').slice(0, 300), proponents: String(cl.proponents || '').slice(0, 120), issues: (Array.isArray(cl.issues) ? cl.issues : []).map(String).filter(x => known.has(x)).slice(0, 3), model }); });
+  return out;
+}
+/** Name the narratives that have earned it (three rows, or doubled since
+ *  their last naming), five to a call, within the day's budget. */
+async function narrLabel(env, ids, log) {
+  const db = env.MIND_DB; const now = Date.now();
+  const marks = ids.map(() => '?').join(',');
+  const rows = ids.length ? (await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND n>=? AND (label=\'\' OR labelled_n*2<=n)').bind(...ids, NARR_LABEL_MIN).all()).results || [] : [];
+  const out = { named: 0, calls: 0, errors: [] };
+  if (!rows.length) return out;
+  const budget = await narrBudget(env);
+  const clusters = [];
+  for (const r of rows) {
+    const items = (await db.prepare('SELECT a.kind, a.title, a.body, a.ts, ni.channel FROM narrative_items ni JOIN arc_items a ON a.id=ni.item WHERE ni.narrative=? ORDER BY ni.ts').bind(r.id).all()).results || [];
+    if (!items.length) continue;
+    const pick = []; const seen = new Set();
+    const add = it => { if (!it) return; const t = narrText(it); if (t.length < 15 || seen.has(t.slice(0, 80))) return; seen.add(t.slice(0, 80)); pick.push(t); };
+    add(items[0]); add(items[items.length - 1]);
+    const step = Math.max(1, Math.floor(items.length / 4));
+    for (let i = step; i < items.length && pick.length < 6; i += step) add(items[i]);
+    const chan = pjs(r.channels, []).slice(0, 4).map(c => c.channel).join(', ') || pjs(r.spread, []).map(s => s.platform).join(', ');
+    clusters.push({ id: r.id, n: r.n, terms: narrTopTerms(pjs(r.terms, {}), 8), chan, samples: pick });
+  }
+  for (let i = 0; i < clusters.length; i += 5) {
+    if (out.calls >= budget.left) { out.errors.push('naming budget of ' + budget.cap + ' calls reached; ' + (clusters.length - i) + ' narratives stay unnamed until tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
+    const batch = clusters.slice(i, i + 5);
+    await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
+    let named;
+    try { named = await narrLabelBatch(env, batch, log); out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); }
+    catch (e) { out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); const m = String((e && e.message) || e).slice(0, 160); out.errors.push(m); await log('err', m); continue; }
+    const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, labelled_n=n, model=?, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.model, now, x.id); });
+    if (stmts.length) await db.batch(stmts);
+    out.named += named.length;
+    named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '')));
+  }
+  return out;
+}
+/** Two narratives on the same issue facing opposite ways toward the client are each other's counter. */
+async function narrCounters(env) {
+  const db = env.MIND_DB;
+  const rows = ((await db.prepare("SELECT id, issues, side, n FROM narratives WHERE label<>'' AND muted=0 AND n>=? AND last_ts>? AND side IN ('hostile','supportive')").bind(NARR_LABEL_MIN, Date.now() - 14 * 86400000).all()).results || []).map(r => ({ id: r.id, issue: (pjs(r.issues, []))[0] || '', side: r.side, n: r.n }));
+  const stmts = [];
+  rows.forEach(a => {
+    if (!a.issue) return;
+    const opp = rows.filter(b => b.id !== a.id && b.issue === a.issue && b.side !== a.side).sort((x, y) => y.n - x.n)[0];
+    stmts.push(db.prepare('UPDATE narratives SET counter=? WHERE id=?').bind(opp ? opp.id : '', a.id));
+  });
+  for (let i = 0; i < stmts.length; i += 100) await db.batch(stmts.slice(i, i + 100));
+  return stmts.length;
+}
+/** A named narrative that is new, has reached NARR_ALERT_MIN rows and touches a client issue is reported to that client's Slack once. */
+async function narrAlerts(env, log) {
+  const db = env.MIND_DB; const now = Date.now();
+  const rows = (await db.prepare("SELECT * FROM narratives WHERE status='emerging' AND alerted=0 AND muted=0 AND label<>'' AND issues<>'[]'").all()).results || [];
+  const sent = [];
+  for (const r0 of rows) {
+    const r = narrRow(r0);
+    const ci = CLIENT_ISSUES.find(c => c.id === r.issues[0]) || {};
+    const hostile = r.sentiment.judged ? Math.round(r.sentiment.neg / r.sentiment.judged * 100) : null;
+    const lines = [
+      ':rotating_light: *Emerging narrative* for *' + (ci.client || 'Curious Minds') + '* (' + (ci.label || r.issues[0]) + ')',
+      '*' + r.label.replace(/[<>|*]/g, ' ') + '*',
+      '`first seen ' + (r.first_platform || Object.keys(r.platforms)[0] || '?') + ' ' + Math.round((now - r.first_ts) / 3600000) + 'h ago - ' + r.n + ' rows across ' + Object.keys(r.platforms).length + ' channel' + (Object.keys(r.platforms).length === 1 ? '' : 's') + ' - ' + (r.nprev ? r.velocity + 'x yesterday\'s pace' : r.n24 + ' in 24h') + (hostile == null ? '' : ' - ' + hostile + '% hostile') + ' - ' + r.side + ' toward the client`',
+    ];
+    if (r.claim) lines.push('*Claim*  ' + r.claim);
+    if (r.counter_claim) lines.push('*Counter*  ' + r.counter_claim);
+    if (r.proponents) lines.push('*Carried by*  ' + r.proponents);
+    const order = r.spread.map(s => s.platform).join(' > ');
+    if (order) lines.push('*Spread*  ' + order + (r.channels.length ? ' - busiest: ' + r.channels.slice(0, 3).map(c => c.channel).join(', ') : ''));
+    const ev = r.amplifiers.filter(a => /^https?:/.test(a.url || '')).slice(0, 3);
+    if (ev.length) { lines.push('', '*Evidence*'); ev.forEach(a => lines.push('- <' + a.url + '|' + a.title.replace(/[<>|]/g, ' ').slice(0, 110) + '> _(' + (a.channel || a.platform) + ')_')); }
+    lines.push('', '_AXIOM Narratives - open the Narratives view for every row._');
+    const ok = await slackPost(env, ci.ns || '_default', lines.join('\n'));
+    await db.prepare('UPDATE narratives SET alerted=?, alert_ts=? WHERE id=?').bind(ok ? 1 : 2, now, r.id).run();
+    sent.push({ id: r.id, label: r.label, slack: ok });
+    await log('info', (ok ? 'Slack told about ' : 'no Slack webhook for ') + '"' + r.label + '"');
+  }
+  return sent;
+}
+/** The run: place the newest rows, recount what changed, name what has
+ *  earned a name, pair counters, raise alerts. */
+async function narrativesRun(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureNarratives(env)) || !(await ensureArchive(env)) || !(await ensureSentiment(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  const db = env.MIND_DB; const now = Date.now();
+  const hours = Math.min(Math.max(parseInt(opts.hours, 10) || NARR_WINDOW_H, 1), 24 * 14);
+  const scan = Math.min(Math.max(parseInt(opts.scan, 10) || NARR_SCAN, 1), 1000);
+  const kinds = SENT_KINDS.map(() => '?').join(',');
+  const rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
+  const liveRows = (await db.prepare('SELECT id, issues, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0').bind(now - NARR_LIVE_H * 3600000).all()).results || [];
+  const live = liveRows.map(r => ({ id: r.id, issues: new Set(pjs(r.issues, [])), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }));
+  const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
+  const texts = rows.map(narrText);
+  const vecs = await narrEmbed(env, texts.map(t => t || ' '));
+  if (!vecs && env.AI) { out.mode = 'terms (embedding failed)'; }
+  const matcher = await entityMatcher(env);
+  await log('info', out.scanned + ' rows of the last ' + hours + 'h not yet placed; ' + live.length + ' live narratives; matching by ' + out.mode);
+  const itemStmts = []; const touched = new Set();
+  rows.forEach((r, i) => {
+    let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
+    const text = texts[i];
+    const platform = platformOf(r.kind, meta); const channel = narrChannel(r.kind, meta, r.src);
+    if (text.length < 20) { itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,0)').bind(r.id, '', r.ts || now, platform, channel)); out.skipped++; return; }
+    const tokens = narrTokens(text); const tv = tokenVec(tokens);
+    const issues = new Set(Array.isArray(meta.issues) ? meta.issues : issueTag(text));
+    const ents = new Set(matcher.match(text));
+    const v = vecs ? vecs[i] : null;
+    let best = null, bestSim = 0;
+    for (const c of live) {
+      const sim = v && c.vec ? vecCos(v, c.vec) : tokenCos(tv, c.tok);
+      const anchor = [...issues].some(x => c.issues.has(x)) || [...ents].some(x => c.ents.has(x));
+      const thr = v && c.vec ? (anchor ? NARR_SIM : NARR_SIM_STRICT) : (anchor ? NARR_TOKEN_SIM : NARR_TOKEN_SIM + 0.15);
+      if (sim >= thr && sim > bestSim) { best = c; bestSim = sim; }
+    }
+    if (best) {
+      if (v && best.vec) { const k = best.n; best.vec = best.vec.map((x, j) => (x * k + v[j]) / (k + 1)); }
+      for (const t in tv) best.tok[t] = (best.tok[t] || 0) + tv[t];
+      issues.forEach(x => best.issues.add(x)); ents.forEach(x => best.ents.add(x));
+      best.n++; best.last_ts = Math.max(best.last_ts, r.ts || now); best.first_ts = Math.min(best.first_ts || r.ts, r.ts || now); best.touched = true;
+      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,?)').bind(r.id, best.id, r.ts || now, platform, channel, Math.round(bestSim * 1000) / 1000));
+      touched.add(best.id); out.joined++;
+    } else {
+      const c = { id: narrId(), issues, ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel };
+      live.push(c);
+      itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,1)').bind(r.id, c.id, r.ts || now, platform, channel));
+      touched.add(c.id); out.started++;
+    }
+    out.placed++;
+  });
+  // write placements and centres
+  const nStmts = [];
+  live.filter(c => c.touched).forEach(c => {
+    const terms = {}; narrTopTerms(c.tok, 40).forEach(t => { terms[t] = Math.round(c.tok[t] * 1000) / 1000; });
+    if (c.fresh) nStmts.push(db.prepare("INSERT INTO narratives(id,label,summary,claim,counter_claim,proponents,issues,entities,ns,side,n,n24,nprev,velocity,first_ts,first_item,first_platform,first_channel,last_ts,platforms,channels,spread,amplifiers,sentiment,counter,status,alerted,alert_ts,muted,pinned,edited,terms,centroid,dim,labelled_n,model,created,updated) VALUES(?,'','','','','',?,?,?,'unknown',?,0,0,0,?,?,?,?,?,'{}','[]','[]','[]','{}','','new',0,0,0,0,0,?,?,?,0,'',?,?) ON CONFLICT(id) DO NOTHING")
+      .bind(c.id, JSON.stringify([...c.issues]), JSON.stringify([...c.ents].slice(0, 12)), (CLIENT_ISSUES.find(ci => c.issues.has(ci.id)) || {}).ns || '', c.n, c.first_ts, c.first_item, c.first_platform, c.first_channel, c.last_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, now));
+    else nStmts.push(db.prepare("UPDATE narratives SET issues=?, entities=?, ns=CASE WHEN ns='' THEN ? ELSE ns END, n=?, last_ts=?, first_ts=?, terms=?, centroid=?, dim=?, updated=? WHERE id=?")
+      .bind(JSON.stringify([...c.issues]), JSON.stringify([...c.ents].slice(0, 12)), (CLIENT_ISSUES.find(ci => c.issues.has(ci.id)) || {}).ns || '', c.n, c.last_ts, c.first_ts, JSON.stringify(terms), c.vec ? f32b64(c.vec) : '', c.vec ? c.vec.length : 0, now, c.id));
+  });
+  for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
+  for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
+  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place');
+  // recount what changed, plus narratives that need their pace re-read
+  const stale = ((await db.prepare('SELECT id FROM narratives WHERE muted=0 AND last_ts>? AND updated<?').bind(now - 7 * 86400000, now - 6 * 3600000).all()).results || []).map(r => r.id);
+  const ids = Array.from(new Set([...touched, ...stale])).slice(0, 250);
+  let recounted = 0;
+  for (const id of ids) { try { if (await narrRefresh(env, id, now)) recounted++; } catch (e) { out.errors.push('recount ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); } }
+  await log('info', recounted + ' narratives recounted (size, pace, spread, sentiment split, stance toward the client)');
+  // names, counters, alerts
+  if (env.ANTHROPIC_API_KEY) { try { const nm = await narrLabel(env, ids, log); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
+  else await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed (their terms and rows are still here)');
+  try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); }
+  try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); }
+  // singletons that never grew are noise: gone after a week
+  try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<?').bind(now - 7 * 86400000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
+  out.ms = Date.now() - now;
+  await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');
+  if (out.errors.length && !out.placed && !out.named) { out.ok = false; out.detail = out.errors[0]; }
+  await kvPut(env.AXIOM_KV, 'narr_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
+  return out;
+}
+async function narrativesCron(env) {
+  if (!env.MIND_DB) return { ok: false, skipped: true };
+  return narrativesRun(env, {});
+}
+async function narrativesList(env, f) {
+  f = f || {};
+  const days = Math.min(Math.max(parseInt(f.days, 10) || 7, 1), 90);
+  const since = Date.now() - days * 86400000;
+  const w = ['last_ts>?', 'muted=?']; const b = [since, f.muted ? 1 : 0];
+  if (f.issue) { w.push('issues LIKE ?'); b.push('%"' + String(f.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
+  if (f.ns) { w.push('ns=?'); b.push(String(f.ns).slice(0, 24)); }
+  if (f.status) { w.push('status=?'); b.push(String(f.status).slice(0, 12)); }
+  if (f.platform) { w.push('platforms LIKE ?'); b.push('%"' + String(f.platform).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
+  if (f.side) { w.push('side=?'); b.push(String(f.side).slice(0, 12)); }
+  if (f.q) { w.push("(label LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR terms LIKE ? ESCAPE '\\')"); const l = arcLike(String(f.q).slice(0, 80)); b.push(l, l, l); }
+  if (!f.all) w.push('n>=?'), b.push(2);
+  const sort = f.sort === 'n' ? 'n DESC' : f.sort === 'new' ? 'first_ts DESC' : f.sort === 'latest' ? 'last_ts DESC' : 'velocity DESC, n DESC';
+  const limit = Math.min(Math.max(parseInt(f.limit, 10) || 80, 1), 300);
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM narratives WHERE ' + w.join(' AND ') + ' ORDER BY pinned DESC, ' + sort + ' LIMIT ?').bind(...b, limit).all()).results || [];
+  const list = rows.map(narrRow).map(r => { delete r.terms; return Object.assign(r, { issueLabels: r.issues.map(id => (CLIENT_ISSUES.find(ci => ci.id === id) || { label: id }).label), client: (CLIENT_ISSUES.find(ci => ci.ns === r.ns) || {}).client || '' }); });
+  return { ok: true, days, narratives: list, statuses: ['emerging', 'growing', 'steady', 'fading', 'new'], sides: ['hostile', 'supportive', 'mixed', 'unknown'] };
+}
+/** Milliseconds Sydney is ahead of UTC at the given instant (AEST 10h, AEDT
+ *  11h), so day buckets follow Australian days rather than UTC ones. */
+function auOffsetMs(at) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(at));
+    const g = k => Number((parts.find(p => p.type === k) || {}).value || 0);
+    const local = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second'));
+    return Math.round((local - Math.floor(at / 1000) * 1000) / 60000) * 60000;
+  } catch (e) { return 10 * 3600000; }
+}
+async function narrativeOne(env, id) {
+  const r0 = await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first();
+  if (!r0) return null;
+  const r = narrRow(r0);
+  r.termsTop = narrTopTerms(r.terms, 12); delete r.terms;
+  const items = (await env.MIND_DB.prepare("SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, ni.platform, ni.channel, ni.sim, COALESCE(json_extract(a.meta,'$.score'),0) score, COALESCE(json_extract(a.meta,'$.comments'),0) comments, s.tone, json_extract(a.meta,'$.mp') mp FROM narrative_items ni JOIN arc_items a ON a.id=ni.item LEFT JOIN sent_items s ON s.item=a.id WHERE ni.narrative=? ORDER BY ni.ts DESC LIMIT 120").bind(id).all()).results || [];
+  r.items = items.map(it => ({ id: it.id, kind: it.kind, src: it.src, platform: it.platform, channel: it.channel, ts: it.ts, title: String(it.title || '').replace(/^Comment on:\s*/i, '').slice(0, 300), excerpt: String(it.body || '').replace(/\s+/g, ' ').slice(0, 400), url: it.url, sim: it.sim, score: Number(it.score) || 0, comments: Number(it.comments) || 0, tone: it.tone == null ? null : Math.round(Number(it.tone) * 100) / 100, mp: pjs(it.mp, null) }));
+  r.origin = r.items.length ? r.items[r.items.length - 1] : null;
+  if (r.counter) { const c = await env.MIND_DB.prepare('SELECT id, label, side, n, velocity, status FROM narratives WHERE id=?').bind(r.counter).first(); r.counterNarrative = c ? { id: c.id, label: c.label, side: c.side, n: c.n, velocity: c.velocity, status: c.status } : null; }
+  r.issueLabels = r.issues.map(x => (CLIENT_ISSUES.find(ci => ci.id === x) || { label: x }).label);
+  r.client = (CLIENT_ISSUES.find(ci => ci.ns === r.ns) || {}).client || '';
+  const off = auOffsetMs(Date.now());
+  const series = (await env.MIND_DB.prepare('SELECT CAST((ts+?)/86400000 AS INTEGER) d, COUNT(*) n, platform FROM narrative_items WHERE narrative=? GROUP BY d, platform ORDER BY d').bind(off, id).all()).results || [];
+  const byDay = {}; series.forEach(s => { const k = s.d * 86400000 - off; byDay[k] = byDay[k] || { t: k, n: 0, platforms: {} }; byDay[k].n += s.n; byDay[k].platforms[s.platform || 'unknown'] = s.n; });
+  r.series = Object.values(byDay).sort((a, b) => a.t - b.t);
+  return r;
+}
+async function narrativesStatus(env) {
+  const now = Date.now();
+  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0) live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000).first()) || {};
+  const placed = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ts>?) n24 FROM narrative_items WHERE narrative<>\'\'').bind(now - 86400000).first()) || {};
+  const kinds = SENT_KINDS.map(() => '?').join(',');
+  const backlog = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ')').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first()) || {};
+  let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'narr_last')) || 'null'); } catch (e) { last = null; }
+  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN };
 }
 
 // ==============================================================================
@@ -6412,7 +6761,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -6420,7 +6769,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -7520,6 +7869,67 @@ export default {
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
+    }
+
+    // -- Narratives: the stories the conversation keeps telling, with origin, spread, pace, split and evidence --
+    //    GET  /narratives?days=&issue=&ns=&platform=&status=&side=&q=&sort=velocity|n|new|latest&all=1&muted=1   (read)
+    //    GET  /narratives/one?id=            the whole narrative: summary, claim, counter, spread, amplifiers, series, every row (read)
+    //    GET  /narratives/status             live, emerging, named, alerts, backlog, budget (read)
+    //    POST /narratives/run {hours,scan}   place, recount, name, pair, alert - as a job the console tails (full)
+    //    POST /narratives/update {id,label,summary,claim,counter_claim,issues,muted,pinned}   an operator's edit (full)
+    //    POST /narratives/merge {into,from}  fold one narrative into another (full)
+    if (path === '/narratives' || path.startsWith('/narratives/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let nrb = {}; if (req.method === 'POST') { try { nrb = await req.json(); } catch (e) { nrb = {}; } }
+      try {
+        await ensureArchive(env); await ensureSentiment(env); await ensureNarratives(env);
+        const qf = k => reqUrl.searchParams.get(k) || '';
+        if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
+        if (path === '/narratives/one' && req.method === 'GET') {
+          const id = String(qf('id')).replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const r = id ? await narrativeOne(env, id) : null;
+          return r ? jsonResp(Object.assign({ ok: true }, r)) : jsonResp({ error: 'unknown_narrative' }, 404);
+        }
+        if (path === '/narratives/status' && req.method === 'GET') return jsonResp(await narrativesStatus(env));
+        if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Running, editing and merging narratives need a full-access key.' }, 403);
+        if (path === '/narratives/run') {
+          const params = { hours: parseInt(nrb.hours, 10) || NARR_WINDOW_H, scan: parseInt(nrb.scan, 10) || NARR_SCAN, where: 'worker' };
+          const job = await jobCreate(env, 'narratives', params, auth.name);
+          ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'narratives', params }));
+          return jsonResp({ ok: true, job: job.id, id: job.id, where: 'worker', note: 'Running in the worker. Tail /bridge/job?id=' + job.id });
+        }
+        if (path === '/narratives/update') {
+          const id = String(nrb.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const cur = id ? await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first() : null;
+          if (!cur) return jsonResp({ error: 'unknown_narrative' }, 404);
+          const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
+          const issues = Array.isArray(nrb.issues) ? nrb.issues.map(String).filter(x => known.has(x)).slice(0, 3) : null;
+          const textEdit = nrb.label != null || nrb.summary != null || nrb.claim != null || nrb.counter_claim != null || issues;
+          await env.MIND_DB.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, issues=?, ns=?, muted=?, pinned=?, edited=CASE WHEN ? THEN 1 ELSE edited END, updated=? WHERE id=?')
+            .bind(nrb.label != null ? String(nrb.label).slice(0, 140) : cur.label, nrb.summary != null ? String(nrb.summary).slice(0, 600) : cur.summary, nrb.claim != null ? String(nrb.claim).slice(0, 300) : cur.claim, nrb.counter_claim != null ? String(nrb.counter_claim).slice(0, 300) : cur.counter_claim,
+              issues ? JSON.stringify(issues) : cur.issues, issues && issues.length ? ((CLIENT_ISSUES.find(ci => ci.id === issues[0]) || {}).ns || cur.ns) : cur.ns, nrb.muted == null ? cur.muted : (nrb.muted ? 1 : 0), nrb.pinned == null ? cur.pinned : (nrb.pinned ? 1 : 0), textEdit ? 1 : 0, Date.now(), id).run();
+          return jsonResp({ ok: true, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first()) });
+        }
+        if (path === '/narratives/merge') {
+          const into = String(nrb.into || '').replace(/[^a-z0-9]/gi, '').slice(0, 24), from = String(nrb.from || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          if (!into || !from || into === from) return jsonResp({ error: 'missing_ids', detail: 'Give into and from, two different narrative ids.' }, 400);
+          const a = await env.MIND_DB.prepare('SELECT id, terms, centroid, n FROM narratives WHERE id=?').bind(into).first(); const b = await env.MIND_DB.prepare('SELECT id, terms, centroid, n FROM narratives WHERE id=?').bind(from).first();
+          if (!a || !b) return jsonResp({ error: 'unknown_narrative' }, 404);
+          const ta = pjs(a.terms, {}), tb = pjs(b.terms, {}); for (const k in tb) ta[k] = (ta[k] || 0) + tb[k];
+          const va = b64f32(a.centroid), vb = b64f32(b.centroid);
+          const merged = va && vb && va.length === vb.length ? va.map((x, i) => (x * (a.n || 1) + vb[i] * (b.n || 1)) / ((a.n || 1) + (b.n || 1))) : va || vb;
+          await env.MIND_DB.batch([
+            env.MIND_DB.prepare('UPDATE narrative_items SET narrative=? WHERE narrative=?').bind(into, from),
+            env.MIND_DB.prepare('UPDATE narratives SET terms=?, centroid=?, dim=?, updated=? WHERE id=?').bind(JSON.stringify(Object.fromEntries(narrTopTerms(ta, 40).map(k => [k, Math.round(ta[k] * 1000) / 1000]))), merged ? f32b64(merged) : '', merged ? merged.length : 0, Date.now(), into),
+            env.MIND_DB.prepare('DELETE FROM narratives WHERE id=?').bind(from),
+            env.MIND_DB.prepare("UPDATE narratives SET counter='' WHERE counter=?").bind(from),
+          ]);
+          await narrRefresh(env, into, Date.now());
+          return jsonResp({ ok: true, into, from, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(into).first()) });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'narratives_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
     // -- Sentiment: who is talked about, how, where, on which channel; every number traces to rows --
@@ -9725,6 +10135,8 @@ async function handleScheduled(env) {
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
   // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget.
   try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); }
+  // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take off on a client issue, reported.
+  try { const nr = await narrativesCron(env); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named, 'named'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
   // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
   try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {
