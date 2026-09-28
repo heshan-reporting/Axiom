@@ -1037,6 +1037,10 @@ body.kiosk .kprog{display:block}
 .src-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px}
 .src-form label{display:flex;flex-direction:column;gap:4px;font-family:var(--fm);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
 .src-form input,.src-form select{font-size:12.5px;padding:7px 9px;border-radius:8px;border:1px solid var(--ln);background:rgba(255,255,255,.03);color:var(--t0);font-family:inherit;letter-spacing:0;text-transform:none}
+.pet-table td .m,.cov-table td .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:3px;line-height:1.45}
+.cov-table td .cov-no{color:#F5B942}
+.cov-table td b{color:var(--t0)}
+.pet-table a{color:var(--t0);text-decoration:none}.pet-table a:hover{text-decoration:underline}
 /* Content Desk (React island, docs/content.js) */
 .cd-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--ln);border-radius:14px;background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.015));margin-bottom:12px}
 .cd-logo{width:64px;height:64px;border-radius:12px;border:1px solid var(--ln);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:13px;font-weight:700;color:var(--t1);overflow:hidden;flex:0 0 auto}
@@ -2115,7 +2119,7 @@ body.kiosk .kprog{display:block}
       <!-- KNOWLEDGE MAP -->
       <!-- ═══ SIGNALS — Reddit, X, LinkedIn and Meta: what is being said, and the console that shows it being collected (React island, docs/signals.js) ═══ -->
       <section class="view" id="v-signals">
-        <div class="note" style="margin:0 0 14px">Public conversation about our clients, in one shape across four platforms: Reddit threads, X posts and replies, and the comments under the clients' own LinkedIn and Facebook pages — each tagged with the issues our clients own and read for tone. <b>Sweep</b> runs where the access is: the worker collects what it can reach, and X (and Reddit, in practice) are collected by the agent on your Mac, with every command and answer shown live below. Internal agency use. Comment authors are never stored. Ad comments and campaign performance stay in <b>Audience</b>.</div>
+        <div class="note" style="margin:0 0 14px">Public conversation about our clients, in one shape across every platform we can reach: Reddit threads, X posts (account timelines from the worker, search and replies from your Mac), Bluesky and Mastodon posts with their replies, YouTube videos with their comments and captions, Substack posts and comment threads, and the comments under the clients' own LinkedIn and Facebook pages — each tagged with the issues our clients own and read for tone. <b>Petitions</b> shows what people are signing, by growth; <b>Coverage</b> shows how each platform is read, what it needs and what it cannot reach. <b>Sweep</b> runs where the access is, with every command and answer shown live below. Internal agency use. Comment authors are never stored. Ad comments and campaign performance stay in <b>Audience</b>.</div>
         <div id="signals-root"><div class="empty" style="padding:40px 0">Loading signals…</div></div>
       </section>
       <!-- ═══ RELEASE DESK — a media release in, a pack of social tiles out (React island, docs/release.js) ═══ -->

@@ -411,6 +411,44 @@ Add source, Import / Export JSON. Harnesses in the session scratchpad:
 (16 agent tests). The sandbox has no egress, so live per-source results come
 from the first deployed sweep: read them at `/sources` or in the view.
 
+## Social and community capture (Phase 2 of the intelligence expansion)
+
+Beyond Reddit and the clients' own pages, the worker reads the public
+conversation through routes that need no login, and files it in the Signals
+shape - `sig_thread` / `sig_comment` with `meta.platform`, `meta.eng`
+`{likes, reposts, replies, quotes, views}`, `meta.issues` from `issueTag()`,
+no names (sitting MPs on their own posts excepted, `meta.mp`). One table says
+what each platform needs, reaches, cannot reach and how it fared:
+`GET /social/coverage?probe=1` (`socialCoverage()`; `probe=1` asks each
+keyless platform one small live question), the Coverage tab in Signals.
+
+| Platform | How | Needs | Cannot |
+|---|---|---|---|
+| Bluesky | `bskySweep`: public AppView `searchPosts` per client term (the Australian gate applies, with the search term struck out of the text first), `getPostThread` for posts with replies | nothing | - |
+| Mastodon | `mastodonSweep`: tag timelines for `MASTO_TAGS` on `MASTO_INSTANCES`, `statuses/:id/context` for replies | nothing | full-text search (needs an instance token) |
+| X | `xSyndSweep`: account timelines through X's embed service (`syndication.twitter.com/srv/timeline-profile/screen-name/`) for the MP register plus KV `x_watch` (`GET/POST /social/x/watch`), 30 accounts a run by cursor; `xTweet()` reads one post through `cdn.syndication.twimg.com/tweet-result` | nothing for timelines; a signed-in Mac (twitter-cli) for search and replies | keyword search and reply text from the cloud |
+| YouTube | Source Registry method `youtube` (`urls.youtube` = `@handle` or `UC...`; `ytChannelId` resolves handles, KV `yt_ch_*`; the channel feed files videos as `sig_thread` platform youtube); `youtubeEnrich` then reads comments (`ytCommentsApi` with `YOUTUBE_KEY`, else `ytCommentsWeb` through `youtubei/v1/next`) and captions (`ytTranscript`: watch page or the Android player endpoint, `fmt=json3`) into kind `transcript` (`x:yt:tr:<video>`), issue videos first, each video once (`meta.enriched`) | `YOUTUBE_KEY` optional | keyword search without a key |
+| Petitions | `petitionsSweep`: `PETITION_SITES` (APH, Vic, QLD, NSW e-petitions) - list page anchors, then each petition's page for text, signatures and closing date; kind `petition`: one canonical row per petition (`meta.signatures` kept current with `json_set`) plus a daily snapshot `x:pet:<hash>:<day>`; `GET /social/petitions` ranks by 24h growth | nothing | change.org (bot-walled) |
+| Substack | Source Registry method `substack` (`urls.substack`): `/feed` posts as `sig_thread` platform substack, `/api/v1/posts/<slug>` then `/api/v1/post/<id>/comments` for the threads; `GET /social/substack/search?q=` finds publications | nothing | - |
+| TikTok | `GET /social/tiktok?url=` oEmbed for one post | nothing; Research API is approval-gated | profiles, search, comments (signed browser requests) |
+| Threads, Facebook public pages and groups | none | Threads API is own-account only, keyword search needs `threads_keyword_search`; Facebook needs Page Public Content Access or the Meta Content Library | everything else - stated, not skipped |
+
+`socialCron()` runs at most two-hourly from `handleScheduled`: ten Bluesky
+terms by cursor (KV `bsky_q_cursor`), all Mastodon tags, thirty X timelines,
+six videos' comments and captions, and the petitions once a day (KV
+`petitions_last`); results in KV `social_last` feed the coverage table.
+Sweeps are bridge jobs the console tails: sources `bluesky`, `mastodon`,
+`youtube`, `petitions` run in the worker (`socialSweep()` dispatch in
+`jobRunLocal`); an `x` job sent with `where:'worker'` (or `POST /social/sweep
+{platform:'x'}`) runs the timelines there while the Mac keeps search. The
+YouTube job with `sweepChannels` refreshes the listed channels first. Routes
+under `/social/` are read-role for GETs, full for POSTs. The Signals view
+grew Bluesky, Mastodon, YouTube and Substack tabs (same components), a
+Petitions tab (growth table, Read now) and the Coverage tab (Probe), and the
+X tab has **Read account timelines**. Harnesses in the session scratchpad:
+`social-worker.mjs` (16 route and cron tests over the SQLite-backed D1),
+`signals-browser.mjs` (7 browser tests).
+
 ## The Content Desk (copy for each client and platform, changed by instruction)
 
 The `v-content` view (React island, `docs/content.js`) writes social and

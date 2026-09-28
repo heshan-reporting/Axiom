@@ -49,8 +49,21 @@
       about: 'The clients\' own LinkedIn pages: posts and the comments underneath, through LinkedIn\'s API.' },
     { id: 'meta', label: 'Meta', unit: 'post', channel: 'page', prefix: '', colour: '#5A8DEE', desktop: false,
       about: 'The clients\' own Facebook and Instagram pages: organic posts and their comments, through the Graph API. Ad comments stay in Audience.' },
+    { id: 'bluesky', label: 'Bluesky', unit: 'post', channel: '', prefix: '', colour: '#3B82F6', desktop: false,
+      about: 'The client keywords searched on Bluesky\'s public AppView, with the reply threads under the posts that draw argument. The Australian gate applies.' },
+    { id: 'mastodon', label: 'Mastodon', unit: 'post', channel: 'instance', prefix: '', colour: '#8C8DFF', desktop: false,
+      about: 'The Australian political tags (#auspol, #springst, #qldpol and the rest) on aus.social, mastodon.au, theblower.au and mastodon.social, with the replies underneath.' },
+    { id: 'youtube', label: 'YouTube', unit: 'video', channel: 'channel', prefix: '', colour: '#FF4E45', desktop: false,
+      about: 'Videos from the channels listed in Sources, their comments with likes, and their captions filed as transcripts. Add channels in the Sources view.' },
+    { id: 'substack', label: 'Substack', unit: 'post', channel: 'publication', prefix: '', colour: '#FF6719', desktop: false,
+      about: 'Posts and comment threads of the publications listed in Sources. Find publications with the search on the Coverage tab.' },
   ];
-  const P = id => PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
+  /* Two tabs that are not a platform: what people are signing, and how every platform is read. */
+  const EXTRA_TABS = [
+    { id: 'petitions', label: 'Petitions', unit: 'petition', channel: '', prefix: '', colour: '#F5B942', desktop: false, special: true, about: 'The parliaments\' e-petitions with signatures a day.' },
+    { id: 'coverage', label: 'Coverage', unit: 'platform', channel: '', prefix: '', colour: '#7EE0AE', desktop: false, special: true, about: 'Every platform: how it is read, what it needs, what it cannot reach.' },
+  ];
+  const P = id => PLATFORMS.find(p => p.id === id) || EXTRA_TABS.find(p => p.id === id) || PLATFORMS[0];
 
   /* ---- small helpers ---------------------------------------------------- */
   const fmtN = n => { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)); };
@@ -203,6 +216,62 @@
     return html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}>${body}${!err && canWrite ? html`<div class="aud-diagwrap"><button class="btn sm" disabled=${busy} onClick=${onSweep}>${busy ? 'Sweeping...' : 'Sweep ' + plat.label}</button></div>` : null}</div>`;
   }
 
+  /* Petitions: what people are signing, fastest-growing first. */
+  function Petitions({ f, setF, canWrite, onSweep, busy }) {
+    const [d, setD] = useState(null); const [err, setErr] = useState('');
+    const load = useCallback(async () => { try { setD(await call('/social/petitions?issue=' + encodeURIComponent(f.issue) + '&days=' + f.days)); setErr(''); } catch (e) { setErr(e.message); } }, [f.issue, f.days]);
+    useEffect(() => { load(); }, [load]);
+    const list = (d && d.petitions) || [];
+    const growth = g => (g == null ? '-' : (g > 0 ? '+' : '') + fmtN(g));
+    const siteName = id => ((d && d.sites || []).find(s => s.id === id) || {}).name || id;
+    return html`<div>
+      <div class="rd-ctl">
+        <select class="sel" value=${f.days} onChange=${e => setF(x => Object.assign({}, x, { days: +e.target.value }))} aria-label="Window"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select>
+        <select class="sel" value=${f.issue} onChange=${e => setF(x => Object.assign({}, x, { issue: e.target.value }))} aria-label="Issue"><option value="">All issues</option>${issues().map(i => html`<option key=${i.id} value=${i.id}>${i.label}</option>`)}</select>
+        ${canWrite ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onSweep} title="Read the parliaments' e-petition pages now and take today's signature counts">${busy ? 'Reading...' : 'Read the petition pages now'}</button>` : null}
+        <span class="sig-where">${d ? list.length + ' petitions on file, ' + (d.sites || []).length + ' parliaments read daily' : ''}</span>
+      </div>
+      ${err ? html`<div class="rd-res err">${err}</div>` : null}
+      ${d && !list.length ? html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}><b>No petitions on file for this scope.</b> The cron reads the parliaments' e-petition pages once a day. ${canWrite ? 'Press the button to read them now.' : 'Ask a full-access user to read them now.'}</div>` : null}
+      ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Parliament</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
+        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}</td><td class="num" style=${{ color: p.growth24 > 0 ? '#7EE0AE' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
+      </tbody></table>` : null}
+    </div>`;
+  }
+  /* Coverage: every platform, how it is read, what it needs, what it cannot reach, how it fared. */
+  function Coverage() {
+    const [d, setD] = useState(null); const [err, setErr] = useState(''); const [probing, setProbing] = useState(false);
+    const load = useCallback(async (probe) => { if (probe) setProbing(true); try { setD(await call('/social/coverage' + (probe ? '?probe=1' : ''))); setErr(''); } catch (e) { setErr(e.message); } setProbing(false); }, []);
+    useEffect(() => { load(false); }, [load]);
+    const list = (d && d.platforms) || [];
+    const chip = (on, txt) => html`<span class=${'src-chip' + (on ? ' on' : '')}>${txt}</span>`;
+    return html`<div>
+      <div class="rd-ctl">
+        <span class="sig-where">${d && d.lastRun ? 'Last capture run ' + ago(d.lastRun) + ' ago. ' : ''}${d ? (d.mac ? 'A Mac collector is connected.' : 'No Mac collector connected: X search and Reddit wait.') : ''}</span>
+        <button class="btn sm ghost" disabled=${probing} onClick=${() => load(true)} title="Ask each keyless platform one small question right now">${probing ? 'Probing...' : 'Probe every platform'}</button>
+      </div>
+      ${err ? html`<div class="rd-res err">${err}</div>` : null}
+      ${list.length ? html`<table class="src-probe cov-table"><thead><tr><th>Platform</th><th>How it is read</th><th>Needs</th><th>State</th><th class="num">24h posts / comments</th><th>Last run</th><th>Probe</th></tr></thead><tbody>
+        ${list.map(p => html`<tr key=${p.id} class=${p.configured ? '' : 'skip'}>
+          <td><b>${p.label}</b><div class="m">${p.where === 'none' ? 'not reachable' : p.where === 'mac' ? 'runs on the Mac' : p.where === 'both' ? 'worker and Mac' : 'runs in the worker'}</div></td>
+          <td class="det">${p.method}${p.reach ? html`<div class="m">Reaches: ${p.reach}</div>` : null}${p.unreachable ? html`<div class="m cov-no">Cannot: ${p.unreachable}</div>` : null}</td>
+          <td class="det">${p.keys}</td>
+          <td>${chip(p.configured, p.configured ? (p.id === 'youtube' && !p.apiKey ? 'on, no key' : 'on') : 'not set up')}</td>
+          <td class="num" title=${(p.counts.threads7 || 0) + ' posts and ' + (p.counts.comments7 || 0) + ' comments in 7 days'}>${fmtN(p.counts.threads24)} / ${fmtN(p.counts.comments24)}</td>
+          <td class="det">${p.last ? html`<span style=${{ color: p.last.ok ? '#7EE0AE' : '#F0908B' }}>${p.last.ok ? 'ok' : 'failed'}</span> ${ago(p.last.at)} ago${p.last.threads != null ? ', ' + fmtN(p.last.threads) + ' posts, ' + fmtN(p.last.comments) + ' comments' : ''}${p.last.detail ? html`<div class="m">${p.last.detail}</div>` : null}` : '-'}</td>
+          <td class="det">${p.probe ? html`<span style=${{ color: p.probe.ok ? '#7EE0AE' : '#F0908B' }}>${p.probe.ok ? 'reachable' : 'failed'}</span> ${p.probe.ms}ms<div class="m">${p.probe.detail}</div>` : ''}</td>
+        </tr>`)}
+      </tbody></table>` : (!err ? html`<div class="empty">Loading coverage...</div>` : null)}
+    </div>`;
+  }
+  function SpecialTab({ tab, f, setF, canWrite, job, onCancel, startJob, busy }) {
+    const sweep = async () => { try { const d = await call('/bridge/run', { source: 'petitions', params: {} }); startJob({ id: d.id, source: 'petitions', where: d.where }); } catch (e) { toastMsg(e.message, true); } };
+    return html`<div>
+      <${Console} job=${job} onCancel=${onCancel} canWrite=${canWrite} />
+      ${tab === 'petitions' ? html`<${Petitions} f=${f} setF=${setF} canWrite=${canWrite} onSweep=${sweep} busy=${busy} />` : html`<${Coverage} />`}
+    </div>`;
+  }
+
   function SignalsApp() {
     const [tab, setTab] = useState('reddit');
     const [f, setF] = useState({ days: 7, issue: '', q: '', channel: '', sort: 'relevance', all: false });
@@ -222,6 +291,7 @@
     const plat = P(tab);
 
     const load = useCallback(async () => {
+      if (P(tab).special) { setData(null); setErr(null); return; }   // petitions and coverage load their own
       setBusy(b => Object.assign({}, b, { load: true }));
       try {
         const d = await call('/signals/threads?platform=' + tab + '&days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&channel=' + encodeURIComponent(f.channel) + '&q=' + encodeURIComponent(f.q) + '&sort=' + f.sort + (f.all ? '&all=1' : '') + '&limit=80');
@@ -283,13 +353,25 @@
     const sweep = async () => {
       setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null); setJob(null);
       try {
-        const d = await call('/bridge/run', { source: tab, params: { issue: f.issue || undefined, queries: 'auto', time: f.days <= 1 ? 'day' : f.days <= 7 ? 'week' : 'month' } });
+        const d = await call('/bridge/run', { source: tab, params: { issue: f.issue || undefined, queries: 'auto', time: f.days <= 1 ? 'day' : f.days <= 7 ? 'week' : 'month', days: f.days, sweepChannels: tab === 'youtube' ? true : undefined } });
         setJob({ id: d.id, source: tab, status: d.where === 'worker' ? 'running' : 'queued', lines: [], follow: true });
         follow(d.id);
       } catch (e) {
         setBusy(b => Object.assign({}, b, { sweep: false }));
         setResult({ ok: false, text: 'Could not start the sweep: ' + e.message });
       }
+    };
+    /* A job started elsewhere (the petitions read, the X timelines) is followed the same way. */
+    const startJob = (d) => {
+      setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null);
+      setJob({ id: d.id, source: d.source || tab, status: d.where === 'worker' ? 'running' : 'queued', lines: [], follow: true });
+      follow(d.id);
+    };
+    /* X account timelines through X's embed service: the MP register and the watch list, in the worker, no Mac needed. */
+    const timelines = async () => {
+      setBusy(b => Object.assign({}, b, { sweep: true })); setResult(null); setJob(null);
+      try { const d = await call('/social/sweep', { platform: 'x', params: { days: f.days } }); startJob({ id: d.job, source: 'x', where: 'worker' }); }
+      catch (e) { setBusy(b => Object.assign({}, b, { sweep: false })); setResult({ ok: false, text: 'Could not start the timeline read: ' + e.message }); }
     };
     const cancel = async () => {
       if (!job) return;
@@ -344,11 +426,11 @@
 
     return html`<div class="rd-wrap">
       <div class="sig-tabs" role="tablist">
-        ${PLATFORMS.map(p => {
+        ${PLATFORMS.concat(EXTRA_TABS).map(p => {
           const s = byPlat[p.id] || {};
           return html`<button key=${p.id} role="tab" aria-selected=${tab === p.id} class=${'sig-tab' + (tab === p.id ? ' on' : '')} onClick=${() => setTab(p.id)}>
             <span class="dot" style=${{ background: p.colour }}></span>${p.label}
-            <span class="n">${fmtN(s.threads || 0)}</span>
+            ${p.special ? null : html`<span class="n">${fmtN(s.threads || 0)}</span>`}
             ${p.desktop ? html`<span class="rd-chip" title="Collected from a logged-in machine">desktop</span>` : null}
           </button>`;
         })}
@@ -356,7 +438,7 @@
           ${liveAgent.length ? liveAgent.length + ' collector' + (liveAgent.length === 1 ? '' : 's') + ' connected' : 'no collector connected'}
         </span>
       </div>
-      <div class="rd-ctl">
+      ${plat.special ? html`<${SpecialTab} tab=${tab} f=${f} setF=${setF} canWrite=${canWrite} job=${job} onCancel=${cancel} startJob=${startJob} busy=${busy.sweep} />` : html`<div class="rd-ctl">
         ${(chanList.length > 1 || f.channel) ? html`<select class="sel" value=${f.channel} onChange=${e => setF(x => Object.assign({}, x, { channel: e.target.value }))} aria-label=${plat.id === 'reddit' ? 'Subreddit' : 'Page'}>
           <option value="">${plat.id === 'reddit' ? 'All subreddits' : 'All pages'}</option>${chanList.map(c => html`<option key=${c.channel} value=${c.channel}>${plat.prefix}${c.channel} (${c.n})</option>`)}
         </select>` : null}
@@ -380,6 +462,7 @@
         ${data && data.noise ? html`<label class="rd-chip sig-noise" style=${{ cursor: 'pointer' }} title="Threads a generic keyword found outside Australia. Hidden by default; tick to see them."><input type="checkbox" checked=${!!f.all} onChange=${e => setF(x => Object.assign({}, x, { all: e.target.checked }))} style=${{ marginRight: 6 }} />${fmtN(data.noise)} off-topic ${f.all ? 'shown' : 'hidden'}</label>
           ${canWrite && tab === 'reddit' ? html`<button class="btn sm ghost" disabled=${busy.prune} onClick=${prune} title="Delete the off-topic Reddit threads and their comments from the archive">${busy.prune ? 'Pruning...' : 'Prune'}</button>` : null}` : null}
         ${canWrite ? html`<button class="btn sm ghost" disabled=${busy.sweep} onClick=${sweep} title=${plat.desktop ? 'Queue a sweep for the collector on your Mac and watch it run' : 'Collect from ' + plat.label + ' now and watch it run'}>${busy.sweep ? 'Sweeping...' : 'Sweep ' + plat.label}</button>` : null}
+        ${canWrite && tab === 'x' ? html`<button class="btn sm ghost" disabled=${busy.sweep} onClick=${timelines} title="Read the MP register and watch-list account timelines through X's embed service, in the worker. No Mac needed; replies still come from the Mac.">Read account timelines</button>` : null}
         ${wantsAgent && !agentFor.length ? html`<span class="sig-warn" title=${plat.desktop ? 'A sweep will sit in the queue until a collector connects' : 'The worker can try, but ' + plat.label + ' usually refuses it'}>no ${plat.label} collector connected - run <code>python3 tools/reach-agent.py --key $AXIOM_KEY</code> on your Mac</span>` : null}
         ${wantsAgent && agentFor.length ? html`<span class="sig-agent on" style=${{ marginLeft: 0 }} title=${'This sweep will run on ' + agentFor.map(a => a.agent).join(', ')}>runs on ${agentFor[0].agent}</span>` : null}
       </div>
@@ -412,7 +495,7 @@
           </div>
           ${analysis ? html`<div class="panel"><div class="phead"><div class="ptitle">What ${plat.label} is arguing</div><span class="ptag">CLAUDE · ${analysis.ns.toUpperCase()}</span></div><${Analysis} a=${analysis.analysis} meta=${analysis} /></div>` : null}
         </div>
-      </div>` : null}
+      </div>` : null}`}
     </div>`;
   }
 

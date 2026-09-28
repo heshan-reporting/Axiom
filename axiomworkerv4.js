@@ -1887,7 +1887,12 @@ function auRelevant(sub, text, q) {
   const s = String(sub || '');
   if (s && REDDIT_POLITICS.some(w => w.toLowerCase() === s.toLowerCase())) return true;
   if (s && AU_SUB_RX.test(s)) return true;
-  if (AU_RX.test(String(text || ''))) return true;
+  // the words of the search term are struck out before the text is checked:
+  // "fuel tax credit" is in AU_RX because it is a client's fight, but a Texan
+  // post found by that very term has to say something else Australian
+  let t = String(text || '');
+  if (q) { try { t = t.replace(new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'gi'), ' '); } catch (e) {} }
+  if (AU_RX.test(t)) return true;
   return !!q && AU_QUERY_RX.test(String(q));
 }
 const REDDIT_UA = { 'User-Agent': 'axiom-au-intel/1.0 (AU political media dashboard)' };
@@ -2154,7 +2159,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2856,6 +2861,14 @@ async function jobRunLocal(env, job) {
       ok = !!(out && out.ok);
     } else if (job.source === 'render') {
       out = await renderJob(env, job, log);
+      ok = !!(out && out.ok);
+    } else if (SOCIAL_PLATFORMS.indexOf(job.source) >= 0) {
+      out = await socialSweep(env, Object.assign({}, job.params, { platform: job.source }), log);
+      ok = !!(out && out.ok);
+    } else if (job.source === 'x') {
+      // reached only when the job was sent here on purpose (where:'worker'):
+      // the account timelines through X's embed service; search stays on the Mac
+      out = await xSyndSweep(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
     } else {
       out = { ok: false, error: 'desktop_only', detail: job.source + ' can only be collected from a logged-in desktop. Run tools/reach-agent.py on your Mac and it will claim this job.' };
@@ -3704,15 +3717,15 @@ function arcLike(q) { return '%' + String(q).replace(/[%_\\]/g, c => '\\' + c) +
 // source_health with the reason.
 // ==============================================================================
 let SOURCES_READY = false;
-const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'sweep'];
+const SOURCE_TIERS = ['core', 'national', 'metro', 'regional', 'broadcaster', 'wire', 'independent', 'official', 'party', 'polling', 'thinktank', 'sector', 'podcast', 'video', 'newsletter', 'sweep'];
 const SOURCE_JURIS = ['au', 'nsw', 'vic', 'qld', 'wa', 'sa', 'tas', 'act', 'nt'];
-const SOURCE_METHODS = ['rss', 'wp', 'json', 'sitemap', 'podcast', 'html', 'gnews', 'render'];
+const SOURCE_METHODS = ['rss', 'wp', 'json', 'youtube', 'substack', 'sitemap', 'podcast', 'html', 'gnews', 'render'];
 const SOURCES_PER_TICK = 50;        // registry sources swept per cron tick (the core is fetched separately)
 const SOURCE_DEAD_FAILS = 6;        // consecutive failed sweeps before a source is reported dead
 const SOURCE_WINDOW_H = 72;         // dated items older than this are not filed
 const SOURCE_FETCH_MS = 7000;       // per-request abort
 const SOURCE_HEALTH_KEEP = 4000;    // rows kept in source_health
-const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, sweep: 60 };
+const SOURCE_SCHED = { core: 30, wire: 30, broadcaster: 30, national: 45, metro: 45, regional: 90, independent: 90, sector: 90, official: 120, party: 120, polling: 180, thinktank: 180, podcast: 240, video: 120, newsletter: 180, sweep: 60 };
 /* Names, tiers and jurisdictions for the AU_FEEDS core (keys not listed here
  * are Google News sweeps, named from their key). */
 const CORE_META = {
@@ -3954,6 +3967,18 @@ const SOURCE_SEED_EXT = [
   ['guncontrolau', 'Gun Control Australia', 'thinktank', 'au', 'activism', { s: 'guncontrol.org.au' }],
   ['accountantsdaily', 'Accountants Daily', 'sector', 'au', 'econ', { r: 'https://www.accountantsdaily.com.au/feed', s: 'accountantsdaily.com.au' }],
   ['taxinstitute', 'The Tax Institute', 'sector', 'au', 'econ', { s: 'taxinstitute.com.au' }],
+  // -- YouTube channels (handles resolve to channel ids on the first sweep; videos file as Signals threads, then get comments and captions) --
+  ['yt_abcnews', 'ABC News (Australia) on YouTube', 'video', 'au', 'gov', { y: '@abcnewsaustralia' }],
+  ['yt_skynews', 'Sky News Australia on YouTube', 'video', 'au', 'gov', { y: '@SkyNewsAustralia' }],
+  ['yt_7news', '7NEWS Australia on YouTube', 'video', 'au', '', { y: '@7NEWSAustralia' }],
+  ['yt_9news', '9News Australia on YouTube', 'video', 'au', '', { y: '@9NewsAUS' }],
+  ['yt_10news', '10 News First on YouTube', 'video', 'au', '', { y: '@10NewsFirst' }],
+  ['yt_albanese', 'Anthony Albanese on YouTube', 'video', 'au', 'gov', { y: '@AlboMP' }],
+  ['yt_labor', 'Australian Labor Party on YouTube', 'video', 'au', 'gov', { y: '@AustralianLabor' }],
+  ['yt_liberal', 'Liberal Party of Australia on YouTube', 'video', 'au', 'gov', { y: '@LiberalAus' }],
+  ['yt_greens', 'Australian Greens on YouTube', 'video', 'au', 'energy,gov', { y: '@AustralianGreens' }],
+  ['yt_nationals', 'The Nationals on YouTube', 'video', 'au', 'regional,gov', { y: '@TheNationalsAU' }],
+  ['yt_mca', 'Minerals Council of Australia on YouTube', 'video', 'au', 'mining,ftc,cm', { y: '@MineralsCouncilofAustralia' }],
   // -- podcasts (found through the Apple Podcasts directory, then read as feeds) --
   ['pod_partyroom', 'The Party Room (ABC)', 'podcast', 'au', 'gov', { p: 'The Party Room ABC' }],
   ['pod_guardian_pol', 'Australian Politics (Guardian)', 'podcast', 'au', 'gov', { r: 'https://www.theguardian.com/australia-news/series/australian-politics-live/podcast.xml', p: 'Australian Politics Guardian' }],
@@ -3990,6 +4015,8 @@ function sourceMethods(urls, explicit) {
   if (urls.rss) m.push('rss');
   if (urls.wp) m.push('wp');
   if (urls.json) m.push('json');
+  if (urls.youtube) m.push('youtube');
+  if (urls.substack) m.push('substack');
   if (urls.sitemap || urls.site) m.push('sitemap');
   if (urls.podcast) m.push('podcast');
   if (urls.home) m.push('html');
@@ -4011,6 +4038,7 @@ function sourceSeed() {
     const u = r[5] || {}; const urls = {};
     if (u.r) urls.rss = u.r; if (u.w) urls.wp = u.w; if (u.j) urls.json = u.j; if (u.m) urls.sitemap = u.m;
     if (u.p) urls.podcast = u.p; if (u.h) urls.home = u.h; if (u.s) urls.site = u.s; if (u.g) urls.gnews = u.g;
+    if (u.y) urls.youtube = u.y; if (u.n) urls.substack = u.n;
     out.push({ id: r[0], name: r[1], tier: r[2], juris: r[3], issues: String(r[4] || '').split(/[,\s]+/).filter(Boolean), methods: sourceMethods(urls, null), urls, schedule: r[6] || SOURCE_SCHED[r[2]] || 60, core: false });
   });
   return out;
@@ -4072,7 +4100,8 @@ function sourceSanitize(b, cur) {
   let urls = cur ? Object.assign({}, cur.urls) : {};
   if (u) {
     urls = {};
-    ['rss', 'wp', 'json', 'sitemap', 'home'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    ['rss', 'wp', 'json', 'sitemap', 'home', 'substack'].forEach(k => { const v = String(u[k] || '').trim(); if (/^https?:\/\/\S+$/.test(v)) urls[k] = v.slice(0, 400); });
+    if (u.youtube) { const y = String(u.youtube).trim(); const idm = y.match(/(UC[\w-]{22})/); if (idm) urls.youtube = idm[1]; else if (/^@?[\w.-]{2,60}$/.test(y.replace(/^https?:\/\/(www\.)?youtube\.com\//, ''))) urls.youtube = y.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/^@?/, '@').slice(0, 64); }
     if (u.site) urls.site = String(u.site).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '').slice(0, 120);
     if (u.gnews) urls.gnews = String(u.gnews).trim().slice(0, 200);
     if (u.podcast) urls.podcast = String(u.podcast).trim().slice(0, 120);
@@ -4297,6 +4326,8 @@ async function srcMethod(env, m, src) {
   if (m === 'rss') return u.rss ? srcRss(env, src) : { ok: false, items: [], skipped: true, detail: 'no feed url' };
   if (m === 'wp') return u.wp ? srcWp(env, src) : { ok: false, items: [], skipped: true, detail: 'no WordPress root' };
   if (m === 'json') return u.json ? srcJson(env, src) : { ok: false, items: [], skipped: true, detail: 'no JSON feed url' };
+  if (m === 'youtube') return u.youtube ? srcYoutube(env, src) : { ok: false, items: [], skipped: true, detail: 'no YouTube channel' };
+  if (m === 'substack') return u.substack ? srcSubstack(env, src) : { ok: false, items: [], skipped: true, detail: 'no Substack publication' };
   if (m === 'sitemap') return srcSitemap(env, src);
   if (m === 'podcast') return srcPodcast(env, src);
   if (m === 'html') return u.home ? srcHtml(env, src) : { ok: false, items: [], skipped: true, detail: 'no listing page' };
@@ -4307,6 +4338,7 @@ async function srcMethod(env, m, src) {
 function srcTarget(src, m) {
   const u = src.urls || {};
   if (m === 'rss') return u.rss || ''; if (m === 'wp') return String(u.wp || '').replace(/\/+$/, '') + '/wp-json/wp/v2/posts'; if (m === 'json') return u.json || '';
+  if (m === 'youtube') return 'youtube.com/feeds/videos.xml ' + (u.youtube || ''); if (m === 'substack') return String(u.substack || '').replace(/\/+$/, '') + '/feed';
   if (m === 'sitemap') return u.sitemap || ('https://' + siteHost(u.site) + '/robots.txt'); if (m === 'podcast') return 'itunes.apple.com/search "' + (u.podcast || '') + '"';
   if (m === 'html' || m === 'render') return u.home || ''; if (m === 'gnews') return 'news.google.com/rss/search ' + (u.gnews || ('site:' + siteHost(u.site)));
   return '';
@@ -4415,9 +4447,14 @@ async function sourceSweep(env, opts) {
     const run = await sourceRun(env, s, { log, all: !!opts.probe });
     let added = 0; run.rows = 0;
     if (run.ok) {
-      const rws = sourceRows(s, run.hit, now);
+      // a method may hand back rows in another shape (videos and newsletter
+      // posts file as Signals threads, with their comments beside them)
+      const rws = run.hit.rows || sourceRows(s, run.hit, now);
       run.rows = rws.length;
-      if (opts.file !== false) for (let i = 0; i < rws.length; i += 150) added += await archiveItems(env, 'news', rws.slice(i, i + 150));
+      if (opts.file !== false) {
+        for (let i = 0; i < rws.length; i += 150) added += await archiveItems(env, run.hit.kind || 'news', rws.slice(i, i + 150));
+        for (const ex of (run.hit.extra || [])) for (let i = 0; i < ex.rows.length; i += 150) added += await archiveItems(env, ex.kind, ex.rows.slice(i, i + 150));
+      }
     }
     run.added = added;
     return run;
@@ -4462,7 +4499,7 @@ async function sourcesList(env, filt) {
   const now = Date.now();
   const rows = ((await env.MIND_DB.prepare('SELECT * FROM sources ORDER BY tier, name').all()).results || []).map(sourceRow);
   const counts = {};
-  try { (((await env.MIND_DB.prepare("SELECT src, COUNT(*) n, MAX(ts) latest FROM arc_items WHERE kind='news' AND ts>? GROUP BY src").bind(now - 86400000).all()).results) || []).forEach(r => { counts[r.src] = { n: r.n || 0, latest: r.latest || 0 }; }); } catch (e) {}
+  try { (((await env.MIND_DB.prepare("SELECT COALESCE(json_extract(meta,'$.source'), src) s, COUNT(*) n, MAX(ts) latest FROM arc_items WHERE ts>? AND (kind='news' OR (kind='sig_thread' AND json_extract(meta,'$.reg')=1)) GROUP BY s").bind(now - 86400000).all()).results) || []).forEach(r => { counts[r.s] = { n: r.n || 0, latest: r.latest || 0 }; }); } catch (e) {}
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'sources_last_sweep')) || 'null'); } catch (e) { last = null; }
   const summary = { total: rows.length, enabled: 0, core: 0, ok: 0, failing: 0, dead: 0, stale: 0, unverified: 0, off: 0, items24: 0, byTier: {}, byMethod: {} };
   rows.forEach(s => {
@@ -4755,6 +4792,667 @@ async function renderJob(env, job, log) {
   let filed = null;
   if (p.id && ex.text.length >= FT_MIN) { filed = await fulltextSave(env, { id: p.id, text: ex.text, title: ex.title, method: 'render', published: ex.published }); if (filed.ok) await log('info', 'archive row ' + filed.id + ' now carries the article'); }
   return { ok: ex.text.length >= FT_MIN, url, title: ex.title, chars: ex.text.length, method: 'render', extract: ex.method, paywall: ex.paywall, filed: filed && filed.ok ? filed.id : 0, text: ex.text.slice(0, 2000) };
+}
+
+// ==============================================================================
+// SOCIAL CAPTURE - the public conversation beyond Reddit and the clients' own
+// pages, through routes that need no login: Bluesky's public AppView (search,
+// threads, replies), Mastodon tag timelines and reply contexts on the
+// Australian instances, X account timelines through X's own embed service (the
+// MP register and a watch list; replies still need the Mac), YouTube channel
+// feeds with comments (the Data API when a key is set, the site's own web
+// endpoint otherwise) and captions, parliamentary e-petitions with daily
+// signature snapshots, and Substack publications with their comment threads.
+// Everything files in the Signals shape (sig_thread / sig_comment) with the
+// engagement kept in meta.eng; names are never stored except sitting MPs on
+// their own posts. What each platform needs, what it can and cannot reach and
+// how it fared last time is one table: socialCoverage().
+// ==============================================================================
+const SOCIAL_PLATFORMS = ['bluesky', 'mastodon', 'youtube', 'petitions'];   // worker-side sweeps the Signals view can start as jobs
+const BSKY_API = 'https://public.api.bsky.app/xrpc/';
+const MASTO_INSTANCES = ['aus.social', 'mastodon.au', 'theblower.au', 'mastodon.social'];
+const MASTO_TAGS = ['auspol', 'springst', 'nswpol', 'qldpol', 'wapol', 'sapol', 'taspol', 'ntpol', 'actpol', 'ausvotes', 'insiders', 'qanda'];
+const X_TIMELINE = 'https://syndication.twitter.com/srv/timeline-profile/screen-name/';
+const X_TWEET = 'https://cdn.syndication.twimg.com/tweet-result';
+const YT_FEED = 'https://www.youtube.com/feeds/videos.xml?channel_id=';
+const YT_WEB_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';   // the key YouTube's own web client sends with every request; public in every page, not a secret
+const YT_CONSENT = 'CONSENT=YES+cb.20240101-00-p0.en+FX+000; SOCS=CAI';
+const SOCIAL_PACE = 350;   // ms between calls to one service
+async function socialJson(url, init, ms) {
+  const t0 = Date.now();
+  try {
+    const opts = { headers: Object.assign({ 'User-Agent': BROWSER_UA, 'Accept': 'application/json,*/*', 'Accept-Language': 'en-AU,en;q=0.8' }, (init && init.headers) || {}), signal: abortAfter(ms || 9000) };
+    if (init && init.method) { opts.method = init.method; opts.body = init.body; }
+    const r = await fetch(url, opts);
+    const text = await r.text();
+    let json = null; try { json = JSON.parse(text); } catch (e) { json = null; }
+    const msg = json && (json.message || (json.error && (json.error.message || json.error))) ? ': ' + String(json.message || json.error.message || json.error).slice(0, 80) : '';
+    return { ok: r.ok, status: r.status, json, text, ms: Date.now() - t0, error: r.ok ? '' : ('HTTP ' + r.status + msg) };
+  } catch (e) {
+    const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e);
+    return { ok: false, status: 0, json: null, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) };
+  }
+}
+function engRow(row, e) { e = e || {}; row.meta.eng = { likes: e.likes || 0, reposts: e.reposts || 0, replies: e.replies || 0, quotes: e.quotes || 0, views: e.views || 0 }; return row; }
+
+// -- Bluesky: the public AppView, no key ---------------------------------------
+function bskyNorm(p, q) {
+  const rec = p.record || {}; const text = stripHtml(String(rec.text || '')).trim();
+  const rkey = String(p.uri || '').split('/').pop(); const did = (p.author || {}).did || '';
+  return { platform: 'bluesky', id: 'b' + arcHash(String(p.uri || '')), uri: String(p.uri || ''), text, ts: Date.parse(rec.createdAt || p.indexedAt || '') || Date.now(),
+    likes: p.likeCount || 0, reposts: p.repostCount || 0, replies: p.replyCount || 0, quotes: p.quoteCount || 0,
+    url: did && rkey ? 'https://bsky.app/profile/' + did + '/post/' + rkey : 'x:sig:bluesky:' + rkey, q: q || '', reply: !!rec.reply, lang: (rec.langs || [])[0] || '' };
+}
+async function bskySearch(q, limit, sinceIso) {
+  const r = await socialJson(BSKY_API + 'app.bsky.feed.searchPosts?q=' + encodeURIComponent(q) + '&limit=' + Math.min(Math.max(limit || 40, 1), 100) + '&sort=latest' + (sinceIso ? '&since=' + encodeURIComponent(sinceIso) : ''));
+  if (!r.ok) return { ok: false, posts: [], detail: r.error };
+  return { ok: true, posts: ((r.json || {}).posts || []).map(p => bskyNorm(p, q)) };
+}
+async function bskyThread(uri, depth) {
+  const r = await socialJson(BSKY_API + 'app.bsky.feed.getPostThread?uri=' + encodeURIComponent(uri) + '&depth=' + (depth || 6) + '&parentHeight=0');
+  if (!r.ok) return { ok: false, replies: [], detail: r.error };
+  const out = [];
+  const walk = (node, d) => { if (!node || d > 8 || out.length >= 300) return; (node.replies || []).forEach(ch => { if (ch && ch.post) { const n = bskyNorm(ch.post, ''); n.depth = d; out.push(n); walk(ch, d + 1); } }); };
+  walk((r.json || {}).thread, 1);
+  return { ok: true, replies: out };
+}
+async function bskySweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const sel = opts.issue ? String(opts.issue).split(',').map(s => s.trim()).filter(Boolean) : [];
+  const queries = Array.isArray(opts.queries) ? opts.queries.map(String).filter(Boolean) : issueQueries(sel.length ? sel : null);
+  const perQuery = Math.min(Math.max(parseInt(opts.perQuery, 10) || 40, 5), 100);
+  const maxThreads = Math.min(Math.max(parseInt(opts.threads, 10) || 25, 0), 100);
+  const days = Math.min(Math.max(parseInt(opts.days, 10) || 7, 1), 90);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const out = { ok: true, platform: 'bluesky', queries: queries.length, found: 0, kept: 0, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
+  const seen = new Map();
+  await log('info', 'Bluesky: ' + queries.length + ' keywords on the public AppView, last ' + days + ' days');
+  for (const q of queries) {
+    await log('cmd', 'GET app.bsky.feed.searchPosts q="' + q + '" sort=latest');
+    const r = await bskySearch(q, perQuery, since);
+    if (!r.ok) { out.errors.push(q + ': ' + r.detail); await log('err', q + ': ' + r.detail); await rdSleep(SOCIAL_PACE); continue; }
+    let kept = 0;
+    r.posts.forEach(p => { out.found++; if (!p.text || seen.has(p.uri)) return; if (!auRelevant('', p.text, q)) return; seen.set(p.uri, p); kept++; });
+    out.kept += kept;
+    await log('out', r.posts.length + ' hits, ' + kept + ' Australian kept');
+    await rdSleep(SOCIAL_PACE);
+  }
+  const posts = Array.from(seen.values());
+  const threads = posts.map(p => { const t = { platform: 'bluesky', id: p.id, title: p.text.split('\n')[0].slice(0, 200) || 'Bluesky post', body: p.text, page: '', page_name: '', score: p.likes + p.reposts, comments: p.replies, url: p.url, ts: p.ts, q: p.q, via: 'worker' }; t.issues = issueTag(p.text); return t; });
+  const trows = threads.map((t, i) => { const row = engRow(sigThreadRow(t), posts[i]); row.meta.uri = posts[i].uri; if (posts[i].lang) row.meta.lang = posts[i].lang; return row; });
+  const crows = [];
+  const busy = threads.map((t, i) => ({ t, p: posts[i] })).filter(x => x.p.replies >= 2).sort((a, b) => (b.t.issues.length - a.t.issues.length) || (b.p.replies - a.p.replies)).slice(0, maxThreads);
+  for (const x of busy) {
+    await log('cmd', 'GET app.bsky.feed.getPostThread ' + x.p.uri.split('/').pop() + ' depth=6');
+    const th = await bskyThread(x.p.uri, 6);
+    if (!th.ok) { out.errors.push(th.detail); await log('err', th.detail); await rdSleep(SOCIAL_PACE); continue; }
+    th.replies.forEach(c => { if (!c.text) return; crows.push(engRow(sigCommentRow({ platform: 'bluesky', id: c.id, body: c.text, score: c.likes, depth: c.depth, ts: c.ts, via: 'worker' }, x.t), c)); });
+    await log('out', th.replies.length + ' replies');
+    await rdSleep(SOCIAL_PACE);
+  }
+  out.threads = trows.length; out.comments = crows.length; out.hostile = crows.filter(r => r.tone < 0).length;
+  const f = await sigFile(env, trows, crows); out.threadRows = f.threadRows; out.commentRows = f.commentRows;
+  await log('info', 'filed ' + f.threadRows + ' new posts and ' + f.commentRows + ' new replies');
+  if (!out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
+  return out;
+}
+
+// -- Mastodon: tag timelines and reply contexts on the Australian instances ----
+function mastoNorm(s, inst) {
+  const text = stripHtml(String(s.content || '').replace(/<\/p>\s*<p>/gi, ' - ')).trim();
+  return { platform: 'mastodon', id: 'm' + arcHash(String(s.url || s.uri || (inst + '/' + s.id))), sid: String(s.id || ''), inst, text, ts: Date.parse(s.created_at || '') || Date.now(),
+    likes: s.favourites_count || 0, reposts: s.reblogs_count || 0, replies: s.replies_count || 0, url: String(s.url || s.uri || ''), tags: (s.tags || []).map(t => String(t.name || '').toLowerCase()), reply: !!s.in_reply_to_id, lang: s.language || '' };
+}
+async function mastoTag(inst, tag, limit) {
+  const r = await socialJson('https://' + inst + '/api/v1/timelines/tag/' + encodeURIComponent(tag) + '?limit=' + Math.min(Math.max(limit || 40, 1), 40));
+  if (!r.ok) return { ok: false, posts: [], detail: r.error };
+  return { ok: true, posts: (Array.isArray(r.json) ? r.json : []).filter(s => s && !s.reblog).map(s => mastoNorm(s, inst)) };
+}
+async function mastoContext(inst, sid) {
+  const r = await socialJson('https://' + inst + '/api/v1/statuses/' + encodeURIComponent(sid) + '/context');
+  if (!r.ok) return { ok: false, replies: [], detail: r.error };
+  return { ok: true, replies: (((r.json || {}).descendants) || []).map(s => mastoNorm(s, inst)) };
+}
+async function mastodonSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const tags = Array.isArray(opts.tags) && opts.tags.length ? opts.tags.map(String) : MASTO_TAGS;
+  const instances = Array.isArray(opts.instances) && opts.instances.length ? opts.instances.map(String) : MASTO_INSTANCES;
+  const maxThreads = Math.min(Math.max(parseInt(opts.threads, 10) || 30, 0), 100);
+  const days = Math.min(Math.max(parseInt(opts.days, 10) || 7, 1), 90);
+  const since = Date.now() - days * 86400000;
+  const out = { ok: true, platform: 'mastodon', instances: instances.length, tags: tags.length, found: 0, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
+  const seen = new Map();
+  await log('info', 'Mastodon: ' + tags.length + ' tags on ' + instances.join(', ') + ', last ' + days + ' days');
+  for (const inst of instances) {
+    let dead = false;
+    for (const tag of tags) {
+      await log('cmd', 'GET ' + inst + '/api/v1/timelines/tag/' + tag);
+      const r = await mastoTag(inst, tag, 40);
+      if (!r.ok) { out.errors.push(inst + ' #' + tag + ': ' + r.detail); await log('err', inst + ' #' + tag + ': ' + r.detail); if (/HTTP (0|5\d\d)|timed out/.test(r.detail)) { dead = true; break; } await rdSleep(SOCIAL_PACE); continue; }
+      let kept = 0;
+      r.posts.forEach(p => { out.found++; if (!p.text || p.ts < since || seen.has(p.url)) return; seen.set(p.url, p); kept++; });
+      await log('out', r.posts.length + ' posts, ' + kept + ' new');
+      await rdSleep(SOCIAL_PACE);
+    }
+    if (dead) await log('err', inst + ' is not answering; moving on');
+  }
+  const posts = Array.from(seen.values());
+  const threads = posts.map(p => { const t = { platform: 'mastodon', id: p.id, title: p.text.split(' - ')[0].slice(0, 200) || 'Mastodon post', body: p.text, page: p.inst, page_name: p.inst, score: p.likes + p.reposts, comments: p.replies, url: p.url, ts: p.ts, q: p.tags.filter(x => tags.indexOf(x) >= 0)[0] || '', via: 'worker' }; t.issues = issueTag(p.text); return t; });
+  const trows = threads.map((t, i) => { const row = engRow(sigThreadRow(t), posts[i]); row.meta.tags = posts[i].tags.slice(0, 8); return row; });
+  const crows = [];
+  const busy = threads.map((t, i) => ({ t, p: posts[i] })).filter(x => x.p.replies >= 1).sort((a, b) => (b.t.issues.length - a.t.issues.length) || (b.p.replies - a.p.replies)).slice(0, maxThreads);
+  for (const x of busy) {
+    await log('cmd', 'GET ' + x.p.inst + '/api/v1/statuses/' + x.p.sid + '/context');
+    const c = await mastoContext(x.p.inst, x.p.sid);
+    if (!c.ok) { out.errors.push(c.detail); await log('err', c.detail); await rdSleep(SOCIAL_PACE); continue; }
+    c.replies.forEach(r => { if (!r.text) return; crows.push(engRow(sigCommentRow({ platform: 'mastodon', id: r.id, body: r.text, score: r.likes, depth: 1, ts: r.ts, via: 'worker' }, x.t), r)); });
+    await log('out', c.replies.length + ' replies');
+    await rdSleep(SOCIAL_PACE);
+  }
+  out.threads = trows.length; out.comments = crows.length; out.hostile = crows.filter(r => r.tone < 0).length;
+  const f = await sigFile(env, trows, crows); out.threadRows = f.threadRows; out.commentRows = f.commentRows;
+  await log('info', 'filed ' + f.threadRows + ' new posts and ' + f.commentRows + ' new replies');
+  if (!out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
+  return out;
+}
+
+// -- X: account timelines through X's own embed service ------------------------
+//    Search and replies still need a signed-in Mac (tools/reach-x.py). The
+//    timelines of named accounts - the MP register, and the watch list in KV
+//    x_watch - are public and served to embeds, so the worker reads them here.
+function xTweetToken(id) { return ((Number(id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, ''); }
+function xNorm(t) {
+  const u = t.user || {};
+  return { id: String(t.id_str || t.id || ''), text: String(t.full_text || t.text || '').trim(), ts: Date.parse(t.created_at || '') || Date.now(),
+    likes: t.favorite_count || 0, reposts: t.retweet_count || 0, replies: t.reply_count || t.conversation_count || 0, quotes: t.quote_count || 0, views: 0,
+    handle: String(u.screen_name || ''), replyTo: String(t.in_reply_to_status_id_str || ''), retweet: !!t.retweeted_status, quoted: t.quoted_status ? String(t.quoted_status.id_str || '') : '' };
+}
+async function xTimeline(handle) {
+  const h = String(handle || '').replace(/^@/, '');
+  const f = await srcFetch(X_TIMELINE + encodeURIComponent(h), 'text/html,*/*', 9000);
+  if (!f.ok) return { ok: false, tweets: [], status: f.status, detail: f.error || ('HTTP ' + f.status + (f.status === 404 ? ' (no such account, or protected)' : f.status === 429 ? ' (rate limited)' : '')) };
+  const m = f.text.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) return { ok: false, tweets: [], status: f.status, detail: 'the embed page carried no timeline (X may be refusing this network)' };
+  let d; try { d = JSON.parse(m[1]); } catch (e) { return { ok: false, tweets: [], status: f.status, detail: 'timeline payload is not JSON' }; }
+  const pp = (((d || {}).props || {}).pageProps) || {};
+  const entries = ((pp.timeline || {}).entries) || [];
+  const tweets = entries.map(e => e && e.content && e.content.tweet).filter(Boolean).map(xNorm).filter(t => t.id);
+  if (!tweets.length) return { ok: false, tweets: [], status: f.status, detail: pp.headerProps ? 'the account has no posts in the embed timeline' : 'no posts in the embed timeline (protected, suspended or renamed?)' };
+  return { ok: true, tweets };
+}
+async function xTweet(id) {
+  const r = await socialJson(X_TWEET + '?id=' + encodeURIComponent(id) + '&token=' + xTweetToken(id) + '&lang=en');
+  if (!r.ok || !r.json) return { ok: false, detail: r.error || 'no payload' };
+  if (r.json.tombstone || !r.json.text) return { ok: false, detail: 'post unavailable' };
+  return { ok: true, tweet: xNorm(r.json) };
+}
+async function xWatchList(env) {
+  let list = []; try { list = JSON.parse((await kvGet(env.AXIOM_KV, 'x_watch')) || '[]'); } catch (e) { list = []; }
+  return (Array.isArray(list) ? list : []).map(w => ({ handle: String((w && (w.handle || w)) || '').replace(/^@/, '').trim().slice(0, 30), ns: String((w && w.ns) || '').slice(0, 24), name: String((w && w.name) || '').slice(0, 80) })).filter(w => /^[A-Za-z0-9_]{1,15}$/.test(w.handle));
+}
+async function xSyndSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const days = Math.min(Math.max(parseInt(opts.days, 10) || 7, 1), 90);
+  const max = Math.min(Math.max(parseInt(opts.max, 10) || 30, 1), 200);
+  const watch = await xWatchList(env);
+  let mps = []; try { mps = opts.mps === false ? [] : await mpsList(env, { withX: true, limit: 600 }); } catch (e) { mps = []; }
+  const all = watch.map(w => ({ handle: w.handle, name: w.name, ns: w.ns, mp: null }))
+    .concat(mps.map(m => ({ handle: String(m.x || '').replace(/^@/, ''), name: m.name, ns: '', mp: { name: m.name, party: m.party || '', house: m.house || '' } })))
+    .filter(a => /^[A-Za-z0-9_]{1,15}$/.test(a.handle));
+  let accounts = all;
+  if (Array.isArray(opts.handles) && opts.handles.length) {
+    const want = opts.handles.map(h => String(h).replace(/^@/, '').toLowerCase()).filter(Boolean).slice(0, max);
+    accounts = want.map(h => all.find(a => a.handle.toLowerCase() === h) || { handle: h, name: '', ns: '', mp: null });
+  } else if (all.length > max) {
+    const cur = Number(await kvGet(env.AXIOM_KV, 'x_synd_cursor') || 0) % all.length;
+    accounts = all.slice(cur, cur + max).concat(cur + max > all.length ? all.slice(0, cur + max - all.length) : []);
+    await kvPut(env.AXIOM_KV, 'x_synd_cursor', String((cur + max) % all.length), 7 * 86400);
+  }
+  const out = { ok: true, platform: 'x', mode: 'timelines', accounts: accounts.length, watched: watch.length, mps: mps.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
+  const since = Date.now() - days * 86400000; const trows = [];
+  await log('info', 'X: ' + accounts.length + ' account timelines through the embed service (' + watch.length + ' watched, ' + mps.length + ' MPs on file), last ' + days + ' days');
+  for (const a of accounts) {
+    await log('cmd', 'GET syndication.twitter.com/srv/timeline-profile/screen-name/' + a.handle);
+    const r = await xTimeline(a.handle);
+    if (!r.ok) { out.errors.push(a.handle + ': ' + r.detail); await log('err', a.handle + ': ' + r.detail); await rdSleep(r.status === 429 ? 2000 : SOCIAL_PACE); continue; }
+    let n = 0;
+    r.tweets.forEach(t => {
+      if (t.ts < since || t.retweet || !t.text) return;
+      const th = { platform: 'x', id: t.id, title: t.text.split('\n')[0].slice(0, 200) || 'Post', body: t.text, page: a.handle, page_name: a.name || a.handle, score: t.likes + t.reposts, comments: t.replies, url: 'https://x.com/i/web/status/' + t.id, ts: t.ts, ns: a.ns, via: 'worker' };
+      const row = engRow(sigThreadRow(th), t); row.meta.synd = 1;
+      if (a.mp) row.meta.mp = a.mp;
+      if (t.replyTo) row.meta.reply_to = t.replyTo; if (t.quoted) row.meta.quoted = t.quoted;
+      trows.push(row); n++;
+    });
+    await log('out', a.handle + ': ' + r.tweets.length + ' posts in the timeline, ' + n + ' in the window');
+    await rdSleep(SOCIAL_PACE);
+  }
+  out.threads = trows.length;
+  const f = await sigFile(env, trows, []); out.threadRows = f.threadRows;
+  await log('info', 'filed ' + f.threadRows + ' new posts (replies are not in the embed service: the Mac collector reads those)');
+  if (!out.threads && out.errors.length) { out.ok = false; out.detail = 'Nothing was read. ' + out.errors[0]; }
+  return out;
+}
+
+// -- YouTube: channel feeds (a Source Registry method), comments and captions --
+async function fetchYt(url, ms) {
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'en-AU,en;q=0.8', 'Cookie': YT_CONSENT }, signal: abortAfter(ms || 10000), redirect: 'follow' });
+    const text = r.ok ? (await r.text()).slice(0, 3000000) : '';
+    return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, url: r.url || url };
+  } catch (e) { const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e); return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out' : s.trim().slice(0, 90) }; }
+}
+async function ytChannelId(env, ref) {
+  ref = String(ref || '').trim();
+  if (/^UC[\w-]{22}$/.test(ref)) return { ok: true, id: ref };
+  const m0 = ref.match(/(UC[\w-]{22})/); if (m0) return { ok: true, id: m0[1] };
+  const handle = ref.replace(/^https?:\/\/(www\.)?youtube\.com\//, '').replace(/[/?#].*$/, '').replace(/^@?/, '@');
+  if (!/^@[\w.-]{2,60}$/.test(handle)) return { ok: false, detail: 'give a channel id (UC...) or a handle (@name)' };
+  const ck = 'yt_ch_' + handle.slice(1).toLowerCase();
+  const c = await kvGet(env.AXIOM_KV, ck); if (c) return { ok: true, id: c, cached: true };
+  const f = await fetchYt('https://www.youtube.com/' + handle);
+  if (!f.ok) return { ok: false, detail: (f.error || ('HTTP ' + f.status)) + ' resolving ' + handle };
+  const m = f.text.match(/"externalId":"(UC[\w-]{22})"/) || f.text.match(/"channelId":"(UC[\w-]{22})"/) || f.text.match(/channel_id=(UC[\w-]{22})/);
+  if (!m) return { ok: false, detail: 'no channel id on the page for ' + handle + (/consent\.youtube\.com|before you continue/i.test(f.text) ? ' (consent wall)' : '') };
+  await kvPut(env.AXIOM_KV, ck, m[1], 30 * 86400);
+  return { ok: true, id: m[1] };
+}
+function ytFeedParse(xml) {
+  const out = [];
+  for (const m of String(xml).matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    const b = m[1];
+    const videoId = (b.match(/<yt:videoId>([^<]+)<\/yt:videoId>/) || [])[1] || '';
+    if (!videoId) continue;
+    out.push({ videoId, title: stripHtml((b.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || ''), link: 'https://www.youtube.com/watch?v=' + videoId,
+      date: ((b.match(/<published>([^<]+)<\/published>/) || [])[1] || '').trim(), desc: stripHtml((b.match(/<media:description>([\s\S]*?)<\/media:description>/) || [])[1] || ''),
+      views: parseInt((b.match(/<media:statistics[^>]*views="(\d+)"/) || [])[1] || '0', 10) || 0, channel: stripHtml((b.match(/<author>[\s\S]*?<name>([^<]+)<\/name>/) || [])[1] || ''), channelId: (b.match(/<yt:channelId>([^<]+)<\/yt:channelId>/) || [])[1] || '' });
+  }
+  return out;
+}
+async function srcYoutube(env, src) {
+  const ch = await ytChannelId(env, src.urls.youtube);
+  if (!ch.ok) return { ok: false, items: [], detail: ch.detail };
+  const f = await srcFetch(YT_FEED + ch.id, 'application/atom+xml,application/xml,text/xml,*/*');
+  if (!f.ok) return srcFail(f);
+  const vids = ytFeedParse(f.text);
+  if (!vids.length) return { ok: false, items: [], status: f.status, detail: 'channel feed had no videos' };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000;
+  const rows = vids.filter(v => { const t = Date.parse(v.date || ''); return !t || t >= cut; }).map(v => {
+    const th = { platform: 'youtube', id: v.videoId, title: v.title, body: v.desc.slice(0, 3000), page: ch.id, page_name: v.channel || src.name, score: v.views, comments: 0, url: v.link, ts: Date.parse(v.date || '') || now, via: 'worker' };
+    const row = engRow(sigThreadRow(th), { views: v.views }); row.meta.video = v.videoId; row.meta.source = src.id; row.meta.reg = 1; return row;
+  });
+  return { ok: true, items: vids.map(v => ({ title: v.title, link: v.link, date: v.date, desc: v.desc.slice(0, 240) })), status: f.status, kind: 'sig_thread', rows, channel: ch.id };
+}
+async function ytCommentsApi(env, videoId, max) {
+  const r = await socialJson('https://www.googleapis.com/youtube/v3/commentThreads?part=snippet,replies&videoId=' + encodeURIComponent(videoId) + '&maxResults=' + Math.min(Math.max(max || 100, 1), 100) + '&order=relevance&textFormat=plainText&key=' + encodeURIComponent(env.YOUTUBE_KEY));
+  if (!r.ok) { const reason = ((((r.json || {}).error || {}).errors) || [])[0] || {}; return { ok: false, comments: [], detail: reason.reason === 'commentsDisabled' ? 'comments are off for this video' : (reason.reason === 'quotaExceeded' ? 'YouTube Data API quota spent for today' : (r.error || 'Data API error')) }; }
+  const out = [];
+  (((r.json || {}).items) || []).forEach(it => {
+    const c = ((it.snippet || {}).topLevelComment) || {}; const s = c.snippet || {};
+    if (s.textDisplay) out.push({ id: String(c.id || ''), text: String(s.textDisplay), likes: s.likeCount || 0, ts: Date.parse(s.publishedAt || '') || Date.now(), depth: 0 });
+    ((((it.replies || {}).comments)) || []).forEach(rc => { const rs = rc.snippet || {}; if (rs.textDisplay) out.push({ id: String(rc.id || ''), text: String(rs.textDisplay), likes: rs.likeCount || 0, ts: Date.parse(rs.publishedAt || '') || Date.now(), depth: 1 }); });
+  });
+  return { ok: true, comments: out, via: 'data api' };
+}
+function deepCollect(obj, key, out, limit) {
+  if (!obj || typeof obj !== 'object' || out.length >= (limit || 500)) return;
+  if (Array.isArray(obj)) { for (const x of obj) deepCollect(x, key, out, limit); return; }
+  if (obj[key] !== undefined) out.push(obj[key]);
+  for (const k in obj) if (k !== key && obj[k] && typeof obj[k] === 'object') deepCollect(obj[k], key, out, limit);
+}
+function relTime(s) {
+  const m = String(s || '').match(/(\d+)\s*(second|minute|hour|day|week|month|year)/i);
+  if (!m) return Date.now();
+  const u = { second: 1e3, minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5, month: 2592e6, year: 31536e6 }[m[2].toLowerCase()] || 864e5;
+  return Date.now() - Number(m[1]) * u;
+}
+async function ytCommentsWeb(videoId, max) {
+  const client = { hl: 'en', gl: 'AU', clientName: 'WEB', clientVersion: '2.20250101.00.00' };
+  const post = body => socialJson('https://www.youtube.com/youtubei/v1/next?key=' + YT_WEB_KEY + '&prettyPrint=false', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': YT_CONSENT, 'Origin': 'https://www.youtube.com', 'X-Youtube-Client-Name': '1', 'X-Youtube-Client-Version': client.clientVersion }, body: JSON.stringify(Object.assign({ context: { client } }, body)) }, 12000);
+  const first = await post({ videoId });
+  if (!first.ok || !first.json) return { ok: false, comments: [], detail: first.error || 'no watch payload from the web endpoint' };
+  let token = '';
+  const secs = []; deepCollect(first.json, 'itemSectionRenderer', secs, 60);
+  const cs = secs.find(s => s && s.sectionIdentifier === 'comment-item-section');
+  if (cs) { const c0 = ((cs.contents || [])[0] || {}).continuationItemRenderer; token = ((((c0 || {}).continuationEndpoint || {}).continuationCommand) || {}).token || ''; }
+  if (!token) { const conts = []; deepCollect(first.json, 'continuationItemRenderer', conts, 60); const c = conts.find(x => /comment/i.test(String(x.targetId || ''))); token = ((((c || {}).continuationEndpoint || {}).continuationCommand) || {}).token || ''; }
+  if (!token) return { ok: false, comments: [], detail: 'no comments section (comments off, or the page shape changed)' };
+  const second = await post({ continuation: token });
+  if (!second.ok || !second.json) return { ok: false, comments: [], detail: second.error || 'no comments payload' };
+  const out = [];
+  const payloads = []; deepCollect(second.json, 'commentEntityPayload', payloads, 400);
+  payloads.forEach(p => {
+    const pr = p.properties || {}; const text = String(((pr.content || {}).content) || '').trim(); if (!text) return;
+    const tb = p.toolbar || {}; const likes = parseInt(String(tb.likeCountNotliked || tb.likeCountLiked || '0').replace(/[^\d]/g, ''), 10) || 0;
+    out.push({ id: String(pr.commentId || arcHash(text)), text, likes, ts: relTime(pr.publishedTime), depth: pr.replyLevel || 0 });
+  });
+  if (!out.length) {
+    const rends = []; deepCollect(second.json, 'commentRenderer', rends, 400);
+    rends.forEach(c => { const text = ((c.contentText || {}).runs || []).map(r => r.text).join('').trim(); if (!text) return; out.push({ id: String(c.commentId || arcHash(text)), text, likes: parseInt(String((c.voteCount || {}).simpleText || '0').replace(/[^\d]/g, ''), 10) || 0, ts: relTime((((c.publishedTimeText || {}).runs) || [{}])[0].text), depth: 0 }); });
+  }
+  return out.length ? { ok: true, comments: out.slice(0, Math.max(max || 100, 1)), via: 'web' } : { ok: false, comments: [], detail: 'the comments payload carried no comment text (shape changed?)' };
+}
+async function ytComments(env, videoId, max) {
+  if (env.YOUTUBE_KEY) { const a = await ytCommentsApi(env, videoId, max); if (a.ok || /comments are off|quota/.test(a.detail)) return a; }
+  return ytCommentsWeb(videoId, max);
+}
+function jsonAfter(text, marker) {
+  const i = text.indexOf(marker); if (i < 0) return null;
+  const j = text.indexOf('{', i); if (j < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let k = j; k < text.length && k < j + 3000000; k++) {
+    const ch = text[k];
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true; else if (ch === '{') depth++; else if (ch === '}') { depth--; if (!depth) { try { return JSON.parse(text.slice(j, k + 1)); } catch (e) { return null; } } }
+  }
+  return null;
+}
+async function ytPlayer(videoId) {
+  const f = await fetchYt('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId) + '&hl=en&gl=AU', 12000);
+  const pr = f.ok ? jsonAfter(f.text, 'ytInitialPlayerResponse') : null;
+  if (pr && pr.captions) return { ok: true, pr, via: 'watch page' };
+  const r = await socialJson('https://www.youtube.com/youtubei/v1/player?key=' + YT_WEB_KEY + '&prettyPrint=false', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip', 'X-Youtube-Client-Name': '3', 'X-Youtube-Client-Version': '19.09.37' },
+    body: JSON.stringify({ context: { client: { clientName: 'ANDROID', clientVersion: '19.09.37', androidSdkVersion: 30, hl: 'en', gl: 'AU' } }, videoId, contentCheckOk: true, racyCheckOk: true }) }, 12000);
+  if (r.ok && r.json && r.json.captions) return { ok: true, pr: r.json, via: 'player endpoint' };
+  const st = ((r.json || pr || {}).playabilityStatus) || {};
+  return { ok: false, detail: st.reason ? String(st.reason).slice(0, 120) : (pr || (r.json && r.json.videoDetails) ? 'no captions on this video' : (f.error || r.error || 'no player response')) };
+}
+async function ytTranscript(videoId) {
+  const p = await ytPlayer(videoId);
+  if (!p.ok) return { ok: false, text: '', detail: p.detail };
+  const tracks = ((((p.pr.captions || {}).playerCaptionsTracklistRenderer || {}).captionTracks) || []);
+  if (!tracks.length) return { ok: false, text: '', detail: 'no captions on this video' };
+  const en = tracks.filter(t => /^en/i.test(t.languageCode || ''));
+  const track = en.find(t => t.kind !== 'asr') || en[0] || tracks[0];
+  const f = await fetchYt(String(track.baseUrl) + '&fmt=json3', 12000);
+  if (!f.ok) return { ok: false, text: '', detail: 'caption track ' + (f.error || ('HTTP ' + f.status)) };
+  let text = '';
+  try { const d = JSON.parse(f.text); text = (d.events || []).map(e => (e.segs || []).map(s => s.utf8 || '').join('')).join(' ').replace(/\s+/g, ' ').trim(); }
+  catch (e) { text = stripHtml(f.text.replace(/<text[^>]*>/g, ' ')); }
+  return text.length > 40 ? { ok: true, text: text.slice(0, 20000), lang: track.languageCode || '', asr: track.kind === 'asr', via: p.via } : { ok: false, text: '', detail: 'caption track was empty' };
+}
+/** Recent videos on file get their comments and captions: the ones that speak
+ *  to a client issue first, a few a tick, each video once. */
+async function youtubeEnrich(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const max = Math.min(Math.max(parseInt(opts.max, 10) || 8, 1), 40);
+  const now = Date.now();
+  const vid = String(opts.video || '').replace(/[^\w-]/g, '').slice(0, 20);
+  // from the Signals tab: refresh the listed channels first, then read comments and captions
+  if (opts.sweepChannels && !vid) {
+    try {
+      await ensureSources(env);
+      const chans = ((await env.MIND_DB.prepare("SELECT id FROM sources WHERE enabled=1 AND methods LIKE '%\"youtube\"%'").all()).results || []).map(r => r.id);
+      if (chans.length) { await log('info', 'refreshing ' + chans.length + ' YouTube channel' + (chans.length === 1 ? '' : 's') + ' from the Source Registry first'); await sourceSweep(env, { ids: chans, log }); }
+      else await log('info', 'no YouTube channels in the Source Registry yet - add one in Sources with a handle or channel id');
+    } catch (e) { await log('err', 'channel refresh failed: ' + String((e && e.message) || e).slice(0, 120)); }
+  }
+  const rows = vid
+    ? (await env.MIND_DB.prepare("SELECT id, title, url, meta FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='youtube' AND json_extract(meta,'$.video')=? LIMIT 1").bind(vid).all()).results || []
+    : (await env.MIND_DB.prepare("SELECT id, title, url, meta FROM arc_items WHERE kind='sig_thread' AND json_extract(meta,'$.platform')='youtube' AND ts>? AND json_extract(meta,'$.enriched') IS NULL ORDER BY (json_array_length(json_extract(meta,'$.issues'))>0) DESC, ts DESC LIMIT ?").bind(now - 5 * 86400000, max).all()).results || [];
+  const out = { ok: true, platform: 'youtube', videos: rows.length, threads: rows.length, comments: 0, threadRows: 0, commentRows: 0, transcripts: 0, hostile: 0, errors: [], via: env.YOUTUBE_KEY ? 'data api' : 'web' };
+  if (!rows.length) { await log('info', vid ? 'no video ' + vid + ' on file - sweep its channel first' : 'no recent videos waiting for comments and captions'); if (vid) { out.ok = false; out.detail = 'That video is not on file yet.'; } return out; }
+  await log('info', 'YouTube: comments and captions for ' + rows.length + ' video' + (rows.length === 1 ? '' : 's') + ' (' + out.via + ')');
+  const stmts = [];
+  for (const r of rows) {
+    let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
+    const v = String(meta.video || ''); if (!v) continue;
+    const thread = { id: v, title: r.title, url: r.url, issues: Array.isArray(meta.issues) ? meta.issues : [] };
+    await log('cmd', (env.YOUTUBE_KEY ? 'GET youtube/v3/commentThreads videoId=' : 'POST youtubei/v1/next videoId=') + v);
+    const c = await ytComments(env, v, 100);
+    let filed = 0;
+    if (c.ok) {
+      const crows = c.comments.filter(x => x.text).map(x => engRow(sigCommentRow({ platform: 'youtube', id: x.id, body: x.text, score: x.likes, depth: x.depth, ts: x.ts, via: 'worker' }, thread), x));
+      out.comments += crows.length; out.hostile += crows.filter(x => x.tone < 0).length;
+      for (let i = 0; i < crows.length; i += 150) filed += await archiveItems(env, 'sig_comment', crows.slice(i, i + 150));
+      out.commentRows += filed;
+      await log('out', c.comments.length + ' comments via ' + c.via + ', ' + filed + ' new');
+    } else { out.errors.push(v + ': ' + c.detail); await log('err', v + ': ' + c.detail); }
+    await log('cmd', 'captions ' + v);
+    const t = await ytTranscript(v);
+    let chars = 0;
+    if (t.ok) {
+      chars = t.text.length;
+      await archiveItems(env, 'transcript', [{ src: 'youtube', title: 'Transcript: ' + String(r.title || '').slice(0, 200), body: t.text.slice(0, 6000), url: 'x:yt:tr:' + v, ts: now, meta: { platform: 'youtube', thread: v, video: v, lang: t.lang, asr: t.asr ? 1 : 0, chars, issues: issueTag(t.text.slice(0, 8000)), via: t.via } }]);
+      out.transcripts++;
+      await log('out', chars + ' chars of ' + (t.asr ? 'auto-generated' : 'published') + ' captions via ' + t.via);
+    } else { await log('err', v + ': ' + t.detail); }
+    stmts.push(env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'),'$.enriched',1,'$.comments_held',?,'$.transcript',?,'$.comments',?) WHERE id=?").bind(filed, chars, c.ok ? c.comments.length : (meta.comments || 0), r.id));
+    await rdSleep(SOCIAL_PACE);
+  }
+  for (let i = 0; i < stmts.length; i += 50) { try { await env.MIND_DB.batch(stmts.slice(i, i + 50)); } catch (e) {} }
+  await log('info', out.commentRows + ' new comments and ' + out.transcripts + ' transcripts filed');
+  if (!out.commentRows && !out.transcripts && out.errors.length) { out.ok = false; out.detail = 'Nothing was collected. ' + out.errors[0]; }
+  return out;
+}
+
+// -- Petitions: the parliaments' e-petition pages, with daily signature counts --
+const PETITION_SITES = [
+  { id: 'aph', name: 'Parliament of Australia e-petitions', juris: 'au', list: 'https://www.aph.gov.au/e-petitions', link: /\/e-petitions\/petition\/EN\d+/i, base: 'https://www.aph.gov.au' },
+  { id: 'vic', name: 'Parliament of Victoria e-petitions', juris: 'vic', list: 'https://www.parliament.vic.gov.au/get-involved/petitions/electronic-petitions', link: /\/get-involved\/petitions\/electronic-petitions\/[a-z0-9][a-z0-9-]+/i, base: 'https://www.parliament.vic.gov.au' },
+  { id: 'qld', name: 'Queensland Parliament e-petitions', juris: 'qld', list: 'https://www.parliament.qld.gov.au/Work-of-the-Assembly/Petitions/Current-EPetitions', link: /\/Work-of-the-Assembly\/Petitions\/Petition-Details\?id=\d+/i, base: 'https://www.parliament.qld.gov.au' },
+  { id: 'nsw', name: 'NSW Parliament e-petitions', juris: 'nsw', list: 'https://www.parliament.nsw.gov.au/la/Pages/ePetitions-List.aspx', link: /\/la\/Pages\/ePetition-details\.aspx\?q=[A-Za-z0-9%=_-]+/i, base: 'https://www.parliament.nsw.gov.au' },
+];
+function anchorsMatching(html, re, base) {
+  const out = []; const seen = new Set();
+  for (const m of String(html).matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = m[1]; if (!re.test(href)) continue;
+    const title = stripHtml(m[2]); if (title.length < 8) continue;
+    let url; try { url = new URL(href, base).toString(); } catch (e) { continue; }
+    if (seen.has(url)) continue; seen.add(url);
+    out.push({ url, title });
+  }
+  return out;
+}
+function petitionCount(html) {
+  const s = stripHtml(String(html).replace(/<script[\s\S]*?<\/script>/gi, ' '));
+  const m = s.match(/(?:signatures?|signed|supporters?)[^0-9]{0,40}(\d[\d,\.]{0,9})/i) || s.match(/(\d[\d,\.]{0,9})\s*(?:signatures?|people have signed|supporters?)/i);
+  return m ? (parseInt(m[1].replace(/[^\d]/g, ''), 10) || 0) : 0;
+}
+function petitionCloses(html) {
+  const s = stripHtml(String(html));
+  const m = s.match(/(?:clos(?:es|ing)(?: date)?|open until|until)[^0-9A-Za-z]{0,20}(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4})/i);
+  return m ? m[1] : '';
+}
+async function petitionsSweep(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const detailMax = Math.min(Math.max(parseInt(opts.detail, 10) || 12, 1), 40);
+  const sites = PETITION_SITES.filter(s => !opts.site || s.id === opts.site);
+  const day = new Date().toISOString().slice(0, 10); const now = Date.now();
+  const out = { ok: true, platform: 'petitions', sites: sites.length, listed: 0, read: 0, threads: 0, comments: 0, threadRows: 0, commentRows: 0, rows: 0, snapshots: 0, errors: [] };
+  const canon = [], snaps = [], upd = [];
+  for (const site of sites) {
+    await log('cmd', 'GET ' + site.list);
+    const f = await srcFetch(site.list, 'text/html,*/*', 9000);
+    if (!f.ok) { out.errors.push(site.id + ': ' + (f.error || ('HTTP ' + f.status))); await log('err', site.id + ': ' + (f.error || ('HTTP ' + f.status))); continue; }
+    const links = anchorsMatching(f.text, site.link, site.base);
+    out.listed += links.length;
+    await log('out', links.length + ' petitions listed');
+    if (!links.length) { out.errors.push(site.id + ': no petition links on the page (markup changed?)'); continue; }
+    const ranked = links.map(l => Object.assign({ issues: issueTag(l.title) }, l)).sort((a, b) => b.issues.length - a.issues.length).slice(0, detailMax);
+    for (const l of ranked) {
+      const g = await srcFetch(l.url, 'text/html,*/*', 9000);
+      if (!g.ok) { out.errors.push(l.url.slice(0, 80) + ': ' + (g.error || ('HTTP ' + g.status))); await rdSleep(SOCIAL_PACE); continue; }
+      out.read++;
+      const text = paragraphs(g.text.replace(/<(nav|header|footer|script|style)\b[\s\S]*?<\/\1>/gi, ' ')).slice(0, 3000);
+      const sigs = petitionCount(g.text); const closes = petitionCloses(g.text);
+      const issues = issueTag(l.title + ' ' + text);
+      canon.push({ src: site.id, title: l.title.slice(0, 300), body: text, url: l.url, ts: now, tone: 0, meta: { platform: 'petitions', site: site.id, juris: site.juris, issues, signatures: sigs, closes, seen: now, day } });
+      snaps.push({ src: site.id, title: l.title.slice(0, 300), body: '', url: 'x:pet:' + arcHash(l.url) + ':' + day, ts: now, meta: { platform: 'petitions', site: site.id, juris: site.juris, petition: l.url, signatures: sigs, issues, day } });
+      upd.push(env.MIND_DB.prepare("UPDATE arc_items SET meta=json_set(COALESCE(meta,'{}'),'$.signatures',?,'$.seen',?,'$.closes',?) WHERE kind='petition' AND url=?").bind(sigs, now, closes, l.url));
+      await log('out', (sigs ? sigs + ' signatures' : 'count not shown') + (issues.length ? ' [' + issues.join(', ') + ']' : '') + ' - ' + l.title.slice(0, 70));
+      await rdSleep(SOCIAL_PACE);
+    }
+  }
+  for (let i = 0; i < canon.length; i += 150) out.rows += await archiveItems(env, 'petition', canon.slice(i, i + 150));
+  for (let i = 0; i < snaps.length; i += 150) out.snapshots += await archiveItems(env, 'petition', snaps.slice(i, i + 150));
+  for (let i = 0; i < upd.length; i += 50) { try { await env.MIND_DB.batch(upd.slice(i, i + 50)); } catch (e) {} }
+  out.threads = canon.length; out.threadRows = out.rows;
+  await log('info', out.read + ' petitions read, ' + out.rows + ' new, ' + out.snapshots + ' signature snapshots for ' + day);
+  if (!out.read && out.errors.length) { out.ok = false; out.detail = 'Nothing was read. ' + out.errors[0]; }
+  return out;
+}
+async function petitionsList(env, opts) {
+  opts = opts || {};
+  if (!(await ensureArchive(env))) return { ok: false, error: 'mind_unbound' };
+  const days = Math.min(Math.max(parseInt(opts.days, 10) || 30, 1), 365);
+  const now = Date.now();
+  const w = ["kind='petition'", "url NOT LIKE 'x:pet:%'", "COALESCE(json_extract(meta,'$.seen'), ts)>?"]; const b = [now - days * 86400000];
+  if (opts.juris) { w.push("json_extract(meta,'$.juris')=?"); b.push(String(opts.juris).slice(0, 4)); }
+  if (opts.issue) { w.push('meta LIKE ?'); b.push('%"' + String(opts.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
+  const rows = (await env.MIND_DB.prepare('SELECT title, url, body, ts, meta FROM arc_items WHERE ' + w.join(' AND ') + ' ORDER BY ts DESC LIMIT 300').bind(...b).all()).results || [];
+  const snaps = (await env.MIND_DB.prepare("SELECT json_extract(meta,'$.petition') p, json_extract(meta,'$.signatures') s, json_extract(meta,'$.day') d FROM arc_items WHERE kind='petition' AND url LIKE 'x:pet:%' AND ts>? ORDER BY ts").bind(now - 9 * 86400000).all()).results || [];
+  const hist = {}; snaps.forEach(s => { if (!s.p) return; (hist[s.p] = hist[s.p] || []).push({ d: s.d, s: Number(s.s) || 0 }); });
+  const dayKey = ago => new Date(now - ago * 86400000).toISOString().slice(0, 10);
+  const at = (h, key) => { const x = (h || []).filter(e => e.d <= key).pop(); return x ? x.s : null; };
+  const list = rows.map(r => {
+    let m = {}; try { m = JSON.parse(r.meta || '{}') || {}; } catch (e) { m = {}; }
+    const h = hist[r.url] || []; const sigs = Number(m.signatures) || 0;
+    const y = at(h, dayKey(1)), wk = at(h, dayKey(7));
+    return { title: r.title, url: r.url, site: m.site || '', juris: m.juris || '', issues: Array.isArray(m.issues) ? m.issues : [], signatures: sigs, closes: m.closes || '', seen: m.seen || r.ts, first: r.ts,
+      growth24: y == null ? null : sigs - y, growth7: wk == null ? null : sigs - wk, excerpt: String(r.body || '').slice(0, 300), points: h.slice(-10) };
+  }).sort((a, b) => ((b.growth24 || 0) - (a.growth24 || 0)) || (b.signatures - a.signatures));
+  return { ok: true, days, petitions: list, sites: PETITION_SITES.map(s => ({ id: s.id, name: s.name, juris: s.juris, url: s.list })) };
+}
+
+// -- Substack: a publication's feed and comment threads (a Source Registry method) --
+async function srcSubstack(env, src) {
+  const base = String(src.urls.substack || '').replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(base)) return { ok: false, items: [], detail: 'substack needs the publication url, e.g. https://name.substack.com' };
+  const f = await srcFetch(base + '/feed', 'application/rss+xml,application/xml,text/xml,*/*');
+  if (!f.ok) return srcFail(f);
+  const posts = parseFeedXml(f.text);
+  if (!posts.length) return { ok: false, items: [], status: f.status, detail: 'the publication feed had no posts' };
+  const now = Date.now(); const cut = now - SOURCE_WINDOW_H * 3600000;
+  const recent = posts.filter(p => { const t = Date.parse(p.date || ''); return p.link && (!t || t >= cut); });
+  const rows = recent.map(p => { const th = { platform: 'substack', id: 's' + arcHash(p.link), title: p.title, body: p.desc, page: base.replace(/^https?:\/\//, ''), page_name: src.name, score: 0, comments: 0, url: p.link, ts: Date.parse(p.date || '') || now, via: 'worker' }; const row = sigThreadRow(th); row.meta.source = src.id; row.meta.reg = 1; return row; });
+  const extra = [];
+  for (const p of recent.slice(0, 4)) {
+    const slug = (String(p.link).match(/\/p\/([^/?#]+)/) || [])[1]; if (!slug) continue;
+    const meta = await socialJson(base + '/api/v1/posts/' + encodeURIComponent(slug), null, 8000);
+    const pid = meta.ok && meta.json ? meta.json.id : 0; if (!pid) { await rdSleep(SOCIAL_PACE); continue; }
+    const cm = await socialJson(base + '/api/v1/post/' + pid + '/comments?token=&all_comments=true&sort=best_first', null, 9000);
+    const flat = [];
+    const walk = (arr, d) => (arr || []).forEach(c => { if (!c) return; if (c.body) flat.push({ id: String(c.id || ''), text: stripHtml(String(c.body)), likes: (c.reactions && c.reactions['\u2764']) || c.reaction_count || 0, ts: Date.parse(c.date || '') || now, depth: d }); walk(c.children, d + 1); });
+    if (cm.ok && cm.json) walk(cm.json.comments || [], 0);
+    const thread = { id: 's' + arcHash(p.link), title: p.title, url: p.link, issues: issueTag(p.title + ' ' + p.desc) };
+    const crows = flat.filter(c => c.text).map(c => engRow(sigCommentRow({ platform: 'substack', id: c.id, body: c.text, score: c.likes, depth: c.depth, ts: c.ts, via: 'worker' }, thread), c));
+    if (crows.length) extra.push({ kind: 'sig_comment', rows: crows });
+    const row = rows.find(r => r.url === p.link); if (row) row.meta.comments = flat.length;
+    await rdSleep(SOCIAL_PACE);
+  }
+  return { ok: true, items: recent.map(p => ({ title: p.title, link: p.link, date: p.date, desc: p.desc })), status: f.status, kind: 'sig_thread', rows, extra };
+}
+async function substackSearch(q) {
+  const r = await socialJson('https://substack.com/api/v1/publication/search?query=' + encodeURIComponent(q) + '&page=0');
+  if (!r.ok) return { ok: false, results: [], detail: r.error };
+  const arr = (r.json && (r.json.results || r.json.publications)) || (Array.isArray(r.json) ? r.json : []);
+  return { ok: true, results: arr.slice(0, 25).map(p => ({ name: String(p.name || '').slice(0, 120), url: p.custom_domain ? 'https://' + p.custom_domain : (p.subdomain ? 'https://' + p.subdomain + '.substack.com' : ''), description: String(p.hero_text || p.description || '').slice(0, 240), subscribers: p.subscriber_count_string || p.subscriber_count || '' })).filter(p => p.url) };
+}
+async function tiktokOembed(url) {
+  if (!/^https?:\/\/(www\.|vm\.)?tiktok\.com\//.test(String(url || ''))) return { ok: false, detail: 'give a tiktok.com post url' };
+  const r = await socialJson('https://www.tiktok.com/oembed?url=' + encodeURIComponent(url));
+  if (!r.ok || !r.json) return { ok: false, detail: r.error || 'no oEmbed payload' };
+  return { ok: true, url, title: String(r.json.title || '').slice(0, 500), thumbnail: r.json.thumbnail_url || '', provider: 'tiktok' };
+}
+
+// -- one table: what each platform needs, what it reaches, how it fared --------
+async function socialCoverage(env, probe) {
+  const now = Date.now(); const db = env.MIND_DB;
+  const counts = {};
+  if (db) {
+    try {
+      await ensureArchive(env);
+      const rows = (await db.prepare("SELECT COALESCE(json_extract(meta,'$.platform'), src) p, kind, SUM(ts>?) d1, COUNT(*) d7, MAX(ts) newest FROM arc_items WHERE ts>? AND kind IN ('sig_thread','sig_comment','petition','transcript','reddit_thread','reddit_comment','forum','oppads') GROUP BY p, kind").bind(now - 86400000, now - 7 * 86400000).all()).results || [];
+      rows.forEach(r => {
+        const p = /^reddit_/.test(r.kind) ? 'reddit' : r.kind === 'forum' ? 'forums' : r.kind === 'oppads' ? 'adlibrary' : (r.p || 'unknown');
+        const c = counts[p] = counts[p] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 };
+        const isC = /comment/.test(r.kind);
+        if (isC) { c.comments24 += r.d1 || 0; c.comments7 += r.d7 || 0; } else { c.threads24 += r.d1 || 0; c.threads7 += r.d7 || 0; }
+        c.newest = Math.max(c.newest, r.newest || 0);
+      });
+    } catch (e) {}
+  }
+  let last = {}; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'social_last')) || '{}'); } catch (e) { last = {}; }
+  const agents = await agentsSeen(env);
+  const mac = agents.some(a => a.live);
+  const P = [
+    { id: 'reddit', label: 'Reddit', method: 'JSON API with app credentials from the worker, or rdt on a signed-in Mac', keys: 'REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET (optional; registration is closed)', configured: redditAuthed(env) || mac, where: redditAuthed(env) ? 'worker' : 'mac', reach: 'watched subs, keyword search across Reddit, full comment trees, scores', unreachable: '' },
+    { id: 'bluesky', label: 'Bluesky', method: 'public AppView API (searchPosts, getPostThread)', keys: 'none', configured: true, where: 'worker', reach: 'keyword search, threads, replies, likes/reposts/quotes; the Australian gate applies', unreachable: '' },
+    { id: 'mastodon', label: 'Mastodon', method: 'tag timelines and reply contexts on ' + MASTO_INSTANCES.join(', '), keys: 'none', configured: true, where: 'worker', reach: 'the Australian political tags (' + MASTO_TAGS.slice(0, 5).join(', ') + '...), replies, favourites/boosts', unreachable: 'full-text search needs an instance token' },
+    { id: 'x', label: 'X', method: 'account timelines through X\'s embed service from the worker; keyword search and replies through twitter-cli on a signed-in Mac', keys: 'none for timelines; a signed-in Mac for search', configured: true, where: 'both', reach: 'MP register and watch-list timelines with likes/reposts/replies counts; search and reply threads from the Mac', unreachable: 'keyword search and reply text from the cloud (X requires a session and a transaction id)' },
+    { id: 'youtube', label: 'YouTube', method: 'channel feeds as Source Registry sources; comments through the Data API or YouTube\'s web endpoint; captions', keys: 'YOUTUBE_KEY optional (free, 10,000 units a day)', configured: true, apiKey: !!env.YOUTUBE_KEY, where: 'worker', reach: 'every video of a listed channel, its comments with likes, its captions as a transcript', unreachable: 'keyword search without YOUTUBE_KEY' },
+    { id: 'linkedin', label: 'LinkedIn', method: 'the clients\' own pages through the Marketing API', keys: 'LINKEDIN_TOKEN + LINKEDIN_ORGS', configured: !!(env.LINKEDIN_TOKEN && liOrgs(env).length), where: 'worker', reach: 'own posts and comments', unreachable: 'other pages, search: no public route and none is wanted' },
+    { id: 'meta', label: 'Facebook and Instagram, own pages', method: 'Graph API', keys: 'META_TOKEN (pages_read_engagement, pages_read_user_content) + META_PAGES', configured: !!(env.META_TOKEN && metaPages(env).length), where: 'worker', reach: 'own posts, comments and reaction mix', unreachable: '' },
+    { id: 'adlibrary', label: 'Meta Ad Library', method: 'Graph API ads_archive', keys: 'META_USER_TOKEN (ID-verified user, ~60-day expiry)', configured: !!env.META_USER_TOKEN, where: 'worker', reach: 'political and issue ads by funder, spend band and creative', unreachable: '' },
+    { id: 'facebook_public', label: 'Facebook public pages and groups (others\')', method: 'none available', keys: 'Page Public Content Access (Meta app review) or Meta Content Library (research application)', configured: false, where: 'none', reach: '', unreachable: 'the Graph API refuses other pages without PPCA; the web is login-walled from any server. Ask for PPCA on the Meta app, or apply for the Content Library.' },
+    { id: 'threads', label: 'Threads', method: 'none available', keys: 'Threads API is for the account\'s own posts; keyword search needs the threads_keyword_search permission (app review)', configured: false, where: 'none', reach: '', unreachable: 'no public route to others\' posts; the web pages are built client-side behind a login prompt' },
+    { id: 'tiktok', label: 'TikTok', method: 'oEmbed for a single post url', keys: 'none; the Research API needs approval', configured: true, where: 'worker', reach: 'title and thumbnail of a given post', unreachable: 'profiles, search and comments: signed requests from a browser session (a Mac render job could read a profile; the Research API is approval-gated)' },
+    { id: 'forums', label: 'Forums', method: 'RSS, Discourse JSON and listing pages (AU_FORUMS)', keys: 'none', configured: true, where: 'worker', reach: 'new threads on Whirlpool, OzBargain, BigFooty, HotCopper, PropertyChat and Discourse boards', unreachable: 'reply text on most boards' },
+    { id: 'petitions', label: 'Petitions', method: 'the parliaments\' e-petition pages, daily', keys: 'none', configured: true, where: 'worker', reach: PETITION_SITES.map(s => s.name).join(', ') + ': title, text, signatures a day, closing date', unreachable: 'change.org (bot-walled from servers; add a petition url as a source to try)' },
+    { id: 'substack', label: 'Substack', method: 'publication feed plus the comments API, as Source Registry sources (urls.substack)', keys: 'none', configured: true, where: 'worker', reach: 'posts and comment threads of any listed publication; discovery through /social/substack/search', unreachable: '' },
+  ];
+  P.forEach(p => { p.counts = counts[p.id] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }; p.last = last[p.id] || null; });
+  if (probe) {
+    const t = async (fn) => { const t0 = Date.now(); try { const r = await fn(); return Object.assign({ ms: Date.now() - t0 }, r); } catch (e) { return { ok: false, ms: Date.now() - t0, detail: String((e && e.message) || e).slice(0, 120) }; } };
+    const probes = {
+      bluesky: () => bskySearch('auspol', 3).then(r => ({ ok: r.ok, detail: r.ok ? r.posts.length + ' posts for auspol' : r.detail })),
+      mastodon: () => mastoTag(MASTO_INSTANCES[0], 'auspol', 5).then(r => ({ ok: r.ok, detail: r.ok ? r.posts.length + ' posts on ' + MASTO_INSTANCES[0] : r.detail })),
+      x: () => xTimeline('AlboMP').then(r => ({ ok: r.ok, detail: r.ok ? r.tweets.length + ' posts in the embed timeline of the PM\'s account' : r.detail })),
+      youtube: () => ytChannelId(env, '@abcnewsaustralia').then(r => ({ ok: r.ok, detail: r.ok ? 'channel resolves to ' + r.id : r.detail })),
+      petitions: () => srcFetch(PETITION_SITES[0].list, 'text/html,*/*', 9000).then(f => ({ ok: f.ok && anchorsMatching(f.text, PETITION_SITES[0].link, PETITION_SITES[0].base).length > 0, detail: f.ok ? anchorsMatching(f.text, PETITION_SITES[0].link, PETITION_SITES[0].base).length + ' petitions listed at aph.gov.au' : (f.error || ('HTTP ' + f.status)) })),
+      substack: () => substackSearch('australian politics').then(r => ({ ok: r.ok, detail: r.ok ? r.results.length + ' publications match "australian politics"' : r.detail })),
+    };
+    for (const p of P) if (probes[p.id]) p.probe = await t(probes[p.id]);
+  }
+  return { ok: true, platforms: P, agents, lastRun: Number(await kvGet(env.AXIOM_KV, 'social_last_run') || 0), mac };
+}
+async function socialSweep(env, params, log) {
+  const p = Object.assign({}, params || {}, { log });
+  switch (String(p.platform || '')) {
+    case 'bluesky': return bskySweep(env, p);
+    case 'mastodon': return mastodonSweep(env, p);
+    case 'youtube': return youtubeEnrich(env, p);
+    case 'petitions': return petitionsSweep(env, p);
+    case 'x': return xSyndSweep(env, p);
+    default: return { ok: false, error: 'unknown_platform', detail: 'platform must be one of bluesky, mastodon, youtube, petitions, x.' };
+  }
+}
+function socialSummary(r) {
+  r = r || {};
+  const s = { ok: !!r.ok, threads: r.threads || 0, comments: r.comments || 0, threadRows: r.threadRows || 0, commentRows: r.commentRows || 0, errors: (r.errors || []).length, detail: String(r.detail || (r.errors || [])[0] || '').slice(0, 160) };
+  if (r.read != null) { s.listed = r.listed; s.read = r.read; s.snapshots = r.snapshots; }
+  if (r.videos != null) { s.videos = r.videos; s.transcripts = r.transcripts; }
+  if (r.accounts != null) { s.accounts = r.accounts; }
+  return s;
+}
+/** Every tick, at most two-hourly: a slice of the client keywords on Bluesky,
+ *  the Australian tags on Mastodon, thirty X account timelines, comments and
+ *  captions for a few videos, and the petitions once a day. */
+async function socialCron(env) {
+  if (!env.MIND_DB) return { ok: false };
+  const now = Date.now();
+  const last = Number(await kvGet(env.AXIOM_KV, 'social_last_run') || 0);
+  if (now - last < 2 * 3600000) return { ok: true, skipped: true };
+  await kvPut(env.AXIOM_KV, 'social_last_run', String(now), 86400);
+  let res = {}; try { res = JSON.parse((await kvGet(env.AXIOM_KV, 'social_last')) || '{}'); } catch (e) { res = {}; }
+  const run = async (id, fn) => { try { res[id] = Object.assign({ at: now }, socialSummary(await fn())); } catch (e) { res[id] = { at: now, ok: false, detail: String((e && e.message) || e).slice(0, 160) }; } };
+  const all = issueQueries(); const slice = 10;
+  const cur = Number(await kvGet(env.AXIOM_KV, 'bsky_q_cursor') || 0) % Math.max(1, all.length);
+  const qs = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
+  await kvPut(env.AXIOM_KV, 'bsky_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
+  await run('bluesky', () => bskySweep(env, { queries: qs, threads: 15, days: 3 }));
+  await run('mastodon', () => mastodonSweep(env, { threads: 15, days: 3 }));
+  await run('x', () => xSyndSweep(env, { max: 30, days: 3 }));
+  await run('youtube', () => youtubeEnrich(env, { max: 6 }));
+  const pl = Number(await kvGet(env.AXIOM_KV, 'petitions_last') || 0);
+  if (now - pl > 20 * 3600000) { await kvPut(env.AXIOM_KV, 'petitions_last', String(now), 7 * 86400); await run('petitions', () => petitionsSweep(env, { detail: 10 })); }
+  await kvPut(env.AXIOM_KV, 'social_last', JSON.stringify(res).slice(0, 8000), 7 * 86400);
+  return res;
 }
 
 // ==============================================================================
@@ -5264,7 +5962,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext') && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -5272,7 +5970,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -6374,6 +7072,56 @@ export default {
       }
     }
 
+    // -- Social capture beyond Reddit and the clients' own pages --
+    //    GET  /social/coverage?probe=1        every platform: method, keys, configured, what it reaches and cannot, counts, last run (read)
+    //    GET  /social/petitions?issue=&juris=&days=   petitions with signatures and 24h / 7d growth (read)
+    //    GET  /social/substack/search?q=      publications to add as sources (read)
+    //    GET  /social/tiktok?url=             one TikTok post through oEmbed (read)
+    //    GET  /social/youtube/transcript?v=   captions of one video, on demand (read; not filed)
+    //    GET  /social/x/watch  POST /social/x/watch {handles:[{handle,ns,name}]}   the X accounts read beside the MP register
+    //    POST /social/sweep {platform, params}   a worker-side sweep as a job the console tails (full)
+    if (path.startsWith('/social/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let ob = {}; if (req.method === 'POST') { try { ob = await req.json(); } catch (e) { ob = {}; } }
+      try {
+        await ensureArchive(env);
+        if (path === '/social/coverage' && req.method === 'GET') return jsonResp(await socialCoverage(env, reqUrl.searchParams.get('probe') === '1'));
+        if (path === '/social/petitions' && req.method === 'GET') return jsonResp(await petitionsList(env, { issue: reqUrl.searchParams.get('issue') || '', juris: reqUrl.searchParams.get('juris') || '', days: reqUrl.searchParams.get('days') || 30 }));
+        if (path === '/social/substack/search' && req.method === 'GET') {
+          const q = String(reqUrl.searchParams.get('q') || '').trim().slice(0, 80);
+          if (!q) return jsonResp({ error: 'missing_q', detail: 'Give q=, e.g. australian politics.' }, 400);
+          return jsonResp(await substackSearch(q));
+        }
+        if (path === '/social/tiktok' && req.method === 'GET') return jsonResp(await tiktokOembed(String(reqUrl.searchParams.get('url') || '')));
+        if (path === '/social/youtube/transcript' && req.method === 'GET') {
+          const v = String(reqUrl.searchParams.get('v') || '').replace(/[^\w-]/g, '').slice(0, 20);
+          if (!v) return jsonResp({ error: 'missing_video', detail: 'Give v=<video id>.' }, 400);
+          const r = await ytTranscript(v);
+          return jsonResp(Object.assign({ video: v }, r, { text: String(r.text || '').slice(0, 12000), chars: String(r.text || '').length }));
+        }
+        if (path === '/social/x/watch' && req.method === 'GET') {
+          let mps = 0; try { mps = (await mpsList(env, { withX: true, limit: 600 })).length; } catch (e) { mps = 0; }
+          return jsonResp({ ok: true, handles: await xWatchList(env), mps });
+        }
+        if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Starting sweeps and editing the watch list need a full-access key.' }, 403);
+        if (path === '/social/x/watch') {
+          const list = (Array.isArray(ob.handles) ? ob.handles : []).slice(0, 200).map(w => (typeof w === 'string' ? { handle: w } : (w || {})));
+          await kvPut(env.AXIOM_KV, 'x_watch', JSON.stringify(list), 365 * 86400);
+          return jsonResp({ ok: true, handles: await xWatchList(env) });
+        }
+        if (path === '/social/sweep') {
+          const platform = String(ob.platform || '').toLowerCase().replace(/[^a-z]/g, '');
+          if (SOCIAL_PLATFORMS.indexOf(platform) < 0 && platform !== 'x') return jsonResp({ error: 'unknown_platform', detail: 'platform must be one of ' + SOCIAL_PLATFORMS.concat(['x']).join(', ') + '.' }, 400);
+          const params = Object.assign({}, (ob.params && typeof ob.params === 'object') ? ob.params : {}, { where: 'worker' }, platform === 'x' ? { mode: 'timelines' } : {});
+          const job = await jobCreate(env, platform, params, auth.name);
+          ctx.waitUntil(jobRunLocal(env, { id: job.id, source: platform, params }));
+          return jsonResp({ ok: true, job: job.id, id: job.id, platform, where: 'worker', note: 'Running in the worker. Tail /bridge/job?id=' + job.id });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'social_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
     // -- Full text: the article behind a headline, through every public route --
     //    GET  /fulltext?url=&save=1&light=1     (read) body text plus the attempt log; save=1 asks the Wayback Machine for a snapshot
     //    GET  /fulltext?id=<archive row>         (read) the same for an archive row; a full-access key also files the result on the row
@@ -6437,7 +7185,7 @@ export default {
           const run = await sourceRun(env, s, { all: true });
           try { await env.MIND_DB.batch(sourceStmts(env, run, 0, Date.now())); } catch (e) {}
           return jsonResp({ ok: true, id: s.id, name: s.name, methods: s.methods, best: run.method, delivering: run.tried.filter(t => t.ok).map(t => t.method), results: run.tried,
-            items: run.ok ? sourceRows(s, run.hit, Date.now()).length : 0, renderConfigured: renderConfigured(env) });
+            items: run.ok ? (run.hit.rows || sourceRows(s, run.hit, Date.now())).length : 0, renderConfigured: renderConfigured(env) });
         }
         if (path === '/sources/export' && req.method === 'GET') {
           const rows = ((await env.MIND_DB.prepare('SELECT * FROM sources ORDER BY tier, name').all()).results || []).map(sourceRow);
@@ -8456,6 +9204,8 @@ async function handleScheduled(env) {
   // Signals: the clients' own LinkedIn and Meta pages, 6-hourly, so the view is
   // never empty when someone opens it. X and Reddit come from the desktop agent.
   try { await signalsCron(env); } catch (e) {}
+  // Social capture: Bluesky, Mastodon, X timelines, YouTube comments and captions, petitions (two-hourly).
+  try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
   // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
   try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {
