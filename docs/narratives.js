@@ -13,7 +13,7 @@
     };
     return;
   }
-  const { html, call, toastMsg, fmtN, ago, Console, tailJob } = window.AXUI;
+  const { html, call, toastMsg, fmtN, ago, Console, tailJob, useGoto } = window.AXUI;
   const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
   const PLATFORMS = ['news', 'reddit', 'x', 'bluesky', 'mastodon', 'youtube', 'substack', 'linkedin', 'meta', 'forum'];
@@ -163,6 +163,7 @@
     }, [f.days, f.issue, f.platform, f.status, f.side, f.sort, f.q]);
     useEffect(() => { loadStatus(); return () => { if (stopRef.current) stopRef.current(); }; }, [loadStatus]);
     useEffect(() => { load(); }, [load]);
+    useGoto('narratives', p => { if (p.id) setPick(String(p.id)); if (p.issue != null || p.status || p.side || p.platform) setF(cur => Object.assign({}, cur, p.issue != null ? { issue: String(p.issue) } : {}, p.status ? { status: String(p.status) } : {}, p.side ? { side: String(p.side) } : {}, p.platform ? { platform: String(p.platform) } : {})); });
     const run = async () => {
       setBusy(true);
       try { const d = await call('/narratives/run', {}); if (stopRef.current) stopRef.current(); setJob({ id: d.job, status: 'running', lines: [] }); stopRef.current = tailJob(d.job, j => setJob(j), j => { setJob(j); setBusy(false); loadStatus(); load(); }); }

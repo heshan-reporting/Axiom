@@ -246,6 +246,7 @@
     }, [f.days, f.platform, f.region, f.issue, f.kind]);
     useEffect(() => { loadStatus(); return () => { if (stopRef.current) stopRef.current(); }; }, [loadStatus]);
     useEffect(() => { load(); }, [load]);
+    window.AXUI.useGoto('sentiment', p => { if (p.id) { setShowReg(false); setTopic(null); setPick(String(p.id)); } if (p.issue != null || p.platform || p.region) setF(cur => Object.assign({}, cur, p.issue != null ? { issue: String(p.issue) } : {}, p.platform ? { platform: String(p.platform) } : {}, p.region ? { region: String(p.region) } : {})); });
     const list = useMemo(() => {
       const by = { n: (a, b) => b.n - a.n, score: (a, b) => a.score - b.score, neg: (a, b) => (pct(b.neg, b.n) - pct(a.neg, a.n)) || (b.n - a.n), pos: (a, b) => (pct(b.pos, b.n) - pct(a.pos, a.n)) || (b.n - a.n), change: (a, b) => Math.abs(b.change || 0) - Math.abs(a.change || 0), name: (a, b) => a.name.localeCompare(b.name) };
       return (board || []).slice().sort(by[sort] || by.n);

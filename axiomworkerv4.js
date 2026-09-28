@@ -6254,6 +6254,86 @@ async function narrativesStatus(env) {
   return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN };
 }
 
+// ============================================================================
+// THE OVERVIEW - the front page: what changed, why it matters, where the
+// evidence is. Nothing here is computed fresh from raw text; it is the
+// narratives, stances, alerts, sources and rows the other modules already
+// keep, read together for one window and ranked by movement.
+// ============================================================================
+const OVERVIEW_KINDS = ['news', 'reddit_thread', 'sig_thread', 'reddit_comment', 'sig_comment', 'comments'];
+const OVERVIEW_LATEST_KINDS = ['news', 'reddit_thread', 'sig_thread'];
+/** Rows tagged with each client issue in the window against that issue's own
+ *  average for the same window length over the rest of the last fourteen days. */
+async function overviewIssues(env, now, hours) {
+  const marks = OVERVIEW_KINDS.map(() => '?').join(',');
+  const since14 = now - 14 * 86400000, sinceH = now - hours * 3600000;
+  const rows = (await env.MIND_DB.prepare("SELECT je.value id, SUM(a.ts>?) recent, COUNT(*) n14, SUM(a.ts>? AND a.kind='news') news_recent FROM arc_items a, json_each(json_extract(a.meta,'$.issues')) je WHERE a.ts>? AND a.kind IN (" + marks + ') GROUP BY je.value').bind(sinceH, sinceH, since14, ...OVERVIEW_KINDS).all()).results || [];
+  const byId = {}; rows.forEach(r => { byId[r.id] = r; });
+  const windows = Math.max(1, (14 * 24 - hours) / hours);
+  return CLIENT_ISSUES.map(ci => {
+    const r = byId[ci.id] || {}; const recent = Number(r.recent) || 0; const n14 = Number(r.n14) || 0;
+    const base = Math.round(((n14 - recent) / windows) * 10) / 10;
+    const ratio = base > 0 ? Math.round((recent / base) * 10) / 10 : (recent ? null : 0);
+    return { id: ci.id, label: ci.label, client: ci.client, ns: ci.ns, recent, news: Number(r.news_recent) || 0, base, ratio, n14 };
+  }).sort((a, b) => ((b.recent - b.base) - (a.recent - a.base)) || (b.recent - a.recent));
+}
+/** The newest rows on any client issue: a headline, a thread, a post. */
+async function overviewLatest(env, now, hours, limit) {
+  const marks = OVERVIEW_LATEST_KINDS.map(() => '?').join(',');
+  const rows = (await env.MIND_DB.prepare("SELECT id, kind, src, title, url, ts, tone, meta FROM arc_items WHERE ts>? AND kind IN (" + marks + ") AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0 ORDER BY ts DESC LIMIT ?").bind(now - hours * 3600000, ...OVERVIEW_LATEST_KINDS, limit).all()).results || [];
+  return rows.map(r => {
+    const m = pjs(r.meta, {});
+    return { id: r.id, kind: r.kind, platform: platformOf(r.kind, m), src: r.src || '', channel: m.sub ? 'r/' + m.sub : String(m.page_name || m.outlet || m.source || r.src || '').slice(0, 60), title: String(r.title || '').replace(/^Comment on:\s*/i, '').slice(0, 200), url: /^https?:/.test(r.url || '') ? r.url : '', ts: r.ts, tone: r.tone == null ? null : Number(r.tone), issues: (Array.isArray(m.issues) ? m.issues : []).slice(0, 3), score: Number(m.score) || 0, comments: Number(m.comments) || 0 };
+  });
+}
+function overviewAlertRow(r) {
+  return { id: r.id, ns: r.ns, client: r.client, issue: r.issue, label: r.label, severity: r.severity, hot: r.hot, baseline: r.baseline, ratio: r.ratio, srcs: r.srcs, tone: r.tone, detected: r.detected_ts, notified: r.notified_ts, acked: r.acked_ts, drafted: r.drafted_ts, open: !r.acked_ts, angle: r.angle ? (pjs(r.angle, null) || null) : null };
+}
+async function overview(env, opts) {
+  opts = opts || {};
+  const now = Date.now();
+  const days = Math.min(Math.max(parseFloat(opts.days) || 1, 0.25), 7);
+  const hours = Math.round(days * 24);
+  const wholeDays = String(Math.max(1, Math.ceil(days)));
+  await ensureArchive(env); await ensureSentiment(env); await ensureNarratives(env); await ensureSentinel(env); await ensureSources(env);
+  const soft = async (fn, fallback) => { try { return await fn(); } catch (e) { return Object.assign({}, fallback || {}, { error: String((e && e.message) || e).slice(0, 160) }); } };
+  const [narr, sent, sentSt, narrSt, alertRows, issues, latest, src, tot] = await Promise.all([
+    soft(() => narrativesList(env, { days: String(Math.max(4, Math.ceil(days))), limit: 80 }), { narratives: [] }),
+    soft(() => sentimentEntities(env, { days: wholeDays }), { entities: [] }),
+    soft(() => sentimentStatus(env), {}),
+    soft(() => narrativesStatus(env), {}),
+    soft(async () => ({ rows: (await env.MIND_DB.prepare('SELECT * FROM arc_alerts WHERE detected_ts>? ORDER BY detected_ts DESC LIMIT 30').bind(now - 7 * 86400000).all()).results || [] }), { rows: [] }),
+    soft(() => overviewIssues(env, now, hours), []),
+    soft(() => overviewLatest(env, now, hours, 30), []),
+    soft(() => sourcesList(env, {}), { summary: {} }),
+    soft(async () => (await env.MIND_DB.prepare("SELECT COUNT(*) n, SUM(kind='news') news FROM arc_items WHERE ts>? AND kind IN (" + OVERVIEW_KINDS.map(() => '?').join(',') + ") AND json_array_length(COALESCE(json_extract(meta,'$.issues'),'[]'))>0").bind(now - hours * 3600000, ...OVERVIEW_KINDS).first()) || {}, {}),
+  ]);
+  const sinceH = now - hours * 3600000;
+  const narrs = (narr.narratives || []).map(n => ({ id: n.id, label: n.label, client: n.client || '', issues: n.issues || [], issueLabels: n.issueLabels || [], ns: n.ns, side: n.side, n: n.n, n24: n.n24, nprev: n.nprev, velocity: n.velocity, status: n.status, first_ts: n.first_ts, first_platform: n.first_platform, first_channel: n.first_channel, last_ts: n.last_ts, platforms: Object.keys(n.platforms || {}), sentiment: n.sentiment || {}, alerted: !!n.alerted, counter: n.counter || '', proponents: n.proponents || '' }));
+  const moving = narrs.filter(n => n.n24 > 0 && (n.status === 'emerging' || n.status === 'growing' || n.status === 'new' || n.first_ts > sinceH || (n.nprev && n.velocity >= 1.5))).sort((a, b) => (b.n24 - a.n24) || (b.velocity - a.velocity)).slice(0, 10);
+  const fading = narrs.filter(n => n.status === 'fading' && n.n >= 5).slice(0, 4);
+  const ents = (sent.entities || []).filter(e => e.n >= 3);
+  const movers = ents.filter(e => e.change != null && e.prev && e.prev.n >= 3).sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, 8);
+  const loudest = ents.slice().sort((a, b) => b.n - a.n).slice(0, 6);
+  const hostileTo = ents.filter(e => e.side === 'client' && e.n >= 5).sort((a, b) => a.score - b.score).slice(0, 4);
+  const alerts = (alertRows.rows || []).map(overviewAlertRow);
+  const open = alerts.filter(a => a.open);
+  const s = src.summary || {};
+  const totals = { rows: Number(tot.n) || 0, news: Number(tot.news) || 0, tagged: (issues || []).reduce((a, i) => a + (i.recent || 0), 0) };
+  let social = {}; try { social = JSON.parse((await kvGet(env.AXIOM_KV, 'social_last')) || '{}'); } catch (e) { social = {}; }
+  const socialRows = Object.keys(social || {}).filter(k => social[k] && typeof social[k] === 'object').map(k => { const v = social[k]; return { platform: k, ok: v.ok !== false && !v.error, filed: v.filed != null ? v.filed : v.added != null ? v.added : v.n != null ? v.n : null, at: v.at || v.ts || null, error: String(v.error || '').slice(0, 120) }; });
+  return {
+    ok: true, at: now, days, hours,
+    alerts: { open, recent: alerts.slice(0, 10), openCount: open.length },
+    narratives: { moving, fading, live: narrSt.live || 0, emerging: narrSt.emerging || 0, growing: narrSt.growing || 0, placed24: narrSt.placed24 || 0, backlog: narrSt.backlog || 0, error: narr.error || narrSt.error || '' },
+    sentiment: { movers, loudest, hostileTo, judged24: sentSt.classified24 || 0, backlog: sentSt.backlog || 0, budget: sentSt.budget || null, configured: sentSt.configured !== false, error: sent.error || sentSt.error || '' },
+    issues: Array.isArray(issues) ? issues : [], totals,
+    latest: Array.isArray(latest) ? latest : [],
+    collection: { sources: { total: s.total || 0, delivering: s.ok || 0, failing: s.failing || 0, dead: s.dead || 0, unverified: s.unverified || 0, items24: s.items24 || 0, lastSweep: src.lastSweep || null, error: src.error || '' }, social: socialRows },
+    errors: [narr.error, sent.error, sentSt.error, narrSt.error, alertRows.error, issues.error, latest.error, src.error, tot.error].filter(Boolean),
+  };
+}
+
 // ==============================================================================
 // ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
 // ==============================================================================
@@ -6761,7 +6841,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview') && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -6769,7 +6849,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview';
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -7869,6 +7949,15 @@ export default {
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
+    }
+
+    // -- The overview: what changed, why it matters, where the evidence is (read) --
+    //    GET /overview?days=   alerts open, narratives moving, entities that moved, issues against their baseline, the latest rows, collection health
+    if (path === '/overview') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      if (req.method !== 'GET') return jsonResp({ error: 'not_found' }, 404);
+      try { return jsonResp(await overview(env, { days: reqUrl.searchParams.get('days') })); }
+      catch (e) { return jsonResp({ ok: false, error: 'overview_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
     // -- Narratives: the stories the conversation keeps telling, with origin, spread, pace, split and evidence --

@@ -25,6 +25,7 @@
 <script src="sources.js" defer></script>
 <script src="sentiment.js" defer></script>
 <script src="narratives.js" defer></script>
+<script src="overview.js" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -1704,6 +1705,49 @@ body.kiosk .kprog{display:block}
 .cc-err{padding:16px;border-radius:14px;background:rgba(255,84,112,.1);border:1px solid rgba(255,84,112,.3);color:#ffb3c0;font-size:13px;line-height:1.5}
 .rbtn-cc.on{color:var(--amb)}
 @media(max-width:640px){.cc-hero{padding:24px 20px}.cc-composer{padding:16px}}
+/* ═══ THE FRONT PAGE — what changed, why it matters, the evidence (docs/overview.js) ═══ */
+.ovpage{max-width:1400px}
+.ov-head{display:flex;align-items:center;gap:14px;padding:2px 0 10px;border-bottom:1px solid var(--x-line1);margin-bottom:6px;font-size:12.5px;color:var(--t1)}
+.ov-head select{font:inherit;color:var(--t0);background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:4px;padding:2px 6px}
+.ov-head .btn{margin-left:auto}
+.ov-sec{padding:12px 0 4px;border-bottom:1px solid var(--x-line1)}
+.ov-sechead{display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.ov-title{font-family:var(--fm);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--t2);font-weight:600}
+.ov-count{font-family:var(--fm);font-size:11px;color:var(--t0);background:var(--x-sur3);border-radius:4px;padding:0 6px}
+.ov-why{font-size:11.5px;color:var(--t3)}
+.ov-empty{font-size:12.5px;color:var(--t2);padding:4px 0 8px}
+.ov-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.ov-table th{font-family:var(--fm);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);text-align:left;padding:4px 8px 6px;border-bottom:1px solid var(--x-line1);font-weight:500}
+.ov-table td{padding:6px 8px;border-bottom:1px solid var(--hair);vertical-align:top;color:var(--t1);line-height:1.4}
+.ov-table td b{color:var(--t0);font-weight:600}
+.ov-table tr:last-child td{border-bottom:0}
+.ov-table .num{text-align:right;font-family:var(--fm);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ov-table th.num{text-align:right}
+.ov-table tr.hot td{background:var(--x-neg-dim)}
+.ovpage .neg{color:var(--x-neg)} .ovpage .pos{color:var(--x-pos)}
+.ov-dim{color:var(--t3);font-size:11.5px}
+.ov-when{font-family:var(--fm);font-size:11px;color:var(--t3);white-space:nowrap}
+.ov-go{text-align:right;white-space:nowrap}
+.ov-link{background:none;border:0;padding:0;color:var(--x-ac-hi);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.ov-link:hover{color:var(--t0)}
+.ov-pace{font-family:var(--fm);font-size:11px;color:var(--t2)} .ov-pace.up{color:var(--x-neg)}
+.ov-lbl{max-width:380px}
+.ov-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+@media(max-width:1100px){.ov-cols{grid-template-columns:1fr}}
+.ov-barcell{width:24%;min-width:140px}
+.ov-bar{position:relative;display:block;height:8px;background:var(--x-sur2);border-radius:2px;margin-top:5px}
+.ov-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--x-ac);border-radius:2px;opacity:.85}
+.ov-bar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--t0);opacity:.7}
+.ov-lines{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--t1);padding-bottom:8px}
+.ov-lines b{color:var(--t0)}
+.ov-foot{font-size:12px;color:var(--t2);padding:6px 8px}
+.ov-latest{display:flex;flex-direction:column}
+.ov-row{display:grid;grid-template-columns:40px 160px 1fr auto;gap:12px;align-items:baseline;padding:5px 8px;border-bottom:1px solid var(--hair);font-size:12.5px}
+.ov-row:last-child{border-bottom:0}
+.ov-chan{color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px} .ov-chan i{font-style:normal;color:var(--t3)}
+.ov-tx a{color:var(--t0);text-decoration:none} .ov-tx a:hover{text-decoration:underline}
+.ov-tags{display:flex;gap:6px;align-items:center;white-space:nowrap}
+.ov-tags em{font-style:normal;font-family:var(--fm);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--t2);border:1px solid var(--x-line1);border-radius:3px;padding:1px 5px}
 </style>
 </head>
 <body>
@@ -1752,7 +1796,7 @@ body.kiosk .kprog{display:block}
     <header class="top">
       <div>
         <button class="backc" id="backc" disabled onclick="go('command')" aria-label="Back to the national board" title="Back to the national board"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-        <div class="top-title" id="vtitle">National Pulse</div>
+        <div class="top-title" id="vtitle">What changed</div>
         <span class="vtag" id="vtag"></span>
       </div>
       <div class="spacer" style="flex:1"></div>
@@ -1768,6 +1812,9 @@ body.kiosk .kprog{display:block}
 
       <!-- ═══ COMMAND CENTER ═══ -->
       <section class="view on" id="v-command">
+        <div id="overview-root"></div>
+        <!-- the former hero: ticker, attention radar, gauge and the insight cards. Kept hidden so the loaders that address their ids keep working; the overview island above answers the same questions as tables. -->
+        <div class="ov-legacy" hidden aria-hidden="true">
         <div class="ticker"><span class="ticker-b">BREAKING WIRE</span><div class="ticker-vp"><div class="ticker-tk" id="ticker"><a>Loading the national wire…</a></div></div></div>
 
         <!-- ═══ HERO — attention profile · pulse gauge · coverage volume ═══ -->
@@ -1903,6 +1950,7 @@ body.kiosk .kprog{display:block}
           </div>
         </div>
 
+        </div>
         <div class="panel gspan">
           <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>Priority Desk</div><span class="ptag" id="pri-tag">MONITORING</span></div>
           <div class="note" style="margin:0 0 12px">Stories AXIOM judges important — cross-outlet pickup, breaking keywords, coverage spikes, tone extremes. Draft a comms package and push it to ClickUp.</div>
@@ -1918,6 +1966,7 @@ body.kiosk .kprog{display:block}
           <span id="narrative"></span><span id="sov-total"></span><span id="sov-stack"></span><span id="ptybars"></span><span id="sigs"></span><span id="er-board"></span>
         </div>
 
+        <div class="ov-legacy" hidden aria-hidden="true">
         <div class="grid2 gspan">
           <div class="panel">
             <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Share of Voice · Trend</div><span class="ptag" id="hist-tag">ACCUMULATING</span></div>
@@ -1929,6 +1978,7 @@ body.kiosk .kprog{display:block}
           </div>
         </div>
 
+        </div>
         <div class="panel">
           <div class="phead"><div class="ptitle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20"/><path d="M4 7h16v13H4z"/><path d="M9 11h6"/></svg>Top Stories</div><span class="ptag" id="cl-tag">CROSS-OUTLET CLUSTERS</span></div>
           <div id="clusters"><div class="skel" style="height:52px;margin-bottom:8px"></div><div class="skel" style="height:52px"></div></div>
@@ -2796,6 +2846,7 @@ function go(v){
   if(v==='sources'&&typeof sourcesInit==='function')sourcesInit();
   if(v==='sentiment'&&typeof sentimentInit==='function')sentimentInit();
   if(v==='narratives'&&typeof narrativesInit==='function')narrativesInit();
+  if(v==='command'&&typeof overviewInit==='function')overviewInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */

@@ -84,5 +84,25 @@
     tick();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
   }
-  window.AXUI = { html, call, blobUrl, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob };
+  /* Drill-down between views. goto(view, params) opens the view and hands it
+     the params (an id to open, a filter to set); an island reads them with
+     consume(view) when it mounts and listens for 'ax:goto' when it is already
+     mounted. Params never carry text the user did not choose. */
+  const pending = {};
+  function goto(view, params) {
+    pending[view] = Object.assign({}, params || {}, { at: Date.now() });
+    if (typeof go === 'function') go(view);
+    setTimeout(() => { window.dispatchEvent(new CustomEvent('ax:goto', { detail: { view, params: pending[view] || {} } })); }, 30);
+  }
+  function consume(view) { const p = pending[view]; delete pending[view]; return p || null; }
+  /* useGoto(view, apply): apply(params) runs for the pending params at mount and for every later goto to this view. */
+  function useGoto(view, apply) {
+    useEffect(() => {
+      const p = consume(view); if (p) apply(p);
+      const h = e => { if (e.detail && e.detail.view === view) { consume(view); apply(e.detail.params || {}); } };
+      window.addEventListener('ax:goto', h);
+      return () => window.removeEventListener('ax:goto', h);
+    }, []);
+  }
+  window.AXUI = { html, call, blobUrl, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto };
 })();
