@@ -33,7 +33,7 @@
   function Bar({ score }) {
     const v = Math.max(-1, Math.min(1, Number(score) || 0));
     const w = Math.abs(v) * 50;
-    return html`<span class="sn-bar" title=${'net stance ' + signed(v) + ' (-1 all critical, +1 all supportive)'}><i style=${{ left: v < 0 ? (50 - w) + '%' : '50%', width: w + '%', background: v < 0 ? '#F0908B' : '#7EE0AE' }}></i></span>`;
+    return html`<span class="sn-bar" title=${'net stance ' + signed(v) + ' (-1 all critical, +1 all supportive)'}><i style=${{ left: v < 0 ? (50 - w) + '%' : '50%', width: w + '%', background: v < 0 ? 'var(--x-neg)' : 'var(--x-pos)' }}></i></span>`;
   }
   function Kind({ e }) { return html`<span class=${'sn-kind ' + (e.side || '')} title=${e.side === 'client' ? 'A client or its people' : e.side === 'opponent' ? 'An opponent' : ''}>${e.side === 'client' ? 'client' : e.side === 'opponent' ? 'opponent' : (KIND_LABEL[e.kind] || e.kind)}</span>`; }
   function Dot({ party }) { const c = PARTY_COLOUR[party]; return c ? html`<span class="sn-dot" style=${{ background: c }} title=${party}></span>` : null; }
@@ -48,7 +48,7 @@
     return html`<svg class="sn-chart" viewBox=${'0 0 ' + W + ' ' + H} preserveAspectRatio="none" role="img" aria-label="Volume and net stance by day">
       <line x1="0" y1=${H / 2} x2=${W} y2=${H / 2} stroke="rgba(255,255,255,.18)" stroke-dasharray="3 3" />
       ${points.map((p, i) => html`<rect key=${i} x=${x(i)} y=${H - pad - (p.n / maxN) * (H * 0.5)} width=${bw} height=${(p.n / maxN) * (H * 0.5)} fill=${p.score < -0.15 ? 'rgba(240,144,139,.35)' : p.score > 0.15 ? 'rgba(126,224,174,.35)' : 'rgba(255,255,255,.12)'}><title>${new Date(p.t).toISOString().slice(0, 10) + ': ' + p.n + ' mentions, net ' + signed(p.score)}</title></rect>`)}
-      <path d=${line} fill="none" stroke=${tone ? '#8FB6FF' : '#F5B942'} stroke-width="2" />
+      <path d=${line} fill="none" stroke=${tone ? 'var(--x-ac-hi)' : 'var(--x-warn)'} stroke-width="2" />
     </svg>`;
   }
 
@@ -59,10 +59,10 @@
     return html`<div class="src-strip">
       <div class="src-stats">
         <div class="src-stat"><div class="k">Stances, 7 days</div><div class="v">${fmtN(s.mentions7 || 0)}</div><div class="s">${fmtN(s.classified7 || 0)} rows judged</div></div>
-        <div class="src-stat"><div class="k">Critical</div><div class="v" style=${{ color: critical != null && critical >= 40 ? '#F0908B' : undefined }}>${critical == null ? '-' : critical + '%'}</div><div class="s">${fmtN(s.neg7 || 0)} critical mentions</div></div>
-        <div class="src-stat"><div class="k">Supportive</div><div class="v" style=${{ color: supportive != null && supportive >= 30 ? '#7EE0AE' : undefined }}>${supportive == null ? '-' : supportive + '%'}</div><div class="s">${fmtN(s.pos7 || 0)} supportive mentions</div></div>
+        <div class="src-stat"><div class="k">Critical</div><div class="v" style=${{ color: critical != null && critical >= 40 ? 'var(--x-neg)' : undefined }}>${critical == null ? '-' : critical + '%'}</div><div class="s">${fmtN(s.neg7 || 0)} critical mentions</div></div>
+        <div class="src-stat"><div class="k">Supportive</div><div class="v" style=${{ color: supportive != null && supportive >= 30 ? 'var(--x-pos)' : undefined }}>${supportive == null ? '-' : supportive + '%'}</div><div class="s">${fmtN(s.pos7 || 0)} supportive mentions</div></div>
         <div class="src-stat"><div class="k">Judged, 24h</div><div class="v">${fmtN(s.classified24 || 0)}</div><div class="s">${fmtN(s.skipped24 || 0)} rows mentioned nothing</div></div>
-        <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 200 ? '#F5B942' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows that mention an entity, of the newest ${s.unclassifiedScanned || 0} unjudged</div></div>
+        <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 200 ? 'var(--x-warn)' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows that mention an entity, of the newest ${s.unclassifiedScanned || 0} unjudged</div></div>
         <div class="src-stat"><div class="k">Budget today</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.configured ? 'Claude calls, ' + (b.model || '') : 'ANTHROPIC_API_KEY is not set'}</div></div>
       </div>
       <div class="src-actions">
@@ -91,10 +91,10 @@
       <tbody>${list.map(e => html`<tr key=${e.id} class=${'sn-row' + (pick === e.id ? ' on' : '')} onClick=${() => onPick(e.id)}>
         <td class="sn-name"><div class="n"><${Dot} party=${e.party} />${e.name}<${Kind} e=${e} /></div>${e.role ? html`<div class="m">${e.role}</div>` : null}</td>
         <td class="num">${fmtN(e.n)}</td>
-        <td><${Bar} score=${e.score} /><span class="sn-score" style=${{ color: e.score < -0.15 ? '#F0908B' : e.score > 0.15 ? '#7EE0AE' : undefined }}>${signed(e.score)}</span></td>
-        <td class="num" style=${{ color: pct(e.neg, e.n) >= 50 ? '#F0908B' : undefined }}>${pct(e.neg, e.n)}%</td>
-        <td class="num" style=${{ color: pct(e.pos, e.n) >= 40 ? '#7EE0AE' : undefined }}>${pct(e.pos, e.n)}%</td>
-        <td class="num"><span class="sn-delta" style=${{ color: e.change == null ? 'var(--t3)' : e.change < -0.1 ? '#F0908B' : e.change > 0.1 ? '#7EE0AE' : undefined }} title=${e.prev ? 'previous window: ' + e.prev.n + ' mentions, net ' + signed(e.prev.score) : 'no mentions in the previous window'}>${e.change == null ? 'new' : signed(e.change)}</span></td>
+        <td><${Bar} score=${e.score} /><span class="sn-score" style=${{ color: e.score < -0.15 ? 'var(--x-neg)' : e.score > 0.15 ? 'var(--x-pos)' : undefined }}>${signed(e.score)}</span></td>
+        <td class="num" style=${{ color: pct(e.neg, e.n) >= 50 ? 'var(--x-neg)' : undefined }}>${pct(e.neg, e.n)}%</td>
+        <td class="num" style=${{ color: pct(e.pos, e.n) >= 40 ? 'var(--x-pos)' : undefined }}>${pct(e.pos, e.n)}%</td>
+        <td class="num"><span class="sn-delta" style=${{ color: e.change == null ? 'var(--t3)' : e.change < -0.1 ? 'var(--x-neg)' : e.change > 0.1 ? 'var(--x-pos)' : undefined }} title=${e.prev ? 'previous window: ' + e.prev.n + ' mentions, net ' + signed(e.prev.score) : 'no mentions in the previous window'}>${e.change == null ? 'new' : signed(e.change)}</span></td>
         <td><span class="src-name"><span class="m" style=${{ marginTop: 0 }}>${(e.platforms || []).slice(0, 4).map(p => (PLAT_LABEL[p.platform] || p.platform) + ' ' + p.n).join(' / ')}</span></span></td>
       </tr>`)}</tbody>
     </table>${!list.length ? html`<div class="empty" style=${{ padding: '30px 0' }}>No entity has been judged in this scope. Widen the window, or press Classify now.</div>` : null}</div>`;
@@ -138,7 +138,7 @@
       <div class="sn-drawerhead"><div><div class="sn-drawertitle"><${Dot} party=${e.party} /> ${e.name}</div><div class="src-name"><div class="m">${[KIND_LABEL[e.kind] || e.kind, e.role, e.side !== 'neutral' ? e.side + (e.ns ? ' (' + e.ns + ')' : '') : ''].filter(Boolean).join(' / ')}</div></div></div><button class="btn sm ghost" onClick=${onClose}>Close</button></div>
       <div class="sn-facts">
         <div><span class="k">Mentions</span>${fmtN(e.n)}</div>
-        <div><span class="k">Net stance</span><span style=${{ color: e.score < -0.15 ? '#F0908B' : e.score > 0.15 ? '#7EE0AE' : undefined }}>${signed(e.score)}</span></div>
+        <div><span class="k">Net stance</span><span style=${{ color: e.score < -0.15 ? 'var(--x-neg)' : e.score > 0.15 ? 'var(--x-pos)' : undefined }}>${signed(e.score)}</span></div>
         <div><span class="k">Change</span>${e.change == null ? 'new in this window' : signed(e.change) + ' vs previous ' + f.days + 'd'}</div>
         <div><span class="k">Critical</span>${pct(e.neg, e.n)}% (${e.neg})</div>
         <div><span class="k">Supportive</span>${pct(e.pos, e.n)}% (${e.pos})</div>

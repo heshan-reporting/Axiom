@@ -29,7 +29,7 @@
   function Split({ s }) {
     if (!s || !s.judged) return html`<span class="src-name"><span class="m" style=${{ marginTop: 0 }}>no rows judged yet</span></span>`;
     const neg = pct(s.neg, s.judged), pos = pct(s.pos, s.judged);
-    return html`<span class="nr-split" title=${s.neg + ' hostile, ' + s.neu + ' neutral, ' + s.pos + ' warm of ' + s.judged + ' rows judged'}><i style=${{ width: neg + '%', background: '#F0908B' }}></i><i style=${{ width: (100 - neg - pos) + '%', background: 'rgba(255,255,255,.14)' }}></i><i style=${{ width: pos + '%', background: '#7EE0AE' }}></i></span>`;
+    return html`<span class="nr-split" title=${s.neg + ' hostile, ' + s.neu + ' neutral, ' + s.pos + ' warm of ' + s.judged + ' rows judged'}><i style=${{ width: neg + '%', background: 'var(--x-neg)' }}></i><i style=${{ width: (100 - neg - pos) + '%', background: 'rgba(255,255,255,.14)' }}></i><i style=${{ width: pos + '%', background: 'var(--x-pos)' }}></i></span>`;
   }
   function Spread({ spread }) { return html`<span class="nr-spread">${(spread || []).slice(0, 6).map(s => html`<span key=${s.platform} title=${(PLAT_LABEL[s.platform] || s.platform) + ': first ' + aest(s.first) + ', ' + s.n + ' rows'}>${PLAT_LABEL[s.platform] || s.platform}</span>`)}</span>`; }
   function Status({ s }) { return html`<span class=${'nr-status ' + s}>${STATUS_LABEL[s] || s}</span>`; }
@@ -39,7 +39,7 @@
     if (!series || !series.length) return html`<div class="empty" style=${{ padding: '14px 0' }}>Nothing yet.</div>`;
     const W = 480, H = 100, pad = 6, maxN = Math.max(1, ...series.map(p => p.n));
     const bw = Math.max(3, (W - pad * 2) / series.length - 3);
-    const colour = { news: '#8FB6FF', reddit: '#FF6314', x: '#C9D2E0', bluesky: '#3B82F6', mastodon: '#8C8DFF', youtube: '#FF4E45', substack: '#FF6719', meta: '#5A8DEE', linkedin: '#4A9BE0', forum: '#7EE0AE' };
+    const colour = { news: 'var(--x-ac-hi)', reddit: '#FF6314', x: '#C9D2E0', bluesky: '#3B82F6', mastodon: '#8C8DFF', youtube: '#FF4E45', substack: '#FF6719', meta: '#5A8DEE', linkedin: '#4A9BE0', forum: 'var(--x-pos)' };
     return html`<svg class="sn-chart" style=${{ height: 100 }} viewBox=${'0 0 ' + W + ' ' + H} preserveAspectRatio="none" role="img" aria-label="Rows a day by channel">
       ${series.map((p, i) => { let y = H - pad; const x = pad + i * ((W - pad * 2) / series.length); return Object.keys(p.platforms).map(pl => { const h = (p.platforms[pl] / maxN) * (H - pad * 2); y -= h; return html`<rect key=${i + pl} x=${x} y=${y} width=${bw} height=${h} fill=${colour[pl] || 'rgba(255,255,255,.3)'}><title>${new Date(p.t).toISOString().slice(0, 10) + ' ' + (PLAT_LABEL[pl] || pl) + ': ' + p.platforms[pl]}</title></rect>`; }); })}
     </svg>`;
@@ -50,10 +50,10 @@
     return html`<div class="src-strip">
       <div class="src-stats">
         <div class="src-stat"><div class="k">Live narratives</div><div class="v">${fmtN(s.live || 0)}</div><div class="s">${fmtN(s.named || 0)} named, ${fmtN(s.placed24 || 0)} rows placed today</div></div>
-        <div class="src-stat"><div class="k">Emerging</div><div class="v" style=${{ color: (s.emerging || 0) ? '#F0908B' : undefined }}>${s.emerging || 0}</div><div class="s">new, ${s.alertMin || 6}+ rows within 48h</div></div>
-        <div class="src-stat"><div class="k">Growing</div><div class="v" style=${{ color: (s.growing || 0) ? '#F5B942' : undefined }}>${s.growing || 0}</div><div class="s">faster than yesterday</div></div>
+        <div class="src-stat"><div class="k">Emerging</div><div class="v" style=${{ color: (s.emerging || 0) ? 'var(--x-neg)' : undefined }}>${s.emerging || 0}</div><div class="s">new, ${s.alertMin || 6}+ rows within 48h</div></div>
+        <div class="src-stat"><div class="k">Growing</div><div class="v" style=${{ color: (s.growing || 0) ? 'var(--x-warn)' : undefined }}>${s.growing || 0}</div><div class="s">faster than yesterday</div></div>
         <div class="src-stat"><div class="k">Alerts sent</div><div class="v">${s.alerted || 0}</div><div class="s">to the client's Slack, once each</div></div>
-        <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 300 ? '#F5B942' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows of the last ${s.windowHours || 72}h not yet placed</div></div>
+        <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 300 ? 'var(--x-warn)' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows of the last ${s.windowHours || 72}h not yet placed</div></div>
         <div class="src-stat"><div class="k">Naming budget</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.embeddings ? 'embeddings' : 'term vectors (Workers AI unbound)'}${s.naming ? ', ' + (b.model || '') : ', ANTHROPIC_API_KEY not set'}</div></div>
       </div>
       ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button></div>` : null}
@@ -79,7 +79,7 @@
         <td><div class=${'lbl' + (n.label ? '' : ' un')}>${n.pinned ? html`<span title="pinned">* </span>` : null}${n.label || 'Unnamed: ' + (n.entities || []).slice(0, 3).join(', ')}</div><div class="m">${(n.issueLabels || []).join(', ')}${n.client ? ' / ' + n.client : ''}${n.proponents ? ' / ' + n.proponents : ''}</div></td>
         <td><${Side} s=${n.side} /></td>
         <td class="num" title=${n.n24 + ' in the last 24h, ' + n.nprev + ' the day before'}>${fmtN(n.n)}</td>
-        <td class="num"><span class="nr-pace" style=${{ color: n.nprev && n.velocity >= 2 ? '#F0908B' : n.nprev && n.velocity < 0.5 ? 'var(--t3)' : undefined }}>${pace(n)}</span></td>
+        <td class="num"><span class="nr-pace" style=${{ color: n.nprev && n.velocity >= 2 ? 'var(--x-neg)' : n.nprev && n.velocity < 0.5 ? 'var(--t3)' : undefined }}>${pace(n)}</span></td>
         <td><${Spread} spread=${n.spread} /></td>
         <td title=${aest(n.first_ts)}><span class="src-name"><span class="m" style=${{ marginTop: 0 }}>${(PLAT_LABEL[n.first_platform] || n.first_platform || '?') + (n.first_channel ? ' ' + n.first_channel : '')}</span></span><div class="m">${ago(n.first_ts)} ago</div></td>
         <td><${Split} s=${n.sentiment} /></td>
@@ -125,7 +125,7 @@
       <div class="sn-sub">Every row, newest first (the origin is marked)</div>
       <div>${(d.items || []).map(it => html`<div key=${it.id} class=${'nr-ev' + (d.origin && it.id === d.origin.id ? ' origin' : '')}>
         <div class="tx">${it.title ? html`<b>${it.title}</b> ` : null}${it.excerpt}</div>
-        <div class="m">${d.origin && it.id === d.origin.id ? html`<span style=${{ color: '#8FB6FF' }}>origin</span>` : null}<span>${PLAT_LABEL[it.platform] || it.platform}</span><span>${it.channel}</span>${it.mp ? html`<span>${it.mp.name}, ${it.mp.party}</span>` : null}<span title=${aest(it.ts)}>${ago(it.ts)} ago</span>${it.tone != null ? html`<span class=${'sn-st ' + (it.tone < -0.2 ? 'neg' : it.tone > 0.2 ? 'pos' : 'neu')}>tone ${it.tone}</span>` : null}<span>fit ${Math.round((it.sim || 0) * 100)}%</span>${/^https?:/.test(it.url || '') ? html`<a href=${it.url} target="_blank" rel="noopener">open</a>` : null}</div>
+        <div class="m">${d.origin && it.id === d.origin.id ? html`<span style=${{ color: 'var(--x-ac-hi)' }}>origin</span>` : null}<span>${PLAT_LABEL[it.platform] || it.platform}</span><span>${it.channel}</span>${it.mp ? html`<span>${it.mp.name}, ${it.mp.party}</span>` : null}<span title=${aest(it.ts)}>${ago(it.ts)} ago</span>${it.tone != null ? html`<span class=${'sn-st ' + (it.tone < -0.2 ? 'neg' : it.tone > 0.2 ? 'pos' : 'neu')}>tone ${it.tone}</span>` : null}<span>fit ${Math.round((it.sim || 0) * 100)}%</span>${/^https?:/.test(it.url || '') ? html`<a href=${it.url} target="_blank" rel="noopener">open</a>` : null}</div>
       </div>`)}</div>
       ${canWrite ? html`<div class="sn-sub">Operator</div>
         <div class="src-btns">

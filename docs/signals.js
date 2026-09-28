@@ -60,8 +60,8 @@
   ];
   /* Two tabs that are not a platform: what people are signing, and how every platform is read. */
   const EXTRA_TABS = [
-    { id: 'petitions', label: 'Petitions', unit: 'petition', channel: '', prefix: '', colour: '#F5B942', desktop: false, special: true, about: 'The parliaments\' e-petitions with signatures a day.' },
-    { id: 'coverage', label: 'Coverage', unit: 'platform', channel: '', prefix: '', colour: '#7EE0AE', desktop: false, special: true, about: 'Every platform: how it is read, what it needs, what it cannot reach.' },
+    { id: 'petitions', label: 'Petitions', unit: 'petition', channel: '', prefix: '', colour: 'var(--x-warn)', desktop: false, special: true, about: 'The parliaments\' e-petitions with signatures a day.' },
+    { id: 'coverage', label: 'Coverage', unit: 'platform', channel: '', prefix: '', colour: 'var(--x-pos)', desktop: false, special: true, about: 'Every platform: how it is read, what it needs, what it cannot reach.' },
   ];
   const P = id => PLATFORMS.find(p => p.id === id) || EXTRA_TABS.find(p => p.id === id) || PLATFORMS[0];
 
@@ -234,7 +234,7 @@
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       ${d && !list.length ? html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}><b>No petitions on file for this scope.</b> The cron reads the parliaments' e-petition pages once a day. ${canWrite ? 'Press the button to read them now.' : 'Ask a full-access user to read them now.'}</div>` : null}
       ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Parliament</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
-        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}</td><td class="num" style=${{ color: p.growth24 > 0 ? '#7EE0AE' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
+        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}</td><td class="num" style=${{ color: p.growth24 > 0 ? 'var(--x-pos)' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
       </tbody></table>` : null}
     </div>`;
   }
@@ -258,8 +258,8 @@
           <td class="det">${p.keys}</td>
           <td>${chip(p.configured, p.configured ? (p.id === 'youtube' && !p.apiKey ? 'on, no key' : 'on') : 'not set up')}</td>
           <td class="num" title=${(p.counts.threads7 || 0) + ' posts and ' + (p.counts.comments7 || 0) + ' comments in 7 days'}>${fmtN(p.counts.threads24)} / ${fmtN(p.counts.comments24)}</td>
-          <td class="det">${p.last ? html`<span style=${{ color: p.last.ok ? '#7EE0AE' : '#F0908B' }}>${p.last.ok ? 'ok' : 'failed'}</span> ${ago(p.last.at)} ago${p.last.threads != null ? ', ' + fmtN(p.last.threads) + ' posts, ' + fmtN(p.last.comments) + ' comments' : ''}${p.last.detail ? html`<div class="m">${p.last.detail}</div>` : null}` : '-'}</td>
-          <td class="det">${p.probe ? html`<span style=${{ color: p.probe.ok ? '#7EE0AE' : '#F0908B' }}>${p.probe.ok ? 'reachable' : 'failed'}</span> ${p.probe.ms}ms<div class="m">${p.probe.detail}</div>` : ''}</td>
+          <td class="det">${p.last ? html`<span style=${{ color: p.last.ok ? 'var(--x-pos)' : 'var(--x-neg)' }}>${p.last.ok ? 'ok' : 'failed'}</span> ${ago(p.last.at)} ago${p.last.threads != null ? ', ' + fmtN(p.last.threads) + ' posts, ' + fmtN(p.last.comments) + ' comments' : ''}${p.last.detail ? html`<div class="m">${p.last.detail}</div>` : null}` : '-'}</td>
+          <td class="det">${p.probe ? html`<span style=${{ color: p.probe.ok ? 'var(--x-pos)' : 'var(--x-neg)' }}>${p.probe.ok ? 'reachable' : 'failed'}</span> ${p.probe.ms}ms<div class="m">${p.probe.detail}</div>` : ''}</td>
         </tr>`)}
       </tbody></table>` : (!err ? html`<div class="empty">Loading coverage...</div>` : null)}
     </div>`;
@@ -469,8 +469,8 @@
       <div class="sen-strip aud-strip">
         <${Stat} k=${plat.unit === 'thread' ? 'Threads' : 'Posts'} v=${fmtN(threads.length)} s=${f.days + 'd in scope · ' + fmtN(mine.threads || 0) + ' on file'} />
         <${Stat} k="Comments held" v=${fmtN(mine.comments || 0)} s=${plat.label + ' comments on file'} />
-        <${Stat} k="Hostile" v=${hostileShare === null ? '—' : hostileShare + '%'} s=${(mine.hostile || 0) + ' hostile comments'} col=${hostileShare !== null && hostileShare >= 40 ? '#F0908B' : ''} />
-        <${Stat} k="Supportive" v=${mine.comments ? Math.round((mine.supportive || 0) / mine.comments * 100) + '%' : '—'} s=${(mine.supportive || 0) + ' supportive comments'} col=${mine.comments && (mine.supportive || 0) / mine.comments >= .3 ? '#7EE0AE' : ''} />
+        <${Stat} k="Hostile" v=${hostileShare === null ? '—' : hostileShare + '%'} s=${(mine.hostile || 0) + ' hostile comments'} col=${hostileShare !== null && hostileShare >= 40 ? 'var(--x-neg)' : ''} />
+        <${Stat} k="Supportive" v=${mine.comments ? Math.round((mine.supportive || 0) / mine.comments * 100) + '%' : '—'} s=${(mine.supportive || 0) + ' supportive comments'} col=${mine.comments && (mine.supportive || 0) / mine.comments >= .3 ? 'var(--x-pos)' : ''} />
         <${Stat} k=${plat.id === 'reddit' ? 'Busiest sub' : 'Busiest page'} v=${chanTop ? plat.prefix + chanTop.name : '—'} s=${chanTop ? chanTop.n + ' in scope' : 'nothing in scope'} />
       </div>
       <${Console} job=${job} onCancel=${cancel} canWrite=${canWrite} />
