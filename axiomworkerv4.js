@@ -6209,6 +6209,7 @@ async function narrativesList(env, f) {
   if (f.status) { w.push('status=?'); b.push(String(f.status).slice(0, 12)); }
   if (f.platform) { w.push('platforms LIKE ?'); b.push('%"' + String(f.platform).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
   if (f.side) { w.push('side=?'); b.push(String(f.side).slice(0, 12)); }
+  if (f.entity) { w.push('entities LIKE ?'); b.push('%"' + String(f.entity).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
   if (f.q) { w.push("(label LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR terms LIKE ? ESCAPE '\\')"); const l = arcLike(String(f.q).slice(0, 80)); b.push(l, l, l); }
   if (!f.all) w.push('n>=?'), b.push(2);
   const sort = f.sort === 'n' ? 'n DESC' : f.sort === 'new' ? 'first_ts DESC' : f.sort === 'latest' ? 'last_ts DESC' : 'velocity DESC, n DESC';
@@ -7973,7 +7974,7 @@ export default {
       try {
         await ensureArchive(env); await ensureSentiment(env); await ensureNarratives(env);
         const qf = k => reqUrl.searchParams.get(k) || '';
-        if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
+        if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), entity: qf('entity'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
         if (path === '/narratives/one' && req.method === 'GET') {
           const id = String(qf('id')).replace(/[^a-z0-9]/gi, '').slice(0, 24);
           const r = id ? await narrativeOne(env, id) : null;

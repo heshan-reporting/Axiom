@@ -11,7 +11,7 @@
     };
     return;
   }
-  const { html, call, fmtN, ago, goto } = window.AXUI;
+  const { html, call, fmtN, ago, goto, useScope } = window.AXUI;
   const { useState, useEffect, useCallback } = React;
   const PLAT = { news: 'News', reddit: 'Reddit', x: 'X', bluesky: 'Bluesky', mastodon: 'Mastodon', youtube: 'YouTube', substack: 'Substack', linkedin: 'LinkedIn', meta: 'Facebook', forum: 'Forums' };
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -134,21 +134,33 @@
     const [d, setD] = useState(null);
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
+    const [sc, setSc] = useState({ ns: '', issue: '' });
     const load = useCallback(async () => { setBusy(true); try { setD(await call('/overview?days=' + days)); setErr(''); } catch (e) { setErr(e.message); } setBusy(false); }, [days]);
     useEffect(() => { load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t); }, [load]);
+    useScope(s => { setSc({ ns: s.ns || '', issue: s.issue || '' }); if (s.days) setDays(Math.min(7, s.days)); });
     if (err && !d) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not read the overview.</b> ${err}</div>`;
     if (!d) return html`<div class="empty" style=${{ padding: '30px 0' }}>Reading what changed...</div>`;
+    /* The scope narrows the parts that carry a client or an issue; stances are per entity and stay whole. */
+    const inScope = (ns, issues) => (!sc.ns || ns === sc.ns) && (!sc.issue || (issues || []).indexOf(sc.issue) >= 0);
+    const issueNs = id => { const i = d.issues.find(x => x.id === id); return i ? i.ns : ''; };
+    const scoped = !sc.ns && !sc.issue ? d : Object.assign({}, d, {
+      alerts: Object.assign({}, d.alerts, { open: d.alerts.open.filter(a => inScope(a.ns, [a.issue])), recent: d.alerts.recent.filter(a => inScope(a.ns, [a.issue])) }),
+      narratives: Object.assign({}, d.narratives, { moving: d.narratives.moving.filter(n => inScope(n.ns, n.issues)), fading: d.narratives.fading.filter(n => inScope(n.ns, n.issues)) }),
+      issues: d.issues.filter(i => inScope(i.ns, [i.id])),
+      latest: d.latest.filter(r => (!sc.ns || (r.issues || []).map(issueNs).indexOf(sc.ns) >= 0) && (!sc.issue || (r.issues || []).indexOf(sc.issue) >= 0)),
+    });
+    const scopeWords = [sc.ns ? ((d.issues.find(i => i.ns === sc.ns) || {}).client || sc.ns) : '', sc.issue ? ((d.issues.find(i => i.id === sc.issue) || {}).label || sc.issue) : ''].filter(Boolean).join(' / ');
     return html`<div class="ovpage">
       <div class="ov-head">
-        <span class="ov-scope">What changed in the last <select value=${days} onChange=${e => setDays(+e.target.value)} aria-label="Window"><option value="0.25">6 hours</option><option value="1">24 hours</option><option value="3">3 days</option><option value="7">7 days</option></select> to ${aest(d.at)} AEST</span>
+        <span class="ov-scope">What changed in the last <select value=${days} onChange=${e => setDays(+e.target.value)} aria-label="Window"><option value="0.25">6 hours</option><option value="1">24 hours</option><option value="3">3 days</option><option value="7">7 days</option></select> to ${aest(d.at)} AEST${scopeWords ? html`<span class="ov-scoped">, scoped to ${scopeWords}</span>` : null}</span>
         <span class="ov-dim">${d.errors && d.errors.length ? d.errors.length + ' part' + (d.errors.length === 1 ? '' : 's') + ' failed: ' + d.errors.join('; ') : ''}</span>
         <button class="btn sm ghost" disabled=${busy} onClick=${load}>${busy ? 'Reading...' : 'Refresh'}</button>
       </div>
-      <${Alerts} a=${d.alerts} />
-      <${Narratives} n=${d.narratives} hours=${d.hours} />
+      <${Alerts} a=${scoped.alerts} />
+      <${Narratives} n=${scoped.narratives} hours=${d.hours} />
       <${Movers} s=${d.sentiment} days=${d.days} />
-      <${Issues} issues=${d.issues} hours=${d.hours} totals=${d.totals} />
-      <${Latest} rows=${d.latest} hours=${d.hours} />
+      <${Issues} issues=${scoped.issues} hours=${d.hours} totals=${d.totals} />
+      <${Latest} rows=${scoped.latest} hours=${d.hours} />
       <${Collection} c=${d.collection} n=${d.narratives} s=${d.sentiment} />
     </div>`;
   }

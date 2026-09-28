@@ -13,7 +13,7 @@
     };
     return;
   }
-  const { html, call, toastMsg, fmtN, ago, Console, tailJob, useGoto } = window.AXUI;
+  const { html, call, toastMsg, fmtN, ago, Console, tailJob, useGoto, useScope } = window.AXUI;
   const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
   const PLATFORMS = ['news', 'reddit', 'x', 'bluesky', 'mastodon', 'youtube', 'substack', 'linkedin', 'meta', 'forum'];
@@ -148,7 +148,7 @@
 
   function NarrativesApp() {
     const [status, setStatus] = useState(null);
-    const [f, setF] = useState({ days: 7, issue: '', platform: '', status: '', side: '', sort: 'velocity', q: '' });
+    const [f, setF] = useState({ days: 7, issue: '', platform: '', status: '', side: '', sort: 'velocity', q: '', ns: '', entity: '' });
     const [list, setList] = useState(null);
     const [pick, setPick] = useState('');
     const [job, setJob] = useState(null);
@@ -158,9 +158,10 @@
     const canWrite = !(window.AX_ROLE === 'read');
     const loadStatus = useCallback(async () => { try { setStatus(await call('/narratives/status')); } catch (e) { setErr(e.message); } }, []);
     const load = useCallback(async () => {
-      try { const d = await call('/narratives?days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&platform=' + encodeURIComponent(f.platform) + '&status=' + encodeURIComponent(f.status) + '&side=' + encodeURIComponent(f.side) + '&sort=' + f.sort + '&q=' + encodeURIComponent(f.q.trim()) + '&limit=120'); setList(d.narratives || []); setErr(''); }
+      try { const d = await call('/narratives?days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&platform=' + encodeURIComponent(f.platform) + '&status=' + encodeURIComponent(f.status) + '&side=' + encodeURIComponent(f.side) + '&sort=' + f.sort + '&q=' + encodeURIComponent(f.q.trim()) + '&ns=' + encodeURIComponent(f.ns || '') + '&entity=' + encodeURIComponent(f.entity || '') + '&limit=120'); setList(d.narratives || []); setErr(''); }
       catch (e) { setErr(e.message); setList([]); }
-    }, [f.days, f.issue, f.platform, f.status, f.side, f.sort, f.q]);
+    }, [f.days, f.issue, f.platform, f.status, f.side, f.sort, f.q, f.ns, f.entity]);
+    useScope(sc => setF(cur => Object.assign({}, cur, { issue: sc.issue || '', platform: sc.platform || '', ns: sc.ns || '', entity: sc.entity || '', days: sc.days || cur.days })));
     useEffect(() => { loadStatus(); return () => { if (stopRef.current) stopRef.current(); }; }, [loadStatus]);
     useEffect(() => { load(); }, [load]);
     useGoto('narratives', p => { if (p.id) setPick(String(p.id)); if (p.issue != null || p.status || p.side || p.platform) setF(cur => Object.assign({}, cur, p.issue != null ? { issue: String(p.issue) } : {}, p.status ? { status: String(p.status) } : {}, p.side ? { side: String(p.side) } : {}, p.platform ? { platform: String(p.platform) } : {})); });

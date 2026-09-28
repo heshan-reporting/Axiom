@@ -278,6 +278,8 @@
     const [data, setData] = useState(null);
     const [err, setErr] = useState(null);
     const [status, setStatus] = useState(null);
+    // the app-wide scope: issue and window narrow every tab; a channel that is a tab here switches to it
+    if (window.AXUI.useScope) window.AXUI.useScope(sc => { setF(x => Object.assign({}, x, { issue: sc.issue || '', days: sc.days || x.days })); if (sc.platform && PLATFORMS.some(p => p.id === sc.platform)) setTab(sc.platform); });
     const [busy, setBusy] = useState({ load: false, sweep: false, analyse: false, mind: false });
     const [sel, setSel] = useState(() => new Set());
     const [open, setOpen] = useState(null);

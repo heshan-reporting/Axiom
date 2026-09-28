@@ -220,6 +220,7 @@
     const [data, setData] = useState(null);
     const [err, setErr] = useState('');
     const [f, setF] = useState({ q: '', tier: '', juris: '', status: 'ok', issue: '', method: '', sort: 'items' });
+    window.AXUI.useScope(sc => setF(cur => Object.assign({}, cur, { issue: sc.issue || '', juris: sc.region && sc.region !== 'au' ? sc.region : (sc.region === 'au' ? 'au' : cur.juris) })));
     const [pick, setPick] = useState('');
     const [adding, setAdding] = useState(false);
     const [job, setJob] = useState(null);

@@ -104,5 +104,28 @@
       return () => window.removeEventListener('ax:goto', h);
     }, []);
   }
-  window.AXUI = { html, call, blobUrl, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto };
+  /* The scope: one set of filters the whole app reads - client (ns), client
+     issue, party or person (an entity id), channel, window in days (0 = each
+     view's own default) and region. Stored per browser; islands adopt it with
+     useScope(apply), which runs at mount and on every change. */
+  const SCOPE_KEY = 'ax_scope', SCOPE_DEF = { ns: '', issue: '', entity: '', platform: '', days: 0, region: '' };
+  let scopeCur = (() => { try { return Object.assign({}, SCOPE_DEF, JSON.parse(localStorage.getItem(SCOPE_KEY) || '{}')); } catch (e) { return Object.assign({}, SCOPE_DEF); } })();
+  function scope() { return scopeCur; }
+  function setScope(patch) {
+    scopeCur = Object.assign({}, scopeCur, patch || {});
+    Object.keys(scopeCur).forEach(k => { if (!(k in SCOPE_DEF)) delete scopeCur[k]; });
+    scopeCur.days = +scopeCur.days || 0;
+    try { localStorage.setItem(SCOPE_KEY, JSON.stringify(scopeCur)); } catch (e) {}
+    window.dispatchEvent(new CustomEvent('ax:scope', { detail: scopeCur }));
+  }
+  function useScope(apply) {
+    useEffect(() => {
+      apply(scopeCur);
+      const h = e => apply(e.detail || scopeCur);
+      window.addEventListener('ax:scope', h);
+      return () => window.removeEventListener('ax:scope', h);
+    }, []);
+  }
+  const scopeActive = s => Object.keys(SCOPE_DEF).filter(k => (s || scopeCur)[k]).length;
+  window.AXUI = { html, call, blobUrl, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto, scope, setScope, useScope, scopeActive, SCOPE_DEF };
 })();
