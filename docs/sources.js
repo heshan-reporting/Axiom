@@ -25,7 +25,7 @@
   const TIER_LABEL = { core: 'Core feed', national: 'National', metro: 'Metro', regional: 'Regional', broadcaster: 'Broadcaster', wire: 'Wire', independent: 'Independent', official: 'Official', party: 'Party', polling: 'Polling', thinktank: 'Think tank / peak body', sector: 'Sector press', podcast: 'Podcast', sweep: 'Google News sweep' };
   const JURIS_LABEL = { au: 'National', nsw: 'NSW', vic: 'VIC', qld: 'QLD', wa: 'WA', sa: 'SA', tas: 'TAS', act: 'ACT', nt: 'NT' };
   const METHOD_LABEL = { rss: 'feed', wp: 'WordPress API', json: 'JSON feed', sitemap: 'news sitemap', podcast: 'podcast directory', html: 'listing page', gnews: 'Google News', render: 'rendered page' };
-  const STATUS = { ok: ['Delivering', '#7EE0AE'], failing: ['Failing', '#F5B942'], dead: ['Dead', '#F0908B'], stale: ['Stale', '#C9A24A'], unverified: ['Not yet tried', '#8A93A6'], off: ['Off', '#5C6475'] };
+  const STATUS = { ok: ['Delivering', 'var(--x-pos)'], failing: ['Failing', 'var(--x-warn)'], dead: ['Dead', 'var(--x-neg)'], stale: ['Stale', '#C9A24A'], unverified: ['Not yet tried', '#8A93A6'], off: ['Off', '#5C6475'] };
   const STATUS_ORDER = { dead: 0, failing: 1, stale: 2, unverified: 3, ok: 4, off: 5 };
   const URL_FIELDS = [['rss', 'Feed (RSS/Atom)'], ['wp', 'WordPress site root'], ['json', 'JSON feed'], ['sitemap', 'News sitemap'], ['home', 'Listing page'], ['site', 'Site for Google News (site:)'], ['gnews', 'Google News query'], ['podcast', 'Podcast (Apple directory search)']];
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -40,19 +40,19 @@
   function Word({ status }) { const s = STATUS[status] || STATUS.unverified; return html`<span class="src-status" style=${{ color: s[1] }}><${Dot} status=${status} />${s[0]}</span>`; }
 
   /* The strip: what the estate looks like right now. */
-  function Summary({ data, onSweepDue, onSweepAll, canWrite, busy }) {
+  function Summary({ data, onSweepDue, onSweepAll, onStatus, canWrite, busy }) {
     const s = (data && data.summary) || {};
     const last = data && data.lastSweep;
     const by = s.byMethod || {};
     const methods = Object.keys(by).sort((a, b) => by[b] - by[a]).map(m => (METHOD_LABEL[m] || m) + ' ' + by[m]).join(' / ');
+    const quiet = [['failing', s.failing, 'failing'], ['dead', s.dead, 'dead'], ['stale', s.stale, 'stale'], ['unverified', s.unverified, 'not yet tried'], ['off', s.off, 'off']].filter(x => x[1]);
+    const notDelivering = quiet.reduce((a, x) => a + x[1], 0);
     return html`<div class="src-strip">
       <div class="src-stats">
-        <div class="src-stat"><div class="k">Sources</div><div class="v">${s.total || 0}</div><div class="s">${s.enabled || 0} on, ${s.core || 0} core feeds</div></div>
-        <div class="src-stat"><div class="k">Delivering</div><div class="v" style=${{ color: '#7EE0AE' }}>${s.ok || 0}</div><div class="s">${methods || 'no method has delivered yet'}</div></div>
-        <div class="src-stat"><div class="k">Failing</div><div class="v" style=${{ color: (s.failing || 0) ? '#F5B942' : undefined }}>${s.failing || 0}</div><div class="s">${s.stale || 0} stale (nothing for 48h)</div></div>
-        <div class="src-stat"><div class="k">Dead</div><div class="v" style=${{ color: (s.dead || 0) ? '#F0908B' : undefined }}>${s.dead || 0}</div><div class="s">${data && data.deadAfter ? data.deadAfter + ' failed sweeps in a row' : ''}</div></div>
-        <div class="src-stat"><div class="k">Not yet tried</div><div class="v">${s.unverified || 0}</div><div class="s">${data && data.perTick ? data.perTick + ' swept each half hour' : ''}</div></div>
+        <div class="src-stat"><div class="k">Delivering</div><div class="v" style=${{ color: 'var(--x-pos)' }}>${s.ok || 0}</div><div class="s">${methods || 'no method has delivered yet'}</div></div>
         <div class="src-stat"><div class="k">Items, 24h</div><div class="v">${s.items24 || 0}</div><div class="s">${last ? 'last sweep ' + ago(last.at) + ' ago: ' + last.succeeded + ' of ' + last.ran + ' delivered' : 'no sweep recorded yet'}</div></div>
+        <div class="src-stat"><div class="k">Sources</div><div class="v">${s.total || 0}</div><div class="s">${s.enabled || 0} on, ${s.core || 0} core feeds${data && data.perTick ? ', ' + data.perTick + ' swept each half hour' : ''}</div></div>
+        <div class="src-stat quiet"><div class="k">Not delivering</div><div class="v">${notDelivering}</div><div class="s">${quiet.length ? quiet.map((x, i) => html`<span key=${x[0]}>${i ? ' / ' : ''}<button class="src-link" onClick=${() => onStatus(x[0])}>${x[1]} ${x[2]}</button></span>`) : 'every source on the books delivers'}</div></div>
       </div>
       ${canWrite ? html`<div class="src-actions">
         <button class="btn sm" disabled=${busy} onClick=${onSweepDue}>Sweep what is due</button>
@@ -61,16 +61,17 @@
     </div>`;
   }
 
-  function DeadBanner({ list, onPick }) {
+  function DeadBanner({ list, onPick, shown }) {
     const dead = list.filter(s => s.status === 'dead');
     if (!dead.length) return null;
+    if (!shown) return html`<div class="src-banner quiet"><span class="m">${dead.length} source${dead.length === 1 ? ' has' : 's have'} stopped delivering (reported to Slack once).</span> <button class="src-link" onClick=${() => onPick('')}>Show them</button></div>`;
     return html`<div class="src-banner">
       <b>${dead.length} source${dead.length === 1 ? ' has' : 's have'} stopped delivering.</b> Reported to Slack once; probe to see every route, or switch off what is gone.
       <span class="src-banner-list">${dead.slice(0, 12).map(s => html`<button key=${s.id} class="src-link" onClick=${() => onPick(s.id)}>${s.name}</button>`)}${dead.length > 12 ? html`<span class="m">and ${dead.length - 12} more</span>` : null}</span>
     </div>`;
   }
 
-  function Filters({ f, setF, data, count }) {
+  function Filters({ f, setF, data, count, hidden }) {
     const set = (k, v) => setF(Object.assign({}, f, { [k]: v }));
     const tiers = (data && data.tiers) || Object.keys(TIER_LABEL);
     const juris = (data && data.juris) || Object.keys(JURIS_LABEL);
@@ -79,11 +80,11 @@
       <input class="src-q" placeholder="Search name, id or url" value=${f.q} onInput=${e => set('q', e.target.value)} />
       <select value=${f.tier} onChange=${e => set('tier', e.target.value)}><option value="">All tiers</option>${tiers.map(t => html`<option key=${t} value=${t}>${TIER_LABEL[t] || t}</option>`)}</select>
       <select value=${f.juris} onChange=${e => set('juris', e.target.value)}><option value="">All jurisdictions</option>${juris.map(j => html`<option key=${j} value=${j}>${JURIS_LABEL[j] || j}</option>`)}</select>
-      <select value=${f.status} onChange=${e => set('status', e.target.value)}><option value="">Any status</option>${Object.keys(STATUS).map(s => html`<option key=${s} value=${s}>${STATUS[s][0]}</option>`)}</select>
+      <select value=${f.status} onChange=${e => set('status', e.target.value)} aria-label="Status"><option value="ok">Delivering only</option><option value="">Every status</option>${Object.keys(STATUS).filter(s => s !== 'ok').map(s => html`<option key=${s} value=${s}>${STATUS[s][0]}</option>`)}</select>
       <select value=${f.issue} onChange=${e => set('issue', e.target.value)}><option value="">Any client issue</option>${issues().map(i => html`<option key=${i.id} value=${i.id}>${i.label || i.id}</option>`)}</select>
       <select value=${f.method} onChange=${e => set('method', e.target.value)}><option value="">Any method</option>${methods.map(m => html`<option key=${m} value=${m}>${METHOD_LABEL[m] || m}</option>`)}</select>
       <select value=${f.sort} onChange=${e => set('sort', e.target.value)}><option value="status">Sort: needs attention</option><option value="name">Sort: name</option><option value="items">Sort: items 24h</option><option value="latest">Sort: latest item</option><option value="fails">Sort: failures</option></select>
-      <span class="src-count">${count} shown</span>
+      <span class="src-count">${count} shown${hidden ? ', ' + hidden + ' hidden' : ''}</span>
     </div>`;
   }
 
@@ -97,7 +98,7 @@
       <td class="src-route"><span class=${'src-chip' + (s.method_ok ? ' on' : '')}>${route}</span>${others ? html`<span class="m">+${others} fallback${others === 1 ? '' : 's'}</span>` : null}</td>
       <td class="num" title=${s.latest_ts ? aestLong(s.latest_ts) : 'no dated item yet'}>${s.latest_ts ? ago(s.latest_ts) : '-'}</td>
       <td class="num">${s.items24 || 0}</td>
-      <td class="num" style=${{ color: s.fails >= 6 ? '#F0908B' : s.fails ? '#F5B942' : undefined }}>${s.fails || 0}</td>
+      <td class="num" style=${{ color: s.fails >= 6 ? 'var(--x-neg)' : s.fails ? 'var(--x-warn)' : undefined }}>${s.fails || 0}</td>
       <td><${Word} status=${s.status} /></td>
     </tr>`;
   }
@@ -218,7 +219,7 @@
   function SourcesApp() {
     const [data, setData] = useState(null);
     const [err, setErr] = useState('');
-    const [f, setF] = useState({ q: '', tier: '', juris: '', status: '', issue: '', method: '', sort: 'status' });
+    const [f, setF] = useState({ q: '', tier: '', juris: '', status: 'ok', issue: '', method: '', sort: 'items' });
     const [pick, setPick] = useState('');
     const [adding, setAdding] = useState(false);
     const [job, setJob] = useState(null);
@@ -257,11 +258,11 @@
     if (err) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load the registry.</b> ${err}</div>`;
     if (!data) return html`<div class="empty" style=${{ padding: '40px 0' }}>Loading the source registry...</div>`;
     return html`<div class="src-app">
-      <${Summary} data=${data} canWrite=${canWrite} busy=${busy} onSweepDue=${() => sweep(false)} onSweepAll=${() => sweep(true)} />
-      <${DeadBanner} list=${data.sources} onPick=${id => { setAdding(false); setPick(id); }} />
+      <${Summary} data=${data} canWrite=${canWrite} busy=${busy} onSweepDue=${() => sweep(false)} onSweepAll=${() => sweep(true)} onStatus=${st => setF(Object.assign({}, f, { status: st, sort: 'status' }))} />
+      <${DeadBanner} list=${data.sources} shown=${f.status !== 'ok'} onPick=${id => { if (!id) { setF(Object.assign({}, f, { status: 'dead', sort: 'status' })); return; } setAdding(false); setPick(id); }} />
       ${job ? html`<${Console} job=${job} title=${job.title} />` : null}
       <div class="src-toolbar">
-        <${Filters} f=${f} setF=${setF} data=${data} count=${list.length} />
+        <${Filters} f=${f} setF=${setF} data=${data} count=${list.length} hidden=${data.sources.length - list.length} />
         <div class="src-toolbtns">
           ${canWrite ? html`<button class="btn sm" onClick=${() => { setPick(''); setAdding(true); }}>Add source</button>` : null}
           <button class="btn sm ghost" onClick=${exportJson}>Export</button>
@@ -275,7 +276,9 @@
             <thead><tr><th>Source</th><th>Tier</th><th>Juris.</th><th>Delivers via</th><th class="num">Latest</th><th class="num">24h</th><th class="num">Fails</th><th>Status</th></tr></thead>
             <tbody>${list.map(s => html`<${Row} key=${s.id} s=${s} on=${s.id === pick} onPick=${id => { setAdding(false); setPick(id === pick ? '' : id); }} />`)}</tbody>
           </table>
-          ${!list.length ? html`<div class="empty" style=${{ padding: '30px 0' }}>No source matches these filters.</div>` : null}
+          ${!list.length ? (f.status === 'ok' && !f.q && !f.tier && !f.juris && !f.issue && !f.method
+            ? html`<div class="empty" style=${{ padding: '30px 0' }}>No source is delivering yet. The first sweeps after a deploy prove the routes; ${data.sources.length} sources are on the books. <button class="src-link" onClick=${() => setF(Object.assign({}, f, { status: '', sort: 'status' }))}>Show every source</button></div>`
+            : html`<div class="empty" style=${{ padding: '30px 0' }}>No source matches these filters.${f.status === 'ok' ? html` <button class="src-link" onClick=${() => setF(Object.assign({}, f, { status: '' }))}>Include sources that are not delivering</button>` : null}</div>`) : null}
         </div>
         ${adding ? html`<${AddForm} onAdded=${id => { setAdding(false); setPick(id); load(); }} onClose=${() => setAdding(false)} />`
           : picked ? html`<${Drawer} s=${picked} canWrite=${canWrite} renderReady=${!!data.renderConfigured} onClose=${() => setPick('')} onChanged=${load} onJob=${tail} />` : null}
