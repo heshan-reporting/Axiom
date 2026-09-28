@@ -110,6 +110,13 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   RENDER_URL        (optional alternative: an HTTP render service that takes
 #                      POST {url} and answers {html} - an AWS or Mac Playwright
 #                      box; RENDER_KEY is sent as X-Axiom-Key if set)
+#   SENTIMENT_MODEL   (plain text var, optional: the Claude model that judges
+#                      stance; default claude-haiku-4-5-20251001 for cost. Set
+#                      claude-sonnet-4-6 for finer judgement at about ten
+#                      times the price)
+#   SENTIMENT_DAILY_CALLS (plain text var, optional: Claude calls a day the
+#                      classifier may spend, default 300; each call judges up
+#                      to 20 rows)
 #   YOUTUBE_KEY       (optional: a YouTube Data API v3 key, free at 10,000 units
 #                      a day. Comments then come through the API (1 unit each)
 #                      instead of YouTube's web endpoint; search becomes

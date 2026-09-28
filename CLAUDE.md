@@ -449,6 +449,74 @@ X tab has **Read account timelines**. Harnesses in the session scratchpad:
 `social-worker.mjs` (16 route and cron tests over the SQLite-backed D1),
 `signals-browser.mjs` (7 browser tests).
 
+## Sentiment by party, person, organisation and topic (Phase 3)
+
+Every number is a sum over rows in D1 `sent_entities`, each pointing at the
+archive item it came from; nothing is a model's impression of the whole.
+
+- **The register.** D1 `entities(id, kind party|person|org|topic, name,
+  aliases json, party, role, side client|opponent|neutral, ns, active,
+  edited, source seed|mps|operator, note)`. `ENTITY_SEED` (98 rows: parties,
+  federal leaders and ministers, shadow ministers, premiers and chief
+  ministers, the clients and their spokespeople, their opponents,
+  institutions and industry, and topics such as fuel tax credits, gas
+  reservation, nuclear, 60-day dispensing) seeds it through
+  `ensureSentiment()`; the seed refreshes rows with `edited=0` when its hash
+  changes and never touches an edit. Aliases are plain words; plurals are
+  implied and whole-word boundaries are enforced (`entityMatcher()`, cached
+  five minutes). Bare surnames that are also words (Watt, Cook, Bowen, Ley,
+  Constable, Waters, Taylor, Allan) are deliberately not aliases. `POST
+  /entities/sync-mps` turns every sitting member and senator in `mps` into a
+  person entity (`mp_<qid>`, alias their name, party from the register's
+  label), updating only unedited rows. Routes: `GET /entities?kind=&q=&active=`
+  (with 7-day mention counts), `GET /entities/test?text=` (which entities a
+  sentence mentions, and its region), `POST /entities/add|update|delete`.
+- **The first pass and the verdicts.** `sentimentRun(env, {limit, hours,
+  platform, log})`: the newest unclassified rows of `SENT_KINDS` (news, the
+  Signals threads and comments, Reddit, Meta comments, forums, transcripts)
+  within `SENT_WINDOW_H` = 72h (`SENT_SCAN` = 400 looked at), matched with the
+  register; rows mentioning nothing are marked in `sent_items` with model
+  `none` so they are never looked at again; the rest are ordered by client
+  issue tags, client mentions and engagement, and the top `SENT_PER_TICK` =
+  80 go to Claude in batches of `SENT_BATCH` = 20 (`sentClassify`, model
+  `SENTIMENT_MODEL` or Haiku 4.5, one retry on invalid JSON). For each text
+  and each entity mentioned the model returns stance -1/0/1, intensity 1-3,
+  sarcasm and a twelve-word `why`; for the text an overall tone -1..1 and a
+  type news/opinion/question. Writes: `sent_items(item, kind, platform, src,
+  ts, tone, texttype, region, issues, entities, model)`, `sent_entities(item,
+  entity, stance, intensity, sarcasm, why, ts, platform, region, kind)`, and
+  the archive row's `tone` is replaced by the model's (rounded), so every
+  view that reads tone improves. `regionOf()` takes the source registry's
+  `juris`, else the subreddit, else place names in the text; `platformOf()`
+  maps kinds to channels. Spend: KV `sent_calls_<day>` against
+  `SENTIMENT_DAILY_CALLS` (default 300); a run stops with a message when it
+  is reached. `sentimentCron()` runs every tick within the budget; `POST
+  /sentiment/run {limit,hours,platform}` is a bridge job (`sentiment`,
+  worker-side) the console tails.
+- **The sums.** `GET /sentiment/entities?days=&platform=&region=&issue=&kind=`
+  (per entity: mentions, net stance -1..1, critical and supportive counts,
+  sarcasm, intensity, change against the previous window of the same length,
+  by platform, by region), `/sentiment/series?entity=&days=&bucket=day|hour`
+  (an entity's stance over time, or the whole conversation's tone, optionally
+  by issue), `/sentiment/topics?days=` (tone by client issue through
+  `json_each(issues)`, with the entities named inside), `/sentiment/items?
+  entity=&stance=&issue=&platform=&region=&days=` (the evidence rows: the
+  deciding phrase, the excerpt, the link), `/sentiment/status` (judged 24h
+  and 7d, rows marked as mentioning nothing, the backlog of matched rows
+  waiting, budget, model, register size). All read-role; writes full.
+- **In-app.** The Sentiment view (`docs/sentiment.js`, `#v-sentiment`): the
+  strip (stances this week, critical and supportive shares, judged 24h, the
+  backlog, today's budget and model), filters (window, channel, region,
+  client issue, kind), the leaderboard (net-stance bar, shares, change vs the
+  previous window, channel mix; headers sort), the topic table, a drawer per
+  entity (facts, a volume-and-stance chart, by channel and region, and the
+  rows behind the numbers with stance chips and the deciding phrase), a
+  drawer per topic, **Classify now** with the console, and the **Entity
+  register** panel (add, edit aliases, switch off, delete, test a sentence,
+  sync MPs). Australian Eastern time. Harnesses in the session scratchpad:
+  `sentiment-worker.mjs` (15 route and cron tests with a stub Claude),
+  `sentiment-browser.mjs` (9 browser tests).
+
 ## The Content Desk (copy for each client and platform, changed by instruction)
 
 The `v-content` view (React island, `docs/content.js`) writes social and

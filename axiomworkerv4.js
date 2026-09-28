@@ -2159,7 +2159,7 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
 const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
@@ -2861,6 +2861,9 @@ async function jobRunLocal(env, job) {
       ok = !!(out && out.ok);
     } else if (job.source === 'render') {
       out = await renderJob(env, job, log);
+      ok = !!(out && out.ok);
+    } else if (job.source === 'sentiment') {
+      out = await sentimentRun(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
     } else if (SOCIAL_PLATFORMS.indexOf(job.source) >= 0) {
       out = await socialSweep(env, Object.assign({}, job.params, { platform: job.source }), log);
@@ -5456,6 +5459,453 @@ async function socialCron(env) {
 }
 
 // ==============================================================================
+// SENTIMENT - who is being talked about, how, where and on which channel. An
+// editable register of entities (parties, people, organisations, topics) with
+// the aliases they go by; a cheap first pass that finds the rows mentioning
+// one; then Claude, in batches, judging the author's stance toward each
+// entity mentioned (critical / neutral / supportive, with intensity, sarcasm
+// and the phrase that decided it) and the text's overall tone. Every score
+// in the view is a sum over rows in sent_entities, and every row points at
+// the archive item it came from. Spend is capped per day.
+// ==============================================================================
+let SENT_READY = false;
+const SENT_KINDS = ['news', 'sig_thread', 'sig_comment', 'reddit_thread', 'reddit_comment', 'comments', 'forum', 'transcript'];
+const SENT_PER_TICK = 80;      // rows classified per cron tick
+const SENT_BATCH = 20;         // texts per Claude call
+const SENT_SCAN = 400;         // newest unclassified rows looked at per run
+const SENT_WINDOW_H = 72;      // rows older than this are left alone
+const SENT_MODEL = 'claude-haiku-4-5-20251001';
+const SENT_DAILY_CALLS = 300;  // Claude calls a day unless SENTIMENT_DAILY_CALLS says otherwise
+const ENTITY_KINDS = ['party', 'person', 'org', 'topic'];
+const ENTITY_SIDES = ['client', 'opponent', 'neutral'];
+/* [id, kind, name, aliases (pipe-separated, plain words; plurals are implied), party, role, side, client ns].
+ * Roles are as at 2025 and are meant to be edited in the view. */
+const ENTITY_SEED = [
+  // parties
+  ['alp', 'party', 'Australian Labor Party', 'Labor|ALP|Labor Party|Labor government|Albanese government|federal Labor', 'alp', 'Government', 'neutral', ''],
+  ['lib', 'party', 'Liberal Party of Australia', 'Liberal Party|Liberals|the Libs|Liberal opposition', 'lib', 'Opposition (Coalition)', 'neutral', ''],
+  ['nat', 'party', 'The Nationals', 'Nationals|National Party|the Nats|Nationals party', 'nat', 'Opposition (Coalition)', 'neutral', ''],
+  ['coalition', 'party', 'The Coalition', 'the Coalition|Coalition opposition|federal opposition|Liberal-National Coalition', 'coalition', 'Opposition', 'neutral', ''],
+  ['grn', 'party', 'Australian Greens', 'the Greens|Australian Greens|Greens party|Greens senator|Greens MP', 'grn', 'Crossbench', 'neutral', ''],
+  ['on', 'party', 'One Nation', 'One Nation|PHON', 'on', 'Crossbench', 'neutral', ''],
+  ['teal', 'party', 'Teal independents', 'teals|teal independents|teal MPs|Climate 200 independents|community independents', 'ind', 'Crossbench', 'neutral', ''],
+  ['vicnats', 'party', 'The Nationals Victoria', 'Victorian Nationals|Nationals Victoria|Vic Nats|Victorian National Party', 'nat', 'Victorian opposition (Coalition)', 'client', 'vicnats'],
+  ['viclib', 'party', 'Liberal Victoria', 'Victorian Liberals|Vic Libs|Victorian Liberal Party|Victorian opposition', 'lib', 'Victorian opposition', 'neutral', ''],
+  ['viclabor', 'party', 'Victorian Labor', 'Victorian Labor|Allan government|Victorian government|Andrews government', 'alp', 'Victorian government', 'neutral', ''],
+  // federal leaders and ministers
+  ['albanese', 'person', 'Anthony Albanese', 'Albanese|Albo|Prime Minister Albanese|the Prime Minister|the PM', 'alp', 'Prime Minister', 'neutral', ''],
+  ['chalmers', 'person', 'Jim Chalmers', 'Chalmers|the Treasurer|Treasurer Chalmers', 'alp', 'Treasurer', 'neutral', ''],
+  ['ley', 'person', 'Sussan Ley', 'Sussan Ley|Ms Ley|the Opposition Leader|Opposition Leader Ley', 'lib', 'Leader of the Opposition', 'neutral', ''],
+  ['littleproud', 'person', 'David Littleproud', 'Littleproud', 'nat', 'Leader of the Nationals', 'neutral', ''],
+  ['waters', 'person', 'Larissa Waters', 'Larissa Waters|Senator Waters|Greens leader Waters', 'grn', 'Leader of the Greens', 'neutral', ''],
+  ['hanson', 'person', 'Pauline Hanson', 'Pauline Hanson|Hanson|Senator Hanson', 'on', 'Leader of One Nation', 'neutral', ''],
+  ['marles', 'person', 'Richard Marles', 'Marles|the Deputy Prime Minister|the Defence Minister', 'alp', 'Deputy Prime Minister, Defence', 'neutral', ''],
+  ['wong', 'person', 'Penny Wong', 'Penny Wong|Senator Wong|the Foreign Minister', 'alp', 'Foreign Affairs', 'neutral', ''],
+  ['gallagher', 'person', 'Katy Gallagher', 'Katy Gallagher|Senator Gallagher|the Finance Minister', 'alp', 'Finance', 'neutral', ''],
+  ['bowen', 'person', 'Chris Bowen', 'Chris Bowen|Minister Bowen|the Energy Minister|the Climate Change Minister', 'alp', 'Climate Change and Energy', 'neutral', ''],
+  ['king', 'person', 'Madeleine King', 'Madeleine King|Minister King|the Resources Minister', 'alp', 'Resources and Northern Australia', 'neutral', ''],
+  ['butler', 'person', 'Mark Butler', 'Mark Butler|Minister Butler|the Health Minister', 'alp', 'Health and Ageing', 'neutral', ''],
+  ['oneil', 'person', 'Clare O\'Neil', 'Clare O\'Neil|Minister O\'Neil|the Housing Minister', 'alp', 'Housing', 'neutral', ''],
+  ['rishworth', 'person', 'Amanda Rishworth', 'Rishworth|the Workplace Relations Minister|the Employment Minister', 'alp', 'Employment and Workplace Relations', 'neutral', ''],
+  ['watt', 'person', 'Murray Watt', 'Murray Watt|Minister Watt|the Environment Minister', 'alp', 'Environment and Water', 'neutral', ''],
+  ['plibersek', 'person', 'Tanya Plibersek', 'Plibersek', 'alp', 'Social Services', 'neutral', ''],
+  ['burke', 'person', 'Tony Burke', 'Tony Burke|the Home Affairs Minister', 'alp', 'Home Affairs', 'neutral', ''],
+  ['obrien_ted', 'person', 'Ted O\'Brien', 'Ted O\'Brien|the Shadow Treasurer', 'lib', 'Deputy Liberal leader, Shadow Treasurer', 'neutral', ''],
+  ['taylor', 'person', 'Angus Taylor', 'Angus Taylor', 'lib', 'Shadow Defence', 'neutral', ''],
+  ['tehan', 'person', 'Dan Tehan', 'Dan Tehan|Tehan', 'lib', 'Shadow Energy', 'neutral', ''],
+  ['mcdonald', 'person', 'Susan McDonald', 'Susan McDonald|Senator McDonald', 'nat', 'Shadow Resources', 'neutral', ''],
+  ['bragg', 'person', 'Andrew Bragg', 'Andrew Bragg|Senator Bragg', 'lib', 'Shadow Housing', 'neutral', ''],
+  ['ruston', 'person', 'Anne Ruston', 'Anne Ruston|Senator Ruston', 'lib', 'Shadow Health', 'neutral', ''],
+  ['katter', 'person', 'Bob Katter', 'Bob Katter|Katter', 'ind', 'Member for Kennedy', 'neutral', ''],
+  ['lambie', 'person', 'Jacqui Lambie', 'Jacqui Lambie|Lambie', 'ind', 'Senator for Tasmania', 'neutral', ''],
+  ['pocock', 'person', 'David Pocock', 'David Pocock|Pocock|Senator Pocock', 'ind', 'Senator for the ACT', 'neutral', ''],
+  // premiers, chief ministers, state leaders
+  ['minns', 'person', 'Chris Minns', 'Minns|Premier Minns|the NSW Premier', 'alp', 'Premier of New South Wales', 'neutral', ''],
+  ['allan', 'person', 'Jacinta Allan', 'Jacinta Allan|Premier Allan|the Victorian Premier', 'alp', 'Premier of Victoria', 'neutral', ''],
+  ['crisafulli', 'person', 'David Crisafulli', 'Crisafulli|Premier Crisafulli|the Queensland Premier', 'lib', 'Premier of Queensland', 'neutral', ''],
+  ['cook', 'person', 'Roger Cook', 'Roger Cook|Premier Cook|the WA Premier', 'alp', 'Premier of Western Australia', 'neutral', ''],
+  ['malinauskas', 'person', 'Peter Malinauskas', 'Malinauskas|Premier Malinauskas|the SA Premier', 'alp', 'Premier of South Australia', 'neutral', ''],
+  ['rockliff', 'person', 'Jeremy Rockliff', 'Rockliff|Premier Rockliff|the Tasmanian Premier', 'lib', 'Premier of Tasmania', 'neutral', ''],
+  ['finocchiaro', 'person', 'Lia Finocchiaro', 'Finocchiaro|the NT Chief Minister', 'lib', 'Chief Minister of the Northern Territory', 'neutral', ''],
+  ['barr', 'person', 'Andrew Barr', 'Andrew Barr|Chief Minister Barr|the ACT Chief Minister', 'alp', 'Chief Minister of the ACT', 'neutral', ''],
+  ['battin', 'person', 'Brad Battin', 'Brad Battin|Battin', 'lib', 'Leader of the Victorian Opposition', 'neutral', ''],
+  ['dobrien', 'person', 'Danny O\'Brien', 'Danny O\'Brien', 'nat', 'Leader of the Victorian Nationals', 'client', 'vicnats'],
+  ['bullock', 'person', 'Michele Bullock', 'Michele Bullock|Governor Bullock|the RBA Governor|the Reserve Bank Governor', '', 'Governor of the Reserve Bank', 'neutral', ''],
+  // the clients and their people
+  ['mca', 'org', 'Minerals Council of Australia', 'Minerals Council|MCA', '', 'Peak body, mining', 'client', 'mca'],
+  ['constable', 'person', 'Tania Constable', 'Tania Constable', '', 'CEO, Minerals Council of Australia', 'client', 'mca'],
+  ['hoof', 'org', 'Hands Off Our Fuel', 'Hands Off Our Fuel|HOOF|Fuel Tax Credit Alliance', '', 'Campaign', 'client', 'mca'],
+  ['aep', 'org', 'Australian Energy Producers', 'Australian Energy Producers|AEP|APPEA', '', 'Peak body, oil and gas', 'client', 'aep'],
+  ['mcculloch', 'person', 'Samantha McCulloch', 'Samantha McCulloch', '', 'CEO, Australian Energy Producers', 'client', 'aep'],
+  ['pca', 'org', 'Property Council of Australia', 'Property Council', '', 'Peak body, property', 'client', 'pca'],
+  ['zorbas', 'person', 'Mike Zorbas', 'Mike Zorbas|Zorbas', '', 'CEO, Property Council of Australia', 'client', 'pca'],
+  ['mba', 'org', 'Master Builders Australia', 'Master Builders', '', 'Peak body, building and construction', 'client', 'mba'],
+  ['wawn', 'person', 'Denita Wawn', 'Denita Wawn|Wawn', '', 'CEO, Master Builders Australia', 'client', 'mba'],
+  ['guild', 'org', 'Pharmacy Guild of Australia', 'Pharmacy Guild|the Guild', '', 'Peak body, community pharmacy', 'client', 'pharm'],
+  ['twomey', 'person', 'Trent Twomey', 'Trent Twomey|Twomey', '', 'National President, Pharmacy Guild', 'client', 'pharm'],
+  // the other side
+  ['lockthegate', 'org', 'Lock the Gate Alliance', 'Lock the Gate', '', 'Anti-mining and anti-gas campaign', 'opponent', 'mca'],
+  ['risingtide', 'org', 'Rising Tide', 'Rising Tide', '', 'Climate protest group (Newcastle coal port blockades)', 'opponent', 'mca'],
+  ['marketforces', 'org', 'Market Forces', 'Market Forces', '', 'Divestment campaign', 'opponent', 'aep'],
+  ['acf', 'org', 'Australian Conservation Foundation', 'Australian Conservation Foundation|ACF', '', 'Environment group', 'opponent', ''],
+  ['climatecouncil', 'org', 'Climate Council', 'Climate Council', '', 'Climate advocacy', 'opponent', 'aep'],
+  ['greenpeace', 'org', 'Greenpeace Australia Pacific', 'Greenpeace', '', 'Environment group', 'opponent', ''],
+  ['getup', 'org', 'GetUp', 'GetUp', '', 'Campaign organisation', 'opponent', ''],
+  ['tai', 'org', 'The Australia Institute', 'Australia Institute', '', 'Progressive think tank', 'opponent', ''],
+  ['edo', 'org', 'Environmental Defenders Office', 'Environmental Defenders Office|EDO', '', 'Environmental law centre', 'opponent', ''],
+  ['extinctionrebellion', 'org', 'Extinction Rebellion', 'Extinction Rebellion', '', 'Protest group', 'opponent', ''],
+  ['blockade', 'org', 'Blockade Australia', 'Blockade Australia', '', 'Protest group', 'opponent', ''],
+  ['cfmeu', 'org', 'CFMEU', 'CFMEU|construction union', '', 'Construction union', 'opponent', 'mba'],
+  ['chemistwarehouse', 'org', 'Chemist Warehouse', 'Chemist Warehouse', '', 'Discount pharmacy chain', 'opponent', 'pharm'],
+  // institutions and industry
+  ['actu', 'org', 'ACTU', 'ACTU|Australian Council of Trade Unions', '', 'Union peak body', 'neutral', ''],
+  ['bca', 'org', 'Business Council of Australia', 'Business Council|BCA', '', 'Business peak body', 'neutral', ''],
+  ['grattan', 'org', 'Grattan Institute', 'Grattan Institute|Grattan', '', 'Think tank', 'neutral', ''],
+  ['rba', 'org', 'Reserve Bank of Australia', 'Reserve Bank|RBA', '', 'Central bank', 'neutral', ''],
+  ['accc', 'org', 'ACCC', 'ACCC|the competition watchdog', '', 'Regulator', 'neutral', ''],
+  ['aemo', 'org', 'AEMO', 'AEMO|Australian Energy Market Operator', '', 'Energy market operator', 'neutral', ''],
+  ['woodside', 'org', 'Woodside', 'Woodside|Woodside Energy', '', 'Gas producer', 'neutral', 'aep'],
+  ['santos', 'org', 'Santos', 'Santos', '', 'Gas producer', 'neutral', 'aep'],
+  ['bhp', 'org', 'BHP', 'BHP', '', 'Miner', 'neutral', 'mca'],
+  ['riotinto', 'org', 'Rio Tinto', 'Rio Tinto', '', 'Miner', 'neutral', 'mca'],
+  ['fortescue', 'org', 'Fortescue', 'Fortescue|FMG|Andrew Forrest|Twiggy Forrest', '', 'Miner', 'neutral', 'mca'],
+  ['glencore', 'org', 'Glencore', 'Glencore', '', 'Miner', 'neutral', 'mca'],
+  // topics: the stance is for or against the thing itself
+  ['t_nuclear', 'topic', 'Nuclear power', 'nuclear power|nuclear energy|nuclear reactor|nuclear plant|small modular reactor|SMRs', '', 'Policy debate', 'neutral', ''],
+  ['t_ftc', 'topic', 'Fuel tax credits', 'fuel tax credit|diesel rebate|diesel fuel rebate|fuel excise credit', '', 'Client fight', 'client', 'mca'],
+  ['t_cm', 'topic', 'Critical minerals reserve', 'critical minerals reserve|critical mineral reserve|strategic reserve|critical minerals strategy', '', 'Client fight', 'client', 'mca'],
+  ['t_gasres', 'topic', 'Gas reservation', 'gas reservation|domestic gas reservation|east coast gas reservation|gas export control', '', 'Client fight', 'client', 'aep'],
+  ['t_neggear', 'topic', 'Negative gearing', 'negative gearing|capital gains tax discount|CGT discount', '', 'Policy debate', 'neutral', 'pca'],
+  ['t_housingtarget', 'topic', 'Housing targets', 'housing target|1.2 million homes|National Housing Accord|housing accord', '', 'Policy debate', 'neutral', 'pca'],
+  ['t_samejob', 'topic', 'Same job, same pay', 'same job, same pay|same job same pay|labour hire laws', '', 'IR debate', 'neutral', 'mba'],
+  ['t_60day', 'topic', '60-day dispensing', '60-day dispensing|60 day dispensing|sixty-day dispensing|60-day prescription', '', 'Client fight', 'client', 'pharm'],
+  ['t_scope', 'topic', 'Pharmacist prescribing', 'pharmacist prescribing|pharmacists prescribing|scope of practice', '', 'Client fight', 'client', 'pharm'],
+  ['t_super', 'topic', 'Superannuation tax', 'superannuation tax|super tax|Division 296|$3 million super', '', 'Policy debate', 'neutral', ''],
+  ['t_immig', 'topic', 'Immigration', 'immigration|migration intake|net overseas migration|migrant intake', '', 'Policy debate', 'neutral', ''],
+  ['t_cost', 'topic', 'Cost of living', 'cost of living|cost-of-living', '', 'Public mood', 'neutral', ''],
+  ['t_rates', 'topic', 'Interest rates', 'interest rate|rate cut|rate rise|rate hike|cash rate', '', 'Public mood', 'neutral', ''],
+  ['t_ducks', 'topic', 'Duck hunting', 'duck hunting|duck season|duck shooting', '', 'Victorian debate', 'client', 'vicnats'],
+  ['t_vline', 'topic', 'Regional rail', 'V/Line|regional rail|country trains', '', 'Victorian debate', 'client', 'vicnats'],
+];
+async function ensureSentiment(env) {
+  if (!env.MIND_DB) return false;
+  if (SENT_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS entities(id TEXT PRIMARY KEY, kind TEXT, name TEXT, aliases TEXT, party TEXT, role TEXT, side TEXT, ns TEXT, active INTEGER, edited INTEGER, source TEXT, note TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS sent_items(item INTEGER PRIMARY KEY, kind TEXT, platform TEXT, src TEXT, ts INTEGER, tone REAL, texttype TEXT, region TEXT, issues TEXT, entities TEXT, model TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS sent_items_ts ON sent_items(ts)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS sent_entities(id INTEGER PRIMARY KEY AUTOINCREMENT, item INTEGER, entity TEXT, stance INTEGER, intensity INTEGER, sarcasm INTEGER, why TEXT, ts INTEGER, platform TEXT, region TEXT, kind TEXT)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS sent_entities_e ON sent_entities(entity, ts)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS sent_entities_i ON sent_entities(item)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS sent_entities_ts ON sent_entities(ts)'),
+  ]);
+  SENT_READY = true;
+  try { await entitiesSeed(env); } catch (e) {}
+  return true;
+}
+async function entitiesSeed(env, force) {
+  const ver = arcHash(JSON.stringify(ENTITY_SEED));
+  const n = ((await env.MIND_DB.prepare('SELECT COUNT(*) n FROM entities').first()) || {}).n || 0;
+  if (!force && n > 0 && (await kvGet(env.AXIOM_KV, 'entities_seed_v')) === ver) return { ok: true, unchanged: true, n };
+  const now = Date.now();
+  const ins = env.MIND_DB.prepare("INSERT INTO entities(id,kind,name,aliases,party,role,side,ns,active,edited,source,note,created,updated) VALUES(?,?,?,?,?,?,?,?,1,0,'seed','',?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name, aliases=excluded.aliases, party=excluded.party, role=excluded.role, side=excluded.side, ns=excluded.ns, updated=excluded.updated WHERE entities.edited=0");
+  const stmts = ENTITY_SEED.map(r => ins.bind(r[0], r[1], r[2], JSON.stringify(String(r[3]).split('|').map(s => s.trim()).filter(Boolean)), r[4] || '', r[5] || '', r[6] || 'neutral', r[7] || '', now, now));
+  for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  await kvPut(env.AXIOM_KV, 'entities_seed_v', ver, 30 * 86400);
+  ENTITY_CACHE = null;
+  return { ok: true, seeded: ENTITY_SEED.length, had: n };
+}
+function entityRow(r) {
+  return { id: r.id, kind: r.kind || 'org', name: r.name || r.id, aliases: pjs(r.aliases, []), party: r.party || '', role: r.role || '', side: r.side || 'neutral', ns: r.ns || '',
+    active: !!r.active, edited: !!r.edited, source: r.source || '', note: r.note || '', created: r.created || 0, updated: r.updated || 0 };
+}
+function entityIdClean(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40); }
+function entitySanitize(b, cur) {
+  b = b || {};
+  const name = String(b.name || (cur && cur.name) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const id = entityIdClean(b.id || (cur && cur.id) || name.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  const kind = ENTITY_KINDS.indexOf(b.kind) >= 0 ? b.kind : ((cur && cur.kind) || 'org');
+  let aliases = Array.isArray(b.aliases) ? b.aliases : (typeof b.aliases === 'string' ? b.aliases.split(/[|\n,]/) : ((cur && cur.aliases) || []));
+  aliases = aliases.map(a => String(a).replace(/\s+/g, ' ').trim().slice(0, 80)).filter(a => a.length >= 2);
+  if (!aliases.length && name) aliases = [name];
+  const side = ENTITY_SIDES.indexOf(b.side) >= 0 ? b.side : ((cur && cur.side) || 'neutral');
+  return { id, name, kind, aliases: Array.from(new Set(aliases)).slice(0, 30), party: String(b.party != null ? b.party : ((cur && cur.party) || '')).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20),
+    role: String(b.role != null ? b.role : ((cur && cur.role) || '')).slice(0, 120), side, ns: String(b.ns != null ? b.ns : ((cur && cur.ns) || '')).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24),
+    note: String(b.note != null ? b.note : ((cur && cur.note) || '')).slice(0, 300), active: b.active == null ? (cur ? cur.active : true) : !!b.active };
+}
+async function entityUpsert(env, s, now, source) {
+  await env.MIND_DB.prepare("INSERT INTO entities(id,kind,name,aliases,party,role,side,ns,active,edited,source,note,created,updated) VALUES(?,?,?,?,?,?,?,?,?,1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name, aliases=excluded.aliases, party=excluded.party, role=excluded.role, side=excluded.side, ns=excluded.ns, active=excluded.active, edited=1, note=excluded.note, updated=excluded.updated")
+    .bind(s.id, s.kind, s.name, JSON.stringify(s.aliases), s.party, s.role, s.side, s.ns, s.active ? 1 : 0, source || 'operator', s.note, now, now).run();
+  ENTITY_CACHE = null;
+}
+async function entitiesList(env, opts) {
+  opts = opts || {};
+  const rows = ((await env.MIND_DB.prepare('SELECT * FROM entities ORDER BY kind, name').all()).results || []).map(entityRow);
+  const q = String(opts.q || '').toLowerCase();
+  return rows.filter(e => (!opts.kind || e.kind === opts.kind) && (opts.active == null || e.active === !!opts.active) && (!q || (e.name + ' ' + e.id + ' ' + e.aliases.join(' ') + ' ' + e.role).toLowerCase().indexOf(q) >= 0));
+}
+/** The first pass: one regular expression per active entity, built from its
+ *  aliases (plain words, plural allowed, whole words only), cached for a
+ *  few minutes. Returns the ids mentioned in a text. */
+let ENTITY_CACHE = null;
+async function entityMatcher(env) {
+  if (ENTITY_CACHE && Date.now() - ENTITY_CACHE.at < 5 * 60000) return ENTITY_CACHE.m;
+  const rows = await entitiesList(env, { active: true });
+  const list = rows.map(e => {
+    const parts = e.aliases.map(a => a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+').replace(/'/g, "['\\u2019]")).filter(Boolean);
+    if (!parts.length) return null;
+    let rx = null; try { rx = new RegExp('(?<![A-Za-z0-9])(?:' + parts.join('|') + ')(?:s|es)?(?![A-Za-z0-9])', 'i'); } catch (e) { rx = null; }
+    return rx ? { id: e.id, kind: e.kind, name: e.name, role: e.role, party: e.party, side: e.side, rx } : null;
+  }).filter(Boolean);
+  const m = {
+    entities: list,
+    byId: Object.fromEntries(list.map(e => [e.id, e])),
+    match: text => { const t = String(text || '').replace(/[\u2018\u2019]/g, "'"); const out = []; for (const e of list) if (e.rx.test(t)) out.push(e.id); return out; },
+  };
+  ENTITY_CACHE = { at: Date.now(), m };
+  return m;
+}
+/** Sitting members and senators become person entities (alias: their name),
+ *  refreshed from the register but never over an operator's edit. */
+async function entitiesSyncMps(env) {
+  const mps = await mpsList(env, { limit: 600 });
+  if (!mps.length) return { ok: false, error: 'no_mps', detail: 'The MP register is empty. Sync it first (POST /mps/sync).' };
+  const partyOf = p => { const s = String(p || '').toLowerCase(); return /labor/.test(s) ? 'alp' : /liberal national/.test(s) ? 'lib' : /liberal/.test(s) ? 'lib' : /national/.test(s) ? 'nat' : /green/.test(s) ? 'grn' : /one nation/.test(s) ? 'on' : /jacqui lambie/.test(s) ? 'ind' : 'ind'; };
+  const now = Date.now();
+  const st = env.MIND_DB.prepare("INSERT INTO entities(id,kind,name,aliases,party,role,side,ns,active,edited,source,note,created,updated) VALUES(?,?,?,?,?,?,?,?,1,0,'mps','',?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, aliases=excluded.aliases, party=excluded.party, role=excluded.role, updated=excluded.updated WHERE entities.edited=0");
+  const stmts = mps.filter(m => m.name).map(m => {
+    const role = (m.house === 'senate' ? 'Senator for ' : 'Member for ') + (m.electorate || '') + (m.party ? ' (' + m.party + ')' : '');
+    return st.bind('mp_' + String(m.id).toLowerCase().replace(/[^a-z0-9]/g, ''), 'person', m.name, JSON.stringify([m.name]), partyOf(m.party), role.slice(0, 120), 'neutral', '', now, now);
+  });
+  for (let i = 0; i < stmts.length; i += 100) await env.MIND_DB.batch(stmts.slice(i, i + 100));
+  ENTITY_CACHE = null;
+  return { ok: true, synced: stmts.length };
+}
+// -- where and on what ----------------------------------------------------------
+const REGION_RX = [
+  ['nsw', /new south wales|\bnsw\b|sydney|newcastle|wollongong|macquarie street|\bminns\b/i],
+  ['vic', /victoria(?!\s*(?:bc|british columbia|falls|harbour|cross|secret))|victorian|melbourne|spring street|geelong|ballarat|bendigo|gippsland|jacinta allan/i],
+  ['qld', /queensland|\bqld\b|brisbane|gold coast|townsville|cairns|toowoomba|crisafulli/i],
+  ['wa', /western australia|\bperth\b|pilbara|kalgoorlie|\bwa (government|premier|budget|parliament)\b|roger cook/i],
+  ['sa', /south australia|adelaide|malinauskas/i],
+  ['tas', /tasmania|hobart|launceston|rockliff/i],
+  ['nt', /northern territory|\bdarwin\b|finocchiaro/i],
+  ['act', /\bact (government|budget|legislative assembly)\b|andrew barr/i],
+];
+const SUB_REGION = { melbourne: 'vic', perth: 'wa', brisbane: 'qld', sydney: 'nsw', adelaide: 'sa', hobart: 'tas', canberra: 'act', darwin: 'nt', tasmania: 'tas', queensland: 'qld' };
+function regionOf(text, meta, sub) {
+  if (meta && meta.juris && meta.juris !== 'au' && SOURCE_JURIS.indexOf(meta.juris) >= 0) return meta.juris;
+  const s = String(sub || '').toLowerCase(); if (SUB_REGION[s]) return SUB_REGION[s];
+  for (const [code, rx] of REGION_RX) if (rx.test(String(text || ''))) return code;
+  return 'au';
+}
+function platformOf(kind, meta) {
+  if (/^sig_/.test(kind)) return String((meta && meta.platform) || 'unknown');
+  if (/^reddit_/.test(kind)) return 'reddit';
+  if (kind === 'comments') return 'meta';
+  if (kind === 'transcript') return String((meta && meta.platform) || 'youtube');
+  if (kind === 'forum') return 'forum';
+  return 'news';
+}
+function sentText(r) {
+  const title = String(r.title || '').trim(), body = String(r.body || '').trim();
+  if (r.kind === 'transcript') return (title + '. ' + body).slice(0, 1200);
+  if (/comment/.test(r.kind)) return body.slice(0, 900) || title.slice(0, 300);
+  return (title + (body && body !== title ? '. ' + body : '')).slice(0, 900);
+}
+function sentDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
+async function sentBudget(env) {
+  const cap = Math.max(0, parseInt(env.SENTIMENT_DAILY_CALLS, 10) || SENT_DAILY_CALLS);
+  const used = Number(await kvGet(env.AXIOM_KV, 'sent_calls_' + sentDay()) || 0);
+  return { used, cap, left: Math.max(0, cap - used), model: env.SENTIMENT_MODEL || SENT_MODEL };
+}
+async function sentSpend(env, n) { const k = 'sent_calls_' + sentDay(); const used = Number(await kvGet(env.AXIOM_KV, k) || 0) + n; await kvPut(env.AXIOM_KV, k, String(used), 2 * 86400); return used; }
+const SENT_SYS = 'You read Australian political text and judge how its author regards the entities named under it. For each text and each entity listed, give stance: -1 when the text is critical, hostile, mocking, or blames the entity; 1 when it praises, supports, defends or credits it; 0 when it merely mentions or reports it without a view. Judge the author\'s view, not the events: a report of an attack on X is 0 unless the reporter\'s own framing takes a side. For a topic entity the stance is for or against the thing itself. Sarcasm inverts the literal words; mark it. intensity: 1 mild, 2 clear, 3 strong or abusive. Also give the text\'s overall tone from -1 (hostile, angry, despairing) to 1 (warm, approving) as a number with one decimal, and its type: news (reporting), opinion (a view, a comment) or question. Reply with strict JSON only, no prose: {"items":[{"n":1,"tone":-0.6,"type":"opinion","entities":[{"id":"alp","stance":-1,"intensity":2,"sarcasm":false,"why":"calls the policy a rort"}]}]}. why: at most twelve words, the phrase that decided it. Every text and every listed entity must appear.';
+async function sentClassify(env, batch, matcher, log) {
+  const ids = Array.from(new Set(batch.flatMap(b => b.entities)));
+  const gloss = ids.map(id => { const e = matcher.byId[id]; return e ? id + ': ' + e.name + ' (' + e.kind + (e.role ? ', ' + e.role : '') + ')' : id; }).join('\n');
+  const texts = batch.map((b, i) => '[' + (i + 1) + '] ' + b.kind.replace('_', ' ') + ', ' + b.platform + ', ' + new Date(b.ts).toISOString().slice(0, 10) + '; mentions: ' + b.entities.join(', ') + '\n' + b.text.replace(/\s+/g, ' ')).join('\n\n');
+  const user = 'ENTITIES\n' + gloss + '\n\nTEXTS\n' + texts;
+  let txt = '', parsed = null;
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    txt = await claudeMsg(env, SENT_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 400 + batch.length * 140, 45000, env.SENTIMENT_MODEL || SENT_MODEL);
+    parsed = relJson(txt);
+    if (!parsed || !Array.isArray(parsed.items)) parsed = null;
+  }
+  if (!parsed) throw new Error('classifier answered without valid JSON');
+  const out = [];
+  parsed.items.forEach(it => {
+    const n = parseInt(it.n, 10); const b = batch[n - 1]; if (!b) return;
+    const tone = Math.max(-1, Math.min(1, Number(it.tone) || 0));
+    const type = /^(news|opinion|question)$/.test(String(it.type || '')) ? String(it.type) : 'opinion';
+    const ents = (Array.isArray(it.entities) ? it.entities : []).map(e => ({ id: String(e.id || ''), stance: Math.max(-1, Math.min(1, Math.round(Number(e.stance) || 0))), intensity: Math.max(1, Math.min(3, Math.round(Number(e.intensity) || 1))), sarcasm: !!e.sarcasm, why: String(e.why || '').slice(0, 160) })).filter(e => b.entities.indexOf(e.id) >= 0);
+    b.entities.forEach(id => { if (!ents.some(e => e.id === id)) ents.push({ id, stance: 0, intensity: 1, sarcasm: false, why: 'not judged by the model' }); });
+    out.push({ b, tone, type, ents });
+  });
+  return out;
+}
+/** One classification run: the newest unclassified rows, those that mention
+ *  an entity, the important ones first (client issues, busy threads), in
+ *  batches, within the day's budget. Rows mentioning nothing are marked so
+ *  they are not looked at again. */
+async function sentimentRun(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!(await ensureSentiment(env)) || !(await ensureArchive(env))) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  if (!env.ANTHROPIC_API_KEY) return { ok: false, error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the classifier is Claude.' };
+  const now = Date.now();
+  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || SENT_PER_TICK, 1), 400);
+  const scan = Math.min(Math.max(parseInt(opts.scan, 10) || SENT_SCAN, limit), 1500);
+  const hours = Math.min(Math.max(parseInt(opts.hours, 10) || SENT_WINDOW_H, 1), 24 * 30);
+  const budget = await sentBudget(env);
+  const out = { ok: true, scanned: 0, matched: 0, classified: 0, mentions: 0, calls: 0, skipped: 0, budget, byStance: { neg: 0, neu: 0, pos: 0 }, errors: [], model: budget.model };
+  const kinds = SENT_KINDS.map(() => '?').join(',');
+  const w = ['s.item IS NULL', 'a.ts>?', 'a.kind IN (' + kinds + ')']; const b = [now - hours * 3600000].concat(SENT_KINDS);
+  if (opts.platform) { w.push("(json_extract(a.meta,'$.platform')=? OR a.kind LIKE ?)"); b.push(String(opts.platform), String(opts.platform) + '%'); }
+  const rows = (await env.MIND_DB.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN sent_items s ON s.item=a.id WHERE ' + w.join(' AND ') + ' ORDER BY a.ts DESC LIMIT ?').bind(...b, scan).all()).results || [];
+  out.scanned = rows.length;
+  const matcher = await entityMatcher(env);
+  const cands = [], markers = [];
+  rows.forEach(r => {
+    let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
+    const text = sentText(r);
+    const ents = text.length < 12 ? [] : matcher.match(text);
+    const platform = platformOf(r.kind, meta);
+    const issues = Array.isArray(meta.issues) ? meta.issues : [];
+    if (!ents.length) { markers.push(env.MIND_DB.prepare("INSERT OR REPLACE INTO sent_items(item,kind,platform,src,ts,tone,texttype,region,issues,entities,model,created) VALUES(?,?,?,?,?,NULL,'',?,?,'[]','none',?)").bind(r.id, r.kind, platform, String(r.src || ''), r.ts || now, regionOf(text, meta, meta.sub), JSON.stringify(issues), now)); return; }
+    cands.push({ id: r.id, kind: r.kind, src: String(r.src || ''), ts: r.ts || now, text, entities: ents, platform, region: regionOf(text, meta, meta.sub), issues, weight: issues.length * 10 + Math.min(Number(meta.comments) || 0, 200) / 20 + Math.min(Number(meta.score) || 0, 500) / 100 + (ents.some(id => (matcher.byId[id] || {}).side === 'client') ? 15 : 0) });
+  });
+  out.matched = cands.length;
+  for (let i = 0; i < markers.length; i += 100) { try { await env.MIND_DB.batch(markers.slice(i, i + 100)); out.skipped += Math.min(100, markers.length - i); } catch (e) {} }
+  cands.sort((a, b2) => (b2.weight - a.weight) || (b2.ts - a.ts));
+  const take = cands.slice(0, limit);
+  const callsNeeded = Math.ceil(take.length / SENT_BATCH);
+  await log('info', out.scanned + ' rows of the last ' + hours + 'h without a verdict; ' + out.matched + ' mention an entity; classifying ' + take.length + ' in ' + callsNeeded + ' call' + (callsNeeded === 1 ? '' : 's') + ' (' + budget.used + ' of ' + budget.cap + ' calls used today, ' + budget.model + ')');
+  if (!take.length) { await kvPut(env.AXIOM_KV, 'sent_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400); return out; }
+  for (let i = 0; i < take.length; i += SENT_BATCH) {
+    if (out.calls >= budget.left) { out.errors.push('daily budget of ' + budget.cap + ' Claude calls reached; ' + (take.length - i) + ' rows wait for tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
+    const batch = take.slice(i, i + SENT_BATCH);
+    await log('cmd', 'claude ' + budget.model + ' batch ' + (i / SENT_BATCH + 1) + ': ' + batch.length + ' texts, ' + batch.reduce((a, x) => a + x.entities.length, 0) + ' entity mentions');
+    let verdicts;
+    try { verdicts = await sentClassify(env, batch, matcher, log); out.calls++; await sentSpend(env, 1); }
+    catch (e) { out.calls++; await sentSpend(env, 1); const m = String((e && e.message) || e).slice(0, 160); out.errors.push(m); await log('err', m); continue; }
+    const stmts = [];
+    let neg = 0, neu = 0, pos = 0;
+    verdicts.forEach(v => {
+      const r = v.b;
+      stmts.push(env.MIND_DB.prepare('INSERT OR REPLACE INTO sent_items(item,kind,platform,src,ts,tone,texttype,region,issues,entities,model,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(r.id, r.kind, r.platform, r.src, r.ts, v.tone, v.type, r.region, JSON.stringify(r.issues), JSON.stringify(v.ents.map(e => e.id)), budget.model, now));
+      stmts.push(env.MIND_DB.prepare('DELETE FROM sent_entities WHERE item=?').bind(r.id));
+      v.ents.forEach(e => { stmts.push(env.MIND_DB.prepare('INSERT INTO sent_entities(item,entity,stance,intensity,sarcasm,why,ts,platform,region,kind) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(r.id, e.id, e.stance, e.intensity, e.sarcasm ? 1 : 0, e.why, r.ts, r.platform, r.region, r.kind)); if (e.stance < 0) neg++; else if (e.stance > 0) pos++; else neu++; });
+      // the model's tone replaces the lexicon's on the archive row, so every view that reads tone improves
+      stmts.push(env.MIND_DB.prepare('UPDATE arc_items SET tone=? WHERE id=?').bind(v.tone <= -0.3 ? -1 : v.tone >= 0.3 ? 1 : 0, r.id));
+      out.classified++; out.mentions += v.ents.length;
+    });
+    for (let j = 0; j < stmts.length; j += 100) { try { await env.MIND_DB.batch(stmts.slice(j, j + 100)); } catch (e) { out.errors.push('write failed: ' + String((e && e.message) || e).slice(0, 100)); } }
+    out.byStance.neg += neg; out.byStance.neu += neu; out.byStance.pos += pos;
+    const avg = verdicts.length ? (verdicts.reduce((a, v) => a + v.tone, 0) / verdicts.length).toFixed(2) : '0';
+    await log('out', verdicts.length + ' verdicts: ' + neg + ' critical, ' + neu + ' neutral, ' + pos + ' supportive mentions; tone ' + avg + ' on average');
+  }
+  out.budget = await sentBudget(env);
+  await log('info', out.classified + ' rows classified, ' + out.mentions + ' entity stances recorded, ' + out.skipped + ' rows marked as mentioning nothing');
+  if (!out.classified && out.errors.length) { out.ok = false; out.detail = out.errors[0]; }
+  await kvPut(env.AXIOM_KV, 'sent_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
+  return out;
+}
+async function sentimentCron(env) {
+  if (!env.MIND_DB || !env.ANTHROPIC_API_KEY) return { ok: false, skipped: true };
+  const b = await sentBudget(env);
+  if (!b.left) return { ok: true, skipped: 'budget' };
+  return sentimentRun(env, { limit: SENT_PER_TICK });
+}
+// -- the sums, always over rows that point back at the archive ------------------
+function sentWhere(f, alias) {
+  const a = alias || 'e'; const w = []; const b = [];
+  if (f.platform) { w.push(a + '.platform=?'); b.push(String(f.platform)); }
+  if (f.region) { w.push(a + '.region=?'); b.push(String(f.region)); }
+  return { w, b };
+}
+async function sentimentEntities(env, f) {
+  f = f || {};
+  const days = Math.min(Math.max(parseInt(f.days, 10) || 7, 1), 365);
+  const now = Date.now(), since = now - days * 86400000, prev = since - days * 86400000;
+  const { w, b } = sentWhere(f);
+  const issueJoin = f.issue ? ' JOIN sent_items s ON s.item=e.item' : '';
+  const issueW = f.issue ? ' AND s.issues LIKE ?' : ''; const issueB = f.issue ? ['%"' + String(f.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'] : [];
+  const cur = (await env.MIND_DB.prepare('SELECT e.entity, COUNT(*) n, AVG(e.stance) score, SUM(e.stance<0) neg, SUM(e.stance>0) pos, SUM(e.sarcasm) sarcasm, AVG(e.intensity) intensity, MAX(e.ts) latest FROM sent_entities e' + issueJoin + ' WHERE e.ts>?' + (w.length ? ' AND ' + w.join(' AND ') : '') + issueW + ' GROUP BY e.entity').bind(since, ...b, ...issueB).all()).results || [];
+  const before = (await env.MIND_DB.prepare('SELECT e.entity, COUNT(*) n, AVG(e.stance) score FROM sent_entities e' + issueJoin + ' WHERE e.ts>? AND e.ts<=?' + (w.length ? ' AND ' + w.join(' AND ') : '') + issueW + ' GROUP BY e.entity').bind(prev, since, ...b, ...issueB).all()).results || [];
+  const plats = (await env.MIND_DB.prepare('SELECT e.entity, e.platform, COUNT(*) n, AVG(e.stance) score FROM sent_entities e' + issueJoin + ' WHERE e.ts>?' + (w.length ? ' AND ' + w.join(' AND ') : '') + issueW + ' GROUP BY e.entity, e.platform').bind(since, ...b, ...issueB).all()).results || [];
+  const bm = {}; before.forEach(r => { bm[r.entity] = r; });
+  const regs = (await env.MIND_DB.prepare('SELECT e.entity, e.region, COUNT(*) n, AVG(e.stance) score FROM sent_entities e' + issueJoin + ' WHERE e.ts>?' + (w.length ? ' AND ' + w.join(' AND ') : '') + issueW + ' GROUP BY e.entity, e.region').bind(since, ...b, ...issueB).all()).results || [];
+  const pm = {}; plats.forEach(r => { (pm[r.entity] = pm[r.entity] || []).push({ platform: r.platform, n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100 }); });
+  const rm = {}; regs.forEach(r => { (rm[r.entity] = rm[r.entity] || []).push({ region: r.region || 'au', n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100 }); });
+  const reg = {}; (await entitiesList(env, {})).forEach(e => { reg[e.id] = e; });
+  const list = cur.map(r => { const e = reg[r.entity] || { name: r.entity, kind: 'org', party: '', side: 'neutral', role: '', ns: '' }; const p = bm[r.entity]; return {
+    id: r.entity, name: e.name, kind: e.kind, party: e.party, side: e.side, role: e.role, ns: e.ns, active: e.active !== false,
+    n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100, neg: r.neg || 0, pos: r.pos || 0, neu: (r.n || 0) - (r.neg || 0) - (r.pos || 0), sarcasm: r.sarcasm || 0, intensity: Math.round((Number(r.intensity) || 1) * 10) / 10, latest: r.latest || 0,
+    prev: p ? { n: p.n, score: Math.round((Number(p.score) || 0) * 100) / 100 } : null, change: p ? Math.round(((Number(r.score) || 0) - (Number(p.score) || 0)) * 100) / 100 : null,
+    platforms: (pm[r.entity] || []).sort((x, y) => y.n - x.n), regions: (rm[r.entity] || []).sort((x, y) => y.n - x.n) }; })
+    .filter(x => !f.kind || x.kind === f.kind).sort((x, y) => y.n - x.n);
+  return { ok: true, days, since, filters: { platform: f.platform || '', region: f.region || '', issue: f.issue || '', kind: f.kind || '' }, entities: list };
+}
+async function sentimentSeries(env, f) {
+  f = f || {};
+  const days = Math.min(Math.max(parseInt(f.days, 10) || 30, 1), 365);
+  const bucket = f.bucket === 'hour' ? 3600000 : 86400000;
+  const since = Date.now() - days * 86400000;
+  const { w, b } = sentWhere(f);
+  const entity = entityIdClean(f.entity);
+  let rows;
+  if (entity) rows = (await env.MIND_DB.prepare('SELECT CAST(e.ts/? AS INTEGER) b, COUNT(*) n, AVG(e.stance) score, SUM(e.stance<0) neg, SUM(e.stance>0) pos FROM sent_entities e WHERE e.entity=? AND e.ts>?' + (w.length ? ' AND ' + w.join(' AND ') : '') + ' GROUP BY b ORDER BY b').bind(bucket, entity, since, ...b).all()).results || [];
+  else { const sw = sentWhere(f, 's'); rows = (await env.MIND_DB.prepare("SELECT CAST(s.ts/? AS INTEGER) b, COUNT(*) n, AVG(s.tone) score, SUM(s.tone<-0.2) neg, SUM(s.tone>0.2) pos FROM sent_items s WHERE s.model<>'none' AND s.ts>?" + (sw.w.length ? ' AND ' + sw.w.join(' AND ') : '') + (f.issue ? ' AND s.issues LIKE ?' : '') + ' GROUP BY b ORDER BY b').bind(bucket, since, ...sw.b, ...(f.issue ? ['%"' + String(f.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'] : [])).all()).results || []; }
+  return { ok: true, entity, days, bucket: f.bucket === 'hour' ? 'hour' : 'day', points: rows.map(r => ({ t: r.b * bucket, n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100, neg: r.neg || 0, pos: r.pos || 0 })) };
+}
+async function sentimentTopics(env, f) {
+  f = f || {};
+  const days = Math.min(Math.max(parseInt(f.days, 10) || 7, 1), 365);
+  const since = Date.now() - days * 86400000;
+  const sw = sentWhere(f, 's');
+  const rows = (await env.MIND_DB.prepare("SELECT j.value issue, COUNT(*) n, AVG(s.tone) tone, SUM(s.tone<-0.2) neg, SUM(s.tone>0.2) pos, SUM(s.texttype='news') news FROM sent_items s, json_each(s.issues) j WHERE s.model<>'none' AND s.ts>?" + (sw.w.length ? ' AND ' + sw.w.join(' AND ') : '') + ' GROUP BY j.value ORDER BY n DESC').bind(since, ...sw.b).all()).results || [];
+  const ents = (await env.MIND_DB.prepare('SELECT j.value issue, e.entity, COUNT(*) n, AVG(e.stance) score FROM sent_items s JOIN sent_entities e ON e.item=s.item, json_each(s.issues) j WHERE s.ts>?' + (sw.w.length ? ' AND ' + sw.w.join(' AND ') : '') + ' GROUP BY j.value, e.entity ORDER BY n DESC').bind(since, ...sw.b).all()).results || [];
+  const reg = {}; (await entitiesList(env, {})).forEach(e => { reg[e.id] = e; });
+  const by = {}; ents.forEach(r => { (by[r.issue] = by[r.issue] || []).push({ id: r.entity, name: (reg[r.entity] || {}).name || r.entity, kind: (reg[r.entity] || {}).kind || '', n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100 }); });
+  const label = id => { const ci = CLIENT_ISSUES.find(c => c.id === id); return ci ? { label: ci.label, client: ci.client, ns: ci.ns } : { label: id, client: '', ns: '' }; };
+  return { ok: true, days, topics: rows.map(r => Object.assign({ id: r.issue, n: r.n, tone: Math.round((Number(r.tone) || 0) * 100) / 100, neg: r.neg || 0, pos: r.pos || 0, news: r.news || 0, entities: (by[r.issue] || []).slice(0, 5) }, label(r.issue))) };
+}
+async function sentimentItems(env, f) {
+  f = f || {};
+  const days = Math.min(Math.max(parseInt(f.days, 10) || 7, 1), 365);
+  const since = Date.now() - days * 86400000;
+  const limit = Math.min(Math.max(parseInt(f.limit, 10) || 60, 1), 300);
+  const entity = entityIdClean(f.entity);
+  const { w, b } = sentWhere(f);
+  if (f.stance === '-1' || f.stance === '0' || f.stance === '1' || typeof f.stance === 'number') { w.push('e.stance=?'); b.push(Number(f.stance)); }
+  if (f.issue) { w.push('s.issues LIKE ?'); b.push('%"' + String(f.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
+  let rows;
+  if (entity) rows = (await env.MIND_DB.prepare('SELECT e.entity, e.stance, e.intensity, e.sarcasm, e.why, e.platform, e.region, e.ts, a.id, a.kind, a.src, a.title, a.body, a.url, s.tone, s.texttype, s.issues FROM sent_entities e JOIN sent_items s ON s.item=e.item JOIN arc_items a ON a.id=e.item WHERE e.entity=? AND e.ts>?' + (w.length ? ' AND ' + w.join(' AND ') : '') + ' ORDER BY e.ts DESC LIMIT ?').bind(entity, since, ...b, limit).all()).results || [];
+  else {
+    const sw = sentWhere(f, 's'); const ww = sw.w.slice(); const bb = sw.b.slice();
+    if (f.issue) { ww.push('s.issues LIKE ?'); bb.push('%"' + String(f.issue).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
+    if (f.stance === '-1') ww.push('s.tone<-0.2'); else if (f.stance === '1') ww.push('s.tone>0.2'); else if (f.stance === '0') ww.push('s.tone BETWEEN -0.2 AND 0.2');
+    rows = (await env.MIND_DB.prepare("SELECT '' entity, NULL stance, NULL intensity, 0 sarcasm, '' why, s.platform, s.region, s.ts, a.id, a.kind, a.src, a.title, a.body, a.url, s.tone, s.texttype, s.issues FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE s.model<>'none' AND s.ts>?" + (ww.length ? ' AND ' + ww.join(' AND ') : '') + ' ORDER BY s.ts DESC LIMIT ?').bind(since, ...bb, limit).all()).results || [];
+  }
+  return { ok: true, entity, days, items: rows.map(r => ({ id: r.id, kind: r.kind, src: r.src, platform: r.platform, region: r.region, ts: r.ts, title: String(r.title || '').slice(0, 300), excerpt: String(r.body || '').replace(/\s+/g, ' ').slice(0, 400), url: r.url,
+    tone: r.tone == null ? null : Math.round(Number(r.tone) * 100) / 100, type: r.texttype || '', issues: pjs(r.issues, []), stance: r.stance == null ? null : r.stance, intensity: r.intensity, sarcasm: !!r.sarcasm, why: r.why || '' })) };
+}
+async function sentimentStatus(env) {
+  const now = Date.now();
+  const c = (await env.MIND_DB.prepare("SELECT SUM(model<>'none' AND ts>?) c24, SUM(model<>'none' AND ts>?) c7, SUM(model='none' AND created>?) skipped24, COUNT(*) total, MAX(created) last FROM sent_items").bind(now - 86400000, now - 7 * 86400000, now - 86400000).first()) || {};
+  const m = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(stance<0) neg, SUM(stance>0) pos FROM sent_entities WHERE ts>?').bind(now - 7 * 86400000).first()) || {};
+  const ents = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(active) active, SUM(kind=\'person\') people, SUM(kind=\'party\') parties, SUM(kind=\'org\') orgs, SUM(kind=\'topic\') topics FROM entities').first()) || {};
+  // the backlog: of the newest unclassified rows, how many mention an entity
+  const kinds = SENT_KINDS.map(() => '?').join(',');
+  const rows = (await env.MIND_DB.prepare('SELECT a.kind, a.title, a.body FROM arc_items a LEFT JOIN sent_items s ON s.item=a.id WHERE s.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts DESC LIMIT 400').bind(now - SENT_WINDOW_H * 3600000, ...SENT_KINDS).all()).results || [];
+  const matcher = await entityMatcher(env);
+  const backlog = rows.filter(r => matcher.match(sentText(r)).length).length;
+  let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'sent_last')) || 'null'); } catch (e) { last = null; }
+  return { ok: true, configured: !!env.ANTHROPIC_API_KEY, budget: await sentBudget(env), classified24: c.c24 || 0, classified7: c.c7 || 0, skipped24: c.skipped24 || 0, total: c.total || 0, mentions7: m.n || 0, neg7: m.neg || 0, pos7: m.pos || 0,
+    entities: { total: ents.n || 0, active: ents.active || 0, people: ents.people || 0, parties: ents.parties || 0, orgs: ents.orgs || 0, topics: ents.topics || 0 }, backlog, unclassifiedScanned: rows.length, perTick: SENT_PER_TICK, batch: SENT_BATCH, windowHours: SENT_WINDOW_H, last, regions: SOURCE_JURIS };
+}
+
+// ==============================================================================
 // ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
 // ==============================================================================
 /** Compare in time that does not depend on where the first difference falls,
@@ -5682,11 +6132,11 @@ async function nanoRender(env, opts) {
   }
   return { ok: false, error: 'no_image', detail: lastDetail || 'all image models failed', model: lastModel };
 }
-async function claudeMsg(env, system, user, maxTok, timeoutMs) {
+async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTok, system: system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model: model || 'claude-sonnet-4-6', max_tokens: maxTok, system: system, messages: [{ role: 'user', content: user }] }),
     signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const d = await r.json().catch(() => ({}));
@@ -5962,7 +6412,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -5970,7 +6420,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -7070,6 +7520,73 @@ export default {
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
+    }
+
+    // -- Sentiment: who is talked about, how, where, on which channel; every number traces to rows --
+    //    GET  /entities?kind=&q=&active=       the register with 7-day mention counts (read)
+    //    GET  /entities/test?text=              which entities a text mentions (read)
+    //    POST /entities/add|update|delete {id,...}   POST /entities/sync-mps   (full)
+    //    GET  /sentiment/status                 classified, backlog, budget, model (read)
+    //    GET  /sentiment/entities?days=&platform=&region=&issue=&kind=   the leaderboard with trend and platform mix (read)
+    //    GET  /sentiment/series?entity=&days=&bucket=day|hour&platform=&region=   over time (read)
+    //    GET  /sentiment/topics?days=&platform=&region=   tone by client issue with the entities inside (read)
+    //    GET  /sentiment/items?entity=&stance=&issue=&platform=&region=&days=&limit=   the evidence rows (read)
+    //    POST /sentiment/run {limit,hours,platform}   classify now, as a job the console tails (full)
+    if (path.startsWith('/entities') || path.startsWith('/sentiment/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let nb = {}; if (req.method === 'POST') { try { nb = await req.json(); } catch (e) { nb = {}; } }
+      try {
+        await ensureArchive(env); await ensureSentiment(env);
+        const qf = k => reqUrl.searchParams.get(k) || '';
+        if (path === '/entities' && req.method === 'GET') {
+          const list = await entitiesList(env, { kind: qf('kind'), q: qf('q'), active: qf('active') === '' ? null : qf('active') === '1' });
+          const counts = {}; (((await env.MIND_DB.prepare('SELECT entity, COUNT(*) n, AVG(stance) score FROM sent_entities WHERE ts>? GROUP BY entity').bind(Date.now() - 7 * 86400000).all()).results) || []).forEach(r => { counts[r.entity] = { n: r.n, score: Math.round((Number(r.score) || 0) * 100) / 100 }; });
+          return jsonResp({ ok: true, entities: list.map(e => Object.assign(e, { mentions7: (counts[e.id] || {}).n || 0, score7: (counts[e.id] || {}).score })), kinds: ENTITY_KINDS, sides: ENTITY_SIDES, total: list.length });
+        }
+        if (path === '/entities/test' && req.method === 'GET') {
+          const text = String(qf('text') || '').slice(0, 5000);
+          const m = await entityMatcher(env);
+          return jsonResp({ ok: true, entities: m.match(text).map(id => ({ id, name: (m.byId[id] || {}).name || id, kind: (m.byId[id] || {}).kind || '' })), region: regionOf(text, {}, '') });
+        }
+        if (path === '/sentiment/status' && req.method === 'GET') return jsonResp(await sentimentStatus(env));
+        if (path === '/sentiment/entities' && req.method === 'GET') return jsonResp(await sentimentEntities(env, { days: qf('days'), platform: qf('platform'), region: qf('region'), issue: qf('issue'), kind: qf('kind') }));
+        if (path === '/sentiment/series' && req.method === 'GET') return jsonResp(await sentimentSeries(env, { entity: qf('entity'), days: qf('days'), bucket: qf('bucket'), platform: qf('platform'), region: qf('region'), issue: qf('issue') }));
+        if (path === '/sentiment/topics' && req.method === 'GET') return jsonResp(await sentimentTopics(env, { days: qf('days'), platform: qf('platform'), region: qf('region') }));
+        if (path === '/sentiment/items' && req.method === 'GET') return jsonResp(await sentimentItems(env, { entity: qf('entity'), stance: qf('stance'), issue: qf('issue'), platform: qf('platform'), region: qf('region'), days: qf('days'), limit: qf('limit') }));
+        if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Editing the register and running the classifier need a full-access key.' }, 403);
+        if (path === '/entities/add') {
+          const s = entitySanitize(nb, null);
+          if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the entity a name.' }, 400);
+          const had = await env.MIND_DB.prepare('SELECT id FROM entities WHERE id=?').bind(s.id).first();
+          await entityUpsert(env, s, Date.now(), auth.name || 'operator');
+          return jsonResp({ ok: true, added: !had, entity: entityRow(await env.MIND_DB.prepare('SELECT * FROM entities WHERE id=?').bind(s.id).first()) });
+        }
+        if (path === '/entities/update') {
+          const id = entityIdClean(nb.id);
+          const row = id ? await env.MIND_DB.prepare('SELECT * FROM entities WHERE id=?').bind(id).first() : null;
+          if (!row) return jsonResp({ error: 'unknown_entity', detail: 'No entity with id ' + id + '.' }, 404);
+          const s = entitySanitize(Object.assign({}, nb.patch && typeof nb.patch === 'object' ? nb.patch : nb, { id }), entityRow(row));
+          await entityUpsert(env, s, Date.now(), row.source);
+          return jsonResp({ ok: true, entity: entityRow(await env.MIND_DB.prepare('SELECT * FROM entities WHERE id=?').bind(id).first()) });
+        }
+        if (path === '/entities/delete') {
+          const id = entityIdClean(nb.id);
+          if (!id) return jsonResp({ error: 'missing_id' }, 400);
+          await env.MIND_DB.prepare('DELETE FROM entities WHERE id=?').bind(id).run();
+          ENTITY_CACHE = null;
+          return jsonResp({ ok: true, deleted: id, note: 'Past verdicts for ' + id + ' stay in the sums until they age out.' });
+        }
+        if (path === '/entities/sync-mps') { const r = await entitiesSyncMps(env); return jsonResp(r, r.ok ? 200 : 400); }
+        if (path === '/sentiment/run') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the classifier is Claude.' }, 501);
+          const params = { limit: Math.min(Math.max(parseInt(nb.limit, 10) || SENT_PER_TICK, 1), 400), hours: parseInt(nb.hours, 10) || SENT_WINDOW_H, platform: String(nb.platform || '').slice(0, 20), where: 'worker' };
+          const job = await jobCreate(env, 'sentiment', params, auth.name);
+          ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'sentiment', params }));
+          return jsonResp({ ok: true, job: job.id, id: job.id, where: 'worker', note: 'Classifying in the worker. Tail /bridge/job?id=' + job.id });
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'sentiment_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
     // -- Social capture beyond Reddit and the clients' own pages --
@@ -9206,6 +9723,8 @@ async function handleScheduled(env) {
   try { await signalsCron(env); } catch (e) {}
   // Social capture: Bluesky, Mastodon, X timelines, YouTube comments and captions, petitions (two-hourly).
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
+  // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget.
+  try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); }
   // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
   try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {

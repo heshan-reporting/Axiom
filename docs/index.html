@@ -23,6 +23,7 @@
 <script src="topics.js" defer></script>
 <script src="content.js" defer></script>
 <script src="sources.js" defer></script>
+<script src="sentiment.js" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -1041,6 +1042,53 @@ body.kiosk .kprog{display:block}
 .cov-table td .cov-no{color:#F5B942}
 .cov-table td b{color:var(--t0)}
 .pet-table a{color:var(--t0);text-decoration:none}.pet-table a:hover{text-decoration:underline}
+/* Sentiment (React island, docs/sentiment.js) */
+.sn-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
+.sn-filters select{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--ln);background:rgba(255,255,255,.03);color:var(--t1)}
+.sn-main{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+.sn-main.split{grid-template-columns:minmax(0,1fr) minmax(380px,520px)}
+@media(max-width:1200px){.sn-main.split{grid-template-columns:1fr}}
+.sn-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.sn-table th{position:sticky;top:0;background:rgba(10,14,22,.96);text-align:left;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);padding:9px 10px;border-bottom:1px solid var(--ln);z-index:1;cursor:pointer;white-space:nowrap}
+.sn-table th.on{color:var(--t0)}
+.sn-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle;color:var(--t1)}
+.sn-table .num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--fm);font-size:11.5px}
+.sn-row{cursor:pointer;transition:background .12s}.sn-row:hover{background:rgba(255,255,255,.03)}.sn-row.on{background:rgba(143,182,255,.08)}
+.sn-name .n{font-weight:600;color:var(--t0);line-height:1.3;display:flex;gap:7px;align-items:center}
+.sn-name .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:2px}
+.sn-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.sn-kind{font-family:var(--fm);font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:999px;border:1px solid var(--ln);color:var(--t3)}
+.sn-kind.client{border-color:rgba(126,224,174,.5);color:#7EE0AE}.sn-kind.opponent{border-color:rgba(240,144,139,.5);color:#F0908B}
+.sn-bar{position:relative;width:120px;height:8px;border-radius:4px;background:rgba(255,255,255,.07);display:inline-block;vertical-align:middle}
+.sn-bar i{position:absolute;top:0;height:100%;border-radius:4px}
+.sn-bar:after{content:'';position:absolute;left:50%;top:-2px;width:1px;height:12px;background:rgba(255,255,255,.35)}
+.sn-score{font-family:var(--fm);font-size:11.5px;font-variant-numeric:tabular-nums;margin-left:8px}
+.sn-delta{font-family:var(--fm);font-size:11px;white-space:nowrap}
+.sn-tablewrap{border:1px solid var(--ln);border-radius:12px;overflow:auto;max-height:calc(100vh - 380px)}
+.sn-sub{font-family:var(--fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--ln)}
+.sn-drawer{border:1px solid var(--ln);border-radius:12px;padding:14px;background:rgba(255,255,255,.02);position:sticky;top:12px;max-height:calc(100vh - 120px);overflow:auto}
+.sn-drawerhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}
+.sn-drawertitle{font-family:var(--fd);font-size:18px;font-weight:700;color:var(--t0);letter-spacing:-.02em;line-height:1.2}
+.sn-facts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 12px;font-size:12.5px;color:var(--t1)}
+.sn-facts .k{display:block;font-family:var(--fm);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin-bottom:2px}
+.sn-chart{width:100%;height:120px;display:block;margin-top:6px}
+.sn-mini{width:100%;border-collapse:collapse;font-size:12px}
+.sn-mini td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.05);color:var(--t1)}
+.sn-ev{border-top:1px solid rgba(255,255,255,.05);padding:8px 0}
+.sn-ev .why{font-style:italic;color:var(--t0);font-size:12.5px}
+.sn-ev .tx{font-size:12px;color:var(--t2);margin-top:3px;line-height:1.45}
+.sn-ev .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sn-ev .m a{color:#8FB6FF;text-decoration:none}
+.sn-st{font-family:var(--fm);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid var(--ln)}
+.sn-st.neg{color:#F0908B;border-color:rgba(240,144,139,.5)}.sn-st.pos{color:#7EE0AE;border-color:rgba(126,224,174,.5)}.sn-st.neu{color:var(--t3)}
+.sn-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.sn-chip{font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--ln);background:transparent;color:var(--t2);cursor:pointer}
+.sn-chip.on{border-color:rgba(143,182,255,.7);background:rgba(143,182,255,.12);color:var(--t0)}
+.sn-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:6px}
+.sn-form label{display:flex;flex-direction:column;gap:4px;font-family:var(--fm);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
+.sn-form input,.sn-form select,.sn-form textarea{font-size:12.5px;padding:7px 9px;border-radius:8px;border:1px solid var(--ln);background:rgba(255,255,255,.03);color:var(--t0);font-family:inherit;letter-spacing:0;text-transform:none}
+.sn-form .wide{grid-column:1 / -1}
+.sn-reg td .al{font-family:var(--fm);font-size:10.5px;color:var(--t2);line-height:1.5}
 /* Content Desk (React island, docs/content.js) */
 .cd-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--ln);border-radius:14px;background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.015));margin-bottom:12px}
 .cd-logo{width:64px;height:64px;border-radius:12px;border:1px solid var(--ln);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:13px;font-weight:700;color:var(--t1);overflow:hidden;flex:0 0 auto}
@@ -1702,6 +1750,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span class="rtip">Topics</span></button>
         <button class="rbtn" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/><path d="M4 12H2M6 4l-1.5-1.5"/></svg><span class="rtip">Content Desk</span></button>
         <button class="rbtn" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span class="rtip">Sources</span></button>
+        <button class="rbtn" data-v="sentiment" onclick="go('sentiment')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg><span class="rtip">Sentiment</span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -2142,6 +2191,11 @@ body.kiosk .kprog{display:block}
         <div class="note" style="margin:0 0 14px">Every outlet, office, party, pollster, sector title and podcast the platform reads, as one table. For each source the sweep tries its routes in order — the feed, the WordPress API, a JSON feed, the news sitemap, the podcast directory, the listing page, Google News, a rendered page — keeps what works and records which one delivered, when, how much, and what failed and why. Probe runs every route live. A source that fails six sweeps in a row turns red here and is reported to Slack once. Times are Australian Eastern.</div>
         <div id="sources-root"><div class="empty" style="padding:40px 0">Loading the source registry…</div></div>
       </section>
+      <!-- ═══ SENTIMENT — who is talked about, how, where and on which channel; every number traces to rows (React island, docs/sentiment.js) ═══ -->
+      <section class="view" id="v-sentiment">
+        <div class="note" style="margin:0 0 14px">How the conversation regards each party, person, organisation and topic — the entity register with the aliases they go by, a first pass that finds the rows mentioning one, then Claude judging the author's stance toward each (critical, neutral, supportive, with intensity, sarcasm and the phrase that decided it) and the text's tone. Sums are by window, channel, region and client issue; every figure opens the rows behind it. Edit the register when a name, role or alias changes. Australian Eastern time.</div>
+        <div id="sentiment-root"><div class="empty" style="padding:40px 0">Loading sentiment…</div></div>
+      </section>
       <section class="view" id="v-map">
         <div class="kmwrap">
           <canvas id="km-cv"></canvas>
@@ -2428,6 +2482,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Desk</span></button>
   <button class="tab" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span>Topics</span></button>
   <button class="tab" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span>Sources</span></button>
+  <button class="tab" data-v="sentiment" onclick="go('sentiment')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg><span>Sentiment</span></button>
   <button class="tab" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg><span>Content</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
@@ -2709,7 +2764,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',sources:'Sources',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',sources:'Sources',sentiment:'Sentiment',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2725,6 +2780,7 @@ function go(v){
   if(v==='topics'&&typeof topicsInit==='function')topicsInit();
   if(v==='content'&&typeof contentInit==='function')contentInit();
   if(v==='sources'&&typeof sourcesInit==='function')sourcesInit();
+  if(v==='sentiment'&&typeof sentimentInit==='function')sentimentInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */
