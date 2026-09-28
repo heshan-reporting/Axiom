@@ -2904,13 +2904,15 @@ async function brandSave(env, ns, body, who) {
   if (body.palette && typeof body.palette === 'object') {
     ['primary', 'secondary', 'bg', 'text'].forEach(k => { const v = String(body.palette[k] || '').trim(); if (/^#[0-9a-fA-F]{3,8}$/.test(v)) pal[k] = v; else if (v === '') delete pal[k]; });
   }
-  const kit = {
+  // the structured half - campaigns, facts, banned terms, platform notes,
+  // segments, people - is what the Content Desk writes from; see kitStructured
+  const kit = Object.assign({
     ns, name: pick(body.name != null ? body.name : cur.name, 80), palette: pal,
     fonts: { display: pick(body.fonts && body.fonts.display != null ? body.fonts.display : (cur.fonts || {}).display, 60), body: pick(body.fonts && body.fonts.body != null ? body.fonts.body : (cur.fonts || {}).body, 60) },
     voice: pick(body.voice != null ? body.voice : cur.voice, 4000),
-    rules: pick(body.rules != null ? body.rules : cur.rules, 2000),
+    rules: pick(body.rules != null ? body.rules : cur.rules, 3000),
     logoMime: cur.logoMime || '', hasLogo: !!cur.hasLogo, updated: Date.now(), by: String(who || '').slice(0, 40),
-  };
+  }, kitStructured(body, cur));
   if (body.logoB64) {
     if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo');
     const mime = String(body.logoMime || 'image/png');
@@ -2965,6 +2967,7 @@ async function releaseCompose(env, pack, opts, log) {
   const sys = 'You are the creative director of an Australian political communications agency, turning a client media release into social media tiles. Client: ' + client + '.'
     + (kit.voice ? '\n\nCLIENT VOICE:\n' + kit.voice : '') + (opts.brief ? '\n\nCLIENT BRIEF:\n' + String(opts.brief).slice(0, 3000) : '')
     + (kit.rules ? '\n\nSTANDING RULES:\n' + kit.rules : '') + (playbook ? '\n\nPLAYBOOK (from the client knowledge base):\n' + playbook : '')
+    + ((kit.banned || []).length ? '\n\nNEVER USE these words (and what to say instead):\n' + kit.banned.map(b => '- "' + b.term + '"' + (b.use ? ' -> ' + b.use : '') + (b.allowNegated ? ' (allowed only inside a denial)' : '')).join('\n') : '')
     + '\n\nRULES. Use only facts, figures and quotes that appear in the release - never invent a number or a quotation. Australian English. Plain, confident, human; no jargon, no exclamation marks, no hashtags in headlines.'
     + ' Each tile does one job. Headline max 60 characters, support line max 120, CTA max 28 or empty. A "stat" tile only if the release contains a real figure; its headline is the figure itself.'
     + ' A "quote" tile uses a verbatim sentence from the release with attribution. Captions: LinkedIn up to 600 chars (professional, one line break allowed), X up to 270, Facebook up to 400; captions may add one relevant hashtag at most.'
@@ -3214,6 +3217,317 @@ async function engineArtwork(env, body, who) {
   await env.MIND_DB.prepare('INSERT INTO engine_art(id,ns,title,key,mime,description,meta,docId,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .bind(id, ns, title, key, mime, d.description, JSON.stringify(meta).slice(0, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
   return { id, ns, title, key, description: d.description, model: d.model, docId, url: '/engine/art?id=' + id };
+}
+
+// ==============================================================================
+// THE CONTENT DESK - copy for each client and each platform, written in the
+// client's own voice: the brand kit (voice, standing rules, campaigns with
+// their sign-offs, approved facts with sources, banned terms, platform and
+// audience notes), the approved examples filed in the Mind, and the
+// corrections the team has taught the Engine. Every piece can be changed by
+// instruction: a one-off change is applied to this set; a standing instruction
+// ("always write per cent", "never call it a subsidy") becomes a rule that the
+// next build obeys, for this client only. Every figure is checked back against
+// the approved facts and the source material and flagged, never dropped.
+// ==============================================================================
+let CONTENT_READY = false;
+const CONTENT_PLATFORMS = {
+  facebook:  { label: 'Facebook', max: 900, ideal: [300, 650], hashtags: 0, register: 'The fullest caption: a hook line, the fact and what it funds or who it employs, the sign-off, the link line, the source line. Short paragraphs separated by blank lines.' },
+  instagram: { label: 'Instagram', max: 700, ideal: [180, 480], hashtags: 1, register: 'Shorter and visual-first; the image carries the headline, the caption adds the meaning. One hashtag at most, none in paid.' },
+  linkedin:  { label: 'LinkedIn', max: 900, ideal: [250, 550], hashtags: 0, register: 'Professional and evidence-first for members, executives, MPs and staffers; the source line is included; fewer words than Facebook. No election framing.' },
+  x:         { label: 'X', max: 280, ideal: [120, 260], hashtags: 1, register: 'One fact, its source, a link. Measured, never combative. Under 260 characters.' },
+  tiktok:    { label: 'TikTok', max: 300, ideal: [60, 220], hashtags: 1, register: 'One to three punchy lines in plain speech; the words on screen matter more than the caption. Myth vs fact, careers energy.' },
+  reddit:    { label: 'Reddit', max: 2500, ideal: [400, 1500], hashtags: 0, title: true, register: 'A text post that makes an argument in native tone with sources linked; a real title; no marketing sign-off and no brand creative. Written to be replied to.' },
+  youtube:   { label: 'YouTube', max: 1200, ideal: [200, 800], hashtags: 0, title: true, register: 'A video title and a description carrying the fact, the source and the link; a 15-second script when the brief asks for one.' },
+  spotify:   { label: 'Spotify audio', max: 700, ideal: [380, 520], hashtags: 0, script: true, register: 'A 30-second audio script of 70-80 words, one voice, conversational, the URL spoken plainly without hyphens.' },
+  email:     { label: 'Email', max: 1800, ideal: [500, 1200], hashtags: 0, title: true, register: 'A subject line and a short eDM body: one message, one link, one closing line.' },
+};
+async function ensureContent(env) {
+  if (!env.MIND_DB) return false;
+  if (CONTENT_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS content_sets(id TEXT PRIMARY KEY, ns TEXT, campaign TEXT, segment TEXT, brief TEXT, source TEXT, platforms TEXT, items TEXT, status TEXT, job TEXT, who TEXT, history TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS content_sets_ns ON content_sets(ns, created)'),
+  ]);
+  CONTENT_READY = true;
+  return true;
+}
+function contentId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function contentPlatform(v) { const p = String(v || '').toLowerCase().replace(/[^a-z]/g, ''); return CONTENT_PLATFORMS[p] ? p : ''; }
+function kitSlug(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24); }
+/** The structured half of the brand kit, sanitised: campaigns, facts, banned
+ *  terms, platform notes, segments, people. Arrays given replace the stored
+ *  array; arrays left out are kept. */
+function kitStructured(body, cur) {
+  const pick = (v, n) => String(v == null ? '' : v).slice(0, n);
+  const arr = (v, n) => (Array.isArray(v) ? v.slice(0, n) : null);
+  const out = {};
+  const camps = arr(body.campaigns, 12);
+  out.campaigns = (camps || cur.campaigns || []).map(c => c && typeof c === 'object' ? ({ id: kitSlug(c.id) || kitSlug(c.name), name: pick(c.name, 90), url: pick(c.url, 120), signoff: pick(c.signoff, 160), cta: pick(c.cta, 160),
+    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), active: c.active !== false }) : null).filter(c => c && c.id);
+  const facts = arr(body.facts, 80);
+  out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? ({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }) : null).filter(f => f && f.text);
+  const banned = arr(body.banned, 60);
+  out.banned = (banned || cur.banned || []).map(b => typeof b === 'string' ? { term: pick(b, 80), use: '', why: '', allowNegated: false }
+    : (b && typeof b === 'object' ? { term: pick(b.term, 80), use: pick(b.use, 160), why: pick(b.why, 240), allowNegated: !!b.allowNegated } : null)).filter(b => b && b.term);
+  const plats = body.platforms && typeof body.platforms === 'object' ? body.platforms : null;
+  out.platforms = {};
+  Object.keys(CONTENT_PLATFORMS).forEach(k => {
+    const src = plats ? plats[k] : (cur.platforms || {})[k];
+    if (!src || typeof src !== 'object') return;
+    const mx = parseInt(src.max, 10);
+    out.platforms[k] = { notes: pick(src.notes, 700), max: mx >= 40 && mx <= 5000 ? mx : 0, hashtags: Math.min(Math.max(parseInt(src.hashtags, 10) || 0, 0), 5) };
+  });
+  const segs = arr(body.segments, 12);
+  out.segments = (segs || cur.segments || []).map(s => s && typeof s === 'object' ? ({ id: kitSlug(s.id) || kitSlug(s.name), name: pick(s.name, 90), who: pick(s.who, 320), themes: pick(s.themes, 320), platforms: pick(s.platforms, 140) }) : null).filter(s => s && s.id);
+  const ppl = arr(body.people, 12);
+  out.people = (ppl || cur.people || []).map(p => p && typeof p === 'object' ? ({ name: pick(p.name, 80), title: pick(p.title, 120), role: pick(p.role, 220) }) : null).filter(p => p && p.name);
+  out.approval = pick(body.approval != null ? body.approval : cur.approval, 500);
+  return out;
+}
+/** Banned terms present in a text. A term marked allowNegated is fine inside a
+ *  denial ("not a subsidy") - the campaign's own myth-busting line. */
+function contentBannedCheck(text, banned) {
+  const t = String(text || ''); const hits = [];
+  (banned || []).forEach(b => {
+    if (!b || !b.term) return;
+    const rx = new RegExp('(^|[^a-z0-9])' + String(b.term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+') + '(?![a-z0-9])', 'gi');
+    let m;
+    while ((m = rx.exec(t))) {
+      const before = t.slice(Math.max(0, m.index - 40), m.index + m[1].length);
+      if (b.allowNegated && /\b(not|n't|never|no|isn't|aren't|wasn't)\b/i.test(before)) continue;
+      if (hits.indexOf(b.term) < 0) hits.push(b.term);
+      break;
+    }
+  });
+  return hits;
+}
+/** Every figure on a piece must appear in the approved facts, the source
+ *  material or the brief. Years and single digits are not figures. */
+function contentNumberCheck(text, allowed) {
+  const chk = relNumberCheck(text, allowed);
+  const missing = chk.missing.filter(t => !/^(19|20)\d\d$/.test(t) && !/^\d$/.test(t));
+  return { ok: !missing.length, missing };
+}
+function contentItemCheck(item, allowed, banned) {
+  const spec = CONTENT_PLATFORMS[item.platform] || { max: 2000 };
+  const text = [item.title, item.body, item.cta].filter(Boolean).join(' ');
+  const num = contentNumberCheck(text, allowed);
+  const bad = contentBannedCheck(text, banned);
+  const chars = String(item.body || '').length;
+  const flags = [];
+  if (!num.ok) flags.push('unverified_figure');
+  if (bad.length) flags.push('banned_term');
+  if (chars > spec.max) flags.push('over_limit');
+  if ((item.hashtags || []).length > (spec.hashtags || 0)) flags.push('too_many_hashtags');
+  if (/!/.test(item.body || '') && item.platform !== 'reddit') flags.push('exclamation');
+  return { ok: !flags.length, missing: num.missing, banned: bad, chars, max: spec.max, flags };
+}
+/** The client block of a compose or revise prompt: voice, rules, the chosen
+ *  campaign, the audience, the facts that may be quoted, the words never used. */
+function contentKitBlock(kit, campaignId, segmentId, platforms) {
+  kit = kit || {};
+  const camp = (kit.campaigns || []).find(c => c.id === campaignId) || null;
+  const seg = (kit.segments || []).find(s => s.id === segmentId) || null;
+  let facts = (kit.facts || []).filter(f => f.status !== 'pending');
+  if (camp) { const own = facts.filter(f => f.campaign === camp.id); const rest = facts.filter(f => f.campaign !== camp.id); facts = own.concat(rest); }
+  facts = facts.slice(0, 40);
+  let s = '';
+  if (kit.voice) s += '\n\nCLIENT VOICE:\n' + kit.voice;
+  if (kit.rules) s += '\n\nSTANDING RULES:\n' + kit.rules;
+  if (camp) {
+    s += '\n\nCAMPAIGN - ' + camp.name + ':' + (camp.signoff ? '\nSign-off (close with it, spelled exactly): "' + camp.signoff + '"' : '') + (camp.cta ? '\nLink line / CTA: "' + camp.cta + '"' : '')
+      + (camp.url ? '\nSite: ' + camp.url : '') + (camp.sourceLine ? '\nSource line to use for the campaign figure: "' + camp.sourceLine + '"' : '')
+      + (camp.tone ? '\nTone: ' + camp.tone : '') + (camp.structure ? '\nStructure: ' + camp.structure : '') + (camp.notes ? '\nNotes: ' + camp.notes : '');
+  }
+  if (seg) s += '\n\nAUDIENCE - ' + seg.name + ': ' + seg.who + (seg.themes ? '\nThemes that land: ' + seg.themes : '');
+  if (facts.length) s += '\n\nAPPROVED FACTS - the only figures you may use, apart from figures in the SOURCE MATERIAL; quote them exactly and cite the source:\n' + facts.map(f => '- [' + f.id + '] ' + f.text + (f.source ? ' (Source: ' + f.source + ')' : '')).join('\n');
+  if ((kit.banned || []).length) s += '\n\nNEVER USE these words (and what to say instead):\n' + kit.banned.map(b => '- "' + b.term + '"' + (b.use ? ' -> ' + b.use : '') + (b.allowNegated ? ' (allowed only inside a denial such as "not a ' + b.term + '")' : '') + (b.why ? ' - ' + b.why : '')).join('\n');
+  const pn = kit.platforms || {};
+  (platforms || []).forEach(p => { if (pn[p] && pn[p].notes) s += '\n\nHOW THIS CLIENT USES ' + (CONTENT_PLATFORMS[p] || {}).label.toUpperCase() + ': ' + pn[p].notes; });
+  if ((kit.people || []).length) s += '\n\nSPOKESPEOPLE: ' + kit.people.map(p => p.name + (p.title ? ' (' + p.title + ')' : '') + (p.role ? ' - ' + p.role : '')).join('; ');
+  return { text: s, campaign: camp, segment: seg, facts, banned: kit.banned || [] };
+}
+/** Approved examples for this client from the Mind: copy filed by the voice
+ *  pack, WIN outcomes the team approved, the content guide. */
+async function contentExemplars(env, ns, camp, platforms, brief, log) {
+  let hits = [];
+  try {
+    const q = [(camp && camp.name) || '', (platforms || []).join(' '), 'approved caption post copy example', String(brief || '').slice(0, 300)].join(' ');
+    hits = await mindRetrieve(env, ns, q, 10);
+  } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); return { text: '', count: 0 }; }
+  const want = hits.filter(h => /^(copy|outcome|brief|release)$/.test(String(h.meta.kind || '')));
+  const own = want.filter(h => camp && String(h.meta.source || '').indexOf(camp.id) >= 0);
+  const picked = own.concat(want.filter(h => own.indexOf(h) < 0)).slice(0, 8);
+  await log('out', 'Mind: ' + picked.length + ' approved example' + (picked.length === 1 ? '' : 's') + (camp ? ' (' + own.length + ' from ' + camp.id + ')' : '') + ' for ' + ns);
+  if (!picked.length) return { text: '', count: 0 };
+  const text = '\n\nAPPROVED EXAMPLES - match their shape, rhythm, sign-offs and source lines; do not copy them word for word:\n' + picked.map(h => '[' + String(h.meta.kind || 'doc').toUpperCase() + ' - ' + (h.meta.title || '') + ']\n' + String(h.meta.snippet || '').slice(0, 700)).join('\n\n').slice(0, 6000);
+  return { text, count: picked.length };
+}
+function contentNorm(t, i, ns) {
+  const platform = contentPlatform(t.platform) || 'facebook';
+  const spec = CONTENT_PLATFORMS[platform];
+  const hashtags = Array.isArray(t.hashtags) ? t.hashtags.map(h => String(h || '').replace(/^#/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40)).filter(Boolean).slice(0, 5) : [];
+  return { n: i, platform, title: spec.title || spec.script ? String(t.title || '').trim().slice(0, 160) : '', body: String(t.body || '').replace(/\r/g, '').trim().slice(0, 4000),
+    cta: String(t.cta || '').trim().slice(0, 160), link: String(t.link || '').trim().slice(0, 200), hashtags, alt: String(t.alt || '').slice(0, 160), visual: String(t.visual || '').slice(0, 200),
+    factIds: Array.isArray(t.factIds) ? t.factIds.map(kitSlug).filter(Boolean).slice(0, 6) : [], note: String(t.note || '').slice(0, 120), segment: String(t.segment || '').slice(0, 24), verdict: '', revisions: 0 };
+}
+/** Compose: one Claude call writes n pieces per platform in the client voice. */
+async function contentCompose(env, set, opts, log) {
+  const ns = set.ns;
+  const kit = (await brandKit(env, ns)) || {};
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || kit.name || 'the client';
+  const platforms = set.platforms;
+  const block = contentKitBlock(kit, set.campaign, set.segment, platforms);
+  await log('out', 'voice profile: ' + (block.campaign ? 'campaign "' + block.campaign.name + '", ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms' + (block.segment ? ', audience ' + block.segment.name : ''));
+  const ex = await contentExemplars(env, ns, block.campaign, platforms, set.brief, log);
+  let learned = { text: '', count: 0 };
+  try { learned = await engineRules(env, ns, 'copy'); } catch (e) {}
+  if (learned.count) await log('info', 'applying ' + learned.count + ' learned correction' + (learned.count === 1 ? '' : 's') + ' for ' + ns);
+  const n = Math.min(Math.max(parseInt(opts.n, 10) || 2, 1), 4);
+  const specLines = platforms.map(p => { const s = CONTENT_PLATFORMS[p]; const own = (kit.platforms || {})[p] || {}; const mx = own.max || s.max; return '- ' + p + ' (' + s.label + '): ' + s.register + ' Body up to ' + mx + ' characters' + (s.title ? ', with a title' : '') + (s.script ? ', written as a script' : '') + '; ' + ((own.hashtags != null ? own.hashtags : s.hashtags) ? 'at most ' + (own.hashtags != null ? own.hashtags : s.hashtags) + ' hashtag(s)' : 'no hashtags') + '.'; }).join('\n');
+  const sys = 'You are the senior copywriter of an Australian political communications agency, writing social and digital copy for the client ' + client + '. You write exactly as the client has approved before: same shape, same sign-offs, same source lines, same restraint. Return strict JSON only, no prose.'
+    + block.text + ex.text + learned.text
+    + '\n\nPLATFORMS - write exactly ' + n + ' piece' + (n === 1 ? '' : 's') + ' for each, every piece a different angle:\n' + specLines
+    + '\n\nRULES. Australian English, sentence case, no exclamation marks, no emojis, hashtags only where a platform allows them. Every figure comes from the APPROVED FACTS or the SOURCE MATERIAL, quoted exactly, with its source line where the campaign uses one; never invent, round or update a number. Use only claims the client has made or the source supports. Paragraphs are separated by a blank line (\\n\\n). Do not favour a political party. The link goes to the campaign site, never a third-party article.'
+    + '\n\nOUTPUT: {"items":[{"platform":"facebook","title":"only for platforms that take one","body":"the caption or script","cta":"the closing line or call to action, or empty","link":"URL or empty","hashtags":[],"alt":"<=140 chars image description for accessibility","visual":"<=160 chars art direction for the tile: subject, mood, no text instructions","factIds":["ids of APPROVED FACTS used"],"note":"<=80 chars: the angle"}]}';
+  const user = 'BRIEF:\n' + (set.brief || '(none - work from the source material)') + (set.source ? '\n\nSOURCE MATERIAL (the only other place figures may come from):\n' + String(set.source).slice(0, 16000) : '')
+    + (opts.instructions ? '\n\nEXTRA INSTRUCTIONS FOR THIS SET:\n' + String(opts.instructions).slice(0, 1500) : '')
+    + '\n\nWrite ' + n + ' piece' + (n === 1 ? '' : 's') + ' for each of: ' + platforms.join(', ') + '.';
+  await log('cmd', 'claude: write ' + (n * platforms.length) + ' pieces for ' + client + ' (' + platforms.join(', ') + ')');
+  const raw = await claudeMsg(env, sys, user, Math.min(8000, 1200 + n * platforms.length * 500), 120000);
+  const j = relJson(raw);
+  if (!j || !Array.isArray(j.items) || !j.items.length) throw new Error('compose_unparseable');
+  const allowed = [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), (block.campaign ? [block.campaign.name, block.campaign.url, block.campaign.cta, block.campaign.sourceLine, block.campaign.notes].join(' ') : ''), kit.voice, kit.rules].join(' ');
+  const items = j.items.slice(0, n * platforms.length + 2).map((t, i) => contentNorm(t, i, ns)).filter(t => t.body);
+  items.forEach((it, i) => { it.n = i; it.check = contentItemCheck(it, allowed, block.banned); });
+  const flagged = items.filter(it => !it.check.ok);
+  await log('out', items.length + ' pieces: ' + platforms.map(p => p + ' x' + items.filter(it => it.platform === p).length).join(', ') + (flagged.length ? ' - ' + flagged.length + ' flagged (' + flagged.map(it => it.check.flags.join('/')).join(', ') + ')' : ' - every figure traced, no banned terms'));
+  return { items, allowed, facts: block.facts.length, examples: ex.count, learned: learned.count, campaign: block.campaign ? block.campaign.id : '' };
+}
+/** The whole build, run after POST /content/generate has answered. */
+async function contentBuild(env, setId, opts) {
+  const log = mkJobLog(env, opts.job);
+  const row = await env.MIND_DB.prepare('SELECT id,ns,campaign,segment,brief,source,platforms,who FROM content_sets WHERE id=?').bind(setId).first();
+  if (!row) return;
+  const set = Object.assign({}, row, { platforms: JSON.parse(row.platforms || '[]') });
+  try {
+    const r = await contentCompose(env, set, opts, log);
+    await env.MIND_DB.prepare('UPDATE content_sets SET items=?, status=?, updated=? WHERE id=?').bind(JSON.stringify(r.items).slice(0, 200000), 'written', Date.now(), setId).run();
+    await log('info', 'set ' + setId + ' written: ' + r.items.length + ' pieces in the ' + set.ns + ' voice (' + r.facts + ' facts, ' + r.examples + ' examples, ' + r.learned + ' corrections in play)');
+    await log.flush();
+    await jobFinish(env, opts.job, true, { ok: true, setId, pieces: r.items.length, flagged: r.items.filter(it => !it.check.ok).length, campaign: r.campaign });
+  } catch (e) {
+    const m = String((e && e.message) || e).slice(0, 200);
+    await log('err', m);
+    await log.flush();
+    await env.MIND_DB.prepare('UPDATE content_sets SET status=?, updated=? WHERE id=?').bind('failed', Date.now(), setId).run();
+    await jobFinish(env, opts.job, false, { ok: false, error: 'compose_failed', detail: m });
+  }
+}
+async function contentLoad(env, id) {
+  const row = await env.MIND_DB.prepare('SELECT id,ns,campaign,segment,brief,source,platforms,items,status,job,who,history,created,updated FROM content_sets WHERE id=?').bind(id).first();
+  if (!row) return null;
+  const j = (s, d) => { try { return JSON.parse(s || '') || d; } catch (e) { return d; } };
+  return Object.assign({}, row, { platforms: j(row.platforms, []), items: j(row.items, []), history: j(row.history, []) });
+}
+function contentView(set) {
+  if (!set) return null;
+  return { id: set.id, ns: set.ns, campaign: set.campaign, segment: set.segment, brief: set.brief, source: set.source, platforms: set.platforms, items: set.items, status: set.status, job: set.job, who: set.who, history: set.history, created: set.created, updated: set.updated };
+}
+async function contentSave(env, set) {
+  await env.MIND_DB.prepare('UPDATE content_sets SET items=?, history=?, updated=? WHERE id=?').bind(JSON.stringify(set.items).slice(0, 200000), JSON.stringify((set.history || []).slice(-60)).slice(0, 60000), Date.now(), set.id).run();
+}
+/** Revise by instruction. Claude edits the chosen piece (or all of them) and
+ *  says whether the instruction is a standing preference; if it is, the Engine
+ *  learns it as a rule for this client and every later build obeys it. */
+async function contentRevise(env, id, body, who) {
+  const set = await contentLoad(env, id);
+  if (!set) return { ok: false, error: 'unknown_set', status: 404 };
+  const instruction = String(body.instruction || '').trim().slice(0, 1200);
+  if (instruction.length < 3) return { ok: false, error: 'missing_instruction', detail: 'Say what to change.', status: 400 };
+  const n = body.n == null || body.n === '' || body.n === 'all' ? null : Math.max(0, parseInt(body.n, 10) || 0);
+  const targets = n == null ? set.items : set.items.filter(it => it.n === n);
+  if (!targets.length) return { ok: false, error: 'unknown_piece', status: 404 };
+  const kit = (await brandKit(env, set.ns)) || {};
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === set.ns) || {}).client || kit.name || 'the client';
+  const block = contentKitBlock(kit, set.campaign, set.segment, set.platforms);
+  let learned = { text: '', count: 0 };
+  try { learned = await engineRules(env, set.ns, 'copy'); } catch (e) {}
+  const sys = 'You edit existing social and digital copy for the client ' + client + ' exactly as instructed by the team. Change only what the instruction asks; keep everything else - angle, facts, sign-off, source line - as it is unless the instruction touches it. Obey the client voice, the standing rules, the banned terms and the learned corrections. Return strict JSON only:'
+    + '\n{"items":[{"n":0,"title":"","body":"","cta":"","link":"","hashtags":[]}],"note":"one line: what changed","memory":{"standing":true,"rule":"one imperative sentence, max 40 words, general enough to apply to future copy for this client but no broader than the instruction supports","why":"","confidence":0.0}}'
+    + '\n"standing" is true when the instruction expresses a preference that should apply to future copy for this client - a wording, a term to avoid or prefer, a tone, a format, a length, a sign-off, an always or a never. It is false when the instruction concerns only these pieces - a specific figure, place, date, angle or one-off edit. When in doubt, false. Every figure in the edited copy must still come from the approved facts or the source material.'
+    + block.text + learned.text;
+  const user = 'INSTRUCTION FROM THE TEAM:\n' + instruction + '\n\nPIECES TO EDIT (return every one of them, edited):\n' + targets.map(it => '[' + it.n + '] ' + it.platform + ' (body up to ' + (((kit.platforms || {})[it.platform] || {}).max || CONTENT_PLATFORMS[it.platform].max) + ' chars)' + (it.title ? '\nTITLE: ' + it.title : '') + '\nBODY:\n' + it.body + (it.cta ? '\nCTA: ' + it.cta : '') + (it.link ? '\nLINK: ' + it.link : '') + (it.hashtags.length ? '\nHASHTAGS: ' + it.hashtags.join(', ') : '')).join('\n\n')
+    + (set.brief ? '\n\nORIGINAL BRIEF:\n' + set.brief : '') + (set.source ? '\n\nSOURCE MATERIAL:\n' + String(set.source).slice(0, 8000) : '');
+  const raw = await claudeMsg(env, sys, user, Math.min(6000, 800 + targets.length * 500), 90000);
+  const j = relJson(raw);
+  if (!j || !Array.isArray(j.items)) return { ok: false, error: 'revise_unparseable', status: 502 };
+  const allowed = [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), (block.campaign ? [block.campaign.name, block.campaign.url, block.campaign.cta, block.campaign.sourceLine, block.campaign.notes].join(' ') : ''), kit.voice, kit.rules, instruction].join(' ');
+  const changed = []; const before = {};
+  j.items.forEach(e => {
+    const k = parseInt(e.n, 10); const it = set.items.find(x => x.n === k);
+    if (!it || targets.indexOf(it) < 0) return;
+    before[k] = it.body;
+    const spec = CONTENT_PLATFORMS[it.platform];
+    if (e.body != null) it.body = String(e.body).replace(/\r/g, '').trim().slice(0, 4000);
+    if (e.title != null && (spec.title || spec.script)) it.title = String(e.title).trim().slice(0, 160);
+    if (e.cta != null) it.cta = String(e.cta).trim().slice(0, 160);
+    if (e.link != null) it.link = String(e.link).trim().slice(0, 200);
+    if (Array.isArray(e.hashtags)) it.hashtags = e.hashtags.map(h => String(h || '').replace(/^#/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40)).filter(Boolean).slice(0, 5);
+    it.revisions = (it.revisions || 0) + 1;
+    it.check = contentItemCheck(it, allowed, block.banned);
+    changed.push(k);
+  });
+  // what the Engine remembers
+  const mem = j.memory && typeof j.memory === 'object' ? j.memory : {};
+  const mode = body.remember === 'always' ? 'always' : body.remember === 'never' ? 'never' : 'auto';
+  const standing = mode === 'always' || (mode === 'auto' && !!mem.standing && (parseFloat(mem.confidence) || 0) >= 0.6);
+  let fix = null;
+  if (standing) {
+    try {
+      const k0 = changed[0]; const it0 = set.items.find(x => x.n === k0);
+      fix = await engineAddFix(env, { ns: set.ns, task: 'copy', scope: 'client', wrong: k0 != null ? String(before[k0] || '').slice(0, 400) : '', right: it0 ? String(it0.body || '').slice(0, 400) : '',
+        why: instruction, rule: String(mem.rule || instruction).slice(0, 400), exemplar: it0 ? String(it0.body || '').slice(0, 300) : '', source: 'content:' + set.id }, who);
+    } catch (e) { fix = null; }
+  }
+  const note = String(j.note || (changed.length ? 'Changed ' + changed.length + ' piece' + (changed.length === 1 ? '' : 's') + '.' : 'Nothing changed.')).slice(0, 300);
+  set.history = (set.history || []).concat([{ ts: Date.now(), who: String(who || '').slice(0, 40), n, instruction, note, changed, ruleId: fix ? fix.id : '', rule: fix ? fix.rule : '', standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0 }]);
+  await contentSave(env, set);
+  return { ok: true, set: contentView(set), changed, note, remembered: fix ? { id: fix.id, rule: fix.rule } : null, memory: { standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0, rule: String(mem.rule || '').slice(0, 400) } };
+}
+async function contentUpdate(env, id, n, patch) {
+  const set = await contentLoad(env, id);
+  if (!set) return { ok: false, error: 'unknown_set', status: 404 };
+  const it = set.items.find(x => x.n === n);
+  if (!it) return { ok: false, error: 'unknown_piece', status: 404 };
+  patch = patch && typeof patch === 'object' ? patch : {};
+  if (patch.body != null) it.body = String(patch.body).replace(/\r/g, '').trim().slice(0, 4000);
+  if (patch.title != null) it.title = String(patch.title).trim().slice(0, 160);
+  if (patch.cta != null) it.cta = String(patch.cta).trim().slice(0, 160);
+  if (patch.link != null) it.link = String(patch.link).trim().slice(0, 200);
+  if (Array.isArray(patch.hashtags)) it.hashtags = patch.hashtags.map(h => String(h || '').replace(/^#/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 40)).filter(Boolean).slice(0, 5);
+  const kit = (await brandKit(env, set.ns)) || {};
+  const block = contentKitBlock(kit, set.campaign, set.segment, set.platforms);
+  const allowed = [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), kit.voice, kit.rules, it.body].join(' ');
+  it.check = contentItemCheck(it, allowed, block.banned);
+  it.check.missing = contentNumberCheck([it.title, it.body, it.cta].filter(Boolean).join(' '), [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), kit.voice, kit.rules].join(' ')).missing;
+  it.check.flags = it.check.flags.filter(f => f !== 'unverified_figure').concat(it.check.missing.length ? ['unverified_figure'] : []);
+  it.check.ok = !it.check.flags.length;
+  it.edited = Date.now();
+  await contentSave(env, set);
+  return { ok: true, item: it };
+}
+async function contentVerdict(env, id, n, verdict, why, who) {
+  const set = await contentLoad(env, id);
+  if (!set) return { ok: false, error: 'unknown_set', status: 404 };
+  const it = set.items.find(x => x.n === n);
+  if (!it) return { ok: false, error: 'unknown_piece', status: 404 };
+  const v = verdict === 'killed' ? 'killed' : 'approved';
+  const o = await engineOutcome(env, { ns: set.ns, surface: 'content', ref: set.id, n, verdict: v, why: why || '', headline: (it.title || it.platform + ' - ' + (set.campaign || set.ns)).slice(0, 200), support: it.body.slice(0, 300), cta: it.cta }, who);
+  it.verdict = v;
+  await contentSave(env, set);
+  return { ok: true, item: it, outcome: o };
 }
 
 // ==============================================================================
@@ -3853,7 +4167,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/topics') || path.startsWith('/mps')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -3861,7 +4175,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/topics') || path.startsWith('/mps');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -4960,6 +5274,76 @@ export default {
         if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
+      }
+    }
+
+    // -- The Content Desk: copy for each client and each platform, edited by instruction --
+    //    GET  /content/platforms                          the platform specs (labels, limits, registers)
+    //    GET  /content/set?id=   GET /content/list?ns=&limit=
+    //    POST /content/generate {ns,campaign,segment,platforms[],brief,source:{kind:'text'|'release'|'topic',text,id},n,instructions}   (full) -> {id, job}
+    //    POST /content/revise {id,n|null,instruction,remember:'auto'|'always'|'never'}   (full) edits by instruction; standing instructions become rules
+    //    POST /content/update {id,n,patch}                  hand edits (full)
+    //    POST /content/verdict {id,n,verdict,why}            approve / kill -> the Engine's outcomes (full)
+    if (path.startsWith('/content/')) {
+      if (path === '/content/platforms') return jsonResp({ ok: true, platforms: CONTENT_PLATFORMS });
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let cbody = {}; if (req.method === 'POST') { try { cbody = await req.json(); } catch (e) { cbody = {}; } }
+      const cns = relNs(reqUrl.searchParams.get('ns') || cbody.ns);
+      try {
+        await ensureArchive(env); await ensureBridge(env); await ensureEngine(env); await ensureContent(env);
+        if (path === '/content/set') {
+          const id = String(reqUrl.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const set = await contentLoad(env, id);
+          if (!set) return jsonResp({ error: 'unknown_set' }, 404);
+          return jsonResp({ ok: true, set: contentView(set) });
+        }
+        if (path === '/content/list') {
+          const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '20', 10) || 20, 100);
+          const rows = (await env.MIND_DB.prepare('SELECT id,ns,campaign,segment,brief,platforms,items,status,who,created,updated FROM content_sets WHERE ns=? ORDER BY created DESC LIMIT ?').bind(cns, lim).all()).results || [];
+          return jsonResp({ ok: true, ns: cns, sets: rows.map(r => { let it = [], pl = []; try { it = JSON.parse(r.items || '[]'); } catch (e) {} try { pl = JSON.parse(r.platforms || '[]'); } catch (e) {}
+            return { id: r.id, campaign: r.campaign, segment: r.segment, brief: String(r.brief || '').slice(0, 140), platforms: pl, pieces: it.length, flagged: it.filter(x => x.check && !x.check.ok).length, approved: it.filter(x => x.verdict === 'approved').length, status: r.status, who: r.who, created: r.created, updated: r.updated }; }) });
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing, revising and approving copy need a full-access key.' }, 403);
+        if (path === '/content/generate' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          const platforms = []; (Array.isArray(cbody.platforms) ? cbody.platforms : [cbody.platforms]).forEach(p => { const v = contentPlatform(p); if (v && platforms.indexOf(v) < 0) platforms.push(v); });
+          if (!platforms.length) return jsonResp({ error: 'missing_platforms', detail: 'Pick at least one platform: ' + Object.keys(CONTENT_PLATFORMS).join(', ') + '.' }, 400);
+          if (platforms.length > 6) return jsonResp({ error: 'too_many_platforms', detail: 'Up to six platforms per set.' }, 400);
+          const brief = String(cbody.brief || '').replace(/\r/g, '').trim().slice(0, 4000);
+          let source = ''; const sk = cbody.source && typeof cbody.source === 'object' ? cbody.source : {};
+          if (sk.kind === 'release' && sk.id) { const rp = await env.MIND_DB.prepare('SELECT source FROM release_packs WHERE id=?').bind(String(sk.id).replace(/[^a-z0-9]/gi, '').slice(0, 24)).first(); source = rp ? String(rp.source || '') : ''; if (!source) return jsonResp({ error: 'unknown_pack', detail: 'That release pack was not found.' }, 404); }
+          else if (sk.kind === 'topic' && sk.id) { let tb = null; try { tb = JSON.parse(await kvGet(env.AXIOM_KV, 'topic_brief_' + String(sk.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 40)) || 'null'); } catch (e) { tb = null; } if (!tb) return jsonResp({ error: 'unknown_topic', detail: 'No brief has been written for that topic yet.' }, 404); source = JSON.stringify(tb).slice(0, 16000); }
+          else source = String(sk.text || cbody.source || '').replace(/\r/g, '').trim();
+          source = source.slice(0, 16000);
+          if (brief.length < 8 && source.length < 40) return jsonResp({ error: 'missing_brief', detail: 'Write a one-line brief or paste source material.' }, 400);
+          const id = contentId();
+          const job = await jobCreate(env, 'content', { setId: id, ns: cns, where: 'worker' }, auth.name);
+          await env.MIND_DB.prepare('INSERT INTO content_sets(id,ns,campaign,segment,brief,source,platforms,items,status,job,who,history,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(id, cns, kitSlug(cbody.campaign), kitSlug(cbody.segment), brief, source, JSON.stringify(platforms), '[]', 'writing', job.id, auth.name || '', '[]', Date.now(), Date.now()).run();
+          ctx.waitUntil(contentBuild(env, id, { job: job.id, n: cbody.n, instructions: cbody.instructions }));
+          return jsonResp({ ok: true, id, job: job.id, ns: cns, platforms });
+        }
+        if (path === '/content/revise' && req.method === 'POST') {
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
+          const id = String(cbody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const r = await contentRevise(env, id, cbody, auth.name);
+          return jsonResp(r, r.ok ? 200 : (r.status || 500));
+        }
+        if (path === '/content/update' && req.method === 'POST') {
+          const id = String(cbody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const r = await contentUpdate(env, id, Math.max(0, parseInt(cbody.n, 10) || 0), cbody.patch);
+          return jsonResp(r, r.ok ? 200 : (r.status || 500));
+        }
+        if (path === '/content/verdict' && req.method === 'POST') {
+          const id = String(cbody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
+          const r = await contentVerdict(env, id, Math.max(0, parseInt(cbody.n, 10) || 0), cbody.verdict, cbody.why, auth.name);
+          return jsonResp(r, r.ok ? 200 : (r.status || 500));
+        }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
+        return jsonResp({ ok: false, error: 'content_failed', detail: m.slice(0, 200) }, /needs what|missing|too/.test(m) ? 400 : 500);
       }
     }
 

@@ -21,6 +21,7 @@
 <script src="signals.js" defer></script>
 <script src="release.js" defer></script>
 <script src="topics.js" defer></script>
+<script src="content.js" defer></script>
 <!-- Tailwind (additive utility layer, token-configured; nothing critical depends on it) -->
 <script src="https://cdn.tailwindcss.com" onerror="void 0"></script>
 <script>try{if(window.tailwind)tailwind.config={theme:{extend:{colors:{
@@ -971,6 +972,75 @@ body.kiosk .kprog{display:block}
 .rel-fix .w{color:var(--t2);font-family:inherit;font-size:11.5px}
 .btn.sm.on{border-color:#F5B942;color:#F5B942}
 @media(prefers-reduced-motion:reduce){.sig-dot.run{animation:none}}
+/* Content Desk (React island, docs/content.js) */
+.cd-head{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--ln);border-radius:14px;background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.015));margin-bottom:12px}
+.cd-logo{width:64px;height:64px;border-radius:12px;border:1px solid var(--ln);background:rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:13px;font-weight:700;color:var(--t1);overflow:hidden;flex:0 0 auto}
+.cd-logo img{max-width:88%;max-height:88%;object-fit:contain}
+.cd-who{flex:1 1 260px;min-width:0}
+.cd-name{font-size:15px;color:var(--t1);line-height:1.3}.cd-name b{color:var(--t0)}
+.cd-know{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.cd-stat{font-family:var(--fm);font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid rgba(126,224,174,.4);color:#7EE0AE}
+.cd-stat.dim{border-color:var(--ln);color:var(--t3)}
+.cd-warn{margin-top:8px;font-size:12px;color:#F5B942;line-height:1.5}.cd-warn code{font-size:11px}
+.cd-lbl{font-family:var(--fm);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);margin:10px 0 6px}
+.cd-chips{display:flex;flex-wrap:wrap;gap:6px}
+.cd-chip{font-size:12px;padding:6px 12px;border-radius:999px;border:1px solid var(--ln);background:transparent;color:var(--t2);cursor:pointer;line-height:1.2;transition:border-color .12s,background .12s}
+.cd-chip:hover{border-color:rgba(143,182,255,.5);color:var(--t0)}
+.cd-chip.on{border-color:rgba(143,182,255,.7);background:rgba(143,182,255,.12);color:var(--t0)}
+.cd-brief,.cd-source{width:100%;box-sizing:border-box;resize:vertical;font-size:13px;line-height:1.55;margin-top:10px}
+.cd-main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start}
+@media(max-width:1100px){.cd-main{grid-template-columns:1fr}}
+.cd-side{position:sticky;top:12px}
+@media(max-width:1100px){.cd-side{position:static}}
+.cd-group{margin-top:12px}
+.cd-grouphead{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--ln);margin-bottom:10px}
+.cd-grouphead b{font-size:13px;color:var(--t0)}.cd-grouphead .m{font-family:var(--fm);font-size:10px;color:var(--t3)}
+.cd-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.cd-piece{border:1px solid var(--ln);border-radius:14px;padding:12px 14px;background:rgba(255,255,255,.025);display:flex;flex-direction:column;gap:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.cd-piece:hover{border-color:rgba(143,182,255,.35)}
+.cd-piece.on{border-color:rgba(143,182,255,.8);box-shadow:0 0 0 2px rgba(143,182,255,.15)}
+.cd-piece.approved{border-color:rgba(34,217,147,.45)}.cd-piece.killed{opacity:.6}
+.cd-piecehead{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.cd-plat{font-family:var(--fm);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:rgba(143,182,255,.12);color:#8FB6FF}
+.cd-n{font-family:var(--fm);font-size:10px;color:var(--t3)}
+.cd-angle{font-size:11px;color:var(--t3);font-style:italic;margin-left:auto}
+.cd-title{font-size:14px;font-weight:700;color:var(--t0);line-height:1.3}
+.cd-text{font-size:13px;line-height:1.6;color:var(--t1);white-space:pre-wrap}
+.cd-cta{font-size:12.5px;color:var(--t0);font-weight:600}
+.cd-link{font-family:var(--fm);font-size:11px;color:#8FB6FF;word-break:break-all}
+.cd-tags{display:flex;flex-wrap:wrap;gap:6px;font-family:var(--fm);font-size:11px;color:var(--t2)}
+.cd-body{width:100%;box-sizing:border-box;font-size:13px;line-height:1.55;resize:vertical}
+.cd-piece .fi{width:100%;box-sizing:border-box}
+.cd-meter{height:4px;border-radius:2px;background:rgba(255,255,255,.07);overflow:hidden}
+.cd-meter i{display:block;height:100%;border-radius:2px;background:#22D993;transition:width .2s}
+.cd-meter i.warm{background:#F5B942}.cd-meter i.over{background:#E05A54}
+.cd-acts{display:flex;flex-wrap:wrap;gap:6px;padding-top:6px;border-top:1px solid var(--ln)}
+.cd-chat{display:flex;flex-direction:column;min-height:320px}
+.cd-thread{flex:1;max-height:52vh;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px}
+.cd-msg{max-width:94%;border-radius:12px;padding:8px 11px;font-size:12.5px;line-height:1.5}
+.cd-msg.user{align-self:flex-end;background:rgba(143,182,255,.14);color:var(--t0);border:1px solid rgba(143,182,255,.3)}
+.cd-msg.desk{align-self:flex-start;background:rgba(255,255,255,.04);color:var(--t1);border:1px solid var(--ln)}
+.cd-msg.desk.busy{color:var(--t3);font-style:italic}
+.cd-msg .m{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:4px}
+.cd-remember{display:inline-block;margin-top:6px;font-size:11.5px;line-height:1.4;text-align:left;padding:5px 9px;border-radius:9px;border:1px solid rgba(126,224,174,.45);background:rgba(126,224,174,.08);color:#7EE0AE;cursor:pointer;font-family:inherit}
+.cd-remember:hover{background:rgba(126,224,174,.15)}
+.cd-compose{border-top:1px solid var(--ln);padding-top:8px;margin-top:8px}
+.cd-quick{display:flex;flex-wrap:wrap;gap:5px}
+.cd-qchip{font-size:11px;padding:4px 9px;border-radius:999px;border:1px solid var(--ln);background:transparent;color:var(--t2);cursor:pointer}
+.cd-qchip:hover{color:var(--t0);border-color:rgba(143,182,255,.5)}
+.cd-input{width:100%;box-sizing:border-box;resize:vertical;font-size:13px}
+.cd-voice .tp-tabs{margin-top:4px}
+.cd-list{display:flex;flex-direction:column;gap:8px}
+.cd-row{border:1px solid var(--ln);border-radius:10px;overflow:hidden}
+.cd-rowhead{display:flex;gap:10px;align-items:center;padding:9px 12px;cursor:pointer;font-size:13px;color:var(--t0)}
+.cd-rowhead .m{flex:1;font-size:11.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd-row.open .cd-rowhead{background:rgba(255,255,255,.04);border-bottom:1px solid var(--ln)}
+.cd-rowbody{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.cd-rowbody .fi,.cd-fact .fi,.cd-ban .fi{width:100%;box-sizing:border-box;font-size:12.5px}
+.cd-rowbody .rd-ctl{margin:0}.cd-rowbody .rd-ctl .fi{flex:1}
+.cd-fact{border-bottom:1px solid var(--ln);padding-bottom:8px;display:flex;flex-direction:column;gap:6px}
+.cd-fact .rd-ctl{margin:0}.cd-fact .rd-ctl .fi{flex:1}
+.cd-ban{margin:0;align-items:center}.cd-ban .fi{flex:1}
 .aud-diagwrap{margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
 .aud-diagbox{flex:1 1 100%;max-height:280px;overflow:auto;margin:4px 0 0;padding:12px 14px;border:1px solid var(--ln);border-radius:10px;background:rgba(0,0,0,.28);font-family:var(--fm);font-size:11px;line-height:1.55;color:var(--t1);white-space:pre-wrap;word-break:break-word}
 .aud-mini{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-family:var(--fm);font-size:10.5px;color:var(--t2)}
@@ -1561,6 +1631,7 @@ body.kiosk .kprog{display:block}
         <button class="rbtn" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span class="rtip">Signals</span></button>
         <button class="rbtn" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span class="rtip">Release Desk</span></button>
         <button class="rbtn" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span class="rtip">Topics</span></button>
+        <button class="rbtn" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/><path d="M4 12H2M6 4l-1.5-1.5"/></svg><span class="rtip">Content Desk</span></button>
         <button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button>
         <button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button>
       </nav>
@@ -1991,6 +2062,11 @@ body.kiosk .kprog{display:block}
         <div class="note" style="margin:0 0 14px">Keywords and topics arrive from SIFA (or are added here). For each one a research run gathers the news coverage, government and party statements, Hansard, what the archive and the Mind already hold, then sends the collectors after the MPs' and senators' own X accounts and the Reddit conversation, and writes a cited brief: who holds what position, which outlets are carrying it, what changed, and what it means for the client. SIFA reads the same results back through its own endpoints. MPs are public officials and are named on their own posts; everyone else stays anonymous.</div>
         <div id="topics-root"><div class="empty" style="padding:40px 0">Loading topics…</div></div>
       </section>
+      <!-- ═══ CONTENT DESK — copy for each client and each platform, changed by telling it what to change (React island, docs/content.js) ═══ -->
+      <section class="view" id="v-content">
+        <div class="note" style="margin:0 0 14px">Pick the client, the campaign and the platforms, write a one-line brief or paste source material, and the Desk writes in the client's own voice: the sign-offs, approved figures and banned words from the voice profile, the examples the client has approved before, and every correction the team has taught it. Then tell it what to change. One-off edits apply to this set; a standing instruction is remembered for the client and shown as a rule you can switch off. Every figure is checked against the approved facts and the source, and flagged, never dropped.</div>
+        <div id="content-root"><div class="empty" style="padding:40px 0">Loading the Content Desk…</div></div>
+      </section>
       <section class="view" id="v-map">
         <div class="kmwrap">
           <canvas id="km-cv"></canvas>
@@ -2276,6 +2352,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span>Signals</span></button>
   <button class="tab" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Desk</span></button>
   <button class="tab" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span>Topics</span></button>
+  <button class="tab" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg><span>Content</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
@@ -2556,7 +2633,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'National Pulse',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2570,6 +2647,7 @@ function go(v){
   if(v==='signals'&&typeof signalsInit==='function')signalsInit();
   if(v==='release'&&typeof releaseInit==='function')releaseInit();
   if(v==='topics'&&typeof topicsInit==='function')topicsInit();
+  if(v==='content'&&typeof contentInit==='function')contentInit();
   if(v==='clients')ccInit();
 }
 /* ── issue heat strip — how today's coverage maps onto the knowledge graph ── */

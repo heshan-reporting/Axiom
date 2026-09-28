@@ -3,15 +3,23 @@
 engine-ingest.py - feed a client's past work into the Engine's memory.
 
 Point it at a folder of exports (Drive, Slack, past releases, approved tiles,
-ads) and it walks everything, files the documents in the Mind under the
-client's namespace, and hands every image to the Engine's artwork memory,
-where a vision model describes it so "make it like the March creative" means
-something. Nothing touches the git vault: confidential material goes straight
-to the Mind. A state file in the folder remembers what has been filed, so
-re-running only picks up what is new or changed.
+ads) or at a voice pack, and it walks everything, files the documents in the
+Mind under the client's namespace, hands every image to the Engine's artwork
+memory (a vision model describes it so "make it like the March creative" means
+something), loads a brand kit and teaches the Engine a list of standing
+corrections. Nothing touches the git vault: confidential material goes
+straight to the Mind. A state file in the folder remembers what has been
+filed, so re-running only picks up what is new or changed.
+
+A voice pack is a folder holding any of:
+  brand-kit.json     -> POST /brand/kit   (voice, rules, campaigns, facts, banned terms, platforms, segments, people)
+  fixes.json         -> POST /engine/fix  (a list of {task, scope, wrong, right, why, rule}; rules already in force are skipped)
+  *.md with a frontmatter block (kind:, title:, campaign:, platform:) -> /mind/ingest with that kind
+  anything else      -> filed as before (kind guessed from the path)
 
 Usage (on the Mac, from the repo):
   python3 tools/engine-ingest.py ~/Exports/MCA --ns mca --key $AXIOM_KEY
+  python3 tools/engine-ingest.py ~/Downloads/mca-voice-pack --ns mca --key $AXIOM_KEY
   python3 tools/engine-ingest.py ~/Exports/MCA --ns mca --key $AXIOM_KEY --kinds artwork   # images only
   python3 tools/engine-ingest.py ~/Exports/MCA --ns mca --dry-run                            # list what would be filed
 
@@ -31,6 +39,9 @@ TEXT_EXT = {'.txt', '.md', '.markdown', '.html', '.htm', '.csv', '.json', '.docx
 IMAGE_EXT = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
 MAX_TEXT = 180000
 MAX_IMAGE = 6 * 1024 * 1024
+KIT_RX = re.compile(r'(^|[-_])brand[-_]?kit\.json$', re.I)
+FIXES_RX = re.compile(r'(^|[-_])fixes\.json$', re.I)
+KINDS_ORDER = {'kit': 0, 'fixes': 1, 'doc': 2, 'artwork': 3}
 
 
 def sha(path):
@@ -57,6 +68,19 @@ def read_pdf(path):
     return p.stdout
 
 
+def frontmatter(txt):
+    """A leading `---` block of `key: value` lines. Returns (meta, body)."""
+    m = re.match(r'^---\s*\n(.*?)\n---\s*\n?', txt, flags=re.S)
+    if not m:
+        return {}, txt
+    meta = {}
+    for line in m.group(1).splitlines():
+        if ':' in line:
+            k, v = line.split(':', 1)
+            meta[k.strip().lower()] = v.strip()
+    return meta, txt[m.end():]
+
+
 def read_text(path):
     ext = os.path.splitext(path)[1].lower()
     if ext == '.docx': return read_docx(path)
@@ -73,9 +97,9 @@ def read_text(path):
 def guess_kind(rel):
     r = rel.lower()
     if re.search(r'release|media[-_ ]?statement|\bmr\b', r): return 'release'
-    if re.search(r'brief|strategy|plan', r): return 'brief'
+    if re.search(r'brief|strategy|plan|guide', r): return 'brief'
     if re.search(r'slack|chat|thread', r): return 'slack'
-    if re.search(r'copy|caption|post', r): return 'copy'
+    if re.search(r'copy|caption|post|exemplar', r): return 'copy'
     return 'doc'
 
 
@@ -86,6 +110,15 @@ def date_from(rel, path):
     return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc).strftime('%Y-%m-%d')
 
 
+def classify(f, kinds):
+    ext = os.path.splitext(f)[1].lower()
+    if KIT_RX.search(f) and 'kit' in kinds: return 'kit'
+    if FIXES_RX.search(f) and 'fixes' in kinds: return 'fixes'
+    if ext in TEXT_EXT and 'doc' in kinds: return 'doc'
+    if ext in IMAGE_EXT and 'artwork' in kinds: return 'artwork'
+    return 'skip'
+
+
 def walk(folder, kinds):
     out = []
     for root, dirs, files in os.walk(folder):
@@ -94,10 +127,9 @@ def walk(folder, kinds):
             if f.startswith('.'): continue
             path = os.path.join(root, f)
             rel = os.path.relpath(path, folder)
-            ext = os.path.splitext(f)[1].lower()
-            if ext in TEXT_EXT and 'doc' in kinds: out.append(('doc', path, rel))
-            elif ext in IMAGE_EXT and 'artwork' in kinds: out.append(('artwork', path, rel))
-            else: out.append(('skip', path, rel))
+            out.append((classify(f, kinds), path, rel))
+    # the kit first (the Desk writes from it), then the rules, then the documents
+    out.sort(key=lambda t: (KINDS_ORDER.get(t[0], 9), t[2]))
     return out
 
 
@@ -114,9 +146,14 @@ def save_state(folder, state):
 
 def file_doc(worker, key, ns, path, rel):
     text = read_text(path)
+    meta = {}
+    if os.path.splitext(path)[1].lower() in ('.md', '.markdown'):
+        meta, text = frontmatter(text)
     if len(text.strip()) < 40: raise RuntimeError('no readable text')
-    title = os.path.splitext(os.path.basename(rel))[0].replace('_', ' ').replace('-', ' ').strip()[:200]
-    body = {'namespace': ns, 'title': title, 'text': text[:MAX_TEXT], 'kind': guess_kind(rel), 'source': 'ingest:' + rel[:280], 'date': date_from(rel, path)}
+    title = (meta.get('title') or os.path.splitext(os.path.basename(rel))[0].replace('_', ' ').replace('-', ' ').strip())[:200]
+    kind = re.sub(r'[^a-z_]', '', (meta.get('kind') or '').lower())[:40] or guess_kind(rel)
+    tags = ':'.join(x for x in [ns, re.sub(r'[^a-z0-9_-]', '', (meta.get('campaign') or '').lower())[:24], re.sub(r'[^a-z0-9_, -]', '', (meta.get('platform') or '').lower())[:60]] if x)
+    body = {'namespace': ns, 'title': title, 'text': text[:MAX_TEXT], 'kind': kind, 'source': ('pack:' + tags + ':' if meta else 'ingest:') + rel[:240], 'date': date_from(rel, path)}
     d = rr.http_json(worker.rstrip('/') + '/mind/ingest', key, body, timeout=120)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
     return {'docId': d.get('docId', ''), 'chunks': d.get('chunks', 0), 'kind': body['kind'], 'chars': len(text)}
@@ -136,13 +173,66 @@ def file_artwork(worker, key, ns, path, rel):
     return {'id': a.get('id', ''), 'description': (a.get('description') or '')[:120]}
 
 
+def file_kit(worker, key, ns, path, rel):
+    """brand-kit.json -> POST /brand/kit. The palette, fonts and logo are only
+    touched if the file carries them, so a kit set in the app is kept."""
+    with open(path, 'rb') as f:
+        kit = json.loads(f.read().decode('utf8', 'ignore'))
+    if not isinstance(kit, dict): raise RuntimeError('brand-kit.json must hold one object')
+    body = {k: v for k, v in kit.items() if k not in ('ns', 'logoB64', 'logoMime', 'removeLogo')}
+    body['ns'] = ns
+    d = rr.http_json(worker.rstrip('/') + '/brand/kit', key, body, timeout=120)
+    if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
+    k = d.get('kit') or {}
+    return {'campaigns': len(k.get('campaigns') or []), 'facts': len(k.get('facts') or []), 'banned': len(k.get('banned') or []), 'voice': len(k.get('voice') or ''), 'rules': len(k.get('rules') or '')}
+
+
+def file_fixes(worker, key, ns, path, rel, pace=0.3):
+    """fixes.json -> one POST /engine/fix per correction. A rule that is already
+    in force for the namespace (same wording) is skipped, so re-runs after an
+    edit only add what is new."""
+    with open(path, 'rb') as f:
+        fixes = json.loads(f.read().decode('utf8', 'ignore'))
+    if not isinstance(fixes, list): raise RuntimeError('fixes.json must hold a list')
+    have = set()
+    try:
+        cur = rr.http_json(worker.rstrip('/') + '/engine/fixes?ns=%s&all=1' % ns, key, None, timeout=60)
+        for fx in cur.get('fixes') or []:
+            have.add((fx.get('rule') or '').strip().lower())
+    except Exception:
+        pass
+    added = skipped = 0
+    src = 'voice-pack:' + os.path.basename(rel)[:60]
+    for fx in fixes:
+        if not isinstance(fx, dict): continue
+        rule = (fx.get('rule') or '').strip()
+        if rule and rule.lower() in have:
+            skipped += 1; continue
+        body = {'ns': ns, 'task': fx.get('task') or 'copy', 'scope': fx.get('scope') or 'client', 'wrong': fx.get('wrong') or '', 'right': fx.get('right') or '',
+                'why': fx.get('why') or '', 'source': fx.get('source') or src}
+        if rule: body['rule'] = rule; body['exemplar'] = fx.get('exemplar') or fx.get('right') or ''
+        d = rr.http_json(worker.rstrip('/') + '/engine/fix', key, body, timeout=90)
+        if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
+        added += 1
+        if rule: have.add(rule.lower())
+        time.sleep(pace)
+    return {'added': added, 'already': skipped, 'total': len(fixes)}
+
+
+def describe(kind, res):
+    if kind == 'artwork': return ' - ' + res['description']
+    if kind == 'kit': return ' - %d campaigns, %d facts, %d banned terms, voice %d chars, rules %d chars' % (res['campaigns'], res['facts'], res['banned'], res['voice'], res['rules'])
+    if kind == 'fixes': return ' - %d rules taught, %d already in force' % (res['added'], res['already'])
+    return ' - %s, %d chars, %d chunks' % (res['kind'], res['chars'], res['chunks'])
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('folder')
     ap.add_argument('--ns', required=True, help='client namespace: mca, aep, vicnats, pca, mba, pharm, cmm')
     ap.add_argument('--key', default=os.environ.get('AXIOM_KEY', ''))
     ap.add_argument('--worker', default=WORKER)
-    ap.add_argument('--kinds', default='doc,artwork', help='what to file: doc, artwork, or both')
+    ap.add_argument('--kinds', default='kit,fixes,doc,artwork', help='what to file: kit, fixes, doc, artwork (comma-separated)')
     ap.add_argument('--max', type=int, default=0, help='stop after this many files (0 = all)')
     ap.add_argument('--pace', type=float, default=0.4, help='seconds between files')
     ap.add_argument('--dry-run', action='store_true')
@@ -158,7 +248,8 @@ def main(argv=None):
     todo = [(k, p, r) for k, p, r in items if k != 'skip']
     skipped = [r for k, p, r in items if k == 'skip']
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-    print('%s  %s: %d documents, %d images, %d other files in %s' % (stamp, ns, sum(1 for k, _, _ in todo if k == 'doc'), sum(1 for k, _, _ in todo if k == 'artwork'), len(skipped), folder))
+    n = lambda kind: sum(1 for k, _, _ in todo if k == kind)
+    print('%s  %s: %d documents, %d images, %s%s%d other files in %s' % (stamp, ns, n('doc'), n('artwork'), '1 brand kit, ' if n('kit') else '', '1 fixes list, ' if n('fixes') else '', len(skipped), folder))
     if skipped[:5]: print('  not filed (type not handled): ' + ', '.join(skipped[:5]) + (' ...' if len(skipped) > 5 else ''))
     done = failed = same = 0
     for i, (kind, path, rel) in enumerate(todo):
@@ -169,11 +260,14 @@ def main(argv=None):
         if a.dry_run:
             print('  would file %-8s %s' % (kind, rel)); done += 1; continue
         try:
-            res = file_doc(a.worker, a.key, ns, path, rel) if kind == 'doc' else file_artwork(a.worker, a.key, ns, path, rel)
+            if kind == 'kit': res = file_kit(a.worker, a.key, ns, path, rel)
+            elif kind == 'fixes': res = file_fixes(a.worker, a.key, ns, path, rel)
+            elif kind == 'doc': res = file_doc(a.worker, a.key, ns, path, rel)
+            else: res = file_artwork(a.worker, a.key, ns, path, rel)
             state[rel] = {'sha': h, 'kind': kind, 'filed': stamp, 'result': res}
             save_state(folder, state)
             done += 1
-            print('  filed %-8s %s%s' % (kind, rel, (' - ' + res['description']) if kind == 'artwork' else (' - %d chars, %d chunks' % (res['chars'], res['chunks']))))
+            print('  filed %-8s %s%s' % (kind, rel, describe(kind, res)))
         except Exception as e:
             failed += 1
             print('  FAILED %-7s %s - %s' % (kind, rel, str(e)[:160]), file=sys.stderr)

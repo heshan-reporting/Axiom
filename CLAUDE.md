@@ -318,6 +318,86 @@ graph (people, organisations, issues, opponents, journalists - a claims ledger
 with sources), watchers writing to that graph, then per-client style adapters
 once the approved corpus is large enough.
 
+## The Content Desk (copy for each client and platform, changed by instruction)
+
+The `v-content` view (React island, `docs/content.js`) writes social and
+digital copy in a client's own voice and is corrected by telling it what to
+change. It writes from three memories, all namespaced to the client:
+
+- **The voice profile** - the brand kit (KV `brand_<ns>`, `GET/POST
+  /brand/kit`) grew a structured half, sanitised by `kitStructured()`:
+  `campaigns[]` (id, name, url, signoff, cta, sourceLine, tone, structure,
+  notes, active), `facts[]` (text, source, status approved|pending, campaign -
+  **the only figures the Desk may quote** besides the brief and pasted
+  source), `banned[]` (term, use, why, `allowNegated` so "not a subsidy" is
+  fine), `platforms{}` notes per platform, `segments[]`, `people[]`,
+  `approval`. Arrays sent replace the stored array; arrays left out are kept,
+  so a palette edit in the Release Desk never wipes the words. The palette,
+  fonts and logo stay where they were. `contentKitBlock()` turns it into the
+  prompt block; the Release Desk composer now also carries the banned terms.
+- **Approved examples in the Mind** - kind `copy` (the client's approved
+  captions), `outcome` (WIN/LOSS), `brief` (the content guide), retrieved by
+  `contentExemplars()` through `mindRetrieve(ns)` and preferred when their
+  `source` names the campaign (`pack:<ns>:<campaign>:<platform>:<file>`).
+- **Learned corrections** - `engineRules(env, ns, 'copy')`, the same
+  `engine_fixes` the Release Desk uses.
+
+`POST /content/generate {ns,campaign,segment,platforms[],brief,source:{kind:
+'text'|'release'|'topic',text,id},n,instructions}` (full role) creates a
+bridge job (source `content`, worker-side) and runs `contentBuild()` after the
+response: `contentCompose()` is one Claude call writing `n` pieces per platform
+against `CONTENT_PLATFORMS` (label, max chars, hashtag policy, register, title
+or script) and the client's own platform notes, strict JSON, then every piece
+is normalised and checked - `contentItemCheck()` flags `unverified_figure`
+(`contentNumberCheck`: digits not in the facts, brief or source; years and
+single digits ignored), `banned_term` (`contentBannedCheck`, negation-aware),
+`over_limit`, `too_many_hashtags`, `exclamation`. Flagged, never dropped. Rows
+live in D1 `content_sets` (items, history). `GET /content/set?id=`,
+`/content/list?ns=`, `/content/platforms` are read-role.
+
+**Revise by instruction.** `POST /content/revise {id, n|null, instruction,
+remember:'auto'|'always'|'never'}` has Claude edit the chosen piece (or all of
+them) and classify the instruction: `memory.standing` is true for a preference
+that should apply next time (a wording, a term, a tone, a format, an always or
+a never), false for a one-off (this figure, this place). Standing instructions
+(confidence >= 0.6 in `auto`, always in `always`, never in `never`) become an
+`engine_fixes` row via `engineAddFix()` - task `copy`, scope `client`, source
+`content:<id>`, rule pre-compiled from the model - so the next build obeys
+them. The revision, its note and the rule id go into the set's `history`,
+which is the chat thread the view shows. `POST /content/update` is a hand
+edit (re-checked); `POST /content/verdict` records Approve/Kill through
+`engineOutcome()` (surface `content`) and files WIN/LOSS exemplars.
+
+In-app: a client header (logo, "Writing as", what the Desk knows - campaigns,
+approved facts, corrections in force, examples in the Mind, or a warning when
+no profile exists), campaign chips, platform chips, audience, pieces per
+platform, a brief, optional pasted source or a release pack as the source,
+the console, then the pieces grouped by platform (character meter, check
+chips, Copy / Edit / Ask the Desk / Approve / Kill) beside the chat pane
+(target: all pieces or one; remember mode; quick chips; each reply shows
+"Remembered for <client>: <rule>" or "Applied to this set only"). The
+**Voice profile** panel edits voice, rules, campaigns, facts and banned terms;
+the **Learned** panel switches rules off. Harnesses in the session scratchpad:
+`content-worker.mjs` (17 route tests through the handler with a fake D1 and a
+stub Claude), `content-browser.mjs` (15 Playwright tests), `engine-ingest-
+test.py` (16).
+
+**Voice packs.** A client's profile is loaded in bulk with
+`python3 tools/engine-ingest.py <pack> --ns <ns> --key $AXIOM_KEY`: the tool
+now recognises `brand-kit.json` (-> `/brand/kit`, ns forced, logo fields
+dropped), `fixes.json` (-> one `/engine/fix` each, skipping rules already in
+force so re-runs only add), and `.md` files with a frontmatter block (`kind:`,
+`title:`, `campaign:`, `platform:` -> `/mind/ingest` with that kind and a
+`pack:` source tag). The kit goes first, then the rules, then the documents.
+The MCA pack (distilled in September 2026 from the approved content calendars
+in Drive - national, Phase 1.5, Victoria, Hands Off Our Fuel, myth busting -
+the strategy documents, and the #minerals-council Slack threads where Dee,
+Tania, Steve, Stef and Laura briefed the writers and designers) holds the
+voice, 8 campaigns, 37 facts, 14 banned terms, 24 of Dee's corrections as
+rules, 9 exemplar files and a content guide. **Voice packs are confidential
+client material and never enter the repo**: they are handed over as files
+and loaded straight into the Mind.
+
 ## The Release Desk (a media release in, a pack of social tiles out)
 
 The `v-release` view (React island, `docs/release.js`, shared pieces in
