@@ -589,6 +589,67 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   embedding, a stub Claude and a Slack recorder), `narratives-browser.mjs`
   (9 browser tests).
 
+## The interface (Phase 5): restraint, the front page, the scope, drill-down
+
+The rule for every screen is the same three questions - what changed, why it
+matters (which client, which issue), where the evidence is (a row that opens
+the view holding it) - answered in tables, not cards.
+
+- **The shell.** A flat token ground (`--x-bg1`), a small masthead with a
+  plain readout, and one line of text navigation grouped Today / Signals /
+  Clients / System (`.rgrp`, `.rbtn`, underline on the current view); panels
+  are flat 8px surfaces with no glass, glow, hover lift or entrance
+  animation; the islands' status colours are the semantic tokens (`--x-pos`,
+  `--x-neg`, `--x-warn`, `--x-ac-hi`), never hex. Figures sit in one hairline
+  strip (`.sen-strip`, `.src-stats`, `.kpis` share the rule) rather than a
+  row of tiles, and the long note at the top of each view folds behind
+  "About this view" (`.note-toggle`, added at load). Body text is 13px,
+  numbers tabular mono, section labels small uppercase mono.
+- **The front page** (`docs/overview.js`, mounted into `#overview-root` at
+  the top of the Command view; the old ticker, attention radar, gauge and
+  insight cards stay in the page hidden so their loaders keep working).
+  `GET /overview?days=` (read-role; `overview()` in the worker) reads for one
+  window: Sentinel alerts awaiting a response; narratives that gained rows
+  (`moving`: rows today against the day before, stance, split, origin,
+  status; `fading`); entities whose net stance moved most (`movers`, needs
+  three judged mentions in both windows), the loudest, and the client-side
+  entities spoken of critically (`hostileTo`); every client issue against its
+  own fourteen-day baseline for the same window length (`overviewIssues`,
+  `json_each` over `meta.issues`, ratio and a bar); the newest rows tagged
+  with an issue (`overviewLatest`); collection health (sources delivering /
+  dead / failing / untried, rows judged and placed today, the social
+  platforms from KV `social_last`). Every part fails soft and is named in
+  `errors`. In the island each row carries the client and issue and a link
+  that opens the evidence.
+- **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
+  params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
+  through `consume`, later through the `ax:goto` event). Narratives take
+  `{id, issue, status, side, platform}`, Sentiment `{id, issue, platform,
+  region}`; the front page uses both, and `go('sentinel')` for alerts.
+- **The scope bar** (`docs/scope.js`, `#scope-root` under the navigation).
+  `AXUI.scope()` / `setScope(patch)` / `useScope(apply)` keep one set of
+  filters per browser (localStorage `ax_scope`: `ns`, `issue`, `entity`,
+  `platform`, `days` with 0 meaning each view's own window, `region`) and
+  fire `ax:scope`. Narratives adopt client, issue, channel, window and
+  entity (`GET /narratives` gained `entity=`, a LIKE on the `entities`
+  column); Sentiment adopts issue, channel, region and window and opens the
+  entity's drawer; Signals adopts issue and window and switches to a channel
+  that is one of its tabs; Sources adopts issue and region; the front page
+  narrows its alerts, narratives, issues and rows to the client and issue
+  and follows the window. The bar only sets; each island keeps its own
+  finer controls. Legacy views (Newsroom, Pulse, Radar, Audience, Briefing)
+  keep their own controls and do not read the scope yet.
+- **Sources** opens on the delivering sources, most productive first
+  (`status: 'ok'`, sort `items`); failing, dead, stale, untried and off are
+  one quiet figure with a breakdown that filters to them, and the dead line
+  is a sentence until asked.
+- Harnesses in the session scratchpad: `overview-worker.mjs` (4),
+  `overview-browser.mjs` (11, including the drill-downs), `scope-browser.mjs`
+  (6); the sources (14), narratives (9), sentiment (9) and signals (7)
+  browser harnesses run against the new shell. Not rebuilt in this phase:
+  the legacy inline views (Newsroom, Pulse, Radar, Analyst, Briefing,
+  Audience, Knowledge, Clients) inherit the shell and panel rules only.
+
 ## The Content Desk (copy for each client and platform, changed by instruction)
 
 The `v-content` view (React island, `docs/content.js`) writes social and

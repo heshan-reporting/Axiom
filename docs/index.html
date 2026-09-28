@@ -1759,6 +1759,26 @@ body.kiosk .kprog{display:block}
 .scope-clear{font:inherit;font-size:11.5px;color:var(--x-ac-hi);background:none;border:0;padding:0 4px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
 .scope-hint{font-size:11px;color:var(--t3);margin-left:4px}
 .ov-scoped{color:var(--x-ac-hi)}
+/* ═══ DENSITY — figures as one hairline strip, not a row of cards; the islands'
+   tables share one weight; the long view notes fold away until asked ═══ */
+.sen-strip,.src-stats,.kpis{display:flex;flex-wrap:wrap;gap:0;margin-bottom:12px;border:1px solid var(--x-line1);border-radius:6px;background:var(--x-sur1)}
+.src-stats{flex:1 1 640px}
+.sen-stat,.src-stat,.kpi{flex:1 1 140px;min-width:0;border:0;border-left:1px solid var(--x-line1);border-radius:0;background:none;padding:8px 14px;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none;transform:none}
+.sen-stat:first-child,.src-stat:first-child,.kpi:first-child{border-left:0}
+.sen-stat:hover,.src-stat:hover,.kpi:hover{transform:none;box-shadow:none;border-color:var(--x-line1)}
+.kpi::before{display:none}
+.sen-stat .v,.src-stat .v{font-family:var(--fm);font-size:18px;font-weight:600;letter-spacing:0;margin-top:3px;line-height:1.2}
+.src-stat.quiet .v{font-size:18px}
+.sen-stat .k,.src-stat .k{font-size:8.5px;letter-spacing:.14em}
+.sen-stat .s,.src-stat .s{font-size:11px;margin-top:2px;line-height:1.35}
+.src-strip{align-items:flex-start;gap:12px}
+.sn-table th,.src-table th,.nr-table th{font-size:9.5px;letter-spacing:.1em}
+.sn-table td,.src-table td{padding:6px 8px}
+.view>.note{font-size:11.5px;color:var(--t2);line-height:1.5}
+.view>.note.collapsible{display:none}
+.view>.note.collapsible.open{display:block;margin:0 0 12px}
+.note-toggle{font:inherit;font-size:11px;color:var(--t3);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;margin:0 0 8px;display:block}
+.note-toggle:hover{color:var(--t1)}
 </style>
 </head>
 <body>
@@ -7255,6 +7275,12 @@ rsNsFill();                      // research agent's client scope selector
 refreshAll().then(hideSplash);
 /* 3D globe removed from the sentiment gauge per design direction — heroBoot no longer runs. */
 setInterval(refreshAll,5*60e3);
+</script>
+<script>
+/* The long explanatory note at the top of each view folds away behind one
+   line; the tables are the explanation. */
+(function(){function fold(){document.querySelectorAll('.view>.note').forEach(function(n){if(n.dataset.folded)return;n.dataset.folded='1';var b=document.createElement('button');b.type='button';b.className='note-toggle';b.textContent='About this view';b.onclick=function(){var o=n.classList.toggle('open');b.textContent=o?'Hide the note':'About this view';};n.classList.add('collapsible');n.parentNode.insertBefore(b,n);});}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fold);else fold();})();
 </script>
 </body>
 </html>
