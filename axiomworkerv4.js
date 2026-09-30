@@ -6312,7 +6312,7 @@ async function narrativeOne(env, id) {
 }
 async function narrativesStatus(env) {
   const now = Date.now();
-  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad') broad, SUM(n<2) singletons, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000).first()) || {};
+  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, NARR_MAX).first()) || {};
   const placed = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ts>?) n24 FROM narrative_items WHERE narrative<>\'\'').bind(now - 86400000).first()) || {};
   const kinds = SENT_KINDS.map(() => '?').join(',');
   const backlog = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ')').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first()) || {};
