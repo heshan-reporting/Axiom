@@ -52,7 +52,7 @@
     </svg>`;
   }
 
-  function Strip({ status, onRun, busy, canWrite, onRegister, showReg }) {
+  function Strip({ status, onRun, onRunAll, busy, canWrite, onRegister, showReg }) {
     const s = status || {};
     const b = s.budget || {};
     const critical = s.mentions7 ? pct(s.neg7, s.mentions7) : null, supportive = s.mentions7 ? pct(s.pos7, s.mentions7) : null;
@@ -66,7 +66,7 @@
         <div class="src-stat"><div class="k">Budget today</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.configured ? 'Claude calls, ' + (b.model || '') : 'ANTHROPIC_API_KEY is not set'}</div></div>
       </div>
       <div class="src-actions">
-        ${canWrite ? html`<button class="btn sm" disabled=${busy || !s.configured} onClick=${onRun} title="Judge the newest rows that mention an entity now">${busy ? 'Classifying...' : 'Classify now'}</button>` : null}
+        ${canWrite ? html`<button class="btn sm" disabled=${busy || !s.configured} onClick=${onRun} title="Judge up to a hundred waiting rows now, five Claude calls">${busy ? 'Classifying...' : 'Classify now'}</button><button class="btn sm ghost" disabled=${busy || !s.configured || !(s.backlog > 0)} onClick=${onRunAll} title="Keep judging until nothing waits, one Claude call at a time; Stop in the console halts it">Classify all waiting${s.backlog ? ' (' + fmtN(s.backlog) + ')' : ''}</button>` : null}
         <button class=${'btn sm ghost' + (showReg ? ' on' : '')} onClick=${onRegister}>${showReg ? 'Back to the table' : 'Entity register (' + ((s.entities || {}).active || 0) + ')'}</button>
       </div>
     </div>`;
@@ -255,14 +255,16 @@
     const picked = pick ? (board || []).find(e => e.id === pick) : null;
     /* Classify now runs in steps of one Claude call each, inside the request, because a job the
        worker runs after its response lives about thirty seconds and one call can take longer. */
-    const run = async () => {
-      setBusy(true);
+    const haltRef = useRef(false);
+    const run = async (max) => {
+      setBusy(true); haltRef.current = false;
       const lines = []; let n = 0;
       const push = (kind, text) => { lines.push({ id: ++n, ts: Date.now(), kind, text }); setJob({ id: 'step', status: 'running', lines: lines.slice(), follow: true }); };
-      push('info', 'classifying in steps of one Claude call each (up to 5 here; the half-hourly tick does the bulk)');
+      push('info', max > 5 ? 'judging everything waiting, one Claude call at a time; Stop halts it' : 'classifying in steps of one Claude call each (up to 5 here; the half-hourly tick does the bulk)');
       let good = true;
       try {
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < max; i++) {
+          if (haltRef.current) { push('info', 'stopped'); break; }
           const d = await call('/sentiment/step', { limit: 20 });
           (d.lines || []).forEach(l => push(l.kind, l.text));
           const limit = (d.errors || []).find(e => /usage limit|spend limit|regain access|credit balance|billing/i.test(e));
@@ -270,7 +272,7 @@
           if (d.errors && d.errors.length && !d.classified) { good = false; break; }
           if (!d.backlog) { push('info', 'nothing left waiting in the window'); break; }
           if (!d.classified) break;
-          if (i === 4) push('info', d.backlog + ' rows still wait; the tick continues, or press Classify now again');
+          if (i === max - 1) push('info', d.backlog + ' rows still wait; the tick continues, or press again');
         }
       } catch (e) { push('err', e.message); good = false; }
       setJob({ id: 'step', status: 'done', success: good, lines: lines.slice() });
@@ -278,8 +280,8 @@
     };
     if (err && !board) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load sentiment.</b> ${err}</div>`;
     return html`<div>
-      <${Strip} status=${status} onRun=${run} busy=${busy} canWrite=${canWrite} onRegister=${() => setShowReg(!showReg)} showReg=${showReg} />
-      ${job ? html`<${Console} job=${job} title="classify" />` : null}
+      <${Strip} status=${status} onRun=${() => run(5)} onRunAll=${() => run(400)} busy=${busy} canWrite=${canWrite} onRegister=${() => setShowReg(!showReg)} showReg=${showReg} />
+      ${job ? html`<${Console} job=${job} title="classify" canWrite=${canWrite} onCancel=${() => { haltRef.current = true; }} />` : null}
       ${status && !status.configured ? html`<div class="aud-notice" style=${{ margin: '6px 0 12px' }}><b>The classifier is Claude and ANTHROPIC_API_KEY is not set on the worker.</b> The register and the first pass work; verdicts need the key.</div>` : null}
       ${showReg ? html`<${Register} canWrite=${canWrite} onChanged=${() => { loadStatus(); load(); }} />` : html`
         <${Filters} f=${f} setF=${setF} count=${list.length} />

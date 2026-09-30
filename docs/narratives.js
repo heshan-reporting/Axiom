@@ -45,7 +45,7 @@
     </svg>`;
   }
 
-  function Strip({ status, onRun, onReset, busy, canWrite }) {
+  function Strip({ status, onRun, onReset, onNameAll, busy, canWrite }) {
     const s = status || {}; const b = s.budget || {};
     return html`<div class="src-strip">
       <div class="src-stats">
@@ -56,7 +56,7 @@
         <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 300 ? 'var(--x-warn)' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows of the last ${s.windowHours || 72}h not yet placed</div></div>
         <div class="src-stat"><div class="k">Naming budget</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.embeddings ? 'embeddings' : 'term vectors (Workers AI unbound)'}${s.naming ? ', ' + (b.model || '') : ', ANTHROPIC_API_KEY not set'}</div></div>
       </div>
-      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button>${s.broad ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onReset} title=${'A cluster past ' + (s.maxRows || 200) + ' rows is a topic, not a narrative. Dissolving it frees its rows to be placed again under the current rules.'}>Dissolve ${s.broad} broad cluster${s.broad === 1 ? '' : 's'}</button>` : null}</div>` : null}
+      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button>${s.naming ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onNameAll} title="Recount what is stale, then name every narrative that has earned a name, one Claude call at a time; Stop in the console halts it">Name all waiting</button>` : null}${s.broad ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onReset} title=${'A cluster past ' + (s.maxRows || 200) + ' rows is a topic, not a narrative. Dissolving it frees its rows to be placed again under the current rules.'}>Dissolve ${s.broad} broad cluster${s.broad === 1 ? '' : 's'}</button>` : null}</div>` : null}
     </div>`;
   }
   function Filters({ f, setF, count }) {
@@ -193,6 +193,31 @@
     };
     const refresh = () => { loadStatus(); load(); };
     const touchedMap = useMemo(() => { if (!lastRun || !lastRun.touched) return null; const m = {}; lastRun.touched.forEach(x => { m[x.id] = x; }); return m; }, [lastRun]);
+    const haltRef = useRef(false);
+    /* Recount what is stale, then name everything that has earned a name, one call per request, so
+       the whole backlog can be finished from here instead of over many ticks. */
+    const nameAll = async () => {
+      setBusy(true); haltRef.current = false; setLastRun(null);
+      const lines = []; let n = 0;
+      const push = (kind, text) => { lines.push({ id: ++n, ts: Date.now(), kind, text }); setJob({ id: 'step', status: 'running', lines: lines.slice(), follow: true }); };
+      push('info', 'recounting stale narratives, then naming every one that has earned a name; one Claude call per step, Stop halts it');
+      let good = true, named = 0;
+      try {
+        for (let i = 0; i < 10; i++) { if (haltRef.current) break; const d = await call('/narratives/step', { what: 'recount' }); (d.lines || []).forEach(l => push(l.kind, l.text)); if (!d.remaining || !d.recounted) break; }
+        for (let i = 0; i < 80; i++) {
+          if (haltRef.current) { push('info', 'stopped'); break; }
+          const d = await call('/narratives/step', { what: 'name' });
+          (d.lines || []).forEach(l => push(l.kind, l.text)); named += d.named || 0;
+          if (d.errors && d.errors.length) { const e = d.errors[0]; push('err', e); if (/budget|usage limit|spend limit|regain access/i.test(e)) { push('info', /budget/.test(e) ? 'the daily naming budget is spent; NARRATIVE_DAILY_CALLS raises it' : 'this is the Anthropic account spend limit, not an AXIOM budget; raise it in the Anthropic Console under Settings, Limits'); good = false; break; } }
+          if (!d.remaining) { push('info', 'nothing left waiting for a name'); break; }
+          if (!d.named && !d.calls) break;
+          if (i === 79) push('info', d.remaining + ' still wait; press again');
+        }
+      } catch (e) { push('err', e.message); good = false; }
+      push('done', named + ' narrative' + (named === 1 ? '' : 's') + ' named in this pass');
+      setJob({ id: 'step', status: 'done', success: good, lines: lines.slice() });
+      setBusy(false); refresh();
+    };
     const reset = async () => {
       if (!confirm('Dissolve the broad clusters? Their rows go back to the unplaced pool and are placed again under the current rules over the next ticks.')) return;
       setBusy(true);
@@ -201,9 +226,9 @@
     };
     if (err && !list) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load narratives.</b> ${err}</div>`;
     return html`<div>
-      <${Strip} status=${status} onRun=${run} onReset=${reset} busy=${busy} canWrite=${canWrite} />
+      <${Strip} status=${status} onRun=${run} onReset=${reset} onNameAll=${nameAll} busy=${busy} canWrite=${canWrite} />
       <${RunResult} r=${lastRun} list=${list} onOpen=${id => setPick(id)} only=${onlyRun} setOnly=${setOnlyRun} />
-      ${job ? html`<${Console} job=${job} title="place and name" />` : null}
+      ${job ? html`<${Console} job=${job} title=${job.id === 'step' ? 'name all waiting' : 'place and name'} canWrite=${canWrite} onCancel=${() => { haltRef.current = true; }} />` : null}
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       <${Filters} f=${f} setF=${setF} count=${(list || []).length} />
       <div class=${'sn-main' + (pick ? ' split' : '')}>

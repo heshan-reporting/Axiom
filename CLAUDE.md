@@ -479,7 +479,7 @@ archive item it came from; nothing is a model's impression of the whole.
   `none` so they are never looked at again; the rest are ordered by client
   issue tags, client mentions and engagement, and the top `SENT_PER_TICK` =
   80 go to Claude in batches of `SENT_BATCH` = 20 (`sentClassify`, model
-  `SENTIMENT_MODEL` or Sonnet 4.6 by the operator's choice, one retry on
+  `SENTIMENT_MODEL` or Opus 5.5 (`claude-opus-5-5`) by the operator's choice, one retry on
   invalid JSON). For each text
   and each entity mentioned the model returns stance -1/0/1, intensity 1-3,
   sarcasm and a twelve-word `why`; for the text an overall tone -1..1 and a
@@ -498,8 +498,9 @@ archive item it came from; nothing is a model's impression of the whole.
   take longer, so **Classify now** in the app does not use it: it loops
   `POST /sentiment/step {limit<=20}` (one Claude call, synchronously, inside
   the request; returns the run's counts, its log lines and the remaining
-  `backlog`) up to five times and stops when nothing waits. The bulk of the
-  classifying belongs to the tick.
+  `backlog`) up to five times and stops when nothing waits; **Classify all
+  waiting** loops it until the backlog is empty, the budget or the account
+  limit is hit, or Stop is pressed. The tick still does the routine work.
 - **The sums.** `GET /sentiment/entities?days=&platform=&region=&issue=&kind=`
   (per entity: mentions, net stance -1..1, critical and supportive counts,
   sarcasm, intensity, change against the previous window of the same length,
@@ -584,8 +585,8 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
   at most twelve words as its proponents would put it, summary, claim,
   counter-claim, proponents, up to three issue ids) - model `NARRATIVE_MODEL`
-  || `SENTIMENT_MODEL` || Sonnet 4.6, budget KV `narr_calls_<day>` against
-  `NARRATIVE_DAILY_CALLS` (default 60), one retry on invalid JSON; edited or
+  || `SENTIMENT_MODEL` || Opus 5.5, budget KV `narr_calls_<day>` against
+  `NARRATIVE_DAILY_CALLS` (default 120), one retry on invalid JSON; edited or
   muted narratives are never renamed, and the first issue's client becomes
   `ns`. `narrCounters()` makes two narratives on the same top issue facing
   opposite ways each other's `counter`. `narrAlerts()` posts each emerging,
@@ -617,7 +618,11 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   and warm shares, channels), how it spread in Australian Eastern time, rows a
   day by channel, who carries it, the loudest rows, shared terms, every row
   with the origin marked, and for full keys Edit / Pin / Mute / Merge into.
-  **Place and name now** runs the job with the console. Harnesses in the
+  **Place and name now** runs the job with the console; **Name all waiting**
+  loops `POST /narratives/step` (`{what:'recount'}` refreshes up to 60 stale
+  narratives a step; `{what:'name'}` is one naming call of five, then counters
+  and alerts; each answers `remaining`) until nothing waits, the budget or the
+  account limit is hit, or Stop is pressed. Harnesses in the
   session scratchpad: `narratives-worker.mjs` (12 placement, naming, counter,
   alert, list, merge, fallback, budget and cron tests with a semantic stub
   embedding, a stub Claude and a Slack recorder), `narratives-browser.mjs`

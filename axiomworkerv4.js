@@ -5489,7 +5489,7 @@ const SENT_PER_TICK = 80;      // rows classified per cron tick
 const SENT_BATCH = 20;         // texts per Claude call
 const SENT_SCAN = 400;         // newest unclassified rows looked at per run
 const SENT_WINDOW_H = 72;      // rows older than this are left alone
-const SENT_MODEL = 'claude-sonnet-4-6';   // the operator's choice: finer judgement; SENTIMENT_MODEL overrides (claude-haiku-4-5-20251001 is about a tenth of the price)
+const SENT_MODEL = 'claude-opus-5-5';   // the operator's choice: judgement and naming on Opus; SENTIMENT_MODEL / NARRATIVE_MODEL override (claude-sonnet-4-6 is about a fifth of the price, claude-haiku-4-5-20251001 a fiftieth)
 const SENT_DAILY_CALLS = 300;  // Claude calls a day unless SENTIMENT_DAILY_CALLS says otherwise
 const ENTITY_KINDS = ['party', 'person', 'org', 'topic'];
 const ENTITY_SIDES = ['client', 'opponent', 'neutral'];
@@ -5952,7 +5952,7 @@ function narrSims(env) {
 const NARR_TOKEN_SIM = 0.32;    // the term-vector fallback
 const NARR_LABEL_MIN = 3;       // rows before Claude names it
 const NARR_ALERT_MIN = 6;       // rows within 48h of first sight before an emergence alert
-const NARR_DAILY_CALLS = 60;    // naming calls a day unless NARRATIVE_DAILY_CALLS says otherwise
+const NARR_DAILY_CALLS = 120;   // naming calls a day unless NARRATIVE_DAILY_CALLS says otherwise (five narratives a call)
 const NARR_EMBED = '@cf/baai/bge-base-en-v1.5';
 const NARR_STOP = new Set(('the a an and or of to in on for with at by from as is are was were be been being it its this that these those i me my you your he him his she her we us our they them their who whom what which when where why how not no nor but so if then than too very can will would should could may might must just about into over under after before also more most less least such only own same other some any all each both few many much out up down off new old said says say one two three via amp rt https http com www').split(' '));
 async function ensureNarratives(env) {
@@ -8046,6 +8046,7 @@ export default {
     //    POST /narratives/update {id,label,summary,claim,counter_claim,issues,muted,pinned}   an operator's edit (full)
     //    POST /narratives/merge {into,from}  fold one narrative into another (full)
     //    POST /narratives/reset {broad:true} | {all:true,confirm:'reset'}   dissolve broad clusters (or everything) so rows are placed again (full)
+    //    POST /narratives/step {what:'recount'|'name',limit}   one step inside the request; the app loops it to finish the backlog (full)
     if (path === '/narratives' || path.startsWith('/narratives/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let nrb = {}; if (req.method === 'POST') { try { nrb = await req.json(); } catch (e) { nrb = {}; } }
@@ -8099,6 +8100,31 @@ export default {
           }
           await env.AXIOM_KV.delete('narr_last').catch(() => {});
           return jsonResp({ ok: true, all, narratives, items, note: items + ' rows are unplaced again; the half-hourly ticks place them under the current rules, or run Place and name now.' });
+        }
+        if (path === '/narratives/step') {
+          // One step, synchronously, inside the request - the app loops these to finish what the tick
+          // would otherwise take hours over. {what:'recount'} refreshes up to 60 stale narratives;
+          // {what:'name'} makes one naming call (five narratives) and then pairs counters and raises alerts.
+          const what = nrb.what === 'recount' ? 'recount' : 'name';
+          const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
+          const now = Date.now(); const db = env.MIND_DB;
+          if (what === 'recount') {
+            const lim = Math.min(Math.max(parseInt(nrb.limit, 10) || 60, 1), 100);
+            const ids = ((await db.prepare('SELECT id FROM narratives WHERE muted=0 AND last_ts>? AND updated<? ORDER BY n DESC LIMIT ?').bind(now - 7 * 86400000, now - 6 * 3600000, lim).all()).results || []).map(r => r.id);
+            let recounted = 0; const t0 = Date.now();
+            for (const id of ids) { if (Date.now() - t0 > 20000) break; try { if (await narrRefresh(env, id, now)) recounted++; } catch (e) { await log('err', 'recount ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); } }
+            const rem = ((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE muted=0 AND last_ts>? AND updated<?').bind(now - 7 * 86400000, now - 6 * 3600000).first()) || {}).n || 0;
+            await log('info', recounted + ' narratives recounted, ' + rem + ' still stale');
+            return jsonResp({ ok: true, what, recounted, remaining: rem, lines });
+          }
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the namer is Claude.' }, 501);
+          const eligible = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n)";
+          const cands = ((await db.prepare('SELECT id FROM narratives WHERE ' + eligible + ' ORDER BY n DESC LIMIT 5').bind(NARR_LABEL_MIN).all()).results || []).map(r => r.id);
+          const nm = cands.length ? await narrLabel(env, cands, log) : { named: 0, calls: 0, errors: [] };
+          if (nm.named) { try { await narrCounters(env); } catch (e) {} try { const al = await narrAlerts(env, log); nm.alerts = al.length; } catch (e) {} }
+          const rem = ((await db.prepare('SELECT COUNT(*) n FROM narratives WHERE ' + eligible).bind(NARR_LABEL_MIN).first()) || {}).n || 0;
+          if (!cands.length) await log('info', 'nothing waits for a name');
+          return jsonResp({ ok: true, what, named: nm.named || 0, calls: nm.calls || 0, alerts: nm.alerts || 0, errors: nm.errors || [], remaining: rem, budget: await narrBudget(env), lines });
         }
         if (path === '/narratives/merge') {
           const into = String(nrb.into || '').replace(/[^a-z0-9]/gi, '').slice(0, 24), from = String(nrb.from || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);

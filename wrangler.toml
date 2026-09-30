@@ -111,15 +111,16 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      POST {url} and answers {html} - an AWS or Mac Playwright
 #                      box; RENDER_KEY is sent as X-Axiom-Key if set)
 #   SENTIMENT_MODEL   (plain text var, optional: the Claude model that judges
-#                      stance and names narratives; default claude-sonnet-4-6.
-#                      claude-haiku-4-5-20251001 is about a tenth of the price)
+#                      stance and names narratives; default claude-opus-5-5.
+#                      claude-sonnet-4-6 is about a fifth of the price,
+#                      claude-haiku-4-5-20251001 about a fiftieth)
 #   SENTIMENT_DAILY_CALLS (plain text var, optional: Claude calls a day the
 #                      classifier may spend, default 300; each call judges up
 #                      to 20 rows)
 #   NARRATIVE_MODEL   (plain text var, optional: the Claude model that names
 #                      narratives - label, summary, claim, counter-claim,
 #                      proponents, issues; falls back to SENTIMENT_MODEL, then
-#                      claude-sonnet-4-6)
+#                      claude-opus-5-5)
 #   NARRATIVE_SIM / NARRATIVE_SIM_STRICT (plain text vars, optional: the cosine a
 #                      row needs to join a narrative with a shared leading issue
 #                      or entity / without one; defaults 0.84 / 0.91 for bge-base)
@@ -127,7 +128,7 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      topic rather than a narrative and stops taking rows;
 #                      default 600)
 #   NARRATIVE_DAILY_CALLS (plain text var, optional: naming calls a day,
-#                      default 60; each call names up to 5 narratives. The
+#                      default 120; each call names up to 5 narratives. The
 #                      placement itself uses Workers AI embeddings, not Claude,
 #                      and falls back to term vectors when AI is unbound)
 #   YOUTUBE_KEY       (optional: a YouTube Data API v3 key, free at 10,000 units
