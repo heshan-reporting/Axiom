@@ -3122,7 +3122,7 @@ async function releaseRender(env, packId, n, patch, who) {
   if (kit.hasLogo) { const lg = await brandLogo(env, row.ns); if (lg) refs.push({ data: b64FromBuf(lg.bytes), mime: lg.mime }); }
   const log = mkJobLog(env, row.job);
   await log('cmd', 'gemini: render tile ' + (n + 1) + ' (' + tile.kind + ') - "' + tile.headline.slice(0, 60) + '"' + (refs.length ? ' with the brand logo' : ''));
-  const out = await nanoRender(env, { prompt: releasePrompt(tile, kit, client, row.format), references: refs, aspect: RELEASE_FORMATS[row.format] || '1:1', size: '1K' });
+  const out = await nanoRender(env, { prompt: releasePrompt(tile, kit, client, row.format), references: refs, aspect: RELEASE_FORMATS[row.format] || '1:1', size: env.IMAGE_SIZE || '2K' });
   if (!out.ok) { await log('err', 'tile ' + (n + 1) + ': ' + out.error + (out.detail ? ' - ' + out.detail : '')); await log.flush(); return { ok: false, error: out.error, detail: out.detail, status: 502 }; }
   if (!env.MIND_DOCS) { await log.flush(); return { ok: false, error: 'mind_not_configured', detail: 'Bind MIND_DOCS (R2) to store rendered tiles.', status: 501 }; }
   const key = 'packs/' + packId + '/' + n + '.png';
@@ -6820,9 +6820,9 @@ async function nanoRender(env, opts) {
   const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
   const imgCfg = {};
   if (ASPECTS.indexOf(opts.aspect) !== -1) imgCfg.aspectRatio = opts.aspect;
-  // the operator may raise every render to 2K or 4K with the var IMAGE_SIZE (Gemini 3 Pro Image only; 1K is the default the app asks for)
-  const size = SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : opts.size;
-  if (SIZES.indexOf(size) !== -1) imgCfg.imageSize = size;
+    // 2K is the house default on Gemini 3 Pro Image (the operator's choice, September 2026); the var IMAGE_SIZE overrides every render, a request may still ask for 1K or 4K
+  const size = SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : (SIZES.indexOf(opts.size) !== -1 ? opts.size : '2K');
+  imgCfg.imageSize = size;
   let lastDetail = '', lastModel = chain[0];
   for (const model of chain) {
     lastModel = model;

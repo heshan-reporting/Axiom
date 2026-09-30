@@ -4559,7 +4559,7 @@ async function produceVisual(){
     const vfmt=($('vis-format')&&$('vis-format').value)||'square';
     const r=await fetch((WORKER_URL||'').replace(/\/+$/,'')+'/nano',{method:'POST',headers:axHeaders(),
       body:JSON.stringify({prompt:buildImagePrompt(f),referenceB64:f.referenceB64||null,mime:f.refMime||'image/png',
-        aspect:({square:'1:1',portrait:'4:5',story:'9:16'})[vfmt]||'1:1',size:'1K'})});
+        aspect:({square:'1:1',portrait:'4:5',story:'9:16'})[vfmt]||'1:1',size:'2K'})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
     f.visualB64=d.imageB64;f.visualMime=d.mime||'image/png';renderVisualPreview(f);toast('Visual generated ✓');
@@ -5718,7 +5718,7 @@ function ccImagePrompt(copy,mode){
 }
 async function ccGenImage(copy,mode){
   const r=await fetch(ccBase()+'/nano',{method:'POST',headers:axHeaders(),
-    body:JSON.stringify({prompt:ccImagePrompt(copy,mode),references:ccAllRefs(),aspect:ccAspect(),size:'1K'})});
+    body:JSON.stringify({prompt:ccImagePrompt(copy,mode),references:ccAllRefs(),aspect:ccAspect(),size:'2K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status)+' — needs the worker deployed with GEMINI_KEY');
   ccState.lastImgModel=d.model||'';
@@ -5781,7 +5781,7 @@ async function ccRefine(){
     const prompt='Edit the FIRST attached image per this instruction: "'+instr+'". Keep the same brand style, layout and dimensions unless the instruction says otherwise. '+
       (ccState.mode==='overlay'?'Do NOT add any text or logo — background artwork only.':'Ensure all on-image words are real, correctly-spelled English; do not add a logo (leave the bottom-right clear).')+
       ' Output only the edited image.';
-    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:axHeaders(),body:JSON.stringify({prompt,references:refs,aspect:ccAspect(),size:'1K'})});
+    const r=await fetch(ccBase()+'/nano',{method:'POST',headers:axHeaders(),body:JSON.stringify({prompt,references:refs,aspect:ccAspect(),size:'2K'})});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||'edit failed');
     ccState.baseB64=d.imageB64;ccState.baseMime=d.mime||'image/png';
@@ -6221,7 +6221,7 @@ async function csGenerate(editPrompt,baseVer,opt){
   }else{prompt=csBriefPrompt();refs=chatRefs.concat(brand).slice(0,6);}
   const aspect=CC_ASPECT[(csState.brief||{}).format]||'1:1';
   const r=await fetch(csBase()+'/nano',{method:'POST',headers:axHeaders(),
-    body:JSON.stringify({prompt,references:refs,aspect,size:'1K'})});
+    body:JSON.stringify({prompt,references:refs,aspect,size:'2K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
   // Stamp the brand logo (canvas compositor) so it is always present and crisp.
@@ -6721,7 +6721,7 @@ async function alGenerate(editPrompt){
   if(alState.logo&&alState.textmode==='baked')refs.push({data:alState.logo.data,mime:alState.logo.mime});
   refs=refs.concat(ccAllRefs()).slice(0,6);
   const r=await fetch(csBase()+'/nano',{method:'POST',headers:axHeaders(),
-    body:JSON.stringify({prompt:alGenPrompt(editPrompt),references:refs,aspect:CC_ASPECT[b.format]||'1:1',size:'1K'})});
+    body:JSON.stringify({prompt:alGenPrompt(editPrompt),references:refs,aspect:CC_ASPECT[b.format]||'1:1',size:'2K'})});
   const d=await r.json().catch(()=>({}));
   if(!r.ok||!d.imageB64)throw new Error(d.detail||d.error||('HTTP '+r.status));
   alState.artVer++;

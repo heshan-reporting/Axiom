@@ -76,10 +76,10 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      gemini-3-pro-image, falling back to gemini-3.1-flash-image
 #                      and gemini-2.5-flash-image; a request may name another
 #                      image model in its `model` field)
-#   IMAGE_SIZE        (plain text var, optional: 1K, 2K or 4K - raises every
+#   IMAGE_SIZE        (plain text var, optional: 1K, 2K or 4K - forces every
 #                      render (Ad Lab, Studio, Release Desk tiles) to that size on
-#                      Gemini 3 Pro Image; default is the 1K the app asks for.
-#                      Larger renders cost more per image and take longer)
+#                      Gemini 3 Pro Image; the default the app asks for is 2K.
+#                      4K costs more per image and takes longer)
 #   AXIOM_ACCESS_KEY  (single full-access key gating the private routes)
 #   AXIOM_KEYS        (per-person keys with roles, JSON on one line:
 #                      {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
