@@ -6145,7 +6145,7 @@ async function csSend(){
       csState.mindCtx='';
       try{
         const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
-          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:4})});
+          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:4,creative:true})});
         const d=await r.json().catch(()=>({}));
         if(r.ok&&d.ok&&(d.hits||[]).length)
           csState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
@@ -6616,7 +6616,7 @@ async function alSend(){
       alState.mindCtx='';
       try{
         const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
-          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:5})});
+          body:JSON.stringify({namespace:CC_ACTIVE,q:t,topK:5,creative:true})});
         const d=await r.json().catch(()=>({}));
         if(r.ok&&d.ok&&(d.hits||[]).length)
           alState.mindCtx=d.hits.map(h=>'- ('+h.ns+' '+(h.kind||'doc')+') '+(h.title||'')+': '+(h.snippet||'')).join('\n').slice(0,2500);
@@ -6752,7 +6752,7 @@ async function alEditTurn(instr){
    Curious Mind by KIND (not query similarity), so they apply to EVERY
    generation for the client: Studio, Ad Lab and the Composer. Cached per
    client per session; invalidated when new knowledge is ingested. */
-const CC_PLAYBOOK_KINDS=['style','voice','policy'];
+const CC_PLAYBOOK_KINDS=['style','voice','policy','brief'];
 async function ccPlaybook(){
   const ns=CC_ACTIVE;
   ccState.playbooks=ccState.playbooks||{};
@@ -6760,7 +6760,7 @@ async function ccPlaybook(){
   ccState.playbooks[ns]='';
   try{
     const r=await fetch(csBase()+'/mind/query',{method:'POST',headers:axHeaders(),
-      body:JSON.stringify({namespace:ns,q:'brand voice tone wording style rules ad creative design guidelines policy messaging pillars',topK:6,kinds:CC_PLAYBOOK_KINDS})});
+      body:JSON.stringify({namespace:ns,q:'brand voice tone wording style rules ad creative design guidelines policy messaging pillars campaign identity creative feedback',topK:6,kinds:CC_PLAYBOOK_KINDS,creative:true})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d.ok&&(d.hits||[]).length)
       ccState.playbooks[ns]=d.hits.map(h=>'['+String(h.kind||'doc').toUpperCase()+' · '+(h.title||'')+']\n'+(h.snippet||'')).join('\n\n').slice(0,3200);

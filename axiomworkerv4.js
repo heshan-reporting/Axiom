@@ -3017,7 +3017,7 @@ async function releaseCompose(env, pack, opts, log) {
   const kit = (await brandKit(env, ns)) || {};
   let playbook = '';
   try {
-    const hits = await mindRetrieve(env, ns, 'brand voice tone wording style rules messaging pillars design guidelines policy positions ' + (pack.extract.topic || ''), 6);
+    const hits = await mindRetrieve(env, ns, 'brand voice tone wording style rules messaging pillars design guidelines policy positions campaign identity creative feedback ' + (pack.extract.topic || ''), 6, { creative: true });
     playbook = hits.slice(0, 8).map(h => '[' + String(h.meta.kind || 'doc').toUpperCase() + ' - ' + (h.meta.title || '') + '] ' + (h.meta.snippet || '')).join('\n').slice(0, 3500);
     await log('out', 'Mind: ' + hits.length + ' playbook notes for ' + ns);
   } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); }
@@ -3414,7 +3414,7 @@ async function contentExemplars(env, ns, camp, platforms, brief, log) {
   let hits = [];
   try {
     const q = [(camp && camp.name) || '', (platforms || []).join(' '), 'approved caption post copy example', String(brief || '').slice(0, 300)].join(' ');
-    hits = await mindRetrieve(env, ns, q, 10);
+    hits = await mindRetrieve(env, ns, q, 10, { creative: true });
   } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); return { text: '', count: 0 }; }
   const want = hits.filter(h => /^(copy|outcome|brief|release)$/.test(String(h.meta.kind || '')));
   const own = want.filter(h => camp && String(h.meta.source || '').indexOf(camp.id) >= 0);
@@ -6734,7 +6734,12 @@ function median(a) {
 }
 /** Mind retrieval for background jobs (the /mind/* routes keep their own copy,
     which is request-scoped). Client namespace plus the shared cmm layer only. */
-async function mindRetrieve(env, ns, q, topK = 5) {
+/** The client namespace plus the shared cmm layer, nothing else - except the
+ *  client's CREATIVE SHELF (`<ns>_creative`: campaign identities, client
+ *  creative feedback, approval memory), which only the creative surfaces ask
+ *  for with opts.creative: the Content Desk, the Release Desk, Ad Lab and
+ *  Studio. The Sentinel, research, topics and the daily brief never see it. */
+async function mindRetrieve(env, ns, q, topK = 5, opts) {
   if (!env.MIND_VECTORS || !env.AI) return [];
   const out = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [String(q).slice(0, 1500)] });
   const vec = out.data[0];
@@ -6746,6 +6751,7 @@ async function mindRetrieve(env, ns, q, topK = 5) {
     } catch (e) {}
   };
   await one(ns, topK);
+  if (opts && opts.creative && ns !== 'cmm') await one(ns + '_creative', topK);
   if (ns !== 'cmm') await one('cmm', 3);
   hits.sort((a, b) => b.score - a.score);
   return hits;
@@ -9211,7 +9217,7 @@ export default {
       };
       // Retrieval shared by /mind/query and /mind/analyze: the client
       // namespace plus the shared 'cmm' layer, nothing else, ever.
-      const retrieve = async (ns, q, kClient, kShared) => {
+      const retrieve = async (ns, q, kClient, kShared, creative) => {
         const vec = (await embed([q.slice(0, 1500)]))[0];
         const hits = [];
         const one = async (space, topK) => {
@@ -9221,6 +9227,7 @@ export default {
           } catch (e) {}
         };
         await one(ns, kClient);
+        if (creative && ns !== 'cmm') await one(ns + '_creative', kClient);   // the creative shelf, for the creative surfaces only
         if (ns !== 'cmm') await one('cmm', kShared);
         hits.sort((a, b) => b.score - a.score);
         return hits;
@@ -9270,7 +9277,7 @@ export default {
         } catch (e) { return jsonResp({ error: 'docs_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }
       }
 
-      // POST /mind/query {namespace, q, topK?} - raw retrieval (debug/UI)
+      // POST /mind/query {namespace, q, topK?, kinds?, creative?} - raw retrieval (debug/UI); creative:true adds the client's creative shelf (Studio, Ad Lab)
       // Optional b.kinds: ['style','voice','policy',...] filters hits by
       // metadata.kind - used by the client-playbook fetch so standing rules
       // load deterministically instead of only when semantically similar.
@@ -9282,7 +9289,7 @@ export default {
         try {
           const want = Math.min(parseInt(b.topK, 10) || 6, 12);
           // Over-fetch when filtering so a kind filter still fills topK.
-          let hits = await retrieve(ns, String(b.q), kinds ? Math.min(want * 3, 24) : want, 3);
+          let hits = await retrieve(ns, String(b.q), kinds ? Math.min(want * 3, 24) : want, 3, b.creative === true);
           if (kinds) hits = hits.filter(h => kinds.includes(h.meta.kind)).slice(0, want);
           return jsonResp({ ok: true, hits: hits.map(h => ({ ns: h.ns, score: +h.score.toFixed(3), title: h.meta.title, kind: h.meta.kind, snippet: (h.meta.snippet || '').slice(0, 400) })) });
         } catch (e) { return jsonResp({ error: 'query_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }

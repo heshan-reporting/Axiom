@@ -125,6 +125,8 @@ def walk(folder, kinds):
         dirs[:] = [d for d in sorted(dirs) if not d.startswith('.')]
         for f in sorted(files):
             if f.startswith('.'): continue
+            # a pack's README explains the folder to a person; it is not client knowledge
+            if root == folder and f.lower().startswith('readme'): continue
             path = os.path.join(root, f)
             rel = os.path.relpath(path, folder)
             out.append((classify(f, kinds), path, rel))
@@ -231,6 +233,7 @@ def main(argv=None):
     ap.add_argument('folder')
     ap.add_argument('--ns', required=True, help='client namespace: mca, aep, vicnats, pca, mba, pharm, cmm')
     ap.add_argument('--key', default=os.environ.get('AXIOM_KEY', ''))
+    ap.add_argument('--mind-ns', default='', help="namespace the documents are filed under when it differs from --ns: '<ns>_creative' is the creative shelf that only the Content Desk, Release Desk, Ad Lab and Studio retrieve (the kit, rules and artwork still go to --ns)")
     ap.add_argument('--worker', default=WORKER)
     ap.add_argument('--kinds', default='kit,fixes,doc,artwork', help='what to file: kit, fixes, doc, artwork (comma-separated)')
     ap.add_argument('--max', type=int, default=0, help='stop after this many files (0 = all)')
@@ -242,6 +245,8 @@ def main(argv=None):
     if not os.path.isdir(folder): sys.exit('not a folder: ' + folder)
     if not a.key and not a.dry_run: sys.exit('need --key or AXIOM_KEY')
     ns = re.sub(r'[^a-z0-9_-]', '', a.ns.lower())[:24] or 'cmm'
+    mns = re.sub(r'[^a-z0-9_-]', '', (a.mind_ns or a.ns).lower())[:32] or ns
+    if mns != ns and not mns.startswith(ns + '_'): sys.exit('--mind-ns must be the client namespace or a shelf of it, such as %s_creative' % ns)
     kinds = [k.strip() for k in a.kinds.split(',') if k.strip()]
     state = {} if a.force else load_state(folder)
     items = walk(folder, kinds)
@@ -249,7 +254,7 @@ def main(argv=None):
     skipped = [r for k, p, r in items if k == 'skip']
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     n = lambda kind: sum(1 for k, _, _ in todo if k == kind)
-    print('%s  %s: %d documents, %d images, %s%s%d other files in %s' % (stamp, ns, n('doc'), n('artwork'), '1 brand kit, ' if n('kit') else '', '1 fixes list, ' if n('fixes') else '', len(skipped), folder))
+    print('%s  %s: %d documents%s, %d images, %s%s%d other files in %s' % (stamp, ns, n('doc'), (' -> ' + mns) if mns != ns else '', n('artwork'), '1 brand kit, ' if n('kit') else '', '1 fixes list, ' if n('fixes') else '', len(skipped), folder))
     if skipped[:5]: print('  not filed (type not handled): ' + ', '.join(skipped[:5]) + (' ...' if len(skipped) > 5 else ''))
     done = failed = same = 0
     for i, (kind, path, rel) in enumerate(todo):
@@ -262,7 +267,7 @@ def main(argv=None):
         try:
             if kind == 'kit': res = file_kit(a.worker, a.key, ns, path, rel)
             elif kind == 'fixes': res = file_fixes(a.worker, a.key, ns, path, rel)
-            elif kind == 'doc': res = file_doc(a.worker, a.key, ns, path, rel)
+            elif kind == 'doc': res = file_doc(a.worker, a.key, mns, path, rel)
             else: res = file_artwork(a.worker, a.key, ns, path, rel)
             state[rel] = {'sha': h, 'kind': kind, 'filed': stamp, 'result': res}
             save_state(folder, state)

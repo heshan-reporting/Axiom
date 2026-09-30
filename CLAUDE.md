@@ -822,6 +822,24 @@ the **Learned** panel switches rules off. Harnesses in the session scratchpad:
 stub Claude), `content-browser.mjs` (15 Playwright tests), `engine-ingest-
 test.py` (16).
 
+**The creative shelf.** Client creative memory - campaign identities and
+their visual conventions, the client's explicit creative feedback, exact
+approved copy, approval status, open conflicts - is filed in the Mind under
+`<ns>_creative` (`tools/engine-ingest.py <pack> --ns mca --mind-ns
+mca_creative`), and `mindRetrieve(env, ns, q, k, {creative:true})` reads it
+**only for the creative surfaces**: `contentExemplars()` (Content Desk),
+`releaseCompose()` (Release Desk), and `POST /mind/query {creative:true}`
+(Studio, Ad Lab and `ccPlaybook()`). The Sentinel, the research agent,
+topic research, narratives, sentiment and the daily brief retrieve `ns` and
+`cmm` only and never see it. Rules that come with such a pack are task
+`copy` or `tiles`, the two tasks those surfaces read. The MCA creative
+memory (the 30 September 2026 handoff: Australian mining / 1.5, Hands Off
+Our Fuel and Victoria's Golden Opportunity kept as three identities; explicit
+requirements, observed conventions, conditional proposals and approval
+snapshots kept distinct; the evidence appendices whole, not split by
+campaign) is loaded this way as the `mca-creative-memory` pack; a
+content-free provenance stub sits in `knowledge/wiki/sources/`.
+
 **Voice packs.** A client's profile is loaded in bulk with
 `python3 tools/engine-ingest.py <pack> --ns <ns> --key $AXIOM_KEY`: the tool
 now recognises `brand-kit.json` (-> `/brand/kit`, ns forced, logo fields
