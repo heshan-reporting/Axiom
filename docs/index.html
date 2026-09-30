@@ -22,6 +22,7 @@
 <script src="release.js" defer></script>
 <script src="topics.js" defer></script>
 <script src="content.js" defer></script>
+<script src="studio.js" defer></script>
 <script src="sources.js" defer></script>
 <script src="sentiment.js" defer></script>
 <script src="narratives.js" defer></script>
@@ -1706,6 +1707,98 @@ body.kiosk .kprog{display:block}
 .cc-err{padding:16px;border-radius:14px;background:rgba(255,84,112,.1);border:1px solid rgba(255,84,112,.3);color:#ffb3c0;font-size:13px;line-height:1.5}
 .rbtn-cc.on{color:var(--amb)}
 @media(max-width:640px){.cc-hero{padding:24px 20px}.cc-composer{padding:16px}}
+/* ═══ CREATIVE STUDIO (docs/studio.js) — three columns, the work in the middle ═══ */
+.st{display:flex;flex-direction:column;min-height:calc(100vh - 150px)}
+.st-head{display:flex;align-items:center;gap:12px;padding:4px 0 10px;border-bottom:1px solid var(--x-line1);font-size:12.5px;flex-wrap:wrap}
+.st-head-l,.st-head-r{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.st-head-r{margin-left:auto}
+.st-sep{color:var(--t3)}
+.st-sel{font:inherit;font-size:12.5px;color:var(--t0);background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:4px;padding:3px 8px;max-width:100%}
+.st-steps{display:flex;gap:2px;padding:8px 0;border-bottom:1px solid var(--x-line1)}
+.st-step{font-family:var(--fm);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);background:none;border:0;border-bottom:2px solid transparent;padding:4px 12px;cursor:pointer}
+.st-step.done{color:var(--t2)}.st-step.on{color:var(--t0);border-bottom-color:var(--x-ac-hi)}.st-step.skipped{text-decoration:line-through;opacity:.6}
+.st-body{display:grid;grid-template-columns:230px minmax(0,1fr) 360px;flex:1;min-height:0}
+.st-body.lib{grid-template-columns:minmax(0,1fr)}
+.st-rail{border-right:1px solid var(--x-line1);padding:10px 10px 10px 0;display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+.st-lbl{font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin:10px 0 4px}
+.st-railbtn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:6px;padding:6px 8px;color:var(--t1);font:inherit;font-size:12.5px;cursor:pointer}
+.st-railbtn:hover{background:var(--x-bg2)}.st-railbtn.on{background:var(--x-sur3);color:var(--t0)}
+.st-railbtn .st-n{margin-left:auto;font-family:var(--fm);font-size:10px;color:var(--t2);background:var(--x-bg2);border-radius:4px;padding:0 5px}
+.st-railbtn.asset{justify-content:space-between}
+.st-fam{margin:2px 0 6px}.st-famname{font-size:11px;color:var(--t2);padding:4px 8px 2px}
+.st-dot{width:8px;height:8px;border-radius:50%;background:var(--t3);flex-shrink:0;margin-left:auto}.st-dot.approved{background:var(--x-pos)}.st-dot.partly{background:var(--x-warn)}.st-dot.revised{background:var(--x-ac-hi)}
+.st-centre{min-width:0;overflow:auto;padding:0 16px}
+.st-centre-pad{padding:12px 0}
+.st-pad{padding:8px 0}
+.st-partner{border-left:1px solid var(--x-line1);padding:10px 0 10px 12px;display:flex;flex-direction:column;min-height:0;max-height:calc(100vh - 210px);position:sticky;top:0}
+.st-partner-head{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.st-thread{flex:1;overflow:auto;display:flex;flex-direction:column;gap:10px;padding-right:4px;min-height:200px}
+.st-msg{font-size:12.5px;line-height:1.5}
+.st-msg.you .st-msg-text{background:var(--x-sur3);border-radius:8px;padding:6px 10px;color:var(--t0)}
+.st-msg.studio .st-msg-text{color:var(--t1)}
+.st-msg-meta{font-family:var(--fm);font-size:10px;color:var(--t3);margin-bottom:2px}
+.st-msg-foot{margin-top:4px;font-size:11.5px;color:var(--t2);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.st-alts{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.st-alt{text-align:left;background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:6px;padding:6px 10px;color:var(--t0);font:inherit;font-size:12.5px;cursor:pointer}.st-alt:hover{border-color:var(--x-ac-hi)}
+.st-proposal,.st-offer-box{margin-top:6px;padding:8px 10px;border:1px solid var(--x-line1);border-radius:6px;background:var(--x-bg2)}
+.st-offer{margin-top:6px;font-size:12px}
+.st-composer{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--x-line1);margin-top:8px}
+.st-chip{display:inline-block;font-family:var(--fm);font-size:10px;letter-spacing:.04em;border-radius:4px;padding:0 6px;line-height:17px;background:var(--x-sur3);color:var(--t1)}
+.st-chip.ok{color:var(--x-pos);background:color-mix(in srgb,var(--x-pos) 14%,transparent)}.st-chip.warn{color:var(--x-warn);background:color-mix(in srgb,var(--x-warn) 14%,transparent)}.st-chip.bad{color:var(--x-neg);background:color-mix(in srgb,var(--x-neg) 14%,transparent)}
+.st-status{font-family:var(--fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:1px 6px;background:var(--x-sur3);color:var(--t1)}
+.st-status.done,.st-status.approved,.st-status.export{color:var(--x-pos)}.st-status.running,.st-status.production{color:var(--x-ac-hi)}.st-status.failed,.st-status.cancelled{color:var(--x-neg)}.st-status.review{color:var(--x-warn)}.st-status.legacy{color:var(--t3)}
+.st-lib-head{display:flex;align-items:baseline;gap:12px;padding:10px 0;flex-wrap:wrap}.st-lib-head .btn{margin-left:auto}
+.st-legacy td{opacity:.85}
+.st-foot{padding:10px 0}
+.st-intake{max-width:900px;padding:12px 0;display:flex;flex-direction:column;gap:10px}
+.st-intake-row{display:grid;grid-template-columns:1.2fr 1fr .8fr;gap:16px}
+.st-seg{display:flex;flex-wrap:wrap;gap:4px}
+.st-segbtn{background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:6px;padding:5px 10px;color:var(--t1);font:inherit;font-size:12px;cursor:pointer}.st-segbtn.on{background:var(--x-sur3);color:var(--t0);border-color:var(--x-ac-hi)}
+.st-ta,.st-in{width:100%;box-sizing:border-box;font:inherit;font-size:12.5px;line-height:1.45;color:var(--t0);background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:6px;padding:6px 8px;resize:vertical}
+.st-ta:disabled,.st-in:disabled{opacity:.7}
+.st-drop{border:1px dashed var(--x-line1);border-radius:8px;padding:14px;color:var(--t2);font-size:12.5px}
+.st-intake-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.st-intake-foot .ov-dim{flex:1}
+.st-asset{display:flex;flex-direction:column;gap:12px;padding:10px 0}
+.st-asset-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.st-asset-acts{margin-left:auto;display:flex;gap:6px}
+.st-stage{background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:8px;padding:16px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.st-stage.fit .st-stage-inner{width:min(100%,520px)}.st-stage.actual .st-stage-inner{width:1080px;max-width:none}.st-stage.actual{overflow:auto;align-items:flex-start}
+.st-comp{position:relative;width:100%;border-radius:4px;overflow:hidden;color:#fff;font-family:var(--fd);container-type:inline-size}
+.st-comp.thumb{width:96px;flex-shrink:0;border-radius:3px}
+.st-comp-tag{position:absolute;top:6px;left:8px;font-family:var(--fm);font-size:9px;letter-spacing:.06em;background:rgba(0,0,0,.45);padding:1px 6px;border-radius:3px;color:#ddd}
+.st-comp-panel{position:absolute;left:6%;bottom:14%;width:70%;background:color-mix(in srgb,var(--st-accent,#c9a227) 88%,#000);padding:4% 4% 3.5%;border-radius:2px}
+.st-comp-h{font-weight:750;font-size:6.2cqw;line-height:1.08;letter-spacing:-.01em}
+.st-comp-panel.small .st-comp-h{font-size:5cqw}
+.st-comp.thumb .st-comp-h{font-size:9cqw}
+.st-comp-s{margin-top:2.2cqw;font-size:3.1cqw;line-height:1.3;opacity:.92;font-family:var(--fb)}
+.st-comp-cta{margin-top:3cqw;display:inline-block;font-family:var(--fm);font-size:2.6cqw;letter-spacing:.1em;text-transform:uppercase;border:1px solid rgba(255,255,255,.7);padding:1.2cqw 2.4cqw;border-radius:2px}
+.st-comp-logo{position:absolute;right:4%;bottom:4%;background:rgba(255,255,255,.92);color:#222;font-family:var(--fm);font-size:2.4cqw;padding:1.2cqw 2cqw;border-radius:2px}
+.st-flatnote{font-size:12px;color:var(--t2);text-align:left;width:100%}
+.st-copy{display:flex;flex-direction:column;gap:8px}
+.st-field{padding:6px 8px;border-radius:6px;border:1px solid transparent}.st-field.on{border-color:var(--x-ac-hi);background:var(--x-bg2)}.st-field.locked{background:color-mix(in srgb,var(--x-warn) 6%,transparent)}
+.st-field-head{display:flex;align-items:baseline;justify-content:space-between}
+.st-lock{font-family:var(--fm);font-size:10px;letter-spacing:.06em;background:none;border:1px solid var(--x-line1);border-radius:4px;padding:0 6px;color:var(--t2);cursor:pointer}.st-lock.on{color:var(--x-warn);border-color:var(--x-warn)}
+.st-checks{list-style:none;margin:0;padding:0;font-size:12.5px;display:flex;flex-direction:column;gap:4px}
+.st-approve{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--x-line1);padding-top:10px}
+.st-appr{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;flex-wrap:wrap}.st-appr>span:last-child{display:flex;gap:6px}
+.st-hist{border-top:1px solid var(--x-line1);padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.st-hist-row{display:grid;grid-template-columns:96px 1fr auto;gap:12px;align-items:center;padding:6px;border-radius:6px;font-size:12.5px}.st-hist-row.cur{background:var(--x-bg2)}
+.st-cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:10px 0}
+.st-source{margin:10px 0 16px}.st-source-head{margin-bottom:6px}
+.st-ledger td em{color:var(--t0)}
+.st-passage{font-size:12px;color:var(--t1);padding:6px 8px;background:var(--x-bg2);border-radius:6px;margin-top:4px;max-width:520px}
+.st-refs{display:flex;flex-direction:column;gap:8px}.st-ref{display:flex;gap:12px;align-items:center;font-size:12.5px}
+.st-ref-thumb{width:64px;height:44px;border-radius:4px;background:var(--x-sur3);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);flex-shrink:0}
+.st-dirs{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:10px 0}
+.st-dir{border:1px solid var(--x-line1);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;background:var(--x-bg2)}.st-dir.chosen{border-color:var(--x-pos)}
+.st-dir-title{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--fm);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t2)}
+.st-dir-h{font-family:var(--fd);font-size:17px;font-weight:700;line-height:1.25;color:var(--t0)}
+.st-dir-line b{color:var(--t2);font-weight:600;margin-right:4px}
+.st-ul{margin:4px 0;padding-left:18px;font-size:12.5px;line-height:1.5}
+.st-ctx{display:flex;flex-direction:column;gap:2px;font-size:12.5px;max-width:820px}
+.st-dialog{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:60;padding:20px}
+.st-dialog-box{background:var(--x-bg1);border:1px solid var(--x-line1);border-radius:10px;padding:16px 18px;width:min(900px,100%);max-height:90vh;overflow:auto;font-size:12.5px}.st-dialog-box.narrow{width:min(520px,100%)}
+.st-dialog-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+@media(max-width:1200px){.st-body{grid-template-columns:200px minmax(0,1fr)}.st-partner{grid-column:1/-1;border-left:0;border-top:1px solid var(--x-line1);position:static;max-height:none;padding-left:0}}
+@media(max-width:800px){.st-body{grid-template-columns:1fr}.st-rail{border-right:0;border-bottom:1px solid var(--x-line1)}.st-intake-row{grid-template-columns:1fr}.st-cmp{grid-template-columns:1fr}}
 /* ═══ THE FRONT PAGE — what changed, why it matters, the evidence (docs/overview.js) ═══ */
 .ovpage{max-width:1400px}
 .ov-head{display:flex;align-items:center;gap:14px;padding:2px 0 10px;border-bottom:1px solid var(--x-line1);margin-bottom:6px;font-size:12.5px;color:var(--t1)}
@@ -2290,6 +2383,10 @@ body.kiosk .kprog{display:block}
         <div id="signals-root"><div class="empty" style="padding:40px 0">Loading signals…</div></div>
       </section>
       <!-- ═══ RELEASE DESK — a media release in, a pack of social tiles out (React island, docs/release.js) ═══ -->
+      <!-- ═══ CREATIVE STUDIO — one client-aware workspace for copy, creative and campaign production (React island, docs/studio.js; Phase 0 prototype on synthetic data) ═══ -->
+      <section class="view" id="v-studio">
+        <div id="studio-root"><div class="empty" style="padding:40px 0">Loading the Creative Studio…</div></div>
+      </section>
       <section class="view" id="v-release">
         <div class="note" style="margin:0 0 14px">Paste a client media release. The Desk reads what it actually says — claims, figures, quotes, who is speaking — writes a set of social tiles in the client's voice from the playbook in the Mind, and renders each one in the client's stored brand kit. Every figure on a tile is checked back against the release. Edit copy, re-render, download, or open a tile in the Ad Lab canvas for layer-level work. Every pack is archived with its source and its author.</div>
         <div id="release-root"><div class="empty" style="padding:40px 0">Loading the Release Desk…</div></div>
@@ -2602,6 +2699,7 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span>Alerts</span></button>
   <button class="tab" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span>Audience</span></button>
   <button class="tab" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span>Signals</span></button>
+  <button class="tab" data-v="studio" onclick="go('studio')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Studio</span></button>
   <button class="tab" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Desk</span></button>
   <button class="tab" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span>Topics</span></button>
   <button class="tab" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span>Sources</span></button>
@@ -2888,7 +2986,7 @@ function go(v){
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
   document.querySelectorAll('.rbtn[data-v],.tab[data-v]').forEach(b=>{const on=b.dataset.v===v;b.classList.toggle('on',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  $('vtitle').textContent={command:'What changed',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',topics:'Topics',content:'Content Desk',sources:'Sources',sentiment:'Sentiment',narratives:'Narratives',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
+  $('vtitle').textContent={command:'What changed',news:'Newsroom',pulse:'Pulse',radar:'Radar',analyst:'AXIOM Analyst',brief:'Daily Briefing',sentinel:'Sentinel',audience:'Audience',signals:'Signals',release:'Release Desk',studio:'Creative Studio',topics:'Topics',content:'Content Desk',sources:'Sources',sentiment:'Sentiment',narratives:'Narratives',map:'Knowledge Map',clients:'Client Central'}[v]||'AXIOM';
   const vt=$('vtag');if(vt)vt.textContent=v==='command'?(state.pulseTag||''):'';
   const bc=$('backc');if(bc){if(v==='command')bc.setAttribute('disabled','');else bc.removeAttribute('disabled');}
   $('content').scrollTop=0;
@@ -2901,6 +2999,7 @@ function go(v){
   if(v==='audience')audInit();
   if(v==='signals'&&typeof signalsInit==='function')signalsInit();
   if(v==='release'&&typeof releaseInit==='function')releaseInit();
+  if(v==='studio'&&typeof studioInit==='function')studioInit();
   if(v==='topics'&&typeof topicsInit==='function')topicsInit();
   if(v==='content'&&typeof contentInit==='function')contentInit();
   if(v==='sources'&&typeof sourcesInit==='function')sourcesInit();
