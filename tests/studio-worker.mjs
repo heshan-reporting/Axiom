@@ -46,7 +46,7 @@ console.log('studio-worker harness (Phase 1)');
 await t('the creative endpoints are gated: no key is 401, a read key is 403 on writes, and GETs under /studio read', async () => {
   for (const p of ['/chat', '/nano', '/clickup', '/studio/project']) eq((await req('POST', p, { messages: [{ role: 'user', content: 'x' }], prompt: 'x', ns: 'mca' }, null)).status, 401, p + ' without a key');
   for (const p of ['/chat', '/nano', '/clickup', '/studio/project', '/studio/job']) eq((await req('POST', p, { messages: [{ role: 'user', content: 'x' }], prompt: 'x', ns: 'mca' }, 'read-key')).status, 403, p + ' with a read key');
-  const r = await req('GET', '/studio/status', null, 'read-key'); eq(r.status, 200); ok(/studio-p1/.test(r.d.build), r.d.build); eq(r.d.phase, 1);
+  const r = await req('GET', '/studio/status', null, 'read-key'); eq(r.status, 200); ok(/studio-p\d/.test(r.d.build), r.d.build); eq(r.d.phase, 2);
   eq((await req('GET', '/studio/list?ns=mca', null, 'read-key')).status, 200);
   eq((await req('GET', '/engine/status?ns=mca', null, 'read-key')).d.build, r.d.build, 'the deploy check route carries the same build id');
 });

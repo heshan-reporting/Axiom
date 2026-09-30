@@ -14,7 +14,8 @@ Node 22 or later (the SQLite shim uses `node:sqlite`), Python 3, Chromium
 through Playwright for the browser harnesses.
 
 ```
-node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1
+node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1 (projects, versions, approvals, jobs, legacy)
+node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phase 2 (ledger, directions, copy, checks, layouts, export, budget)
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
 node --experimental-sqlite tests/artwork-worker.mjs       # artwork memory
 node --experimental-sqlite tests/overview-worker.mjs      # the front page and the daily brief
@@ -22,7 +23,7 @@ node --experimental-sqlite tests/narratives-worker.mjs
 node --experimental-sqlite tests/sentiment-worker.mjs
 node --experimental-sqlite tests/social-worker.mjs
 node --experimental-sqlite tests/sources-worker.mjs
-node tests/studio-browser.mjs                             # SHOT=1 writes screenshots beside it
+node --experimental-sqlite tests/studio-browser.mjs       # the Studio journey in a browser through the in-process worker; SHOT=1 writes screenshots beside it
 node tests/overview-browser.mjs                           # also narratives-, sentiment-, sources-, signals-, scope-, content-browser
 python3 tests/engine-ingest-test.py
 python3 tests/reach-render-test.py
@@ -44,7 +45,19 @@ it at the end.
   abandoned-runner recovery, bounded retries that tell transient from invalid,
   cancel, the stale-result branch, legacy adapters with untouched originals,
   idempotent import, inventory, the models probe, archive.
-- `studio-browser.mjs`: the Phase 0 prototype journey in a browser.
+- `studio-p2-worker.mjs`: the Phase 2 production journey - the client context
+  (kit, facts, banned terms, learned rules, no other client's), the claim
+  ledger with passages and unverified rows, directions for an open brief,
+  copy adapted per channel with the deterministic checks (matches / differs /
+  unsupported / banned / overflow), compositions with the exact kit logo,
+  render jobs queued by idempotent key, a headline edit without an image
+  call, the namespace wall in the prompt, the daily budget and the account
+  spend limit, the adaptive-thinking fallback, export of approved versions
+  only with nothing sent anywhere, the rule-only ledger without a Claude key.
+- `studio-browser.mjs`: the same journey in a real browser. The page's calls
+  to the worker are routed into the worker module running in the harness
+  process, so intake, extraction, production, the renderer's preview, hand
+  edits, approvals, export and the read-only role are exercised end to end.
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,

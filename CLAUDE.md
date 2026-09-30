@@ -765,14 +765,88 @@ the view holding it) - answered in tables, not cards.
   the legacy inline views (Newsroom, Pulse, Radar, Analyst, Briefing,
   Audience, Knowledge, Clients) inherit the shell and panel rules only.
 
-## The Creative Studio (one client-aware workspace; Phases 0-1 shipped)
+## The Creative Studio (one client-aware workspace; Phases 0-2 built)
 
 The approved proposal (`CREATIVE-STUDIO.md`) consolidates the Release Desk,
 the Content Desk and the Client Central Studio into one feature. Phase 0
-shipped the clickable prototype (`docs/studio.js`, `#v-studio`, the Studio
-tab) on synthetic data. **Phase 1 is the durable ground under it**, all in
-the worker behind `/studio/*` (`ensureStudio`, build id `AXIOM_BUILD`, also
-returned by `/engine/status` so the deploy script proves the release):
+was the clickable prototype; **Phase 1 is the durable ground** in the worker
+behind `/studio/*` (`ensureStudio`, build id `AXIOM_BUILD`, also returned by
+`/engine/status` so the deploy script proves the release); **Phase 2 is the
+production journey on it**, and `docs/studio.js` now runs on the worker, not
+on synthetic data. Phase 2, in short (details in `CREATIVE-STUDIO.md` s.9):
+
+- **Models by role, checked not assumed.** `stModel(env, role)`:
+  `CREATIVE_MODEL` (default `claude-opus-5-5`) for directions and copy,
+  `EXTRACT_MODEL` (default `claude-sonnet-5-5`) for the ledger. `stClaude()`
+  sends 5.x models `thinking: {type:'adaptive'}` and `output_config.effort`
+  (`STUDIO_EFFORT`, default medium / low for extraction) and repeats the call
+  plain on a 400 that names those fields. Every call counts against
+  `STUDIO_DAILY_CALLS` (default 200; KV `studio_calls_<day>`, `stBudget`,
+  `GET /studio/budget`, also on `/studio/status`); an exhausted budget, an
+  account spend limit, a refusal or a missing key fail the stage with the
+  reason and are not retried (`(not retried)` in the message stops
+  `stTransient`). Live reachability is still `GET /studio/models`.
+- **Stages** (`stStageRun`, dispatched from `stJobRun`; each writes its log
+  lines into the job's `progress.lines`): `extract {source}` builds the claim
+  ledger on `studio_sources.claims` (`stExtractLocal` rule pass: every figure
+  with unit and sentence, every quotation with speaker; the model pass is
+  verified by `stLedgerVerify` against the passages and merged by
+  `stLedgerMerge`; rows the source does not carry stay, marked
+  `verified:false`; a brief is proposed into empty fields with the
+  assumption recorded, `brief.proposed`); `direct {n, instruction}` records
+  2-3 directions in `studio_directions` (unknown claim ids dropped,
+  near-duplicates flagged `similar`, status -> `directions`); `copy
+  {channels, formats, deliverable copy|visual|set, template, instruction,
+  direction, render}` writes one piece per channel from the chosen direction,
+  the brief, the ledger, the source excerpt and the client context, creates
+  one asset per channel (mode `copy` or `composition` with `stLayout`), runs
+  `stChecks`, and for a set queues one `render` job per asset (idem
+  `render:<asset>:<version>`, prompt from `stArtPrompt`: no text, no logos,
+  the panel area kept quiet); `export {assets}` takes exactly the versions
+  whose approvals stand (copy for copy-only, copy and design otherwise),
+  writes `studio/<project>/export/<id>.json` and `.txt` (the copy sheet) to
+  R2, references the browser's PNG from `POST /studio/render/save {asset,
+  version, imageB64}` (`studio/<p>/<a>/<v>-export.png`), and sends nothing.
+- **The client context** (`stContext`): `contentKitBlock` + shelf examples
+  (`contentExemplars`, creative shelf) + `engineRules` for `copy` and
+  `tiles`, one client only; the snapshot (kit revision, rule ids, facts,
+  examples, models) is stored in every version's `context`. `GET
+  /studio/context?project=` (`stContextView`) itemises it for the view.
+- **Checks** (`stChecks`, deterministic, advisory): per figure `matches`
+  (ledger value and unit, with passage and period), `differs` (unit or value,
+  with what the source says), `fact` (in the approved facts or brief, not a
+  passage), `unsupported`; quotations verbatim or `unsupported`; `banned`
+  (negation-aware); `over_limit`, `too_many_hashtags`, `exclamation`; and
+  fit (`stFit` over the layout's text layers: `overflow`, `small_type`,
+  `logo_size`). `stVersionChecks` recomputes them on every `/studio/version`
+  and `/studio/asset` write. The label is never "verified".
+- **Layouts** (`stLayout`): the Ad Lab layer model in per cent of the stage -
+  a panel (`stTemplateFor`: teal for HOOF, gold for the national campaign,
+  plain, or `kit` = the palette primary), headline, support, CTA, and the
+  logo as an exact `img` layer `/brand/logo?ns=` when the kit has one;
+  `layout.stage` is the format's pixel size, `layout.fonts` the kit fonts
+  with the app fallbacks. **`docs/studio-render.js` is the one renderer**
+  (`STRender.render/toBlob/zip`): the preview canvas and the export PNG are
+  the same drawing at different widths.
+- **In-app** (`docs/studio.js`): library from `/studio/list` with the build
+  chip; intake (release + optional instruction, brief or one line, reference
+  image; campaign from the kit; channels and deliverable stored on the
+  brief); a clear instruction goes straight to `copy`, an open brief to
+  `direct`; the browser steps every job (`runJob`) and pumps queued renders
+  while the tab is open; brief, sources (ledger with passages and
+  `unverified` chips, add and extract), references (upload), directions
+  (choose -> production), client context, jobs (log lines, retry, run now,
+  cancel); the asset view draws the composition, hand edits become versions
+  (debounced, `no render`), headline smaller/larger is a layout version,
+  Re-render is announced first, checks and approvals come from the server;
+  export draws each approved composition at native size, saves it, runs the
+  export stage and downloads a zip (`STRender.zip`); ClickUp is a separate
+  confirmed dialog; the composer records a **note** (`POST /studio/note`) and
+  says direction by instruction is Phase 3. Harnesses:
+  `tests/studio-p2-worker.mjs` (11), `tests/studio-browser.mjs` (11, the page
+  against the worker module in-process).
+
+Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
   brief, status, owner, `revision`, `legacy_kind/legacy_id`, `idem`,

@@ -6639,9 +6639,9 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-09-30.studio-p1';
+const AXIOM_BUILD = '2026-09-30.studio-p2';
 let STUDIO_READY = false;
-const ST_STAGES = ['echo', 'render'];       // Phase 2 adds extract, direct, copy, export
+const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
 const ST_MAX_ATTEMPTS = 3;
 const ST_PARTS = ['copy', 'design'];
@@ -6671,6 +6671,7 @@ async function ensureStudio(env) {
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_jobs_p ON studio_jobs(project, created)'),
     env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS studio_jobs_idem ON studio_jobs(idem)'),
   ]);
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
   STUDIO_READY = true;
   return true;
 }
@@ -6733,7 +6734,7 @@ async function stAppendVersion(env, asset, patch, who, opts) {
   const v = {
     id: stId('v'), asset: asset.id, project: asset.project, parent: base ? base.id : null, kind: stStr(patch.kind || 'text', 12), note: stStr(patch.note, 200),
     copy: Object.assign({}, base ? base.copy : {}, stCopy(patch.copy || {})), layout: patch.layout && typeof patch.layout === 'object' ? patch.layout : (base ? base.layout : {}), image: patch.image === undefined ? (base ? base.image : null) : stImage(patch.image),
-    mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : [], context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
+    mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : (base ? base.checks || [] : []), context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
   };
   await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), JSON.stringify(v.layout).slice(0, 20000), v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks).slice(0, 8000), JSON.stringify(v.context).slice(0, 8000), v.restored_from, v.who, v.created).run();
@@ -6861,6 +6862,9 @@ async function stJobCreate(env, body, who) {
   let asset = null;
   if (body.asset) { const pair = await stAsset(env, body.asset); if (!pair) return { error: 'unknown_asset', status: 404 }; if (pair.project.id !== p.id) return { error: 'cross_project', status: 403, detail: 'The asset belongs to another project.' }; asset = pair.asset; }
   if (stage === 'render' && !asset) return { error: 'asset_required', status: 400 };
+  const input0 = body.input && typeof body.input === 'object' ? body.input : {};
+  if (stage === 'extract') { const src = input0.source ? await env.MIND_DB.prepare('SELECT id FROM studio_sources WHERE id=? AND project=?').bind(stClean(input0.source, 24), p.id).first() : null; if (!src) return { error: 'source_required', status: 400, detail: 'extract needs input.source, a source of this project.' }; }
+  if (stage === 'copy' && !(Array.isArray(input0.channels) && input0.channels.some(c => ST_CHANNELS[String(c).toLowerCase()]))) return { error: 'channels_required', status: 400, detail: 'copy needs input.channels from ' + Object.keys(ST_CHANNELS).join(', ') + '.' };
   const idem = body.idem ? stStr(body.idem, 80) : null;
   if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
   const id = stId('j'); const now = Date.now();
@@ -6889,10 +6893,10 @@ async function stJobRun(env, job) {
       .bind(state, patch.result ? JSON.stringify(patch.result).slice(0, 8000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id).run();
     return stJob(env, job.id);
   };
-  const fail = async (msg) => {
-    const transient = stTransient(msg);
+  const fail = async (msg, progress) => {
+    const transient = stTransient(msg) && !/not retried/.test(msg);
     const again = transient && job.attempts < ST_MAX_ATTEMPTS;
-    const out = await done(again ? 'queued' : 'failed', { error: msg + (again ? ' (will retry)' : transient ? ' (attempts exhausted)' : ' (not retried: not a transient failure)') });
+    const out = await done(again ? 'queued' : 'failed', { error: msg + (again ? ' (will retry)' : transient ? ' (attempts exhausted)' : /not retried/.test(msg) ? '' : ' (not retried: not a transient failure)'), progress: progress || {} });
     await stEvent(env, job.project, 'job', { text: 'Job ' + job.id + ' ' + (again ? 'failed, queued to retry' : 'failed') + ': ' + msg, job: job.id }, 'studio');
     return out;
   };
@@ -6918,6 +6922,7 @@ async function stJobRun(env, job) {
       await stEvent(env, job.project, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + pair.asset.title + ' now at version ' + v.id + ' (' + out.model + ').', job: job.id, asset: pair.asset.id, version: v.id, render: true }, 'studio');
       return done('done', { result: { version: v.id, key, model: out.model, branch: stale }, cost: 1 });
     }
+    if (ST_STAGES.indexOf(job.stage) >= 0) return stStageRun(env, job, done, fail);
     return done('failed', { error: 'unknown stage ' + job.stage });
   } catch (e) { return fail(String((e && e.message) || e).slice(0, 200)); }
 }
@@ -6973,7 +6978,7 @@ async function stInventory(env) {
 /** What the worker's keys can reach right now, against the identifiers the Studio would use. */
 async function stModels(env) {
   const want = { claude: Array.from(new Set([env.CREATIVE_MODEL, env.BRIEF_MODEL, env.NARRATIVE_MODEL, env.SENTIMENT_MODEL, SENT_MODEL, 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6'].filter(Boolean))), gemini: Array.from(new Set([env.GEMINI_MODEL, 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.6-flash', 'gemini-2.5-flash'].filter(Boolean))) };
-  const out = { ok: true, build: AXIOM_BUILD, configured: { creative: env.CREATIVE_MODEL || '', brief: env.BRIEF_MODEL || '', sentiment: env.SENTIMENT_MODEL || SENT_MODEL, narrative: env.NARRATIVE_MODEL || '', describe: env.GEMINI_MODEL || 'gemini-3.6-flash', imageSize: env.IMAGE_SIZE || '2K' }, claude: { configured: !!env.ANTHROPIC_API_KEY, models: [] }, gemini: { configured: !!env.GEMINI_KEY, models: [] } };
+  const out = { ok: true, build: AXIOM_BUILD, configured: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract'), creativeSet: !!env.CREATIVE_MODEL, brief: env.BRIEF_MODEL || '', sentiment: env.SENTIMENT_MODEL || SENT_MODEL, narrative: env.NARRATIVE_MODEL || '', describe: env.GEMINI_MODEL || 'gemini-3.6-flash', imageSize: env.IMAGE_SIZE || '2K' }, claude: { configured: !!env.ANTHROPIC_API_KEY, models: [] }, gemini: { configured: !!env.GEMINI_KEY, models: [] } };
   if (env.ANTHROPIC_API_KEY) {
     try {
       const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
@@ -7002,7 +7007,410 @@ async function stStatus(env) {
   const j = (await env.MIND_DB.prepare("SELECT SUM(state='queued') queued, SUM(state='running') running, SUM(state='failed') failed, SUM(state='done' AND updated>?) done24, COUNT(*) total FROM studio_jobs").bind(Date.now() - 86400000).first()) || {};
   const p = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(legacy_id IS NOT NULL) imported, SUM(archived) archived FROM studio_projects').first()) || {};
   const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
-  return { ok: true, build: AXIOM_BUILD, phase: 1, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  const budget = await stBudget(env);
+  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+}
+
+// -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
+// Models: judgment (directions, copy) on CREATIVE_MODEL, default Opus 5.5; structure (extraction) on
+// EXTRACT_MODEL, default Sonnet 5.5. Both are reachability-checked by GET /studio/models, never assumed.
+// Every call is counted against STUDIO_DAILY_CALLS (KV studio_calls_<day>), so a loop cannot spend the account.
+const ST_MODEL_CREATIVE = 'claude-opus-5-5';
+const ST_MODEL_EXTRACT = 'claude-sonnet-5-5';
+const ST_DAILY_CALLS = 200;
+const ST_CHANNELS = { linkedin: { label: 'LinkedIn', format: '1:1' }, facebook: { label: 'Facebook', format: '1:1' }, instagram: { label: 'Instagram', format: '4:5' }, x: { label: 'X', format: '16:9' } };
+const ST_FORMATS = { '1:1': { w: 1080, h: 1080, label: 'Square 1:1' }, '4:5': { w: 1080, h: 1350, label: 'Portrait 4:5' }, '9:16': { w: 1080, h: 1920, label: 'Story 9:16' }, '16:9': { w: 1920, h: 1080, label: 'Landscape 16:9' } };
+const ST_HEADLINE_FIT = { '1:1': 64, '4:5': 56, '9:16': 44, '16:9': 60 };
+const ST_TEMPLATES = { teal: { name: 'teal fact panel', fill: '#0E6A6E' }, gold: { name: 'gold panel', fill: '#B8901E' }, plain: { name: 'plain photographic', fill: 'rgba(10,14,22,0.58)' }, kit: { name: 'client palette', fill: '' } };
+function stModel(env, role) { return role === 'extract' ? (env.EXTRACT_MODEL || ST_MODEL_EXTRACT) : (env.CREATIVE_MODEL || ST_MODEL_CREATIVE); }
+async function stBudget(env) {
+  const cap = Math.max(0, parseInt(env.STUDIO_DAILY_CALLS, 10) || ST_DAILY_CALLS);
+  const used = Number(await kvGet(env.AXIOM_KV, 'studio_calls_' + auDayKey()) || 0);
+  return { used, cap, left: Math.max(0, cap - used), day: auDayKey(), models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') } };
+}
+async function stSpend(env) { const k = 'studio_calls_' + auDayKey(); const used = Number(await kvGet(env.AXIOM_KV, k) || 0) + 1; await kvPut(env.AXIOM_KV, k, String(used), 2 * 86400); return used; }
+function stIsV5(model) { return /(opus|sonnet|fable|haiku)-5(-|$)/i.test(String(model || '')); }
+/** One Claude call for a Studio stage. The 5.x models think adaptively and take an effort level; when a
+ *  deployment answers 400 to those fields the call is repeated plain, so a schema change cannot stall
+ *  production. Account spend limits and an exhausted daily budget are reported as such, never retried. */
+async function stClaude(env, o) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error('claude_not_configured: set ANTHROPIC_API_KEY on the worker (not retried)');
+  const b = await stBudget(env);
+  if (b.left <= 0) throw new Error('budget_exhausted: ' + b.used + ' of ' + b.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)');
+  const model = stModel(env, o.role);
+  const base = { model, max_tokens: o.maxTok || 6000, system: o.system, messages: [{ role: 'user', content: o.user }] };
+  const rich = stIsV5(model) ? Object.assign({}, base, { thinking: { type: 'adaptive' }, output_config: { effort: ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium') } }) : base;
+  const once = async (body) => {
+    await stSpend(env);
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined });
+    const d = await r.json().catch(() => ({}));
+    return { status: r.status, d };
+  };
+  let res = await once(rich);
+  if (res.d.error && res.status === 400 && rich !== base && /thinking|output_config|effort|adaptive/i.test(String(res.d.error.message || ''))) { if (o.log) await o.log('info', 'the model refused the thinking/effort fields (' + String(res.d.error.message || '').slice(0, 80) + '); repeated as a plain request'); res = await once(base); }
+  if (res.d.error) {
+    const m = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
+    if (/credit balance|spend limit|billing|usage limit/i.test(m)) throw new Error('account_limit: ' + m + ' (not retried)');
+    if (res.status === 429 || res.status >= 500 || /overloaded/i.test(m)) throw new Error('overloaded: ' + m);
+    throw new Error(m);
+  }
+  const text = (res.d.content || []).filter(x => x.type === 'text').map(x => x.text).join('').trim();
+  if (res.d.stop_reason === 'refusal') throw new Error('refusal: the model declined this request (not retried)');
+  return { text, model, usage: res.d.usage || {} };
+}
+// -- what the Studio knows about the client: the kit, the rules, the shelf, the examples -----------------
+async function stContext(env, p, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const kit = (await brandKit(env, p.ns)) || {};
+  const channels = (opts.channels || []).filter(c => CONTENT_PLATFORMS[c]);
+  const block = contentKitBlock(kit, p.campaign, (p.brief || {}).segment || '', channels);
+  let rulesCopy = { text: '', count: 0, ids: [] }, rulesTiles = { text: '', count: 0, ids: [] };
+  try { rulesCopy = await engineRules(env, p.ns, 'copy'); rulesTiles = await engineRules(env, p.ns, 'tiles'); } catch (e) {}
+  const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
+  let ex = { text: '', count: 0 };
+  try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log); } catch (e) {}
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
+  const text = block.text + ex.text + rulesCopy.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
+  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, examples: ex.count, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
+  await log('out', 'client context for ' + client + ': ' + (block.campaign ? 'campaign ' + block.campaign.name + ', ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms, ' + (rulesCopy.count + tilesOnly.length) + ' learned corrections, ' + ex.count + ' approved examples' + (kit.hasLogo ? ', logo on file' : ', no logo on file'));
+  return { client, kit, block, text, snapshot, rules: { copy: rulesCopy, tiles: rulesTiles } };
+}
+/** The Client context view: what the Studio would put in front of the model, itemised, no other client's. */
+async function stContextView(env, p) {
+  const kit = (await brandKit(env, p.ns)) || {};
+  const block = contentKitBlock(kit, p.campaign, '', []);
+  let fixes = []; try { fixes = await engineFixes(env, p.ns, null, false); } catch (e) {}
+  fixes = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any');
+  let shelf = { docs: 0, error: '' }; try { const hits = await mindRetrieve(env, p.ns, [(p.brief || {}).objective, p.campaign, 'approved creative example'].filter(Boolean).join(' '), 10, { creative: true }); shelf.docs = hits.filter(h => h.ns === p.ns + '_creative').length; shelf.examples = hits.filter(h => /^(copy|outcome|brief|artwork)$/.test(String(h.meta.kind || ''))).length; } catch (e) { shelf.error = 'retrieval unavailable: ' + String(e.message || e).slice(0, 80); }
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
+  return { ok: true, ns: p.ns, client, kit: { name: kit.name || '', updated: kit.updated || 0, hasLogo: !!kit.hasLogo, palette: kit.palette || {}, fonts: kit.fonts || {}, voice: String(kit.voice || '').slice(0, 1200), rules: String(kit.rules || '').split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 40) },
+    campaign: block.campaign, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name, active: c.active !== false })), facts: block.facts.map(f => ({ id: f.id, text: f.text, source: f.source, status: f.status, campaign: f.campaign })), banned: block.banned,
+    learned: fixes.map(f => ({ id: f.id, task: f.task, scope: f.scope, rule: f.rule, source: f.source, who: f.who, created: f.created })), shelf, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract'), image: 'gemini-3-pro-image at ' + (env.IMAGE_SIZE || '2K') },
+    note: 'Recorded with every generation as a context snapshot. Source accuracy and mandatory requirements outrank preferences. Nothing here comes from another client.' };
+}
+// -- the claim ledger: every figure and quotation in a source, tied to its passage ---------------------
+const ST_UNIT = { bn: 'billion', b: 'billion', billion: 'billion', m: 'million', mn: 'million', million: 'million', k: 'thousand', thousand: 'thousand', '%': 'per cent', percent: 'per cent', 'per cent': 'per cent', pc: 'per cent', jobs: 'jobs', job: 'jobs', australians: 'people', people: 'people', workers: 'people', employees: 'people', businesses: 'businesses', business: 'businesses', companies: 'businesses', years: 'years', year: 'years', tonnes: 'tonnes', hectares: 'hectares', homes: 'homes', households: 'households', members: 'members', mines: 'mines' };
+const ST_NUM_RX = /(?:\$|A\$|AUD\s?)?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(billion|million|thousand|bn|mn|\bm\b|\bk\b|per ?cent|percent|%|pc\b|jobs?|australians|people|workers|employees|businesses|business|companies|years?|tonnes|hectares|homes|households|members|mines)?/gi;
+function stNumbers(text) {
+  const out = []; const rx = new RegExp(ST_NUM_RX.source, 'gi'); let m; const t = String(text || '');
+  while ((m = rx.exec(t))) {
+    const raw = m[0].trim(); const val = parseFloat(m[1].replace(/,/g, '')); const unit = ST_UNIT[String(m[2] || '').toLowerCase().replace(/\s+/g, ' ')] || '';
+    const after = t.slice(m.index + m[0].length, m.index + m[0].length + 4); const before = t.slice(Math.max(0, m.index - 1), m.index);
+    if (/[\d-]/.test(before)) continue;                                                          // the tail of a range or a longer number (2023-24)
+    if (!unit && /^(19|20)\d\d$/.test(m[1]) && !/^\s*(jobs|people)/.test(after)) continue;   // a year
+    if (!unit && /^-\d\d/.test(after)) continue;                                              // 2023-24
+    if (!unit && !/\$/.test(raw) && val < 1000 && m[1].indexOf(',') < 0) continue;              // bare small numbers (dates, counts) are not claims
+    if (/\$/.test(raw) && !unit && val < 10) continue;
+    out.push({ raw, value: val, unit, money: /\$/.test(raw), at: m.index });
+  }
+  return out;
+}
+function stSentences(t) { return String(t || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+(?=[A-Z"\u201c])/).map(s => s.trim()).filter(Boolean); }
+function stNormQuote(s) { return String(s || '').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, ' ').trim().toLowerCase(); }
+/** Deterministic extraction: every figure with its unit and the sentence around it, every quotation with its speaker. */
+function stExtractLocal(passages) {
+  const claims = []; let n = 0;
+  Object.keys(passages).forEach(pid => {
+    const p = passages[pid];
+    stSentences(p).forEach(s => {
+      stNumbers(s).forEach(num => { if (claims.some(c => c.value === num.value && c.unit === num.unit && c.passage === pid)) return; const per = (s.match(/\b(20\d\d-\d\d|20\d\d|FY\s?\d\d)\b/) || [])[0] || ''; claims.push({ id: 'c' + (++n), text: s.slice(0, 300), value: num.value, unit: num.unit, money: num.money, subject: '', period: per, passage: pid, quote: false, verified: true, by: 'rule' }); });
+    });
+    const qrx = /["\u201c]([^"\u201d]{12,400})["\u201d]/g; let q;
+    while ((q = qrx.exec(p))) { const tail = p.slice(q.index + q[0].length, q.index + q[0].length + 80); const who = (tail.match(/\b((?:Ms|Mr|Mrs|Dr|Senator|Minister|Professor)\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/) || [])[1] || ''; claims.push({ id: 'c' + (++n), text: q[1].trim(), value: null, unit: '', subject: '', period: '', passage: pid, quote: true, who, verified: true, verbatim: true, by: 'rule' }); }
+  });
+  return claims;
+}
+/** A model's ledger is checked back against the passages: a figure must appear in the passage it names (or
+ *  another), a quotation must be verbatim. Anything the source does not carry is kept but marked unverified. */
+function stLedgerVerify(claims, passages) {
+  const all = Object.keys(passages).map(k => ({ id: k, text: passages[k], flat: String(passages[k]).replace(/[\s,]/g, '').toLowerCase(), norm: stNormQuote(passages[k]) }));
+  return (Array.isArray(claims) ? claims : []).slice(0, 80).map((c, i) => {
+    const out = { id: 'c' + (i + 1), text: stStr(c.text, 400), value: c.value == null || c.value === '' ? null : Number(String(c.value).replace(/[^0-9.-]/g, '')), unit: ST_UNIT[String(c.unit || '').toLowerCase()] || stStr(c.unit, 20).toLowerCase(), money: /\$/.test(String(c.text || '')), subject: stStr(c.subject, 80), period: stStr(c.period, 20), passage: stClean(c.passage, 8), quote: !!c.quote, who: stStr(c.who, 60), verified: false, by: 'model' };
+    if (out.value != null && isNaN(out.value)) out.value = null;
+    if (out.quote) { const q = stNormQuote(out.text).replace(/^["']|["']$/g, ''); const hit = all.find(p => p.norm.indexOf(q) >= 0); out.verbatim = !!hit; out.verified = !!hit; if (hit) out.passage = hit.id; if (!hit) out.note = 'quotation is not verbatim in the source'; return out; }
+    if (out.value != null) { const needle = String(out.value).replace(/\.0+$/, ''); const named = all.find(p => p.id === out.passage); const hit = (named && named.flat.indexOf(needle) >= 0) ? named : all.find(p => p.flat.indexOf(needle) >= 0); out.verified = !!hit; if (hit) out.passage = hit.id; else out.note = 'the figure is not in the source text'; return out; }
+    const named = all.find(p => p.id === out.passage); const words = stNormQuote(out.text).split(' ').filter(w => w.length > 4).slice(0, 6);
+    const hit = named || all.find(p => words.filter(w => p.norm.indexOf(w) >= 0).length >= Math.max(2, Math.ceil(words.length * 0.6)));
+    out.verified = !!hit; if (hit) out.passage = hit.id; else out.note = 'no passage carries this wording';
+    return out;
+  });
+}
+function stLedgerMerge(model, local) {
+  const out = model.slice();
+  local.forEach(c => { if (c.value != null && !out.some(m => m.value === c.value && (m.unit === c.unit || !m.unit))) out.push(c); if (c.quote && !out.some(m => m.quote && stNormQuote(m.text).indexOf(stNormQuote(c.text).slice(0, 40)) >= 0)) out.push(c); });
+  return out.map((c, i) => Object.assign({}, c, { id: 'c' + (i + 1) }));
+}
+async function stExtractStage(env, job, p, log) {
+  const src = await env.MIND_DB.prepare('SELECT * FROM studio_sources WHERE id=? AND project=?').bind(stClean(job.input.source, 24), p.id).first();
+  if (!src) throw new Error('unknown_source: the source is not in this project (not retried)');
+  const passages = pjs(src.passages, {}); const text = String(src.text || '');
+  const local = stExtractLocal(passages);
+  await log('out', 'rule pass: ' + local.filter(c => !c.quote).length + ' figures, ' + local.filter(c => c.quote).length + ' quotations, each tied to its passage');
+  let claims = local, brief = null, headline = '', spokesperson = null, model = 'rules';
+  if (env.ANTHROPIC_API_KEY) {
+    const sys = 'You read source documents for an Australian political communications agency and build a claim ledger. Return strict JSON only, no prose: {"headline":"","spokesperson":{"name":"","title":""},"claims":[{"text":"the sentence or clause, in the source\'s own words","value":74,"unit":"billion|million|per cent|jobs|people|businesses|... or empty","subject":"what the figure measures, <=8 words","period":"2023-24 or empty","quote":false,"who":"speaker for a quotation","passage":"p3"}],"brief":{"objective":"<=30 words: what communications from this source should achieve","audience":"<=20 words","message":"<=30 words: the single strongest claim, in the client\'s words","deliverables":"<=20 words"}}. '
+      + 'One claim per figure and per quotation, plus the assertions without figures that matter. Copy figures and quotations exactly as written; passage is the id of the passage the claim comes from. Never add a figure the source does not contain.';
+    const user = 'PASSAGES:\n' + Object.keys(passages).map(k => '[' + k + '] ' + passages[k]).join('\n\n').slice(0, 30000);
+    await log('cmd', 'claude ' + stModel(env, 'extract') + ': claims, figures, quotations and a proposed brief from ' + Object.keys(passages).length + ' passages');
+    const r = await stClaude(env, { role: 'extract', system: sys, user, maxTok: 6000, timeoutMs: 120000, log });
+    const j = relJson(r.text);
+    if (!j || !Array.isArray(j.claims)) throw new Error('extract_unparseable: the model did not return the ledger as JSON');
+    model = r.model;
+    const verified = stLedgerVerify(j.claims, passages);
+    claims = stLedgerMerge(verified, local);
+    brief = j.brief && typeof j.brief === 'object' ? j.brief : null; headline = stStr(j.headline, 200); spokesperson = j.spokesperson && typeof j.spokesperson === 'object' ? { name: stStr(j.spokesperson.name, 80), title: stStr(j.spokesperson.title, 120) } : null;
+    const un = claims.filter(c => c.verified === false).length;
+    await log('out', claims.length + ' claims in the ledger (' + claims.filter(c => c.value != null).length + ' figures, ' + claims.filter(c => c.quote).length + ' quotations)' + (un ? '; ' + un + ' the source does not carry as written, marked unverified' : '; every one tied to a passage'));
+  } else await log('info', 'ANTHROPIC_API_KEY is not set: the ledger is the rule pass only, no subjects or brief proposed');
+  const extract = { model, headline, spokesperson, at: Date.now(), figures: claims.filter(c => c.value != null).length, quotes: claims.filter(c => c.quote).length, unverified: claims.filter(c => c.verified === false).length };
+  await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(JSON.stringify(claims).slice(0, 120000), JSON.stringify(extract), src.id).run();
+  let proposed = [];
+  if (brief) {
+    const b = Object.assign({}, p.brief); const asm = Array.isArray(b.assumptions) ? b.assumptions.slice() : [];
+    ['objective', 'audience', 'message', 'deliverables'].forEach(k => { if (!String(b[k] || '').trim() && brief[k]) { b[k] = stStr(brief[k], 400); proposed.push(k); } });
+    if (proposed.length) { asm.push('The ' + proposed.join(', ') + ' ' + (proposed.length === 1 ? 'was' : 'were') + ' proposed from the source by the Studio; edit before production.'); b.assumptions = asm; b.proposed = proposed; await env.MIND_DB.prepare('UPDATE studio_projects SET brief=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(b).slice(0, 12000), Date.now(), p.id).run(); }
+  }
+  await stBump(env, p.id);
+  await stEvent(env, p.id, 'extract', { text: 'Read ' + (src.name || 'the source') + ': ' + extract.figures + ' figures, ' + extract.quotes + ' quotations, ' + claims.length + ' claims tied to their passages' + (extract.unverified ? ', ' + extract.unverified + ' marked unverified' : '') + (proposed.length ? '. A brief was proposed from it (' + proposed.join(', ') + '); its assumptions are marked for you to confirm.' : '.'), source: src.id, job: job.id }, 'studio');
+  return { source: src.id, claims: claims.length, figures: extract.figures, quotes: extract.quotes, unverified: extract.unverified, proposed, model };
+}
+async function stLedger(env, project) {
+  const rows = (await env.MIND_DB.prepare('SELECT id,name,claims,passages,text FROM studio_sources WHERE project=? ORDER BY created').bind(project).all()).results || [];
+  const claims = []; let allText = '';
+  rows.forEach((r, i) => { const pre = rows.length > 1 ? 's' + (i + 1) + '.' : ''; pjs(r.claims, []).forEach(c => claims.push(Object.assign({}, c, { id: pre + c.id, source: r.id, sourceName: r.name }))); allText += ' ' + (r.text || ''); });
+  return { claims, sources: rows.length, text: allText.trim(), passages: rows.reduce((acc, r) => Object.assign(acc, pjs(r.passages, {})), {}) };
+}
+// -- checks: figures, units, quotations, banned terms, limits and fit - deterministic, advisory, never "verified" --
+function stWrapLines(text, charsPerLine) {
+  const words = String(text || '').split(/\s+/).filter(Boolean); let lines = 1, cur = 0;
+  words.forEach(w => { const l = w.length; if (cur && cur + 1 + l > charsPerLine) { lines++; cur = l; } else cur = cur ? cur + 1 + l : l; if (l > charsPerLine) { lines += Math.floor(l / charsPerLine); cur = l % charsPerLine; } });
+  return words.length ? lines : 0;
+}
+/** Does the text fit its layer? Sizes are per cent of the stage width, heights per cent of the stage height. */
+function stFit(layout, copy, format) {
+  const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const out = [];
+  (layout && Array.isArray(layout.layers) ? layout.layers : []).forEach(l => {
+    if (l.type !== 'text' || !l.role || !l.h) return;
+    const text = copy[l.role] != null ? copy[l.role] : l.text; if (!text) return;
+    const charsPerLine = Math.max(6, Math.floor(l.w / (l.size * (l.role === 'headline' ? 0.52 : 0.48))));
+    const lineH = l.size * 1.12 * (f.w / f.h); const maxLines = Math.max(1, Math.floor(l.h / lineH));
+    const lines = stWrapLines(text, charsPerLine);
+    if (lines > maxLines) out.push({ state: 'overflow', text: String(text).slice(0, 60), note: 'The ' + l.role + ' needs ' + lines + ' lines at this size; ' + maxLines + ' fit at ' + format + ' (about ' + (charsPerLine * maxLines) + ' characters). Shorten it, or accept a smaller type size.' });
+    if (l.size < 2.4) out.push({ state: 'small_type', text: l.role, note: 'Type at ' + l.size + '% of the width is under the 2.4% minimum for a feed.' });
+  });
+  const logo = (layout && layout.layers || []).find(l => l.role === 'logo');
+  if (logo && (logo.w < 8 || logo.w > 32)) out.push({ state: 'logo_size', text: 'logo', note: 'The logo is ' + logo.w + '% wide; 8-32% keeps it legible without dominating.' });
+  return out;
+}
+function stChecks(copy, ledger, opts) {
+  opts = opts || {}; const out = [];
+  copy = copy || {};
+  const fields = ['headline', 'support', 'cta', 'caption', 'body', 'title']; const text = fields.map(k => copy[k]).filter(Boolean).join(' \n ');
+  const claims = Array.isArray(ledger) ? ledger : [];
+  const allowedFlat = String(opts.allowed || '').replace(/[\s,]/g, '').toLowerCase();
+  stNumbers(text).forEach(num => {
+    const exact = claims.find(c => c.value === num.value && (c.unit === num.unit || (!c.unit && !num.unit)));
+    if (exact) { out.push({ state: 'matches', text: num.raw, claim: exact.id, note: 'matches the source, ' + exact.passage + (exact.period ? ', ' + exact.period : '') + (exact.verified === false ? ' (a claim the source does not carry as written)' : '') }); return; }
+    const sameNum = claims.find(c => c.value === num.value && c.unit && num.unit && c.unit !== num.unit);
+    if (sameNum) { out.push({ state: 'differs', text: num.raw, claim: sameNum.id, note: 'unit differs: the source says ' + sameNum.value.toLocaleString('en-AU') + ' ' + sameNum.unit + ' (' + sameNum.passage + ')' }); return; }
+    const sameUnit = num.unit ? claims.filter(c => c.unit === num.unit && c.value !== num.value) : [];
+    if (sameUnit.length === 1) { out.push({ state: 'differs', text: num.raw, claim: sameUnit[0].id, note: 'value differs: the source says ' + sameUnit[0].value.toLocaleString('en-AU') + ' ' + sameUnit[0].unit + ' (' + sameUnit[0].passage + ')' }); return; }
+    const needle = String(num.value).replace(/\.0+$/, '');
+    if (allowedFlat && allowedFlat.indexOf(needle) >= 0) { out.push({ state: 'fact', text: num.raw, claim: null, note: 'in the approved facts, the brief or the kit (not in a source passage)' }); return; }
+    out.push({ state: 'unsupported', text: num.raw, claim: null, note: claims.length ? 'not supported by the supplied sources or the approved facts' : 'no source in this project supports it' });
+  });
+  const qrx = /["\u201c]([^"\u201d]{12,})["\u201d]/g; let q;
+  while ((q = qrx.exec(text))) { const inner = stNormQuote(q[1]).replace(/[,.;:!?]+$/, ''); const hit = claims.find(c => c.quote && stNormQuote(c.text).indexOf(inner) >= 0); out.push({ state: hit ? 'matches' : 'unsupported', text: q[0].slice(0, 70), claim: hit ? hit.id : null, note: hit ? 'exact quotation, ' + hit.passage + (hit.who ? ', ' + hit.who : '') : 'quotation not found verbatim in the sources' }); }
+  contentBannedCheck(text, opts.banned || []).forEach(term => { const b = (opts.banned || []).find(x => x.term === term) || {}; out.push({ state: 'banned', text: term, claim: null, note: 'a banned term for this client' + (b.use ? ': say "' + b.use + '"' : '') + (b.why ? ' - ' + b.why : '') }); });
+  const spec = CONTENT_PLATFORMS[opts.channel]; const cap = copy.caption || copy.body || '';
+  if (spec && cap.length > spec.max) out.push({ state: 'over_limit', text: cap.length + ' characters', claim: null, note: spec.label + ' allows ' + spec.max });
+  if (spec && (cap.match(/#\w+/g) || []).length > spec.hashtags) out.push({ state: 'too_many_hashtags', text: (cap.match(/#\w+/g) || []).join(' '), claim: null, note: spec.label + ' allows ' + spec.hashtags });
+  if (/!/.test(cap)) out.push({ state: 'exclamation', text: '!', claim: null, note: 'no exclamation marks in this client\'s copy' });
+  if (opts.layout && opts.layout.layers) stFit(opts.layout, copy, opts.format).forEach(x => out.push(x));
+  else if (copy.headline && opts.format && copy.headline.length > (ST_HEADLINE_FIT[opts.format] || 64)) out.push({ state: 'overflow', text: copy.headline.slice(0, 60), note: 'Headline is ' + copy.headline.length + ' characters; about ' + ST_HEADLINE_FIT[opts.format] + ' fit at ' + opts.format + ' before the type shrinks.' });
+  return out;
+}
+/** Recompute a version's checks from the project's ledger and the client's kit; stored on the version row. */
+async function stVersionChecks(env, project, asset, v) {
+  const led = await stLedger(env, project.id);
+  const kit = (await brandKit(env, project.ns)) || {};
+  const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
+  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], channel: asset.channel, format: asset.format, layout: v.layout });
+  try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(JSON.stringify(checks).slice(0, 8000), v.id).run(); } catch (e) {}
+  return checks;
+}
+// -- layouts: the Ad Lab layer model (percentages of the stage), one document drawn by one renderer ---------
+function stTemplateFor(kit, campaign, want) {
+  if (ST_TEMPLATES[want]) return want;
+  const c = String(campaign || '').toLowerCase();
+  if (/hoof|fuel/.test(c)) return 'teal';
+  if (/national|mining|1\.5|australian/.test(c)) return 'gold';
+  return kit && kit.palette && kit.palette.primary ? 'kit' : 'plain';
+}
+function stLayout(kit, ns, format, template, copy, opts) {
+  opts = opts || {}; kit = kit || {}; copy = copy || {};
+  const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const tpl = ST_TEMPLATES[template] ? template : 'plain';
+  const fill = tpl === 'kit' ? (kit.palette && kit.palette.primary) || ST_TEMPLATES.plain.fill : ST_TEMPLATES[tpl].fill;
+  const textCol = tpl === 'gold' ? '#141414' : '#FFFFFF';
+  const geo = format === '9:16' ? { x: 7, y: 58, w: 74, h: 30 } : format === '16:9' ? { x: 6, y: 34, w: 52, h: 54 } : format === '4:5' ? { x: 6, y: 54, w: 74, h: 34 } : { x: 6, y: 50, w: 74, h: 38 };
+  const pad = 3; const innerW = geo.w - pad * 2; const hSize = format === '16:9' ? 4.2 : format === '9:16' ? 6.4 : 6.2; const aspect = f.w / f.h;
+  const lineH = s => s * 1.12 * aspect;
+  const layers = [];
+  layers.push({ id: 'panel', type: 'shape', role: 'panel', shape: 'rect', x: geo.x, y: geo.y, w: geo.w, h: geo.h, fill, opacity: tpl === 'plain' ? 0.85 : 0.94 });
+  let y = geo.y + pad * aspect;
+  const hLines = format === '16:9' ? 4 : 3;
+  layers.push({ id: 'headline', type: 'text', role: 'headline', x: geo.x + pad, y, w: innerW, h: lineH(hSize) * hLines, size: hSize, weight: 750, color: textCol, align: 'left', font: 'display', text: copy.headline || '' });
+  y += lineH(hSize) * hLines + 1.2 * aspect;
+  if (copy.support || opts.support !== false) { const sSize = format === '16:9' ? 2.2 : 3.0; layers.push({ id: 'support', type: 'text', role: 'support', x: geo.x + pad, y, w: innerW, h: lineH(sSize) * 3, size: sSize, weight: 500, color: textCol, align: 'left', font: 'body', text: copy.support || '' }); y += lineH(sSize) * 3 + 1.4 * aspect; }
+  if (copy.cta || opts.cta !== false) { const cSize = format === '16:9' ? 1.9 : 2.5; layers.push({ id: 'cta', type: 'text', role: 'cta', x: geo.x + pad, y, w: Math.min(innerW, 40), h: lineH(cSize) * 1.6, size: cSize, weight: 650, color: tpl === 'gold' ? '#FFFFFF' : '#0F1420', bg: tpl === 'gold' ? '#141414' : '#FFFFFF', align: 'center', font: 'body', text: copy.cta || '' }); }
+  if (kit.hasLogo) layers.push({ id: 'logo', type: 'img', role: 'logo', x: 78, y: 100 - 4 - 8 * aspect, w: 17, h: 8 * aspect, src: '/brand/logo?ns=' + ns, exact: true, name: 'Client logo (exact, from the brand kit)' });
+  return { v: 2, format, template: tpl, templateName: ST_TEMPLATES[tpl].name, stage: { w: f.w, h: f.h }, palette: Object.assign({ primary: fill }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans', fallback: 'the app families when the kit fonts are not installed on the machine rendering' }, layers };
+}
+function stArtPrompt(piece, direction, ctx, format, template) {
+  const f = ST_FORMATS[format] || ST_FORMATS['1:1'];
+  const panelSide = format === '16:9' ? 'the left half' : 'the lower third';
+  return ['Photographic background for an Australian ' + (ctx.client || 'client') + ' social tile, ' + format + ' (' + f.w + 'x' + f.h + '), documentary realism, natural light.',
+    'Subject and mood: ' + (piece.visual || (direction && direction.visual) || 'a calm regional Australian scene relevant to the message'),
+    (direction && direction.visual ? 'Direction: ' + direction.visual : ''), (ctx.block && ctx.block.campaign && ctx.block.campaign.tone ? 'Campaign tone: ' + ctx.block.campaign.tone : ''),
+    'Composition: keep ' + panelSide + ' of the frame quiet and low in detail, because a ' + (ST_TEMPLATES[template] || ST_TEMPLATES.plain).name + ' with the headline will be laid over it later.',
+    'Absolutely no text, letters, numbers, logos, watermarks or signage anywhere in the image. No political figures or recognisable people. Editable composition: the words are added as layers, never painted.',
+    ctx.rules && ctx.rules.tiles && ctx.rules.tiles.count ? ctx.rules.tiles.text.replace(/\n\n/g, '\n') : ''].filter(Boolean).join('\n');
+}
+// -- directions: two or three genuinely different ways in, for an open brief ----------------------------
+function stTokens(s) { return new Set(String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 3)); }
+function stSimilar(a, b) { const A = stTokens(a), B = stTokens(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach(w => { if (B.has(w)) n++; }); return n / (A.size + B.size - n); }
+async function stDirectStage(env, job, p, log) {
+  const n = Math.min(Math.max(parseInt(job.input.n, 10) || 2, 2), 3);
+  const ctx = await stContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log });
+  const led = await stLedger(env, p.id);
+  const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give"}]}. Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
+  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
+    + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
+    + '\n\nGive ' + n + ' directions.';
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + n + ' directions for an open brief, grounded in ' + led.claims.length + ' ledger claims and the client context');
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log });
+  const j = relJson(r.text);
+  if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON');
+  const known = new Set(led.claims.map(c => c.id)); const ids = []; const rows = []; let similar = 0;
+  const dirs = j.directions.slice(0, 3).map(d => ({ title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
+  dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6) { d.similar = dirs[k].title; similar++; } });
+  for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(d).slice(0, 8000), 0, 'studio', Date.now())); }
+  await env.MIND_DB.batch(rows);
+  await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
+  await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title).join(' / ') + (similar ? ' - ' + similar + ' read as close to another; ask for another' : ' - distinct arguments'));
+  await stEvent(env, p.id, 'directions', { text: dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids }, 'studio');
+  return { directions: ids, titles: dirs.map(d => d.title), similar, model: r.model };
+}
+// -- copy: the set written together, adapted per channel, checked, laid out; renders queued as jobs --------
+async function stCopyStage(env, job, p, log) {
+  const inp = job.input || {};
+  const channels = (Array.isArray(inp.channels) ? inp.channels : []).map(c => String(c).toLowerCase()).filter(c => ST_CHANNELS[c]);
+  if (!channels.length) throw new Error('channels_required: name at least one of ' + Object.keys(ST_CHANNELS).join(', ') + ' (not retried)');
+  const deliverable = ['copy', 'visual', 'set'].indexOf(inp.deliverable) >= 0 ? inp.deliverable : 'set';
+  const formats = {}; channels.forEach(c => { const f = inp.formats && inp.formats[c]; formats[c] = ST_FORMATS[f] ? f : ST_CHANNELS[c].format; });
+  const ctx = await stContext(env, p, { channels, log });
+  const led = await stLedger(env, p.id);
+  let direction = null;
+  const drow = inp.direction ? await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=? AND project=?').bind(stClean(inp.direction, 24), p.id).first() : await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE project=? AND chosen=1 ORDER BY created DESC LIMIT 1').bind(p.id).first();
+  if (drow) direction = Object.assign({ id: drow.id }, pjs(drow.data, {}));
+  const template = stTemplateFor(ctx.kit, p.campaign || (ctx.block.campaign || {}).id, inp.template);
+  const specLines = channels.map(c => { const s = CONTENT_PLATFORMS[c]; const own = (ctx.kit.platforms || {})[c] || {}; return '- ' + c + ' (' + s.label + ', tile ' + formats[c] + '): ' + s.register + ' Caption up to ' + (own.max || s.max) + ' characters; ' + ((own.hashtags != null ? own.hashtags : s.hashtags) ? 'at most ' + (own.hashtags != null ? own.hashtags : s.hashtags) + ' hashtag(s)' : 'no hashtags') + '. Headline at most ' + ST_HEADLINE_FIT[formats[c]] + ' characters for ' + formats[c] + '.'; }).join('\n');
+  const sys = 'You are the creative team (creative director and senior copywriter) of an Australian political communications agency, producing a coordinated set for ' + ctx.client + '. One argument, adapted to each channel: LinkedIn leads with the figure and its source, Instagram with the human consequence, Facebook with the plain ask, X with one fact and its source. Write exactly as the client has approved before. Return strict JSON only, no prose: {"pieces":[{"channel":"linkedin","headline":"the words on the tile","support":"<=140 characters, the second line on the tile or empty","cta":"<=30 characters or empty","caption":"the post text for the channel","alt":"<=140 characters describing the finished tile for accessibility","visual":"<=160 characters of art direction for the background photograph: subject, mood, what to avoid, no text","claims":["ledger ids used"],"hashtags":[],"note":"<=60 characters: the angle"}]}. '
+    + 'RULES. Australian English, sentence case, no exclamation marks, no emojis. Every figure comes from the LEDGER or the APPROVED FACTS, quoted exactly with its period, never rounded, updated or invented; list the ledger ids you used in claims. Quotations verbatim or not at all. Use only claims the source supports. Do not favour a political party.'
+    + (deliverable === 'copy' ? ' This is copy-only work: the headline is the hook line of the post; no tile will be made.' : ' The headline, support and CTA are laid out as editable text over a photograph; the logo is placed from the kit, so never describe or write it.')
+    + ctx.text;
+  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n')
+    + (direction ? '\n\nCHOSEN DIRECTION: ' + direction.title + '\nMessage: ' + direction.message + '\nHeadline idea: ' + direction.headline + '\nOpening: ' + direction.opening + '\nVisual: ' + direction.visual : '')
+    + (inp.instruction ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1500) : '')
+    + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED - do not use]' : '')).join('\n') || '(no source in this project: use only the APPROVED FACTS, or no figures)')
+    + (led.text ? '\n\nSOURCE TEXT (excerpt):\n' + led.text.slice(0, 6000) : '')
+    + '\n\nCHANNELS - one piece each:\n' + specLines;
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': write ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' (' + channels.map(c => c + ' ' + formats[c]).join(', ') + ')' + (direction ? ' from direction "' + direction.title + '"' : ' from the brief') + (deliverable === 'copy' ? ', copy only' : ''));
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 8000, timeoutMs: 170000, log });
+  const j = relJson(r.text);
+  if (!j || !Array.isArray(j.pieces) || !j.pieces.length) throw new Error('copy_unparseable: the model did not return the pieces as JSON');
+  const allowed = [led.text, ctx.block.facts.map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(p.brief || {}), ctx.block.campaign ? [ctx.block.campaign.name, ctx.block.campaign.url, ctx.block.campaign.cta, ctx.block.campaign.sourceLine].join(' ') : '', ctx.kit.voice || '', ctx.kit.rules || ''].join(' ');
+  const known = new Set(led.claims.map(c => c.id));
+  const assets = [], versions = [], renders = []; let flagged = 0; const now = Date.now();
+  for (const c of channels) {
+    const piece = j.pieces.find(x => String(x.channel || '').toLowerCase() === c) || j.pieces.find(x => !x._used) || j.pieces[0]; piece._used = true;
+    const copy = stCopy({ headline: piece.headline, support: piece.support, cta: piece.cta, caption: (piece.caption || '') + ((Array.isArray(piece.hashtags) && piece.hashtags.length && (CONTENT_PLATFORMS[c] || {}).hashtags) ? ' ' + piece.hashtags.slice(0, CONTENT_PLATFORMS[c].hashtags).map(h => '#' + String(h).replace(/^#/, '')).join(' ') : ''), alt: piece.alt });
+    const format = formats[c]; const layout = deliverable === 'copy' ? {} : stLayout(ctx.kit, p.ns, format, template, copy);
+    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, channel: c, format, layout: deliverable === 'copy' ? null : layout });
+    if (checks.some(x => x.state !== 'matches' && x.state !== 'fact')) flagged++;
+    const aid = stId('a'); const title = ST_CHANNELS[c].label + ' ' + (deliverable === 'copy' ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
+    await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
+    const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(piece.visual, 200), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : template }) }, 'studio');
+    assets.push(aid); versions.push(v.id);
+    if (deliverable !== 'copy' && inp.render !== false) {
+      const rj = await stJobCreate(env, { project: p.id, asset: aid, stage: 'render', input: { prompt: stArtPrompt(Object.assign({}, piece, { visual: stStr(piece.visual, 200) }), direction, ctx, format, template), aspect: format, size: env.IMAGE_SIZE || '2K', note: 'background for ' + title }, idem: 'render:' + aid + ':' + v.id }, 'studio');
+      if (rj.job) renders.push(rj.job.id);
+    }
+  }
+  await env.MIND_DB.prepare("UPDATE studio_projects SET status='production', revision=revision+1, updated=? WHERE id=?").bind(Date.now(), p.id).run();
+  await log('out', assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ' written' + (flagged ? ', ' + flagged + ' with checks to look at' : ', every figure traced') + (renders.length ? '; ' + renders.length + ' background render' + (renders.length === 1 ? '' : 's') + ' queued at ' + (env.IMAGE_SIZE || '2K') : deliverable === 'copy' ? '; copy only, no renders' : '; no renders queued'));
+  await stEvent(env, p.id, 'produced', { text: 'Produced ' + assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ': ' + channels.map(c => ST_CHANNELS[c].label + ' ' + formats[c]).join(', ') + '. One argument adapted per channel' + (direction ? ' from the direction "' + direction.title + '"' : '') + '; ' + ctx.snapshot.rules.copy.length + ' learned corrections and ' + ctx.snapshot.facts + ' approved facts in play' + (deliverable === 'copy' ? '. Copy only: no render spent.' : '. Compositions laid out as editable ' + ST_TEMPLATES[template].name + 's' + (ctx.kit.hasLogo ? ' with the kit logo placed exactly' : ' (no logo on file for this client)') + (renders.length ? '; ' + renders.length + ' background renders queued as jobs.' : '.')) + (flagged ? ' ' + flagged + ' asset' + (flagged === 1 ? ' has' : 's have') + ' checks to look at.' : ''), job: job.id, assets, changed: assets, render: false }, 'studio');
+  return { assets, versions, renders, flagged, channels, deliverable, template: deliverable === 'copy' ? '' : template, model: r.model };
+}
+// -- export: exactly the approved versions, a copy sheet, the context; nothing is sent anywhere -------------
+function stCopySheet(p, items) {
+  const L = [];
+  L.push('COPY SHEET - ' + p.title + ' (' + p.ns + (p.campaign ? ', ' + p.campaign : '') + ')'); L.push('Exported ' + new Date().toISOString() + '. Approved versions only. Checks are deterministic matches against the supplied sources; "matches source" is not independent verification.'); L.push('');
+  items.forEach(it => {
+    L.push('== ' + it.title + ' (' + it.channel + ' ' + it.format + ') - version ' + it.version + ' ==');
+    ['headline', 'support', 'cta', 'caption', 'alt'].forEach(k => { if (it.copy[k]) L.push(k.toUpperCase() + ': ' + it.copy[k]); });
+    if (it.image) L.push('BACKGROUND: ' + it.image.key + ' (' + it.image.model + ', ' + (it.image.size || '') + ')');
+    if (it.exportKey) L.push('COMPOSITION: ' + it.exportKey);
+    if (it.checks.length) L.push('CHECKS: ' + it.checks.map(c => c.state + ' ' + c.text + (c.note ? ' (' + c.note + ')' : '')).join('; '));
+    L.push('APPROVALS: ' + Object.keys(it.approvals).map(k => k + ' by ' + it.approvals[k].by + (it.approvals[k].reason ? ' - ' + it.approvals[k].reason : '')).join('; '));
+    L.push('');
+  });
+  return L.join('\n');
+}
+async function stExportStage(env, job, p, log) {
+  const want = Array.isArray(job.input.assets) && job.input.assets.length ? new Set(job.input.assets.map(x => stClean(x, 24))) : null;
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const items = [], excluded = [];
+  for (const r of rows) {
+    const a = stAssetRow(r); if (want && !want.has(a.id)) continue;
+    const cur = await stCurrent(env, a); if (!cur) { excluded.push({ asset: a.id, title: a.title, why: 'no version' }); continue; }
+    const ap = await stStanding(env, a);
+    const need = cur.mode === 'copy' ? ['copy'] : ['copy', 'design'];
+    const missing = need.filter(k => !ap[k]);
+    if (missing.length) { excluded.push({ asset: a.id, title: a.title, why: missing.join(' and ') + ' not approved on the current version' }); continue; }
+    const exportKey = 'studio/' + p.id + '/' + a.id + '/' + cur.id + '-export.png';
+    let hasExport = false; try { hasExport = !!(env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {}
+    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {} });
+  }
+  const id = stId('e'); const base = 'studio/' + p.id + '/export/' + id;
+  const sheet = stCopySheet(p, items);
+  const manifest = { id, project: p.id, ns: p.ns, title: p.title, campaign: p.campaign, at: Date.now(), by: job.who, build: AXIOM_BUILD, assets: items, excluded, files: { manifest: base + '.json', copySheet: base + '.txt' }, note: 'Approved versions only; each asset names the exact version it took. This export created no task and sent nothing anywhere.' };
+  if (env.MIND_DOCS) { await env.MIND_DOCS.put(base + '.json', JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json' } }); await env.MIND_DOCS.put(base + '.txt', sheet, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } }); }
+  await log('out', items.length + ' asset' + (items.length === 1 ? '' : 's') + ' exported' + (excluded.length ? ', ' + excluded.length + ' left out (' + excluded.map(x => x.title + ': ' + x.why).join('; ') + ')' : '') + (items.some(it => it.mode !== 'copy' && !it.exportKey) ? '; some compositions have no rendered PNG yet - the browser renders and saves them before download' : ''));
+  await stEvent(env, p.id, 'export', { text: 'Export ' + id + ': ' + items.length + ' approved asset' + (items.length === 1 ? '' : 's') + (excluded.length ? ', ' + excluded.length + ' not approved and left out' : '') + '. Files: manifest and copy sheet under studio/' + p.id + '/export/. Nothing was sent; a hand-off is its own step.', job: job.id, export: id }, job.who);
+  return { export: id, included: items.map(it => ({ asset: it.asset, version: it.version, exportKey: it.exportKey })), excluded, files: manifest.files, sheet: sheet.slice(0, 4000) };
+}
+/** Stage dispatch for the production stages; the render stage and echo stay in stJobRun. */
+async function stStageRun(env, job, done, fail) {
+  const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
+  const p = await stProject(env, job.project);
+  if (!p) return done('failed', { error: 'project gone (not retried)' });
+  try {
+    let result;
+    if (job.stage === 'extract') result = await stExtractStage(env, job, p, log);
+    else if (job.stage === 'direct') result = await stDirectStage(env, job, p, log);
+    else if (job.stage === 'copy') result = await stCopyStage(env, job, p, log);
+    else if (job.stage === 'export') result = await stExportStage(env, job, p, log);
+    else return done('failed', { error: 'unknown stage ' + job.stage });
+    const again = await stJob(env, job.id);
+    if (!again || again.state !== 'running') return again;
+    return done('done', { result, cost: (lines.filter(l => l.kind === 'cmd').length), progress: { lines } });
+  } catch (e) {
+    const m = String((e && e.message) || e).slice(0, 220);
+    await log('err', m);
+    return fail(m, { lines });
+  }
 }
 
 // ==============================================================================
@@ -8694,6 +9102,10 @@ export default {
     //    POST /studio/source {project,kind,name,text}   /studio/reference {project,kind,name,purpose,note}   /studio/direction {project,data,chosen}
     //    POST /studio/asset {project,family,channel,format,title,copy,layout,image,mode}   /studio/version {asset,revision,copy,layout,image,mode,note,kind,restoreFrom}
     //    POST /studio/approve {asset,part,decision,reason}   /studio/import {legacy}   /studio/job {project,asset,stage,input,idem}   /studio/job/step {id}   /studio/job/cancel {id}   - full role
+    //    Phase 2: GET /studio/context?project=   what the Studio knows about the client (kit, facts, banned terms, learned rules, shelf, models) (read)
+    //             stages extract {source} / direct {n,instruction} / copy {channels,formats,deliverable,template,instruction,direction,render} / export {assets}
+    //             POST /studio/render/save {asset,version,imageB64,mime}   the browser's composition PNG for a version, stored for export (full)
+    //             POST /studio/note {project,text,target}   a team note on the thread (full)
     if (path === '/studio' || path.startsWith('/studio/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
@@ -8710,12 +9122,14 @@ export default {
             return p ? jsonResp(Object.assign({ ok: true }, p)) : jsonResp({ error: 'unknown_project' }, 404);
           }
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
+          if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
+          if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
           if (path === '/studio/models') return jsonResp(await stModels(env));
           if (path === '/studio/job') { const j = await stJob(env, qf('id')); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
           if (path === '/studio/jobs') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all()).results || []; return jsonResp({ ok: true, jobs: rows.map(stJobRow) }); }
           if (path === '/studio/file') {
             const key = String(qf('key') || '');
-            if (!/^studio\/[a-z0-9]+\/[a-z0-9]+\/[a-z0-9]+\.(png|jpg|jpeg|webp|txt|json)$/i.test(key)) return jsonResp({ error: 'bad_key' }, 400);
+            if (!/^studio\/[a-z0-9]+\/[a-z0-9]+\/[a-z0-9-]+\.(png|jpg|jpeg|webp|txt|json)$/i.test(key)) return jsonResp({ error: 'bad_key' }, 400);
             if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured' }, 501);
             const obj = await env.MIND_DOCS.get(key);
             if (!obj) return jsonResp({ error: 'not_found' }, 404);
@@ -8754,7 +9168,7 @@ export default {
             // Phase 1 stores the text and its passages; the claim ledger is extracted in Phase 2
             const paras = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean); const passages = {}; paras.forEach((t, i) => { passages['p' + (i + 1)] = t.slice(0, 2000); });
             await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'text', 20), stStr(sb.name || 'Pasted text', 120), text, JSON.stringify(passages).slice(0, 60000), '[]', stStr(sb.provenance || 'pasted', 200), who, now).run();
-            await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. Claim extraction runs in Phase 2.', source: id }, who);
+            await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. Claim extraction runs as a job (stage extract).', source: id }, who);
             return jsonResp({ ok: true, id, passages: paras.length });
           }
           if (path === '/studio/reference') {
@@ -8782,7 +9196,8 @@ export default {
           const id = stId('a');
           await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.family || 'Assets', 60), stStr(sb.channel, 20), stStr(sb.format || '1:1', 8), stStr(sb.title || 'Asset', 80), '', '{}', 1, now, now).run();
           const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(id).first());
-          const v = await stAppendVersion(env, a, { kind: sb.image ? 'render' : 'text', note: stStr(sb.note || 'first version', 200), copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode || (sb.image ? 'composition' : 'copy'), context: sb.context }, who);
+          const v = await stAppendVersion(env, a, { kind: sb.image ? 'render' : 'text', note: stStr(sb.note || 'first version', 200), copy: sb.copy, layout: sb.layout && typeof sb.layout === 'object' ? sb.layout : (sb.mode === 'copy' ? {} : stLayout((await brandKit(env, p.ns)) || {}, p.ns, a.format, stTemplateFor(await brandKit(env, p.ns), p.campaign, sb.template), stCopy(sb.copy || {}))), image: sb.image, mode: sb.mode || (sb.image ? 'composition' : 'copy'), context: sb.context }, who);
+          if (sb.checks === undefined) v.checks = await stVersionChecks(env, p, a, v);
           await stEvent(env, p.id, 'asset', { text: 'Asset added: ' + a.title + ' (' + a.channel + ' ' + a.format + ').', asset: id, version: v.id }, who);
           return jsonResp({ ok: true, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(id).first())) });
         }
@@ -8805,6 +9220,7 @@ export default {
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
           const v = await stAppendVersion(env, pair.asset, patch, who, { baseVersion: base });
+          if (sb.checks === undefined) v.checks = await stVersionChecks(env, pair.project, pair.asset, v);
           await stEvent(env, pair.project.id, 'version', { text: (patch.kind === 'restore' ? 'Restored ' : patch.kind === 'render' ? 'New image on ' : 'Text change on ') + pair.asset.title + ': ' + (patch.note || '') + (patch.kind === 'render' ? '' : ' (no render)'), asset: pair.asset.id, version: v.id, render: patch.kind === 'render' }, who);
           return jsonResp({ ok: true, version: v, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
         }
@@ -8818,6 +9234,24 @@ export default {
           await stBump(env, pair.project.id);
           await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance.', asset: pair.asset.id, version: cur.id, part, decision }, who);
           return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset) });
+        }
+        if (path === '/studio/note') {
+          // a note to the team on the project thread: recorded, never interpreted (direction by instruction is Phase 3)
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          const text = String(sb.text || '').trim().slice(0, 2000); if (!text) return jsonResp({ error: 'empty_note' }, 400);
+          await stEvent(env, p.id, 'note', { text, target: stStr(sb.target, 80) }, who); await stBump(env, p.id);
+          return jsonResp({ ok: true });
+        }
+        if (path === '/studio/render/save') {
+          // the browser rendered a composition (the one renderer, at the stage's native size) and hands the PNG back for export
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const v = await stVersion(env, sb.version); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404);
+          if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured' }, 501);
+          const mime = String(sb.mime || 'image/png'); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type' }, 400);
+          const buf = bufFromB64(sb.imageB64); if (buf.byteLength < 64 || buf.byteLength > 12 * 1024 * 1024) return jsonResp({ error: 'bad_image', detail: 'between 64 bytes and 12 MB' }, 400);
+          const key = 'studio/' + pair.project.id + '/' + pair.asset.id + '/' + v.id + '-export.png';
+          await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+          return jsonResp({ ok: true, key, url: '/studio/file?key=' + encodeURIComponent(key), version: v.id });
         }
         if (path === '/studio/import') {
           const r = await stImport(env, sb.legacy, who);

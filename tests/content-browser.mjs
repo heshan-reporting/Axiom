@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const { chromium } = require('/opt/node22/lib/node_modules/playwright');
+const DOCS = new URL('../docs', import.meta.url).pathname;
 
 const PORT = 8765, W = 'https://newsaus.heshan-998.workers.dev';
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });

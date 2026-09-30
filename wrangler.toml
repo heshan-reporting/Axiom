@@ -80,6 +80,17 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      render (Ad Lab, Studio, Release Desk tiles) to that size on
 #                      Gemini 3 Pro Image; the default the app asks for is 2K.
 #                      4K costs more per image and takes longer)
+#   CREATIVE_MODEL    (plain text var, optional: the Claude model the Creative
+#                      Studio uses for judgment - directions, copy; default
+#                      claude-opus-5-5. Check reachability with GET /studio/models)
+#   EXTRACT_MODEL     (plain text var, optional: the Claude model that builds the
+#                      Studio's claim ledger from a source; default claude-sonnet-5-5)
+#   STUDIO_EFFORT     (plain text var, optional: low, medium, high or max - the
+#                      effort level sent to the 5.x models; default medium for
+#                      judgment, low for extraction)
+#   STUDIO_DAILY_CALLS (plain text var, optional: Claude calls a day the Studio
+#                      may spend across every client, default 200; a stage that
+#                      would exceed it fails with the reason and is not retried)
 #   AXIOM_ACCESS_KEY  (single full-access key gating the private routes)
 #   AXIOM_KEYS        (per-person keys with roles, JSON on one line:
 #                      {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
