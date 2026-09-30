@@ -265,6 +265,8 @@
         for (let i = 0; i < 5; i++) {
           const d = await call('/sentiment/step', { limit: 20 });
           (d.lines || []).forEach(l => push(l.kind, l.text));
+          const limit = (d.errors || []).find(e => /usage limit|spend limit|regain access|credit balance|billing/i.test(e));
+          if (limit) { const m = /(\d{4}-\d{2}-\d{2}) at (\d{2}):(\d{2}) UTC/.exec(limit); let when = ''; try { if (m) when = ' It resets at ' + new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(Date.UTC(+m[1].slice(0, 4), +m[1].slice(5, 7) - 1, +m[1].slice(8, 10), +m[2], +m[3]))) + ' AEST.'; } catch (e) {} push('info', 'This is the Anthropic account spend limit, not an AXIOM budget (' + (d.budget ? d.budget.used + ' of ' + d.budget.cap + ' calls used here today' : 'the classifier has budget left') + '). Raise it in the Anthropic Console under Settings, Limits, or wait.' + when + ' Nothing is lost: the rows stay in the backlog and the ticks pick them up once calls succeed.'); good = false; break; }
           if (d.errors && d.errors.length && !d.classified) { good = false; break; }
           if (!d.backlog) { push('info', 'nothing left waiting in the window'); break; }
           if (!d.classified) break;
