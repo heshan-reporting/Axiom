@@ -8120,6 +8120,7 @@ export default {
     //    GET  /sentiment/series?entity=&days=&bucket=day|hour&platform=&region=   over time (read)
     //    GET  /sentiment/topics?days=&platform=&region=   tone by client issue with the entities inside (read)
     //    GET  /sentiment/items?entity=&stance=&issue=&platform=&region=&days=&limit=   the evidence rows (read)
+    //    POST /sentiment/step {limit<=20,hours,platform}   one Claude call inside the request; the app loops it (full)
     //    POST /sentiment/run {limit,hours,platform}   classify now, as a job the console tails (full)
     if (path.startsWith('/entities') || path.startsWith('/sentiment/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
@@ -8173,6 +8174,15 @@ export default {
           const job = await jobCreate(env, 'sentiment', params, auth.name);
           ctx.waitUntil(jobRunLocal(env, { id: job.id, source: 'sentiment', params }));
           return jsonResp({ ok: true, job: job.id, id: job.id, where: 'worker', note: 'Classifying in the worker. Tail /bridge/job?id=' + job.id });
+        }
+        if (path === '/sentiment/step') {
+          // One Claude call, synchronously, inside the request. The app loops these, so a run started
+          // from the app never depends on the worker outliving the response (about 30 seconds).
+          if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the classifier is Claude.' }, 501);
+          const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
+          const out = await sentimentRun(env, { limit: Math.min(Math.max(parseInt(nb.limit, 10) || SENT_BATCH, 1), SENT_BATCH), hours: parseInt(nb.hours, 10) || SENT_WINDOW_H, platform: String(nb.platform || '').slice(0, 20), log });
+          const st = await sentimentStatus(env);
+          return jsonResp(Object.assign({}, out, { lines, backlog: st.backlog || 0 }));
         }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) { return jsonResp({ ok: false, error: 'sentiment_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }

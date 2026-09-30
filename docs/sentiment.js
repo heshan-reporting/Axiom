@@ -253,14 +253,26 @@
       return (board || []).slice().sort(by[sort] || by.n);
     }, [board, sort]);
     const picked = pick ? (board || []).find(e => e.id === pick) : null;
+    /* Classify now runs in steps of one Claude call each, inside the request, because a job the
+       worker runs after its response lives about thirty seconds and one call can take longer. */
     const run = async () => {
       setBusy(true);
+      const lines = []; let n = 0;
+      const push = (kind, text) => { lines.push({ id: ++n, ts: Date.now(), kind, text }); setJob({ id: 'step', status: 'running', lines: lines.slice(), follow: true }); };
+      push('info', 'classifying in steps of one Claude call each (up to 5 here; the half-hourly tick does the bulk)');
+      let good = true;
       try {
-        const d = await call('/sentiment/run', { limit: 100 });
-        if (stopRef.current) stopRef.current();
-        setJob({ id: d.job, status: 'running', lines: [] });
-        stopRef.current = tailJob(d.job, j => setJob(j), j => { setJob(j); setBusy(false); loadStatus(); load(); });
-      } catch (e) { toastMsg(e.message, true); setBusy(false); }
+        for (let i = 0; i < 5; i++) {
+          const d = await call('/sentiment/step', { limit: 20 });
+          (d.lines || []).forEach(l => push(l.kind, l.text));
+          if (d.errors && d.errors.length && !d.classified) { good = false; break; }
+          if (!d.backlog) { push('info', 'nothing left waiting in the window'); break; }
+          if (!d.classified) break;
+          if (i === 4) push('info', d.backlog + ' rows still wait; the tick continues, or press Classify now again');
+        }
+      } catch (e) { push('err', e.message); good = false; }
+      setJob({ id: 'step', status: 'done', success: good, lines: lines.slice() });
+      setBusy(false); loadStatus(); load();
     };
     if (err && !board) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load sentiment.</b> ${err}</div>`;
     return html`<div>

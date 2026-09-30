@@ -493,7 +493,13 @@ archive item it came from; nothing is a model's impression of the whole.
   `SENTIMENT_DAILY_CALLS` (default 300); a run stops with a message when it
   is reached. `sentimentCron()` runs every tick within the budget; `POST
   /sentiment/run {limit,hours,platform}` is a bridge job (`sentiment`,
-  worker-side) the console tails.
+  worker-side) the console tails - but a job the worker runs after an HTTP
+  response lives about 30 seconds and one Sonnet call on twenty texts can
+  take longer, so **Classify now** in the app does not use it: it loops
+  `POST /sentiment/step {limit<=20}` (one Claude call, synchronously, inside
+  the request; returns the run's counts, its log lines and the remaining
+  `backlog`) up to five times and stops when nothing waits. The bulk of the
+  classifying belongs to the tick.
 - **The sums.** `GET /sentiment/entities?days=&platform=&region=&issue=&kind=`
   (per entity: mentions, net stance -1..1, critical and supportive counts,
   sarcasm, intensity, change against the previous window of the same length,
