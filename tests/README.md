@@ -16,6 +16,7 @@ through Playwright for the browser harnesses.
 ```
 node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1 (projects, versions, approvals, jobs, legacy)
 node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phase 2 (ledger, directions, copy, checks, layouts, export, budget)
+node --experimental-sqlite tests/studio-p3-worker.mjs     # Creative Studio Phases 3-4 (direction by instruction, Remember, outcomes, KV session import)
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
 node --experimental-sqlite tests/artwork-worker.mjs       # artwork memory
 node --experimental-sqlite tests/overview-worker.mjs      # the front page and the daily brief
@@ -54,6 +55,12 @@ it at the end.
   call, the namespace wall in the prompt, the daily budget and the account
   spend limit, the adaptive-thinking fallback, export of approved versions
   only with nothing sent anywhere, the rule-only ledger without a Claude key.
+- `studio-p3-worker.mjs`: direction by instruction - text and layout changes
+  as versions with locks honoured, alternatives offered with checks, a render
+  proposed and run only on confirmation, adaptation reusing the image, the
+  ambiguous-pronoun question, the Remember offer saved as a campaign
+  preference (read by that campaign only) or a client rule or declined, WIN
+  and LOSS exemplars on approve and reject, and KV session import.
 - `studio-browser.mjs`: the same journey in a real browser. The page's calls
   to the worker are routed into the worker module running in the harness
   process, so intake, extraction, production, the renderer's preview, hand

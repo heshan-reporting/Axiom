@@ -1296,7 +1296,7 @@ body.kiosk .kprog{display:block}
   border:1px solid var(--line2);border-radius:24px;
   background:linear-gradient(180deg,rgba(24,20,30,.72),rgba(12,24,32,.72));backdrop-filter:blur(30px) saturate(1.35);
   -webkit-backdrop-filter:blur(30px) saturate(1.35);padding:6px 4px;box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.07)}
-.tabs-in{display:flex;justify-content:space-around;max-width:520px;margin:0 auto}
+.tabs-in{display:flex;justify-content:flex-start;gap:2px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;padding:0 4px}.tabs-in::-webkit-scrollbar{display:none}.tab{flex:0 0 auto}
 .tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--t3);padding:7px 12px;border-radius:13px;transition:color .18s var(--ease)}
 .tab svg{width:21px;height:21px;transition:transform .2s var(--spring)}
 .tab span{font-family:var(--fm);font-size:7.5px;letter-spacing:.1em;text-transform:uppercase}
@@ -1743,6 +1743,12 @@ body.kiosk .kprog{display:block}
 .st-proposal,.st-offer-box{margin-top:6px;padding:8px 10px;border:1px solid var(--x-line1);border-radius:6px;background:var(--x-bg2)}
 .st-offer{margin-top:6px;font-size:12px}
 .st-composer{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid var(--x-line1);margin-top:8px}
+.st-composer-acts{display:flex;align-items:center;gap:10px}.st-composer-acts .ov-link:disabled{opacity:.5;cursor:default}
+.st-msg-you{font-size:12px;color:var(--t2);margin-bottom:3px;font-style:italic}
+.st-le{position:relative}.st-le-layer{position:absolute;border:1px dashed rgba(255,255,255,.55);cursor:move;touch-action:none;box-sizing:border-box}.st-le-layer.sel{border:2px solid var(--x-ac-hi)}.st-le-layer:focus{outline:2px solid var(--x-ac-hi);outline-offset:1px}
+.st-le-h{position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;border-radius:50%;background:var(--x-ac-hi);cursor:nwse-resize}
+.st-le-lbl{position:absolute;left:0;top:-16px;font-family:var(--fm);font-size:9px;letter-spacing:.06em;background:rgba(0,0,0,.6);color:#eee;padding:0 4px;border-radius:2px;white-space:nowrap}
+.st-panel-dialog .panel{margin:0}
 .st-chip{display:inline-block;font-family:var(--fm);font-size:10px;letter-spacing:.04em;border-radius:4px;padding:0 6px;line-height:17px;background:var(--x-sur3);color:var(--t1)}
 .st-chip.ok{color:var(--x-pos);background:color-mix(in srgb,var(--x-pos) 14%,transparent)}.st-chip.warn{color:var(--x-warn);background:color-mix(in srgb,var(--x-warn) 14%,transparent)}.st-chip.bad{color:var(--x-neg);background:color-mix(in srgb,var(--x-neg) 14%,transparent)}
 .st-status{font-family:var(--fm);font-size:10px;letter-spacing:.08em;text-transform:uppercase;border-radius:4px;padding:1px 6px;background:var(--x-sur3);color:var(--t1)}
@@ -1966,7 +1972,7 @@ body.kiosk .kprog{display:block}
       <nav class="rnav" aria-label="Primary">
         <span class="rgrp"><i>Today</i><button class="rbtn on" data-v="command" onclick="go('command')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="rtip">What changed</span></button><button class="rbtn" data-v="news" onclick="go('news')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg><span class="rtip">Newsroom</span></button><button class="rbtn" data-v="brief" onclick="go('brief')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="rtip">Briefing</span></button><button class="rbtn" data-v="analyst" onclick="go('analyst')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg><span class="rtip">Analyst</span></button></span>
         <span class="rgrp"><i>Signals</i><button class="rbtn" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span class="rtip">Signals</span></button><button class="rbtn" data-v="sentiment" onclick="go('sentiment')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg><span class="rtip">Sentiment</span></button><button class="rbtn" data-v="narratives" onclick="go('narratives')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.5 7.5l4 3M13.5 13.5l4 3M7 6h10M14 12h5"/></svg><span class="rtip">Narratives</span></button><button class="rbtn" data-v="sentinel" onclick="go('sentinel')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 3.5v6c0 5-3.4 9.3-8 10.5-4.6-1.2-8-5.5-8-10.5v-6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rtip">Sentinel</span><span class="rdot" id="sen-dot" hidden></span></button><button class="rbtn" data-v="pulse" onclick="go('pulse')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="rtip">Pulse</span></button><button class="rbtn" data-v="radar" onclick="go('radar')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg><span class="rtip">Radar</span></button><button class="rbtn" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span class="rtip">Topics</span></button></span>
-        <span class="rgrp"><i>Clients</i><button class="rbtn" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span class="rtip">Audience</span></button><button class="rbtn" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span class="rtip">Release Desk</span></button><button class="rbtn" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/><path d="M4 12H2M6 4l-1.5-1.5"/></svg><span class="rtip">Content Desk</span></button><button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button></span>
+        <span class="rgrp"><i>Clients</i><button class="rbtn" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span class="rtip">Audience</span></button><button class="rbtn rbtn-cc" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="rtip">Clients</span></button></span>
         <span class="rgrp"><i>System</i><button class="rbtn" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span class="rtip">Sources</span></button><button class="rbtn" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span class="rtip">Knowledge</span></button></span>
       </nav>
       <div id="scope-root" class="scope-row"></div>
@@ -2711,12 +2717,10 @@ body.kiosk .kprog{display:block}
   <button class="tab" data-v="audience" onclick="go('audience')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg><span>Audience</span></button>
   <button class="tab" data-v="signals" onclick="go('signals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-5"/><path d="M9 18V8"/><path d="M14 18v-8"/><path d="M19 18V5"/><circle cx="9" cy="5" r="1.6"/></svg><span>Signals</span></button>
   <button class="tab" data-v="studio" onclick="go('studio')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Studio</span></button>
-  <button class="tab" data-v="release" onclick="go('release')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M14 17h7M17.5 13.5v7"/></svg><span>Desk</span></button>
   <button class="tab" data-v="topics" onclick="go('topics')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6M11 8v6"/></svg><span>Topics</span></button>
   <button class="tab" data-v="sources" onclick="go('sources')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/><circle cx="19" cy="19" r="2"/></svg><span>Sources</span></button>
   <button class="tab" data-v="sentiment" onclick="go('sentiment')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/><path d="M3 21h18"/></svg><span>Sentiment</span></button>
   <button class="tab" data-v="narratives" onclick="go('narratives')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="18" r="2"/><path d="M6.5 7.5l4 3M13.5 13.5l4 3M7 6h10M14 12h5"/></svg><span>Narratives</span></button>
-  <button class="tab" data-v="content" onclick="go('content')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg><span>Content</span></button>
   <button class="tab" data-v="map" onclick="go('map')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.4"/><circle cx="19" cy="5" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="19" r="2.4"/><circle cx="19" cy="18" r="2.4"/><line x1="7" y1="7" x2="10" y2="10.5"/><line x1="17.2" y1="6.3" x2="13.8" y2="10.5"/><line x1="6.6" y1="17.4" x2="10.3" y2="13.7"/><line x1="13.9" y1="13.5" x2="17.2" y2="16.6"/></svg><span>Map</span></button>
   <button class="tab" data-v="clients" onclick="go('clients')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg><span>Clients</span></button>
 </div></nav>
@@ -2993,6 +2997,8 @@ const AXISX={ticks:{color:'#8B94A3',font:{size:9,family:'Spline Sans Mono, JetBr
 
 /* ── ROUTER ── */
 function go(v){
+  // the Release Desk and the Content Desk are entry points of the Creative Studio now: they open the Studio's intake
+  if(v==='release'||v==='content'){const q={intake:v==='release'?'release':'brief',deliverable:v==='content'?'copy':'set',from:v};if(window.AXUI&&AXUI.goto){AXUI.goto('studio',q);return;}v='studio';}
   state.view=v;
   document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
   $('v-'+v).classList.add('on');
@@ -3129,7 +3135,7 @@ function renderSentinel(){
     h+='<div class="sen-acts">';
     if(a.acked)h+='<span class="done-tag"><b></b>Responded'+(a.ackedBy?' · '+esc(a.ackedBy):'')+' in '+senMin((a.acked-a.detected)/60000).join('')+'</span>';
     else if(!ro)h+='<button class="pri" onclick="senAck('+a.id+')">Acknowledge</button>';
-    if(!ro)h+='<button onclick="senDraftIn('+a.id+')">Draft in Ad Lab →</button>';
+    if(!ro)h+='<button onclick="senDraftIn('+a.id+')">Draft in Studio →</button>';
     if(a.mapnode)h+='<button onclick="kmJump(\''+esc(a.mapnode)+'\')">See on the map</button>';
     h+='<button onclick="senCoverage('+a.id+')">Open the coverage</button>';
     h+='</div></div>';
@@ -3170,12 +3176,9 @@ function senDraftIn(id){
     +(A.read?'\n\nContext: '+A.read:'')
     +((a.evidence||[]).length?'\n\nCoverage:\n'+a.evidence.slice(0,3).map(e=>'- '+(e.s||'')+': '+(e.t||'')+(e.u?' '+e.u:'')).join('\n'):'')
     +'\n\nWrite rapid-response social copy for this, on the client brief.';
-  go('clients');
-  setTimeout(()=>{
-    try{ccShowTab('adlab');}catch(e){}
-    setTimeout(()=>{const inp=$('al-inp');if(inp){inp.value=brief;inp.focus();inp.dispatchEvent(new Event('input'));}
-      toast('Brief loaded in Ad Lab — review and send');},140);
-  },90);
+  // the Studio opens its intake on this client with the alert as the brief; nothing is produced until Create project
+  if(window.AXUI&&AXUI.goto){AXUI.goto('studio',{ns:a.ns,intake:'brief',deliverable:'set',text:brief,from:'sentinel'});toast('Brief loaded in the Studio - review and create the project');return;}
+  go('studio');
 }
 async function senScan(){
   const b=$('sen-scan');if(b){b.disabled=true;b.textContent='Scanning…';}
@@ -5542,6 +5545,7 @@ function ccInit(){
    Composer · Mind. Deep links (use-in-composer, create-from-signal)
    switch tabs before scrolling so the target is actually on screen. */
 function ccShowTab(t){
+  if(t==='studio'){go('studio');return;}   // the Client Central Studio tab is the Creative Studio view now
   if(!document.querySelector('#cc-tabs [data-t="'+t+'"]'))t='overview';
   try{localStorage.setItem('axiom_cc_tab',t);}catch(e){}
   document.querySelectorAll('#cc-tabs .cc-tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t));

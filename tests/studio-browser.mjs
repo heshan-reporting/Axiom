@@ -33,13 +33,17 @@ const DIRS = { directions: [
   { title: 'The plain ask', message: 'The credit is not a subsidy; it returns a tax that never applied.', insight: 'Subsidy sounds like a handout.', headline: 'Not a subsidy. A tax that never applied.', opening: 'Fuel tax credits are not a subsidy.', visual: 'Restrained documentary photography', rationale: 'Plain language', claims: ['c1'], uncertainty: 'No figure for the credit itself' },
   { title: 'Who it really is', message: 'The credit is used by 150,000 businesses of all sizes.', insight: 'Naming tradies moves the frame.', headline: 'Farmers. Tradies. Tourism operators.', opening: 'Who uses the fuel tax credit?', visual: 'A tradie at a rural bowser', rationale: 'Approved usage wording', claims: ['c3'], uncertainty: 'Portraits need releases' }] };
 const pieces = user => ({ pieces: ['linkedin', 'facebook', 'instagram', 'x'].filter(c => new RegExp('- ' + c + ' \\(').test(user)).map(c => ({ channel: c, headline: c === 'instagram' ? 'Who uses the fuel tax credit? Farmers, tradies and tourism operators across regional Australia do' : 'Not a subsidy. A tax that never applied.', support: 'Businesses do not pay a road fuel tax on fuel used off-road.', cta: 'Get the facts', caption: 'Mining paid $74 billion in company tax and royalties in 2023-24, more than any other industry. Hands Off Our Fuel.', alt: 'Teal fact panel over a harvester at dusk', visual: 'Harvester at dusk, restrained', claims: ['c1'], hashtags: [] })) });
+const decide = user => { const ins = (user.match(/TEAM LEAD[^\n]*\):\n([^\n]+)/) || [])[1] || ''; const A = Array.from(user.matchAll(/^\[(a[a-z0-9]+)\]/gm)).map(m => m[1]);
+  if (/alternative/i.test(ins)) return { kind: 'alternatives', reply: 'Three openings, each within the limit.', alternatives: { asset: A[0], field: 'caption', options: ['Who uses the fuel tax credit? Probably someone you know.', 'Mining paid $74 billion in company tax and royalties in 2023-24. Hands Off Our Fuel.', 'Fuel tax credits are not a subsidy. Here is what they are.'] }, memory: { standing: false } };
+  if (/restrained/i.test(ins)) return { kind: 'render', reply: 'A quieter photograph reads better under the panel.', render: { assets: [A[0]], visual: 'A quiet regional road at dusk, no machinery', steps: ['Simplify the background', 'Keep the panel, headline and logo'] }, memory: { standing: true, rule: 'No haul trucks in Hands Off Our Fuel imagery.', scope: 'campaign', confidence: 0.9 } };
+  return { kind: 'text', reply: 'Headline sharpened; layout and image kept.', changes: [{ asset: A[0], copy: { headline: 'Not a subsidy. Never was.' }, note: 'sharper' }], memory: { standing: false } }; };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) { calls.gemini++; if (/\/models\?/.test(u)) return new Response(JSON.stringify({ models: [{ name: 'models/gemini-3-pro-image' }] }), { status: 200 }); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: PNG } }] } }] }), { status: 200 }); }
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = String(body.messages[0].content || '');
-    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : {};
+    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -94,7 +98,7 @@ await t('the library opens on the client from the worker: nothing yet for MCA ex
   await page.waitForSelector(R + '.st-lib tbody tr, ' + R + '.ov-empty');
   ok(/Creative Studio/.test(await page.textContent(R + '.st-head'))); eq(await page.inputValue(R + '.st-head select'), 'mca');
   await page.waitForFunction(() => /Backend build/.test(document.querySelector('#studio-root .st-lib').textContent));
-  ok(/studio-p2/.test(await page.textContent(R + '.st-head')), 'the build chip');
+  ok(/studio-p\d/.test(await page.textContent(R + '.st-head')), 'the build chip');
   const rows = await texts(page, R + '.st-lib tbody tr'); eq(rows.length, 1); ok(/Critical minerals reserve/.test(rows[0]) && /legacy release pack, read-only/.test(rows[0]), rows[0]);
 });
 await t('a release with a clear instruction: the source is read into a ledger, no direction step, copy adapted per channel, compositions laid out, renders queued and run as jobs', async () => {
@@ -196,17 +200,46 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
   await page.click(R + '.st-dialog-box.narrow button:has-text("Cancel")');
   await page.waitForSelector(R + '.st-dialog', { state: 'detached' });
 });
+await t('directing the team: a text direction lands as a version with no render; alternatives arrive as chips and one becomes the caption; a visual direction is proposed, confirmed, and runs a render; the standing preference is offered and saved for the campaign', async () => {
+  await page.click(R + '.st-railbtn.asset:has-text("LinkedIn post")'); await page.waitForSelector(R + '.st-asset');
+  const head0 = await page.textContent(R + '.st-asset-head'); const v0 = +(head0.match(/v(\d+) of/) || [])[1];
+  const g0 = calls.gemini;
+  await page.fill(R + '.st-composer textarea', 'Keep this layout but make the headline sharper'); await page.press(R + '.st-composer textarea', 'Enter');
+  await page.waitForFunction(() => /Text change only: 1 asset at a new version, image kept, no render spent/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v0, { timeout: 15000 });
+  eq(await page.inputValue(R + '.st-field:nth-of-type(1) input'), 'Not a subsidy. Never was.'); eq(calls.gemini, g0);
+  ok(/Direction: Keep this layout/.test(await page.textContent(R + '.st-thread')), 'the direction is quoted');
+  await page.fill(R + '.st-composer textarea', 'Give me three alternative opening lines'); await page.press(R + '.st-composer textarea', 'Enter');
+  await page.waitForSelector(R + '.st-alts', { timeout: 30000 });
+  eq((await texts(page, R + '.st-alt')).length, 3);
+  await page.click(R + '.st-alt:nth-child(1)');
+  await page.waitForFunction(() => /^Who uses the fuel tax credit\?/.test(document.querySelector('#studio-root .st-field:nth-of-type(4) textarea').value), null, { timeout: 15000 });
+  await page.fill(R + '.st-composer textarea', 'Make the visual more restrained, no trucks'); await page.press(R + '.st-composer textarea', 'Enter');
+  await page.waitForSelector(R + '.st-proposal', { timeout: 30000 });
+  ok(/needs a new image, not a text change/.test(await page.textContent(R + '.st-thread')) && /Simplify the background/.test(await page.textContent(R + '.st-proposal')));
+  eq(calls.gemini, g0, 'nothing spent before confirmation');
+  await page.click(R + '.st-offer .ov-link:has-text("show wording")');
+  await page.waitForSelector(R + '.st-offer-box'); eq(await page.inputValue(R + '.st-offer-box textarea'), 'No haul trucks in Hands Off Our Fuel imagery.');
+  await page.click(R + '.st-offer-box button:has-text("Campaign preference (hoof)")');
+  await page.waitForFunction(() => /Saved as a campaign preference for hoof/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 15000 });
+  eq(env.MIND_DB.db.prepare("SELECT source FROM engine_fixes WHERE rule LIKE '%haul trucks%'").get().source.split(':campaign:')[1], 'hoof');
+  await page.click(R + '.st-proposal button:has-text("Do this")');
+  await page.waitForFunction(() => /Render finished/.test(document.querySelector('#studio-root .st-thread').textContent.split('Confirmed: 1 render queued')[1] || ''), null, { timeout: 60000 });
+  eq(calls.gemini, g0 + 1, 'one render, after confirmation');
+  ok(/confirmed, 1 render/.test(await page.textContent(R + '.st-proposal')));
+  await shot(page, 'studio-partner');
+});
 await t('the jobs view lists every job with its log; the client context lists the kit, the facts, the banned terms and the learned rule', async () => {
   await page.click(R + '.st-railbtn:has-text("Jobs")');
   await page.waitForSelector(R + '.st-centre table');
   const stages = await texts(page, R + '.st-centre tbody tr td:nth-child(2)'); const states = await texts(page, R + '.st-centre tbody tr td:nth-child(4) .st-status');
-  ok(stages.length >= 7, String(stages.length)); eq(stages.filter(s => s === 'render').length, 4); ok(stages.indexOf('extract') >= 0 && stages.indexOf('copy') >= 0 && stages.indexOf('export') >= 0, JSON.stringify(stages)); ok(states.every(s => s === 'done'), JSON.stringify(states));
+  ok(stages.length >= 7, String(stages.length)); eq(stages.filter(s => s === 'render').length, 5); ok(stages.indexOf('extract') >= 0 && stages.indexOf('copy') >= 0 && stages.indexOf('export') >= 0, JSON.stringify(stages)); ok(states.every(s => s === 'done'), JSON.stringify(states));
   for (const s of await page.$$(R + '.st-centre summary')) await s.click();
   ok(/claude claude-/.test((await texts(page, R + '.st-joblog')).join(' ')), 'the job logs name the model calls');
   await page.click(R + '.st-railbtn:has-text("Client context")');
   await page.waitForSelector(R + '.st-ctx');
   const c = await page.textContent(R + '.st-ctx');
-  ok(/Label the answer Fact/.test(c) && /more than any other industry/.test(c) && /300,000 Australians/.test(c) && /"subsidy"/.test(c) && /logo on file/.test(c) && /claude-opus-5-5/.test(c), c.slice(0, 500));
+  ok(/Label the answer Fact/.test(c) && /more than any other industry/.test(c) && /300,000 Australians/.test(c) && /"subsidy"/.test(c) && /logo on file/.test(c) && /claude-opus-5-5/.test(c) && /No haul trucks/.test(c) && /campaign/.test(c), c.slice(0, 500));
   await shot(page, 'studio-context');
 });
 await t('an open brief, copy only: two distinct directions first, nothing produced until one is chosen; then copy-only assets with no render', async () => {
@@ -244,6 +277,51 @@ await t('a legacy pack imports once into a project whose tile is flattened and m
   ok(/original is untouched/.test(await page.textContent(R + '.st-thread')));
   ok(await page.$(R + '.st-field:nth-of-type(1) input:disabled'), 'headline disabled on a flattened tile');
   ok(/imported from rp:rp1/.test(await page.textContent(R + '.st-head')));
+});
+await t('the Release Desk and Content Desk entry points open the Studio intake with the right preset; the Sentinel hook does too; their nav buttons are gone and the mobile tab bar scrolls', async () => {
+  eq(await page.$$eval('#studio-root ~ *, .rbtn[data-v="release"], .rbtn[data-v="content"], .tab[data-v="release"], .tab[data-v="content"]', els => els.filter(e => e.matches('.rbtn,.tab')).length), 0, 'no Release Desk or Content Desk buttons');
+  await page.evaluate(() => go('release'));
+  await page.waitForSelector(R + '.st-intake', { timeout: 10000 });
+  ok(/The Release Desk is this intake now/.test(await page.textContent(R + '.st-intake')));
+  ok(await page.$(R + '.st-segbtn.on:has-text("A release or source document")'), 'release preset');
+  await page.evaluate(() => go('content'));
+  await page.waitForFunction(() => /The Content Desk is this intake now/.test(document.querySelector('#studio-root .st-intake').textContent));
+  ok(await page.$(R + '.st-segbtn.on:has-text("Copy only")'), 'copy preset');
+  await page.evaluate(() => AXUI.goto('studio', { ns: 'mca', intake: 'brief', deliverable: 'set', text: 'BREAKING - fuel tax credits spiking', from: 'sentinel' }));
+  await page.waitForFunction(() => /Drafted from a Sentinel alert/.test((document.querySelector('#studio-root .st-intake') || {}).textContent || ''));
+  eq(await page.inputValue(R + '.st-intake textarea'), 'BREAKING - fuel tax credits spiking');
+  eq(await page.$eval('.tabs-in', el => getComputedStyle(el).overflowX), 'auto', 'the mobile tab bar scrolls sideways');
+  await page.click(R + '.st-intake-foot .btn:has-text("Cancel")');
+});
+await t('the layout editor moves a layer by drag and saves a layout version with no render; the Client panel opens the voice profile editor and the learned rules', async () => {
+  await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link');
+  await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-railbtn.asset:has-text("LinkedIn post")'); await page.waitForSelector(R + '.st-stage canvas');
+  const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")');
+  await page.waitForSelector(R + '.st-le-layer');
+  const hl = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const bb = await hl.boundingBox();
+  await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 60, bb.y + bb.height / 2 - 40, { steps: 6 }); await page.mouse.up();
+  await page.click(R + '.st-le .btn:has-text("Save layout")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
+  ok(/layout edited by hand/.test(await page.textContent(R + '.st-asset-head'))); eq(calls.gemini, g0, 'no render for a layout edit');
+  const proj = await page.evaluate(() => document.querySelector('#studio-root .st-head b').textContent);
+  const row = env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='LinkedIn post' ORDER BY v.created DESC LIMIT 1").get();
+  const hlL = JSON.parse(row.layout).layers.find(l => l.role === 'headline'); ok(hlL.x > 9.5 && hlL.y < 55, 'the headline moved right and up: ' + JSON.stringify([hlL.x, hlL.y]));
+  await page.click(R + '.st-head .ov-link:has-text("client")');
+  await page.waitForSelector(R + '.st-ctx');
+  await page.click(R + 'button:has-text("Edit voice profile")');
+  await page.waitForSelector(R + '.cd-voice', { timeout: 10000 });
+  ok(/Voice profile - MCA/.test(await page.textContent(R + '.cd-voice')));
+  await page.click(R + '.cd-voice button:has-text("Close")');
+  await page.click(R + 'button:has-text("Learned rules")');
+  await page.waitForSelector(R + '.st-panel-dialog table');
+  const rows = await texts(page, R + '.st-panel-dialog tbody tr'); ok(rows.some(r => /haul trucks/.test(r) && /campaign hoof/.test(r)) && rows.some(r => /more than any other industry/.test(r)), JSON.stringify(rows));
+  await page.click(R + '.st-panel-dialog tbody tr:first-child .ov-link:has-text("switch off")');
+  await page.waitForFunction(() => /switch on/.test(document.querySelector('#studio-root .st-panel-dialog tbody tr:first-child').textContent), null, { timeout: 10000 });
+  await page.click(R + '.st-panel-dialog button:has-text("Close")');
+  await shot(page, 'studio-client');
 });
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {

@@ -765,7 +765,7 @@ the view holding it) - answered in tables, not cards.
   the legacy inline views (Newsroom, Pulse, Radar, Analyst, Briefing,
   Audience, Knowledge, Clients) inherit the shell and panel rules only.
 
-## The Creative Studio (one client-aware workspace; Phases 0-2 built)
+## The Creative Studio (one client-aware workspace; Phases 0-4 built)
 
 The approved proposal (`CREATIVE-STUDIO.md`) consolidates the Release Desk,
 the Content Desk and the Client Central Studio into one feature. Phase 0
@@ -842,9 +842,73 @@ on synthetic data. Phase 2, in short (details in `CREATIVE-STUDIO.md` s.9):
   export draws each approved composition at native size, saves it, runs the
   export stage and downloads a zip (`STRender.zip`); ClickUp is a separate
   confirmed dialog; the composer records a **note** (`POST /studio/note`) and
-  says direction by instruction is Phase 3. Harnesses:
-  `tests/studio-p2-worker.mjs` (11), `tests/studio-browser.mjs` (11, the page
+  records a team note when asked to. Harnesses:
+  `tests/studio-p2-worker.mjs` (11), `tests/studio-browser.mjs` (the page
   against the worker module in-process).
+
+**Phase 3, direction by instruction** (`stReviseStage`, stage `revise
+{target asset|family|set, asset, instruction}`): one creative-model call
+reads the direction against the assets in scope (their copy, locks, layout
+and background note), the ledger and the client context, and decides what
+it asks for - `text` (versions with the new fields, locked fields kept and
+named, checks recomputed, no render), `layout` (headline size as a layout
+version), `alternatives` (two to four options for one field, each with its
+checks, offered on the thread and applied only when chosen through
+`/studio/version`), `render` (a `proposal` event with the art direction and
+steps; `POST /studio/proposal {project, eid, decision do|decline}` queues
+one render job per asset by idempotent key `render:<eid>:<asset>` or
+records the decline; a second answer is 409), `adapt` (new assets in the
+family for the channels and formats named, the model's adapted copy,
+`stLayout` per format, the source image reused, locks carried, no render)
+or `question`. An ambiguous pronoun aimed at the whole set is asked about
+before any model call. A standing preference (`memory.standing`, confidence
+>= 0.6) rides on the event as `offer {rule, scope, campaign, task}` and is
+never saved alone: `POST /studio/remember {project, eid, scope campaign|
+client|none, rule, task}` writes an `engine_fixes` row through
+`engineAddFix` with the model's wording (a campaign preference carries
+`:campaign:<id>` in its `source`; `engineRules(env, ns, task, limit,
+{campaign})` and `stContext` read such a rule only for that campaign, and
+the Content Desk passes its set's campaign) or records `offer_declined`.
+Every event carries `eid`, `instruction`, `model` and `job`. Approve and
+reject on `/studio/approve` also file WIN / LOSS exemplars through
+`engineOutcome` (surface `studio`). The Studio's checks now treat the kit's
+approved facts as claims of their own (`opts.facts`), so a wrong unit
+against a fact is `differs`, not `approved fact`. In-app, the creative
+partner panel sends directions (target select), renders alternatives as
+chips, proposals with Do this / Not that, offers with editable wording and
+Campaign preference / Lasting client rule / Don't save, and "record as a
+note instead" for plain notes. Harness: `tests/studio-p3-worker.mjs` (10).
+
+**Phase 4, one island.** The Release Desk and the Content Desk nav buttons
+and mobile tabs are gone; `go('release')` and `go('content')` open the
+Studio's intake through `AXUI.goto('studio', {intake, deliverable, from})`
+(release preset, or brief + copy-only), the Sentinel's **Draft in Studio**
+does the same with the alert as the brief and the client set, and the
+Client Central Creative Studio tab is the Studio view. The island adopts
+these with `useGoto('studio')` (the intake remounts on each preset). The
+**Client panel** (header link "client", the context view) opens the voice
+profile editor - `content.js` exposes `window.AX_CONTENT = {VoicePanel,
+LearnedPanel}` and the Studio reuses `VoicePanel` - and a Learned table of
+every rule for the client with its scope (campaign, client, every client),
+switch off and delete through `/engine/fix/update|delete`. The **layout
+editor** (`LayoutEditor`, "Edit layout" on a composition whose layout is
+not locked) overlays the layers on the same renderer: drag to move, the
+corner to resize (text scales with its box), arrow keys nudge the focused
+layer; Save writes a layout version, no render. **KV sessions** (Ad Lab
+and the old Studio, `imgsess_<id>`) that recorded a client list as legacy
+rows `ks:<id>` (`stSessions`), open read-only with each saved artwork as a
+flattened `generated` asset (`stSessionGet`; `/session/img?raw=1` serves
+the bytes) and import once with the images copied into R2 so the project
+outlives the session's thirty days; a session without images answers
+`no_images`. The mobile tab bar scrolls sideways instead of clipping.
+`tools/studio-golden.py <folder> --key` re-runs a folder of golden cases
+(client material, outside the repo) through the live Studio with renders
+off and diffs copy, checks and context counts against the baseline
+(`--accept` writes it; exit 1 on any difference). Harnesses: the browser
+harness (14, entry points, layout editor, Client panel) and the session
+case in `studio-p3-worker.mjs`. The Release Desk and Content Desk sections
+and scripts stay in the page (their routes keep answering) but have no
+entry point of their own.
 
 Phase 1, the ground:
 

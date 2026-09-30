@@ -245,6 +245,9 @@
     </div>`;
   }
 
+  /* the Studio reuses the voice profile editor and the learned panel as its Client panel */
+  window.AX_CONTENT = { VoicePanel, LearnedPanel };
+
   function Notice({ err }) {
     const e = String((err && err.message) || ''); const code = (err && err.code) || '';
     let body;

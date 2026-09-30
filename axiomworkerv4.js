@@ -3212,8 +3212,9 @@ async function engineFixes(env, ns, task, all) {
 }
 /** The block that goes into a prompt: the team's standing corrections for this
  *  client and task, newest first, and a note of how many are in force. */
-async function engineRules(env, ns, task, limit) {
-  const fixes = (await engineFixes(env, ns, task, false)).slice(0, limit || 60);
+async function engineRules(env, ns, task, limit, opts) {
+  const camp = String((opts && opts.campaign) || '');
+  const fixes = (await engineFixes(env, ns, task, false)).filter(f => { const c = stCampaignOf(f); return !c || c === camp; }).slice(0, limit || 60);
   if (!fixes.length) return { text: '', count: 0, ids: [] };
   const lines = fixes.map(f => '- ' + f.rule + (f.exemplar && f.exemplar !== f.rule ? ' (e.g. "' + f.exemplar.slice(0, 140) + '")' : ''));
   const text = '\n\nLEARNED CORRECTIONS - taught by the team, ' + fixes.length + ' in force; these outrank taste and any generic guideline:\n' + lines.join('\n');
@@ -3484,7 +3485,7 @@ async function contentCompose(env, set, opts, log) {
   await log('out', 'voice profile: ' + (block.campaign ? 'campaign "' + block.campaign.name + '", ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms' + (block.segment ? ', audience ' + block.segment.name : ''));
   const ex = await contentExemplars(env, ns, block.campaign, platforms, set.brief, log);
   let learned = { text: '', count: 0 };
-  try { learned = await engineRules(env, ns, 'copy'); } catch (e) {}
+  try { learned = await engineRules(env, ns, 'copy', 0, { campaign: set.campaign }); } catch (e) {}
   if (learned.count) await log('info', 'applying ' + learned.count + ' learned correction' + (learned.count === 1 ? '' : 's') + ' for ' + ns);
   const n = Math.min(Math.max(parseInt(opts.n, 10) || 2, 1), 4);
   const specLines = platforms.map(p => { const s = CONTENT_PLATFORMS[p]; const own = (kit.platforms || {})[p] || {}; const mx = own.max || s.max; return '- ' + p + ' (' + s.label + '): ' + s.register + ' Body up to ' + mx + ' characters' + (s.title ? ', with a title' : '') + (s.script ? ', written as a script' : '') + '; ' + ((own.hashtags != null ? own.hashtags : s.hashtags) ? 'at most ' + (own.hashtags != null ? own.hashtags : s.hashtags) + ' hashtag(s)' : 'no hashtags') + '.'; }).join('\n');
@@ -3561,7 +3562,7 @@ async function contentRevise(env, id, body, who) {
   const client = (CLIENT_ISSUES.find(ci => ci.ns === set.ns) || {}).client || kit.name || 'the client';
   const block = contentKitBlock(kit, set.campaign, set.segment, set.platforms);
   let learned = { text: '', count: 0 };
-  try { learned = await engineRules(env, set.ns, 'copy'); } catch (e) {}
+  try { learned = await engineRules(env, set.ns, 'copy', 0, { campaign: set.campaign }); } catch (e) {}
   const sys = 'You edit existing social and digital copy for the client ' + client + ' exactly as instructed by the team. Change only what the instruction asks; keep everything else - angle, facts, sign-off, source line - as it is unless the instruction touches it. Obey the client voice, the standing rules, the banned terms and the learned corrections. Return strict JSON only:'
     + '\n{"items":[{"n":0,"title":"","body":"","cta":"","link":"","hashtags":[]}],"note":"one line: what changed","memory":{"standing":true,"rule":"one imperative sentence, max 40 words, general enough to apply to future copy for this client but no broader than the instruction supports","why":"","confidence":0.0}}'
     + '\n"standing" is true when the instruction expresses a preference that should apply to future copy for this client - a wording, a term to avoid or prefer, a tone, a format, a length, a sign-off, an always or a never. It is false when the instruction concerns only these pieces - a specific figure, place, date, angle or one-off edit. When in doubt, false. Every figure in the edited copy must still come from the approved facts or the source material.'
@@ -6653,9 +6654,9 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-09-30.studio-p2';
+const AXIOM_BUILD = '2026-09-30.studio-p4';
 let STUDIO_READY = false;
-const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export'];   // render and echo run in stJobRun; the production stages in stStageRun
+const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
 const ST_MAX_ATTEMPTS = 3;
 const ST_PARTS = ['copy', 'design'];
@@ -6811,13 +6812,51 @@ async function stLegacyList(env, ns, imported) {
     const rows = (await env.MIND_DB.prepare('SELECT id,ns,campaign,brief,platforms,items,status,who,created,updated FROM content_sets WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
     rows.forEach(r => { const it = pjs(r.items, []); out.push({ id: 'cs:' + r.id, kind: 'legacy_content', ns: r.ns, title: 'Copy: ' + (String(r.brief || '').slice(0, 70) || r.campaign || 'content set'), campaign: r.campaign || '', status: r.status || '', owner: r.who || '', created: r.created, updated: r.updated, assets: it.length, approved: it.filter(x => x.verdict === 'approved').length, readOnly: true, imported: done.has('cs:' + r.id) ? (imported.find(p => p.legacy && p.legacy.id === 'cs:' + r.id) || {}).id : '' }); });
   } catch (e) {}
+  try { (await stSessions(env, ns)).forEach(x => out.push(Object.assign(x, { imported: done.has(x.id) ? (imported.find(p => p.legacy && p.legacy.id === x.id) || {}).id : '' }))); } catch (e) {}
   return out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+}
+/** The Ad Lab and old Studio sessions in KV that recorded this client (imgsess_<id>; images beside them as _v<n>). */
+async function stSessions(env, ns) {
+  const l = await env.AXIOM_KV.list({ prefix: 'imgsess_', limit: 1000 });
+  const names = ((l && l.keys) || []).map(k => k.name).filter(n => !/_v\d+$/.test(n)).slice(0, 80);
+  const out = [];
+  for (const name of names) {
+    let d; try { d = JSON.parse((await kvGet(env.AXIOM_KV, name)) || 'null'); } catch (e) { d = null; }
+    if (!d || typeof d !== 'object') continue;
+    const client = String(d.client || d.ns || d.clientId || (d.brief && d.brief.ns) || '').toLowerCase();
+    if (client !== ns) continue;
+    const sid = name.slice('imgsess_'.length); const b = d.brief || {};
+    const n = Number(d.artVer) || (Array.isArray(d.vers) ? d.vers.length : 0) || (Array.isArray(d.thread) ? d.thread.filter(m => m && m.r === 'art').length : 0);
+    out.push({ id: 'ks:' + sid, kind: 'legacy_session', ns, title: 'Session: ' + (String(b.headline || (d.chosen && d.chosen.headline) || b.notes || (typeof b === 'string' ? b : '') || sid).slice(0, 70)), campaign: '', status: d.stage || 'session', owner: '', created: d.ts || 0, updated: d.ts || 0, assets: n, readOnly: true, source: sid.indexOf('al') === 0 ? 'Ad Lab' : 'Studio (KV)' });
+  }
+  return out;
+}
+/** A KV session as a project view: every saved artwork version is a flattened `generated` asset; fields the session never held are not recorded. */
+async function stSessionGet(env, sid, wantNs) {
+  const d = JSON.parse((await kvGet(env.AXIOM_KV, 'imgsess_' + sid)) || 'null');
+  if (!d || typeof d !== 'object') return null;
+  const ns = relNs(d.client || d.ns || d.clientId || (d.brief && d.brief.ns) || wantNs || 'cmm');
+  const b = d.brief && typeof d.brief === 'object' ? d.brief : {}; const ch = d.chosen && typeof d.chosen === 'object' ? d.chosen : {};
+  const max = Math.min(40, Math.max(Number(d.artVer) || 0, Array.isArray(d.vers) ? d.vers.length : 0, Array.isArray(d.thread) ? d.thread.filter(m => m && m.r === 'art').map(m => Number(m.ver) || 0).reduce((a, x) => Math.max(a, x), 0) : 0, 3));
+  const versions = []; let misses = 0;
+  for (let v = 1; v <= max && misses < 3; v++) { const raw = await kvGet(env.AXIOM_KV, 'imgsess_' + sid + '_v' + v); if (!raw) { misses++; continue; } misses = 0; let im; try { im = JSON.parse(raw); } catch (e) { continue; } if (im && im.b64) versions.push({ ver: v, mime: im.mime || 'image/png', note: ((Array.isArray(d.thread) ? d.thread.find(m => m && m.r === 'art' && Number(m.ver) === v) : null) || {}).note || '' }); }
+  const fmt = RELEASE_FORMATS[b.format] || (String(b.format || '').indexOf(':') > 0 ? b.format : '1:1');
+  const copy = { headline: String(b.headline || ch.headline || '').slice(0, 200), support: String(b.support || ch.support || '').slice(0, 300), cta: String(b.cta || ch.cta || '').slice(0, 80) };
+  const now = Date.now();
+  return {
+    id: 'ks:' + sid, ns, campaign: '', title: 'Session: ' + (copy.headline || b.notes || sid).slice(0, 70), brief: { objective: String(b.notes || '').slice(0, 400), audience: String(b.audience || '').slice(0, 200), message: copy.headline, deliverables: (versions.length + ' artwork version' + (versions.length === 1 ? '' : 's') + ', ' + fmt), assumptions: [], notRecorded: ['objective', 'audience'].filter(k => !b[k === 'objective' ? 'notes' : k]) }, status: d.stage || 'session', owner: '', revision: 0, legacy: { kind: 'session', id: 'ks:' + sid }, readOnly: true, created: d.ts || now, updated: d.ts || now,
+    sources: [], references: [], directions: [],
+    assets: versions.map(x => { const v = { id: 'legacy-' + sid + '-' + x.ver, asset: 'ks:' + sid + ':' + x.ver, parent: null, kind: 'render', note: x.note || 'session artwork v' + x.ver, copy, layout: {}, image: { key: 'kv:imgsess_' + sid + '_v' + x.ver, url: '/session/img?id=' + encodeURIComponent(sid) + '&ver=' + x.ver + '&raw=1', model: '', size: '' }, mode: 'generated', checks: [], context: {}, who: '', created: d.ts || now }; return { id: 'ks:' + sid + ':' + x.ver, project: 'ks:' + sid, family: 'Session artwork', channel: '', format: fmt, title: 'Artwork v' + x.ver, current: v.id, locks: {}, revision: 0, versions: [v], approvals: {}, legacyVerdict: '' }; }),
+    thread: [{ id: 0, kind: 'note', who: 'studio', at: now, text: 'A saved ' + (sid.indexOf('al') === 0 ? 'Ad Lab' : 'Studio') + ' session, read-only. Its artwork is flattened: the text on it is not editable until rebuilt. Import copies the images into a Studio project under ' + ns + '; the session itself is untouched and expires on its own schedule.' }], jobs: [],
+    _versions: versions, _sid: sid,
+  };
 }
 /** A legacy pack or set as a project view: flattened tiles are `generated`, copy pieces are `copy`. Nothing is written. */
 async function stLegacyGet(env, id) {
-  const m = /^(rp|cs):([a-z0-9]+)$/i.exec(String(id || ''));
+  const m = /^(rp|cs|ks):([a-zA-Z0-9_-]+)$/.exec(String(id || ''));
   if (!m) return null;
   const now = Date.now();
+  if (m[1] === 'ks') return stSessionGet(env, m[2]);
   if (m[1] === 'rp') {
     await ensureRelease(env);
     const r = await env.MIND_DB.prepare('SELECT * FROM release_packs WHERE id=?').bind(m[2]).first();
@@ -6846,20 +6885,26 @@ async function stLegacyGet(env, id) {
 }
 /** Import once: a second call for the same legacy id returns the same project. Originals are read, never written. */
 async function stImport(env, legacyId, who) {
-  const lid = String(legacyId || '').slice(0, 40);
+  const lid = String(legacyId || '').slice(0, 48);
   const had = await env.MIND_DB.prepare('SELECT id FROM studio_projects WHERE legacy_id=?').bind(lid).first();
   if (had) return { id: had.id, existing: true };
   const view = await stLegacyGet(env, lid);
   if (!view) return null;
+  if (view.legacy && view.legacy.kind === 'session' && !view._versions.length) return { error: 'no_images', detail: 'This session holds no saved artwork (its images have expired); nothing to import.' };
   const id = stId('p'); const now = Date.now();
   await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(id, view.ns, view.campaign || '', view.title, JSON.stringify(view.brief), 'production', stStr(who, 40) || view.owner || '', 1, view.legacy.kind, lid, null, 0, now, now).run();
   for (const s of view.sources) await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('s'), id, s.kind, s.name, s.text || '', JSON.stringify(s.passages || {}), JSON.stringify(s.claims || []), s.provenance || '', stStr(who, 40), now).run();
   for (const a of view.assets) {
     const aid = stId('a'); const v = a.versions[0]; const vid = stId('v');
+    let image = v.image;
+    if (image && /^kv:/.test(image.key) && env.MIND_DOCS) {
+      // a session image lives in KV for thirty days: copy the bytes into R2 under the project so the import outlives the session
+      try { const im = JSON.parse((await kvGet(env.AXIOM_KV, image.key.slice(3))) || 'null'); if (im && im.b64) { const key = 'studio/' + id + '/' + aid + '/' + vid + '.png'; await env.MIND_DOCS.put(key, bufFromB64(im.b64), { httpMetadata: { contentType: im.mime || 'image/png' } }); image = { key, url: '/studio/file?key=' + encodeURIComponent(key), model: '', size: '' }; } } catch (e) {}
+    }
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, id, a.family, a.channel, a.format, a.title, vid, '{}', 1, now, now).run();
     await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(vid, aid, id, null, v.kind, 'imported from ' + lid + (a.legacyVerdict ? '; legacy verdict ' + a.legacyVerdict : ''), JSON.stringify(v.copy), '{}', v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks || []), JSON.stringify({ importedFrom: lid, legacyVerdict: a.legacyVerdict || '' }), null, stStr(who, 40), now).run();
+      .bind(vid, aid, id, null, v.kind, 'imported from ' + lid + (a.legacyVerdict ? '; legacy verdict ' + a.legacyVerdict : ''), JSON.stringify(v.copy), '{}', image ? JSON.stringify(image) : null, v.mode, JSON.stringify(v.checks || []), JSON.stringify({ importedFrom: lid, legacyVerdict: a.legacyVerdict || '' }), null, stStr(who, 40), now).run();
   }
   await stEvent(env, id, 'imported', { text: 'Imported ' + lid + ' as a Studio project. The original is untouched; flattened tiles stay flattened until rebuilt; fields the legacy record never held are marked not recorded, not invented.', legacy: lid }, who);
   return { id, existing: false };
@@ -7079,7 +7124,7 @@ async function stContext(env, p, opts) {
   const channels = (opts.channels || []).filter(c => CONTENT_PLATFORMS[c]);
   const block = contentKitBlock(kit, p.campaign, (p.brief || {}).segment || '', channels);
   let rulesCopy = { text: '', count: 0, ids: [] }, rulesTiles = { text: '', count: 0, ids: [] };
-  try { rulesCopy = await engineRules(env, p.ns, 'copy'); rulesTiles = await engineRules(env, p.ns, 'tiles'); } catch (e) {}
+  try { rulesCopy = await engineRules(env, p.ns, 'copy', 0, { campaign: p.campaign }); rulesTiles = await engineRules(env, p.ns, 'tiles', 0, { campaign: p.campaign }); } catch (e) {}
   const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
   let ex = { text: '', count: 0 };
   try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log); } catch (e) {}
@@ -7094,12 +7139,12 @@ async function stContextView(env, p) {
   const kit = (await brandKit(env, p.ns)) || {};
   const block = contentKitBlock(kit, p.campaign, '', []);
   let fixes = []; try { fixes = await engineFixes(env, p.ns, null, false); } catch (e) {}
-  fixes = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any');
+  fixes = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any').filter(f => { const c = stCampaignOf(f); return !c || c === String(p.campaign || ''); });
   let shelf = { docs: 0, error: '' }; try { const hits = await mindRetrieve(env, p.ns, [(p.brief || {}).objective, p.campaign, 'approved creative example'].filter(Boolean).join(' '), 10, { creative: true }); shelf.docs = hits.filter(h => h.ns === p.ns + '_creative').length; shelf.examples = hits.filter(h => /^(copy|outcome|brief|artwork)$/.test(String(h.meta.kind || ''))).length; } catch (e) { shelf.error = 'retrieval unavailable: ' + String(e.message || e).slice(0, 80); }
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
   return { ok: true, ns: p.ns, client, kit: { name: kit.name || '', updated: kit.updated || 0, hasLogo: !!kit.hasLogo, palette: kit.palette || {}, fonts: kit.fonts || {}, voice: String(kit.voice || '').slice(0, 1200), rules: String(kit.rules || '').split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 40) },
     campaign: block.campaign, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name, active: c.active !== false })), facts: block.facts.map(f => ({ id: f.id, text: f.text, source: f.source, status: f.status, campaign: f.campaign })), banned: block.banned,
-    learned: fixes.map(f => ({ id: f.id, task: f.task, scope: f.scope, rule: f.rule, source: f.source, who: f.who, created: f.created })), shelf, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract'), image: 'gemini-3-pro-image at ' + (env.IMAGE_SIZE || '2K') },
+    learned: fixes.map(f => ({ id: f.id, task: f.task, scope: stCampaignOf(f) ? 'campaign' : f.scope, campaign: stCampaignOf(f), rule: f.rule, source: f.source, who: f.who, created: f.created })), shelf, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract'), image: 'gemini-3-pro-image at ' + (env.IMAGE_SIZE || '2K') },
     note: 'Recorded with every generation as a context snapshot. Source accuracy and mandatory requirements outrank preferences. Nothing here comes from another client.' };
 }
 // -- the claim ledger: every figure and quotation in a source, tied to its passage ---------------------
@@ -7220,15 +7265,16 @@ function stChecks(copy, ledger, opts) {
   opts = opts || {}; const out = [];
   copy = copy || {};
   const fields = ['headline', 'support', 'cta', 'caption', 'body', 'title']; const text = fields.map(k => copy[k]).filter(Boolean).join(' \n ');
-  const claims = Array.isArray(ledger) ? ledger : [];
+  const factClaims = (Array.isArray(opts.facts) ? opts.facts : []).flatMap(f => stNumbers(String(f.text || '')).map(n => ({ id: 'fact:' + (f.id || ''), value: n.value, unit: n.unit, passage: 'approved fact' + (f.id ? ' ' + f.id : ''), period: '', verified: true, fact: true })));
+  const claims = (Array.isArray(ledger) ? ledger : []).concat(factClaims);
   const allowedFlat = String(opts.allowed || '').replace(/[\s,]/g, '').toLowerCase();
   stNumbers(text).forEach(num => {
     const exact = claims.find(c => c.value === num.value && (c.unit === num.unit || (!c.unit && !num.unit)));
-    if (exact) { out.push({ state: 'matches', text: num.raw, claim: exact.id, note: 'matches the source, ' + exact.passage + (exact.period ? ', ' + exact.period : '') + (exact.verified === false ? ' (a claim the source does not carry as written)' : '') }); return; }
+    if (exact) { out.push(exact.fact ? { state: 'fact', text: num.raw, claim: exact.id, note: exact.passage + (exact.id.slice(5) ? '' : '') } : { state: 'matches', text: num.raw, claim: exact.id, note: 'matches the source, ' + exact.passage + (exact.period ? ', ' + exact.period : '') + (exact.verified === false ? ' (a claim the source does not carry as written)' : '') }); return; }
     const sameNum = claims.find(c => c.value === num.value && c.unit && num.unit && c.unit !== num.unit);
-    if (sameNum) { out.push({ state: 'differs', text: num.raw, claim: sameNum.id, note: 'unit differs: the source says ' + sameNum.value.toLocaleString('en-AU') + ' ' + sameNum.unit + ' (' + sameNum.passage + ')' }); return; }
+    if (sameNum) { out.push({ state: 'differs', text: num.raw, claim: sameNum.id, note: 'unit differs: the ' + (sameNum.fact ? 'approved fact' : 'source') + ' says ' + sameNum.value.toLocaleString('en-AU') + ' ' + sameNum.unit + ' (' + sameNum.passage + ')' }); return; }
     const sameUnit = num.unit ? claims.filter(c => c.unit === num.unit && c.value !== num.value) : [];
-    if (sameUnit.length === 1) { out.push({ state: 'differs', text: num.raw, claim: sameUnit[0].id, note: 'value differs: the source says ' + sameUnit[0].value.toLocaleString('en-AU') + ' ' + sameUnit[0].unit + ' (' + sameUnit[0].passage + ')' }); return; }
+    if (sameUnit.length === 1) { out.push({ state: 'differs', text: num.raw, claim: sameUnit[0].id, note: 'value differs: the ' + (sameUnit[0].fact ? 'approved fact' : 'source') + ' says ' + sameUnit[0].value.toLocaleString('en-AU') + ' ' + sameUnit[0].unit + ' (' + sameUnit[0].passage + ')' }); return; }
     const needle = String(num.value).replace(/\.0+$/, '');
     if (allowedFlat && allowedFlat.indexOf(needle) >= 0) { out.push({ state: 'fact', text: num.raw, claim: null, note: 'in the approved facts, the brief or the kit (not in a source passage)' }); return; }
     out.push({ state: 'unsupported', text: num.raw, claim: null, note: claims.length ? 'not supported by the supplied sources or the approved facts' : 'no source in this project supports it' });
@@ -7249,7 +7295,7 @@ async function stVersionChecks(env, project, asset, v) {
   const led = await stLedger(env, project.id);
   const kit = (await brandKit(env, project.ns)) || {};
   const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
-  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], channel: asset.channel, format: asset.format, layout: v.layout });
+  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(f => f.status !== 'pending'), channel: asset.channel, format: asset.format, layout: v.layout });
   try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(JSON.stringify(checks).slice(0, 8000), v.id).run(); } catch (e) {}
   return checks;
 }
@@ -7350,7 +7396,7 @@ async function stCopyStage(env, job, p, log) {
     const piece = j.pieces.find(x => String(x.channel || '').toLowerCase() === c) || j.pieces.find(x => !x._used) || j.pieces[0]; piece._used = true;
     const copy = stCopy({ headline: piece.headline, support: piece.support, cta: piece.cta, caption: (piece.caption || '') + ((Array.isArray(piece.hashtags) && piece.hashtags.length && (CONTENT_PLATFORMS[c] || {}).hashtags) ? ' ' + piece.hashtags.slice(0, CONTENT_PLATFORMS[c].hashtags).map(h => '#' + String(h).replace(/^#/, '')).join(' ') : ''), alt: piece.alt });
     const format = formats[c]; const layout = deliverable === 'copy' ? {} : stLayout(ctx.kit, p.ns, format, template, copy);
-    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, channel: c, format, layout: deliverable === 'copy' ? null : layout });
+    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel: c, format, layout: deliverable === 'copy' ? null : layout });
     if (checks.some(x => x.state !== 'matches' && x.state !== 'fact')) flagged++;
     const aid = stId('a'); const title = ST_CHANNELS[c].label + ' ' + (deliverable === 'copy' ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
@@ -7405,6 +7451,180 @@ async function stExportStage(env, job, p, log) {
   await stEvent(env, p.id, 'export', { text: 'Export ' + id + ': ' + items.length + ' approved asset' + (items.length === 1 ? '' : 's') + (excluded.length ? ', ' + excluded.length + ' not approved and left out' : '') + '. Files: manifest and copy sheet under studio/' + p.id + '/export/. Nothing was sent; a hand-off is its own step.', job: job.id, export: id }, job.who);
   return { export: id, included: items.map(it => ({ asset: it.asset, version: it.version, exportKey: it.exportKey })), excluded, files: manifest.files, sheet: sheet.slice(0, 4000) };
 }
+// -- Phase 3: direction by instruction - the creative team answers a direction on an asset, a family or the set --
+// One model call reads the instruction against the targets, their locks, the ledger and the client context and
+// decides what it asks for: a text change (applied as versions, no render), alternatives for one field (offered,
+// not applied), a new image (proposed with its steps, run only on confirmation), an adaptation to other channels
+// or formats (new assets in the family that reuse the image), a layout change, or a question back. A standing
+// preference is offered as a rule, never saved without an answer: campaign preference, lasting client rule, or no.
+const ST_REVISE_KINDS = ['text', 'alternatives', 'render', 'adapt', 'layout', 'question'];
+const ST_COPY_FIELDS = ['headline', 'support', 'cta', 'caption', 'alt'];
+function stCampaignOf(fix) { const m = /:campaign:([a-z0-9_-]+)$/.exec(String((fix && fix.source) || '')); return m ? m[1] : ''; }
+async function stProjectAssets(env, p) {
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const out = [];
+  for (const r of rows) { const a = stAssetRow(r); out.push({ asset: a, version: await stCurrent(env, a) }); }
+  return out;
+}
+function stAssetBrief(t) {
+  const a = t.asset, v = t.version || { copy: {}, layout: {} };
+  const locks = Object.keys(a.locks || {}).filter(k => a.locks[k]);
+  const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
+  return '[' + a.id + '] ' + a.title + ' - ' + a.channel + ' ' + a.format + ', mode ' + (v.mode || 'copy') + (locks.length ? ', LOCKED: ' + locks.join(', ') : '') + (hl ? ', headline size ' + hl.size + '% (' + (v.layout.templateName || v.layout.template) + ')' : '')
+    + '\n' + ST_COPY_FIELDS.filter(k => v.copy && v.copy[k]).map(k => '  ' + k + ': ' + v.copy[k]).join('\n') + (v.context && v.context.visual ? '\n  background: ' + v.context.visual : '');
+}
+async function stReviseStage(env, job, p, log) {
+  const inp = job.input || {};
+  const instruction = stStr(inp.instruction, 1500).trim();
+  if (instruction.length < 3) throw new Error('instruction_required: say what to change (not retried)');
+  const target = ['asset', 'family', 'set'].indexOf(inp.target) >= 0 ? inp.target : 'asset';
+  const all = await stProjectAssets(env, p);
+  if (!all.length) throw new Error('no_assets: nothing to direct yet - produce the set first (not retried)');
+  let targets;
+  if (target === 'set') targets = all;
+  else { const t = all.find(x => x.asset.id === stClean(inp.asset, 24)); if (!t) throw new Error('asset_required: name the asset the direction is for (not retried)'); targets = target === 'family' ? all.filter(x => x.asset.family === t.asset.family) : [t]; }
+  const eid = stId('e');
+  // an ambiguous pronoun aimed at the whole set is asked about, not applied to everything
+  if (target === 'set' && all.length > 1 && /\b(this|it|that)\b/i.test(instruction) && !/\b(all|every|each|whole|set|both)\b/i.test(instruction)) {
+    await stEvent(env, p.id, 'question', { eid, text: 'Which asset do you mean? The direction says "' + (instruction.match(/\b(this|it|that)\b/i) || [''])[0] + '" but the target is the whole set (' + all.length + ' assets). Pick the asset on the left or change the target, and send it again. Nothing was changed.', instruction }, 'studio');
+    await log('out', 'asked which asset the direction means; nothing changed');
+    return { kind: 'question', eid, changed: [] };
+  }
+  const channels = Array.from(new Set(targets.map(t => t.asset.channel).filter(c => CONTENT_PLATFORMS[c])));
+  const ctx = await stContext(env, p, { channels, log });
+  const led = await stLedger(env, p.id);
+  const sys = 'You are the creative team (creative director, copywriter, designer) of an Australian political communications agency, working for ' + ctx.client + '. The team lead gives you a direction about one or more assets. First decide what the instruction asks for, then answer with strict JSON only, no prose:\n'
+    + '{"kind":"text|alternatives|render|adapt|layout|question",'
+    + '"reply":"<=45 words to the team lead: what you did or propose and why, naming the assets",'
+    + '"changes":[{"asset":"id","copy":{"headline":"...","support":"...","cta":"...","caption":"...","alt":"..."},"note":"<=12 words"}],'
+    + '"alternatives":{"asset":"id","field":"headline|support|cta|caption","options":["...","...","..."]},'
+    + '"render":{"assets":["id"],"visual":"<=160 characters of art direction for the new photograph, no text, no logos","steps":["<=12 words each: what changes, what is kept"]},'
+    + '"adapt":{"from":"id","pieces":[{"channel":"instagram","format":"4:5|1:1|9:16|16:9","copy":{"headline":"...","support":"...","cta":"...","caption":"...","alt":"..."}}]},'
+    + '"layout":{"assets":["id"],"headlineSize":"smaller|larger|same"},'
+    + '"question":"<=40 words when the direction cannot be applied without an answer",'
+    + '"memory":{"standing":false,"rule":"one imperative sentence, <=40 words, general enough for future work but no broader than the instruction supports","scope":"campaign|client","confidence":0.0}}\n'
+    + 'KINDS. text: the words change (headline, support, CTA, caption, alt) - give the full new value of every field you change, only for the assets named, never a locked field (say in reply what stayed locked). alternatives: the lead asks for options or variants for one field - give two to four, apply nothing. render: the lead wants a different image, background, photograph, mood or visual - describe it and the steps; the render is not yours to run. adapt: the lead wants the asset on other channels or formats - write the adapted copy per channel in its register, same argument. layout: bigger or smaller headline, spacing. question: only when nothing can be done without an answer.\n'
+    + 'RULES. Australian English, sentence case, no exclamation marks. Every figure comes from the LEDGER or the APPROVED FACTS, quoted exactly; never invent, round or update one. Quotations verbatim or not at all. Keep the sign-off and the source line the client uses. Do not favour a political party. memory.standing is true only for a preference that should shape future work for this client (a wording, a term, a tone, an always or a never, an imagery rule); false for a one-off (this figure, this asset, this time). Scope campaign when it is about this campaign\'s identity, client when it holds for everything the client does.'
+    + ctx.text;
+  const user = 'INSTRUCTION FROM THE TEAM LEAD (target: ' + (target === 'set' ? 'the whole set' : target === 'family' ? 'the family ' + targets[0].asset.family : 'one asset') + '):\n' + instruction
+    + '\n\nASSETS IN SCOPE (' + targets.length + '):\n' + targets.map(stAssetBrief).join('\n\n')
+    + (p.campaign ? '\n\nCAMPAIGN: ' + p.campaign : '') + '\n\nBRIEF: ' + [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' - ')
+    + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.verified === false ? ' [UNVERIFIED - do not use]' : '')).join('\n') || '(no source: only the APPROVED FACTS may carry figures)');
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': read the direction against ' + targets.length + ' asset' + (targets.length === 1 ? '' : 's') + ' - "' + instruction.slice(0, 80) + '"');
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 6000, timeoutMs: 170000, log });
+  const j = relJson(r.text);
+  if (!j || ST_REVISE_KINDS.indexOf(String(j.kind || '').toLowerCase()) < 0) throw new Error('revise_unparseable: the model did not answer with a decision as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
+  const kind = String(j.kind).toLowerCase();
+  const reply = stStr(j.reply, 400) || 'Done.';
+  const inScope = id => targets.find(t => t.asset.id === stClean(id, 24));
+  let offer = null;
+  if (j.memory && typeof j.memory === 'object' && j.memory.standing && Number(j.memory.confidence) >= 0.6 && String(j.memory.rule || '').trim()) offer = { rule: stStr(j.memory.rule, 300), scope: j.memory.scope === 'campaign' && p.campaign ? 'campaign' : 'client', campaign: p.campaign || '', task: kind === 'render' || kind === 'layout' ? 'tiles' : 'copy', instruction };
+  const base = { eid, instruction, target, model: r.model, job: job.id, offer: offer || undefined };
+  const changed = [], kept = [];
+  if (kind === 'text' || kind === 'layout') {
+    const changes = Array.isArray(j.changes) ? j.changes : [];
+    for (const c of changes) {
+      const t = inScope(c.asset); if (!t || !t.version) continue;
+      const want = stCopy(c.copy || {}); const patch = {};
+      Object.keys(want).forEach(k => { if (t.asset.locks[k] && want[k] !== (t.version.copy || {})[k]) { kept.push(t.asset.title + '/' + k); return; } if (want[k] !== (t.version.copy || {})[k]) patch[k] = want[k]; });
+      let layout;
+      if (kind === 'layout' && j.layout && t.version.layout && t.version.layout.layers && !t.asset.locks.layout) {
+        const dir = String(j.layout.headlineSize || 'same'); if (dir !== 'same') { layout = JSON.parse(JSON.stringify(t.version.layout)); const hl = layout.layers.find(l => l.role === 'headline'); if (hl) { const d = dir === 'larger' ? 0.6 : -0.6; hl.h = Math.round(hl.h * ((hl.size + d) / hl.size) * 10) / 10; hl.size = Math.max(2.4, Math.round((hl.size + d) * 10) / 10); } }
+      } else if (kind === 'layout' && t.asset.locks.layout) kept.push(t.asset.title + '/layout');
+      if (!Object.keys(patch).length && !layout) continue;
+      const v = await stAppendVersion(env, t.asset, { kind: layout && !Object.keys(patch).length ? 'layout' : 'text', note: 'directed: ' + stStr(c.note || instruction, 80), copy: patch, layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model }) }, 'studio');
+      await stVersionChecks(env, p, t.asset, v);
+      changed.push(t.asset.id);
+    }
+    if (kind === 'layout' && j.layout && Array.isArray(j.layout.assets) && !changes.length) {
+      for (const id of j.layout.assets) { const t = inScope(id); if (!t || !t.version || !t.version.layout || !t.version.layout.layers) continue; if (t.asset.locks.layout) { kept.push(t.asset.title + '/layout'); continue; } const dir = String(j.layout.headlineSize || 'same'); if (dir === 'same') continue; const layout = JSON.parse(JSON.stringify(t.version.layout)); const hl = layout.layers.find(l => l.role === 'headline'); if (!hl) continue; const d = dir === 'larger' ? 0.6 : -0.6; hl.h = Math.round(hl.h * ((hl.size + d) / hl.size) * 10) / 10; hl.size = Math.max(2.4, Math.round((hl.size + d) * 10) / 10); const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: headline ' + dir, layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300) }) }, 'studio'); await stVersionChecks(env, p, t.asset, v); changed.push(t.asset.id); }
+    }
+    const text = reply + (changed.length ? ' ' + (kind === 'layout' ? 'Layout change' : 'Text change') + ' only: ' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' at a new version, image kept, no render spent.' : ' Nothing changed' + (kept.length ? ': the fields named are locked.' : '.')) + (kept.length ? ' Kept locked: ' + kept.join(', ') + '.' : '');
+    await stEvent(env, p.id, 'revise', Object.assign({}, base, { text, changed, render: false, locked: kept.length ? kept : undefined }), 'studio');
+    await log('out', changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' changed as ' + kind + (kept.length ? '; kept locked: ' + kept.join(', ') : '') + (offer ? '; a standing preference is offered, not saved' : ''));
+    return { kind, eid, changed, kept, offer: !!offer };
+  }
+  if (kind === 'alternatives') {
+    const alt = j.alternatives || {}; const t = inScope(alt.asset) || targets[0];
+    const field = ST_COPY_FIELDS.indexOf(alt.field) >= 0 ? alt.field : 'headline';
+    const options = (Array.isArray(alt.options) ? alt.options : []).map(o => stStr(o, field === 'caption' ? 1500 : 200).trim()).filter(Boolean).slice(0, 4);
+    if (!options.length) throw new Error('alternatives_empty: the model offered no options - "' + llmExcerpt(r.text).slice(0, 120) + '"');
+    const checks = options.map(o => stChecks(Object.assign({}, t.version ? t.version.copy : {}, { [field]: o }), led.claims, { allowed: led.text, banned: ctx.block.banned, facts: ctx.block.facts, channel: t.asset.channel, format: t.asset.format, layout: t.version ? t.version.layout : null }).filter(c => c.state !== 'matches' && c.state !== 'fact').map(c => c.state));
+    await stEvent(env, p.id, 'alternatives', Object.assign({}, base, { text: reply + ' Choose one and it becomes a text change on ' + t.asset.title + ', no render.', asset: t.asset.id, field, options, checks }), 'studio');
+    await log('out', options.length + ' alternative ' + field + 's offered for ' + t.asset.title + '; nothing applied');
+    return { kind, eid, asset: t.asset.id, field, options };
+  }
+  if (kind === 'render') {
+    const rd = j.render || {}; const ids = (Array.isArray(rd.assets) ? rd.assets : []).map(x => stClean(x, 24)).filter(inScope);
+    const assets = ids.length ? ids : targets.filter(t => t.version && t.version.mode !== 'copy').map(t => t.asset.id);
+    if (!assets.length) { await stEvent(env, p.id, 'question', Object.assign({}, base, { text: reply + ' These are copy-only assets: there is no image to change. Produce a visual set first, or say which composition you mean.' }), 'studio'); return { kind: 'question', eid, changed: [] }; }
+    const steps = (Array.isArray(rd.steps) ? rd.steps : []).map(s => stStr(s, 120)).filter(Boolean).slice(0, 5);
+    const visual = stStr(rd.visual, 300) || instruction;
+    await stEvent(env, p.id, 'proposal', Object.assign({}, base, { text: reply + ' That needs a new image, not a text change. Confirm and it runs as one render per asset (' + assets.length + ' at ' + (env.IMAGE_SIZE || '2K') + '), text and layout unchanged.', assets, visual, steps: steps.length ? steps : ['Render a new background as directed', 'Keep every text element and the layout'], render: true }), 'studio');
+    await log('out', 'a render is proposed for ' + assets.length + ' asset' + (assets.length === 1 ? '' : 's') + '; nothing spent until confirmed');
+    return { kind, eid, assets, visual, steps };
+  }
+  if (kind === 'adapt') {
+    const ad = j.adapt || {}; const from = inScope(ad.from) || targets[0]; const src = from.version;
+    if (!src) throw new Error('adapt_source_missing: the source asset has no version (not retried)');
+    const pieces = (Array.isArray(ad.pieces) ? ad.pieces : []).filter(pc => ST_CHANNELS[String(pc.channel || '').toLowerCase()]).slice(0, 6);
+    if (!pieces.length) throw new Error('adapt_empty: no channel to adapt to was named - "' + llmExcerpt(r.text).slice(0, 120) + '"');
+    const now = Date.now(); const made = [];
+    for (const pc of pieces) {
+      const channel = String(pc.channel).toLowerCase(); const format = ST_FORMATS[pc.format] ? pc.format : ST_CHANNELS[channel].format;
+      const copy = Object.assign({}, src.copy, stCopy(pc.copy || {}));
+      const copyOnly = src.mode === 'copy';
+      const layout = copyOnly ? {} : stLayout(ctx.kit, p.ns, format, (src.layout && src.layout.template) || stTemplateFor(ctx.kit, p.campaign), copy);
+      const aid = stId('a'); const title = ST_CHANNELS[channel].label + ' ' + (copyOnly ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
+      await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, from.asset.family, channel, format, title, '', JSON.stringify(from.asset.locks || {}), 1, now, now).run();
+      const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
+      const v = await stAppendVersion(env, a, { kind: copyOnly ? 'text' : 'layout', note: 'adapted from ' + from.asset.title, copy, layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { job: job.id, adaptedFrom: from.asset.id + ':' + src.id, instruction: instruction.slice(0, 300), model: r.model }) }, 'studio');
+      await stVersionChecks(env, p, a, v);
+      made.push(aid);
+    }
+    await stEvent(env, p.id, 'adapted', Object.assign({}, base, { text: reply + ' ' + made.length + ' new asset' + (made.length === 1 ? '' : 's') + ' in ' + from.asset.family + ': same argument, caption and reading order adjusted per channel, the layout re-flowed for each format, the image reused, so no render was spent. Locks carried across.', changed: made, render: false }), 'studio');
+    await log('out', made.length + ' asset' + (made.length === 1 ? '' : 's') + ' adapted from ' + from.asset.title + '; image reused, no render');
+    return { kind, eid, changed: made };
+  }
+  await stEvent(env, p.id, 'question', Object.assign({}, base, { text: stStr(j.question, 400) || reply }), 'studio');
+  await log('out', 'the team asked a question back; nothing changed');
+  return { kind: 'question', eid, changed: [] };
+}
+/** Save (or decline) an offered preference. A campaign preference is a client rule tagged with the campaign in its
+ *  source, read only when that campaign is the project's; a lasting rule applies to everything the client does. */
+async function stRemember(env, p, body, who) {
+  const eid = stClean(body.eid, 24);
+  const scope = body.scope === 'campaign' ? 'campaign' : body.scope === 'client' ? 'client' : 'none';
+  if (scope === 'none') { await stEvent(env, p.id, 'offer_declined', { eid, text: 'Not saved: applied to this work only.' }, who); return { ok: true, saved: false, eid }; }
+  const rule = String(body.rule || '').trim().slice(0, 400);
+  if (rule.length < 8) return { error: 'rule_required', status: 400, detail: 'The wording of the rule is needed.' };
+  const campaign = scope === 'campaign' ? (stStr(body.campaign, 40) || p.campaign) : '';
+  if (scope === 'campaign' && !campaign) return { error: 'no_campaign', status: 400, detail: 'This project has no campaign; save it as a client rule or not at all.' };
+  const fix = await engineAddFix(env, { ns: p.ns, task: ['copy', 'tiles', 'any'].indexOf(body.task) >= 0 ? body.task : 'copy', scope: 'client', wrong: '', right: rule, why: stStr(body.why || body.instruction, 300) || 'a standing preference from the Studio', source: 'studio:' + p.id + (campaign ? ':campaign:' + campaign : ''), rule, exemplar: '' }, who);
+  await stEvent(env, p.id, 'remembered', { eid, text: (scope === 'campaign' ? 'Saved as a campaign preference for ' + campaign : 'Saved as a lasting ' + p.ns.toUpperCase() + ' rule') + ': "' + rule + '". It shapes every later build' + (scope === 'campaign' ? ' on this campaign' : ' for this client') + ' and can be switched off in the Learned panel.', fix: fix.id, scope, campaign }, who);
+  return { ok: true, saved: true, eid, fix: fix.id, scope, campaign };
+}
+/** Confirm or decline a proposed render: confirmed, one render job per asset is queued (idempotent on the proposal). */
+async function stProposalDecide(env, p, body, who) {
+  const eid = stClean(body.eid, 24);
+  const row = eid ? await env.MIND_DB.prepare("SELECT * FROM studio_events WHERE project=? AND kind='proposal' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + eid + '"%').first() : null;
+  if (!row) return { error: 'unknown_proposal', status: 404 };
+  const prop = pjs(row.data, {});
+  const already = await env.MIND_DB.prepare("SELECT id FROM studio_events WHERE project=? AND kind='decided' AND data LIKE ? LIMIT 1").bind(p.id, '%"eid":"' + eid + '"%').first();
+  if (already) return { error: 'already_decided', status: 409, detail: 'This proposal was answered already.' };
+  if (body.decision !== 'do') { await stEvent(env, p.id, 'decided', { eid, decision: 'declined', text: 'Not that: the render was not run.' }, who); return { ok: true, decision: 'declined', jobs: [] }; }
+  const ctx = await stContext(env, p, { channels: [] });
+  const jobs = [];
+  for (const id of (prop.assets || [])) {
+    const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) continue;
+    const cur = await stCurrent(env, pair.asset); if (!cur) continue;
+    const template = (cur.layout && cur.layout.template) || stTemplateFor(ctx.kit, p.campaign);
+    const r = await stJobCreate(env, { project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt: stArtPrompt({ visual: stStr(prop.visual, 300) }, null, ctx, pair.asset.format, template), aspect: pair.asset.format, size: env.IMAGE_SIZE || '2K', note: 'directed: ' + stStr(prop.instruction, 60) }, idem: 'render:' + eid + ':' + pair.asset.id }, who);
+    if (r.job) jobs.push(r.job.id);
+  }
+  await stEvent(env, p.id, 'decided', { eid, decision: 'do', jobs, text: 'Confirmed: ' + jobs.length + ' render' + (jobs.length === 1 ? '' : 's') + ' queued as jobs; text and layout stay as they are. Design approval on those assets will need renewing when the image lands.', render: true }, who);
+  return { ok: true, decision: 'do', jobs };
+}
 /** Stage dispatch for the production stages; the render stage and echo stay in stJobRun. */
 async function stStageRun(env, job, done, fail) {
   const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
@@ -7416,6 +7636,7 @@ async function stStageRun(env, job, done, fail) {
     else if (job.stage === 'direct') result = await stDirectStage(env, job, p, log);
     else if (job.stage === 'copy') result = await stCopyStage(env, job, p, log);
     else if (job.stage === 'export') result = await stExportStage(env, job, p, log);
+    else if (job.stage === 'revise') result = await stReviseStage(env, job, p, log);
     else return done('failed', { error: 'unknown stage ' + job.stage });
     const again = await stJob(env, job.id);
     if (!again || again.state !== 'running') return again;
@@ -9123,6 +9344,9 @@ export default {
     //             stages extract {source} / direct {n,instruction} / copy {channels,formats,deliverable,template,instruction,direction,render} / export {assets}
     //             POST /studio/render/save {asset,version,imageB64,mime}   the browser's composition PNG for a version, stored for export (full)
     //             POST /studio/note {project,text,target}   a team note on the thread (full)
+    //    Phase 3: stage revise {target asset|family|set, asset, instruction} - a text or layout change (versions, no render), alternatives (offered),
+    //             a render (proposed), an adaptation (new assets, image reused) or a question; a standing preference is offered on the event
+    //             POST /studio/remember {project,eid,scope campaign|client|none,rule,task}   POST /studio/proposal {project,eid,decision do|decline} (full)
     if (path === '/studio' || path.startsWith('/studio/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
@@ -9134,8 +9358,9 @@ export default {
           if (path === '/studio/status') return jsonResp(await stStatus(env));
           if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit') }));
           if (path === '/studio/get') {
-            const id = String(qf('id')).slice(0, 40);
-            const p = /^(rp|cs):/.test(id) ? await stLegacyGet(env, id) : await stGet(env, id, { light: qf('light') === '1' });
+            const id = String(qf('id')).slice(0, 48);
+            const p = /^(rp|cs|ks):/.test(id) ? await stLegacyGet(env, id) : await stGet(env, id, { light: qf('light') === '1' });
+            if (p) { delete p._versions; delete p._sid; }
             return p ? jsonResp(Object.assign({ ok: true }, p)) : jsonResp({ error: 'unknown_project' }, 404);
           }
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
@@ -9249,8 +9474,17 @@ export default {
           const cur = await stCurrent(env, pair.asset); if (!cur) return jsonResp({ error: 'no_version' }, 400);
           await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(sb.reason, 400), who, now).run();
           await stBump(env, pair.project.id);
-          await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance.', asset: pair.asset.id, version: cur.id, part, decision }, who);
+          let outcome = '';
+          if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
+          await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome }, who);
           return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset) });
+        }
+        if (path === '/studio/remember' || path === '/studio/proposal') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          const r = path === '/studio/remember' ? await stRemember(env, p, sb, who) : await stProposalDecide(env, p, sb, who);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '' }, r.status || 400);
+          await stBump(env, p.id);
+          return jsonResp(r);
         }
         if (path === '/studio/note') {
           // a note to the team on the project thread: recorded, never interpreted (direction by instruction is Phase 3)
@@ -9272,7 +9506,8 @@ export default {
         }
         if (path === '/studio/import') {
           const r = await stImport(env, sb.legacy, who);
-          if (!r) return jsonResp({ error: 'unknown_legacy', detail: 'legacy is rp:<release pack id> or cs:<content set id>.' }, 404);
+          if (!r) return jsonResp({ error: 'unknown_legacy', detail: 'legacy is rp:<release pack id>, cs:<content set id> or ks:<session id>.' }, 404);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '' }, 400);
           return jsonResp(Object.assign({ ok: true, existing: r.existing }, await stGet(env, r.id, { light: true })));
         }
         if (path === '/studio/job') {
@@ -10232,6 +10467,7 @@ export default {
       }
       const ver = parseInt(reqUrl.searchParams.get('ver'), 10);
       const img = await kvGet(env.AXIOM_KV, 'imgsess_' + sid + '_v' + ver);
+      if (img && reqUrl.searchParams.get('raw') === '1') { let im = {}; try { im = JSON.parse(img); } catch (e) {} if (im.b64) return new Response(bufFromB64(im.b64), { headers: Object.assign({}, CORS, { 'Content-Type': im.mime || 'image/png', 'Cache-Control': 'private, max-age=600' }) }); }
       return img ? new Response('{"ok":true,"img":' + img + '}', { headers: CORS })
         : jsonResp({ ok: false, error: 'not_found' }, 404);
     }
