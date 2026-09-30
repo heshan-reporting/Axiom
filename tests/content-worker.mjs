@@ -118,6 +118,8 @@ globalThis.fetch = async (url, init) => {
       out = { items: ns.map(n => ({ n, body: 'REVISED(' + n + '): ' + (standing ? 'Mining paid 30 per cent of all company taxes - more than any other industry. That\'s the difference Australian mining makes.' : 'Greater Bendigo benefits from mining: $96.2 million in salaries. That\'s the difference Australian mining makes.'), cta: 'Learn more: thatsmining.com.au', link: 'thatsmining.com.au', hashtags: [] })),
         note: 'Changed ' + ns.length + ' piece' + (ns.length === 1 ? '' : 's') + ': ' + instr.slice(0, 40), memory: { standing, rule: standing ? 'Write per cent in body copy, never the % sign.' : '', why: instr, confidence: standing ? 0.92 : 0.15 } };
     } else {
+      if (claude.mode === 'refusal') return new Response(JSON.stringify({ content: [], stop_reason: 'refusal' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (claude.mode === 'prose' || (claude.mode === 'prose-once' && !/Answer with the JSON object only/.test(user))) return new Response(JSON.stringify({ content: [{ type: 'text', text: 'I need the approved facts for this campaign before I can write it. Could you share the figures you want used?' }], stop_reason: 'end_turn' }), { status: 200, headers: { 'content-type': 'application/json' } });
       const plats = ((user.match(/for each of: ([^.]+)\./) || [])[1] || 'facebook').split(',').map(s => s.trim());
       const n = Number((user.match(/Write (\d+) piece/) || [])[1] || 1);
       const items = [];
@@ -307,6 +309,22 @@ await t('the creative shelf: the Content Desk reads <ns>_creative beside the nam
   await req('POST', '/mind/query', { namespace: 'mca', q: 'fuel tax credit myth', creative: true }, 'full-key');
   eq(mindNs.filter(n => n === 'mca_creative').length, 1, 'creative:true adds it: ' + JSON.stringify(mindNs));
   ok(!mindNs.includes('aep_creative'), 'never another client\'s');
+});
+await t('a prose answer is asked again for the JSON and the log quotes what the model said; prose twice fails with the excerpt; a refusal is named', async () => {
+  const logOf = id => env.MIND_DB.table('bridge_log').filter(l => l.job === id).map(l => l.text);
+  claude.mode = 'prose-once';
+  const g = await req('POST', '/content/generate', { ns: 'mca', platforms: ['facebook'], brief: 'Create a Meta ad creative on mining fuel tax credit', n: 1 }); eq(g.status, 200); await drain();
+  const s = await req('GET', '/content/set?id=' + g.d.id); eq(s.d.set.status, 'written'); eq(s.d.set.items.length, 1);
+  ok(logOf(g.d.job).some(l => /did not answer with the JSON items: "I need the approved facts/.test(l) && /asked once more/.test(l)), logOf(g.d.job).join(' | '));
+  ok(/Answer with the JSON object only/.test(claude.calls[claude.calls.length - 1].user), 'the second call carries the nudge');
+  claude.mode = 'prose';
+  const g2 = await req('POST', '/content/generate', { ns: 'mca', platforms: ['facebook'], brief: 'Create a Meta ad creative on mining fuel tax credit', n: 1 }); await drain();
+  eq((await req('GET', '/content/set?id=' + g2.d.id)).d.set.status, 'failed');
+  ok(logOf(g2.d.job).some(l => /compose_unparseable: the model answered in prose twice - "I need the approved facts/.test(l)), logOf(g2.d.job).join(' | '));
+  claude.mode = 'refusal';
+  const g3 = await req('POST', '/content/generate', { ns: 'mca', platforms: ['facebook'], brief: 'Create a Meta ad creative on mining fuel tax credit', n: 1 }); eq(g3.status, 200); await drain();
+  ok(logOf(g3.d.job).some(l => /refusal: the model declined this request/.test(l)), logOf(g3.d.job).join(' | '));
+  claude.mode = '';
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

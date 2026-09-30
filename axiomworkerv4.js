@@ -2930,6 +2930,9 @@ function relJson(txt) {
   const s2 = typeof txt === 'string' ? txt : (txt && (txt.text || JSON.stringify(txt))) || '';
   try { return JSON.parse((s2.match(/\{[\s\S]*\}/) || ['{}'])[0]); } catch (e) { return null; }
 }
+/** What a model actually said, for an error or a log line, when it did not say JSON. */
+function llmExcerpt(raw) { return String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 220) || '(empty answer)'; }
+const JSON_ONLY_NUDGE = '\n\nAnswer with the JSON object only, exactly in the shape given - no prose, no questions, no preamble. If the approved facts or source material you would want are missing, write without figures rather than asking for them.';
 
 // -- Brand kit: one per client, set once, used by every render ----------------
 async function brandKit(env, ns) {
@@ -2998,7 +3001,7 @@ async function releaseExtract(env, text, log) {
   await log('cmd', 'claude: extract claims, numbers, quotes and speaker from the release (' + text.length + ' chars)');
   const raw = await claudeMsg(env, sys, 'MEDIA RELEASE:\n\n' + text.slice(0, 24000), 2200, 60000);
   const j = relJson(raw);
-  if (!j) throw new Error('extract_unparseable');
+  if (!j) throw new Error('extract_unparseable: the model did not answer with JSON - "' + llmExcerpt(raw).slice(0, 150) + '"');
   j.numbers = Array.isArray(j.numbers) ? j.numbers.slice(0, 20) : [];
   j.quotes = Array.isArray(j.quotes) ? j.quotes.slice(0, 12) : [];
   j.claims = Array.isArray(j.claims) ? j.claims.slice(0, 20) : [];
@@ -3039,9 +3042,14 @@ async function releaseCompose(env, pack, opts, log) {
   try { learned = await engineRules(env, ns, 'tiles'); } catch (e) {}
   if (learned.count) await log('info', 'applying ' + learned.count + ' learned correction' + (learned.count === 1 ? '' : 's') + ' for ' + ns);
   await log('cmd', 'claude: compose ' + n + ' tiles in the ' + client + ' voice');
-  const raw = await claudeMsg(env, sys + learned.text, user, 4000, 90000);
-  const j = relJson(raw);
-  if (!j || !Array.isArray(j.tiles) || !j.tiles.length) throw new Error('compose_unparseable');
+  let raw = await claudeMsg(env, sys + learned.text, user, 4000, 90000);
+  let j = relJson(raw);
+  if (!j || !Array.isArray(j.tiles) || !j.tiles.length) {
+    await log('info', 'the model did not answer with the JSON tiles: "' + llmExcerpt(raw) + '" - asked once more for the JSON object only');
+    raw = await claudeMsg(env, sys + learned.text, user + JSON_ONLY_NUDGE, 4000, 90000);
+    j = relJson(raw);
+    if (!j || !Array.isArray(j.tiles) || !j.tiles.length) throw new Error('compose_unparseable: the model answered in prose twice - "' + llmExcerpt(raw).slice(0, 150) + '"');
+  }
   const tiles = j.tiles.slice(0, n).map((t, i) => {
     const kind = RELEASE_KINDS.indexOf(String(t.kind || '').toLowerCase()) >= 0 ? String(t.kind).toLowerCase() : 'lead';
     const headline = String(t.headline || '').trim().slice(0, 90), support = String(t.support || '').trim().slice(0, 180), cta = String(t.cta || '').trim().slice(0, 40);
@@ -3489,9 +3497,15 @@ async function contentCompose(env, set, opts, log) {
     + (opts.instructions ? '\n\nEXTRA INSTRUCTIONS FOR THIS SET:\n' + String(opts.instructions).slice(0, 1500) : '')
     + '\n\nWrite ' + n + ' piece' + (n === 1 ? '' : 's') + ' for each of: ' + platforms.join(', ') + '.';
   await log('cmd', 'claude: write ' + (n * platforms.length) + ' pieces for ' + client + ' (' + platforms.join(', ') + ')');
-  const raw = await claudeMsg(env, sys, user, Math.min(8000, 1200 + n * platforms.length * 500), 120000);
-  const j = relJson(raw);
-  if (!j || !Array.isArray(j.items) || !j.items.length) throw new Error('compose_unparseable');
+  const maxTok = Math.min(8000, 1200 + n * platforms.length * 500);
+  let raw = await claudeMsg(env, sys, user, maxTok, 120000);
+  let j = relJson(raw);
+  if (!j || !Array.isArray(j.items) || !j.items.length) {
+    await log('info', 'the model did not answer with the JSON items: "' + llmExcerpt(raw) + '" - asked once more for the JSON object only');
+    raw = await claudeMsg(env, sys, user + JSON_ONLY_NUDGE, maxTok, 120000);
+    j = relJson(raw);
+    if (!j || !Array.isArray(j.items) || !j.items.length) throw new Error('compose_unparseable: the model answered in prose twice - "' + llmExcerpt(raw).slice(0, 150) + '"');
+  }
   const allowed = [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), (block.campaign ? [block.campaign.name, block.campaign.url, block.campaign.cta, block.campaign.sourceLine, block.campaign.notes].join(' ') : ''), kit.voice, kit.rules].join(' ');
   const items = j.items.slice(0, n * platforms.length + 2).map((t, i) => contentNorm(t, i, ns)).filter(t => t.body);
   items.forEach((it, i) => { it.n = i; it.check = contentItemCheck(it, allowed, block.banned); });
@@ -3556,7 +3570,7 @@ async function contentRevise(env, id, body, who) {
     + (set.brief ? '\n\nORIGINAL BRIEF:\n' + set.brief : '') + (set.source ? '\n\nSOURCE MATERIAL:\n' + String(set.source).slice(0, 8000) : '');
   const raw = await claudeMsg(env, sys, user, Math.min(6000, 800 + targets.length * 500), 90000);
   const j = relJson(raw);
-  if (!j || !Array.isArray(j.items)) return { ok: false, error: 'revise_unparseable', status: 502 };
+  if (!j || !Array.isArray(j.items)) return { ok: false, error: 'revise_unparseable', detail: 'the model did not answer with the edited pieces as JSON: "' + llmExcerpt(raw).slice(0, 200) + '"', status: 502 };
   const allowed = [set.brief, set.source, block.facts.map(f => f.text + ' ' + f.source).join(' '), (block.campaign ? [block.campaign.name, block.campaign.url, block.campaign.cta, block.campaign.sourceLine, block.campaign.notes].join(' ') : ''), kit.voice, kit.rules, instruction].join(' ');
   const changed = []; const before = {};
   j.items.forEach(e => {
@@ -7154,7 +7168,7 @@ async function stExtractStage(env, job, p, log) {
     await log('cmd', 'claude ' + stModel(env, 'extract') + ': claims, figures, quotations and a proposed brief from ' + Object.keys(passages).length + ' passages');
     const r = await stClaude(env, { role: 'extract', system: sys, user, maxTok: 6000, timeoutMs: 120000, log });
     const j = relJson(r.text);
-    if (!j || !Array.isArray(j.claims)) throw new Error('extract_unparseable: the model did not return the ledger as JSON');
+    if (!j || !Array.isArray(j.claims)) throw new Error('extract_unparseable: the model did not return the ledger as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
     model = r.model;
     const verified = stLedgerVerify(j.claims, passages);
     claims = stLedgerMerge(verified, local);
@@ -7290,7 +7304,7 @@ async function stDirectStage(env, job, p, log) {
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + n + ' directions for an open brief, grounded in ' + led.claims.length + ' ledger claims and the client context');
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log });
   const j = relJson(r.text);
-  if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON');
+  if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   const known = new Set(led.claims.map(c => c.id)); const ids = []; const rows = []; let similar = 0;
   const dirs = j.directions.slice(0, 3).map(d => ({ title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
   dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6) { d.similar = dirs[k].title; similar++; } });
@@ -7328,7 +7342,7 @@ async function stCopyStage(env, job, p, log) {
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': write ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' (' + channels.map(c => c + ' ' + formats[c]).join(', ') + ')' + (direction ? ' from direction "' + direction.title + '"' : ' from the brief') + (deliverable === 'copy' ? ', copy only' : ''));
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 8000, timeoutMs: 170000, log });
   const j = relJson(r.text);
-  if (!j || !Array.isArray(j.pieces) || !j.pieces.length) throw new Error('copy_unparseable: the model did not return the pieces as JSON');
+  if (!j || !Array.isArray(j.pieces) || !j.pieces.length) throw new Error('copy_unparseable: the model did not return the pieces as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   const allowed = [led.text, ctx.block.facts.map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(p.brief || {}), ctx.block.campaign ? [ctx.block.campaign.name, ctx.block.campaign.url, ctx.block.campaign.cta, ctx.block.campaign.sourceLine].join(' ') : '', ctx.kit.voice || '', ctx.kit.rules || ''].join(' ');
   const known = new Set(led.claims.map(c => c.id));
   const assets = [], versions = [], renders = []; let flagged = 0; const now = Date.now();
@@ -7660,7 +7674,10 @@ async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
   });
   const d = await r.json().catch(() => ({}));
   if (d.error) throw new Error(String(d.error.message || 'anthropic_error').slice(0, 160));
-  return (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  const text = (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+  if (d.stop_reason === 'refusal') throw new Error('refusal: the model declined this request' + (text ? ' - "' + llmExcerpt(text).slice(0, 160) + '"' : ''));
+  if (!text && d.stop_reason === 'max_tokens') throw new Error('empty_answer: the model reached max_tokens (' + maxTok + ') before writing any text');
+  return text;
 }
 async function gnewsSweep(qq, hours, max) {
   try {
