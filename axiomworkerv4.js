@@ -5942,7 +5942,8 @@ const NARR_SIM = 0.86;          // cosine to join, with a shared leading issue o
 const NARR_SIM_STRICT = 0.91;   // ...or this close without one (near-duplicates)
 const NARR_FREEZE = 20;         // the centroid stops moving after this many rows, so a narrative cannot drift into "politics in general"
 const NARR_BIG = 60;            // past this size the bar rises by 0.03: a large narrative must be tight to keep growing
-const NARR_MAX = 200;           // past this size it is a topic, not a narrative: it stops taking rows, is marked broad and hidden
+const NARR_MAX_DEFAULT = 600;   // past this size it is a topic, not a narrative: it stops taking rows, is marked broad and hidden (var NARRATIVE_MAX_ROWS)
+function narrMax(env) { const v = parseInt(env && env.NARRATIVE_MAX_ROWS, 10); return v >= 100 && v <= 5000 ? v : NARR_MAX_DEFAULT; }
 function narrSims(env) {
   const a = parseFloat(env && env.NARRATIVE_SIM), b = parseFloat(env && env.NARRATIVE_SIM_STRICT);
   return [a >= 0.5 && a <= 0.99 ? a : NARR_SIM, b >= 0.5 && b <= 0.99 ? b : NARR_SIM_STRICT];
@@ -6038,7 +6039,7 @@ async function narrRefresh(env, id, now) {
   const n24 = t.n24 || 0, nprev = t.nprev || 0;
   const velocity = nprev ? Math.round((n24 / nprev) * 100) / 100 : (n24 ? n24 : 0);
   const fresh = (t.first_ts || 0) > now - 48 * 3600000;
-  const status = t.n >= NARR_MAX ? 'broad' : t.n < NARR_LABEL_MIN ? 'new' : (fresh && t.n >= NARR_ALERT_MIN) ? 'emerging' : (t.last_ts < now - 36 * 3600000 || (nprev && n24 < nprev / 2)) ? 'fading' : (n24 > nprev && n24 >= 3) ? 'growing' : 'steady';
+  const status = t.n >= narrMax(env) ? 'broad' : t.n < NARR_LABEL_MIN ? 'new' : (fresh && t.n >= NARR_ALERT_MIN) ? 'emerging' : (t.last_ts < now - 36 * 3600000 || (nprev && n24 < nprev / 2)) ? 'fading' : (n24 > nprev && n24 >= 3) ? 'growing' : 'steady';
   await db.prepare('UPDATE narratives SET n=?, n24=?, nprev=?, velocity=?, first_ts=?, last_ts=?, platforms=?, spread=?, channels=?, amplifiers=?, sentiment=?, side=?, entities=?, status=?, updated=? WHERE id=?')
     .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, now, id).run();
   return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts };
@@ -6158,7 +6159,7 @@ async function narrativesRun(env, opts) {
   const rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
   // candidates: live narratives of two or more rows, plus singletons started in the last day (a
   // singleton older than that has had its chance); bounded so a run stays inside its time
-  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, NARR_MAX, now - 24 * 3600000).all()).results || [];
+  const liveRows = (await db.prepare('SELECT id, issues, issue_counts, entities, n, first_ts, last_ts, terms, centroid, dim FROM narratives WHERE last_ts>? AND muted=0 AND n<? AND (n>=2 OR first_ts>?) ORDER BY n DESC, last_ts DESC LIMIT 1500').bind(now - NARR_LIVE_H * 3600000, narrMax(env), now - 24 * 3600000).all()).results || [];
   const live = liveRows.map(r => { let ic = pjs(r.issue_counts, {}); if (!Object.keys(ic).length) { ic = {}; pjs(r.issues, []).forEach(x => { ic[x] = 1; }); } return { id: r.id, ic, top: new Set(narrTopIssues(ic, 3)), ents: new Set(pjs(r.entities, [])), n: r.n || 0, vec: b64f32(r.centroid), tok: pjs(r.terms, {}), first_ts: r.first_ts || 0, last_ts: r.last_ts || 0, fresh: false, touched: false }; });
   const [simA, simS] = narrSims(env);
   const out = { ok: true, scanned: rows.length, placed: 0, joined: 0, started: 0, skipped: 0, unanchored: 0, live: live.length, named: 0, calls: 0, alerts: 0, mode: env.AI ? 'embeddings' : 'terms', errors: [] };
@@ -6179,7 +6180,7 @@ async function narrativesRun(env, opts) {
     const v = vecs ? vecs[i] : null;
     let best = null, bestSim = 0;
     for (const c of live) {
-      if (c.n >= NARR_MAX) continue;   // a topic, not a narrative: it takes no more rows
+      if (c.n >= narrMax(env)) continue;   // a topic, not a narrative: it takes no more rows
       const sim = v && c.vec ? vecCos(v, c.vec) : tokenCos(tv, c.tok);
       // the anchor is a shared LEADING issue (the three its rows name most) or a shared entity, never any issue ever seen
       const anchor = [...issues].some(x => c.top.has(x)) || [...ents].some(x => c.ents.has(x));
@@ -6225,8 +6226,8 @@ async function narrativesRun(env, opts) {
   for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
   for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
   await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment or a row naming no issue or entity, and near nothing live)' : ''));
-  // a cluster at or past NARR_MAX is a topic from this moment, whether or not it is recounted this run
-  try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, NARR_MAX).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
+  // a cluster at or past narrMax(env) is a topic from this moment, whether or not it is recounted this run
+  try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, narrMax(env)).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
   // recount what changed, plus narratives that need their pace re-read
   const stale = ((await db.prepare('SELECT id FROM narratives WHERE muted=0 AND last_ts>? AND updated<?').bind(now - 7 * 86400000, now - 6 * 3600000).all()).results || []).map(r => r.id);
   const grown = live.filter(c => c.touched && c.n >= 2).sort((a, b) => b.n - a.n).map(c => c.id);
@@ -6312,13 +6313,13 @@ async function narrativeOne(env, id) {
 }
 async function narrativesStatus(env) {
   const now = Date.now();
-  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, NARR_MAX).first()) || {};
+  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, narrMax(env)).first()) || {};
   const placed = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ts>?) n24 FROM narrative_items WHERE narrative<>\'\'').bind(now - 86400000).first()) || {};
   const kinds = SENT_KINDS.map(() => '?').join(',');
   const backlog = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ')').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first()) || {};
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'narr_last')) || 'null'); } catch (e) { last = null; }
   const sims = narrSims(env);
-  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: NARR_MAX };
+  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
 }
 
 // ============================================================================
@@ -8069,10 +8070,10 @@ export default {
           return jsonResp({ ok: true, narrative: narrRow(await env.MIND_DB.prepare('SELECT * FROM narratives WHERE id=?').bind(id).first()) });
         }
         if (path === '/narratives/reset') {
-          // {broad:true} (default) dissolves clusters at or past NARR_MAX rows; {all:true, confirm:'reset'} clears every
+          // {broad:true} (default) dissolves clusters at or past narrMax(env) rows; {all:true, confirm:'reset'} clears every
           // narrative. Rows go back to the unplaced pool and the ticks place them again under the current rules.
           const all = nrb.all === true && nrb.confirm === 'reset';
-          const ids = all ? null : ((await env.MIND_DB.prepare('SELECT id FROM narratives WHERE n>=?').bind(Math.max(20, parseInt(nrb.min, 10) || NARR_MAX)).all()).results || []).map(r => r.id);
+          const ids = all ? null : ((await env.MIND_DB.prepare('SELECT id FROM narratives WHERE n>=?').bind(Math.max(20, parseInt(nrb.min, 10) || narrMax(env))).all()).results || []).map(r => r.id);
           let narratives = 0, items = 0;
           if (all) {
             const c = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narratives').first()) || {}; const ci = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM narrative_items').first()) || {};

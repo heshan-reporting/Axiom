@@ -123,6 +123,9 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   NARRATIVE_SIM / NARRATIVE_SIM_STRICT (plain text vars, optional: the cosine a
 #                      row needs to join a narrative with a shared leading issue
 #                      or entity / without one; defaults 0.86 / 0.91 for bge-base)
+#   NARRATIVE_MAX_ROWS (plain text var, optional: rows at which a cluster is a
+#                      topic rather than a narrative and stops taking rows;
+#                      default 600)
 #   NARRATIVE_DAILY_CALLS (plain text var, optional: naming calls a day,
 #                      default 60; each call names up to 5 narratives. The
 #                      placement itself uses Workers AI embeddings, not Claude,

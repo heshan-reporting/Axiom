@@ -536,8 +536,10 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   `NARRATIVE_SIM` / `NARRATIVE_SIM_STRICT` override). Three guards stop a
   narrative drifting into "politics in general": the centroid freezes after
   `NARR_FREEZE` = 20 rows; past `NARR_BIG` = 60 rows the bar rises by 0.03;
-  at `NARR_MAX` = 200 rows it is a topic, not a narrative - status `broad`,
-  takes no more rows, hidden from the list and never named. `POST
+  at `narrMax(env)` rows (var `NARRATIVE_MAX_ROWS`, default 600 - a huge
+  story can legitimately run to hundreds of rows) it is a topic, not a
+  narrative - status `broad`, takes no more rows, hidden from the list and
+  never named. `POST
   /narratives/reset {broad:true}` (full; the **Dissolve broad clusters**
   button) frees such clusters' rows to be placed again; `{all:true,
   confirm:'reset'}` clears everything. The candidates are the narratives
