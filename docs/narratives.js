@@ -67,6 +67,7 @@
       <select value=${f.platform} onChange=${e => set('platform', e.target.value)} aria-label="Channel"><option value="">Every channel</option>${PLATFORMS.map(p => html`<option key=${p} value=${p}>${PLAT_LABEL[p]}</option>`)}</select>
       <select value=${f.status} onChange=${e => set('status', e.target.value)} aria-label="Status"><option value="">Any status</option>${Object.keys(STATUS_LABEL).map(s => html`<option key=${s} value=${s}>${STATUS_LABEL[s]}</option>`)}</select>
       <select value=${f.side} onChange=${e => set('side', e.target.value)} aria-label="Stance"><option value="">Any stance</option><option value="hostile">Hostile to the client</option><option value="supportive">Supportive</option><option value="mixed">Mixed</option><option value="unknown">Unread</option></select>
+      <select value=${f.scope} onChange=${e => set('scope', e.target.value)} aria-label="Relevance"><option value="">Client issues and Australian politics</option><option value="client">Client issues only</option><option value="off">Off-topic (hidden by default)</option></select>
       <select value=${f.sort} onChange=${e => set('sort', e.target.value)} aria-label="Sort"><option value="velocity">Fastest moving</option><option value="n">Largest</option><option value="new">Newest</option><option value="latest">Latest activity</option></select>
       <input class="src-q" placeholder="Search labels and terms" value=${f.q} onInput=${e => set('q', e.target.value)} />
       <span class="src-count">${count} narratives</span>
@@ -95,7 +96,7 @@
     return html`<div class="sn-tablewrap"><table class="sn-table nr-table">
       <thead><tr><th>Narrative</th><th>Toward client</th><th class="num">Rows</th><th class="num">Pace</th><th>Spread</th><th>First seen</th><th>Split</th><th>Status</th></tr></thead>
       <tbody>${list.map(n => html`<tr key=${n.id} class=${'sn-row' + (pick === n.id ? ' on' : '')} onClick=${() => onPick(n.id)}>
-        <td><div class=${'lbl' + (n.label ? '' : ' un')}>${n.pinned ? html`<span title="pinned">* </span>` : null}${n.label || unnamed(n)}${touched && touched[n.id] ? html`<span class="nr-chip" title="rows this narrative gained in the last run from here">+${touched[n.id].added}${touched[n.id].started ? ' new' : ''}</span>` : null}</div><div class="m">${(n.issueLabels || []).join(', ')}${n.client ? ' / ' + n.client : ''}${n.proponents ? ' / ' + n.proponents : ''}</div></td>
+        <td><div class=${'lbl' + (n.label ? '' : ' un')}>${n.pinned ? html`<span title="pinned">* </span>` : null}${n.label || unnamed(n)}${touched && touched[n.id] ? html`<span class="nr-chip" title="rows this narrative gained in the last run from here">+${touched[n.id].added}${touched[n.id].started ? ' new' : ''}</span>` : null}</div><div class="m">${n.scope === 'off' ? html`<span class="nr-off" title=${n.scopeWhy || 'judged off-topic for the agency and its clients'}>off-topic</span> ` : n.scope === 'politics' ? html`<span class="nr-scope" title=${n.scopeWhy || ''}>politics</span> ` : null}${(n.issueLabels || []).join(', ')}${n.client ? ' / ' + n.client : ''}${n.proponents ? ' / ' + n.proponents : ''}</div></td>
         <td><${Side} s=${n.side} /></td>
         <td class="num" title=${n.n24 + ' in the last 24h, ' + n.nprev + ' the day before'}>${fmtN(n.n)}</td>
         <td class="num"><span class="nr-pace" style=${{ color: n.nprev && n.velocity >= 2 ? 'var(--x-neg)' : n.nprev && n.velocity < 0.5 ? 'var(--t3)' : undefined }}>${pace(n)}</span></td>
@@ -119,7 +120,7 @@
     const merge = async () => { if (!mergeInto || !confirm('Fold this narrative and its rows into the chosen one?')) return; setBusy(true); try { await call('/narratives/merge', { into: mergeInto, from: id }); toastMsg('Merged'); onChanged(); onOpen(mergeInto); } catch (e) { toastMsg(e.message, true); } setBusy(false); };
     return html`<div class="sn-drawer">
       <div class="sn-drawerhead"><div><div class="sn-drawertitle">${d.label || 'Unnamed narrative'}</div><div class="src-name"><div class="m">${[(d.issueLabels || []).join(', '), d.client, d.proponents ? 'carried by ' + d.proponents : ''].filter(Boolean).join(' / ')}</div></div></div><button class="btn sm ghost" onClick=${onClose}>Close</button></div>
-      <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><${Status} s=${d.status} /><${Side} s=${d.side} />${d.alerted ? html`<span class="nr-status">alerted ${ago(d.alert_ts)} ago</span>` : null}${d.muted ? html`<span class="nr-status">muted</span>` : null}</div>
+      <div style=${{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}><${Status} s=${d.status} /><${Side} s=${d.side} />${d.scope ? html`<span class=${'nr-status' + (d.scope === 'off' ? ' off' : '')} title=${d.scopeWhy || ''}>${d.scope === 'off' ? 'off-topic' : d.scope === 'client' ? 'client issue' : 'Australian politics'}${d.relevance >= 0 ? ', relevance ' + d.relevance + '/3' : ''}</span>` : null}${d.alerted ? html`<span class="nr-status">alerted ${ago(d.alert_ts)} ago</span>` : null}${d.muted ? html`<span class="nr-status">muted</span>` : null}</div>
       ${d.summary ? html`<div class="nr-claim" style=${{ color: 'var(--t1)', fontSize: 12.5 }}>${d.summary}</div>` : null}
       ${d.claim ? html`<div class="sn-sub">The claim</div><div class="nr-claim">${d.claim}</div>` : null}
       ${d.counter_claim ? html`<div class="sn-sub">The counter-claim</div><div class="nr-claim counter">${d.counter_claim}</div>` : null}
@@ -167,7 +168,7 @@
 
   function NarrativesApp() {
     const [status, setStatus] = useState(null);
-    const [f, setF] = useState({ days: 7, issue: '', platform: '', status: '', side: '', sort: 'velocity', q: '', ns: '', entity: '' });
+    const [f, setF] = useState({ days: 7, issue: '', platform: '', status: '', side: '', sort: 'velocity', q: '', ns: '', entity: '', scope: '' });
     const [list, setList] = useState(null);
     const [pick, setPick] = useState('');
     const [job, setJob] = useState(null);
@@ -179,9 +180,9 @@
     const canWrite = !(window.AX_ROLE === 'read');
     const loadStatus = useCallback(async () => { try { setStatus(await call('/narratives/status')); } catch (e) { setErr(e.message); } }, []);
     const load = useCallback(async () => {
-      try { const d = await call('/narratives?days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&platform=' + encodeURIComponent(f.platform) + '&status=' + encodeURIComponent(f.status) + '&side=' + encodeURIComponent(f.side) + '&sort=' + f.sort + '&q=' + encodeURIComponent(f.q.trim()) + '&ns=' + encodeURIComponent(f.ns || '') + '&entity=' + encodeURIComponent(f.entity || '') + '&limit=120'); setList(d.narratives || []); setErr(''); }
+      try { const d = await call('/narratives?days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&platform=' + encodeURIComponent(f.platform) + '&status=' + encodeURIComponent(f.status) + '&side=' + encodeURIComponent(f.side) + '&sort=' + f.sort + '&q=' + encodeURIComponent(f.q.trim()) + '&ns=' + encodeURIComponent(f.ns || '') + '&entity=' + encodeURIComponent(f.entity || '') + '&scope=' + encodeURIComponent(f.scope || '') + '&limit=120'); setList(d.narratives || []); setErr(''); }
       catch (e) { setErr(e.message); setList([]); }
-    }, [f.days, f.issue, f.platform, f.status, f.side, f.sort, f.q, f.ns, f.entity]);
+    }, [f.days, f.issue, f.platform, f.status, f.side, f.sort, f.q, f.ns, f.entity, f.scope]);
     useScope(sc => setF(cur => Object.assign({}, cur, { issue: sc.issue || '', platform: sc.platform || '', ns: sc.ns || '', entity: sc.entity || '', days: sc.days || cur.days })));
     useEffect(() => { loadStatus(); return () => { if (stopRef.current) stopRef.current(); }; }, [loadStatus]);
     useEffect(() => { load(); }, [load]);

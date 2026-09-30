@@ -5965,6 +5965,9 @@ async function ensureNarratives(env) {
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS narrative_items_n ON narrative_items(narrative, ts)'),
   ]);
   try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN issue_counts TEXT DEFAULT '{}'").run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN scope TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN relevance INTEGER DEFAULT -1").run(); } catch (e) { /* already there */ }
+  try { await env.MIND_DB.prepare("ALTER TABLE narratives ADD COLUMN scope_why TEXT DEFAULT ''").run(); } catch (e) { /* already there */ }
   NARR_READY = true;
   return true;
 }
@@ -6004,7 +6007,8 @@ function narrRow(r) {
   return { id: r.id, label: r.label || '', summary: r.summary || '', claim: r.claim || '', counter_claim: r.counter_claim || '', proponents: r.proponents || '', issues: pjs(r.issues, []), entities: pjs(r.entities, []), ns: r.ns || '', side: r.side || 'unknown',
     n: r.n || 0, n24: r.n24 || 0, nprev: r.nprev || 0, velocity: Number(r.velocity) || 0, first_ts: r.first_ts || 0, first_item: r.first_item || 0, first_platform: r.first_platform || '', first_channel: r.first_channel || '', last_ts: r.last_ts || 0,
     platforms: pjs(r.platforms, {}), channels: pjs(r.channels, []), spread: pjs(r.spread, []), amplifiers: pjs(r.amplifiers, []), sentiment: pjs(r.sentiment, {}), counter: r.counter || '', status: r.status || 'new',
-    alerted: !!r.alerted, alert_ts: r.alert_ts || 0, muted: !!r.muted, pinned: !!r.pinned, edited: !!r.edited, terms: pjs(r.terms, {}), labelled_n: r.labelled_n || 0, model: r.model || '', created: r.created || 0, updated: r.updated || 0 };
+    alerted: !!r.alerted, alert_ts: r.alert_ts || 0, muted: !!r.muted, pinned: !!r.pinned, edited: !!r.edited, terms: pjs(r.terms, {}), labelled_n: r.labelled_n || 0, model: r.model || '', created: r.created || 0, updated: r.updated || 0,
+    scope: r.scope || '', relevance: r.relevance == null ? -1 : Number(r.relevance), scopeWhy: r.scope_why || '' };
 }
 function narrDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
 async function narrBudget(env) {
@@ -6045,7 +6049,7 @@ async function narrRefresh(env, id, now) {
     .bind(t.n, n24, nprev, velocity, t.first_ts, t.last_ts, JSON.stringify(platforms), JSON.stringify(spread), JSON.stringify(channels), JSON.stringify(amplifiers), JSON.stringify(sentiment), stand, JSON.stringify(entities), status, now, id).run();
   return { n: t.n, n24, nprev, velocity, status, side: stand, platforms, spread, sentiment, first_ts: t.first_ts, last_ts: t.last_ts };
 }
-const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"]}]}.';
+const NARR_SYS = 'You name political narratives for an Australian intelligence platform. A narrative is a claim or story that people keep repeating in different words. For each numbered cluster of texts write: label - at most twelve words, the claim as its proponents would put it, no hashtags, no quotation marks; summary - two plain sentences: what is being said, and in general terms by whom (parties, groups, outlets, ordinary posters - never a private individual\'s name); claim - one sentence, the core assertion; counter - one sentence, the strongest opposing claim as its own proponents would put it, or an empty string when there is none; proponents - a short phrase for who tends to push it (e.g. "Greens and climate groups", "mining industry and Coalition MPs", "Reddit posters"); issues - the ids from the ISSUES list that the cluster is really about, at most three; scope - "client" when it is really about an issue in the ISSUES list, "politics" when it is Australian politics, government, public policy, the economy or finance but not a listed issue, "off" when it is celebrity, sport, entertainment, lifestyle, ordinary crime, weather or foreign news with no Australian political actor, policy or economic stake (a kidnapping, a footballer, a TV host - off, unless a politician or a policy is the point); relevance - 0 to 3, how much an Australian public-affairs agency and its clients should care; why - six words on the scope call. Reply with strict JSON only: {"clusters":[{"n":1,"label":"...","summary":"...","claim":"...","counter":"...","proponents":"...","issues":["ftc"],"scope":"client","relevance":3,"why":"..."}]}.';
 async function narrLabelBatch(env, clusters, log) {
   const issuesList = CLIENT_ISSUES.map(ci => ci.id + ' = ' + ci.label).join('; ');
   const user = 'ISSUES: ' + issuesList + '\n\n' + clusters.map((c, i) => '[' + (i + 1) + '] shared terms: ' + c.terms.join(', ') + '; channels: ' + c.chan + '; ' + c.n + ' rows\n' + c.samples.map(s => '- ' + s.replace(/\s+/g, ' ').slice(0, 320)).join('\n')).join('\n\n');
@@ -6058,7 +6062,14 @@ async function narrLabelBatch(env, clusters, log) {
   if (!parsed) throw new Error('the naming model answered without valid JSON');
   const known = new Set(CLIENT_ISSUES.map(ci => ci.id));
   const out = [];
-  parsed.clusters.forEach(cl => { const c = clusters[parseInt(cl.n, 10) - 1]; if (!c) return; out.push({ id: c.id, label: String(cl.label || '').replace(/^["']|["']$/g, '').slice(0, 140), summary: String(cl.summary || '').slice(0, 600), claim: String(cl.claim || '').slice(0, 300), counter: String(cl.counter || '').slice(0, 300), proponents: String(cl.proponents || '').slice(0, 120), issues: (Array.isArray(cl.issues) ? cl.issues : []).map(String).filter(x => known.has(x)).slice(0, 3), model }); });
+  parsed.clusters.forEach(cl => {
+    const c = clusters[parseInt(cl.n, 10) - 1]; if (!c) return;
+    const issues = (Array.isArray(cl.issues) ? cl.issues : []).map(String).filter(x => known.has(x)).slice(0, 3);
+    let scope = String(cl.scope || '').toLowerCase(); if (['client', 'politics', 'off'].indexOf(scope) < 0) scope = issues.length ? 'client' : 'politics';
+    if (scope === 'client' && !issues.length) scope = 'politics';
+    let relevance = parseInt(cl.relevance, 10); if (!(relevance >= 0 && relevance <= 3)) relevance = scope === 'off' ? 0 : scope === 'client' ? 3 : 2;
+    out.push({ id: c.id, label: String(cl.label || '').replace(/^["']|["']$/g, '').slice(0, 140), summary: String(cl.summary || '').slice(0, 600), claim: String(cl.claim || '').slice(0, 300), counter: String(cl.counter || '').slice(0, 300), proponents: String(cl.proponents || '').slice(0, 120), issues, scope, relevance, why: String(cl.why || '').slice(0, 120), model });
+  });
   return out;
 }
 /** Name the narratives that have earned it (three rows, or doubled since
@@ -6070,7 +6081,7 @@ async function narrLabel(env, ids, log, left) {
   const rows = [];
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90); const marks = part.map(() => '?').join(',');
-    rows.push(...((await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND status<>\'broad\' AND n>=? AND (label=\'\' OR labelled_n*2<=n)').bind(...part, NARR_LABEL_MIN).all()).results || []));
+    rows.push(...((await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND status<>\'broad\' AND n>=? AND (label=\'\' OR labelled_n*2<=n OR COALESCE(scope,\'\')=\'\')').bind(...part, NARR_LABEL_MIN).all()).results || []));
   }
   const out = { named: 0, calls: 0, errors: [], deferred: 0 };
   if (!rows.length) return out;
@@ -6095,10 +6106,10 @@ async function narrLabel(env, ids, log, left) {
     let named;
     try { named = await narrLabelBatch(env, batch, log); out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); }
     catch (e) { out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); const m = String((e && e.message) || e).slice(0, 160); out.errors.push(m); await log('err', m); continue; }
-    const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, labelled_n=n, model=?, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.model, now, x.id); });
+    const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
     if (stmts.length) await db.batch(stmts);
     out.named += named.length;
-    named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '')));
+    named.forEach(x => log('out', '"' + x.label + '"' + (x.issues.length ? ' [' + x.issues.join(', ') + ']' : '') + ' - ' + x.scope + (x.scope === 'off' ? ', hidden' : '') + (x.why ? ' (' + x.why + ')' : '')));
   }
   return out;
 }
@@ -6118,7 +6129,7 @@ async function narrCounters(env) {
 /** A named narrative that is new, has reached NARR_ALERT_MIN rows and touches a client issue is reported to that client's Slack once. */
 async function narrAlerts(env, log) {
   const db = env.MIND_DB; const now = Date.now();
-  const rows = (await db.prepare("SELECT * FROM narratives WHERE status='emerging' AND alerted=0 AND muted=0 AND label<>'' AND issues<>'[]'").all()).results || [];
+  const rows = (await db.prepare("SELECT * FROM narratives WHERE status='emerging' AND alerted=0 AND muted=0 AND label<>'' AND issues<>'[]' AND COALESCE(scope,'')<>'off'").all()).results || [];
   const sent = [];
   for (const r0 of rows) {
     const r = narrRow(r0);
@@ -6191,7 +6202,11 @@ async function narrativesRun(env, opts) {
       if (sim >= thr && sim > bestSim) { best = c; bestSim = sim; }
     }
     const isComment = /comment/.test(r.kind) || r.kind === 'comments';
-    const canStart = !isComment && (issues.size > 0 || ents.size > 0);
+    // the wide matchers tag anything that mentions a government or a rent; to START a narrative a story
+    // must hit an issue's tight trigger (the Sentinel's own) or name a register entity - a politician, a
+    // party, a client, an opponent. Celebrity, crime and foreign stories without one may join, never seed.
+    const tight = CLIENT_ISSUES.some(ci => ci.rx.test(text));
+    const canStart = !isComment && (tight || ents.size > 0);
     if (!best && !canStart) {
       // a comment, or a row naming no client issue and no entity, is not the seed of a narrative: it
       // may join one that exists; otherwise it is set aside and not looked at again
@@ -6234,7 +6249,7 @@ async function narrativesRun(env, opts) {
   });
   for (let i = 0; i < itemStmts.length; i += 100) await db.batch(itemStmts.slice(i, i + 100));
   for (let i = 0; i < nStmts.length; i += 50) await db.batch(nStmts.slice(i, i + 50));
-  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment or a row naming no issue or entity, and near nothing live)' : ''));
+  await log('out', out.placed + ' rows placed: ' + out.joined + ' joined a live narrative, ' + out.started + ' started one; ' + out.skipped + ' too short to place' + (out.unanchored ? ', ' + out.unanchored + ' set aside (a lone comment, a row naming no issue or entity, or a story that only brushes an issue without a politician, party or client in it - and near nothing live)' : ''));
   // a cluster at or past narrMax(env) is a topic from this moment, whether or not it is recounted this run
   try { await db.prepare("UPDATE narratives SET status='broad', updated=? WHERE n>=? AND status<>'broad'").bind(now, narrMax(env)).run(); } catch (e) { out.errors.push('broad: ' + String((e && e.message) || e).slice(0, 80)); }
   // recount what changed, plus narratives that need their pace re-read
@@ -6288,6 +6303,10 @@ async function narrativesList(env, f) {
   if (f.entity) { w.push('entities LIKE ?'); b.push('%"' + String(f.entity).replace(/[^a-z0-9_-]/gi, '') + '"%'); }
   if (f.q) { w.push("(label LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR terms LIKE ? ESCAPE '\\')"); const l = arcLike(String(f.q).slice(0, 80)); b.push(l, l, l); }
   if (!f.all) { w.push('n>=?'); b.push(2); w.push("status<>'broad'"); }
+  if (f.scope === 'off') w.push("scope='off'");
+  else if (f.scope === 'client') w.push("scope='client'");
+  else if (f.scope === 'politics') w.push("scope IN ('client','politics')");
+  else if (!f.all) w.push("COALESCE(scope,'')<>'off'");
   const sort = f.sort === 'n' ? 'n DESC' : f.sort === 'new' ? 'first_ts DESC' : f.sort === 'latest' ? 'last_ts DESC' : 'velocity DESC, n DESC';
   const limit = Math.min(Math.max(parseInt(f.limit, 10) || 80, 1), 300);
   const rows = (await env.MIND_DB.prepare('SELECT * FROM narratives WHERE ' + w.join(' AND ') + ' ORDER BY pinned DESC, ' + sort + ' LIMIT ?').bind(...b, limit).all()).results || [];
@@ -6323,13 +6342,13 @@ async function narrativeOne(env, id) {
 }
 async function narrativesStatus(env) {
   const now = Date.now();
-  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, narrMax(env)).first()) || {};
+  const c = (await env.MIND_DB.prepare("SELECT SUM(last_ts>? AND n>=2 AND muted=0 AND status<>'broad') live, SUM(status='emerging' AND muted=0) emerging, SUM(status='growing' AND muted=0) growing, SUM(label<>'') named, SUM(alerted=1) alerted, SUM(status='broad' OR n>=?) broad, SUM(n<2) singletons, SUM(scope='off') off, COUNT(*) total FROM narratives").bind(now - NARR_LIVE_H * 3600000, narrMax(env)).first()) || {};
   const placed = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(ts>?) n24 FROM narrative_items WHERE narrative<>\'\'').bind(now - 86400000).first()) || {};
   const kinds = SENT_KINDS.map(() => '?').join(',');
   const backlog = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ')').bind(now - NARR_WINDOW_H * 3600000, ...SENT_KINDS).first()) || {};
   let last = null; try { last = JSON.parse((await kvGet(env.AXIOM_KV, 'narr_last')) || 'null'); } catch (e) { last = null; }
   const sims = narrSims(env);
-  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
+  return { ok: true, live: c.live || 0, emerging: c.emerging || 0, growing: c.growing || 0, named: c.named || 0, alerted: c.alerted || 0, broad: c.broad || 0, singletons: c.singletons || 0, off: c.off || 0, total: c.total || 0, placed: placed.n || 0, placed24: placed.n24 || 0, backlog: backlog.n || 0, embeddings: !!env.AI, naming: !!env.ANTHROPIC_API_KEY, budget: await narrBudget(env), last, perRun: NARR_SCAN, windowHours: NARR_WINDOW_H, alertMin: NARR_ALERT_MIN, sim: sims[0], simStrict: sims[1], maxRows: narrMax(env) };
 }
 
 // ============================================================================
@@ -8039,7 +8058,7 @@ export default {
     }
 
     // -- Narratives: the stories the conversation keeps telling, with origin, spread, pace, split and evidence --
-    //    GET  /narratives?days=&issue=&ns=&platform=&status=&side=&q=&sort=velocity|n|new|latest&all=1&muted=1   (read)
+    //    GET  /narratives?days=&issue=&ns=&platform=&status=&side=&scope=client|politics|off&q=&sort=velocity|n|new|latest&all=1&muted=1   (read; off-topic hidden unless scope=off or all=1)
     //    GET  /narratives/one?id=            the whole narrative: summary, claim, counter, spread, amplifiers, series, every row (read)
     //    GET  /narratives/status             live, emerging, named, alerts, backlog, budget (read)
     //    POST /narratives/run {hours,scan}   place, recount, name, pair, alert - as a job the console tails (full)
@@ -8053,7 +8072,7 @@ export default {
       try {
         await ensureArchive(env); await ensureSentiment(env); await ensureNarratives(env);
         const qf = k => reqUrl.searchParams.get(k) || '';
-        if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), entity: qf('entity'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
+        if (path === '/narratives' && req.method === 'GET') return jsonResp(await narrativesList(env, { days: qf('days'), issue: qf('issue'), ns: qf('ns'), platform: qf('platform'), status: qf('status'), side: qf('side'), entity: qf('entity'), scope: qf('scope'), q: qf('q'), sort: qf('sort'), all: qf('all') === '1', muted: qf('muted') === '1', limit: qf('limit') }));
         if (path === '/narratives/one' && req.method === 'GET') {
           const id = String(qf('id')).replace(/[^a-z0-9]/gi, '').slice(0, 24);
           const r = id ? await narrativeOne(env, id) : null;
@@ -8118,7 +8137,7 @@ export default {
             return jsonResp({ ok: true, what, recounted, remaining: rem, lines });
           }
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the namer is Claude.' }, 501);
-          const eligible = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n)";
+          const eligible = "muted=0 AND edited=0 AND status<>'broad' AND n>=? AND (label='' OR labelled_n*2<=n OR COALESCE(scope,'')='')";
           const cands = ((await db.prepare('SELECT id FROM narratives WHERE ' + eligible + ' ORDER BY n DESC LIMIT 5').bind(NARR_LABEL_MIN).all()).results || []).map(r => r.id);
           const nm = cands.length ? await narrLabel(env, cands, log) : { named: 0, calls: 0, errors: [] };
           if (nm.named) { try { await narrCounters(env); } catch (e) {} try { const al = await narrAlerts(env, log); nm.alerts = al.length; } catch (e) {} }

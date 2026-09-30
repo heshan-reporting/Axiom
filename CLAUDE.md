@@ -555,9 +555,14 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   and latest first). The cron makes several passes while its eight minutes
   last, so a backlog clears in hours. A row
   that joins nothing **starts a narrative only if it is a story and carries
-  an anchor** - a news item, thread or post naming a client issue or a
-  register entity; a lone comment, or a row naming neither, is set aside
-  (narrative `''`, counted as `unanchored`) rather than seeding noise.
+  an anchor** - a news item, thread or post that fires a client issue's
+  **tight** Sentinel trigger (`CLIENT_ISSUES[].rx`, not the wide collection
+  matcher) or names a register entity (a party, a politician, an
+  organisation, a topic); a lone comment, or a row naming neither, is set
+  aside (narrative `''`, counted as `unanchored`) rather than seeding noise.
+  A wide-tag-only story may still join a narrative it resembles, but it
+  cannot seed one, which is what keeps celebrity, crime, sport and weather
+  news from becoming narratives of their own.
   Singletons that never grow are pruned after 48h and their rows freed.
   Without AI bound the run falls back to term vectors (`narrTokens`, stop
   list; thresholds 0.32 / 0.47). Rows under 20 characters are marked with
@@ -584,11 +589,22 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
   at most twelve words as its proponents would put it, summary, claim,
-  counter-claim, proponents, up to three issue ids) - model `NARRATIVE_MODEL`
-  || `SENTIMENT_MODEL` || Opus 5.5, budget KV `narr_calls_<day>` against
-  `NARRATIVE_DAILY_CALLS` (default 120), one retry on invalid JSON; edited or
-  muted narratives are never renamed, and the first issue's client becomes
-  `ns`. `narrCounters()` makes two narratives on the same top issue facing
+  counter-claim, proponents, up to three issue ids, and a **relevance
+  judgment**: `scope` client / politics / off, `relevance` 0-3 and a
+  six-word `why`) - model `NARRATIVE_MODEL` || `SENTIMENT_MODEL` || Opus 5.5,
+  budget KV `narr_calls_<day>` against `NARRATIVE_DAILY_CALLS` (default 120),
+  one retry on invalid JSON; edited or muted narratives are never renamed,
+  and the first issue's client becomes `ns`. `off` is for celebrity, sport,
+  entertainment, ordinary crime, weather and foreign news with no Australian
+  political actor, policy or economic stake; a politician, a minister, a
+  regulator or a company that matters to the economy makes a story
+  `politics` even when the event itself is a kidnapping or a court case.
+  `client` needs at least one client issue (`narrLabelBatch` demotes a client
+  verdict without issues to politics). Stored in `scope`, `relevance`,
+  `scope_why`; narratives named before the judgment existed
+  (`COALESCE(scope,'')=''`) are re-judged by the next naming pass. Off-topic
+  narratives are hidden from the list by default and are never alerted.
+  `narrCounters()` makes two narratives on the same top issue facing
   opposite ways each other's `counter`. `narrAlerts()` posts each emerging,
   named narrative on a client issue once to that client's Slack (`slackPost`,
   the `slack_webhooks` map, `_default` otherwise): label, client, where it was
@@ -596,8 +612,10 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   (`alerted` 1 sent, 2 no webhook). `narrativesCron()` runs every tick after
   the sentiment pass. Day buckets follow Sydney days (`auOffsetMs`).
 - **Routes.** `GET /narratives?days=&issue=&ns=&platform=&status=&side=&q=
-  &sort=velocity|n|new|latest&all=1&muted=1` (pinned first; singletons hidden
-  unless `all`), `/narratives/one?id=` (summary, claim, counter-claim, the
+  &entity=&scope=&sort=velocity|n|new|latest&all=1&muted=1` (pinned first;
+  singletons, broad clusters and `scope='off'` hidden unless `all`; `scope=`
+  `client` shows client-issue narratives only, `politics` client and
+  politics, `off` the hidden off-topic ones), `/narratives/one?id=` (summary, claim, counter-claim, the
   counter-narrative, the spread timeline, rows a day by channel, channels,
   amplifiers, top terms, every row newest first with fit and tone, the
   origin), `/narratives/status` (live, emerging, growing, named, alerts, rows
@@ -610,8 +628,10 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   full role.
 - **In-app.** The Narratives view (`docs/narratives.js`, `#v-narratives`):
   the strip (live, emerging, growing, alerts sent, waiting, naming budget),
-  filters (window, client issue, channel, status, stance, sort, search), the
-  table (label with issues, client and proponents; stance toward the client;
+  filters (window, client issue, channel, status, stance, relevance - client
+  issues / include politics / off-topic only, sort, search), the
+  table (label with issues, client and proponents, `politics` or `off-topic`
+  tags where the namer judged so; stance toward the client;
   rows; pace; the order the channels took it up; first seen; the split bar;
   status) and a drawer per narrative: the claim and counter-claim with a link
   to the counter-narrative, what changed (24h vs before, first seen, hostile
@@ -623,10 +643,10 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   narratives a step; `{what:'name'}` is one naming call of five, then counters
   and alerts; each answers `remaining`) until nothing waits, the budget or the
   account limit is hit, or Stop is pressed. Harnesses in the
-  session scratchpad: `narratives-worker.mjs` (12 placement, naming, counter,
-  alert, list, merge, fallback, budget and cron tests with a semantic stub
-  embedding, a stub Claude and a Slack recorder), `narratives-browser.mjs`
-  (9 browser tests).
+  session scratchpad: `narratives-worker.mjs` (17 placement, naming,
+  relevance, counter, alert, list, merge, fallback, budget, step and cron
+  tests with a semantic stub embedding, a stub Claude and a Slack recorder),
+  `narratives-browser.mjs` (10 browser tests).
 
 ## The interface (Phase 5): restraint, the front page, the scope, drill-down
 
