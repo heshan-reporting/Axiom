@@ -27,7 +27,7 @@ Text: .txt .md .html .htm .csv .json .docx (native), .pdf when `pdftotext` is on
 PATH (brew install poppler). Images: .png .jpg .jpeg .webp (6 MB cap). Anything
 else is listed as skipped so you can see what did not go in.
 """
-import argparse, base64, datetime, hashlib, html, importlib.util, json, os, re, shutil, subprocess, sys, time, zipfile
+import argparse, base64, datetime, hashlib, html, importlib.util, json, os, re, shutil, subprocess, sys, time, urllib.error, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location('reach_reddit', os.path.join(HERE, 'reach-reddit.py'))
@@ -42,6 +42,21 @@ MAX_IMAGE = 6 * 1024 * 1024
 KIT_RX = re.compile(r'(^|[-_])brand[-_]?kit\.json$', re.I)
 FIXES_RX = re.compile(r'(^|[-_])fixes\.json$', re.I)
 KINDS_ORDER = {'kit': 0, 'fixes': 1, 'doc': 2, 'artwork': 3}
+
+
+def http(url, key=None, body=None, timeout=60):
+    """The worker answers an error with a JSON body that names the reason; keep it
+    instead of the bare 'HTTP Error 500' urllib would raise."""
+    try:
+        return rr.http_json(url, key, body, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        try:
+            d = json.loads(e.read().decode() or '{}')
+        except Exception:
+            d = {}
+        if not isinstance(d, dict) or not d.get('error'):
+            d = {'error': 'HTTP %s' % e.code, 'detail': str(e.reason or '')[:160]}
+        return d
 
 
 def sha(path):
@@ -156,12 +171,12 @@ def file_doc(worker, key, ns, path, rel):
     kind = re.sub(r'[^a-z_]', '', (meta.get('kind') or '').lower())[:40] or guess_kind(rel)
     tags = ':'.join(x for x in [ns, re.sub(r'[^a-z0-9_-]', '', (meta.get('campaign') or '').lower())[:24], re.sub(r'[^a-z0-9_, -]', '', (meta.get('platform') or '').lower())[:60]] if x)
     body = {'namespace': ns, 'title': title, 'text': text[:MAX_TEXT], 'kind': kind, 'source': ('pack:' + tags + ':' if meta else 'ingest:') + rel[:240], 'date': date_from(rel, path)}
-    d = rr.http_json(worker.rstrip('/') + '/mind/ingest', key, body, timeout=120)
+    d = http(worker.rstrip('/') + '/mind/ingest', key, body, timeout=120)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
     return {'docId': d.get('docId', ''), 'chunks': d.get('chunks', 0), 'kind': body['kind'], 'chars': len(text)}
 
 
-def file_artwork(worker, key, ns, path, rel):
+def file_artwork(worker, key, ns, path, rel, mind_ns=None):
     size = os.path.getsize(path)
     if size > MAX_IMAGE: raise RuntimeError('larger than 6 MB')
     with open(path, 'rb') as f: b64 = base64.b64encode(f.read()).decode()
@@ -169,10 +184,12 @@ def file_artwork(worker, key, ns, path, rel):
     parts = rel.split(os.sep)
     meta = {'path': rel[:280], 'date': date_from(rel, path), 'campaign': parts[-2] if len(parts) > 1 else ''}
     title = os.path.splitext(os.path.basename(rel))[0].replace('_', ' ').replace('-', ' ').strip()[:200]
-    d = rr.http_json(worker.rstrip('/') + '/engine/artwork', key, {'ns': ns, 'title': title, 'imageB64': b64, 'mime': mime, 'meta': meta}, timeout=180)
+    body = {'ns': ns, 'title': title, 'imageB64': b64, 'mime': mime, 'meta': meta}
+    if mind_ns and mind_ns != ns: body['mindNs'] = mind_ns
+    d = http(worker.rstrip('/') + '/engine/artwork', key, body, timeout=180)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
     a = d.get('artwork') or {}
-    return {'id': a.get('id', ''), 'description': (a.get('description') or '')[:120]}
+    return {'id': a.get('id', ''), 'description': (a.get('description') or '')[:120], 'described': a.get('described', True), 'warning': (d.get('warning') or '')[:200]}
 
 
 def file_kit(worker, key, ns, path, rel):
@@ -183,7 +200,7 @@ def file_kit(worker, key, ns, path, rel):
     if not isinstance(kit, dict): raise RuntimeError('brand-kit.json must hold one object')
     body = {k: v for k, v in kit.items() if k not in ('ns', 'logoB64', 'logoMime', 'removeLogo')}
     body['ns'] = ns
-    d = rr.http_json(worker.rstrip('/') + '/brand/kit', key, body, timeout=120)
+    d = http(worker.rstrip('/') + '/brand/kit', key, body, timeout=120)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
     k = d.get('kit') or {}
     return {'campaigns': len(k.get('campaigns') or []), 'facts': len(k.get('facts') or []), 'banned': len(k.get('banned') or []), 'voice': len(k.get('voice') or ''), 'rules': len(k.get('rules') or '')}
@@ -198,7 +215,7 @@ def file_fixes(worker, key, ns, path, rel, pace=0.3):
     if not isinstance(fixes, list): raise RuntimeError('fixes.json must hold a list')
     have = set()
     try:
-        cur = rr.http_json(worker.rstrip('/') + '/engine/fixes?ns=%s&all=1' % ns, key, None, timeout=60)
+        cur = http(worker.rstrip('/') + '/engine/fixes?ns=%s&all=1' % ns, key, None, timeout=60)
         for fx in cur.get('fixes') or []:
             have.add((fx.get('rule') or '').strip().lower())
     except Exception:
@@ -213,7 +230,7 @@ def file_fixes(worker, key, ns, path, rel, pace=0.3):
         body = {'ns': ns, 'task': fx.get('task') or 'copy', 'scope': fx.get('scope') or 'client', 'wrong': fx.get('wrong') or '', 'right': fx.get('right') or '',
                 'why': fx.get('why') or '', 'source': fx.get('source') or src}
         if rule: body['rule'] = rule; body['exemplar'] = fx.get('exemplar') or fx.get('right') or ''
-        d = rr.http_json(worker.rstrip('/') + '/engine/fix', key, body, timeout=90)
+        d = http(worker.rstrip('/') + '/engine/fix', key, body, timeout=90)
         if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
         added += 1
         if rule: have.add(rule.lower())
@@ -222,7 +239,7 @@ def file_fixes(worker, key, ns, path, rel, pace=0.3):
 
 
 def describe(kind, res):
-    if kind == 'artwork': return ' - ' + res['description']
+    if kind == 'artwork': return ' - ' + (('STORED, NOT DESCRIBED: ' + res['warning']) if res.get('warning') else res['description'])
     if kind == 'kit': return ' - %d campaigns, %d facts, %d banned terms, voice %d chars, rules %d chars' % (res['campaigns'], res['facts'], res['banned'], res['voice'], res['rules'])
     if kind == 'fixes': return ' - %d rules taught, %d already in force' % (res['added'], res['already'])
     return ' - %s, %d chars, %d chunks' % (res['kind'], res['chars'], res['chunks'])
@@ -268,7 +285,7 @@ def main(argv=None):
             if kind == 'kit': res = file_kit(a.worker, a.key, ns, path, rel)
             elif kind == 'fixes': res = file_fixes(a.worker, a.key, ns, path, rel)
             elif kind == 'doc': res = file_doc(a.worker, a.key, mns, path, rel)
-            else: res = file_artwork(a.worker, a.key, ns, path, rel)
+            else: res = file_artwork(a.worker, a.key, ns, path, rel, mns)
             state[rel] = {'sha': h, 'kind': kind, 'filed': stamp, 'result': res}
             save_state(folder, state)
             done += 1

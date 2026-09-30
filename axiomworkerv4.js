@@ -3264,19 +3264,50 @@ async function engineArtwork(env, body, who) {
   const id = engId('a');
   const title = String(body.title || 'Artwork').slice(0, 200);
   const meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
+  // the Mind document may go to the client's creative shelf (<ns>_creative) so only the creative surfaces retrieve it
+  const mindNs = engineMindNs(ns, body.mindNs); if (mindNs !== ns) meta.mindNs = mindNs;
   const d = await engineDescribe(env, body.imageB64, mime, title + ' ' + JSON.stringify(meta).slice(0, 300));
-  if (!d.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''));
   const key = 'art/' + ns + '/' + id;
   await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+  // the image is kept whether or not the describer answered: an undescribed artwork is still findable by
+  // title, campaign and path, and POST /engine/artwork/describe {id} fills the description in later
+  const description = d.ok ? d.description : ('[not yet described] ' + title + (meta.campaign ? ' (' + meta.campaign + ')' : '') + (meta.path ? ' - ' + meta.path : '') + (d.detail || d.error ? '. Describer: ' + (d.detail || d.error) : ''));
   let docId = '';
-  try {
-    const text = '# Artwork: ' + title + '\n\n' + d.description + '\n\nSource: ' + (meta.path || meta.source || 'upload') + (meta.date ? '\nDate: ' + meta.date : '') + (meta.campaign ? '\nCampaign: ' + meta.campaign : '') + '\nImage: ' + key;
-    const r = await mindIngestDoc(env, { ns, title: 'Artwork: ' + title, text, kind: 'artwork', source: String(meta.path || meta.source || 'upload').slice(0, 300), date: String(meta.date || '').slice(0, 20) });
-    docId = r.docId;
-  } catch (e) {}
+  if (d.ok) docId = await engineArtworkDoc(env, mindNs, id, title, key, description, meta);
   await env.MIND_DB.prepare('INSERT INTO engine_art(id,ns,title,key,mime,description,meta,docId,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .bind(id, ns, title, key, mime, d.description, JSON.stringify(meta).slice(0, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
-  return { id, ns, title, key, description: d.description, model: d.model, docId, url: '/engine/art?id=' + id };
+    .bind(id, ns, title, key, mime, description, JSON.stringify(meta).slice(0, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
+  const out = { id, ns, title, key, description, model: d.model || '', docId, described: !!d.ok, url: '/engine/art?id=' + id };
+  if (!d.ok) out.warning = 'stored, but not described: ' + (d.detail || d.error) + (d.error === 'gemini_not_configured' ? ' (set GEMINI_KEY on the worker)' : '') + '. POST /engine/artwork/describe {id} retries.';
+  return out;
+}
+/** Where an artwork's Mind document goes: the client namespace, or a shelf of it such as <ns>_creative. */
+function engineMindNs(ns, want) {
+  const w = String(want || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+  return w && (w === ns || w.startsWith(ns + '_')) ? w : ns;
+}
+async function engineArtworkDoc(env, mindNs, id, title, key, description, meta) {
+  try {
+    const text = '# Artwork: ' + title + '\n\n' + description + '\n\nSource: ' + (meta.path || meta.source || 'upload') + (meta.date ? '\nDate: ' + meta.date : '') + (meta.campaign ? '\nCampaign: ' + meta.campaign : '') + '\nImage: ' + key + '\nArtwork id: ' + id;
+    const r = await mindIngestDoc(env, { ns: mindNs, title: 'Artwork: ' + title, text, kind: 'artwork', source: String(meta.path || meta.source || 'upload').slice(0, 300), date: String(meta.date || '').slice(0, 20) });
+    return r.docId;
+  } catch (e) { return ''; }
+}
+/** Describe (or re-describe) a stored artwork from the image in R2. */
+async function engineArtworkDescribe(env, id) {
+  await ensureEngine(env);
+  const row = await env.MIND_DB.prepare('SELECT * FROM engine_art WHERE id=?').bind(id).first();
+  if (!row) throw new Error('unknown artwork ' + id);
+  if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2)');
+  const obj = await env.MIND_DOCS.get(row.key);
+  if (!obj) throw new Error('the image for ' + id + ' is missing from R2');
+  const bytes = new Uint8Array(await obj.arrayBuffer());
+  let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const meta = pjs(row.meta, {});
+  const d = await engineDescribe(env, btoa(bin), row.mime, row.title + ' ' + JSON.stringify(meta).slice(0, 300));
+  if (!d.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''));
+  const docId = await engineArtworkDoc(env, engineMindNs(row.ns, meta.mindNs), id, row.title, row.key, d.description, meta);
+  await env.MIND_DB.prepare('UPDATE engine_art SET description=?, docId=? WHERE id=?').bind(d.description, docId || row.docId || '', id).run();
+  return { id, ns: row.ns, title: row.title, description: d.description, model: d.model, docId: docId || row.docId || '', described: true };
 }
 
 // ==============================================================================
@@ -8196,13 +8227,25 @@ export default {
         }
         if (path === '/engine/artwork' && req.method === 'POST') {
           const a = await engineArtwork(env, ebody, auth.name);
-          return jsonResp({ ok: true, artwork: a });
+          return jsonResp(Object.assign({ ok: true, artwork: a }, a.warning ? { warning: a.warning } : {}));
+        }
+        if (path === '/engine/artwork/describe' && req.method === 'POST') {
+          // {id} describes one; {ns, limit} describes every undescribed artwork of the namespace, newest first
+          if (ebody.id) return jsonResp({ ok: true, artwork: await engineArtworkDescribe(env, String(ebody.id).replace(/[^a-z0-9]/gi, '').slice(0, 24)) });
+          const lim = Math.min(Math.max(parseInt(ebody.limit, 10) || 5, 1), 12);
+          const rows = (await env.MIND_DB.prepare("SELECT id FROM engine_art WHERE ns=? AND description LIKE '[not yet described]%' ORDER BY created DESC LIMIT ?").bind(ens, lim).all()).results || [];
+          const done = [], errors = [];
+          for (const r of rows) { try { done.push(await engineArtworkDescribe(env, r.id)); } catch (e) { errors.push(r.id + ': ' + String((e && e.message) || e).slice(0, 120)); } }
+          const left = ((await env.MIND_DB.prepare("SELECT COUNT(*) n FROM engine_art WHERE ns=? AND description LIKE '[not yet described]%'").bind(ens).first()) || {}).n || 0;
+          return jsonResp({ ok: true, described: done.length, remaining: left, artworks: done, errors });
         }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) {
         const m = String((e && e.message) || e);
         if (/mind_not_configured/.test(m)) return jsonResp({ ok: false, error: 'mind_not_configured', detail: m.slice(0, 200) }, 501);
         if (/gemini_not_configured/.test(m)) return jsonResp({ ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY to describe artwork.' }, 501);
+        if (/describe_failed/.test(m)) return jsonResp({ ok: false, error: 'describe_failed', detail: m.slice(0, 200) }, 502);
+        if (/unknown artwork|missing from R2/.test(m)) return jsonResp({ ok: false, error: 'unknown_artwork', detail: m.slice(0, 200) }, 404);
         return jsonResp({ ok: false, error: 'engine_failed', detail: m.slice(0, 200) }, /larger than|must be|empty|needs what/.test(m) ? 400 : 500);
       }
     }

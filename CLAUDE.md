@@ -298,7 +298,13 @@ walls: a client's corrections and exemplars never reach another client.
   creative - layout, palette, typography, every word on it, tags - stores the
   image in R2 `art/<ns>/<id>` (served by `GET /engine/art?id=`), files the
   description in the Mind as kind `artwork`, and records it in `engine_art`.
-  `GET /engine/artworks?ns=` lists them.
+  `GET /engine/artworks?ns=` lists them. **The image is kept even when the
+  describer fails** (quota, key, outage): the row's description starts
+  `[not yet described]` with the reason, the answer carries a `warning`, and
+  `POST /engine/artwork/describe {id}` (one) or `{ns, limit}` (the undescribed
+  ones, newest first, with `remaining`) fills the descriptions in later.
+  `mindNs` on the upload sends the Mind document to a shelf of the client
+  namespace (`mca_creative`); the image itself stays under `art/<ns>/`.
 - **Ingest.** `python3 tools/engine-ingest.py <folder> --ns mca --key
   $AXIOM_KEY` walks an export folder: .txt .md .html .csv .json .docx (native)
   .pdf (pdftotext) go to `/mind/ingest` with kind guessed from the path
