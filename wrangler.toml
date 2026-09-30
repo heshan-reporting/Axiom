@@ -122,7 +122,7 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #                      claude-sonnet-4-6)
 #   NARRATIVE_SIM / NARRATIVE_SIM_STRICT (plain text vars, optional: the cosine a
 #                      row needs to join a narrative with a shared leading issue
-#                      or entity / without one; defaults 0.86 / 0.91 for bge-base)
+#                      or entity / without one; defaults 0.84 / 0.91 for bge-base)
 #   NARRATIVE_MAX_ROWS (plain text var, optional: rows at which a cluster is a
 #                      topic rather than a narrative and stops taking rows;
 #                      default 600)

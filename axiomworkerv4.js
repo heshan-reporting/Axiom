@@ -2224,7 +2224,7 @@ async function jobCreate(env, source, params, who) {
 async function jobFinish(env, id, ok, result) {
   await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, finished=?, ok=?, result=? WHERE id=?')
     .bind(ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, JSON.stringify(result || {}).slice(0, 4000), id).run();
-  await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + JSON.stringify(result || {}).slice(0, 600) }]);
+  await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + (result && typeof result.summary === 'string' && result.summary ? result.summary : JSON.stringify(result || {}).slice(0, 600)) }]);
   // keep the log readable: trim to the most recent lines
   try {
     await env.MIND_DB.prepare('DELETE FROM bridge_log WHERE job=? AND id NOT IN (SELECT id FROM bridge_log WHERE job=? ORDER BY id DESC LIMIT ?)').bind(id, id, BRIDGE_LOG_KEEP).run();
@@ -5821,6 +5821,7 @@ async function sentimentRun(env, opts) {
   }
   out.budget = await sentBudget(env);
   await log('info', out.classified + ' rows classified, ' + out.mentions + ' entity stances recorded, ' + out.skipped + ' rows marked as mentioning nothing');
+  out.summary = out.classified + ' rows judged in ' + out.calls + ' call' + (out.calls === 1 ? '' : 's') + ': ' + out.byStance.neg + ' critical, ' + out.byStance.neu + ' neutral, ' + out.byStance.pos + ' supportive mentions; ' + out.skipped + ' rows mention no one' + (out.errors.length ? '; ' + out.errors.length + ' error' + (out.errors.length === 1 ? '' : 's') : '');
   if (!out.classified && out.errors.length) { out.ok = false; out.detail = out.errors[0]; }
   await kvPut(env.AXIOM_KV, 'sent_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
   return out;
@@ -5938,7 +5939,7 @@ let NARR_READY = false;
 const NARR_WINDOW_H = 72;       // rows this old are still placed
 const NARR_LIVE_H = 96;         // a narrative with nothing newer is asleep: not matched against
 const NARR_SCAN = 300;          // rows placed per run
-const NARR_SIM = 0.86;          // cosine to join, with a shared leading issue or entity (bge-base: same story across outlets scores 0.86-0.93)
+const NARR_SIM = 0.84;          // cosine to join, with a shared leading issue or entity (bge-base: the same story across outlets scores about 0.84-0.93; the anchor, the frozen centroid and the rising bar keep a lower bar from drifting)
 const NARR_SIM_STRICT = 0.91;   // ...or this close without one (near-duplicates)
 const NARR_FREEZE = 20;         // the centroid stops moving after this many rows, so a narrative cannot drift into "politics in general"
 const NARR_BIG = 60;            // past this size the bar rises by 0.03: a large narrative must be tight to keep growing
@@ -6168,7 +6169,7 @@ async function narrativesRun(env, opts) {
   if (!vecs && env.AI) { out.mode = 'terms (embedding failed)'; }
   const matcher = await entityMatcher(env);
   await log('info', out.scanned + ' rows of the last ' + hours + 'h not yet placed; ' + live.length + ' live narratives; matching by ' + out.mode);
-  const itemStmts = []; const touched = new Set();
+  const itemStmts = []; const touched = new Set(); const touchedBy = {}; const bests = [];
   rows.forEach((r, i) => {
     let meta = {}; try { meta = JSON.parse(r.meta || '{}') || {}; } catch (e) { meta = {}; }
     const text = texts[i];
@@ -6178,10 +6179,11 @@ async function narrativesRun(env, opts) {
     const issues = new Set(Array.isArray(meta.issues) ? meta.issues : issueTag(text));
     const ents = new Set(matcher.match(text));
     const v = vecs ? vecs[i] : null;
-    let best = null, bestSim = 0;
+    let best = null, bestSim = 0, bestAny = 0;
     for (const c of live) {
       if (c.n >= narrMax(env)) continue;   // a topic, not a narrative: it takes no more rows
       const sim = v && c.vec ? vecCos(v, c.vec) : tokenCos(tv, c.tok);
+      if (sim > bestAny) bestAny = sim;
       // the anchor is a shared LEADING issue (the three its rows name most) or a shared entity, never any issue ever seen
       const anchor = [...issues].some(x => c.top.has(x)) || [...ents].some(x => c.ents.has(x));
       let thr = v && c.vec ? (anchor ? simA : simS) : (anchor ? NARR_TOKEN_SIM : NARR_TOKEN_SIM + 0.15);
@@ -6203,16 +6205,23 @@ async function narrativesRun(env, opts) {
       issues.forEach(x => { best.ic[x] = (best.ic[x] || 0) + 1; }); best.top = new Set(narrTopIssues(best.ic, 3)); ents.forEach(x => best.ents.add(x));
       best.n++; best.last_ts = Math.max(best.last_ts, r.ts || now); best.first_ts = Math.min(best.first_ts || r.ts, r.ts || now); best.touched = true;
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,?)').bind(r.id, best.id, r.ts || now, platform, channel, Math.round(bestSim * 1000) / 1000));
-      touched.add(best.id); out.joined++;
+      touched.add(best.id); out.joined++; touchedBy[best.id] = touchedBy[best.id] || { id: best.id, added: 0, started: false }; touchedBy[best.id].added++;
     } else {
+      bests.push(bestAny);
       const ic = {}; issues.forEach(x => { ic[x] = 1; });
       const c = { id: narrId(), ic, top: new Set(narrTopIssues(ic, 3)), ents, n: 1, vec: v, tok: tv, first_ts: r.ts || now, last_ts: r.ts || now, fresh: true, touched: true, first_item: r.id, first_platform: platform, first_channel: channel };
       live.push(c);
       itemStmts.push(db.prepare('INSERT OR REPLACE INTO narrative_items(item,narrative,ts,platform,channel,sim) VALUES(?,?,?,?,?,1)').bind(r.id, c.id, r.ts || now, platform, channel));
-      touched.add(c.id); out.started++;
+      touched.add(c.id); out.started++; touchedBy[c.id] = { id: c.id, added: 1, started: true };
     }
     out.placed++;
   });
+  out.touched = Object.values(touchedBy).sort((a, b) => b.added - a.added).slice(0, 60);
+  if (bests.length >= 5 && vecs) {
+    const sorted = bests.slice().sort((a, b) => a - b); const q = f => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))] * 100) / 100;
+    out.simStats = { started: bests.length, median: q(0.5), p90: q(0.9), atOldBar: bests.filter(x => x >= 0.80 && x < simA).length, bar: simA, strict: simS };
+    await log('info', 'closest live narrative for the ' + bests.length + ' rows that started one: median ' + out.simStats.median + ', 90th percentile ' + out.simStats.p90 + ' (the bar is ' + simA + ' with a shared leading issue, ' + simS + ' without); ' + out.simStats.atOldBar + ' would have joined at 0.80 - NARRATIVE_SIM tunes this');
+  }
   // write placements and centres
   const nStmts = [];
   live.filter(c => c.touched).forEach(c => {
@@ -6248,6 +6257,7 @@ async function narrativesRun(env, opts) {
   try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - 48 * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
   out.ms = Date.now() - now;
   await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');
+  out.summary = out.placed + ' rows placed (' + out.joined + ' joined a live narrative, ' + out.started + ' started one)' + (out.unanchored ? ', ' + out.unanchored + ' set aside' : '') + '; ' + recounted + ' recounted' + (out.deferred ? ' (' + out.deferred + ' deferred to the tick)' : '') + '; ' + (out.namingDeferred ? 'naming deferred to the tick' : out.named + ' named') + (out.alerts ? '; ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') : '') + (out.pruned ? '; ' + out.pruned + ' empty singletons pruned' : '') + ' - ' + (out.ms / 1000).toFixed(1) + 's';
   if (out.errors.length && !out.placed && !out.named) { out.ok = false; out.detail = out.errors[0]; }
   await kvPut(env.AXIOM_KV, 'narr_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
   return out;
@@ -6281,7 +6291,7 @@ async function narrativesList(env, f) {
   const sort = f.sort === 'n' ? 'n DESC' : f.sort === 'new' ? 'first_ts DESC' : f.sort === 'latest' ? 'last_ts DESC' : 'velocity DESC, n DESC';
   const limit = Math.min(Math.max(parseInt(f.limit, 10) || 80, 1), 300);
   const rows = (await env.MIND_DB.prepare('SELECT * FROM narratives WHERE ' + w.join(' AND ') + ' ORDER BY pinned DESC, ' + sort + ' LIMIT ?').bind(...b, limit).all()).results || [];
-  const list = rows.map(narrRow).map(r => { delete r.terms; return Object.assign(r, { issueLabels: r.issues.map(id => (CLIENT_ISSUES.find(ci => ci.id === id) || { label: id }).label), client: (CLIENT_ISSUES.find(ci => ci.ns === r.ns) || {}).client || '' }); });
+  const list = rows.map(narrRow).map(r => { const termsTop = narrTopTerms(r.terms, 6); delete r.terms; return Object.assign(r, { termsTop, issueLabels: r.issues.map(id => (CLIENT_ISSUES.find(ci => ci.id === id) || { label: id }).label), client: (CLIENT_ISSUES.find(ci => ci.ns === r.ns) || {}).client || '' }); });
   return { ok: true, days, narratives: list, statuses: ['emerging', 'growing', 'steady', 'fading', 'new'], sides: ['hostile', 'supportive', 'mixed', 'unknown'] };
 }
 /** Milliseconds Sydney is ahead of UTC at the given instant (AEST 10h, AEDT

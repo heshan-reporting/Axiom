@@ -72,11 +72,30 @@
       <span class="src-count">${count} narratives</span>
     </div>`;
   }
-  function Table({ list, pick, onPick }) {
+  const unnamed = n => 'Unnamed: ' + ((n.termsTop && n.termsTop.length ? n.termsTop.slice(0, 5) : (n.entities || []).slice(0, 3)).join(', ') || n.id);
+  /* What the last run did, in words, with the narratives it touched as links. */
+  function RunResult({ r, list, onOpen, only, setOnly }) {
+    if (!r) return null;
+    const touched = r.touched || [];
+    const byId = {}; (list || []).forEach(n => { byId[n.id] = n; });
+    const shown = touched.slice(0, 8);
+    return html`<div class="nr-result">
+      <div class="nr-resulthead"><span class="ov-title">This run</span><span class="nr-resultsum">${r.summary || (r.placed + ' rows placed')}</span></div>
+      ${touched.length ? html`<div class="nr-resultlist">
+        <span class="ov-dim">${touched.length} narrative${touched.length === 1 ? '' : 's'} gained rows:</span>
+        ${shown.map(x => { const n = byId[x.id]; return html`<button key=${x.id} class="nr-link" onClick=${() => onOpen(x.id)} title=${n ? n.n + ' rows, ' + (n.client || 'no client') : 'not in the current list (filtered out, or a single row)'}>${n ? (n.label || unnamed(n)) : (x.started ? 'new narrative' : 'narrative ' + x.id)}<i>+${x.added}${x.started ? ' new' : ''}</i></button>`; })}
+        ${touched.length > shown.length ? html`<span class="ov-dim">and ${touched.length - shown.length} more</span>` : null}
+        <label class="nr-only"><input type="checkbox" checked=${!!only} onChange=${e => setOnly(e.target.checked)} /> show only these</label>
+      </div>` : html`<div class="ov-dim">No narrative gained a row in this run.</div>`}
+      ${r.namingDeferred || r.deferred ? html`<div class="ov-dim">${[r.deferred ? r.deferred + ' recounts' : '', r.namingDeferred ? 'naming' : ''].filter(Boolean).join(' and ')} wait for the half-hourly tick, which has minutes where a run from here has seconds.</div>` : null}
+      ${r.simStats ? html`<div class="ov-dim">Closest existing narrative for the ${r.simStats.started} rows that started one: typically ${r.simStats.median}, top tenth ${r.simStats.p90}; the bar is ${r.simStats.bar}${r.simStats.atOldBar ? ' (' + r.simStats.atOldBar + ' would have joined at 0.80)' : ''}.</div>` : null}
+    </div>`;
+  }
+  function Table({ list, pick, onPick, touched }) {
     return html`<div class="sn-tablewrap"><table class="sn-table nr-table">
       <thead><tr><th>Narrative</th><th>Toward client</th><th class="num">Rows</th><th class="num">Pace</th><th>Spread</th><th>First seen</th><th>Split</th><th>Status</th></tr></thead>
       <tbody>${list.map(n => html`<tr key=${n.id} class=${'sn-row' + (pick === n.id ? ' on' : '')} onClick=${() => onPick(n.id)}>
-        <td><div class=${'lbl' + (n.label ? '' : ' un')}>${n.pinned ? html`<span title="pinned">* </span>` : null}${n.label || 'Unnamed: ' + (n.entities || []).slice(0, 3).join(', ')}</div><div class="m">${(n.issueLabels || []).join(', ')}${n.client ? ' / ' + n.client : ''}${n.proponents ? ' / ' + n.proponents : ''}</div></td>
+        <td><div class=${'lbl' + (n.label ? '' : ' un')}>${n.pinned ? html`<span title="pinned">* </span>` : null}${n.label || unnamed(n)}${touched && touched[n.id] ? html`<span class="nr-chip" title="rows this narrative gained in the last run from here">+${touched[n.id].added}${touched[n.id].started ? ' new' : ''}</span>` : null}</div><div class="m">${(n.issueLabels || []).join(', ')}${n.client ? ' / ' + n.client : ''}${n.proponents ? ' / ' + n.proponents : ''}</div></td>
         <td><${Side} s=${n.side} /></td>
         <td class="num" title=${n.n24 + ' in the last 24h, ' + n.nprev + ' the day before'}>${fmtN(n.n)}</td>
         <td class="num"><span class="nr-pace" style=${{ color: n.nprev && n.velocity >= 2 ? 'var(--x-neg)' : n.nprev && n.velocity < 0.5 ? 'var(--t3)' : undefined }}>${pace(n)}</span></td>
@@ -132,7 +151,7 @@
           <button class="btn sm ghost" onClick=${() => setEdit({ label: d.label, summary: d.summary, claim: d.claim, counter_claim: d.counter_claim, issues: (d.issues || []).join(', ') })}>Edit</button>
           <button class="btn sm ghost" onClick=${() => flag({ pinned: !d.pinned }, d.pinned ? 'Unpinned' : 'Pinned')}>${d.pinned ? 'Unpin' : 'Pin'}</button>
           <button class="btn sm ghost" onClick=${() => flag({ muted: !d.muted }, d.muted ? 'Unmuted' : 'Muted: hidden and no longer matched')}>${d.muted ? 'Unmute' : 'Mute'}</button>
-          <select value=${mergeInto} onChange=${e => setMergeInto(e.target.value)} style=${{ fontSize: 12, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--ln)', background: 'rgba(255,255,255,.03)', color: 'var(--t1)' }}><option value="">Merge into...</option>${(list || []).filter(n => n.id !== id).map(n => html`<option key=${n.id} value=${n.id}>${(n.label || 'Unnamed ' + n.id).slice(0, 60)} (${n.n})</option>`)}</select>
+          <select value=${mergeInto} onChange=${e => setMergeInto(e.target.value)} style=${{ fontSize: 12, padding: '6px 9px', borderRadius: 8, border: '1px solid var(--ln)', background: 'rgba(255,255,255,.03)', color: 'var(--t1)' }}><option value="">Merge into...</option>${(list || []).filter(n => n.id !== id).map(n => html`<option key=${n.id} value=${n.id}>${(n.label || unnamed(n)).slice(0, 60)} (${n.n})</option>`)}</select>
           <button class="btn sm ghost" disabled=${!mergeInto || busy} onClick=${merge}>Merge</button>
         </div>
         ${edit ? html`<div class="sn-form" style=${{ marginTop: 10 }}>
@@ -152,6 +171,8 @@
     const [list, setList] = useState(null);
     const [pick, setPick] = useState('');
     const [job, setJob] = useState(null);
+    const [lastRun, setLastRun] = useState(null);
+    const [onlyRun, setOnlyRun] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
     const stopRef = useRef(null);
@@ -167,10 +188,11 @@
     useGoto('narratives', p => { if (p.id) setPick(String(p.id)); if (p.issue != null || p.status || p.side || p.platform) setF(cur => Object.assign({}, cur, p.issue != null ? { issue: String(p.issue) } : {}, p.status ? { status: String(p.status) } : {}, p.side ? { side: String(p.side) } : {}, p.platform ? { platform: String(p.platform) } : {})); });
     const run = async () => {
       setBusy(true);
-      try { const d = await call('/narratives/run', {}); if (stopRef.current) stopRef.current(); setJob({ id: d.job, status: 'running', lines: [] }); stopRef.current = tailJob(d.job, j => setJob(j), j => { setJob(j); setBusy(false); loadStatus(); load(); }); }
+      try { const d = await call('/narratives/run', {}); if (stopRef.current) stopRef.current(); setLastRun(null); setOnlyRun(false); setJob({ id: d.job, status: 'running', lines: [] }); stopRef.current = tailJob(d.job, j => setJob(j), j => { setJob(j); setLastRun(j.result && j.result.ok !== false ? j.result : null); setBusy(false); loadStatus(); load(); }); }
       catch (e) { toastMsg(e.message, true); setBusy(false); }
     };
     const refresh = () => { loadStatus(); load(); };
+    const touchedMap = useMemo(() => { if (!lastRun || !lastRun.touched) return null; const m = {}; lastRun.touched.forEach(x => { m[x.id] = x; }); return m; }, [lastRun]);
     const reset = async () => {
       if (!confirm('Dissolve the broad clusters? Their rows go back to the unplaced pool and are placed again under the current rules over the next ticks.')) return;
       setBusy(true);
@@ -180,11 +202,12 @@
     if (err && !list) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load narratives.</b> ${err}</div>`;
     return html`<div>
       <${Strip} status=${status} onRun=${run} onReset=${reset} busy=${busy} canWrite=${canWrite} />
+      <${RunResult} r=${lastRun} list=${list} onOpen=${id => setPick(id)} only=${onlyRun} setOnly=${setOnlyRun} />
       ${job ? html`<${Console} job=${job} title="place and name" />` : null}
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       <${Filters} f=${f} setF=${setF} count=${(list || []).length} />
       <div class=${'sn-main' + (pick ? ' split' : '')}>
-        <div>${list === null ? html`<div class="empty" style=${{ padding: '30px 0' }}>Loading...</div>` : html`<${Table} list=${list} pick=${pick} onPick=${id => setPick(id === pick ? '' : id)} />`}</div>
+        <div>${list === null ? html`<div class="empty" style=${{ padding: '30px 0' }}>Loading...</div>` : html`<${Table} list=${onlyRun && touchedMap ? list.filter(n => touchedMap[n.id]) : list} pick=${pick} onPick=${id => setPick(id === pick ? '' : id)} touched=${touchedMap} />`}</div>
         ${pick ? html`<${Drawer} id=${pick} list=${list} canWrite=${canWrite} onClose=${() => setPick('')} onOpen=${id => setPick(id)} onChanged=${refresh} />` : null}
       </div>
     </div>`;
