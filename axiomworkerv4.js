@@ -2190,7 +2190,7 @@ async function jobLog(env, id, lines) {
 function mkJobLog(env, id) {
   let buf = [];
   const flush = async () => { if (!buf.length) return; const b = buf; buf = []; try { await jobLog(env, id, b); } catch (e) {} };
-  const log = async (k, t) => { buf.push({ k, t }); if (buf.length >= 4) await flush(); };
+  const log = async (k, t) => { buf.push({ k, t }); if (buf.length >= 4 || k === 'cmd' || k === 'err' || k === 'done') await flush(); };
   log.flush = flush;
   return log;
 }
@@ -2248,6 +2248,18 @@ async function jobTail(env, id, after) {
   await ensureBridge(env);
   const job = await env.MIND_DB.prepare('SELECT id,source,status,agent,who,created,claimed,finished,ok,result FROM bridge_jobs WHERE id=?').bind(id).first();
   if (!job) return null;
+  if (job.status === 'running' && !job.agent) {
+    // a worker-side job that has written nothing for three minutes was killed by the runtime (an
+    // HTTP-triggered job lives about 30s after the response); say so rather than spin forever
+    const last = (await env.MIND_DB.prepare('SELECT MAX(ts) t FROM bridge_log WHERE job=?').bind(id).first()) || {};
+    const seen = Math.max(Number(last.t) || 0, job.claimed || 0, job.created || 0);
+    if (seen && Date.now() - seen > 180000) {
+      const detail = 'The worker stopped before this job finished: a job started from the app has about 30 seconds after the response. What was written stayed; the half-hourly cron tick carries on with the rest.';
+      await jobLog(env, id, [{ k: 'err', t: detail }]);
+      await jobFinish(env, id, false, { ok: false, error: 'worker_stopped', detail });
+      job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'worker_stopped', detail });
+    }
+  }
   const rows = await env.MIND_DB.prepare('SELECT id,ts,kind,text FROM bridge_log WHERE job=? AND id>? ORDER BY id LIMIT 200').bind(id, Number(after) || 0).all();
   const lines = rows.results || [];
   let result = null; try { result = job.result ? JSON.parse(job.result) : null; } catch (e) {}
@@ -2866,7 +2878,7 @@ async function jobRunLocal(env, job) {
       out = await sentimentRun(env, Object.assign({}, job.params, { log: log }));
       ok = !!(out && out.ok);
     } else if (job.source === 'narratives') {
-      out = await narrativesRun(env, Object.assign({}, job.params, { log: log }));
+      out = await narrativesRun(env, Object.assign({}, job.params, { log: log, budgetMs: 22000 }));
       ok = !!(out && out.ok);
     } else if (SOCIAL_PLATFORMS.indexOf(job.source) >= 0) {
       out = await socialSweep(env, Object.assign({}, job.params, { platform: job.source }), log);
@@ -6039,15 +6051,16 @@ async function narrLabelBatch(env, clusters, log) {
 }
 /** Name the narratives that have earned it (three rows, or doubled since
  *  their last naming), five to a call, within the day's budget. */
-async function narrLabel(env, ids, log) {
+async function narrLabel(env, ids, log, left) {
   const db = env.MIND_DB; const now = Date.now();
+  left = typeof left === 'function' ? left : (() => 1e9);
   // D1 binds at most 100 variables a statement: read the candidates in slices
   const rows = [];
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90); const marks = part.map(() => '?').join(',');
     rows.push(...((await db.prepare('SELECT * FROM narratives WHERE id IN (' + marks + ') AND muted=0 AND edited=0 AND n>=? AND (label=\'\' OR labelled_n*2<=n)').bind(...part, NARR_LABEL_MIN).all()).results || []));
   }
-  const out = { named: 0, calls: 0, errors: [] };
+  const out = { named: 0, calls: 0, errors: [], deferred: 0 };
   if (!rows.length) return out;
   const budget = await narrBudget(env);
   const clusters = [];
@@ -6064,6 +6077,7 @@ async function narrLabel(env, ids, log) {
   }
   for (let i = 0; i < clusters.length; i += 5) {
     if (out.calls >= budget.left) { out.errors.push('naming budget of ' + budget.cap + ' calls reached; ' + (clusters.length - i) + ' narratives stay unnamed until tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
+    if (left() < 15000) { out.deferred = clusters.length - i; await log('info', out.deferred + ' narratives wait for the next cron tick to be named (this run is out of time)'); break; }
     const batch = clusters.slice(i, i + 5);
     await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
     let named;
@@ -6126,6 +6140,10 @@ async function narrativesRun(env, opts) {
   const db = env.MIND_DB; const now = Date.now();
   const hours = Math.min(Math.max(parseInt(opts.hours, 10) || NARR_WINDOW_H, 1), 24 * 14);
   const scan = Math.min(Math.max(parseInt(opts.scan, 10) || NARR_SCAN, 1), 1000);
+  // the budget: a cron tick has minutes; a run started from the app has about 30 seconds of
+  // worker life after the response, so it places what it can and leaves the rest to the tick
+  const budget = Math.min(Math.max(parseInt(opts.budgetMs, 10) || 8 * 60000, 5000), 14 * 60000);
+  const left = () => budget - (Date.now() - now);
   const kinds = SENT_KINDS.map(() => '?').join(',');
   const rows = (await db.prepare('SELECT a.id, a.kind, a.src, a.title, a.body, a.url, a.ts, a.meta FROM arc_items a LEFT JOIN narrative_items ni ON ni.item=a.id WHERE ni.item IS NULL AND a.ts>? AND a.kind IN (' + kinds + ') ORDER BY a.ts ASC LIMIT ?').bind(now - hours * 3600000, ...SENT_KINDS, scan).all()).results || [];
   // candidates: live narratives of two or more rows, plus singletons started in the last day (a
@@ -6193,14 +6211,18 @@ async function narrativesRun(env, opts) {
   const stale = ((await db.prepare('SELECT id FROM narratives WHERE muted=0 AND last_ts>? AND updated<?').bind(now - 7 * 86400000, now - 6 * 3600000).all()).results || []).map(r => r.id);
   const grown = live.filter(c => c.touched && c.n >= 2).sort((a, b) => b.n - a.n).map(c => c.id);
   const ids = Array.from(new Set([...grown, ...touched, ...stale])).slice(0, 150);
-  let recounted = 0;
-  for (const id of ids) { try { if (await narrRefresh(env, id, now)) recounted++; } catch (e) { out.errors.push('recount ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); } }
-  await log('info', recounted + ' narratives recounted (size, pace, spread, sentiment split, stance toward the client)');
-  // names, counters, alerts
-  if (env.ANTHROPIC_API_KEY) { try { const nm = await narrLabel(env, ids, log); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
-  else await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed (their terms and rows are still here)');
-  try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); }
-  try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); }
+  let recounted = 0; out.deferred = 0;
+  for (const id of ids) {
+    if (left() < 6000) { out.deferred = ids.length - recounted; break; }
+    try { if (await narrRefresh(env, id, now)) recounted++; } catch (e) { out.errors.push('recount ' + id + ': ' + String((e && e.message) || e).slice(0, 80)); }
+  }
+  await log('info', recounted + ' narratives recounted (size, pace, spread, sentiment split, stance toward the client)' + (out.deferred ? '; ' + out.deferred + ' left for the next cron tick, this run is out of time' : ''));
+  // names, counters, alerts - each only while the budget allows; the cron tick finishes what is left
+  if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed (their terms and rows are still here)');
+  else if (left() < 15000) { out.namingDeferred = true; await log('info', 'naming deferred to the next cron tick (' + Math.round(left() / 1000) + 's left in this run; a naming call takes up to 45s)'); }
+  else { try { const nm = await narrLabel(env, ids, log, left); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
+  if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
+  if (left() > 2500) { try { const al = await narrAlerts(env, log); out.alerts = al.length; } catch (e) { out.errors.push('alerts: ' + String((e && e.message) || e).slice(0, 80)); } }
   // singletons that never grew are noise: gone after two days (their rows are freed to be placed again)
   try { const old = ((await db.prepare('SELECT id FROM narratives WHERE n<2 AND last_ts<? LIMIT 4000').bind(now - 48 * 3600000).all()).results || []).map(r => r.id); for (let i = 0; i < old.length; i += 90) { const part = old.slice(i, i + 90); const m = part.map(() => '?').join(','); await db.batch([db.prepare('DELETE FROM narrative_items WHERE narrative IN (' + m + ')').bind(...part), db.prepare('DELETE FROM narratives WHERE id IN (' + m + ')').bind(...part)]); } out.pruned = old.length; } catch (e) {}
   out.ms = Date.now() - now;

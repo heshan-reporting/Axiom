@@ -551,7 +551,14 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   hostile, >= 0.25 supportive, else mixed; unknown under two judgments); the
   entities named. Status: new (< 3 rows), emerging (>= `NARR_ALERT_MIN` = 6
   rows within 48h of first sight), growing, steady, fading; velocity is n24 /
-  nprev. Singletons older than seven days are pruned.
+  nprev. **The run has a time budget** (`budgetMs`): the cron tick gets
+  eight minutes; a run started from the app gets 22 seconds, because a job
+  the worker runs after an HTTP response lives about 30 seconds. Placement
+  always completes; recounting stops when the budget is nearly spent, naming
+  is skipped or cut short (`deferred`, `namingDeferred`) and the next tick
+  finishes the rest. `jobTail` marks a worker-side job that has written
+  nothing for three minutes as `failed` with `worker_stopped`, so the console
+  says what happened instead of spinning.
 - **Naming, counters, alerts.** `narrLabel()` sends narratives with >=
   `NARR_LABEL_MIN` = 3 rows that are unnamed or have doubled since their last
   naming to Claude five at a time (`narrLabelBatch`, strict JSON: a label of
