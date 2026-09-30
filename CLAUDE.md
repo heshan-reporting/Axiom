@@ -528,13 +528,20 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
 - **Placement.** `narrativesRun(env, {hours, scan, log})`: the oldest
   unplaced rows of `SENT_KINDS` within `NARR_WINDOW_H` = 72h (`NARR_SCAN` =
   300 a run) are embedded with Workers AI (`NARR_EMBED`, bge-base, 768 dims).
-  A row joins the live narrative (active within `NARR_LIVE_H` = 96h, not
-  muted) whose centroid is closest when the cosine is >= `NARR_SIM` = 0.80
-  and they share a client issue or an entity, or >= `NARR_SIM_STRICT` = 0.88
-  regardless; otherwise it starts one. Without AI bound the run falls back to
-  term vectors (`narrTokens`, stop list; thresholds 0.32 / 0.47). Rows under
-  20 characters are marked with narrative `''` so they are never looked at
-  again. Centroids are stored as base64 Float32 (`f32b64`/`b64f32`), term
+  A row joins the live narrative whose centroid is closest when the cosine
+  is >= `NARR_SIM` = 0.80 and they share a client issue or an entity, or >=
+  `NARR_SIM_STRICT` = 0.88 regardless. The candidates are the narratives
+  active within `NARR_LIVE_H` = 96h with two or more rows, plus singletons
+  started in the last day, at most 1500 (largest and latest first). A row
+  that joins nothing **starts a narrative only if it is a story and carries
+  an anchor** - a news item, thread or post naming a client issue or a
+  register entity; a lone comment, or a row naming neither, is set aside
+  (narrative `''`, counted as `unanchored`) rather than seeding noise.
+  Singletons that never grow are pruned after 48h and their rows freed.
+  Without AI bound the run falls back to term vectors (`narrTokens`, stop
+  list; thresholds 0.32 / 0.47). Rows under 20 characters are marked with
+  narrative `''` so they are never looked at again. Every id list sent to D1
+  is sliced under its 100-variable limit (naming, pruning). Centroids are stored as base64 Float32 (`f32b64`/`b64f32`), term
   counts in `terms`. `narrRefresh(env, id, now)` recounts a touched narrative
   in seven batched queries: n / n24 / nprev; the channels in the order they
   first carried it (`spread`); the channels by volume (subreddit, outlet,
