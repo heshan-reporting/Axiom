@@ -188,13 +188,13 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
   const rows = await texts(page, R + '.st-dialog tbody tr'); eq(rows.filter(r => /included/.test(r)).length, 1); ok(/Facebook post/.test(rows.find(r => /included/.test(r))));
   ok(/Export never creates a task or sends anything by itself/.test(await page.textContent(R + '.st-dialog')));
   await shot(page, 'studio-export');
-  await page.click(R + '.st-dialog button:has-text("Download bundle")');
+  await page.click(R + '.st-dialog button:has-text("Prepare bundle")');
   await page.waitForFunction(() => window.__studioLastExport, null, { timeout: 30000 });
   const ex = await page.evaluate(() => window.__studioLastExport);
   ok(ex.files.some(f => /Facebook_post-v\d\.png/.test(f)) && ex.files.indexOf('copy-sheet.txt') >= 0 && ex.files.indexOf('manifest.json') >= 0, JSON.stringify(ex.files));
   ok(ex.manifest && ex.manifest.export && ex.manifest.included.length === 1 && ex.manifest.included[0].exportKey, 'the export stage recorded the browser-rendered PNG: ' + JSON.stringify(ex.manifest).slice(0, 300));
   ok(Array.from(r2.keys()).some(k => /-export\.png$/.test(k)), 'the composition PNG is in R2');
-  ok(/Bundle downloaded/.test(await page.textContent(R + '.st-dialog')));
+  ok(/Bundle ready/.test(await page.textContent(R + '.st-dialog')) && await page.$(R + '.st-dialog a[download]'), 'the download link is shown');
   await page.click(R + '.st-dialog button:has-text("Send to ClickUp")');
   await page.waitForSelector(R + '.st-dialog-box.narrow'); ok(/Create 1 task/.test(await page.textContent(R + '.st-dialog-box.narrow')));
   await page.click(R + '.st-dialog-box.narrow button:has-text("Cancel")');
