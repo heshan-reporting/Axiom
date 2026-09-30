@@ -529,10 +529,22 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   unplaced rows of `SENT_KINDS` within `NARR_WINDOW_H` = 72h (`NARR_SCAN` =
   300 a run) are embedded with Workers AI (`NARR_EMBED`, bge-base, 768 dims).
   A row joins the live narrative whose centroid is closest when the cosine
-  is >= `NARR_SIM` = 0.80 and they share a client issue or an entity, or >=
-  `NARR_SIM_STRICT` = 0.88 regardless. The candidates are the narratives
-  active within `NARR_LIVE_H` = 96h with two or more rows, plus singletons
-  started in the last day, at most 1500 (largest and latest first). A row
+  is >= `NARR_SIM` = 0.86 and they share a **leading** issue (one of the
+  three its rows name most, `issue_counts`) or an entity, or >=
+  `NARR_SIM_STRICT` = 0.91 regardless (bge-base scores the same story across
+  outlets 0.86-0.93 and unrelated political headlines 0.70-0.85; the vars
+  `NARRATIVE_SIM` / `NARRATIVE_SIM_STRICT` override). Three guards stop a
+  narrative drifting into "politics in general": the centroid freezes after
+  `NARR_FREEZE` = 20 rows; past `NARR_BIG` = 60 rows the bar rises by 0.03;
+  at `NARR_MAX` = 200 rows it is a topic, not a narrative - status `broad`,
+  takes no more rows, hidden from the list and never named. `POST
+  /narratives/reset {broad:true}` (full; the **Dissolve broad clusters**
+  button) frees such clusters' rows to be placed again; `{all:true,
+  confirm:'reset'}` clears everything. The candidates are the narratives
+  active within `NARR_LIVE_H` = 96h with two or more rows and under
+  `NARR_MAX`, plus singletons started in the last day, at most 1500 (largest
+  and latest first). The cron makes several passes while its eight minutes
+  last, so a backlog clears in hours. A row
   that joins nothing **starts a narrative only if it is a story and carries
   an anchor** - a news item, thread or post naming a client issue or a
   register entity; a lone comment, or a row naming neither, is set aside

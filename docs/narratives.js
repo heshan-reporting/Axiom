@@ -45,7 +45,7 @@
     </svg>`;
   }
 
-  function Strip({ status, onRun, busy, canWrite }) {
+  function Strip({ status, onRun, onReset, busy, canWrite }) {
     const s = status || {}; const b = s.budget || {};
     return html`<div class="src-strip">
       <div class="src-stats">
@@ -56,7 +56,7 @@
         <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 300 ? 'var(--x-warn)' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows of the last ${s.windowHours || 72}h not yet placed</div></div>
         <div class="src-stat"><div class="k">Naming budget</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.embeddings ? 'embeddings' : 'term vectors (Workers AI unbound)'}${s.naming ? ', ' + (b.model || '') : ', ANTHROPIC_API_KEY not set'}</div></div>
       </div>
-      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button></div>` : null}
+      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button>${s.broad ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onReset} title=${'A cluster past ' + (s.maxRows || 200) + ' rows is a topic, not a narrative. Dissolving it frees its rows to be placed again under the current rules.'}>Dissolve ${s.broad} broad cluster${s.broad === 1 ? '' : 's'}</button>` : null}</div>` : null}
     </div>`;
   }
   function Filters({ f, setF, count }) {
@@ -171,9 +171,15 @@
       catch (e) { toastMsg(e.message, true); setBusy(false); }
     };
     const refresh = () => { loadStatus(); load(); };
+    const reset = async () => {
+      if (!confirm('Dissolve the broad clusters? Their rows go back to the unplaced pool and are placed again under the current rules over the next ticks.')) return;
+      setBusy(true);
+      try { const d = await call('/narratives/reset', { broad: true }); toastMsg(d.narratives + ' dissolved, ' + fmtN(d.items) + ' rows freed'); setPick(''); refresh(); } catch (e) { toastMsg(e.message, true); }
+      setBusy(false);
+    };
     if (err && !list) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not load narratives.</b> ${err}</div>`;
     return html`<div>
-      <${Strip} status=${status} onRun=${run} busy=${busy} canWrite=${canWrite} />
+      <${Strip} status=${status} onRun=${run} onReset=${reset} busy=${busy} canWrite=${canWrite} />
       ${job ? html`<${Console} job=${job} title="place and name" />` : null}
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       <${Filters} f=${f} setF=${setF} count=${(list || []).length} />
