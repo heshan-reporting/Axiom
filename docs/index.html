@@ -1730,6 +1730,23 @@ body.kiosk .kprog{display:block}
 .ov-when{font-family:var(--fm);font-size:11px;color:var(--t3);white-space:nowrap}
 .ov-go{text-align:right;white-space:nowrap}
 .ov-link{background:none;border:0;padding:0;color:var(--x-ac-hi);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+/* the daily brief: the document at the top of the front page */
+.ov-brief{padding:12px 0 6px;border-bottom:1px solid var(--x-line1)}
+.ov-brief-acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.ov-brief-body{background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:8px;padding:14px 18px 8px;margin-top:4px}
+.ov-brief-h{margin:0 0 6px;font-size:17px;line-height:1.3;color:var(--t0);font-weight:600}
+.ov-brief-sum{margin:0 0 12px;font-size:13.5px;line-height:1.55;color:var(--t1);max-width:900px}
+.ov-brief-sec{margin:6px 0 12px}
+.ov-bul-t{display:block;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin:4px 0 4px}
+.ov-bul ul,.ov-changed{margin:0;padding-left:18px;font-size:12.5px;line-height:1.5;color:var(--t1)}
+.ov-changed li{margin:0 0 5px} .ov-changed li b{color:var(--t0);font-weight:600}
+.ov-cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 18px;margin-top:6px}
+.ov-brief-foot{border-top:1px solid var(--hair);padding-top:6px;margin-top:8px}
+.ov-clients td.ov-lbl{width:170px} .ov-clients td.ov-acts{width:26%}
+.ov-ev{display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:baseline;margin-left:4px}
+.ov-evid{background:var(--x-sur3);border:0;border-radius:3px;padding:0 5px;font-family:var(--fm);font-size:10px;color:var(--x-ac-hi);cursor:pointer;line-height:16px}
+.ov-evid.dim{color:var(--t3);cursor:default}
+@media(max-width:900px){.ov-cols3{grid-template-columns:1fr}}
 .ov-link:hover{color:var(--t0)}
 .ov-pace{font-family:var(--fm);font-size:11px;color:var(--t2)} .ov-pace.up{color:var(--x-neg)}
 .ov-lbl{max-width:380px}

@@ -127,6 +127,10 @@ id = "PASTE_EXISTING_NAMESPACE_ID"
 #   NARRATIVE_MAX_ROWS (plain text var, optional: rows at which a cluster is a
 #                      topic rather than a narrative and stops taking rows;
 #                      default 600)
+#   BRIEF_MODEL       (plain text var, optional: the Claude model that writes the
+#                      daily brief; falls back to NARRATIVE_MODEL, SENTIMENT_MODEL,
+#                      then claude-opus-5-5. One call a day from the cron, plus
+#                      one per on-demand rewrite)
 #   NARRATIVE_DAILY_CALLS (plain text var, optional: naming calls a day,
 #                      default 120; each call names up to 5 narratives. The
 #                      placement itself uses Workers AI embeddings, not Claude,

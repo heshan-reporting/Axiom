@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 # wrangler's local cache, written by tools/deploy-worker.sh
 .wrangler/
+# the daily briefs tools/daily-brief.py writes (client intelligence; kept out of the repo)
+briefs/

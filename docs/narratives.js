@@ -56,7 +56,7 @@
         <div class="src-stat"><div class="k">Waiting</div><div class="v" style=${{ color: (s.backlog || 0) > 300 ? 'var(--x-warn)' : undefined }}>${fmtN(s.backlog || 0)}</div><div class="s">rows of the last ${s.windowHours || 72}h not yet placed</div></div>
         <div class="src-stat"><div class="k">Naming budget</div><div class="v">${b.used || 0}<i style=${{ fontStyle: 'normal', fontSize: 12, color: 'var(--t3)' }}> / ${b.cap || 0}</i></div><div class="s">${s.embeddings ? 'embeddings' : 'term vectors (Workers AI unbound)'}${s.naming ? ', ' + (b.model || '') : ', ANTHROPIC_API_KEY not set'}</div></div>
       </div>
-      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button>${s.naming ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onNameAll} title="Recount what is stale, then name every narrative that has earned a name, one Claude call at a time; Stop in the console halts it">Name all waiting</button>` : null}${s.broad ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onReset} title=${'A cluster past ' + (s.maxRows || 200) + ' rows is a topic, not a narrative. Dissolving it frees its rows to be placed again under the current rules.'}>Dissolve ${s.broad} broad cluster${s.broad === 1 ? '' : 's'}</button>` : null}</div>` : null}
+      ${canWrite ? html`<div class="src-actions"><button class="btn sm" disabled=${busy} onClick=${onRun} title="Place the newest rows, recount, name what has earned a name, pair counters, raise alerts">${busy ? 'Running...' : 'Place and name now'}</button>${s.naming ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onNameAll} title="Place every waiting row, recount what is stale, then name every narrative that has earned a name, one step at a time; Stop in the console halts it">Finish all waiting${s.backlog ? ' (' + fmtN(s.backlog) + ')' : ''}</button>` : null}${s.broad ? html`<button class="btn sm ghost" disabled=${busy} onClick=${onReset} title=${'A cluster past ' + (s.maxRows || 200) + ' rows is a topic, not a narrative. Dissolving it frees its rows to be placed again under the current rules.'}>Dissolve ${s.broad} broad cluster${s.broad === 1 ? '' : 's'}</button>` : null}</div>` : null}
     </div>`;
   }
   function Filters({ f, setF, count }) {
@@ -195,15 +195,23 @@
     const refresh = () => { loadStatus(); load(); };
     const touchedMap = useMemo(() => { if (!lastRun || !lastRun.touched) return null; const m = {}; lastRun.touched.forEach(x => { m[x.id] = x; }); return m; }, [lastRun]);
     const haltRef = useRef(false);
-    /* Recount what is stale, then name everything that has earned a name, one call per request, so
-       the whole backlog can be finished from here instead of over many ticks. */
+    /* Place every waiting row, recount what is stale, then name everything that has earned a name,
+       one step per request, so the whole backlog can be finished from here instead of over many ticks. */
     const nameAll = async () => {
       setBusy(true); haltRef.current = false; setLastRun(null);
       const lines = []; let n = 0;
       const push = (kind, text) => { lines.push({ id: ++n, ts: Date.now(), kind, text }); setJob({ id: 'step', status: 'running', lines: lines.slice(), follow: true }); };
-      push('info', 'recounting stale narratives, then naming every one that has earned a name; one Claude call per step, Stop halts it');
-      let good = true, named = 0;
+      push('info', 'placing the waiting rows, recounting stale narratives, then naming every one that has earned a name; one step per request, Stop halts it');
+      let good = true, named = 0, placed = 0;
       try {
+        for (let i = 0; i < 60; i++) {
+          if (haltRef.current) break;
+          const d = await call('/narratives/step', { what: 'place', scan: 100 });
+          (d.lines || []).filter(l => l.kind !== 'info' || /placed|set aside|started/.test(l.text)).forEach(l => push(l.kind, l.text)); placed += d.placed || 0;
+          if (d.errors && d.errors.length) push('err', d.errors[0]);
+          if (!d.remaining || !d.scanned) { push('info', placed + ' rows placed; ' + (d.remaining ? d.remaining + ' wait' : 'nothing waits to be placed')); break; }
+          if (i === 59) push('info', d.remaining + ' rows still wait to be placed; press again');
+        }
         for (let i = 0; i < 10; i++) { if (haltRef.current) break; const d = await call('/narratives/step', { what: 'recount' }); (d.lines || []).forEach(l => push(l.kind, l.text)); if (!d.remaining || !d.recounted) break; }
         for (let i = 0; i < 80; i++) {
           if (haltRef.current) { push('info', 'stopped'); break; }
@@ -229,7 +237,7 @@
     return html`<div>
       <${Strip} status=${status} onRun=${run} onReset=${reset} onNameAll=${nameAll} busy=${busy} canWrite=${canWrite} />
       <${RunResult} r=${lastRun} list=${list} onOpen=${id => setPick(id)} only=${onlyRun} setOnly=${setOnlyRun} />
-      ${job ? html`<${Console} job=${job} title=${job.id === 'step' ? 'name all waiting' : 'place and name'} canWrite=${canWrite} onCancel=${() => { haltRef.current = true; }} />` : null}
+      ${job ? html`<${Console} job=${job} title=${job.id === 'step' ? 'finish all waiting' : 'place and name'} canWrite=${canWrite} onCancel=${() => { haltRef.current = true; }} />` : null}
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       <${Filters} f=${f} setF=${setF} count=${(list || []).length} />
       <div class=${'sn-main' + (pick ? ' split' : '')}>

@@ -638,15 +638,64 @@ spread, pace and split are all traceable to posts; only the name is Claude's.
   and warm shares, channels), how it spread in Australian Eastern time, rows a
   day by channel, who carries it, the loudest rows, shared terms, every row
   with the origin marked, and for full keys Edit / Pin / Mute / Merge into.
-  **Place and name now** runs the job with the console; **Name all waiting**
-  loops `POST /narratives/step` (`{what:'recount'}` refreshes up to 60 stale
-  narratives a step; `{what:'name'}` is one naming call of five, then counters
-  and alerts; each answers `remaining`) until nothing waits, the budget or the
-  account limit is hit, or Stop is pressed. Harnesses in the
-  session scratchpad: `narratives-worker.mjs` (17 placement, naming,
-  relevance, counter, alert, list, merge, fallback, budget, step and cron
-  tests with a semantic stub embedding, a stub Claude and a Slack recorder),
-  `narratives-browser.mjs` (10 browser tests).
+  **Place and name now** runs the job with the console; **Finish all waiting
+  (N)** loops `POST /narratives/step` (`{what:'place', scan}` is one
+  synchronous placement pass of up to 200 rows with a 20-second budget and
+  naming skipped, answering the `remaining` backlog; `{what:'recount'}`
+  refreshes up to 60 stale narratives a step; `{what:'name'}` is one naming
+  call of five, then counters and alerts; each answers `remaining`) until
+  nothing waits, the budget or the account limit is hit, or Stop is pressed.
+  The same three loops run from a Mac in `tools/daily-brief.py` (below).
+  Harnesses in the session scratchpad: `narratives-worker.mjs` (18
+  placement, naming, relevance, counter, alert, list, merge, fallback,
+  budget, step and cron tests with a semantic stub embedding, a stub Claude
+  and a Slack recorder), `narratives-browser.mjs` (10 browser tests).
+
+## The daily brief (the day, written once, for the person presenting it)
+
+`briefWrite(env, {days, mind, by, log})` reads what the modules keep for one
+window - `overview()` (alerts, narratives moving, movers, issues against
+their fourteen-day baseline, the newest headlines, collection), the largest
+narratives with their claim, counter-claim and proponents, the stance
+leaderboard and tone by issue - and renders it as evidence in which every
+row carries an id (`[A:]` alert, `[N:]` narrative, `[E:]` entity, `[I:]`
+issue, `[L:]` headline). Claude (`BRIEF_MODEL` || `NARRATIVE_MODEL` ||
+`SENTIMENT_MODEL` || Opus 5.5; `BRIEF_SYS`; one retry on invalid JSON, none
+on an account spend-limit answer) writes strict JSON: headline, summary,
+`changed[]` (what, why, evidence), `clients[]` (ns, read, watch, risks,
+openings, actions, evidence - every client namespace, most change first),
+`narratives[]`, `sentiment[]`, risks, actions, gaps. `briefClean()` bounds
+it and ties it back: narrative and entity ids the evidence never gave are
+dropped, labels, counts and client names come from the data, never the
+model. The record (`{day, at, hours, model, brief, stats, by, md}`) is
+stored in KV `brief_<YYYY-MM-DD>` (Sydney days via `auDayKey()`, kept 120
+days), `briefMarkdown()` renders it as a document, and it is filed in the
+Mind as kind `brief_daily` under `cmm` unless `mind:false`. `briefCron()`
+runs every tick and writes the day's brief once after 7am Sydney when none
+exists; a rewrite on demand is the right move after the queues are drained.
+
+Routes: `GET /brief/daily?day=&format=json|md` (the day's brief, the latest
+when `day` is left out; `md` serves `text/markdown`), `GET /brief/list`
+(days held) - read role; `POST /brief/daily {days, mind}` writes today's
+inside the request, a minute or two - full role. In-app: the panel at the
+top of the front page (`Brief` in `docs/overview.js`): headline, summary,
+what changed with evidence chips that open the view holding the evidence,
+by client (read, watch, risks, openings, actions), narratives to watch,
+stances that moved, risks, actions, gaps; Copy, Download .md, Fold, and for
+full keys **Write / Rewrite today's brief**.
+
+**Closing the day from a Mac:** `python3 tools/daily-brief.py --key
+$AXIOM_KEY` drains the sentiment queue (`/sentiment/step` until the backlog
+is empty), places, recounts and names every waiting narrative
+(`/narratives/step` place / recount / name), then writes today's brief and
+saves it as `briefs/brief-<day>.md`, `.html` (a standalone page, print it
+for a PDF) and `.json`. `--skip-queue` writes only, `--only sentiment|
+narratives|brief` runs one part, `--days`, `--out`, `--no-mind`. Each loop
+stops on its own when nothing waits, when the worker's daily Claude budget
+is spent, or when the Anthropic account's spend limit answers, and says
+which. The `briefs/` folder is gitignored: a brief is client intelligence.
+Harnesses: the brief cases in `overview-worker.mjs` (8) and
+`overview-browser.mjs` (12).
 
 ## The interface (Phase 5): restraint, the front page, the scope, drill-down
 

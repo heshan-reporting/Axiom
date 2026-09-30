@@ -11,8 +11,9 @@
     };
     return;
   }
-  const { html, call, fmtN, ago, goto, useScope } = window.AXUI;
+  const { html, call, blobUrl, toastMsg, fmtN, ago, goto, useScope } = window.AXUI;
   const { useState, useEffect, useCallback } = React;
+  const canWrite = () => !(window.AX_ROLE === 'read');
   const PLAT = { news: 'News', reddit: 'Reddit', x: 'X', bluesky: 'Bluesky', mastodon: 'Mastodon', youtube: 'YouTube', substack: 'Substack', linkedin: 'LinkedIn', meta: 'Facebook', forum: 'Forums' };
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
   const aest = ts => (ts ? fmtAest.format(new Date(+ts)) : '');
@@ -129,13 +130,76 @@
     </${Sec}>`;
   }
 
+  /* One evidence id from the brief - N a narrative, E an entity, I an issue, A an alert, L a headline - as a link into the view that holds it. */
+  function Ev({ ids }) {
+    if (!ids || !ids.length) return null;
+    const open = id => { const k = id.slice(0, 1).toUpperCase(), v = id.slice(2); if (k === 'N') goto('narratives', { id: v }); else if (k === 'E') goto('sentiment', { id: v }); else if (k === 'I') goto('narratives', { issue: v }); else if (k === 'A') goto('sentinel', { id: v }); };
+    return html`<span class="ov-ev">${ids.map(id => (/^[NEIA]:/i.test(id) ? html`<button key=${id} class="ov-evid" title=${'open ' + id} onClick=${() => open(id)}>${id}</button>` : html`<span key=${id} class="ov-evid dim">${id}</span>`))}</span>`;
+  }
+  const Bul = ({ title, items }) => (items && items.length ? html`<div class="ov-bul"><span class="ov-bul-t">${title}</span><ul>${items.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null);
+  /* The day's brief: what the director reads first. Written by Claude from what the other
+     sections hold, once a morning by the cron or on demand here after the queues are drained. */
+  function Brief({ days }) {
+    const [b, setB] = useState(null);
+    const [err, setErr] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState('');
+    const [open, setOpen] = useState(true);
+    const load = useCallback(async () => { try { setB(await call('/brief/daily')); setErr(''); } catch (e) { setB(null); setErr(e.code === 'no_brief' ? '' : e.message); } }, []);
+    useEffect(() => { load(); }, [load]);
+    const write = async () => {
+      setBusy(true); setNote('Gathering the evidence and writing; this takes a minute or two. The result replaces today\'s brief.');
+      try { const d = await call('/brief/daily', { days: days || 1 }); setB(d); setOpen(true); setNote(''); toastMsg('Brief written: ' + d.brief.headline); }
+      catch (e) { setNote(''); toastMsg(e.message, true); }
+      setBusy(false);
+    };
+    const download = async () => {
+      try { const u = await blobUrl('/brief/daily?day=' + b.day + '&format=md'); const a = document.createElement('a'); a.href = u; a.download = 'axiom-brief-' + b.day + '.md'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); }
+      catch (e) { toastMsg(e.message, true); }
+    };
+    const copy = async () => { try { await navigator.clipboard.writeText(b.md || ''); toastMsg('Brief copied as Markdown'); } catch (e) { toastMsg('Copy failed', true); } };
+    const w = canWrite();
+    const br = b && b.brief;
+    return html`<div class="ov-brief">
+      <div class="ov-sechead">
+        <span class="ov-title">${b ? (b.isToday ? 'Today\'s brief' : 'Latest brief') : 'Daily brief'}</span>
+        ${b ? html`<span class="ov-count">${b.day}</span><span class="ov-why">written ${ago(b.at)} ago by ${b.by === 'cron' ? 'the morning run' : b.by}, ${b.model}${b.mind ? ', filed in the Mind' : ''}</span>` : html`<span class="ov-why">${err || 'No brief has been written yet. The morning run writes one after 7am Sydney; write one now once the queues are drained.'}</span>`}
+        <span class="ov-brief-acts">
+          ${b ? html`<button class="btn sm ghost" onClick=${() => setOpen(!open)}>${open ? 'Fold' : 'Unfold'}</button><button class="btn sm ghost" onClick=${copy} title="Copy the brief as Markdown">Copy</button><button class="btn sm ghost" onClick=${download} title="Save the brief as a Markdown file">Download .md</button>` : null}
+          ${w ? html`<button class="btn sm" disabled=${busy} onClick=${write} title="Gather today's evidence and have Claude write the brief; replaces today's">${busy ? 'Writing...' : b && b.isToday ? 'Rewrite today\'s brief' : 'Write today\'s brief'}</button>` : null}
+        </span>
+      </div>
+      ${note ? html`<div class="ov-empty">${note}</div>` : null}
+      ${br && open ? html`<div class="ov-brief-body">
+        <h3 class="ov-brief-h">${br.headline}</h3>
+        <p class="ov-brief-sum">${br.summary}</p>
+        ${br.changed.length ? html`<div class="ov-brief-sec"><span class="ov-bul-t">What changed</span><ul class="ov-changed">${br.changed.map((c, i) => html`<li key=${i}><b>${c.what}</b> ${c.why} <${Ev} ids=${c.evidence} /></li>`)}</ul></div>` : null}
+        ${br.clients.length ? html`<div class="ov-brief-sec"><span class="ov-bul-t">By client</span><table class="ov-table ov-clients"><tbody>${br.clients.map(c => html`<tr key=${c.ns}>
+          <td class="ov-lbl"><b>${c.client}</b><div class="ov-dim">${c.ns}</div></td>
+          <td>${c.read} <${Ev} ids=${c.evidence} />
+            <div class="ov-cols3"><${Bul} title="Watch" items=${c.watch} /><${Bul} title="Risks" items=${c.risks} /><${Bul} title="Openings" items=${c.openings} /></div></td>
+          <td class="ov-acts"><${Bul} title="Actions" items=${c.actions} /></td>
+        </tr>`)}</tbody></table></div>` : null}
+        <div class="ov-cols">
+          ${br.narratives.length ? html`<table class="ov-table"><thead><tr><th>Narratives to watch</th><th class="num">Rows</th><th>Toward client</th><th>Why it matters</th><th></th></tr></thead><tbody>${br.narratives.map(n => html`<tr key=${n.id}>
+            <td><b>${n.label}</b>${n.client ? html`<div class="ov-dim">${n.client}</div>` : null}</td><td class="num">${fmtN(n.n)}<span class="ov-dim"> (${n.n24 || 0} today)</span></td><td><span class=${'nr-side ' + n.stance}>${SIDE[n.stance] || n.stance}</span></td><td>${n.why}</td>
+            <td class="ov-go"><${Link} onClick=${() => goto('narratives', { id: n.id })}>rows</${Link}></td></tr>`)}</tbody></table>` : null}
+          ${br.sentiment.length ? html`<table class="ov-table"><thead><tr><th>Stances that moved</th><th class="num">Mentions</th><th class="num">Net</th><th class="num">Change</th><th>Why</th><th></th></tr></thead><tbody>${br.sentiment.map(s => html`<tr key=${s.id}>
+            <td><b>${s.name}</b><div class="ov-dim">${s.direction}</div></td><td class="num">${fmtN(s.n)}</td><td class=${'num ' + (s.score < -0.2 ? 'neg' : s.score > 0.2 ? 'pos' : '')}>${signed(s.score)}</td><td class=${'num ' + (s.change < -0.1 ? 'neg' : s.change > 0.1 ? 'pos' : '')}>${s.change == null ? html`<span class="ov-dim">new</span>` : signed(s.change)}</td><td>${s.why}</td>
+            <td class="ov-go"><${Link} onClick=${() => goto('sentiment', { id: s.id })}>rows</${Link}></td></tr>`)}</tbody></table>` : null}
+        </div>
+        <div class="ov-cols3 ov-brief-foot"><${Bul} title="Risks" items=${br.risks} /><${Bul} title="Actions" items=${br.actions} /><${Bul} title="Gaps in the evidence" items=${br.gaps} /></div>
+      </div>` : null}
+    </div>`;
+  }
+
   function OverviewApp() {
     const [days, setDays] = useState(1);
     const [d, setD] = useState(null);
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
     const [sc, setSc] = useState({ ns: '', issue: '' });
-    const load = useCallback(async () => { setBusy(true); try { setD(await call('/overview?days=' + days)); setErr(''); } catch (e) { setErr(e.message); } setBusy(false); }, [days]);
+    const load = useCallback(async () => { setBusy(true); try { const r = await call('/overview?days=' + days); if (!r || !r.alerts || !r.narratives || !r.sentiment) throw new Error('the worker answered without the overview parts; redeploy it'); setD(r); setErr(''); } catch (e) { setErr(e.message); } setBusy(false); }, [days]);
     useEffect(() => { load(); const t = setInterval(load, 5 * 60000); return () => clearInterval(t); }, [load]);
     useScope(s => { setSc({ ns: s.ns || '', issue: s.issue || '' }); if (s.days) setDays(Math.min(7, s.days)); });
     if (err && !d) return html`<div class="aud-notice" style=${{ margin: '12px 0' }}><b>Could not read the overview.</b> ${err}</div>`;
@@ -156,6 +220,7 @@
         <span class="ov-dim">${d.errors && d.errors.length ? d.errors.length + ' part' + (d.errors.length === 1 ? '' : 's') + ' failed: ' + d.errors.join('; ') : ''}</span>
         <button class="btn sm ghost" disabled=${busy} onClick=${load}>${busy ? 'Reading...' : 'Refresh'}</button>
       </div>
+      <${Brief} days=${days} />
       <${Alerts} a=${scoped.alerts} />
       <${Narratives} n=${scoped.narratives} hours=${d.hours} />
       <${Movers} s=${d.sentiment} days=${d.days} />

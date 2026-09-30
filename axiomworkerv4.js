@@ -6264,6 +6264,7 @@ async function narrativesRun(env, opts) {
   await log('info', recounted + ' narratives recounted (size, pace, spread, sentiment split, stance toward the client)' + (out.deferred ? '; ' + out.deferred + ' left for the next cron tick, this run is out of time' : ''));
   // names, counters, alerts - each only while the budget allows; the cron tick finishes what is left
   if (!env.ANTHROPIC_API_KEY) await log('info', 'ANTHROPIC_API_KEY is not set: narratives stay unnamed (their terms and rows are still here)');
+  else if (opts.skipNaming) { out.namingDeferred = true; await log('info', 'naming left to the name steps'); }
   else if (left() < 15000) { out.namingDeferred = true; await log('info', 'naming deferred to the next cron tick (' + Math.round(left() / 1000) + 's left in this run; a naming call takes up to 45s)'); }
   else { try { const nm = await narrLabel(env, ids, log, left); out.named = nm.named; out.calls = nm.calls; out.errors.push(...nm.errors); if (nm.deferred) out.namingDeferred = true; } catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 120)); } }
   if (left() > 2500) { try { await narrCounters(env); } catch (e) { out.errors.push('counters: ' + String((e && e.message) || e).slice(0, 80)); } }
@@ -6429,6 +6430,158 @@ async function overview(env, opts) {
     collection: { sources: { total: s.total || 0, delivering: s.ok || 0, failing: s.failing || 0, dead: s.dead || 0, unverified: s.unverified || 0, items24: s.items24 || 0, lastSweep: src.lastSweep || null, error: src.error || '' }, social: socialRows },
     errors: [narr.error, sent.error, sentSt.error, narrSt.error, alertRows.error, issues.error, latest.error, src.error, tot.error].filter(Boolean),
   };
+}
+
+// ============================================================================
+// THE DAILY BRIEF - the day's intelligence written once, for the person who
+// has to present it. Nothing here is read fresh from raw text: the brief is
+// composed from what the modules already keep (Sentinel alerts, narratives,
+// stances, issues against their baseline, the newest headlines, collection
+// health) for one window. Claude writes the prose; every point cites the
+// narrative, entity, issue, alert or headline it rests on, so a reader can
+// open the evidence. One record a day (KV brief_<YYYY-MM-DD>, Sydney days),
+// filed in the Mind as kind brief_daily, served as JSON or Markdown. The cron
+// writes one after 7am Sydney when none exists; POST /brief/daily rewrites it
+// on demand - the right moment is after the queues have been drained.
+// ============================================================================
+const BRIEF_DAYS_KEPT = 120;
+const BRIEF_HOUR = 7;                 // Sydney hour after which the cron writes the day's brief
+function auDayKey(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).toISOString().slice(0, 10); }
+function auHour(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).getUTCHours(); }
+const BRIEF_SYS = 'You are the senior analyst at Curious Minds, an Australian public affairs agency, writing the daily intelligence brief that the managing director reads first thing and presents to clients. You are given the day\'s evidence: Sentinel alerts (spikes on client issues), the narratives the public conversation is telling (each a cluster of rows across news, Reddit, X, Bluesky, YouTube and the clients\' own pages, with its claim, counter-claim and stance toward the client), stances toward parties, people, organisations and topics with their change against the window before, every client issue against its own fourteen-day baseline, tone by issue, the newest headlines, and what the collection covered. Write for a director: what changed, why it matters and to which client, what to do about it. Concrete and plain, Australian spelling, no hype, no filler, no restating the data as a list of numbers. Every point cites its evidence by the ids given, in square brackets: [N:<id>] a narrative, [E:<id>] an entity, [I:<id>] an issue, [A:<id>] an alert, [L:<id>] a headline. Never invent a figure, a name, a quote or an event that is not in the evidence; where the evidence is thin, say so under gaps. Reply with strict JSON only, no prose outside it: {"headline":"one line of at most fourteen words","summary":"three to five sentences a director could read aloud","changed":[{"what":"one sentence","why":"one sentence on who it matters to and how","evidence":["N:abc","I:ftc"]}],"clients":[{"ns":"mca","client":"Minerals Council of Australia","read":"two or three sentences on the day for this client","watch":["a narrative or shift to watch"],"risks":["a risk"],"openings":["an opening"],"actions":["a concrete action for the team"],"evidence":["N:abc","E:mca"]}],"narratives":[{"id":"abc","why":"one sentence on what it means and where it is heading","stance":"hostile|supportive|mixed|unknown"}],"sentiment":[{"id":"albanese","direction":"more critical|warmer|steady","why":"one sentence"}],"risks":["..."],"actions":["..."],"gaps":["what the evidence cannot say yet"]}. Cover every client namespace given, most change first; a client with nothing today gets a one-sentence read saying so and empty lists. At most six items in changed, five narratives, six sentiment lines, four risks, five actions, three gaps. Use only narrative and entity ids that appear in the evidence.';
+/** Everything the brief rests on, read together for one window. */
+async function briefGather(env, days) {
+  const now = Date.now();
+  const soft = async (fn, fb) => { try { return await fn(); } catch (e) { return Object.assign({}, fb || {}, { error: String((e && e.message) || e).slice(0, 160) }); } };
+  const wd = String(Math.max(1, Math.ceil(days)));
+  const [ov, narr, ents, topics] = await Promise.all([
+    soft(() => overview(env, { days }), {}),
+    soft(() => narrativesList(env, { days: wd, sort: 'n', limit: 30 }), { narratives: [] }),
+    soft(() => sentimentEntities(env, { days: wd }), { entities: [] }),
+    soft(() => sentimentTopics(env, { days: wd }), { topics: [] }),
+  ]);
+  return { now, days, ov, narr, ents, topics, errors: [ov.error, narr.error, ents.error, topics.error].filter(Boolean) };
+}
+/** The evidence as Claude reads it: every row carries the id the brief must cite. */
+function briefEvidence(g) {
+  const ov = g.ov || {}; const L = []; const iso = ts => new Date(Number(ts) || 0).toISOString().slice(0, 16).replace('T', ' ');
+  const clients = []; CLIENT_ISSUES.forEach(ci => { let c = clients.find(x => x.ns === ci.ns); if (!c) { c = { ns: ci.ns, client: ci.client, issues: [] }; clients.push(c); } c.issues.push(ci.id + ' ' + ci.label); });
+  L.push('WINDOW: the last ' + (ov.hours || Math.round(g.days * 24)) + ' hours to ' + iso(g.now) + ' UTC (' + auDayKey(g.now) + ' in Sydney)');
+  L.push('CLIENTS AND THE ISSUES THEY OWN: ' + clients.map(c => c.ns + ' = ' + c.client + ' (' + c.issues.join('; ') + ')').join(' | '));
+  const al = ov.alerts || {}; const alerts = (al.open || []).concat((al.recent || []).filter(a => !a.open)).slice(0, 8);
+  L.push('SENTINEL ALERTS (coverage of a client issue spiked against its own fourteen-day baseline):' + (alerts.length ? '\n' + alerts.map(a => '[A:' + a.id + '] ' + a.label + ' (' + (a.client || a.ns) + ') ' + a.ratio + 'x baseline, ' + a.hot + ' stories from ' + a.srcs + ' outlets, ' + (a.open ? 'awaiting a response' : a.drafted ? 'drafted' : 'acknowledged') + ', detected ' + iso(a.detected)).join('\n') : ' none in the last seven days'));
+  const iss = (ov.issues || []).filter(i => i.recent || i.base);
+  L.push('ISSUES AGAINST THEIR OWN BASELINE (rows in the window against the usual for a window this long):\n' + (iss.length ? iss.map(i => '[I:' + i.id + '] ' + i.label + ' (' + i.ns + ') ' + i.recent + ' rows, ' + i.news + ' of them news, usual ' + i.base + (i.ratio != null ? ', ' + i.ratio + 'x' : i.recent ? ', new' : '')).join('\n') : 'nothing tagged'));
+  const full = {}; ((g.narr || {}).narratives || []).forEach(n => { full[n.id] = n; });
+  const seen = new Set(); const narrs = [];
+  ((ov.narratives || {}).moving || []).forEach(n => { if (!seen.has(n.id)) { seen.add(n.id); narrs.push(Object.assign({}, full[n.id] || {}, n, { moving: true })); } });
+  Object.keys(full).forEach(id => { if (!seen.has(id) && narrs.length < 26) { seen.add(id); narrs.push(full[id]); } });
+  const plats = n => (Array.isArray(n.platforms) ? n.platforms : Object.keys(n.platforms || {})).join(', ');
+  const nline = n => { const s = n.sentiment || {}; return '[N:' + n.id + '] ' + (n.label || 'unnamed (terms: ' + (n.termsTop || []).join(', ') + ')') + (n.client ? ' - ' + n.client : '') + (n.issueLabels && n.issueLabels.length ? ' [' + n.issueLabels.join(', ') + ']' : '') + '; ' + n.n + ' rows, ' + (n.n24 || 0) + ' in the last 24h vs ' + (n.nprev || 0) + ' the day before, ' + n.status + (n.moving ? ', moving' : '') + '; toward the client: ' + (n.side || 'unknown') + (s.judged ? '; split ' + s.neg + ' hostile / ' + s.neu + ' neutral / ' + s.pos + ' warm of ' + s.judged + ' judged' : '; no rows judged yet') + '; first seen on ' + (n.first_platform || '?') + (n.first_channel ? ' ' + n.first_channel : '') + ' ' + iso(n.first_ts) + '; channels ' + plats(n) + (n.claim ? '\n   claim: ' + n.claim : '') + (n.counter_claim ? '\n   counter-claim: ' + n.counter_claim : '') + (n.proponents ? '\n   carried by: ' + n.proponents : '') + (n.scope && n.scope !== 'client' ? '\n   scope: ' + n.scope + (n.scopeWhy ? ' (' + n.scopeWhy + ')' : '') : ''); };
+  L.push('NARRATIVES (' + ((ov.narratives || {}).live || 0) + ' live; the ones that moved first, then the largest):' + (narrs.length ? '\n' + narrs.map(nline).join('\n') : ' none placed yet'));
+  const ents = ((g.ents || {}).entities || []).filter(e => e.n >= 3).slice(0, 30);
+  L.push('STANCES (net stance -1..1 over judged mentions in the window; change against the window before):' + (ents.length ? '\n' + ents.map(e => '[E:' + e.id + '] ' + e.name + ' (' + e.kind + (e.party ? ', ' + e.party : '') + (e.role ? ', ' + e.role : '') + (e.side && e.side !== 'neutral' ? ', ' + e.side + ' side' : '') + ') ' + e.n + ' mentions, net ' + e.score + ', ' + e.neg + ' critical / ' + e.pos + ' supportive' + (e.change != null ? ', change ' + (e.change > 0 ? '+' : '') + e.change : ', no earlier window') + (e.sarcasm ? ', sarcasm in ' + e.sarcasm : '') + '; by channel ' + (e.platforms || []).slice(0, 4).map(p => p.platform + ' ' + p.n + ' (' + p.score + ')').join(', ')).join('\n') : ' nothing judged in this window yet'));
+  const tp = ((g.topics || {}).topics || []).slice(0, 14);
+  L.push('TONE BY ISSUE (judged rows):' + (tp.length ? '\n' + tp.map(t => '[I:' + t.id + '] ' + t.label + ' ' + t.n + ' rows, tone ' + t.tone + ', ' + t.neg + ' hostile / ' + t.pos + ' warm; most named: ' + (t.entities || []).slice(0, 4).map(e => e.name + ' ' + e.score).join(', ')).join('\n') : ' none'));
+  const latest = (ov.latest || []).slice(0, 16);
+  L.push('NEWEST HEADLINES ON CLIENT ISSUES:' + (latest.length ? '\n' + latest.map(r => '[L:' + r.id + '] ' + r.title + ' (' + (r.channel || r.platform) + ', ' + iso(r.ts) + (r.issues && r.issues.length ? ', ' + r.issues.join('/') : '') + (r.tone ? ', tone ' + r.tone : '') + (r.comments ? ', ' + r.comments + ' comments' : '') + ')').join('\n') : ' none'));
+  const c = ov.collection || {}; const s = c.sources || {}; const st = ov.sentiment || {}; const nt = ov.narratives || {};
+  L.push('COLLECTION: ' + (s.delivering || 0) + ' sources delivering, ' + (s.items24 || 0) + ' items in 24h, ' + (s.dead || 0) + ' dead; ' + (st.judged24 || 0) + ' rows judged today, ' + (st.backlog || 0) + ' matched rows still waiting for a verdict; ' + (nt.placed24 || 0) + ' rows placed into narratives today, ' + (nt.backlog || 0) + ' waiting; ' + ((ov.totals || {}).rows || 0) + ' rows on client issues in the window' + ((c.social || []).length ? '; social sweeps: ' + c.social.map(p => p.platform + (p.ok ? ' ok' : ' failed')).join(', ') : '') + (g.errors && g.errors.length ? '; parts that failed to read: ' + g.errors.join('; ') : ''));
+  return L.join('\n\n').slice(0, 26000);
+}
+/** Claude's answer, bounded and tied back to the evidence: unknown narrative
+ *  and entity ids are dropped, labels and names come from the data, not the model. */
+function briefClean(j, g) {
+  if (!j || typeof j !== 'object') return null;
+  const str = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+  const list = (v, n, m) => (Array.isArray(v) ? v : []).map(x => str(x, m || 300)).filter(Boolean).slice(0, n);
+  const ev = v => (Array.isArray(v) ? v : []).map(x => str(x, 40)).filter(x => /^[NEIAL]:[a-z0-9_:-]+$/i.test(x)).slice(0, 8);
+  const headline = str(j.headline, 160), summary = str(j.summary, 1500);
+  if (!headline || !summary) return null;
+  const ov = g.ov || {}; const narrs = {}; ((g.narr || {}).narratives || []).forEach(n => { narrs[n.id] = n; }); ((ov.narratives || {}).moving || []).forEach(n => { narrs[n.id] = narrs[n.id] || n; });
+  const ents = {}; ((g.ents || {}).entities || []).forEach(e => { ents[e.id] = e; });
+  const known = {}; CLIENT_ISSUES.forEach(ci => { known[ci.ns] = ci.client; });
+  const clients = (Array.isArray(j.clients) ? j.clients : []).map(c => { const ns = str(c.ns, 24).toLowerCase(); return { ns, client: known[ns] || str(c.client, 80), read: str(c.read, 900), watch: list(c.watch, 4), risks: list(c.risks, 4), openings: list(c.openings, 4), actions: list(c.actions, 5), evidence: ev(c.evidence) }; }).filter(c => c.ns && c.read).slice(0, 10);
+  return {
+    headline, summary,
+    changed: (Array.isArray(j.changed) ? j.changed : []).map(x => ({ what: str(x.what, 300), why: str(x.why, 300), evidence: ev(x.evidence) })).filter(x => x.what).slice(0, 6),
+    clients,
+    narratives: (Array.isArray(j.narratives) ? j.narratives : []).map(x => { const n = narrs[str(x.id, 24)]; return n ? { id: n.id, label: n.label || 'unnamed, ' + n.n + ' rows', client: n.client || '', n: n.n, n24: n.n24, status: n.status, stance: ['hostile', 'supportive', 'mixed', 'unknown'].indexOf(x.stance) >= 0 ? x.stance : (n.side || 'unknown'), why: str(x.why, 300) } : null; }).filter(Boolean).slice(0, 5),
+    sentiment: (Array.isArray(j.sentiment) ? j.sentiment : []).map(x => { const e = ents[str(x.id, 40)]; return e ? { id: e.id, name: e.name, kind: e.kind, n: e.n, score: e.score, change: e.change, direction: str(x.direction, 40), why: str(x.why, 300) } : null; }).filter(Boolean).slice(0, 6),
+    risks: list(j.risks, 4), actions: list(j.actions, 5), gaps: list(j.gaps, 3),
+  };
+}
+const BRIEF_DATE = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const BRIEF_TIME = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+/** The brief as a document: the same record, readable and pasteable. */
+function briefMarkdown(rec) {
+  const b = rec.brief || {}; const L = [];
+  const ev = a => (a && a.length ? ' _(' + a.join(', ') + ')_' : '');
+  const bullets = (title, arr) => { if (arr && arr.length) { L.push('**' + title + '**'); arr.forEach(x => L.push('- ' + x)); L.push(''); } };
+  L.push('# AXIOM daily brief - ' + BRIEF_DATE.format(new Date(rec.at || Date.now())));
+  L.push('');
+  L.push('_Curious Minds. The last ' + rec.hours + ' hours to ' + BRIEF_TIME.format(new Date(rec.at || Date.now())) + '. Every point cites its evidence: N a narrative, E an entity, I an issue, A an alert, L a headline; open them in AXIOM._');
+  L.push('');
+  L.push('## ' + b.headline); L.push(''); L.push(b.summary); L.push('');
+  if (b.changed && b.changed.length) { L.push('## What changed'); L.push(''); b.changed.forEach(c => L.push('- **' + c.what + '** ' + c.why + ev(c.evidence))); L.push(''); }
+  if (b.clients && b.clients.length) {
+    L.push('## By client'); L.push('');
+    b.clients.forEach(c => { L.push('### ' + c.client + ' (' + c.ns + ')'); L.push(''); L.push(c.read + ev(c.evidence)); L.push(''); bullets('Watch', c.watch); bullets('Risks', c.risks); bullets('Openings', c.openings); bullets('Actions', c.actions); });
+  }
+  if (b.narratives && b.narratives.length) { L.push('## Narratives to watch'); L.push(''); L.push('| Narrative | Client | Rows | Toward client | Why it matters |'); L.push('|---|---|---:|---|---|'); b.narratives.forEach(n => L.push('| ' + n.label.replace(/\|/g, '/') + ' `N:' + n.id + '` | ' + (n.client || '-') + ' | ' + n.n + ' (' + (n.n24 || 0) + ' today) | ' + n.stance + ' | ' + n.why.replace(/\|/g, '/') + ' |')); L.push(''); }
+  if (b.sentiment && b.sentiment.length) { L.push('## Stances that moved'); L.push(''); L.push('| Who | Mentions | Net stance | Change | Direction | Why |'); L.push('|---|---:|---:|---:|---|---|'); b.sentiment.forEach(s => L.push('| ' + s.name + ' `E:' + s.id + '` | ' + s.n + ' | ' + s.score + ' | ' + (s.change == null ? 'new' : (s.change > 0 ? '+' : '') + s.change) + ' | ' + s.direction + ' | ' + s.why.replace(/\|/g, '/') + ' |')); L.push(''); }
+  bullets('Risks', b.risks); bullets('Actions', b.actions); bullets('Gaps in the evidence', b.gaps);
+  const s = rec.stats || {};
+  L.push('---'); L.push('');
+  L.push('_' + s.rows + ' rows on client issues in the window; ' + s.narrativesLive + ' narratives live, ' + s.moving + ' moving; ' + s.judged24 + ' rows judged today' + (s.sentimentBacklog ? ', ' + s.sentimentBacklog + ' waiting' : '') + '; ' + s.alertsOpen + ' alert' + (s.alertsOpen === 1 ? '' : 's') + ' awaiting a response; ' + s.sourcesDelivering + ' sources delivering. Written by ' + rec.model + ' at ' + BRIEF_TIME.format(new Date(rec.at || Date.now())) + '._');
+  return L.join('\n');
+}
+/** Gather, write, store, file. */
+async function briefWrite(env, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  if (!env.MIND_DB) return { ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' };
+  if (!env.ANTHROPIC_API_KEY) return { ok: false, error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the brief is written by Claude.' };
+  const days = Math.min(Math.max(parseFloat(opts.days) || 1, 0.25), 7);
+  const t0 = Date.now(); const day = auDayKey(t0);
+  await log('info', 'gathering the evidence for ' + day + ': alerts, narratives, stances, issues against baseline, headlines, collection (the last ' + Math.round(days * 24) + ' hours)');
+  const g = await briefGather(env, days);
+  const evidence = briefEvidence(g);
+  const model = env.BRIEF_MODEL || env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || SENT_MODEL;
+  await log('cmd', 'claude ' + model + ' write the brief (' + evidence.length + ' characters of evidence, ' + (((g.ov || {}).narratives || {}).moving || []).length + ' narratives moving, ' + (((g.ents || {}).entities || []).filter(e => e.n >= 3).length) + ' entities judged)');
+  let brief = null, raw = '', err = '';
+  for (let attempt = 0; attempt < 2 && !brief; attempt++) {
+    try { raw = await claudeMsg(env, BRIEF_SYS, 'EVIDENCE\n\n' + evidence + (attempt ? '\n\nYour previous answer was not valid JSON in the shape asked for. Reply with the JSON object only.' : ''), 6000, 170000, model); brief = briefClean(relJson(raw), g); if (!brief) await log('err', 'the answer was not a valid brief; asking once more'); }
+    catch (e) { err = String((e && e.message) || e).slice(0, 200); await log('err', err); if (/usage limit|spend limit|regain access|credit balance|billing/i.test(err)) break; }
+  }
+  if (!brief) return { ok: false, error: 'brief_failed', detail: err || ('Claude did not return a valid brief: ' + raw.slice(0, 200)), day };
+  const ov = g.ov || {};
+  const stats = { alertsOpen: (ov.alerts || {}).openCount || 0, narrativesLive: (ov.narratives || {}).live || 0, moving: ((ov.narratives || {}).moving || []).length, judged24: (ov.sentiment || {}).judged24 || 0, sentimentBacklog: (ov.sentiment || {}).backlog || 0, narrativeBacklog: (ov.narratives || {}).backlog || 0, rows: (ov.totals || {}).rows || 0, sourcesDelivering: ((ov.collection || {}).sources || {}).delivering || 0 };
+  const rec = { ok: true, day, at: t0, days, hours: Math.round(days * 24), model, brief, stats, by: opts.by || 'cron', gatherErrors: g.errors || [] };
+  rec.md = briefMarkdown(rec);
+  if (opts.mind !== false) {
+    try { const m = await mindIngestDoc(env, { ns: 'cmm', title: 'Daily brief ' + day + ': ' + brief.headline, kind: 'brief_daily', text: rec.md, source: 'brief:' + day, date: day }); rec.mind = m.docId; await log('out', 'filed in the Mind as ' + m.docId + ' (kind brief_daily, namespace cmm)'); }
+    catch (e) { rec.mindError = String((e && e.message) || e).slice(0, 120); await log('info', 'not filed in the Mind: ' + rec.mindError); }
+  }
+  rec.ms = Date.now() - t0;
+  await kvPut(env.AXIOM_KV, 'brief_' + day, JSON.stringify(rec), BRIEF_DAYS_KEPT * 86400);
+  await log('done', 'brief for ' + day + ' written in ' + (rec.ms / 1000).toFixed(1) + 's: ' + brief.headline);
+  return rec;
+}
+async function briefDays(env) {
+  try { const l = await env.AXIOM_KV.list({ prefix: 'brief_' }); return ((l && l.keys) || []).map(k => k.name.slice(6)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse().slice(0, 60); } catch (e) { return []; }
+}
+async function briefGet(env, day) {
+  if (!day) { const days = await briefDays(env); day = days[0]; }
+  if (!day) return null;
+  try { const raw = await kvGet(env.AXIOM_KV, 'brief_' + day); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+}
+/** After BRIEF_HOUR Sydney, once a day, when nobody has written one yet. */
+async function briefCron(env) {
+  if (!env.MIND_DB || !env.ANTHROPIC_API_KEY) return { ok: false, skipped: true };
+  if (auHour() < BRIEF_HOUR) return { ok: true, skipped: 'early' };
+  const day = auDayKey();
+  if (await kvGet(env.AXIOM_KV, 'brief_' + day)) return { ok: true, skipped: 'written' };
+  return briefWrite(env, { days: 1, by: 'cron' });
 }
 
 // ==============================================================================
@@ -6938,7 +7091,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview') && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -6946,7 +7099,7 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview';
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/');
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -8057,6 +8210,30 @@ export default {
       catch (e) { return jsonResp({ ok: false, error: 'overview_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
+    // -- The daily brief: the day's intelligence written once, for the person presenting it --
+    //    GET  /brief/daily?day=YYYY-MM-DD&format=json|md   the day's brief (the latest when day is left out); md serves Markdown (read)
+    //    GET  /brief/list                                    the days a brief exists for (read)
+    //    POST /brief/daily {days, mind}                      write (or rewrite) today's brief now, inside the request; a minute or two (full)
+    if (path === '/brief/daily' || path === '/brief/list') {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let bb = {}; if (req.method === 'POST') { try { bb = await req.json(); } catch (e) { bb = {}; } }
+      try {
+        if (path === '/brief/list' && req.method === 'GET') return jsonResp({ ok: true, days: await briefDays(env), today: auDayKey() });
+        if (req.method === 'GET') {
+          const day = String(reqUrl.searchParams.get('day') || '').replace(/[^0-9-]/g, '').slice(0, 10);
+          const rec = await briefGet(env, day);
+          if (!rec) return jsonResp({ ok: false, error: 'no_brief', detail: day ? 'No brief was written for ' + day + '.' : 'No brief has been written yet. Write today\'s brief from the front page, or POST /brief/daily; the cron writes one each morning after ' + BRIEF_HOUR + 'am Sydney.', days: await briefDays(env), today: auDayKey() }, 404);
+          if (reqUrl.searchParams.get('format') === 'md') return new Response(rec.md || briefMarkdown(rec), { status: 200, headers: Object.assign({}, CORS, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': 'inline; filename="axiom-brief-' + rec.day + '.md"' }) });
+          return jsonResp(Object.assign({}, rec, { today: auDayKey(), isToday: rec.day === auDayKey() }));
+        }
+        if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing the brief needs a full-access key.' }, 403);
+        const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
+        const rec = await briefWrite(env, { days: bb.days, mind: bb.mind !== false, by: auth.name || 'operator', log });
+        return jsonResp(Object.assign({}, rec, { lines, today: auDayKey(), isToday: true }), rec.ok ? 200 : rec.error === 'not_configured' ? 501 : 500);
+      } catch (e) { return jsonResp({ ok: false, error: 'brief_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
     // -- Narratives: the stories the conversation keeps telling, with origin, spread, pace, split and evidence --
     //    GET  /narratives?days=&issue=&ns=&platform=&status=&side=&scope=client|politics|off&q=&sort=velocity|n|new|latest&all=1&muted=1   (read; off-topic hidden unless scope=off or all=1)
     //    GET  /narratives/one?id=            the whole narrative: summary, claim, counter, spread, amplifiers, series, every row (read)
@@ -8065,7 +8242,7 @@ export default {
     //    POST /narratives/update {id,label,summary,claim,counter_claim,issues,muted,pinned}   an operator's edit (full)
     //    POST /narratives/merge {into,from}  fold one narrative into another (full)
     //    POST /narratives/reset {broad:true} | {all:true,confirm:'reset'}   dissolve broad clusters (or everything) so rows are placed again (full)
-    //    POST /narratives/step {what:'recount'|'name',limit}   one step inside the request; the app loops it to finish the backlog (full)
+    //    POST /narratives/step {what:'place'|'recount'|'name',scan,limit}   one step inside the request; the app and tools/daily-brief.py loop it to finish the backlog (full)
     if (path === '/narratives' || path.startsWith('/narratives/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let nrb = {}; if (req.method === 'POST') { try { nrb = await req.json(); } catch (e) { nrb = {}; } }
@@ -8124,9 +8301,16 @@ export default {
           // One step, synchronously, inside the request - the app loops these to finish what the tick
           // would otherwise take hours over. {what:'recount'} refreshes up to 60 stale narratives;
           // {what:'name'} makes one naming call (five narratives) and then pairs counters and raises alerts.
-          const what = nrb.what === 'recount' ? 'recount' : 'name';
+          const what = nrb.what === 'recount' ? 'recount' : nrb.what === 'place' ? 'place' : 'name';
           const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
           const now = Date.now(); const db = env.MIND_DB;
+          if (what === 'place') {
+            // one placement pass, synchronously: embed up to `scan` waiting rows and join or start narratives;
+            // recounting follows, naming is left to the name steps so this stays quick and never spends a call
+            const out = await narrativesRun(env, { hours: parseInt(nrb.hours, 10) || NARR_WINDOW_H, scan: Math.min(Math.max(parseInt(nrb.scan, 10) || 100, 1), 200), budgetMs: 20000, skipNaming: true, log });
+            const st = await narrativesStatus(env);
+            return jsonResp(Object.assign({}, out, { what, remaining: st.backlog || 0, lines }));
+          }
           if (what === 'recount') {
             const lim = Math.min(Math.max(parseInt(nrb.limit, 10) || 60, 1), 100);
             const ids = ((await db.prepare('SELECT id FROM narratives WHERE muted=0 AND last_ts>? AND updated<? ORDER BY n DESC LIMIT ?').bind(now - 7 * 86400000, now - 6 * 3600000, lim).all()).results || []).map(r => r.id);
@@ -10381,6 +10565,8 @@ async function handleScheduled(env) {
   try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); }
   // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take off on a client issue, reported.
   try { const nr = await narrativesCron(env); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named, 'named'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
+  // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
+  try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); }
   // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
   try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {
