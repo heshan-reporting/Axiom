@@ -765,6 +765,76 @@ the view holding it) - answered in tables, not cards.
   the legacy inline views (Newsroom, Pulse, Radar, Analyst, Briefing,
   Audience, Knowledge, Clients) inherit the shell and panel rules only.
 
+## The Creative Studio (one client-aware workspace; Phases 0-1 shipped)
+
+The approved proposal (`CREATIVE-STUDIO.md`) consolidates the Release Desk,
+the Content Desk and the Client Central Studio into one feature. Phase 0
+shipped the clickable prototype (`docs/studio.js`, `#v-studio`, the Studio
+tab) on synthetic data. **Phase 1 is the durable ground under it**, all in
+the worker behind `/studio/*` (`ensureStudio`, build id `AXIOM_BUILD`, also
+returned by `/engine/status` so the deploy script proves the release):
+
+- **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
+  brief, status, owner, `revision`, `legacy_kind/legacy_id`, `idem`,
+  archived) with `studio_sources` (text and passages; the claim ledger is
+  Phase 2), `studio_references` (purpose brand / composition / mood /
+  imagery / typography / inspiration / approved; image in R2
+  `studio/<project>/refs/`), `studio_directions`, `studio_assets` (family,
+  channel, format, `current`, `locks`, `revision`), `studio_versions`
+  (**immutable**: a change appends and moves `current`; `restoreFrom`
+  appends a version with `restored_from`; a render's image lives in R2
+  `studio/<project>/<asset>/<version>.png`, served by `GET /studio/file?
+  key=`), `studio_approvals`, `studio_events` (the project thread),
+  `studio_jobs`. The namespace a request supplies is never trusted: every
+  child row is authorised through its project (`stAsset` returns the pair;
+  a `project` that disagrees is `cross_project` 403). Roles are agency-wide
+  full and read, as decided.
+- **Concurrency.** Writes may carry `revision`; a stale one is refused with
+  `conflict` 409 and the current revision, nothing written. `POST
+  /studio/lock {asset, element, locked}`; a version write that changes a
+  locked element is `locked` 409 unless `unlock:true`.
+- **Approvals name their content.** `POST /studio/approve {asset, part
+  copy|design, decision approve|reject|withdraw, reason}` stores the
+  signature of the copy (or of image key, layout and mode); `stStanding()`
+  reports an approval only while the current version still matches, so a
+  copy edit drops the copy approval and leaves design standing
+  (`carried:true`). A reason is required; the thread records it as client
+  acceptance or feedback, never performance.
+- **Durable jobs.** `POST /studio/job {project, asset, stage, input, idem}`
+  (stages `echo`, `render`; Phase 2 adds extract, direct, copy, export) is
+  idempotent on `idem`. `POST /studio/job/step {id}` claims the job with an
+  atomic lease (`stJobClaim`: queued, or running past `ST_LEASE_MS` = 2 min,
+  `attempts < 3`) and runs one stage synchronously; `studioCron()` does the
+  same from the tick for anything queued or abandoned. Transient failures
+  (5xx, 429, timeouts, no image) requeue up to three attempts, invalid input
+  fails at once; `cancel` stops a queued job and notes that an in-flight
+  provider call may still complete and cost, and a cancelled job's result
+  is never filed. **Stale guard:** a render whose asset has moved past
+  `input_version` is filed as a branch off the version it was asked for and
+  `current` is left alone.
+- **Legacy access.** `GET /studio/list?ns=` returns the client's projects
+  plus its release packs and content sets as read-only legacy rows
+  (`rp:<id>`, `cs:<id>`); `GET /studio/get?id=rp:<id>` builds a project
+  view on the fly (tiles as `generated`, pieces as `copy`, fields never
+  recorded marked `notRecorded`). `POST /studio/import {legacy}` creates a
+  project once (unique `legacy_id`; a repeat returns the same project),
+  references tile images by their existing R2 key, and never writes the
+  original. `GET /studio/inventory` counts packs, sets and projects per
+  client and samples KV `imgsess_*` sessions for a recorded client;
+  `tools/studio-inventory.py` does the same from a Mac through the read
+  routes. `GET /studio/models` asks Anthropic and Google which of the
+  candidate identifiers the worker's keys can list (true / false / null),
+  a statement about reachability only. `GET /studio/status` is the build,
+  counts and bindings; the prototype's library shows it when deployed.
+- **Auth hardening.** `/chat`, `/nano` and `/clickup` are gated (writes,
+  full role) with the rest of the creative routes; `axAuth` fails closed
+  when `AXIOM_KEYS` is set but is not a JSON object (`auth_misconfigured`
+  401 for every key) unless `AXIOM_ACCESS_KEY` also exists.
+- **Tests live in the repo now:** `tests/` holds every harness on relative
+  paths (`tests/README.md`), including `studio-worker.mjs` with a case per
+  Phase 1 acceptance line. Run `node --experimental-sqlite
+  tests/studio-worker.mjs`.
+
 ## The Content Desk (copy for each client and platform, changed by instruction)
 
 The `v-content` view (React island, `docs/content.js`) writes social and

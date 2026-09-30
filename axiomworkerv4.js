@@ -6619,6 +6619,393 @@ async function briefCron(env) {
 }
 
 // ==============================================================================
+// CREATIVE STUDIO - one client-aware workspace for copy, creative and campaign
+// production. Phase 1: the durable ground the workspace stands on.
+//   Projects own everything and carry the client namespace; every child row
+//   (source, reference, direction, asset, version, approval, job, event) is
+//   reached through its project, and the namespace a request supplies is never
+//   trusted over the one stored. Versions are immutable: a change appends a
+//   version and moves the asset's `current`; restore appends a version that
+//   points at the earlier content. Approvals name the content they accepted
+//   (a signature of the copy, or of the image and layout) and stand only while
+//   that content is unchanged, so a copy edit leaves a design approval intact.
+//   Writes carry the revision they were made against and are refused with the
+//   current state when it has moved on. Jobs are rows in studio_jobs claimed
+//   with an atomic lease and run one stage at a time - by the browser's step
+//   request while the tab is open, by the cron tick otherwise - with an
+//   idempotency key so a double-click makes one job, bounded retries that tell
+//   a transient failure from bad input, and a stale guard so a result for a
+//   version the asset has moved past is filed as a branch, never over newer
+//   work. Release packs and content sets appear as read-only legacy projects
+//   and are imported explicitly and idempotently; originals are never touched.
+// ==============================================================================
+const AXIOM_BUILD = '2026-09-30.studio-p1';
+let STUDIO_READY = false;
+const ST_STAGES = ['echo', 'render'];       // Phase 2 adds extract, direct, copy, export
+const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
+const ST_MAX_ATTEMPTS = 3;
+const ST_PARTS = ['copy', 'design'];
+async function ensureStudio(env) {
+  if (!env.MIND_DB) return false;
+  if (STUDIO_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_projects(id TEXT PRIMARY KEY, ns TEXT, campaign TEXT, title TEXT, brief TEXT, status TEXT, owner TEXT, revision INTEGER, legacy_kind TEXT, legacy_id TEXT, idem TEXT, archived INTEGER, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_projects_ns ON studio_projects(ns, updated)'),
+    env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS studio_projects_legacy ON studio_projects(legacy_id)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_sources(id TEXT PRIMARY KEY, project TEXT, kind TEXT, name TEXT, text TEXT, passages TEXT, claims TEXT, provenance TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_sources_p ON studio_sources(project)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_references(id TEXT PRIMARY KEY, project TEXT, kind TEXT, name TEXT, purpose TEXT, key TEXT, note TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_references_p ON studio_references(project)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_directions(id TEXT PRIMARY KEY, project TEXT, data TEXT, chosen INTEGER, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_directions_p ON studio_directions(project)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_assets(id TEXT PRIMARY KEY, project TEXT, family TEXT, channel TEXT, format TEXT, title TEXT, current TEXT, locks TEXT, revision INTEGER, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_assets_p ON studio_assets(project, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_versions(id TEXT PRIMARY KEY, asset TEXT, project TEXT, parent TEXT, kind TEXT, note TEXT, copy TEXT, layout TEXT, image TEXT, mode TEXT, checks TEXT, context TEXT, restored_from TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_versions_a ON studio_versions(asset, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_approvals(id TEXT PRIMARY KEY, project TEXT, asset TEXT, part TEXT, version TEXT, sig TEXT, decision TEXT, reason TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_approvals_a ON studio_approvals(asset, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_events(id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, kind TEXT, data TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_events_p ON studio_events(project, id)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_jobs(id TEXT PRIMARY KEY, project TEXT, asset TEXT, stage TEXT, input TEXT, input_version TEXT, state TEXT, attempts INTEGER, lease_until INTEGER, idem TEXT, progress TEXT, cost REAL, result TEXT, error TEXT, who TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_jobs_st ON studio_jobs(state, lease_until)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_jobs_p ON studio_jobs(project, created)'),
+    env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS studio_jobs_idem ON studio_jobs(idem)'),
+  ]);
+  STUDIO_READY = true;
+  return true;
+}
+function stId(p) { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function stClean(v, n) { return String(v == null ? '' : v).replace(/[^a-zA-Z0-9_:.-]/g, '').slice(0, n || 40); }
+function stStr(v, n) { return String(v == null ? '' : v).slice(0, n || 400); }
+/** What an approval accepts: the copy of a version, or its image and layout. */
+function stSig(part, v) {
+  const c = v.copy || {};
+  return part === 'copy' ? JSON.stringify([c.headline || '', c.support || '', c.body || '', c.cta || '', c.caption || '', c.alt || '']) : JSON.stringify([(v.image && v.image.key) || '', v.layout || {}, v.mode || '']);
+}
+function stCopy(c) {
+  c = c && typeof c === 'object' ? c : {};
+  const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
+  return out;
+}
+function stImage(im) { if (!im || typeof im !== 'object') return null; return { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; }
+function stVersionRow(r) {
+  return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
+}
+function stAssetRow(r) { return { id: r.id, project: r.project, family: r.family || '', channel: r.channel || '', format: r.format || '1:1', title: r.title || '', current: r.current || '', locks: pjs(r.locks, {}), revision: r.revision || 0, created: r.created, updated: r.updated }; }
+function stProjectRow(r) {
+  return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false };
+}
+async function stEvent(env, project, kind, data, who) {
+  try { await env.MIND_DB.prepare('INSERT INTO studio_events(project,kind,data,who,created) VALUES(?,?,?,?,?)').bind(project, kind, JSON.stringify(data || {}).slice(0, 4000), stStr(who, 40), Date.now()).run(); } catch (e) {}
+}
+async function stProject(env, id) {
+  id = stClean(id, 24); if (!id) return null;
+  const r = await env.MIND_DB.prepare('SELECT * FROM studio_projects WHERE id=?').bind(id).first();
+  return r ? stProjectRow(r) : null;
+}
+/** An asset with its project - the project's namespace is the only namespace that counts. */
+async function stAsset(env, id) {
+  id = stClean(id, 24); if (!id) return null;
+  const r = await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(id).first();
+  if (!r) return null;
+  const p = await stProject(env, r.project);
+  return p ? { asset: stAssetRow(r), project: p } : null;
+}
+async function stVersion(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE id=?').bind(stClean(id, 24)).first(); return r ? stVersionRow(r) : null; }
+async function stCurrent(env, asset) { return asset.current ? stVersion(env, asset.current) : null; }
+/** The approvals that still stand: the latest approve per part whose signature matches the current version. */
+async function stStanding(env, asset) {
+  const cur = await stCurrent(env, asset); const out = {};
+  if (!cur) return out;
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_approvals WHERE asset=? ORDER BY created DESC, id DESC LIMIT 40').bind(asset.id).all()).results || [];
+  ST_PARTS.forEach(part => {
+    const last = rows.find(r => r.part === part);
+    if (last && last.decision === 'approve' && last.sig === stSig(part, cur)) out[part] = { version: last.version, by: last.who, reason: last.reason, at: last.created, carried: last.version !== cur.id };
+  });
+  return out;
+}
+async function stBump(env, project) { await env.MIND_DB.prepare('UPDATE studio_projects SET revision=revision+1, updated=? WHERE id=?').bind(Date.now(), project).run(); }
+/** Append a version and move the asset's current to it (unless opts.branch). Never edits an existing version. */
+async function stAppendVersion(env, asset, patch, who, opts) {
+  opts = opts || {};
+  const cur = await stCurrent(env, asset);
+  const base = opts.baseVersion || cur;
+  const v = {
+    id: stId('v'), asset: asset.id, project: asset.project, parent: base ? base.id : null, kind: stStr(patch.kind || 'text', 12), note: stStr(patch.note, 200),
+    copy: Object.assign({}, base ? base.copy : {}, stCopy(patch.copy || {})), layout: patch.layout && typeof patch.layout === 'object' ? patch.layout : (base ? base.layout : {}), image: patch.image === undefined ? (base ? base.image : null) : stImage(patch.image),
+    mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : [], context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
+  };
+  await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), JSON.stringify(v.layout).slice(0, 20000), v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks).slice(0, 8000), JSON.stringify(v.context).slice(0, 8000), v.restored_from, v.who, v.created).run();
+  if (!opts.branch) await env.MIND_DB.prepare('UPDATE studio_assets SET current=?, revision=revision+1, updated=? WHERE id=?').bind(v.id, Date.now(), asset.id).run();
+  await stBump(env, asset.project);
+  return stVersionRow(Object.assign({}, v, { copy: JSON.stringify(v.copy), layout: JSON.stringify(v.layout), image: v.image ? JSON.stringify(v.image) : null, checks: JSON.stringify(v.checks), context: JSON.stringify(v.context) }));
+}
+async function stAssetView(env, a, opts) {
+  opts = opts || {};
+  const versions = ((await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE asset=? ORDER BY created ASC, id ASC LIMIT ?').bind(a.id, opts.versions || 60).all()).results || []).map(stVersionRow);
+  const approvals = await stStanding(env, a);
+  return Object.assign({}, a, { versions, approvals, current: a.current || (versions.length ? versions[versions.length - 1].id : '') });
+}
+/** The whole project as the workspace reads it. */
+async function stGet(env, id, opts) {
+  const p = await stProject(env, id);
+  if (!p) return null;
+  const db = env.MIND_DB;
+  const [src, refs, dirs, assets, events, jobs] = await Promise.all([
+    db.prepare('SELECT * FROM studio_sources WHERE project=? ORDER BY created').bind(p.id).all(),
+    db.prepare('SELECT * FROM studio_references WHERE project=? ORDER BY created').bind(p.id).all(),
+    db.prepare('SELECT * FROM studio_directions WHERE project=? ORDER BY created').bind(p.id).all(),
+    db.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all(),
+    db.prepare('SELECT * FROM studio_events WHERE project=? ORDER BY id DESC LIMIT 200').bind(p.id).all(),
+    db.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all(),
+  ]);
+  const out = Object.assign({}, p, {
+    sources: (src.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, text: opts && opts.light ? undefined : r.text, chars: (r.text || '').length, passages: pjs(r.passages, {}), claims: pjs(r.claims, []), provenance: r.provenance || '', who: r.who, created: r.created })),
+    references: (refs.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, purpose: r.purpose, key: r.key || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', note: r.note || '', who: r.who, created: r.created })),
+    directions: (dirs.results || []).map(r => Object.assign({ id: r.id, chosen: !!r.chosen, who: r.who, created: r.created }, pjs(r.data, {}))),
+    assets: [], thread: (events.results || []).reverse().map(r => Object.assign({ id: r.id, kind: r.kind, who: r.who, at: r.created }, pjs(r.data, {}))),
+    jobs: (jobs.results || []).map(stJobRow),
+  });
+  for (const a of (assets.results || [])) out.assets.push(await stAssetView(env, stAssetRow(a)));
+  return out;
+}
+async function stList(env, f) {
+  f = f || {};
+  const ns = relNs(f.ns);
+  const w = ['ns=?']; const b = [ns];
+  if (!f.archived) w.push('archived=0');
+  if (f.status) { w.push('status=?'); b.push(stStr(f.status, 20)); }
+  if (f.q) { w.push("title LIKE ? ESCAPE '\\'"); b.push(arcLike(String(f.q).slice(0, 80))); }
+  const rows = (await env.MIND_DB.prepare('SELECT p.*, (SELECT COUNT(*) FROM studio_assets a WHERE a.project=p.id) n_assets, (SELECT COUNT(*) FROM studio_sources s WHERE s.project=p.id) n_sources FROM studio_projects p WHERE ' + w.join(' AND ') + ' ORDER BY updated DESC LIMIT ?').bind(...b, Math.min(parseInt(f.limit, 10) || 100, 300)).all()).results || [];
+  const projects = rows.map(r => Object.assign(stProjectRow(r), { assets: r.n_assets || 0, sources: r.n_sources || 0 }));
+  const legacy = f.legacy === false ? [] : await stLegacyList(env, ns, projects);
+  return { ok: true, ns, projects, legacy };
+}
+// -- legacy adapters: release packs and content sets as read-only projects ---------------------
+async function stLegacyList(env, ns, imported) {
+  const done = new Set((imported || []).filter(p => p.legacy).map(p => p.legacy.id));
+  const out = [];
+  try {
+    await ensureRelease(env);
+    const rows = (await env.MIND_DB.prepare('SELECT id,ns,title,status,who,format,created,updated,tiles FROM release_packs WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
+    rows.forEach(r => { const t = pjs(r.tiles, []); out.push({ id: 'rp:' + r.id, kind: 'legacy_release', ns: r.ns, title: r.title || 'Release pack', status: r.status || '', owner: r.who || '', format: r.format || '', created: r.created, updated: r.updated, assets: t.length, rendered: t.filter(x => x.image).length, readOnly: true, imported: done.has('rp:' + r.id) ? (imported.find(p => p.legacy && p.legacy.id === 'rp:' + r.id) || {}).id : '' }); });
+  } catch (e) {}
+  try {
+    await ensureContent(env);
+    const rows = (await env.MIND_DB.prepare('SELECT id,ns,campaign,brief,platforms,items,status,who,created,updated FROM content_sets WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
+    rows.forEach(r => { const it = pjs(r.items, []); out.push({ id: 'cs:' + r.id, kind: 'legacy_content', ns: r.ns, title: 'Copy: ' + (String(r.brief || '').slice(0, 70) || r.campaign || 'content set'), campaign: r.campaign || '', status: r.status || '', owner: r.who || '', created: r.created, updated: r.updated, assets: it.length, approved: it.filter(x => x.verdict === 'approved').length, readOnly: true, imported: done.has('cs:' + r.id) ? (imported.find(p => p.legacy && p.legacy.id === 'cs:' + r.id) || {}).id : '' }); });
+  } catch (e) {}
+  return out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+}
+/** A legacy pack or set as a project view: flattened tiles are `generated`, copy pieces are `copy`. Nothing is written. */
+async function stLegacyGet(env, id) {
+  const m = /^(rp|cs):([a-z0-9]+)$/i.exec(String(id || ''));
+  if (!m) return null;
+  const now = Date.now();
+  if (m[1] === 'rp') {
+    await ensureRelease(env);
+    const r = await env.MIND_DB.prepare('SELECT * FROM release_packs WHERE id=?').bind(m[2]).first();
+    if (!r) return null;
+    const ex = pjs(r.extract, {}); const tiles = pjs(r.tiles, []);
+    const claims = [].concat((ex.claims || []).map((c, i) => ({ id: 'c' + (i + 1), text: String(c), value: null, unit: '', passage: '' })), (ex.numbers || []).map((n, i) => ({ id: 'n' + (i + 1), text: String(n.text || n), value: n.value == null ? null : n.value, unit: n.unit || '', passage: '' })), (ex.quotes || []).map((q, i) => ({ id: 'q' + (i + 1), text: String(q.text || q), quote: true, who: q.who || '', passage: '' })));
+    return {
+      id: 'rp:' + r.id, ns: r.ns, campaign: '', title: r.title || 'Release pack', brief: { objective: ex.headline || '', audience: '', message: (ex.claims || [])[0] || '', deliverables: tiles.length + ' tiles, ' + (r.format || 'square'), assumptions: [], notRecorded: ['audience', 'objective'] }, status: r.status || '', owner: r.who || '', revision: 0, legacy: { kind: 'release', id: 'rp:' + r.id }, readOnly: true, created: r.created, updated: r.updated,
+      sources: [{ id: 'src', kind: 'release', name: 'Release text', text: r.source || '', chars: (r.source || '').length, passages: {}, claims, provenance: 'release_packs.' + r.id + '.source', created: r.created }],
+      references: [], directions: [],
+      assets: tiles.map(t => { const img = t.image ? { key: 'packs/' + r.id + '/' + t.n + '.png', url: '/release/tile?id=' + r.id + '&n=' + t.n + '&v=' + (t.image.ver || 1), model: t.image.model || '', size: '' } : null; const v = { id: 'legacy-' + r.id + '-' + t.n, asset: 'rp:' + r.id + ':' + t.n, parent: null, kind: img ? 'render' : 'text', note: 'legacy tile', copy: { headline: t.headline || '', support: t.support || '', cta: t.cta || '', caption: (t.captions && (t.captions.linkedin || t.captions.facebook || t.captions.x)) || '', alt: t.alt || '' }, layout: {}, image: img, mode: img ? 'generated' : 'copy', checks: t.checks || [], context: {}, who: r.who || '', created: r.created }; return { id: 'rp:' + r.id + ':' + t.n, project: 'rp:' + r.id, family: 'Release tiles', channel: 'linkedin', format: RELEASE_FORMATS[r.format] || '1:1', title: 'Tile ' + (t.n + 1) + (t.kind ? ' (' + t.kind + ')' : ''), current: v.id, locks: {}, revision: 0, versions: [v], approvals: {}, legacyVerdict: t.verdict || '' }; }),
+      thread: [{ id: 0, kind: 'note', who: 'studio', at: now, text: 'A legacy release pack, read-only. Its tiles are flattened images: the text on them is not editable until a tile is rebuilt as a composition. Import copies it into a Studio project under ' + r.ns + '; the original stays as it is.' }], jobs: [],
+    };
+  }
+  await ensureContent(env);
+  const r = await env.MIND_DB.prepare('SELECT * FROM content_sets WHERE id=?').bind(m[2]).first();
+  if (!r) return null;
+  const items = pjs(r.items, []); const src = pjs(r.source, null);
+  return {
+    id: 'cs:' + r.id, ns: r.ns, campaign: r.campaign || '', title: 'Copy: ' + (String(r.brief || '').slice(0, 70) || r.campaign || 'content set'), brief: { objective: r.brief || '', audience: r.segment || '', message: '', deliverables: items.length + ' pieces for ' + pjs(r.platforms, []).join(', '), assumptions: [], notRecorded: ['message'] }, status: r.status || '', owner: r.who || '', revision: 0, legacy: { kind: 'content', id: 'cs:' + r.id }, readOnly: true, created: r.created, updated: r.updated,
+    sources: src && src.text ? [{ id: 'src', kind: src.kind || 'text', name: 'Pasted source', text: src.text, chars: String(src.text).length, passages: {}, claims: [], provenance: 'content_sets.' + r.id + '.source', created: r.created }] : [],
+    references: [], directions: [],
+    assets: items.map(it => { const v = { id: 'legacy-' + r.id + '-' + it.n, asset: 'cs:' + r.id + ':' + it.n, parent: null, kind: 'text', note: 'legacy piece' + (it.revisions ? ', ' + it.revisions + ' revisions' : ''), copy: { title: it.title || '', body: it.body || '', cta: it.cta || '', caption: it.body || '', alt: it.alt || '' }, layout: {}, image: null, mode: 'copy', checks: it.check ? [it.check] : [], context: {}, who: r.who || '', created: r.created }; return { id: 'cs:' + r.id + ':' + it.n, project: 'cs:' + r.id, family: 'Copy', channel: it.platform || '', format: '', title: (CONTENT_PLATFORMS[it.platform] || { label: it.platform }).label + ' piece ' + (it.n + 1), current: v.id, locks: {}, revision: 0, versions: [v], approvals: {}, legacyVerdict: it.verdict || '' }; }),
+    thread: pjs(r.history, []).map((h, i) => ({ id: i, kind: 'history', who: h.who || '', at: h.at || r.created, text: h.instruction || h.note || h.text || '' })).concat([{ id: 'n', kind: 'note', who: 'studio', at: now, text: 'A legacy content set, read-only. Import copies it into a Studio project under ' + r.ns + '; the original stays as it is.' }]), jobs: [],
+  };
+}
+/** Import once: a second call for the same legacy id returns the same project. Originals are read, never written. */
+async function stImport(env, legacyId, who) {
+  const lid = String(legacyId || '').slice(0, 40);
+  const had = await env.MIND_DB.prepare('SELECT id FROM studio_projects WHERE legacy_id=?').bind(lid).first();
+  if (had) return { id: had.id, existing: true };
+  const view = await stLegacyGet(env, lid);
+  if (!view) return null;
+  const id = stId('p'); const now = Date.now();
+  await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(id, view.ns, view.campaign || '', view.title, JSON.stringify(view.brief), 'production', stStr(who, 40) || view.owner || '', 1, view.legacy.kind, lid, null, 0, now, now).run();
+  for (const s of view.sources) await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('s'), id, s.kind, s.name, s.text || '', JSON.stringify(s.passages || {}), JSON.stringify(s.claims || []), s.provenance || '', stStr(who, 40), now).run();
+  for (const a of view.assets) {
+    const aid = stId('a'); const v = a.versions[0]; const vid = stId('v');
+    await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, id, a.family, a.channel, a.format, a.title, vid, '{}', 1, now, now).run();
+    await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(vid, aid, id, null, v.kind, 'imported from ' + lid + (a.legacyVerdict ? '; legacy verdict ' + a.legacyVerdict : ''), JSON.stringify(v.copy), '{}', v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks || []), JSON.stringify({ importedFrom: lid, legacyVerdict: a.legacyVerdict || '' }), null, stStr(who, 40), now).run();
+  }
+  await stEvent(env, id, 'imported', { text: 'Imported ' + lid + ' as a Studio project. The original is untouched; flattened tiles stay flattened until rebuilt; fields the legacy record never held are marked not recorded, not invented.', legacy: lid }, who);
+  return { id, existing: false };
+}
+// -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
+function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated }; }
+async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
+async function stJobCreate(env, body, who) {
+  const p = await stProject(env, body.project);
+  if (!p) return { error: 'unknown_project', status: 404 };
+  if (p.readOnly || p.legacy && false) return { error: 'read_only_project', status: 400 };
+  const stage = String(body.stage || '').toLowerCase();
+  if (ST_STAGES.indexOf(stage) < 0) return { error: 'unknown_stage', status: 400, detail: 'Stages: ' + ST_STAGES.join(', ') };
+  let asset = null;
+  if (body.asset) { const pair = await stAsset(env, body.asset); if (!pair) return { error: 'unknown_asset', status: 404 }; if (pair.project.id !== p.id) return { error: 'cross_project', status: 403, detail: 'The asset belongs to another project.' }; asset = pair.asset; }
+  if (stage === 'render' && !asset) return { error: 'asset_required', status: 400 };
+  const idem = body.idem ? stStr(body.idem, 80) : null;
+  if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
+  const id = stId('j'); const now = Date.now();
+  const input = body.input && typeof body.input === 'object' ? body.input : {};
+  try {
+    await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input).slice(0, 12000), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now).run();
+  } catch (e) {
+    if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
+    throw e;
+  }
+  await stEvent(env, p.id, 'job', { text: 'Job ' + id + ' queued: ' + stage + (asset ? ' for ' + asset.title : ''), job: id, stage }, who);
+  return { job: await stJob(env, id), existing: false };
+}
+/** Claim: queued, or running past its lease (a runner that stopped). Atomic through the WHERE clause. */
+async function stJobClaim(env, id) {
+  const now = Date.now();
+  const r = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='running', lease_until=?, attempts=attempts+1, updated=? WHERE id=? AND attempts<? AND (state='queued' OR (state='running' AND lease_until<?))").bind(now + ST_LEASE_MS, now, id, ST_MAX_ATTEMPTS, now).run();
+  return !!(r && r.meta && r.meta.changes);
+}
+function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|rate/i.test(String(err || '')); }
+/** Run one claimed job to its end state. Never writes over a version the asset has moved past. */
+async function stJobRun(env, job) {
+  const done = async (state, patch) => {
+    await env.MIND_DB.prepare('UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=?')
+      .bind(state, patch.result ? JSON.stringify(patch.result).slice(0, 8000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id).run();
+    return stJob(env, job.id);
+  };
+  const fail = async (msg) => {
+    const transient = stTransient(msg);
+    const again = transient && job.attempts < ST_MAX_ATTEMPTS;
+    const out = await done(again ? 'queued' : 'failed', { error: msg + (again ? ' (will retry)' : transient ? ' (attempts exhausted)' : ' (not retried: not a transient failure)') });
+    await stEvent(env, job.project, 'job', { text: 'Job ' + job.id + ' ' + (again ? 'failed, queued to retry' : 'failed') + ': ' + msg, job: job.id }, 'studio');
+    return out;
+  };
+  try {
+    const live = await stJob(env, job.id);
+    if (!live || live.state !== 'running') return live;   // cancelled between claim and run
+    if (job.stage === 'echo') {
+      return done('done', { result: { echo: job.input, at: Date.now() } });
+    }
+    if (job.stage === 'render') {
+      const pair = await stAsset(env, job.asset);
+      if (!pair) return done('failed', { error: 'asset gone' });
+      if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
+      const out = await nanoRender(env, { prompt: String(job.input.prompt || '').slice(0, 8000), references: Array.isArray(job.input.references) ? job.input.references : [], aspect: job.input.aspect || pair.asset.format, size: job.input.size, model: job.input.model });
+      if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''));
+      const again = await stJob(env, job.id);
+      if (!again || again.state !== 'running') return again;   // cancelled while the render ran: the image is not filed
+      const vid = stId('v'); const key = 'studio/' + pair.project.id + '/' + pair.asset.id + '/' + vid + '.png';
+      if (env.MIND_DOCS) await env.MIND_DOCS.put(key, bufFromB64(out.imageB64), { httpMetadata: { contentType: out.mime || 'image/png' } });
+      const stale = !!(job.inputVersion && pair.asset.current && pair.asset.current !== job.inputVersion);
+      const base = stale ? await stVersion(env, job.inputVersion) : null;
+      const v = await stAppendVersion(env, pair.asset, { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (job.input.note || 'render'), image: { key, url: '/studio/file?key=' + encodeURIComponent(key), model: out.model, size: job.input.size || env.IMAGE_SIZE || '2K' }, context: { job: job.id, model: out.model, prompt: String(job.input.prompt || '').slice(0, 2000) } }, 'studio', { branch: stale, baseVersion: base || undefined });
+      await stEvent(env, job.project, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + pair.asset.title + ' now at version ' + v.id + ' (' + out.model + ').', job: job.id, asset: pair.asset.id, version: v.id, render: true }, 'studio');
+      return done('done', { result: { version: v.id, key, model: out.model, branch: stale }, cost: 1 });
+    }
+    return done('failed', { error: 'unknown stage ' + job.stage });
+  } catch (e) { return fail(String((e && e.message) || e).slice(0, 200)); }
+}
+/** One synchronous step: claim if free, run. Returns the job either way. */
+async function stJobStep(env, id) {
+  const job = await stJob(env, id);
+  if (!job) return null;
+  if (job.state === 'done' || job.state === 'failed' || job.state === 'cancelled') return job;
+  if (!(await stJobClaim(env, job.id))) return Object.assign(await stJob(env, job.id), { note: job.state === 'running' ? 'another runner holds the lease' : job.attempts >= ST_MAX_ATTEMPTS ? 'attempts exhausted' : 'not claimable' });
+  return stJobRun(env, await stJob(env, job.id));
+}
+async function stJobCancel(env, id, who) {
+  const job = await stJob(env, id);
+  if (!job) return null;
+  if (job.state === 'done' || job.state === 'failed' || job.state === 'cancelled') return job;
+  const note = job.state === 'running' ? 'cancelled while running: the provider call in flight may still complete and cost; its result will not be filed' : 'cancelled before it ran';
+  await env.MIND_DB.prepare("UPDATE studio_jobs SET state='cancelled', lease_until=0, error=?, updated=? WHERE id=?").bind(note, Date.now(), id).run();
+  await stEvent(env, job.project, 'job', { text: 'Job ' + id + ' ' + note, job: id }, who);
+  return stJob(env, id);
+}
+/** The tick: claim what is queued or abandoned and run it while the budget lasts. */
+async function studioCron(env, budgetMs) {
+  if (!(await ensureStudio(env))) return { ok: false, skipped: true };
+  const t0 = Date.now(); const budget = budgetMs || 120000; const out = { ok: true, ran: 0, done: 0, failed: 0, requeued: 0 };
+  const rows = (await env.MIND_DB.prepare("SELECT id FROM studio_jobs WHERE attempts<? AND (state='queued' OR (state='running' AND lease_until<?)) ORDER BY created LIMIT 10").bind(ST_MAX_ATTEMPTS, t0).all()).results || [];
+  for (const r of rows) {
+    if (Date.now() - t0 > budget - 30000) break;
+    if (!(await stJobClaim(env, r.id))) continue;
+    const j = await stJobRun(env, await stJob(env, r.id)); out.ran++;
+    if (j && j.state === 'done') out.done++; else if (j && j.state === 'failed') out.failed++; else if (j && j.state === 'queued') out.requeued++;
+  }
+  return out;
+}
+// -- inventory, models, status -----------------------------------------------------------------
+async function stInventory(env) {
+  await ensureStudio(env);
+  const out = { ok: true, build: AXIOM_BUILD, namespaces: {}, sessions: { total: 0, byClient: {}, sampled: 0, note: 'KV Studio and Ad Lab sessions expire 30 days after their last write; a client is known only when the session document recorded one.' } };
+  const nss = new Set();
+  const add = (ns, k, n) => { ns = ns || 'unknown'; nss.add(ns); out.namespaces[ns] = out.namespaces[ns] || { releasePacks: 0, releaseRendered: 0, contentSets: 0, contentApproved: 0, projects: 0, imported: 0 }; out.namespaces[ns][k] += n; };
+  try { await ensureRelease(env); ((await env.MIND_DB.prepare('SELECT ns, COUNT(*) n, SUM(status=\'rendered\') r FROM release_packs GROUP BY ns').all()).results || []).forEach(r => { add(r.ns, 'releasePacks', r.n); add(r.ns, 'releaseRendered', r.r || 0); }); } catch (e) { out.releaseError = String(e.message || e).slice(0, 120); }
+  try { await ensureContent(env); ((await env.MIND_DB.prepare('SELECT ns, COUNT(*) n, SUM(status=\'approved\') a FROM content_sets GROUP BY ns').all()).results || []).forEach(r => { add(r.ns, 'contentSets', r.n); add(r.ns, 'contentApproved', r.a || 0); }); } catch (e) { out.contentError = String(e.message || e).slice(0, 120); }
+  ((await env.MIND_DB.prepare('SELECT ns, COUNT(*) n, SUM(legacy_id IS NOT NULL) i FROM studio_projects GROUP BY ns').all()).results || []).forEach(r => { add(r.ns, 'projects', r.n); add(r.ns, 'imported', r.i || 0); });
+  try {
+    const l = await env.AXIOM_KV.list({ prefix: 'imgsess_', limit: 1000 });
+    const docs = ((l && l.keys) || []).map(k => k.name).filter(n => !/_v\d+$/.test(n));
+    out.sessions.total = docs.length; out.sessions.truncated = !!(l && l.list_complete === false);
+    for (const name of docs.slice(0, 40)) {
+      try { const d = JSON.parse((await kvGet(env.AXIOM_KV, name)) || '{}'); const c = String(d.ns || d.client || d.clientId || (d.brief && d.brief.ns) || 'unknown').slice(0, 24); out.sessions.byClient[c] = (out.sessions.byClient[c] || 0) + 1; out.sessions.sampled++; } catch (e) {}
+    }
+  } catch (e) { out.sessions.error = String(e.message || e).slice(0, 120); }
+  return out;
+}
+/** What the worker's keys can reach right now, against the identifiers the Studio would use. */
+async function stModels(env) {
+  const want = { claude: Array.from(new Set([env.CREATIVE_MODEL, env.BRIEF_MODEL, env.NARRATIVE_MODEL, env.SENTIMENT_MODEL, SENT_MODEL, 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6'].filter(Boolean))), gemini: Array.from(new Set([env.GEMINI_MODEL, 'gemini-3-pro-image', 'gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3.6-flash', 'gemini-2.5-flash'].filter(Boolean))) };
+  const out = { ok: true, build: AXIOM_BUILD, configured: { creative: env.CREATIVE_MODEL || '', brief: env.BRIEF_MODEL || '', sentiment: env.SENTIMENT_MODEL || SENT_MODEL, narrative: env.NARRATIVE_MODEL || '', describe: env.GEMINI_MODEL || 'gemini-3.6-flash', imageSize: env.IMAGE_SIZE || '2K' }, claude: { configured: !!env.ANTHROPIC_API_KEY, models: [] }, gemini: { configured: !!env.GEMINI_KEY, models: [] } };
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: { 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (d.error) out.claude.error = String(d.error.message || d.error.type || '').slice(0, 160);
+      const ids = new Set((d.data || []).map(m => m.id));
+      out.claude.models = want.claude.map(id => ({ id, available: d.data ? ids.has(id) : null }));
+      out.claude.listed = d.data ? d.data.length : 0;
+    } catch (e) { out.claude.error = String((e && e.message) || e).slice(0, 120); out.claude.models = want.claude.map(id => ({ id, available: null })); }
+  } else out.claude.models = want.claude.map(id => ({ id, available: null }));
+  if (env.GEMINI_KEY) {
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=' + encodeURIComponent(env.GEMINI_KEY), { signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (d.error) out.gemini.error = String(d.error.message || '').slice(0, 160);
+      const ids = new Set((d.models || []).map(m => String(m.name || '').replace(/^models\//, '')));
+      out.gemini.models = want.gemini.map(id => ({ id, available: d.models ? ids.has(id) : null, image: /image/.test(id) }));
+      out.gemini.listed = d.models ? d.models.length : 0;
+    } catch (e) { out.gemini.error = String((e && e.message) || e).slice(0, 120); out.gemini.models = want.gemini.map(id => ({ id, available: null })); }
+  } else out.gemini.models = want.gemini.map(id => ({ id, available: null }));
+  out.note = 'available: true means the provider lists the identifier for this key; false means it does not; null means it could not be checked. Neither is a statement about quality, price or latency.';
+  return out;
+}
+async function stStatus(env) {
+  await ensureStudio(env);
+  const j = (await env.MIND_DB.prepare("SELECT SUM(state='queued') queued, SUM(state='running') running, SUM(state='failed') failed, SUM(state='done' AND updated>?) done24, COUNT(*) total FROM studio_jobs").bind(Date.now() - 86400000).first()) || {};
+  const p = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(legacy_id IS NOT NULL) imported, SUM(archived) archived FROM studio_projects').first()) || {};
+  const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
+  return { ok: true, build: AXIOM_BUILD, phase: 1, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+}
+
+// ==============================================================================
 // ACCESS CONTROL - per-person keys with roles, plus the legacy single key.
 // ==============================================================================
 /** Compare in time that does not depend on where the first difference falls,
@@ -6632,8 +7019,10 @@ function ctEq(a, b) {
 }
 function axAuth(req, env) {
   const supplied = req.headers.get('X-Axiom-Key') || '';
-  let roster = null;
-  if (env.AXIOM_KEYS) { try { roster = JSON.parse(env.AXIOM_KEYS); } catch (e) { roster = null; } }
+  let roster = null, broken = false;
+  if (env.AXIOM_KEYS) { try { roster = JSON.parse(env.AXIOM_KEYS); if (!roster || typeof roster !== 'object' || Array.isArray(roster)) { roster = null; broken = true; } } catch (e) { roster = null; broken = true; } }
+  // a key roster that is set but unreadable must not open the worker: fail closed until it is fixed
+  if (broken && !env.AXIOM_ACCESS_KEY) return { enforced: true, ok: false, role: null, name: '', misconfigured: true };
   const enforced = !!(env.AXIOM_ACCESS_KEY || (roster && Object.keys(roster).length));
   if (!enforced) return { enforced: false, ok: true, role: 'full', name: 'open' };
   if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) {
@@ -6823,7 +7212,7 @@ async function nanoRender(env, opts) {
     // 2K is the house default on Gemini 3 Pro Image (the operator's choice, September 2026); the var IMAGE_SIZE overrides every render, a request may still ask for 1K or 4K
   const size = SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : (SIZES.indexOf(opts.size) !== -1 ? opts.size : '2K');
   imgCfg.imageSize = size;
-  let lastDetail = '', lastModel = chain[0];
+  let lastDetail = '', lastModel = chain[0], lastCode = 0;
   for (const model of chain) {
     lastModel = model;
     const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length) ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
@@ -6837,7 +7226,7 @@ async function nanoRender(env, opts) {
         const data = await r.json().catch(() => ({}));
         if (data.error) {
           lastDetail = String(data.error.message || '').slice(0, 200);
-          const code = data.error.code || r.status;
+          const code = data.error.code || r.status; lastCode = code;
           if (code === 500 || code === 503 || code === 429) continue;
           if (code === 404 || code === 400 || code === 403) break;
           return { ok: false, error: 'gemini_' + code, detail: lastDetail, model };
@@ -6851,7 +7240,8 @@ async function nanoRender(env, opts) {
       } catch (e) { lastDetail = String((e && e.name) || e).slice(0, 60); }
     }
   }
-  return { ok: false, error: 'no_image', detail: lastDetail || 'all image models failed', model: lastModel };
+  // the error names the provider's last status so a caller can tell a transient refusal (503, 429) from bad input (400) or a key problem (403)
+  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel };
 }
 async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -7097,6 +7487,9 @@ async function sentinelScan(env, opts = {}) {
   return { ok: true, scanned: CLIENT_ISSUES.length, wire: items.length, fired: fired.length, alerts: fired };
 }
 
+// the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
+export { studioCron as __studioCron };
+
 export default {
   async fetch(req, env, ctx) {
     // Always add CORS to every response including errors
@@ -7133,7 +7526,7 @@ export default {
       || (path.startsWith('/perf/') && req.method === 'GET')
       || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
       || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/')) && req.method === 'GET')
+      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/') || path.startsWith('/studio')) && req.method === 'GET')
       // the console must be readable by anyone who can see the view; claiming
       // and reporting jobs is a write and stays full-role
       || (path === '/bridge/job' || path === '/bridge/status');
@@ -7141,7 +7534,9 @@ export default {
       || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
       || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
       || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/');
+      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/')
+      // the creative endpoints spend Claude and Gemini tokens and were open until Studio Phase 1: writes, full role
+      || path.startsWith('/studio') || path === '/chat' || path === '/nano' || path === '/clickup';
     const auth = axAuth(req, env);
     // A key is only as good as the number of guesses allowed against it: lock an
     // address out for ten minutes after a dozen failures.
@@ -7153,7 +7548,7 @@ export default {
       else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
     }
     if (gated && auth.enforced) {
-      if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
+      if (!auth.ok) return jsonResp(auth.misconfigured ? { error: 'auth_misconfigured', detail: 'AXIOM_KEYS on the worker is not a JSON object of keys; access is closed until it is fixed (npx wrangler secret put AXIOM_KEYS --name newsaus).' } : { error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (auth.role === 'read' && !isRead) {
         return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
       }
@@ -8206,7 +8601,7 @@ export default {
           const ar = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM engine_art WHERE ns=?').bind(ens).first()) || {};
           let docs = [];
           try { docs = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) n FROM mind_docs WHERE ns=? GROUP BY kind ORDER BY n DESC').bind(ens).all()).results || []; } catch (e) {}
-          return jsonResp({ ok: true, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
+          return jsonResp({ ok: true, build: AXIOM_BUILD, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
         }
         if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Teaching the Engine, approving and filing artwork need a full-access key.' }, 403);
         if (path === '/engine/fix' && req.method === 'POST') {
@@ -8286,6 +8681,158 @@ export default {
         const rec = await briefWrite(env, { days: bb.days, mind: bb.mind !== false, by: auth.name || 'operator', log });
         return jsonResp(Object.assign({}, rec, { lines, today: auDayKey(), isToday: true }), rec.ok ? 200 : rec.error === 'not_configured' ? 501 : 500);
       } catch (e) { return jsonResp({ ok: false, error: 'brief_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
+    // -- Creative Studio (Phase 1): projects, immutable versions, approvals, durable jobs, legacy access --
+    //    GET  /studio/status                 build id, counts, what is bound (read)
+    //    GET  /studio/list?ns=&status=&q=&archived=1   the client's projects plus its legacy packs and sets, read-only (read)
+    //    GET  /studio/get?id=                a project with sources, references, directions, assets (versions, standing approvals), thread, jobs; rp:<id> / cs:<id> for a legacy view (read)
+    //    GET  /studio/inventory              packs, sets, projects per client; KV sessions (read)
+    //    GET  /studio/models                 which model identifiers the worker's keys can reach (read)
+    //    GET  /studio/job?id=  /studio/jobs?project=   (read)      GET /studio/file?key=   an image or file from R2 (read)
+    //    POST /studio/project {ns,campaign,title,brief,idem}   /studio/project/update {id,revision,patch}   /studio/project/archive {id,archived}
+    //    POST /studio/source {project,kind,name,text}   /studio/reference {project,kind,name,purpose,note}   /studio/direction {project,data,chosen}
+    //    POST /studio/asset {project,family,channel,format,title,copy,layout,image,mode}   /studio/version {asset,revision,copy,layout,image,mode,note,kind,restoreFrom}
+    //    POST /studio/approve {asset,part,decision,reason}   /studio/import {legacy}   /studio/job {project,asset,stage,input,idem}   /studio/job/step {id}   /studio/job/cancel {id}   - full role
+    if (path === '/studio' || path.startsWith('/studio/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
+      let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
+      try {
+        await ensureStudio(env);
+        const qf = k => reqUrl.searchParams.get(k) || '';
+        const conflict = (row, want) => jsonResp({ ok: false, error: 'conflict', detail: 'This ' + (row.asset ? 'asset' : 'project') + ' changed since you read it (revision ' + row.revision + ', you sent ' + want + '). Reload and apply your change again; nothing was written.', revision: row.revision }, 409);
+        if (req.method === 'GET') {
+          if (path === '/studio/status') return jsonResp(await stStatus(env));
+          if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit') }));
+          if (path === '/studio/get') {
+            const id = String(qf('id')).slice(0, 40);
+            const p = /^(rp|cs):/.test(id) ? await stLegacyGet(env, id) : await stGet(env, id, { light: qf('light') === '1' });
+            return p ? jsonResp(Object.assign({ ok: true }, p)) : jsonResp({ error: 'unknown_project' }, 404);
+          }
+          if (path === '/studio/inventory') return jsonResp(await stInventory(env));
+          if (path === '/studio/models') return jsonResp(await stModels(env));
+          if (path === '/studio/job') { const j = await stJob(env, qf('id')); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
+          if (path === '/studio/jobs') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all()).results || []; return jsonResp({ ok: true, jobs: rows.map(stJobRow) }); }
+          if (path === '/studio/file') {
+            const key = String(qf('key') || '');
+            if (!/^studio\/[a-z0-9]+\/[a-z0-9]+\/[a-z0-9]+\.(png|jpg|jpeg|webp|txt|json)$/i.test(key)) return jsonResp({ error: 'bad_key' }, 400);
+            if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured' }, 501);
+            const obj = await env.MIND_DOCS.get(key);
+            if (!obj) return jsonResp({ error: 'not_found' }, 404);
+            return new Response(obj.body, { headers: Object.assign({}, CORS, { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'application/octet-stream', 'Cache-Control': 'private, max-age=3600' }) });
+          }
+          return jsonResp({ error: 'not_found' }, 404);
+        }
+        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Creating, changing and approving Studio work needs a full-access key.' }, 403);
+        const who = auth.name || 'operator'; const now = Date.now();
+        if (path === '/studio/project') {
+          const ns = relNs(sb.ns); if (!sb.ns) return jsonResp({ error: 'missing_ns', detail: 'A project belongs to one client: give ns.' }, 400);
+          const idem = sb.idem ? stStr(sb.idem, 80) : null;
+          if (idem) { const had = await env.MIND_DB.prepare('SELECT id FROM studio_projects WHERE idem=?').bind(idem).first(); if (had) return jsonResp(Object.assign({ ok: true, existing: true }, await stGet(env, had.id, { light: true }))); }
+          const id = stId('p');
+          await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(sb.brief && typeof sb.brief === 'object' ? sb.brief : {}).slice(0, 12000), 'brief', who, 1, null, null, idem, 0, now, now).run();
+          await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' }, who);
+          return jsonResp(Object.assign({ ok: true, existing: false }, await stGet(env, id, { light: true })));
+        }
+        if (path === '/studio/project/update' || path === '/studio/project/archive') {
+          const p = await stProject(env, sb.id); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (path === '/studio/project/archive') { await env.MIND_DB.prepare('UPDATE studio_projects SET archived=?, revision=revision+1, updated=? WHERE id=?').bind(sb.archived === false ? 0 : 1, now, p.id).run(); await stEvent(env, p.id, sb.archived === false ? 'unarchived' : 'archived', { text: sb.archived === false ? 'Project restored from the archive.' : 'Project archived. Nothing is deleted.' }, who); return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true }))); }
+          if (sb.revision != null && Number(sb.revision) !== p.revision) return conflict(p, sb.revision);
+          const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {};
+          const brief = patch.brief && typeof patch.brief === 'object' ? Object.assign({}, p.brief, patch.brief) : p.brief;
+          await env.MIND_DB.prepare('UPDATE studio_projects SET title=?, campaign=?, brief=?, status=?, revision=revision+1, updated=? WHERE id=?')
+            .bind(patch.title != null ? stStr(patch.title, 140) : p.title, patch.campaign != null ? stStr(patch.campaign, 40) : p.campaign, JSON.stringify(brief).slice(0, 12000), patch.status != null ? stStr(patch.status, 20) : p.status, now, p.id).run();
+          await stEvent(env, p.id, 'edited', { text: 'Project ' + Object.keys(patch).join(', ') + ' edited.' }, who);
+          return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true })));
+        }
+        if (path === '/studio/source' || path === '/studio/reference' || path === '/studio/direction') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (path === '/studio/source') {
+            const id = stId('s'); const text = String(sb.text || '').slice(0, 200000);
+            if (text.trim().length < 20) return jsonResp({ error: 'empty_source', detail: 'A source needs text (extraction of documents and links arrives in Phase 2).' }, 400);
+            // Phase 1 stores the text and its passages; the claim ledger is extracted in Phase 2
+            const paras = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean); const passages = {}; paras.forEach((t, i) => { passages['p' + (i + 1)] = t.slice(0, 2000); });
+            await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'text', 20), stStr(sb.name || 'Pasted text', 120), text, JSON.stringify(passages).slice(0, 60000), '[]', stStr(sb.provenance || 'pasted', 200), who, now).run();
+            await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. Claim extraction runs in Phase 2.', source: id }, who);
+            return jsonResp({ ok: true, id, passages: paras.length });
+          }
+          if (path === '/studio/reference') {
+            const id = stId('r'); const purpose = ['brand', 'composition', 'mood', 'imagery', 'typography', 'inspiration', 'approved'].indexOf(String(sb.purpose)) >= 0 ? String(sb.purpose) : 'inspiration';
+            let key = '';
+            if (sb.imageB64 && env.MIND_DOCS) { const mime = String(sb.mime || 'image/png'); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP.' }, 400); const buf = bufFromB64(sb.imageB64); if (buf.byteLength > 6 * 1024 * 1024) return jsonResp({ error: 'too_large', detail: 'A reference is at most 6 MB.' }, 400); key = 'studio/' + p.id + '/refs/' + id + '.' + (mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } }); }
+            await env.MIND_DB.prepare('INSERT INTO studio_references(id,project,kind,name,purpose,key,note,who,created) VALUES(?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'image', 20), stStr(sb.name || 'Reference', 120), purpose, key, stStr(sb.note, 300) + (purpose === 'inspiration' ? (sb.note ? ' ' : '') + 'Inspiration only: no logos, claims or exact layouts reused.' : ''), who, now).run();
+            await stBump(env, p.id); await stEvent(env, p.id, 'reference', { text: 'Reference added: ' + stStr(sb.name || 'Reference', 120) + ' (' + purpose + ').', reference: id }, who);
+            return jsonResp({ ok: true, id, key, url: key ? '/studio/file?key=' + encodeURIComponent(key) : '' });
+          }
+          const id = stId('d');
+          if (sb.chosen) await env.MIND_DB.prepare('UPDATE studio_directions SET chosen=0 WHERE project=?').bind(p.id).run();
+          await env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(sb.data && typeof sb.data === 'object' ? sb.data : {}).slice(0, 8000), sb.chosen ? 1 : 0, who, now).run();
+          await stBump(env, p.id); await stEvent(env, p.id, 'direction', { text: (sb.chosen ? 'Direction chosen: ' : 'Direction recorded: ') + stStr((sb.data || {}).title || '', 80), direction: id }, who);
+          return jsonResp({ ok: true, id });
+        }
+        if (path === '/studio/direction/choose') {
+          const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
+          await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE studio_directions SET chosen=0 WHERE project=?').bind(d.project), env.MIND_DB.prepare('UPDATE studio_directions SET chosen=1 WHERE id=?').bind(d.id)]);
+          await stBump(env, d.project); await stEvent(env, d.project, 'direction', { text: 'Direction chosen: ' + stStr(pjs(d.data, {}).title || '', 80) + '. Saved as the project decision; nothing saved as a rule.', direction: d.id }, who);
+          return jsonResp({ ok: true });
+        }
+        if (path === '/studio/asset') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          const id = stId('a');
+          await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.family || 'Assets', 60), stStr(sb.channel, 20), stStr(sb.format || '1:1', 8), stStr(sb.title || 'Asset', 80), '', '{}', 1, now, now).run();
+          const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(id).first());
+          const v = await stAppendVersion(env, a, { kind: sb.image ? 'render' : 'text', note: stStr(sb.note || 'first version', 200), copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode || (sb.image ? 'composition' : 'copy'), context: sb.context }, who);
+          await stEvent(env, p.id, 'asset', { text: 'Asset added: ' + a.title + ' (' + a.channel + ' ' + a.format + ').', asset: id, version: v.id }, who);
+          return jsonResp({ ok: true, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(id).first())) });
+        }
+        if (path === '/studio/version' || path === '/studio/lock') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The asset belongs to another project; nothing was written.' }, 403);
+          if (sb.revision != null && Number(sb.revision) !== pair.asset.revision) return conflict(pair.asset, sb.revision);
+          if (path === '/studio/lock') {
+            const locks = Object.assign({}, pair.asset.locks); const k = stStr(sb.element, 20); if (!k) return jsonResp({ error: 'missing_element' }, 400);
+            if (sb.locked === false) delete locks[k]; else locks[k] = true;
+            await env.MIND_DB.prepare('UPDATE studio_assets SET locks=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(locks), now, pair.asset.id).run(); await stBump(env, pair.project.id);
+            return jsonResp({ ok: true, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
+          }
+          const cur = await stCurrent(env, pair.asset);
+          // a locked element is not changed by a version write unless the lock is named; the write is refused with the element
+          const wantCopy = stCopy(sb.copy || {}); const lockedHit = Object.keys(wantCopy).find(k => pair.asset.locks[k] && cur && cur.copy[k] !== wantCopy[k]);
+          if (lockedHit && !sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + lockedHit + ' is locked on this asset. Unlock it first, or send unlock:true to change it deliberately.', element: lockedHit }, 409);
+          if (pair.asset.locks.layout && sb.layout && !sb.unlock && cur && JSON.stringify(sb.layout) !== JSON.stringify(cur.layout)) return jsonResp({ error: 'locked', detail: 'The layout is locked on this asset.', element: 'layout' }, 409);
+          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context };
+          let base;
+          if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
+          const v = await stAppendVersion(env, pair.asset, patch, who, { baseVersion: base });
+          await stEvent(env, pair.project.id, 'version', { text: (patch.kind === 'restore' ? 'Restored ' : patch.kind === 'render' ? 'New image on ' : 'Text change on ') + pair.asset.title + ': ' + (patch.note || '') + (patch.kind === 'render' ? '' : ' (no render)'), asset: pair.asset.id, version: v.id, render: patch.kind === 'render' }, who);
+          return jsonResp({ ok: true, version: v, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
+        }
+        if (path === '/studio/approve') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const part = ST_PARTS.indexOf(sb.part) >= 0 ? sb.part : ''; const decision = ['approve', 'reject', 'withdraw'].indexOf(sb.decision) >= 0 ? sb.decision : '';
+          if (!part || !decision) return jsonResp({ error: 'bad_decision', detail: 'part copy|design, decision approve|reject|withdraw' }, 400);
+          if (decision !== 'withdraw' && !String(sb.reason || '').trim()) return jsonResp({ error: 'reason_required', detail: 'Record why: approval is client acceptance of this exact content, never performance.' }, 400);
+          const cur = await stCurrent(env, pair.asset); if (!cur) return jsonResp({ error: 'no_version' }, 400);
+          await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(sb.reason, 400), who, now).run();
+          await stBump(env, pair.project.id);
+          await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance.', asset: pair.asset.id, version: cur.id, part, decision }, who);
+          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset) });
+        }
+        if (path === '/studio/import') {
+          const r = await stImport(env, sb.legacy, who);
+          if (!r) return jsonResp({ error: 'unknown_legacy', detail: 'legacy is rp:<release pack id> or cs:<content set id>.' }, 404);
+          return jsonResp(Object.assign({ ok: true, existing: r.existing }, await stGet(env, r.id, { light: true })));
+        }
+        if (path === '/studio/job') {
+          const r = await stJobCreate(env, sb, who);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '' }, r.status || 400);
+          return jsonResp({ ok: true, existing: r.existing, job: r.job });
+        }
+        if (path === '/studio/job/step') { const j = await stJobStep(env, sb.id); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
+        if (path === '/studio/job/cancel') { const j = await stJobCancel(env, sb.id, who); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'studio_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
     }
 
     // -- Narratives: the stories the conversation keeps telling, with origin, spread, pace, split and evidence --
@@ -10620,6 +11167,8 @@ async function handleScheduled(env) {
   try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); }
   // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take off on a client issue, reported.
   try { const nr = await narrativesCron(env); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named, 'named'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
+  // Creative Studio jobs: anything queued, or abandoned by a runner that stopped, is claimed and run here.
+  try { const sj = await studioCron(env, 120000); if (sj && sj.ran) console.log('Studio jobs:', sj.ran, 'run,', sj.done, 'done,', sj.failed, 'failed'); } catch (e) { console.log('studio cron failed', String(e).slice(0, 120)); }
   // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
   try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); }
   // Topics: SIFA's keyword list hourly, then the two stalest topics researched.

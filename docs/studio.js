@@ -144,11 +144,22 @@
   }
 
   /* ------------------------------------------------------------ library */
+  /* Phase 1: the worker's Studio backend, when it is deployed, reports its build and what it holds.
+     The workspace itself still runs on the synthetic project until Phase 2 wires it up. */
+  function Backend({ client }) {
+    const [st, setSt] = useState(undefined);
+    useEffect(() => { let live = true; (async () => { try { const s = await call('/studio/status'); const l = await call('/studio/list?ns=' + encodeURIComponent(client.id) + '&limit=5'); if (live) setSt({ s, l }); } catch (e) { if (live) setSt({ err: e.code === 'not_found' || e.status === 404 ? 'not deployed' : e.message }); } })(); return () => { live = false; }; }, [client.id]);
+    if (st === undefined) return null;
+    if (st.err) return html`<div class="ov-dim st-foot">Backend: ${st.err === 'not deployed' ? 'the worker does not have the Studio routes yet (redeploy it); the workspace below runs on synthetic data' : st.err}</div>`;
+    const s = st.s, l = st.l;
+    return html`<div class="ov-dim st-foot">Backend build <b>${s.build}</b>: ${s.projects} project${s.projects === 1 ? '' : 's'} (${s.imported} imported), ${s.versions} versions, jobs ${s.jobs.queued} queued / ${s.jobs.running} running / ${s.jobs.failed} failed; for ${client.name}: ${l.projects.length} project${l.projects.length === 1 ? '' : 's'}, ${l.legacy.length} legacy item${l.legacy.length === 1 ? '' : 's'}. The workspace below still shows the synthetic project until Phase 2.</div>`;
+  }
   function Library({ client, projects, onOpen, onNew, onImport }) {
     const mine = projects.filter(p => p.ns === client.id);
     const legacy = LEGACY.filter(l => l.ns === client.id);
     return html`<div class="st-lib">
       <div class="st-lib-head"><span class="ov-title">Projects for ${client.name}</span><span class="ov-why">${mine.length} project${mine.length === 1 ? '' : 's'}, ${legacy.length} legacy item${legacy.length === 1 ? '' : 's'}</span>${canWrite() ? html`<button class="btn sm" onClick=${onNew}>New project</button>` : null}</div>
+      <${Backend} client=${client} />
       ${!mine.length && !legacy.length ? html`<div class="ov-empty">Nothing yet for this client. Start from a release, a brief or existing artwork.</div>` : null}
       <table class="ov-table"><thead><tr><th>Project</th><th>Campaign</th><th>Status</th><th>Owner</th><th>Last activity</th><th></th></tr></thead><tbody>
         ${mine.map(p => html`<tr key=${p.id}><td><b>${p.title}</b><div class="ov-dim">${p.assets.length} asset${p.assets.length === 1 ? '' : 's'}, ${p.sources.length} source${p.sources.length === 1 ? '' : 's'}</div></td><td>${(client.campaigns.find(c => c.id === p.campaign) || {}).name || '-'}</td><td><span class=${'st-status ' + p.status}>${p.status}</span></td><td>${p.owner}</td><td class="ov-dim">${ago(p.updated)} ago</td><td class="ov-go"><button class="ov-link" onClick=${() => onOpen(p.id)}>open</button></td></tr>`)}

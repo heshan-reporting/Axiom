@@ -4,3 +4,4 @@ __pycache__/
 .wrangler/
 # the daily briefs tools/daily-brief.py writes (client intelligence; kept out of the repo)
 briefs/
+tests/shot-*.png
