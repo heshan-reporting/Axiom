@@ -3238,7 +3238,10 @@ async function engineDescribe(env, imageB64, mime, hint) {
   const prompt = 'You are a creative director cataloguing a political communications agency\'s past artwork so it can be found and reused. Describe this creative in 90-140 words for a colleague who cannot see it: format and layout, dominant colours as hex guesses, typography style, imagery and mood, every word of text that appears (verbatim), and what kind of message it carries. Then on a final line write TAGS: followed by 6-10 comma-separated tags (issue, tone, format, style).' + (hint ? '\n\nContext from the file: ' + String(hint).slice(0, 400) : '');
   const parts = [{ text: prompt }, { inline_data: { mime_type: mime || 'image/png', data: String(imageB64) } }];
   let last = '';
-  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
+  // the describer is a vision-capable text model, not the image generator: the current Flash first, the operator's
+  // GEMINI_MODEL if set, then the older Flash for keys that still have it (the 2.0/2.5 chain retired and answered 404)
+  const chain = []; [env.GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-2.5-flash'].forEach(m => { m = String(m || '').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, ''); if (m && chain.indexOf(m) === -1) chain.push(m); });
+  for (const model of chain) {
     try {
       const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(env.GEMINI_KEY), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts }] }), signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined });
@@ -6817,7 +6820,9 @@ async function nanoRender(env, opts) {
   const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
   const imgCfg = {};
   if (ASPECTS.indexOf(opts.aspect) !== -1) imgCfg.aspectRatio = opts.aspect;
-  if (SIZES.indexOf(opts.size) !== -1) imgCfg.imageSize = opts.size;
+  // the operator may raise every render to 2K or 4K with the var IMAGE_SIZE (Gemini 3 Pro Image only; 1K is the default the app asks for)
+  const size = SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : opts.size;
+  if (SIZES.indexOf(size) !== -1) imgCfg.imageSize = size;
   let lastDetail = '', lastModel = chain[0];
   for (const model of chain) {
     lastModel = model;

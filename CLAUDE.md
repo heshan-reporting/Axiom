@@ -294,7 +294,8 @@ walls: a client's corrections and exemplars never reach another client.
   wins and learn from the losses. This is also the approved corpus a future
   per-client style adapter would train on.
 - **Artwork memory.** `POST /engine/artwork {ns,title,imageB64,mime,meta}`
-  has a vision model (`engineDescribe`, gemini-2.5-flash) catalogue a past
+  has a vision model (`engineDescribe`: `GEMINI_MODEL` if set, else
+  gemini-3.6-flash, then gemini-2.5-flash) catalogue a past
   creative - layout, palette, typography, every word on it, tags - stores the
   image in R2 `art/<ns>/<id>` (served by `GET /engine/art?id=`), files the
   description in the Mind as kind `artwork`, and records it in `engine_art`.
