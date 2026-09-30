@@ -60,7 +60,10 @@ it at the end.
   proposed and run only on confirmation, adaptation reusing the image, the
   ambiguous-pronoun question, the Remember offer saved as a campaign
   preference (read by that campaign only) or a client rule or declined, WIN
-  and LOSS exemplars on approve and reject, and KV session import.
+  and LOSS exemplars on approve and reject, KV session import, and art
+  direction (the artwork shown to the model, distinct directions as layout
+  variants with basis and cost, layout-only apply with no render, render only
+  when asked, locked layers kept).
 - `studio-browser.mjs`: the same journey in a real browser. The page's calls
   to the worker are routed into the worker module running in the harness
   process, so intake, extraction, production, the renderer's preview, hand

@@ -910,6 +910,52 @@ case in `studio-p3-worker.mjs`. The Release Desk and Content Desk sections
 and scripts stay in the page (their routes keep answering) but have no
 entry point of their own.
 
+**Art direction (the re-render area as an art director).** Stage `concepts
+{asset, feedback, refine:{eid,index}}` (`stConceptsStage`): one
+creative-model call sees the artwork itself - the background image goes to
+the model as an image block when it is on file under 4.5 MB (`stClaude`
+takes `images`) - with the words on it, the layout, the locks, the brief,
+the campaign, the palette and fonts, the references, the ledger and the
+client context, plus the team's feedback ("Come up with a better creative"
+by default), and answers a critique and three or four distinct directions.
+Each is normalised into a card: name, concept, rationale, imagery,
+composition, typography, colour, text placement, keeps and changes,
+`basis[]` tagged `rule` / `preference` / `inferred`, `missing[]`,
+`needsImage` with a tailored photograph prompt, `cost` ("layout only, no
+render" or "1 render at 2K plus a layout version"), and a full `layout`
+document built deterministically by `stLayoutVariant` from the direction's
+`layoutWant` (`style` same / large / compact / translucent / none (dark
+overlay, no box) / gradient / split, `placement` top / middle / bottom,
+`template`, `headline` larger / smaller) so the browser previews every card
+on the current photograph with the same renderer; locked or hidden layers
+of the current layout carry over by role. `stLayout` grew `opts.style /
+placement / headlineDelta`, overlay layers (`role: 'overlay'`, `gradient`)
+and `radius: 0` for the split field, and `layout.image {x,y,w,h}` for a
+split (the photograph is cover-cropped into the field the panel leaves free
+so its focal point stays in view); the renderer skips `hidden` layers, draws
+gradient shapes and clips the photograph to `layout.image` when set. The
+event `concepts {eid, asset, version, feedback, critique, options,
+imageSeen, model}` is the record (`stEvent` gives concepts, alternatives,
+proposal and applied events room beyond the 4000-char note cap); `POST
+/studio/concept/apply {project, eid, index, render}` (`stConceptApply`)
+appends a layout version (the direction's headline only when not locked)
+and queues one render job (`render:<eid>:<i>:<asset>`) only when the
+direction needs a photograph and `render` is true; a locked layout is 409;
+the event `applied` names the version. `stArtPrompt` now grounds every
+photograph in the words on the tile and forbids unrelated scenes (sport,
+skate, leisure, lifestyle stock, crowds), which is what the skate-park tile
+lacked. In-app the Background box is the **Art direction** area: the
+feedback line, Propose directions, the critique, the cards (preview, basis
+chips, cost chip, Apply layout only, Apply and render with the cost, Refine
+which re-proposes from that card), a stale marker when the cards were
+proposed against an earlier version, and the plain "re-render from a
+description" link kept underneath. The layout editor lists every layer with
+hide / show and lock / unlock (`layer.hidden`, `layer.locked`; a locked
+layer does not drag and keeps its place through directions).
+`tools/brand-logo.py <file> --ns mca --key` puts a client's logo into the
+kit exactly as supplied. Harnesses: the art-direction case in
+`studio-p3-worker.mjs` and in the browser harness.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

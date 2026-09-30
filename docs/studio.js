@@ -63,13 +63,13 @@
     const layout = v && v.layout && v.layout.layers ? v.layout : null; const c = copy || (v && v.copy) || {};
     useEffect(() => {
       const el = ref.current; if (!el) return;
-      if (layout) { const w = size === 'thumb' ? 192 : Math.min(1080, Math.max(320, Math.round((el.parentElement ? el.parentElement.clientWidth : 520) * 2))); R.render(layout, c, imgs, w, el); }
+      if (layout) { const w = size === 'thumb' ? 192 : size === 'card' ? 480 : Math.min(1080, Math.max(320, Math.round((el.parentElement ? el.parentElement.clientWidth : 520) * 2))); R.render(layout, c, imgs, w, el); }
       else if (imgs.bg) { el.width = imgs.bg.naturalWidth; el.height = imgs.bg.naturalHeight; el.getContext('2d').drawImage(imgs.bg, 0, 0); }
     }, [layout, JSON.stringify(c), imgs.bg, imgs.logo, size]);
     if (!layout && !(v && v.image)) return html`<div class=${'st-copycard' + (size === 'thumb' ? ' thumb' : '')}><div class="st-copycard-h">${c.headline || c.title || '(no headline)'}</div>${size !== 'thumb' ? html`<div class="st-copycard-b">${c.caption || c.body || ''}</div>` : null}<div class="st-comp-tag">copy only</div></div>`;
     return html`<div class=${'st-comp' + (size === 'thumb' ? ' thumb' : '')} role="img" aria-label=${c.alt || c.headline || ''}>
       <canvas class="st-canvas" ref=${ref}></canvas>
-      ${size !== 'thumb' ? html`<div class="st-comp-tag">${layout ? 'editable composition, ' + (v.layout.templateName || v.layout.template) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') : layout ? ' - no background yet' : ''}</div>` : null}
+      ${size !== 'thumb' && size !== 'card' ? html`<div class="st-comp-tag">${layout ? 'editable composition, ' + (v.layout.templateName || v.layout.template) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') : layout ? ' - no background yet' : ''}</div>` : null}
     </div>`;
   }
 
@@ -235,7 +235,35 @@
       <table class="ov-table"><thead><tr><th>Field</th><th>Left</th><th>Right</th></tr></thead><tbody>${rows.map(k => html`<tr key=${k} class=${(vA.copy || {})[k] !== (vB.copy || {})[k] ? 'hot' : ''}><td class="ov-dim">${k}</td><td>${(vA.copy || {})[k]}</td><td>${(vB.copy || {})[k]}</td></tr>`)}<tr class=${((vA.image || {}).key) !== ((vB.image || {}).key) ? 'hot' : ''}><td class="ov-dim">image</td><td>${vA.image ? vA.image.key.split('/').pop() : '-'}</td><td>${vB.image ? vB.image.key.split('/').pop() : '-'}</td></tr><tr class=${JSON.stringify(vA.layout) !== JSON.stringify(vB.layout) ? 'hot' : ''}><td class="ov-dim">layout</td><td>${vA.layout && vA.layout.template ? vA.layout.templateName : '-'}</td><td>${vB.layout && vB.layout.template ? vB.layout.templateName : '-'}</td></tr></tbody></table>
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, busy }) {
+  /* ------------------------------------------------------------ art direction: the re-render area as an art director */
+  function ArtDirection({ p, a, v, ro, busy, onPropose, onApply, onRender, rr, setRr }) {
+    const [fb, setFb] = useState('Come up with a better creative'); const [refining, setRefining] = useState(null); const [refineText, setRefineText] = useState('');
+    const ev = useMemo(() => p.thread.filter(e => e.kind === 'concepts' && e.asset === a.id).pop() || null, [p.thread, a.id]);
+    const applied = useMemo(() => { const m = {}; p.thread.forEach(e => { if (e.kind === 'applied' && e.eid) m[e.eid + ':' + e.index] = e; }); return m; }, [p.thread]);
+    const stale = ev && ev.version !== v.id;
+    return html`<div class="st-field st-ad"><div class="st-field-head"><${Lbl}>Art direction</${Lbl}><span class="ov-dim">proposed directions are previews on the current photograph; nothing is applied or rendered until you choose</span></div>
+      ${!ro ? html`<div class="st-ad-ask"><input class="st-in" value=${fb} onInput=${e => setFb(e.target.value)} placeholder='Feedback for the art director, e.g. "Come up with a better creative", "the photo has nothing to do with fuel", "too much box"' /><button class="btn sm" disabled=${!!busy || !fb.trim()} onClick=${() => onPropose(a, fb.trim(), null)}>Propose directions</button><span class="ov-dim">one model call, the artwork is shown to it, no render</span></div>` : null}
+      ${ev ? html`<div class="st-ad-crit"><b>Critique</b> ${ev.critique}${ev.imageSeen ? '' : html` <span class="ov-dim">(the photograph was not shown to the model)</span>`}${stale ? html` <${Chip} kind="warn">proposed against an earlier version</${Chip}>` : null}</div>
+        <div class="st-ad-cards">${ev.options.map(o => { const ap = applied[ev.eid + ':' + o.i]; return html`<div key=${o.i} class=${'st-ad-card' + (ap ? ' applied' : '')}>
+          <${Composition} v=${Object.assign({}, v, { layout: o.layout, copy: Object.assign({}, v.copy, o.copy || {}) })} a=${a} ns=${p.ns} size="card" />
+          <div class="st-ad-name">${String.fromCharCode(65 + o.i)}) ${o.name} ${ap ? html`<${Chip} kind="ok">applied</${Chip}>` : html`<${Chip}>proposed</${Chip}>`}${o.similar ? html` <${Chip} kind="warn">close to ${o.similar}</${Chip}>` : null}</div>
+          <div class="st-ad-line">${o.concept}</div>
+          <div class="st-ad-line"><b>Why</b> ${o.rationale}</div>
+          <div class="st-ad-line"><b>Imagery</b> ${o.imagery}</div>
+          <div class="st-ad-line"><b>Composition</b> ${o.composition}${o.textPlacement ? '; ' + o.textPlacement : ''}</div>
+          <div class="st-ad-line"><b>Type and colour</b> ${o.typography}${o.colour ? '; ' + o.colour : ''}</div>
+          ${o.copy && o.copy.headline ? html`<div class="st-ad-line"><b>Headline</b> ${o.copy.headline}</div>` : null}
+          <div class="st-ad-line"><b>Keeps</b> ${(o.keeps || []).join(', ') || '-'} <b>Changes</b> ${(o.changes || []).join(', ') || '-'}</div>
+          <div class="st-ad-basis">${(o.basis || []).map((b, i) => html`<${Chip} key=${i} kind=${b.kind === 'rule' ? 'ok' : b.kind === 'preference' ? '' : 'warn'} title=${b.kind === 'rule' ? 'a stated brand rule' : b.kind === 'preference' ? 'a recorded preference' : 'inferred by the model'}>${b.kind}: ${b.claim}</${Chip}>`)}${(o.missing || []).length ? html`<span class="ov-dim">Missing: ${o.missing.join('; ')}</span>` : null}</div>
+          <div class="st-ad-cost">${o.needsImage ? html`<${Chip} kind="warn">${o.cost}</${Chip}>` : html`<${Chip} kind="ok">${o.cost}</${Chip}>`}${o.layoutLocked ? html` <span class="ov-dim">layout locked: only copy would change</span>` : null}</div>
+          ${!ro && !ap ? html`<div class="st-ad-acts"><button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, false)}>Apply layout only</button>${o.needsImage ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, true)}>Apply and render (${o.cost.split(' plus')[0]})</button>` : null}<button class="btn sm ghost" onClick=${() => { setRefining(refining === o.i ? null : o.i); setRefineText(''); }}>Refine</button></div>` : ap ? html`<div class="ov-dim">applied as version ${ap.version}${ap.render ? ', render queued' : ''}</div>` : null}
+          ${refining === o.i ? html`<div class="st-offer-box"><textarea class="st-ta" rows="2" value=${refineText} onInput=${e => setRefineText(e.target.value)} placeholder="What to change about this direction"></textarea><div><button class="btn sm" disabled=${!!busy || !refineText.trim()} onClick=${() => { onPropose(a, refineText.trim(), { eid: ev.eid, index: o.i }); setRefining(null); }}>Propose refinements</button></div></div>` : null}
+        </div>`; })}</div>` : html`<div class="ov-dim">No directions proposed yet for this asset.</div>`}
+      ${!ro ? html`<div class="st-ad-quick">${rr === null ? html`<button class="ov-link" onClick=${() => setRr(String((v.context || {}).visual || ''))}>${v.image ? 'Just re-render the photograph from a description' : 'Render a photograph from a description'}</button>` : html`<div class="st-proposal"><div class="ov-dim">Art direction for the photograph (no text, no logos - the words are layers):</div><textarea class="st-ta" rows="2" value=${rr} onInput=${e => setRr(e.target.value)}></textarea><div><button class="btn sm" disabled=${!!busy} onClick=${() => { onRender(a, rr); setRr(null); }}>Do this (one render at ${(v.image && v.image.size) || '2K'})</button> <button class="btn sm ghost" onClick=${() => setRr(null)}>Not now</button></div></div>`}</div>` : null}
+    </div>`;
+  }
+
+  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, busy }) {
     const v = current(a);
     const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.id, a.current]);
@@ -272,7 +300,7 @@
         <div class="st-field"><div class="st-field-head"><${Lbl}>Layout</${Lbl}>${!ro && !copyOnly && !flat ? html`<button class=${'st-lock' + (a.locks.layout ? ' on' : '')} onClick=${() => onLock(a, 'layout', !a.locks.layout)} aria-pressed=${!!a.locks.layout}>${a.locks.layout ? 'locked' : 'lock'}</button>` : null}</div>
           <div class="ov-dim">${copyOnly ? 'copy only: no tile' : flat ? 'not editable (flattened)' : v.layout && v.layout.layers ? 'editable composition: ' + v.layout.templateName + ', headline ' + (hl ? hl.size : '-') + '% of the width, ' + v.layout.layers.length + ' layers' + (v.layout.layers.some(l => l.role === 'logo') ? ', kit logo placed exactly' : ', no logo on file') + '.' : 'no layout'}
             ${!ro && hl && !a.locks.layout ? html` <button class="ov-link" onClick=${() => onLayout(a, -0.6)}>headline smaller</button> <button class="ov-link" onClick=${() => onLayout(a, 0.6)}>larger</button> <span class="ov-dim">(a layout version, no render)</span>` : null}</div></div>
-        ${!copyOnly && !flat && !ro ? html`<div class="st-field"><${Lbl}>Background</${Lbl}>${rr === null ? html`<div><button class="btn sm ghost" disabled=${!!busy} onClick=${() => setRr(String((v.context || {}).visual || ''))}>${v.image ? 'Re-render background' : 'Render background'}</button> <span class="ov-dim">announced first: one render at ${(v.image && v.image.size) || '2K'}, text and layout unchanged.</span></div>` : html`<div class="st-proposal"><div class="ov-dim">Art direction for the photograph (no text, no logos - the words are layers):</div><textarea class="st-ta" rows="2" value=${rr} onInput=${e => setRr(e.target.value)}></textarea><div><button class="btn sm" disabled=${!!busy} onClick=${() => { onRender(a, rr); setRr(null); }}>Do this (one render)</button> <button class="btn sm ghost" onClick=${() => setRr(null)}>Not now</button></div></div>`}</div>` : null}
+        ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} />` : null}
         <div class="st-field"><${Lbl}>Checks on this version</${Lbl}>
           <ul class="st-checks">
             ${(v.checks || []).map((c, i) => html`<li key=${i} class=${c.state}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <b>${c.text}</b> <span class="ov-dim">${c.note}</span></li>`)}
@@ -356,9 +384,10 @@
     const changed = JSON.stringify(layout) !== JSON.stringify(v.layout);
     return html`<div class="st-le" ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
       <${Composition} v=${Object.assign({}, v, { layout })} a=${a} ns=${ns} />
-      ${layers.map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel === l.id ? ' sel' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => down(e, l, 'move')} onKeyDown=${e => key(e, l)} onFocus=${() => setSel(l.id)}>
-        <span class="st-le-lbl">${l.role || l.type}</span>${l.type !== 'shape' || true ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
+      ${layers.filter(l => !l.hidden).map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel === l.id ? ' sel' : '') + (l.locked ? ' locked' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => { if (l.locked) { e.preventDefault(); setSel(l.id); return; } down(e, l, 'move'); }} onKeyDown=${e => { if (!l.locked) key(e, l); }} onFocus=${() => setSel(l.id)}>
+        <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}</span>${!l.locked ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
       </div>`)}
+      <div class="st-le-list">${layers.map(l => html`<span key=${l.id} class=${'st-le-item' + (sel === l.id ? ' on' : '')}><button class="ov-link" onClick=${() => setSel(l.id)}>${l.role || l.type}</button> <button class="st-lock" onClick=${() => upd(l.id, { hidden: !l.hidden })} title="Hide or show this element">${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => upd(l.id, { locked: !l.locked })} title="A locked element keeps its place through directions and hand edits">${l.locked ? 'locked' : 'lock'}</button></span>`)}</div>
       <div class="st-msg-foot" style=${{ marginTop: 8 }}><span class="ov-dim">Drag to move, the corner to resize (text scales with its box), arrow keys nudge the focused layer (Shift for 2%).</span><button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
     </div>`;
   }
@@ -485,6 +514,8 @@
     const addReference = async (r) => { try { await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg('Reference added'); } catch (e) { fail(e); } };
     const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e); } };
     const editAsset = async (as, patch) => { try { const cur = p.assets.find(x => x.id === as.id) || as; const changed = {}; Object.keys(patch).forEach(k => { if ((current(cur).copy || {})[k] !== patch[k]) changed[k] = patch[k]; }); if (!Object.keys(changed).length) return; await call('/studio/version', { asset: as.id, revision: cur.revision, copy: changed, note: 'hand edit: ' + Object.keys(changed).join(', ') }); await reload(); } catch (e) { fail(e); if (e.status === 409 || e.code === 'locked') reload(); } };
+    const propose = async (as, feedback, refine) => { try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), 'The art director reads ' + as.title + ' and the feedback'); await reload(); } catch (e) { fail(e); } };
+    const applyConcept = async (eid, index, render) => { try { const r = await call('/studio/concept/apply', { project: p.id, eid, index, render }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e); } };
     const saveLayout = async (as, layout) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'layout edited by hand' }); await reload(); } catch (e) { fail(e); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)' }); await reload(); } catch (e) { fail(e); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e); } };
@@ -547,7 +578,7 @@
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} busy=${busy} />`;
+    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} busy=${busy} />`;
     else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
 
     return html`<div class="st">

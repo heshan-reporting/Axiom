@@ -37,13 +37,17 @@ const decide = user => { const ins = (user.match(/TEAM LEAD[^\n]*\):\n([^\n]+)/)
   if (/alternative/i.test(ins)) return { kind: 'alternatives', reply: 'Three openings, each within the limit.', alternatives: { asset: A[0], field: 'caption', options: ['Who uses the fuel tax credit? Probably someone you know.', 'Mining paid $74 billion in company tax and royalties in 2023-24. Hands Off Our Fuel.', 'Fuel tax credits are not a subsidy. Here is what they are.'] }, memory: { standing: false } };
   if (/restrained/i.test(ins)) return { kind: 'render', reply: 'A quieter photograph reads better under the panel.', render: { assets: [A[0]], visual: 'A quiet regional road at dusk, no machinery', steps: ['Simplify the background', 'Keep the panel, headline and logo'] }, memory: { standing: true, rule: 'No haul trucks in Hands Off Our Fuel imagery.', scope: 'campaign', confidence: 0.9 } };
   return { kind: 'text', reply: 'Headline sharpened; layout and image kept.', changes: [{ asset: A[0], copy: { headline: 'Not a subsidy. Never was.' }, note: 'sharper' }], memory: { standing: false } }; };
+const CONCEPTS = { critique: 'The photograph is generic; the panel holds.', options: [
+  { name: 'No box, darker image', concept: 'Words over a darkened photograph', rationale: 'Editorial', imagery: 'keep the current photograph', composition: 'Top left', typography: 'Larger', colour: 'Dark overlay', textPlacement: 'top left', layout: { style: 'none', placement: 'top', template: 'same', headline: 'larger' }, keeps: ['photograph'], changes: ['panel removed'], needsImage: false, prompt: '', basis: [{ claim: 'White type on dark reads', kind: 'inferred' }], missing: [] },
+  { name: 'Split field', concept: 'Message on a teal field below', rationale: 'Clean separation', imagery: 'keep the current photograph', composition: 'Split', typography: 'Same', colour: 'Teal', textPlacement: 'bottom band', layout: { style: 'split', placement: 'bottom', template: 'teal', headline: 'same' }, keeps: ['photograph'], changes: ['split'], needsImage: false, prompt: '', basis: [{ claim: 'Teal is the campaign colour', kind: 'rule' }], missing: [] },
+  { name: 'Regional road at dawn', concept: 'A new photograph of a regional road', rationale: 'Where the credit is used', imagery: 'Regional road at dawn', composition: 'Low horizon', typography: 'Same', colour: 'Teal panel', textPlacement: 'lower left', layout: { style: 'same', placement: 'bottom', template: 'same', headline: 'same' }, keeps: ['panel', 'copy'], changes: ['photograph'], needsImage: true, prompt: 'A quiet regional road at dawn', basis: [{ claim: 'Restrained imagery preferred', kind: 'preference' }], missing: ['Whether machinery may appear'] }] };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) { calls.gemini++; if (/\/models\?/.test(u)) return new Response(JSON.stringify({ models: [{ name: 'models/gemini-3-pro-image' }] }), { status: 200 }); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: PNG } }] } }] }), { status: 200 }); }
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = String(body.messages[0].content || '');
-    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : {};
+    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -228,6 +232,32 @@ await t('directing the team: a text direction lands as a version with no render;
   eq(calls.gemini, g0 + 1, 'one render, after confirmation');
   ok(/confirmed, 1 render/.test(await page.textContent(R + '.st-proposal')));
   await shot(page, 'studio-partner');
+});
+await t('art direction: "Come up with a better creative" proposes distinct cards previewed on the current photograph with basis and cost; applying a layout-only card makes a layout version with no render; the render card shows its cost', async () => {
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-ad');
+  const g0 = calls.gemini; const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1];
+  eq(await page.inputValue(R + '.st-ad-ask input'), 'Come up with a better creative');
+  await page.click(R + '.st-ad-ask .btn');
+  await page.waitForSelector(R + '.st-ad-card', { timeout: 30000 });
+  const cards = await texts(page, R + '.st-ad-card'); eq(cards.length, 3);
+  ok(/No box, darker image/.test(cards[0]) && /layout only, no render/.test(cards[0]) && /inferred: White type/.test(cards[0]), cards[0]);
+  ok(/Regional road at dawn/.test(cards[2]) && /1 render at 2K/.test(cards[2]) && /Missing: Whether machinery/.test(cards[2]) && /preference: Restrained/.test(cards[2]), cards[2]);
+  ok(/rule: Teal is the campaign colour/.test(cards[1]));
+  ok(/Critique/.test(await page.textContent(R + '.st-ad-crit')) && /photograph is generic/.test(await page.textContent(R + '.st-ad-crit')));
+  eq((await page.$$(R + '.st-ad-card canvas')).length, 3, 'each card previews on the current photograph');
+  ok(await page.$(R + '.st-ad-card:nth-child(3) button:has-text("Apply and render (1 render at 2K)")'), 'the render card names its cost');
+  eq(calls.gemini, g0, 'proposing spends no render');
+  await page.$eval(R + '.st-ad', el => el.scrollIntoView({ block: 'start' })); await shot(page, 'studio-artdirection-cards');
+  await page.click(R + '.st-ad-card:nth-child(2) button:has-text("Apply layout only")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
+  ok(/art direction: Split field/.test(await page.textContent(R + '.st-asset-head'))); eq(calls.gemini, g0, 'no render for a layout-only direction');
+  await page.waitForFunction(() => /applied/.test(document.querySelectorAll('#studio-root .st-ad-card')[1].textContent));
+  ok(/applied as version/.test((await texts(page, R + '.st-ad-card'))[1]));
+  ok(/proposed against an earlier version/.test(await page.textContent(R + '.st-ad-crit')), 'the cards say they were proposed against the version before');
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-list');
+  const items = await texts(page, R + '.st-le-item'); ok(items.some(x => /panel/.test(x)) && items.some(x => /headline/.test(x)) && items.every(x => /hide|show/.test(x) && /lock/.test(x)), JSON.stringify(items));
+  await page.click(R + '.st-asset-acts button:has-text("Close layout editor")');
+  await shot(page, 'studio-artdirection');
 });
 await t('the jobs view lists every job with its log; the client context lists the kit, the facts, the banned terms and the learned rule', async () => {
   await page.click(R + '.st-railbtn:has-text("Jobs")');

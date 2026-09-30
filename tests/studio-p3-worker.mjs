@@ -21,6 +21,11 @@ const env = {
 const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
 const anth = { calls: [] }; const calls = { gemini: 0 };
 const ids = user => Array.from(user.matchAll(/^\[(a[a-z0-9]+)\]/gm)).map(m => m[1]);
+const CONCEPTS = A => ({ critique: 'The skate park photograph has nothing to do with fuel used off public roads; the teal panel and headline hold, the hierarchy is flat.', options: [
+  { name: 'Quiet regional road', concept: 'Keep the panel, replace the photograph with a dawn regional road and a farm gate', rationale: 'Puts the credit where it is used; the teal panel is the campaign identity', imagery: 'Regional road at dawn, farm gate, no machinery', composition: 'Low horizon, quiet lower third', typography: 'Headline one step larger', colour: 'Teal panel, warm dawn', textPlacement: 'lower left', layout: { style: 'same', placement: 'bottom', template: 'same', headline: 'larger' }, keeps: ['teal panel', 'headline', 'logo'], changes: ['photograph'], needsImage: true, prompt: 'A quiet regional road at dawn with a farm gate, Australia, warm light, low horizon, empty lower third', basis: [{ claim: 'Teal panel is the Hands Off Our Fuel identity', kind: 'rule' }, { claim: 'Dawn light suits the campaign', kind: 'inferred' }], missing: ['Whether machinery may appear in HOOF imagery'] },
+  { name: 'No box, darker image', concept: 'Drop the panel and set the words over a darkened photograph with negative space', rationale: 'More editorial; the type carries the message', imagery: 'keep the current photograph', composition: 'Words top left over a darkened field', typography: 'Larger headline, white', colour: 'Neutral dark overlay', textPlacement: 'top left', layout: { style: 'none', placement: 'top', template: 'same', headline: 'larger' }, keeps: ['photograph', 'logo'], changes: ['panel removed', 'type larger'], needsImage: false, prompt: '', basis: [{ claim: 'White type on a dark ground reads', kind: 'inferred' }], missing: [] },
+  { name: 'Split field', concept: 'The message on a solid teal field below, the photograph above', rationale: 'Clean separation; works at 4:5 and 9:16', imagery: 'keep the current photograph', composition: 'Photograph top, solid field bottom', typography: 'Same size', colour: 'Teal field', textPlacement: 'bottom band', layout: { style: 'split', placement: 'bottom', template: 'teal', headline: 'same' }, keeps: ['photograph', 'copy'], changes: ['split composition'], needsImage: false, prompt: '', basis: [{ claim: 'Teal is the campaign colour', kind: 'rule' }], missing: [] },
+  { name: 'Translucent, compact', concept: 'A smaller translucent panel so the photograph breathes', rationale: 'Restraint the client asked for', imagery: 'keep the current photograph', composition: 'Compact panel lower left', typography: 'Smaller headline', colour: 'Teal at 60 per cent', textPlacement: 'lower left', layout: { style: 'translucent', placement: 'bottom', template: 'same', headline: 'smaller' }, copy: { headline: 'Not a subsidy. A tax that never applied.' }, keeps: ['photograph'], changes: ['panel translucent', 'headline'], needsImage: false, prompt: '', basis: [{ claim: 'The client prefers restrained imagery', kind: 'preference' }], missing: [] }] });
 function decide(sys, user) {
   const ins = (user.match(/TEAM LEAD[^\n]*\):\n([^\n]+)/) || [])[1] || ''; const A = ids(user);
   if (/three alternative|options/i.test(ins)) return { kind: 'alternatives', reply: 'Three openings for the caption, each within the channel limit.', alternatives: { asset: A[0], field: 'caption', options: ['Who uses the fuel tax credit? Probably someone you know. Hands Off Our Fuel.', 'Mining paid $74 billion in company tax and royalties in 2023-24. Hands Off Our Fuel.', 'Mining paid $74 million in tax. Hands Off Our Fuel.'] }, memory: { standing: false } };
@@ -37,7 +42,7 @@ globalThis.fetch = async (url, init) => {
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     const body = JSON.parse(init.body); anth.calls.push(body);
     const sys = String(body.system || ''), user = String(body.messages[0].content || '');
-    const answer = /decide what the instruction asks/.test(sys) ? decide(sys, user) : {};
+    const answer = /decide what the instruction asks/.test(sys) ? decide(sys, user) : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS(ids(user)) : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -173,6 +178,48 @@ await t('a saved Ad Lab or Studio session in KV lists as a legacy row for its cl
   kv.set('imgsess_empty1', JSON.stringify({ client: 'mca', brief: {}, artVer: 0 }));
   const e = await req('POST', '/studio/import', { legacy: 'ks:empty1' }); eq(e.status, 400); eq(e.d.error, 'no_images');
   eq((await req('GET', '/studio/get?id=ks:nothere')).status, 404);
+});
+await t('art direction: the model sees the artwork and proposes distinct directions as layout variants with basis, cost and a prompt; a card applies as a layout version with no render; a card that needs a photograph queues one render only when asked; locked layers keep their place', async () => {
+  const P2 = (await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'AD test' })).d.id;
+  const a = await req('POST', '/studio/asset', { project: P2, family: 'Campaign set', channel: 'instagram', format: '4:5', title: 'Instagram portrait', copy: { headline: 'Myth: it is a subsidy. Fact: no road use, no road tax.', support: 'Fuel Tax Credits stop businesses paying a road tax on fuel used off public roads.', cta: 'Get the facts' }, image: { key: 'studio/x/y/skate.png', url: '/studio/file?key=studio%2Fx%2Fy%2Fskate.png', model: 'gemini-3-pro-image', size: '2K' }, mode: 'composition' }); const AID = a.d.asset.id;
+  r2.set('studio/x/y/skate.png', { v: Buffer.from(PNG, 'base64').buffer, o: { httpMetadata: { contentType: 'image/png' } } });
+  eq((await req('POST', '/studio/job', { project: P2, stage: 'concepts', input: { feedback: 'x' } })).d.error, 'asset_required');
+  const n0 = anth.calls.length; const g0 = calls.gemini;
+  const j = await req('POST', '/studio/job', { project: P2, asset: AID, stage: 'concepts', input: { asset: AID, feedback: 'Come up with a better creative' }, idem: 'ad1' }); const done = await run(j.d.job); eq(done.state, 'done', done.error);
+  eq(done.result.options.length, 4); eq(done.result.imageSeen, true); eq(calls.gemini, g0, 'no render'); eq(anth.calls.length, n0 + 1);
+  const body = anth.calls[anth.calls.length - 1]; ok(Array.isArray(body.messages[0].content) && body.messages[0].content[0].type === 'image' && body.messages[0].content[0].source.media_type === 'image/png', 'the artwork went to the model as an image block'); ok(/FEEDBACK FROM THE TEAM: Come up with a better creative/.test(body.messages[0].content[1].text)); ok(/Words on it: headline "Myth: it is a subsidy/.test(body.messages[0].content[1].text)); ok(/Label the answer Fact|NEVER USE|CAMPAIGN - Hands Off Our Fuel/.test(body.system), 'the client context is in the prompt');
+  const ev = (await events(P2, 'concepts')).pop(); eq(ev.asset, AID); ok(/skate park photograph has nothing to do/.test(ev.critique)); eq(ev.options.length, 4);
+  const [o1, o2, o3, o4] = ev.options;
+  eq(o1.needsImage, true); ok(/1 render at 2K/.test(o1.cost)); ok(/farm gate/.test(o1.prompt)); eq(o1.basis.map(b => b.kind), ['rule', 'inferred']); eq(o1.missing.length, 1);
+  eq(o2.layout.style, 'none'); ok(o2.layout.layers.some(l => l.role === 'overlay') && !o2.layout.layers.some(l => l.role === 'panel'), 'no box: an overlay, no panel'); eq(o2.layout.placement, 'top'); ok(o2.layout.layers.find(l => l.role === 'headline').y < 15, 'text placed at the top');
+  eq(o3.layout.style, 'split'); const sp = o3.layout.layers.find(l => l.role === 'panel'); eq([sp.x, sp.w, sp.opacity, sp.radius], [0, 100, 1, 0]); eq(o3.cost, 'layout only, no render');
+  eq(o4.layout.style, 'translucent'); eq(o4.layout.layers.find(l => l.role === 'panel').opacity, 0.62); eq(o4.copy.headline, 'Not a subsidy. A tax that never applied.');
+  ok(o1.layout.layers.find(l => l.role === 'headline').size > a.d.asset.versions[0].layout.layers.find(l => l.role === 'headline').size, 'larger headline in the first direction');
+  ok(ev.options.every(o => o.layout.layers.some(l => l.role === 'logo') === a.d.asset.versions[0].layout.layers.some(l => l.role === 'logo')), 'the logo layer follows the kit');
+  // apply the split direction: layout only, no render, image kept
+  const ap = await req('POST', '/studio/concept/apply', { project: P2, eid: ev.eid, index: 2, render: false }); eq(ap.status, 200, JSON.stringify(ap.d)); eq(ap.d.job, null);
+  let g = await req('GET', '/studio/get?id=' + P2); let as = g.d.assets[0]; eq(as.versions.length, 2); eq(as.versions[1].kind, 'layout'); eq(as.versions[1].layout.style, 'split'); eq(as.versions[1].image.key, 'studio/x/y/skate.png'); eq(calls.gemini, g0); ok(/art direction: Split field/.test(as.versions[1].note));
+  ok((await events(P2, 'applied')).pop().text.indexOf('a layout version with no render') >= 0);
+  // apply the translucent one: the headline changes with the layout, still no render
+  await req('POST', '/studio/concept/apply', { project: P2, eid: ev.eid, index: 3, render: false });
+  g = await req('GET', '/studio/get?id=' + P2); as = g.d.assets[0]; eq(as.versions[2].copy.headline, 'Not a subsidy. A tax that never applied.'); eq(as.versions[2].layout.style, 'translucent'); eq(calls.gemini, g0);
+  // the first direction with render: a layout version plus one render job with the tailored prompt grounded in the words
+  const ap1 = await req('POST', '/studio/concept/apply', { project: P2, eid: ev.eid, index: 0, render: true }); ok(ap1.d.job, 'a render job'); eq(ap1.d.render, true);
+  const job = (await req('GET', '/studio/job?id=' + ap1.d.job)).d.job; eq(job.idem, 'render:' + ev.eid + ':0:' + AID); ok(/farm gate/.test(job.input.prompt) && /The words laid over it will be/.test(job.input.prompt) && /no sport, skate, leisure/.test(job.input.prompt), job.input.prompt);
+  const rd = await run(job); eq(rd.state, 'done', rd.error); eq(calls.gemini, g0 + 1);
+  g = await req('GET', '/studio/get?id=' + P2); as = g.d.assets[0]; const last = as.versions[as.versions.length - 1]; ok(last.image.key !== 'studio/x/y/skate.png'); eq(last.layout.style, 'same', 'the render carries the first direction\'s layout'); eq(last.copy.headline, 'Not a subsidy. A tax that never applied.');
+  // a locked layout refuses a direction that changes it; a locked layer keeps its place inside a variant
+  await req('POST', '/studio/lock', { asset: AID, element: 'layout' });
+  eq((await req('POST', '/studio/concept/apply', { project: P2, eid: ev.eid, index: 1, render: false })).status, 409);
+  await req('POST', '/studio/lock', { asset: AID, element: 'layout', locked: false });
+  const cur = (await req('GET', '/studio/get?id=' + P2)).d.assets[0]; const L = JSON.parse(JSON.stringify(cur.versions[cur.versions.length - 1].layout)); const lg = L.layers.find(l => l.role === 'logo'); if (lg) { lg.x = 4; lg.y = 4; lg.locked = true; }
+  await req('POST', '/studio/version', { asset: AID, layout: L, kind: 'layout', note: 'logo moved and locked' });
+  const j2 = await req('POST', '/studio/job', { project: P2, asset: AID, stage: 'concepts', input: { asset: AID, feedback: 'again' }, idem: 'ad2' }); eq((await run(j2.d.job)).state, 'done');
+  const ev2 = (await events(P2, 'concepts')).pop(); if (lg) ev2.options.forEach(o => { const l = o.layout.layers.find(x => x.role === 'logo'); ok(l && l.x === 4 && l.y === 4 && l.locked, 'locked logo keeps its place in ' + o.name); });
+  ok(/LOCKED \(must not change\): layer logo/.test(anth.calls[anth.calls.length - 1].messages[0].content[1].text) || !lg, 'locked layers are told to the model');
+  eq((await req('POST', '/studio/concept/apply', { project: P2, eid: 'e_x', index: 0 })).status, 404);
+  const co = await req('POST', '/studio/asset', { project: P2, title: 'copy only', copy: { headline: 'h', caption: 'c' }, mode: 'copy' });
+  const jc = await req('POST', '/studio/job', { project: P2, asset: co.d.asset.id, stage: 'concepts', input: { asset: co.d.asset.id, feedback: 'better' } }); const dc = (await req('POST', '/studio/job/step', { id: jc.d.job.id })).d.job; eq(dc.state, 'failed'); ok(/copy_only/.test(dc.error));
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

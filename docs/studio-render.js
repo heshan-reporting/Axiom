@@ -23,9 +23,12 @@
     return lines;
   }
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
-  function cover(ctx, img, W, H) {
-    const s = Math.max(W / img.naturalWidth, H / img.naturalHeight); const w = img.naturalWidth * s, h = img.naturalHeight * s;
-    ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  function cover(ctx, img, W, H, box) {
+    // box: {x,y,w,h} in stage pixels; the image is cropped to fill it (a split composition), else the stage.
+    const bx = box ? box.x : 0, by = box ? box.y : 0, bw = box ? box.w : W, bh = box ? box.h : H;
+    const s = Math.max(bw / img.naturalWidth, bh / img.naturalHeight); const w = img.naturalWidth * s, h = img.naturalHeight * s;
+    ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
+    ctx.drawImage(img, bx + (bw - w) / 2, by + (bh - h) / 2, w, h); ctx.restore();
   }
   function contain(ctx, img, x, y, w, h) {
     const s = Math.min(w / img.naturalWidth, h / img.naturalHeight); const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
@@ -37,13 +40,18 @@
     const layers = Array.isArray(layout.layers) ? layout.layers : [];
     const pal = layout.palette || {};
     ctx.save(); ctx.clearRect(0, 0, W, H);
-    if (images.bg) cover(ctx, images.bg, W, H);
+    const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : null;
+    if (images.bg) { if (ib) { ctx.fillStyle = pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); } cover(ctx, images.bg, W, H, ib); }
     else { const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
     const overflow = [];
     layers.forEach(l => {
+      if (l.hidden) return;
       const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
       ctx.save(); ctx.globalAlpha = l.opacity == null ? 1 : l.opacity;
-      if (l.type === 'shape') { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
+      if (l.type === 'shape') {
+        if (l.gradient) { const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, l.fill || 'rgba(0,0,0,.7)'); g.addColorStop(1, l.fill || 'rgba(0,0,0,.7)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
+        else { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
+      }
       else if (l.type === 'img') {
         const img = l.role === 'logo' ? images.logo : images[l.id];
         if (img) contain(ctx, img, x, y, w, h);
