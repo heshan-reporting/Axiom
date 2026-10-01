@@ -139,6 +139,7 @@
         ['Time to first approval', st(c.timeToFirstApproval), st(e.timeToFirstApproval), st(L.timeToFirstApproval), D.timeToFirstApproval],
         ['Versions per approved asset', num(c.versionsPerApproved), num(e.versionsPerApproved), L.revisionsPerSet.n ? html`${num(L.revisionsPerSet)} <span class="ov-dim">revisions per set</span>` : num(L.revisionsPerSet), D.versionsPerApproved],
         ['Spend per approved asset', cost(c), cost(e), NR, D.costPerApproved],
+        ['First-pass quality', c.firstPass && c.firstPass.measured ? c.firstPass.share + '% measured clean first time (' + c.firstPass.passed + ' of ' + c.firstPass.measured + '); ' + c.firstPass.approvedAsDrafted + ' of ' + c.firstPass.approved + ' approved as first drafted' : html`<span class="ov-dim">none yet</span>`, e.firstPass && e.firstPass.measured ? e.firstPass.share + '% (' + e.firstPass.passed + ' of ' + e.firstPass.measured + ')' : html`<span class="ov-dim">none yet</span>`, NR, D.firstPass],
         ['Constraint adherence', pct(c.adherence, 'clean', 'current'), pct(e.adherence, 'clean', 'current'), L.adherence.pieces ? html`${pct(L.adherence, 'clean', 'pieces')} <span class="ov-dim">figures and banned terms only</span>` : pct(L.adherence, 'clean', 'pieces'), D.adherence],
         ['Technical validation passed', pct(c.validation, 'passed', 'measured'), pct(e.validation, 'passed', 'measured'), NR, ''],
         ['Agency rejections', String(c.rejections), String(e.rejections), L.killed + ' killed', ''],

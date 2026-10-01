@@ -5,3 +5,6 @@ __pycache__/
 # the daily briefs tools/daily-brief.py writes (client intelligence; kept out of the repo)
 briefs/
 tests/shot-*.png
+# Studio showcase and demonstration output (client creative; kept out of the repo)
+showcase/
+demo/

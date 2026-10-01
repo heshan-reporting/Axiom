@@ -1384,8 +1384,30 @@ of another campaign, or another campaign's wordmark. `definitions` says what
 each figure counts. In-app: **Outcome metrics** under the project library
 (7 / 30 / 90 days; measure, this window, the window before, the desks;
 "none yet" with n, "not recorded" for the desks; the isolation line).
-Harnesses: `tests/studio-p15-worker.mjs` (7), the P15 case in the browser
+`firstPass` counts compositions whose first measurement passed before any
+repair, and approved assets approved as first drafted. Harnesses: `tests/studio-p15-worker.mjs` (7), the P15 case in the browser
 harness (23).
+
+**The demonstration (`tools/studio-demo.py`, P16; `CREATIVE-STUDIO.md`
+s.22).** The six steps the request named, run on the live worker per case
+and written to `<out>/index.html` + `demo.json` + each case's delivery
+bundle: (1) the brief with the workspace's knowledge counts, the mark policy,
+references and the gaps before spending; (2) three directions with medium and
+diversity; (3) production from the chosen direction, then a refine concept
+applied as a layout version on the same imagery (no image call); (4) the set
+adapted for the other channels (`revise` kind adapt); (5) a private review
+link, a client comment answered by a text edit and resolved against the new
+version; (6) agency approval of copy and design, client approval of that
+exact version, and an export with `requireClient`. Cases `hoof`, `mca`
+(national) and `synth` - "Harbourline Ferries - SYNTHETIC DEMO CLIENT" in
+namespace `synthdemo`, whose invented kit is written only into an empty
+namespace or over itself. Afterwards it checks every composed asset's marks
+against its case and reads `/studio/metrics` isolation for each namespace.
+Nothing runs without `--approve-calls N`; images need `--approve-renders N`
+(default 0: typographic directions, nothing generated). Composition and
+validation use `tools/studio-compose.mjs` (Node + Playwright). Output folders
+`demo/` and `showcase/` are gitignored. Harness: `tests/studio-demo-test.mjs`
+(20).
 
 Phase 1, the ground:
 

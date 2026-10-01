@@ -429,3 +429,37 @@ Where the desks recorded nothing, the table says "not recorded", not zero. They 
 
 **Limits.** Until the deployed Studio has run real projects, these metrics describe test data. The first honest reading comes after a few weeks of real work. Comparisons with the desks are fair only for approval time, revisions and figure and banned-term adherence.
 
+**First-pass quality** (added with s.22) counts two things: compositions whose first technical measurement passed before any repair or edit, and fully approved assets approved at their first version.
+
+## 22. The demonstration (tools/studio-demo.py)
+
+The request asked for a boss-ready demonstration in six steps. `tools/studio-demo.py` runs them on the live worker and writes one page of evidence. Every sentence on the page is what the worker recorded, not a description of what it would do.
+
+1. **A brief with visible campaign knowledge and references.** The workspace's knowledge counts by authority, the campaign's mark policy, the references, and the gaps before anything is spent.
+2. **Three genuinely different directions,** each with its medium, and the measured diversity between them.
+3. **A selected concept refined without unnecessary regeneration.** Production from the chosen direction, then a refine card applied as a layout version on the same imagery. The page states that the refinement made no image call.
+4. **A coordinated campaign set.** The master is adapted for the other channels, with each format re-composed from the master's plan.
+5. **A client comment resolved in a new version.** A private, expiring review link; the client's pinned comment; a text edit (no model call); the comment marked as addressed in that version.
+6. **Version-specific approval and a clean delivery bundle.** The agency approves copy and design, then the client approves the same version. The export takes only what the client approved, and the bundle (manifest, copy sheet, composed PNG) is downloaded.
+
+**Cases.**
+- **HOOF:** MCA's Hands Off Our Fuel campaign, carrying its wordmark.
+- **MCA national:** carries the MCA logo.
+- **A third, synthetic client:** "Harbourline Ferries - SYNTHETIC DEMO CLIENT", with an invented kit, facts, a flat placeholder logo and a swatch reference, all labelled synthetic. Its kit is written only into an empty namespace or over itself, never over a real client's.
+
+After the cases, the page shows every mark on every composed asset, checked against its case, and the isolation audit for each namespace.
+
+**Spending.** Nothing runs without `--approve-calls`: without it the tool prints the estimate (about five model calls per case) and stops. Images need `--approve-renders`, which defaults to 0. With no images, the demonstration chooses the typographic direction, so all six steps complete with nothing generated, and the page says so. With images approved, renders run up to the cap, each followed by one inspection, and anything beyond the cap is held.
+
+**What the test proves.** `tests/studio-demo-test.mjs` runs the tool against the worker module, with stub models and the real compose tool in Chromium. It checks:
+- all six steps for all three cases
+- the refinement made no image call
+- the bundle holds the client-approved version and its client decision
+- every mark is the case's own, and the isolation audit is clean
+- no image was generated
+- the synthetic kit refuses to overwrite a kit that is not its own
+
+The first run of the test caught a real issue: the synthetic navy logo was unreadable on its navy ground. The validator blocked sharing until it was changed.
+
+**Not shown:** whether the work is good. With stub models, the words and layouts are placeholders. The real demonstration is the same command on the Mac against the deployed worker, with an approved call budget.
+

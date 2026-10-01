@@ -82,6 +82,7 @@ await t('this window counts what happened: projects, approved assets, times from
   eq(c.spend, { calls: 1, images: 1 }, 'done jobs only'); eq(c.costPerApproved, { calls: 0.5, images: 0.5 });
   eq(c.adherence.current, 3); eq(c.adherence.clean, 2, 'the banned term keeps one version from being clean'); eq(c.adherence.byState.banned, 1); eq(c.adherence.share, 67);
   eq(c.validation, { measured: 1, passed: 1, share: 100 }); eq(c.rejections, 1);
+  eq(c.firstPass, { measured: 1, passed: 1, share: 100, approvedAsDrafted: 1, approved: 2 }, 'the tile measured clean first time and was approved as drafted; the caption needed a second version');
 });
 await t('the earlier window is the baseline from the same client: four versions to approval, two images and one call on one approved asset', async () => {
   const m = (await req('GET', '/studio/metrics?ns=mca&days=30')).d; const e = m.baseline.earlier;
@@ -110,7 +111,7 @@ await t('the isolation audit is clean on honest work and names a rule, a mark an
 });
 await t('every figure says what it counts, and the metrics cost nothing', async () => {
   const a0 = calls.anth, g0 = calls.gem; const m = (await req('GET', '/studio/metrics?ns=mca&days=7')).d; eq([calls.anth, calls.gem], [a0, g0]);
-  ['timeToFirstDraft', 'timeToFirstValidated', 'timeToFirstApproval', 'versionsPerApproved', 'costPerApproved', 'adherence', 'isolation'].forEach(k => ok(m.definitions[k], 'defined: ' + k)); ok(/Small numbers are small numbers/.test(m.note)); eq(m.days, 7);
+  ['timeToFirstDraft', 'firstPass', 'timeToFirstValidated', 'timeToFirstApproval', 'versionsPerApproved', 'costPerApproved', 'adherence', 'isolation'].forEach(k => ok(m.definitions[k], 'defined: ' + k)); ok(/Small numbers are small numbers/.test(m.note)); eq(m.days, 7);
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

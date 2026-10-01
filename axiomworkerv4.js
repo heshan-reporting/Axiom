@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p15';
+const AXIOM_BUILD = '2026-10-01.studio-p16';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7192,11 +7192,14 @@ function stMedian(xs) { const a = xs.filter(x => typeof x === 'number' && isFini
 function stStat(xs) { const a = xs.filter(x => typeof x === 'number' && isFinite(x)); return { n: a.length, median: stMedian(a), mean: a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length * 10) / 10 : null }; }
 async function stMetricsWindow(env, ns, from, to) {
   const projects = ((await env.MIND_DB.prepare("SELECT id, campaign, created FROM studio_projects WHERE ns=? AND created>=? AND created<? AND COALESCE(legacy_id,'')='' AND COALESCE(archived,0)=0").bind(ns, from, to).all()).results || []);
-  const out = { projects: projects.length, assets: 0, approvedAssets: 0, firstDraftMs: [], firstValidatedMs: [], firstApprovalMs: [], versionsToApproval: [], calls: 0, images: 0, current: 0, clean: 0, byState: {}, measured: 0, passed: 0, rejections: 0, clientChanges: 0, clientApprovals: 0 };
+  const out = { projects: projects.length, assets: 0, approvedAssets: 0, firstDraftMs: [], firstValidatedMs: [], firstApprovalMs: [], versionsToApproval: [], calls: 0, images: 0, current: 0, clean: 0, byState: {}, measured: 0, passed: 0, rejections: 0, clientChanges: 0, clientApprovals: 0, firstMeasured: 0, firstPassed: 0 };
   for (const p of projects) {
     const one = async (sql, ...b) => env.MIND_DB.prepare(sql).bind(...b).first();
     const fv = await one('SELECT MIN(created) AS t FROM studio_versions WHERE project=?', p.id); if (fv && fv.t) out.firstDraftMs.push(fv.t - p.created);
     const fl = await one('SELECT MIN(created) AS t FROM studio_validations WHERE project=? AND ok=1', p.id); if (fl && fl.t) out.firstValidatedMs.push(fl.t - p.created);
+    // first-pass quality: did a composition's first measurement pass, before any repair or edit
+    const firsts = (await env.MIND_DB.prepare('SELECT v.ok FROM studio_validations v WHERE v.project=? AND v.created=(SELECT MIN(w.created) FROM studio_validations w WHERE w.asset=v.asset)').bind(p.id).all()).results || [];
+    firsts.forEach(r => { out.firstMeasured++; if (r.ok) out.firstPassed++; });
     const fa = await one("SELECT MIN(created) AS t FROM studio_approvals WHERE project=? AND decision='approve'", p.id); if (fa && fa.t) out.firstApprovalMs.push(fa.t - p.created);
     const rj = await one("SELECT COUNT(*) AS n FROM studio_approvals WHERE project=? AND decision='reject'", p.id); out.rejections += (rj && rj.n) || 0;
     const jobs = (await env.MIND_DB.prepare("SELECT stage, cost FROM studio_jobs WHERE project=? AND state='done'").bind(p.id).all()).results || [];
@@ -7218,6 +7221,7 @@ async function stMetricsWindow(env, ns, from, to) {
     versionsPerApproved: stStat(out.versionsToApproval), spend: { calls: out.calls, images: out.images }, costPerApproved: per, costNote: per ? '' : 'no asset fully approved in this window',
     adherence: { current: out.current, clean: out.clean, share: out.current ? Math.round(out.clean / out.current * 100) : null, byState: out.byState },
     validation: { measured: out.measured, passed: out.passed, share: out.measured ? Math.round(out.passed / out.measured * 100) : null },
+    firstPass: { measured: out.firstMeasured, passed: out.firstPassed, share: out.firstMeasured ? Math.round(out.firstPassed / out.firstMeasured * 100) : null, approvedAsDrafted: out.versionsToApproval.filter(n => n === 1).length, approved: out.versionsToApproval.length },
     rejections: out.rejections, client: { changesRequested: out.clientChanges, approvals: out.clientApprovals } };
 }
 /** The desks the Studio replaced, over the same window: what they recorded, and what they never did. */
@@ -7269,6 +7273,7 @@ async function stMetrics(env, ns, opts) {
       timeToFirstApproval: 'project created to the first agency approval (copy or design); for the desks, created to the first Approve on a tile or piece',
       versionsPerApproved: 'versions of an asset up to its standing approval (copy, and design unless copy only)',
       costPerApproved: 'model calls and images that finished on the window\'s projects, divided by the assets fully approved; failed and queued jobs not counted',
+      firstPass: 'compositions whose first technical measurement passed, before any repair or edit; and fully approved assets approved at their first version',
       adherence: 'current versions with no figure that differs from its source, no unsupported figure or quotation, no banned term and no missing mandatory mark',
       isolation: 'every rule, reference and mark recorded on a current version belongs to this client (and, for recommended references and wordmarks, to the asset\'s campaign)' },
     note: 'Counts over recorded rows. Medians are of projects or assets with the event; a project without one is not counted as zero. Small numbers are small numbers: read n beside every median.' };
