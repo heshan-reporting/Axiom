@@ -12,6 +12,8 @@ A campaign can carry its own mark. Hands Off Our Fuel tiles show the HANDS OFF O
 
   python3 tools/brand-logo.py path/to/hoof-wordmark.png --ns mca --campaign hoof --wordmark --key $AXIOM_KEY
   python3 tools/brand-logo.py --ns mca --campaign hoof --policy wordmark --key $AXIOM_KEY   # logo | wordmark | both | none
+  python3 tools/brand-logo.py --ns mca --campaign hoof --wordmark --remove --key $AXIOM_KEY                 # retire the older single wordmark
+  python3 tools/brand-logo.py --ns mca --campaign hoof --wordmark --variant black --remove --key $AXIOM_KEY # retire one variant
 
 A campaign can hold several approved colour variants of its wordmark (each stored under its own immutable, versioned
 key; uploading one never replaces another). The Studio offers them all on the mark layer, picks the one that suits a
@@ -59,6 +61,7 @@ def main():
     ap.add_argument('--variant', help='with --wordmark: the name of this approved colour variant (blue, white, black...)')
     ap.add_argument('--tone', choices=['light', 'dark', 'colour'], help='with --variant: light for a white mark, dark for a black one, colour otherwise')
     ap.add_argument('--default', action='store_true', help='with --variant: the variant used when the ground is unknown')
+    ap.add_argument('--remove', action='store_true', help='with --wordmark: take the single wordmark (or, with --variant, that variant) off new compositions; versioned copies stay for approved work')
     a = ap.parse_args()
     base = a.worker.rstrip('/')
     if a.policy and not a.campaign:
@@ -67,6 +70,17 @@ def main():
         raise SystemExit('--wordmark needs --campaign')
     if a.variant and not a.wordmark:
         raise SystemExit('--variant goes with --wordmark')
+    if a.remove:
+        if not (a.wordmark and a.campaign) or a.file:
+            raise SystemExit('--remove goes with --wordmark --campaign (and --variant to retire one variant), without a file')
+        body = {'ns': a.ns, 'removeWordmark': True, 'wordmarkCampaign': a.campaign}
+        if a.variant:
+            body['wordmarkVariant'] = a.variant
+        k = http(base, a.key, 'POST', '/brand/kit', body)
+        camp = next((c for c in (k.get('kit') or {}).get('campaigns') or [] if c.get('id') == a.campaign), {})
+        print('%s / %s: %s retired from new compositions (its versioned copy stays, so approved work keeps its exact mark)' % (a.ns, a.campaign, ('variant ' + a.variant) if a.variant else 'the single wordmark'))
+        print('mark policy %s; single wordmark %s; variants on file: %s' % (camp.get('logoPolicy'), 'on file' if camp.get('wordmarkV') else 'none', ', '.join(w.get('variant') for w in camp.get('wordmarks') or []) or 'none'))
+        return
     if a.policy and not a.file:
         k = http(base, a.key, 'POST', '/brand/kit', {'ns': a.ns, 'removeWordmark': False, 'wordmarkCampaign': a.campaign, 'logoPolicy': a.policy, 'wordmarkB64': ''})
         camp = next((c for c in (k.get('kit') or {}).get('campaigns') or [] if c.get('id') == a.campaign), None)
@@ -81,6 +95,8 @@ def main():
         for c in kit.get('campaigns') or []:
             vs = c.get('wordmarks') or []
             print('  campaign %s: mark policy %s, wordmark %s%s' % (c.get('id'), c.get('logoPolicy') or 'logo', 'on file' if c.get('hasWordmark') else 'not on file', ('; variants ' + ', '.join('%s (%s%s, v %s)' % (w.get('variant'), w.get('tone'), ', default' if w.get('variant') == c.get('wordmarkDefault') else '', w.get('v')) for w in vs)) if vs else ''))
+            if vs and c.get('wordmarkV'):
+                print('    also the older single wordmark (v %s): the Brand view reports this as a conflict; retire it with --campaign %s --wordmark --remove' % (c.get('wordmarkV'), c.get('id')))
         if not a.file:
             return
     if not os.path.isfile(a.file):
