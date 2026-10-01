@@ -1249,6 +1249,39 @@ history, item history) and **What the Studio used** on every asset.
 Harnesses: `tests/studio-p10-worker.mjs` (9) and the P10 case in
 `tests/studio-browser.mjs` (19).
 
+**Client review (build `studio-p11`; `CREATIVE-STUDIO.md` s.17).** `POST
+/studio/share {project, assets[], label, expiresDays 0-90, allowApprove}`
+(full) creates a private link: a random 256-bit token returned once, stored
+only as its SHA-256 (`studio_shares.token_hash`), scoped to the assets named;
+an asset is refused unless it is copy-only or its current version passed the
+technical validation (the client sees exactly the validated export). `GET
+/studio/shares?project=`, `POST /studio/share/revoke`. The reviewer's page is
+`docs/review.html#t=<token>&w=<worker>` (the token stays in the fragment and
+travels as `X-Review-Token`); its routes are outside the AXIOM key gate:
+`GET /review/get` (an allow-list: client and project names, each shared
+asset's current version as `/review/file` or its copy, the reviewer's own
+comments with "addressed in version N"; never the thread, notes, checks,
+layouts, other assets or another client), `GET /review/file`, `POST
+/review/comment {asset, version, text, pin:{x,y}, author}`, `POST
+/review/decision {decision approve|changes}`. A comment or decision on a
+superseded version is `stale_version` 409; an unvalidated current version
+shows "in revision"; approval needs `allowApprove` and the agency's own copy
+and design approval, and is of that exact version (it stops standing when a
+new one is made). Wrong tokens lock an address out after twelve tries (KV
+`rf_<ip>`, ten minutes); a revoked link is 403, an expired one 410; 300
+comments per link per day. Rows live in `studio_review`; every comment and
+decision is a `client_review` event on the thread with the name as the
+reviewer gave it. `GET /studio/review?project=` (read) and `POST
+/studio/review/resolve {id, version | decision:'wontfix', note}` (full; the
+version must be of the same asset and not older than the comment). The export
+manifest records each asset's `client` decision; `input.requireClient` leaves
+out what the client has not approved in its current version. In-app: the
+**Client review** rail view (create a link - shown once with Copy -, the
+links with state, views and Withdraw, comments by asset with their pins on
+the tile, "Addressed in vN" and "Answer without a change"). Harnesses:
+`tests/studio-p11-worker.mjs` (8) and `tests/studio-review-browser.mjs` (5,
+both pages in Chromium).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

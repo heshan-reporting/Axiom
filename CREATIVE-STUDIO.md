@@ -279,3 +279,32 @@ The five pages named in the request could not be fetched: the sandbox's egress p
 - **Not done in this slice:** the strategy stage, the canvas upgrade, recipes, client review, delivery and metrics (see 16.3).
 - **Not measured:** the effect on creative quality. No real model was called; the demonstration with real models waits for an approved spending cap.
 
+## 17. Client review (build studio-p11)
+
+The second slice of the plan in s.16.3 is the agency-to-client loop.
+
+**Sharing.** It is private by default and explicitly scoped:
+- a link per review, naming the assets the client may see
+- a random 256-bit token shown once and stored only as a hash
+- optional expiry (7, 14 or 30 days, or none)
+- withdrawal at any time
+- a lockout for an address that guesses
+- no AXIOM key and no storage URL ever reaches the client
+
+**What the client sees.** Only work that is finished enough to judge: a composition appears once its current version has passed the technical validation, as exactly the export that would be delivered. A version in progress reads "in revision". Copy-only assets read as copy. The client never sees the thread, internal notes, checks, layouts, other assets or another client.
+
+**What the client does.** The reviewer gives a name, comments (optionally pinned to a point on the tile), requests changes, or approves. Approval is only possible when the link allows it and the agency has approved the version itself, and it is of that exact version: a new version needs a new approval.
+
+**The agency's side.** The agency sees every comment with its pin on the thread and in the Client review view. It resolves each comment by naming the version that addresses it (not an older one), or answers it without a change. The client then sees "addressed in version N".
+
+**Delivery.** The manifest records the client's decision per asset and can be told to require it.
+
+**Proof.**
+- `tests/studio-p11-worker.mjs` (8) covers the token hash, the allow-list, pins, stale versions, approval order, resolution, the manifest, revocation, expiry, lockout and isolation.
+- `tests/studio-review-browser.mjs` (5) runs both pages in Chromium: the page never sends an AXIOM key, a comment is pinned, the client approves, the agency resolves, the client sees the new version, and the link is withdrawn.
+
+**Not yet.**
+- Delivery bundles sent to the client.
+- Reviewer identity beyond the name typed (an email one-time code would be the next step if needed).
+- Comment threads with replies.
+

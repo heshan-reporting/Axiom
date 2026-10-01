@@ -97,7 +97,7 @@
 const CORS = {
   'Access-Control-Allow-Origin':      '*',
   'Access-Control-Allow-Methods':     'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key',
+  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key, X-Review-Token',
   'Access-Control-Max-Age':           '86400',
   'Content-Type':                     'application/json',
 };
@@ -106,7 +106,7 @@ const CORS = {
 const CORS_ONLY = {
   'Access-Control-Allow-Origin':      '*',
   'Access-Control-Allow-Methods':     'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key',
+  'Access-Control-Allow-Headers':     'Content-Type, Authorization, X-Requested-With, X-Axiom-Key, X-Review-Token',
   'Access-Control-Max-Age':           '86400',
 };
 
@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p10';
+const AXIOM_BUILD = '2026-10-01.studio-p11';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7868,9 +7868,11 @@ async function stExportStage(env, job, p, log) {
     if (cur.mode !== 'copy' && cur.layout && Array.isArray(cur.layout.incomplete) && cur.layout.incomplete.length) { excluded.push({ asset: a.id, title: a.title, why: 'incomplete: ' + cur.layout.incomplete.map(i => i.text).join('; ') }); continue; }
     const rd = cur.mode === 'copy' ? null : await stReadiness(env, p, a, cur);
     if (rd && rd.technical !== 'passed') { excluded.push({ asset: a.id, title: a.title, why: rd.reasons.join(' ') || 'not validated' }); continue; }
+    const client = await stClientDecision(env, a);
+    if (job.input.requireClient && !(client && client.kind === 'approve' && client.current)) { excluded.push({ asset: a.id, title: a.title, why: client && client.kind === 'changes' && client.current ? 'the client asked for changes to this version' : client && client.kind === 'approve' ? 'the client approved an earlier version, not this one' : 'not approved by the client' }); continue; }
     const exportKey = (rd && rd.validation && rd.validation.exportKey) || 'studio/' + p.id + '/' + a.id + '/' + cur.id + '-export.png';
     let hasExport = false; try { hasExport = !!(env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {}
-    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' });
+    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' , client: client ? { decision: client.kind, current: client.current, version: client.version, by: client.author, at: client.at } : null});
   }
   const id = stId('e'); const base = 'studio/' + p.id + '/export/' + id;
   const sheet = stCopySheet(p, items);
@@ -7879,6 +7881,132 @@ async function stExportStage(env, job, p, log) {
   await log('out', items.length + ' asset' + (items.length === 1 ? '' : 's') + ' exported' + (excluded.length ? ', ' + excluded.length + ' left out (' + excluded.map(x => x.title + ': ' + x.why).join('; ') + ')' : '') + (items.some(it => it.mode !== 'copy' && !it.exportKey) ? '; some compositions have no rendered PNG yet - the browser renders and saves them before download' : ''));
   await stEvent(env, p.id, 'export', { text: 'Export ' + id + ': ' + items.length + ' approved asset' + (items.length === 1 ? '' : 's') + (excluded.length ? ', ' + excluded.length + ' not approved and left out' : '') + '. Files: manifest and copy sheet under studio/' + p.id + '/export/. Nothing was sent; a hand-off is its own step.', job: job.id, export: id }, job.who);
   return { export: id, included: items.map(it => ({ asset: it.asset, version: it.version, exportKey: it.exportKey })), excluded, files: manifest.files, sheet: sheet.slice(0, 4000) };
+}
+// -- Client review (build studio-p11) ---------------------------------------------------------------------
+// The agency shares chosen assets with a client through a private link: a random token shown once and stored only as
+// its SHA-256 hash, scoped to the assets named, revocable, optionally expiring, and refused (with a lockout) when
+// guessed. A reviewer sees an allow-list - the client's name, the project title, each shared asset's current version
+// as the exact validated export PNG (or its copy, for a copy-only asset) - never the thread, internal notes, checks,
+// other assets or another client. A reviewer comments (optionally pinned to a point on the tile), requests changes,
+// or, when the link allows it and the agency has approved both parts, approves that exact version. The agency
+// resolves each comment by naming the version that addresses it; the client sees "addressed in version N".
+async function stSha256Hex(s) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(s))); return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join(''); }
+function stToken() { const u = new Uint8Array(32); crypto.getRandomValues(u); let b = ''; u.forEach(x => { b += String.fromCharCode(x); }); return btoa(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+let REVIEW_READY = false;
+async function ensureReview(env) {
+  if (REVIEW_READY) return true;
+  await ensureStudio(env);
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_shares(id TEXT PRIMARY KEY, project TEXT, ns TEXT, token_hash TEXT, label TEXT, assets TEXT, allow_approve INTEGER, expires INTEGER, revoked INTEGER, revoked_by TEXT, revoked_at INTEGER, created_by TEXT, created INTEGER, last_seen INTEGER, views INTEGER)'),
+    env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS studio_shares_token ON studio_shares(token_hash)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_shares_p ON studio_shares(project, created)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_review(id TEXT PRIMARY KEY, share TEXT, project TEXT, asset TEXT, version TEXT, kind TEXT, text TEXT, x REAL, y REAL, author TEXT, status TEXT, resolved_version TEXT, resolved_by TEXT, resolved_note TEXT, created INTEGER, updated INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_review_p ON studio_review(project, created)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_review_a ON studio_review(asset, created)'),
+  ]);
+  REVIEW_READY = true; return true;
+}
+function stShareView(r) { return { id: r.id, project: r.project, label: r.label || '', assets: pjs(r.assets, []), allowApprove: !!r.allow_approve, expires: r.expires || 0, revoked: !!r.revoked, revokedBy: r.revoked_by || '', revokedAt: r.revoked_at || 0, createdBy: r.created_by || '', created: r.created, lastSeen: r.last_seen || 0, views: r.views || 0, state: r.revoked ? 'revoked' : r.expires && r.expires < Date.now() ? 'expired' : 'active' }; }
+function stReviewRow(r) { return { id: r.id, share: r.share, asset: r.asset, version: r.version, kind: r.kind, text: r.text || '', pin: r.x != null && r.y != null ? { x: r.x, y: r.y } : null, author: r.author || '', status: r.status, resolvedVersion: r.resolved_version || '', resolvedBy: r.resolved_by || '', resolvedNote: r.resolved_note || '', created: r.created, updated: r.updated }; }
+/** Can this asset go in front of a client? A copy-only asset when it has copy; a composition only with a passing validation and its export. */
+async function stReviewable(env, p, a) {
+  const v = await stCurrent(env, a); if (!v) return { ok: false, why: 'no version yet' };
+  if (v.mode === 'copy') return { ok: true, v, kind: 'copy' };
+  if (!(v.layout && Array.isArray(v.layout.layers)) && v.image) return { ok: true, v, kind: 'image', key: v.image.key };   // a flattened import is shown as its image
+  const rd = await stReadiness(env, p, a, v);
+  if (rd.technical !== 'passed' || !rd.validation || !rd.validation.exportKey) return { ok: false, v, why: 'the current version is ' + (rd.technical === 'failed' ? 'failing its technical validation' : 'not validated') + ': a client only sees a composition that passed, exactly as it will be delivered' };
+  return { ok: true, v, kind: 'composition', key: rd.validation.exportKey, rd };
+}
+async function stShareCreate(env, p, body, who) {
+  await ensureReview(env);
+  const want = Array.from(new Set((Array.isArray(body.assets) ? body.assets : []).map(x => stClean(x, 24)).filter(Boolean))).slice(0, 60);
+  if (!want.length) return { error: 'assets_required', status: 400, detail: 'Choose the assets the client should see; nothing is shared by default.' };
+  const refused = [];
+  for (const id of want) { const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) { refused.push({ asset: id, why: 'not an asset of this project' }); continue; } const r = await stReviewable(env, p, pair.asset); if (!r.ok) refused.push({ asset: id, title: pair.asset.title, why: r.why }); }
+  if (refused.length) return { error: 'not_reviewable', status: 409, detail: 'Not shared: ' + refused.map(x => (x.title || x.asset) + ' (' + x.why + ')').join('; ') + '.', refused };
+  const days = Math.max(0, Math.min(90, parseInt(body.expiresDays, 10) || 0));
+  const token = stToken(); const id = stId('sh'); const now = Date.now();
+  await env.MIND_DB.prepare('INSERT INTO studio_shares(id,project,ns,token_hash,label,assets,allow_approve,expires,revoked,created_by,created,last_seen,views) VALUES(?,?,?,?,?,?,?,?,0,?,?,0,0)').bind(id, p.id, p.ns, await stSha256Hex(token), stStr(body.label || 'Client review', 120), JSON.stringify(want), body.allowApprove ? 1 : 0, days ? now + days * 86400000 : 0, stStr(who, 40), now).run();
+  await stEvent(env, p.id, 'share', { text: 'Shared ' + want.length + ' asset' + (want.length === 1 ? '' : 's') + ' for client review ("' + stStr(body.label || 'Client review', 80) + '"' + (days ? ', expires in ' + days + ' days' : ', no expiry') + (body.allowApprove ? ', the client may approve' : ', comments only') + '). The link was shown once; only its hash is kept.', share: id, assets: want }, who);
+  const row = await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE id=?').bind(id).first();
+  return { ok: true, share: stShareView(row), token, note: 'Copy the link now: it is not shown again. Revoke it at any time.' };
+}
+/** The share a token opens, or why not. Wrong tokens count toward a ten-minute lockout per address. */
+async function stShareAuth(env, req, token) {
+  await ensureReview(env);
+  const ip = (req.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 60); const fk = 'rf_' + ip;
+  const fails = Number((env.AXIOM_KV && await kvGet(env.AXIOM_KV, fk)) || 0);
+  if (fails >= 12) return { error: 'too_many_attempts', status: 429, detail: 'Too many attempts from this address. Wait ten minutes.' };
+  const t = String(token || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  const row = t.length >= 32 ? await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE token_hash=?').bind(await stSha256Hex(t)).first() : null;
+  if (!row) { if (env.AXIOM_KV) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} } return { error: 'unknown_link', status: 401, detail: 'This review link is not valid. Ask the agency for a new one.' }; }
+  if (row.revoked) return { error: 'link_revoked', status: 403, detail: 'This review link was withdrawn by the agency.' };
+  if (row.expires && row.expires < Date.now()) return { error: 'link_expired', status: 410, detail: 'This review link has expired. Ask the agency for a new one.' };
+  const p = await stProject(env, row.project); if (!p || p.ns !== row.ns) return { error: 'unknown_link', status: 401 };
+  return { share: row, p };
+}
+/** What a reviewer may see: an allow-list per shared asset, built fresh on every request. */
+async function stReviewGet(env, share, p, opts) {
+  opts = opts || {};
+  const kit = (await brandKit(env, p.ns)) || {}; const camp = (kit.campaigns || []).find(c => c.id === p.campaign);
+  const ids = pjs(share.assets, []); const assets = [];
+  for (const id of ids) {
+    const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) continue;
+    const a = pair.asset; const rv = await stReviewable(env, p, a);
+    const vs = (await env.MIND_DB.prepare('SELECT id FROM studio_versions WHERE asset=? ORDER BY created, id').bind(a.id).all()).results || [];
+    const n = id2 => vs.findIndex(x => x.id === id2) + 1;
+    const rows = ((await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE share=? AND asset=? ORDER BY created').bind(share.id, a.id).all()).results || []).map(stReviewRow);
+    const comments = rows.map(c => ({ id: c.id, kind: c.kind, text: c.text, pin: c.pin, author: c.author, version: n(c.version), status: c.status, addressedIn: c.resolvedVersion ? n(c.resolvedVersion) : null, note: c.status === 'resolved' ? c.resolvedNote : '', created: c.created }));
+    const item = { id: a.id, title: a.title, channel: a.channel, format: a.format, comments };
+    if (!rv.ok) { item.state = 'in_revision'; item.note = 'The agency is revising this asset; the next version will appear here when it is ready.'; assets.push(item); continue; }
+    const v = rv.v; const c = v.copy || {};
+    Object.assign(item, { state: 'ready', kind: rv.kind, version: { id: v.id, n: n(v.id), at: v.created }, copy: { headline: c.headline || '', support: c.support || '', cta: c.cta || '', caption: c.caption || '', alt: c.alt || '' }, image: rv.key ? '/review/file?asset=' + a.id + '&version=' + v.id : '' });
+    const dec = rows.filter(x => x.version === v.id && (x.kind === 'approve' || x.kind === 'changes')).pop();
+    item.decision = dec ? { kind: dec.kind, author: dec.author, at: dec.created } : null;
+    const ap = await stStanding(env, a); item.agencyApproved = rv.kind === 'copy' ? !!ap.copy : !!(ap.copy && ap.design);
+    assets.push(item);
+  }
+  return { ok: true, client: kit.name || p.ns, project: p.title, campaign: camp ? camp.name || camp.id : '', label: share.label || '', expires: share.expires || 0, allowApprove: !!share.allow_approve, assets,
+    note: 'A private review shared by the agency. You see only the work chosen for you. Comments go to the agency team; nothing here is published.' };
+}
+async function stReviewPost(env, share, p, body, kind) {
+  const id = stClean(body.asset, 24); if (pjs(share.assets, []).indexOf(id) < 0) return { error: 'not_shared', status: 404 };
+  const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) return { error: 'not_shared', status: 404 };
+  const rv = await stReviewable(env, p, pair.asset); if (!rv.ok) return { error: 'in_revision', status: 409, detail: 'This asset is being revised; reload to see the current version.' };
+  if (stClean(body.version, 24) !== rv.v.id) return { error: 'stale_version', status: 409, detail: 'A newer version of this asset is available. Reload to review it.' };
+  const text = String(body.text || '').trim().slice(0, 2000); const author = stStr(String(body.author || '').trim(), 60) || 'Client reviewer';
+  if (kind !== 'approve' && !text) return { error: 'text_required', status: 400, detail: 'Write the comment or the change you would like.' };
+  const today = (await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_review WHERE share=? AND created>?').bind(share.id, Date.now() - 86400000).first() || {}).n || 0;
+  if (today >= 300) return { error: 'too_many_comments', status: 429, detail: 'This link has reached its daily limit of comments.' };
+  if (kind === 'approve') {
+    if (!share.allow_approve) return { error: 'approve_not_allowed', status: 403, detail: 'This link is for comments; the agency will ask for approval separately.' };
+    const ap = await stStanding(env, pair.asset); const ready = rv.kind === 'copy' ? !!ap.copy : !!(ap.copy && ap.design);
+    if (!ready) return { error: 'not_ready_for_client', status: 409, detail: 'The agency has not finished its own review of this version; approval opens when it has.' };
+  }
+  const num = v => (typeof v === 'number' && isFinite(v) ? Math.max(0, Math.min(100, Math.round(v * 10) / 10)) : null);
+  const x = body.pin && kind === 'comment' ? num(Number(body.pin.x)) : null, y = body.pin && kind === 'comment' ? num(Number(body.pin.y)) : null;
+  const rid = stId('rv'); const now = Date.now();
+  await env.MIND_DB.prepare('INSERT INTO studio_review(id,share,project,asset,version,kind,text,x,y,author,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(rid, share.id, p.id, id, rv.v.id, kind, text, x, y, author, kind === 'approve' ? 'resolved' : 'open', now, now).run();
+  await stEvent(env, p.id, 'client_review', { text: (kind === 'approve' ? 'Client approved ' : kind === 'changes' ? 'Client requested changes to ' : 'Client comment on ') + pair.asset.title + ' (version ' + rv.v.id + ', from "' + author + '" as they gave their name' + (x != null ? ', pinned at ' + x + '%, ' + y + '%' : '') + ')' + (text ? ': ' + text.slice(0, 300) : '') + '.', asset: id, version: rv.v.id, review: rid, reviewKind: kind, share: share.id }, 'client');
+  return { ok: true, id: rid };
+}
+async function stReviewResolve(env, p, body, who) {
+  await ensureReview(env);
+  const r = await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE id=? AND project=?').bind(stClean(body.id, 24), p.id).first(); if (!r) return { error: 'unknown_comment', status: 404 };
+  if (r.kind === 'approve') return { error: 'not_a_comment', status: 400 };
+  const note = stStr(body.note, 400);
+  if (body.decision === 'wontfix') { if (!note) return { error: 'reason_required', status: 400, detail: 'Say why nothing will change, for the client to read.' }; }
+  else {
+    const v = await stVersion(env, body.version); if (!v || v.asset !== r.asset) return { error: 'unknown_version', status: 404, detail: 'Name a version of the same asset that addresses the comment.' };
+    const commented = await stVersion(env, r.version); if (commented && v.created <= commented.created && v.id !== r.version) return { error: 'version_before_comment', status: 409, detail: 'That version is older than the comment; name the version that addresses it.' };
+  }
+  await env.MIND_DB.prepare('UPDATE studio_review SET status=?, resolved_version=?, resolved_by=?, resolved_note=?, updated=? WHERE id=?').bind('resolved', body.decision === 'wontfix' ? '' : stClean(body.version, 24), stStr(who, 40), note || (body.decision === 'wontfix' ? '' : 'addressed'), Date.now(), r.id).run();
+  await stEvent(env, p.id, 'review_resolved', { text: 'Client comment resolved' + (body.decision === 'wontfix' ? ' without a change: ' + note : ' by version ' + stClean(body.version, 24) + (note ? ': ' + note : '')) + '.', review: r.id, asset: r.asset }, who);
+  return { ok: true, review: stReviewRow(await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE id=?').bind(r.id).first()) };
+}
+/** The client's standing decision on an asset's current version (for the agency's views and the delivery manifest). */
+async function stClientDecision(env, a) {
+  try { await ensureReview(env); const r = await env.MIND_DB.prepare("SELECT * FROM studio_review WHERE asset=? AND kind IN ('approve','changes') ORDER BY created DESC LIMIT 1").bind(a.id).first(); if (!r) return null; return { kind: r.kind, version: r.version, current: r.version === a.current, author: r.author, at: r.created, text: r.text || '' }; } catch (e) { return null; }
 }
 // -- Phase 3: direction by instruction - the creative team answers a direction on an asset, a family or the set --
 // One model call reads the instruction against the targets, their locks, the ledger and the client context and
@@ -10866,6 +10994,36 @@ export default {
     //             POST /studio/remember {project,eid,scope campaign|client|none,rule,task}   POST /studio/proposal {project,eid,decision do|decline} (full)
     //    Art direction: stage concepts {asset, feedback, refine:{eid,index}} - the model sees the artwork and proposes 3-4 directions with layout variants, basis, cost;
     //             POST /studio/concept/apply {project, eid, index, render} - a layout version now, a render job only when the direction needs a photograph (full)
+    // -- Client review: a private link, outside the AXIOM key, opened by its own token (X-Review-Token) -----------
+    //    GET  /review/get                 the shared assets as an allow-list
+    //    GET  /review/file?asset=&version= the validated export PNG of a shared asset's current version
+    //    POST /review/comment {asset, version, text, pin:{x,y}, author}
+    //    POST /review/decision {asset, version, decision approve|changes, text, author}
+    if (path.startsWith('/review/')) {
+      if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound' }, 501);
+      let rb = {}; if (req.method === 'POST') { try { rb = await req.json(); } catch (e) { rb = {}; } }
+      try {
+        const au = await stShareAuth(env, req, req.headers.get('X-Review-Token') || reqUrl.searchParams.get('t') || '');
+        if (au.error) return jsonResp({ ok: false, error: au.error, detail: au.detail || '' }, au.status || 401);
+        const share = au.share, p = au.p;
+        if (path === '/review/get' && req.method === 'GET') {
+          await env.MIND_DB.prepare('UPDATE studio_shares SET views=COALESCE(views,0)+1, last_seen=? WHERE id=?').bind(Date.now(), share.id).run();
+          if (!share.last_seen) await stEvent(env, p.id, 'share_opened', { text: 'The client opened the review link "' + (share.label || '') + '" for the first time.', share: share.id }, 'client');
+          return jsonResp(await stReviewGet(env, share, p));
+        }
+        if (path === '/review/file' && req.method === 'GET') {
+          const id = stClean(reqUrl.searchParams.get('asset'), 24); if (pjs(share.assets, []).indexOf(id) < 0) return jsonResp({ error: 'not_shared' }, 404);
+          const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) return jsonResp({ error: 'not_shared' }, 404);
+          const rv = await stReviewable(env, p, pair.asset); if (!rv.ok || !rv.key || stClean(reqUrl.searchParams.get('version'), 24) !== rv.v.id) return jsonResp({ error: 'not_available' }, 404);
+          const obj = env.MIND_DOCS ? await env.MIND_DOCS.get(rv.key) : null; if (!obj) return jsonResp({ error: 'not_available' }, 404);
+          return new Response(await obj.arrayBuffer(), { headers: Object.assign({}, CORS_ONLY, { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', 'Cache-Control': 'private, no-store' }) });
+        }
+        if (path === '/review/comment' && req.method === 'POST') { const r = await stReviewPost(env, share, p, rb, 'comment'); return jsonResp(r, r.status || 200); }
+        if (path === '/review/decision' && req.method === 'POST') { const k = rb.decision === 'approve' ? 'approve' : rb.decision === 'changes' ? 'changes' : ''; if (!k) return jsonResp({ error: 'bad_decision', detail: 'approve or changes' }, 400); const r = await stReviewPost(env, share, p, rb, k); return jsonResp(r, r.status || 200); }
+        return jsonResp({ error: 'not_found' }, 404);
+      } catch (e) { return jsonResp({ ok: false, error: 'review_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }
+    }
+
     if (path === '/studio' || path.startsWith('/studio/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
@@ -10885,6 +11043,8 @@ export default {
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
           if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
           if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
+          if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
+          if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
           if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
@@ -10997,6 +11157,15 @@ export default {
           if (sb.checks === undefined) v.checks = await stVersionChecks(env, pair.project, pair.asset, v);
           await stEvent(env, pair.project.id, 'version', { text: (patch.kind === 'restore' ? 'Restored ' : patch.kind === 'render' ? 'New image on ' : patch.kind === 'layout' ? 'Layout change on ' : 'Text change on ') + pair.asset.title + ': ' + (patch.note || '') + (patch.kind === 'render' ? '' : ' (no render)'), asset: pair.asset.id, version: v.id, render: patch.kind === 'render' }, who);
           return jsonResp({ ok: true, version: v, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
+        }
+        if (path === '/studio/share' || path === '/studio/share/revoke' || path === '/studio/review/resolve') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (path === '/studio/share') { const r = await stShareCreate(env, p, sb, who); return jsonResp(r, r.status || 200); }
+          if (path === '/studio/review/resolve') { const r = await stReviewResolve(env, p, sb, who); return jsonResp(r, r.status || 200); }
+          await ensureReview(env); const row = await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE id=? AND project=?').bind(stClean(sb.id, 24), p.id).first(); if (!row) return jsonResp({ error: 'unknown_share' }, 404);
+          await env.MIND_DB.prepare('UPDATE studio_shares SET revoked=1, revoked_by=?, revoked_at=? WHERE id=?').bind(stStr(who, 40), Date.now(), row.id).run();
+          await stEvent(env, p.id, 'share', { text: 'Withdrew the review link "' + (row.label || '') + '": it no longer opens.', share: row.id }, who);
+          return jsonResp({ ok: true, share: stShareView(await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE id=?').bind(row.id).first()) });
         }
         if (path === '/studio/approve') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);

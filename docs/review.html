@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Creative review</title>
+<style>
+  /* A client's review page: private, focused, no agency internals. The link's token travels in the URL fragment (never
+     sent to a server by the browser) and in a request header to the review endpoints only. */
+  :root { --bg: #f6f4ef; --card: #ffffff; --ink: #16181b; --dim: #5d636b; --line: #e2ded5; --acc: #0e6a6e; --warn: #9a5b00; --bad: #a3271c; --ok: #1f7a3f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111417; --card: #1a1e22; --ink: #eceae4; --dim: #a4aab1; --line: #2c3238; --acc: #4fb3b6; --warn: #e2a64a; --bad: #ef7a6c; --ok: #6cc98d; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  header { padding: 20px 16px 8px; max-width: 1100px; margin: 0 auto; }
+  header h1 { font-size: 20px; margin: 0 0 4px; }
+  .dim { color: var(--dim); font-size: 13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 48px; display: grid; gap: 18px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+  @media (max-width: 760px) { .card { grid-template-columns: 1fr; } }
+  .card h2 { font-size: 16px; margin: 0; }
+  .stage { position: relative; border-radius: 6px; overflow: hidden; background: #0001; cursor: crosshair; }
+  .stage img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .pin { position: absolute; transform: translate(-50%, -50%); width: 24px; height: 24px; border-radius: 50%; background: var(--acc); color: #fff; font: 600 12px/24px sans-serif; text-align: center; box-shadow: 0 0 0 2px #fff; pointer-events: none; }
+  .pin.pending { background: transparent; border: 2px dashed var(--acc); box-shadow: none; color: var(--acc); }
+  .pin.resolved { background: var(--dim); }
+  .copy { border-left: 3px solid var(--line); padding-left: 10px; font-size: 14px; }
+  .copy b { display: block; font-size: 12px; color: var(--dim); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
+  ol.comments { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; }
+  .chip { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--dim); }
+  .chip.ok { color: var(--ok); border-color: var(--ok); } .chip.warn { color: var(--warn); border-color: var(--warn); } .chip.bad { color: var(--bad); border-color: var(--bad); }
+  textarea, input { width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-weight: 600; border-radius: 6px; padding: 8px 12px; border: 1px solid var(--acc); background: var(--acc); color: #fff; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--acc); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .msg { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); }
+  .msg.bad { border-color: var(--bad); color: var(--bad); }
+  .side { display: grid; gap: 10px; align-content: start; }
+  .who { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; gap: 8px; align-items: center; }
+  .who input { max-width: 280px; }
+</style>
+</head>
+<body>
+<header><h1 id="title">Creative review</h1><div class="dim" id="sub">Loading...</div></header>
+<div class="who"><label class="dim" for="name">Your name, shown to the agency with your comments</label><input id="name" autocomplete="name" placeholder="e.g. Tania"></div>
+<main id="main" aria-live="polite"></main>
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.hash.slice(1));
+  var TOKEN = params.get('t') || '';
+  var BASE = (params.get('w') || 'https://newsaus.heshan-998.workers.dev').replace(/\/+$/, '');
+  var main = document.getElementById('main'), nameEl = document.getElementById('name');
+  try { nameEl.value = sessionStorage.getItem('review_name') || ''; } catch (e) {}
+  nameEl.addEventListener('input', function () { try { sessionStorage.setItem('review_name', nameEl.value); } catch (e) {} });
+  var pending = {}, blobs = {};
+  function el(tag, attrs, kids) { var n = document.createElement(tag); Object.keys(attrs || {}).forEach(function (k) { if (k === 'text') n.textContent = attrs[k]; else if (k === 'on') Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); }); else n.setAttribute(k, attrs[k]); }); (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }); return n; }
+  function api(path, body) {
+    return fetch(BASE + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Review-Token': TOKEN }, body: JSON.stringify(body) } : { headers: { 'X-Review-Token': TOKEN } })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { if (!r.ok || d.error) { var e = new Error(d.detail || d.error || ('HTTP ' + r.status)); e.code = d.error; throw e; } return d; }); });
+  }
+  function image(path) {
+    if (blobs[path]) return Promise.resolve(blobs[path]);
+    return fetch(BASE + path, { headers: { 'X-Review-Token': TOKEN } }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then(function (b) { blobs[path] = URL.createObjectURL(b); return blobs[path]; });
+  }
+  function fail(e) { main.innerHTML = ''; main.appendChild(el('div', { class: 'msg bad', role: 'alert', text: e.message || String(e) })); }
+  var data = null;
+  function load() { if (!TOKEN) return fail(new Error('This page needs the private link the agency sent you.')); api('/review/get').then(function (d) { data = d; draw(); }).catch(fail); }
+  function aest(ts) { try { return new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' }).format(new Date(ts)); } catch (e) { return ''; } }
+  function draw() {
+    var d = data; document.getElementById('title').textContent = d.client + ': ' + d.project;
+    document.title = 'Review: ' + d.project;
+    document.getElementById('sub').textContent = (d.campaign ? d.campaign + ' - ' : '') + d.note + (d.expires ? ' This link works until ' + aest(d.expires) + '.' : '');
+    main.innerHTML = '';
+    d.assets.forEach(function (a) { main.appendChild(card(a)); });
+    if (!d.assets.length) main.appendChild(el('div', { class: 'msg', text: 'Nothing is shared on this link.' }));
+  }
+  function card(a) {
+    var left = el('div'), side = el('div', { class: 'side' });
+    var c = el('section', { class: 'card', 'aria-label': a.title }, [left, side]);
+    side.appendChild(el('h2', { text: a.title }));
+    side.appendChild(el('div', { class: 'dim', text: (a.format || '') + (a.version ? ' - version ' + a.version.n : '') }));
+    if (a.state !== 'ready') { left.appendChild(el('div', { class: 'msg', text: a.note })); }
+    else if (a.image) {
+      var stage = el('div', { class: 'stage', title: 'Click to point at something, then write your comment' });
+      var ar = { '1:1': '1 / 1', '4:5': '4 / 5', '9:16': '9 / 16', '16:9': '16 / 9' }[a.format]; if (ar) stage.style.aspectRatio = ar;
+      var img = el('img', { alt: (a.copy && (a.copy.alt || a.copy.headline)) || a.title });
+      stage.appendChild(img); left.appendChild(stage);
+      image(a.image).then(function (u) { img.src = u; }).catch(function () { stage.appendChild(el('div', { class: 'msg bad', text: 'The image could not be loaded.' })); });
+      a.comments.filter(function (cm) { return cm.kind !== 'approve'; }).forEach(function (cm, i) { if (cm.pin) { var p = el('span', { class: 'pin' + (cm.status === 'resolved' ? ' resolved' : ''), text: String(i + 1) }); p.style.left = cm.pin.x + '%'; p.style.top = cm.pin.y + '%'; stage.appendChild(p); } });
+      if (pending[a.id]) { var pp = el('span', { class: 'pin pending', text: '+' }); pp.style.left = pending[a.id].x + '%'; pp.style.top = pending[a.id].y + '%'; stage.appendChild(pp); }
+      stage.addEventListener('click', function (e) { var r = stage.getBoundingClientRect(); pending[a.id] = { x: Math.round((e.clientX - r.left) / r.width * 1000) / 10, y: Math.round((e.clientY - r.top) / r.height * 1000) / 10 }; draw(); });
+    }
+    if (a.state === 'ready' && a.copy) {
+      var cp = el('div', { class: 'copy' });
+      [['headline', 'Headline'], ['support', 'Supporting line'], ['cta', 'Call to action'], ['caption', 'Caption']].forEach(function (f) { if (a.copy[f[0]]) { cp.appendChild(el('b', { text: f[1] })); cp.appendChild(el('div', { text: a.copy[f[0]] })); } });
+      (a.image ? side : left).appendChild(cp);
+    }
+    if (a.decision) side.appendChild(el('div', {}, [el('span', { class: 'chip ' + (a.decision.kind === 'approve' ? 'ok' : 'warn'), text: a.decision.kind === 'approve' ? 'approved by ' + a.decision.author : 'changes requested by ' + a.decision.author }), ' on this version']));
+    var shown = a.comments.filter(function (cm) { return cm.kind !== 'approve'; });
+    if (shown.length) {
+      var ol = el('ol', { class: 'comments' });
+      shown.forEach(function (cm) {
+        var status = cm.status === 'resolved' ? (cm.addressedIn ? el('span', { class: 'chip ok', text: 'addressed in version ' + cm.addressedIn }) : el('span', { class: 'chip', text: 'answered' })) : el('span', { class: 'chip warn', text: 'open' });
+        ol.appendChild(el('li', {}, [el('span', { text: (cm.kind === 'changes' ? 'Change requested: ' : '') + cm.text + ' ' }), el('span', { class: 'dim', text: '- ' + cm.author + ', version ' + cm.version + ' ' }), status, cm.note ? el('div', { class: 'dim', text: 'Agency: ' + cm.note }) : null]));
+      });
+      side.appendChild(ol);
+    }
+    if (a.state === 'ready') {
+      var ta = el('textarea', { rows: '3', 'aria-label': 'Comment on ' + a.title, placeholder: !a.image ? 'Your comment on this copy' : pending[a.id] ? 'Your comment about the marked point' : 'Your comment (click the image first to point at something)' });
+      var msg = el('div', { class: 'dim', role: 'status' });
+      var post = function (path, body, done) { var who = nameEl.value.trim(); if (!who) { msg.textContent = 'Add your name above, so the agency knows who said it.'; nameEl.focus(); return; } msg.textContent = 'Sending...'; api(path, Object.assign({ asset: a.id, version: a.version.id, author: who }, body)).then(function () { delete pending[a.id]; done && done(); load(); }).catch(function (e) { msg.textContent = e.message; if (e.code === 'stale_version' || e.code === 'in_revision') load(); }); };
+      var bComment = el('button', { class: 'ghost', on: { click: function () { if (!ta.value.trim()) { msg.textContent = 'Write the comment first.'; return; } post('/review/comment', { text: ta.value, pin: pending[a.id] || null }); } } }, ['Add comment']);
+      var bChanges = el('button', { class: 'ghost', on: { click: function () { if (!ta.value.trim()) { msg.textContent = 'Say what should change.'; return; } post('/review/decision', { decision: 'changes', text: ta.value }); } } }, ['Request changes']);
+      var acts = el('div', { class: 'acts' }, [bComment, bChanges]);
+      if (data.allowApprove) {
+        var bApprove = el('button', { on: { click: function () { if (confirm('Approve version ' + a.version.n + ' of ' + a.title + ' exactly as shown?')) post('/review/decision', { decision: 'approve', text: ta.value }); } } }, ['Approve version ' + a.version.n]);
+        if (!a.agencyApproved) { bApprove.disabled = true; bApprove.title = 'The agency is still finishing its own review of this version'; }
+        if (a.decision && a.decision.kind === 'approve') bApprove.disabled = true;
+        acts.appendChild(bApprove);
+        if (!a.agencyApproved) acts.appendChild(el('span', { class: 'dim', text: 'Approval opens when the agency has finished its own review.' }));
+      }
+      side.appendChild(ta); side.appendChild(acts); side.appendChild(msg);
+    }
+    return c;
+  }
+  load();
+})();
+</script>
+</body>
+</html>

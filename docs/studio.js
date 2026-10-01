@@ -156,7 +156,7 @@
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     return html`<nav class="st-rail" aria-label="Project">
       <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['brand', 'Brand'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
+      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
       <${Lbl}>Assets</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
         <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
@@ -426,6 +426,46 @@
         <div><b>Marks</b> ${u.marks.length ? u.marks.map(m => m.role + (m.variant ? ' ' + m.variant : '') + (m.version ? ' v' + m.version : '') + (m.hidden ? ' (hidden)' : '')).join(', ') + ' - placed exactly from the file' : html`<span class="ov-dim">none on the tile</span>`}</div>
         ${u.assumptions.length ? html`<div><b>Assumptions</b> ${u.assumptions.join('; ')}${u.acknowledged ? ' (gaps acknowledged before producing)' : ''}</div>` : null}
       </div>`}</details>`;
+  }
+  /* ------------------------------------------------------------ client review: private links out, comments in, resolved by version */
+  function reviewLink(token) {
+    const page = new URL('review.html', location.href); const base = (window.csBase ? window.csBase() : '') || '';
+    return page.origin + page.pathname + '#t=' + encodeURIComponent(token) + (base ? '&w=' + encodeURIComponent(base) : '');
+  }
+  function ReviewView({ p, onOpen }) {
+    const [shares, setShares] = useState(null); const [rows, setRows] = useState(null); const [n, setN] = useState(0);
+    const [form, setForm] = useState(null); const [made, setMade] = useState(null); const [busy, setBusy] = useState(''); const [notes, setNotes] = useState({});
+    useEffect(() => { let live = true; Promise.all([call('/studio/shares?project=' + encodeURIComponent(p.id)), call('/studio/review?project=' + encodeURIComponent(p.id))]).then(([s, r]) => { if (live) { setShares(s.shares); setRows(r.review); } }).catch(e => { if (live) { setShares([]); setRows([]); toastMsg(e.message, true); } }); return () => { live = false; }; }, [p.id, p.revision, n]);
+    const again = () => setN(x => x + 1); const rw = canWrite();
+    const act = async (label, fn) => { setBusy(label); try { await fn(); again(); } catch (e) { toastMsg(label + ': ' + e.message, true); } finally { setBusy(''); } };
+    const ready = a => { const v = current(a); return v && (v.mode === 'copy' || (a.readiness && a.readiness.technical === 'passed')); };
+    const why = a => { const v = current(a); return !v ? 'no version' : a.readiness && a.readiness.technical === 'failed' ? 'technical validation failing' : 'not validated yet - open it so the Studio measures it'; };
+    const assetOf = id => p.assets.find(a => a.id === id);
+    const create = () => act('Not shared', async () => { const r = await call('/studio/share', { project: p.id, assets: Object.keys(form.assets).filter(k => form.assets[k]), label: form.label, expiresDays: +form.days, allowApprove: form.approve }); setMade({ link: reviewLink(r.token), share: r.share }); setForm(null); });
+    if (shares === null) return html`<div class="st-centre-pad"><div class="ov-empty">Reading the review links...</div></div>`;
+    const open = (rows || []).filter(r => r.status === 'open' && r.kind !== 'approve');
+    return html`<div class="st-centre-pad st-review" aria-label="Client review">
+      <div class="ov-sechead"><span class="ov-title">Client review</span>${rw && !form ? html`<button class="btn sm" style=${{ marginLeft: 'auto' }} onClick=${() => { setMade(null); setForm({ assets: {}, label: p.title + ' - review', days: '14', approve: true }); }}>Share for review</button>` : null}</div>
+      <div class="ov-why">A private link per review: the client sees only the assets chosen, each as the exact validated export of its current version, and never the thread, notes, checks or anything else. Links can expire and can be withdrawn; repeated wrong links lock the address out. The link is shown once.</div>
+      ${made ? html`<div class="st-offer-box" aria-label="New review link"><b>Link for "${made.share.label}"</b> <span class="ov-dim">shown once - copy it now</span><input class="st-in" readonly value=${made.link} onFocus=${e => e.target.select()} aria-label="Review link" /><div><button class="btn sm" onClick=${() => { try { navigator.clipboard.writeText(made.link); toastMsg('Link copied'); } catch (e) {} }}>Copy link</button> <button class="btn sm ghost" onClick=${() => setMade(null)}>Done</button></div></div>` : null}
+      ${form ? html`<div class="st-offer-box" aria-label="Share for review">
+        <div class="st-lbl">Assets the client will see</div>
+        ${p.assets.map(a => html`<label key=${a.id} class="st-check"><input type="checkbox" disabled=${!ready(a)} checked=${!!form.assets[a.id]} onChange=${e => setForm(Object.assign({}, form, { assets: Object.assign({}, form.assets, { [a.id]: e.target.checked }) }))} /> ${a.title} <span class="ov-dim">${a.format}, v${a.versions.length}${ready(a) ? '' : ' - ' + why(a)}</span></label>`)}
+        <input class="st-in" value=${form.label} onInput=${e => setForm(Object.assign({}, form, { label: e.target.value }))} aria-label="Review label" />
+        <div class="st-nd-row"><label class="ov-dim">Expires <select class="st-sel" value=${form.days} onChange=${e => setForm(Object.assign({}, form, { days: e.target.value }))} aria-label="Expiry"><option value="7">in 7 days</option><option value="14">in 14 days</option><option value="30">in 30 days</option><option value="0">never (withdraw by hand)</option></select></label>
+          <label class="st-check"><input type="checkbox" checked=${form.approve} onChange=${e => setForm(Object.assign({}, form, { approve: e.target.checked }))} /> the client may approve (after the agency has)</label></div>
+        <div><button class="btn sm" disabled=${!!busy || !Object.values(form.assets).some(Boolean)} onClick=${create}>Create the link</button> <button class="btn sm ghost" onClick=${() => setForm(null)}>Cancel</button></div></div>` : null}
+      <${Lbl}>Links (${shares.length})</${Lbl}>
+      ${shares.length ? html`<table class="ov-table"><thead><tr><th>Review</th><th>Assets</th><th>State</th><th>Seen</th><th></th></tr></thead><tbody>${shares.map(s => html`<tr key=${s.id}><td><b>${s.label}</b><div class="ov-dim">by ${s.createdBy || '-'}, ${aest(s.created)}${s.allowApprove ? ', client may approve' : ', comments only'}</div></td><td>${s.assets.map(id => (assetOf(id) || {}).title || id).join(', ')}</td><td><${Chip} kind=${s.state === 'active' ? 'ok' : ''}>${s.state}</${Chip}>${s.expires ? html`<div class="ov-dim">${s.state === 'expired' ? 'expired' : 'until'} ${aest(s.expires)}</div>` : html`<div class="ov-dim">no expiry</div>`}</td><td class="ov-dim">${s.views ? s.views + ' view' + (s.views === 1 ? '' : 's') + ', last ' + aest(s.lastSeen) : 'not opened'}</td><td>${rw && s.state === 'active' ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => act('Not withdrawn', () => call('/studio/share/revoke', { project: p.id, id: s.id }))}>Withdraw</button>` : null}</td></tr>`)}</tbody></table>` : html`<div class="ov-dim">No review links yet.</div>`}
+      <${Lbl}>Client comments (${open.length} open of ${(rows || []).filter(r => r.kind !== 'approve').length})</${Lbl}>
+      ${Array.from(new Set((rows || []).map(r => r.asset))).map(aid => { const a = assetOf(aid); if (!a) return null; const list = rows.filter(r => r.asset === aid); const cur = current(a); const pinned = list.filter(r => r.pin);
+        return html`<div key=${aid} class="st-review-asset"><div><div class="st-review-thumb"><${Composition} v=${cur} a=${a} ns=${p.ns} size="card" />${pinned.map(r => html`<span key=${r.id} class=${'st-pin' + (r.status === 'resolved' ? ' resolved' : '')} style=${{ left: r.pin.x + '%', top: r.pin.y + '%' }}>${list.indexOf(r) + 1}</span>`)}</div><div class="ov-dim">pins were placed on the version the client saw; the thumbnail is the current version</div></div>
+          <div><b>${a.title}</b> <button class="ov-link" onClick=${() => onOpen(a.id)}>open</button>
+          <ol class="st-review-list">${list.map(r => html`<li key=${r.id}><${Chip} kind=${r.kind === 'approve' ? 'ok' : r.kind === 'changes' ? 'warn' : ''}>${r.kind === 'approve' ? 'client approval' : r.kind === 'changes' ? 'changes requested' : 'comment'}</${Chip}> ${r.text || ''} <span class="ov-dim">- ${r.author} (name as given), on v${vnum(a, a.versions.find(x => x.id === r.version) || {})}, ${aest(r.created)}</span>
+            ${r.kind === 'approve' ? (r.version === a.current ? html` <${Chip} kind="ok">stands: current version</${Chip}>` : html` <${Chip}>of an earlier version</${Chip}>`) : r.status === 'resolved' ? html` <${Chip} kind="ok">${r.resolvedVersion ? 'addressed in v' + vnum(a, a.versions.find(x => x.id === r.resolvedVersion) || {}) : 'answered'}</${Chip}>${r.resolvedNote ? html` <span class="ov-dim">${r.resolvedNote}</span>` : null}`
+              : rw ? html`<div class="st-know-acts"><input class="st-in" placeholder="note for the client" value=${notes[r.id] || ''} onInput=${e => setNotes(Object.assign({}, notes, { [r.id]: e.target.value }))} aria-label="Resolution note" />${cur && cur.id !== r.version ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => act('Not resolved', () => call('/studio/review/resolve', { project: p.id, id: r.id, version: cur.id, note: notes[r.id] || '' }))}>Addressed in v${vnum(a, cur)}</button>` : html`<span class="ov-dim">make the change as a new version, then mark it addressed</span>`}<button class="btn sm ghost" disabled=${!!busy || !(notes[r.id] || '').trim()} onClick=${() => act('Not answered', () => call('/studio/review/resolve', { project: p.id, id: r.id, decision: 'wontfix', note: notes[r.id] }))}>Answer without a change</button></div>` : null}</li>`)}</ol></div></div>`; })}
+      ${!(rows || []).length ? html`<div class="ov-dim">No client comments yet.</div>` : null}
+    </div>`;
   }
   function JobsView({ p, onRetry, onCancel, onStep, budget }) {
     const jobs = (p.jobs || []).slice();
@@ -967,6 +1007,7 @@
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
     else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
+    else if (view === 'review') centre = html`<${ReviewView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
     else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
