@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p13';
+const AXIOM_BUILD = '2026-10-01.studio-p14';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -6977,7 +6977,7 @@ async function stImport(env, legacyId, who) {
   return { id, existing: false };
 }
 // -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
-function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated }; }
+function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '' }; }
 async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
 async function stJobCreate(env, body, who) {
   const p = await stProject(env, body.project);
@@ -6997,8 +6997,10 @@ async function stJobCreate(env, body, who) {
   const id = stId('j'); const now = Date.now();
   const input = body.input && typeof body.input === 'object' ? body.input : {};
   try {
-    await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input).slice(0, 12000), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now).run();
+    await ensureRecipes(env);
+    let after = ''; if (body.after) { const dep = await env.MIND_DB.prepare('SELECT id FROM studio_jobs WHERE id=? AND project=?').bind(stClean(body.after, 30), p.id).first(); if (!dep) return { error: 'unknown_after', status: 400, detail: 'after must name a job of the same project.' }; after = dep.id; }
+    await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated,after,recipe) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input).slice(0, 12000), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null).run();
   } catch (e) {
     if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
     throw e;
@@ -7009,6 +7011,8 @@ async function stJobCreate(env, body, who) {
 /** Claim: queued, or running past its lease (a runner that stopped). Atomic through the WHERE clause. */
 async function stJobClaim(env, id) {
   const now = Date.now();
+  await ensureRecipes(env);
+  const pre = await env.MIND_DB.prepare('SELECT id, after FROM studio_jobs WHERE id=?').bind(id).first(); if (pre && pre.after && (await stJobGate(env, pre)) !== 'ok') return false;
   const r = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='running', lease_until=?, attempts=attempts+1, updated=? WHERE id=? AND attempts<? AND (state='queued' OR (state='running' AND lease_until<?))").bind(now + ST_LEASE_MS, now, id, ST_MAX_ATTEMPTS, now).run();
   return !!(r && r.meta && r.meta.changes);
 }
@@ -7047,7 +7051,7 @@ async function stJobStep(env, id) {
   const job = await stJob(env, id);
   if (!job) return null;
   if (job.state === 'done' || job.state === 'failed' || job.state === 'cancelled') return job;
-  if (!(await stJobClaim(env, job.id))) return Object.assign(await stJob(env, job.id), { note: job.state === 'running' ? 'another runner holds the lease' : job.attempts >= ST_MAX_ATTEMPTS ? 'attempts exhausted' : 'not claimable' });
+  if (!(await stJobClaim(env, job.id))) { const j2 = await stJob(env, job.id); return Object.assign(j2, { note: j2.state === 'failed' ? 'its upstream step failed' : j2.after && j2.state === 'queued' ? 'waiting for the step before it (' + j2.after + ')' : job.state === 'running' ? 'another runner holds the lease' : job.attempts >= ST_MAX_ATTEMPTS ? 'attempts exhausted' : 'not claimable' }); }
   return stJobRun(env, await stJob(env, job.id));
 }
 async function stJobCancel(env, id, who) {
@@ -7072,6 +7076,114 @@ async function studioCron(env, budgetMs) {
   }
   return out;
 }
+// -- Recipes, impact and usage (build studio-p14) -----------------------------------------------------------
+// A recipe is a named, reusable list of production steps (stages with their inputs) a team runs without drawing a
+// graph: the steps become jobs chained by `after`, so each waits for the one before it, survives a closed tab like any
+// job, and fails with the reason when the step it depends on failed - nothing downstream runs on a broken input. Before
+// a recipe runs the Studio estimates the model calls and images it will spend; a recipe that would render needs the
+// estimate confirmed. The impact view says which assets an upstream change has made stale (the kit's facts or banned
+// terms, the confirmed strategy, the master an adaptation came from, a mark file, a client approval of an older
+// version) and which remedy is free (re-check, re-measure) and which costs a model call; locked fields stay as they are.
+const ST_RECIPE_STAGES = ['extract', 'strategy', 'direct', 'sequence', 'copy', 'export'];
+const ST_BUILTIN_RECIPES = [
+  { id: 'builtin:guided', name: 'Guided campaign: strategy, then three directions', steps: [{ stage: 'strategy', input: {} }, { stage: 'direct', input: { n: 3 } }], note: 'Two model calls; nothing produced until a direction is chosen.' },
+  { id: 'builtin:release-set', name: 'Release to a coordinated set', steps: [{ stage: 'extract', input: { source: '$latestSource' } }, { stage: 'copy', input: { channels: '$briefChannels', deliverable: 'set' } }], note: 'Reads the latest source, then writes and lays out one piece per channel; renders the imagery.' },
+  { id: 'builtin:sequence', name: 'Strategy, then a four-asset sequence (no images)', steps: [{ stage: 'strategy', input: {} }, { stage: 'sequence', input: { count: 4, channels: '$briefChannels' } }], note: 'Two model calls; editable compositions, no render.' },
+  { id: 'builtin:deliver', name: 'Deliver what the client approved', steps: [{ stage: 'export', input: { requireClient: true } }], note: 'No model call: packages the versions the client approved.' },
+];
+let RECIPES_READY = false;
+async function ensureRecipes(env) {
+  if (RECIPES_READY) return true; await ensureStudio(env);
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_recipes(id TEXT PRIMARY KEY, ns TEXT, campaign TEXT, name TEXT, steps TEXT, note TEXT, who TEXT, created INTEGER, updated INTEGER)').run();
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_jobs ADD COLUMN after TEXT').run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_jobs ADD COLUMN recipe TEXT').run(); } catch (e) {}
+  RECIPES_READY = true; return true;
+}
+function stRecipeSteps(v) { return (Array.isArray(v) ? v : []).slice(0, 8).map(s => s && ST_RECIPE_STAGES.indexOf(s.stage) >= 0 ? { stage: s.stage, input: s.input && typeof s.input === 'object' ? JSON.parse(JSON.stringify(s.input).slice(0, 4000)) : {}, label: stStr(s.label, 80) } : null).filter(Boolean); }
+/** What one step would spend: model calls and images, at a size. An estimate, from the brief and the inputs, never a promise. */
+function stStepEstimate(step, p) {
+  const b = p.brief || {}; const chans = Array.isArray(step.input.channels) ? step.input.channels : (b.channels || []); const deliverable = step.input.deliverable || b.deliverable || 'set';
+  const size = ['1K', '2K', '4K'].indexOf(step.input.size || b.size) >= 0 ? (step.input.size || b.size) : '2K';
+  if (step.stage === 'export') return { calls: 0, renders: 0, size, note: 'packaging only' };
+  if (step.stage === 'copy') { const r = deliverable === 'copy' ? 0 : Math.max(1, chans.length); return { calls: 1, renders: r, inspections: r, size, note: deliverable === 'copy' ? 'copy only' : 'one image per channel at least (a plan with several regions makes more), each inspected once' }; }
+  return { calls: 1, renders: 0, size, note: step.stage === 'sequence' ? 'editable compositions, no image' : '' };
+}
+async function stRecipeResolve(env, p, steps) {
+  const latest = await env.MIND_DB.prepare('SELECT id FROM studio_sources WHERE project=? ORDER BY created DESC LIMIT 1').bind(p.id).first();
+  const chans = ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]);
+  return steps.map(s => { const input = JSON.parse(JSON.stringify(s.input || {})); Object.keys(input).forEach(k => { if (input[k] === '$latestSource') input[k] = latest ? latest.id : ''; if (input[k] === '$briefChannels') input[k] = chans.length ? chans : ['instagram', 'facebook', 'linkedin']; }); return Object.assign({}, s, { input }); });
+}
+async function stRecipeGet(env, ns, id) {
+  const b = ST_BUILTIN_RECIPES.find(r => r.id === id); if (b) return Object.assign({ builtin: true, ns, campaign: '' }, b);
+  await ensureRecipes(env); const r = await env.MIND_DB.prepare('SELECT * FROM studio_recipes WHERE id=? AND ns=?').bind(stClean(id, 30), ns).first();
+  return r ? { id: r.id, ns: r.ns, campaign: r.campaign || '', name: r.name, steps: pjs(r.steps, []), note: r.note || '', who: r.who, created: r.created, updated: r.updated, builtin: false } : null;
+}
+async function stRecipeEstimate(env, p, recipe) {
+  const steps = await stRecipeResolve(env, p, recipe.steps); const per = steps.map(s => Object.assign({ stage: s.stage, label: s.label || '' }, stStepEstimate(s, p)));
+  const tot = per.reduce((a, x) => ({ calls: a.calls + x.calls + (x.inspections || 0), renders: a.renders + x.renders }), { calls: 0, renders: 0 });
+  const missing = steps.filter(s => s.stage === 'extract' && !s.input.source).length ? ['the project has no source to read'] : [];
+  return { steps: per, calls: tot.calls, renders: tot.renders, missing, note: 'An estimate: model calls include one inspection per image; a plan with several image regions renders more. Actual usage is shown after the run.' };
+}
+async function stRecipeRun(env, p, body, who) {
+  await ensureRecipes(env);
+  const recipe = await stRecipeGet(env, p.ns, body.recipe); if (!recipe) return { error: 'unknown_recipe', status: 404 };
+  if (recipe.campaign && p.campaign && recipe.campaign !== p.campaign) return { error: 'other_campaign', status: 409, detail: 'This recipe belongs to the ' + recipe.campaign + ' campaign.' };
+  const est = await stRecipeEstimate(env, p, recipe);
+  if (est.missing.length) return { error: 'recipe_inputs_missing', status: 409, detail: 'Cannot run: ' + est.missing.join('; ') + '.', estimate: est };
+  if (est.renders > 0 && !body.confirm) return { error: 'confirm_spend', status: 409, detail: 'This recipe would generate about ' + est.renders + ' image' + (est.renders === 1 ? '' : 's') + ' and ' + est.calls + ' model calls. Confirm to run it.', estimate: est };
+  const steps = await stRecipeResolve(env, p, recipe.steps); const runId = stId('rr'); const jobs = []; let prev = '';
+  for (let i = 0; i < steps.length; i++) {
+    const r = await stJobCreate(env, { project: p.id, stage: steps[i].stage, input: steps[i].input, idem: 'recipe:' + runId + ':' + i, after: prev || undefined, recipe: recipe.id }, who);
+    if (r.error) return Object.assign({ jobs }, r);
+    jobs.push(r.job.id); prev = r.job.id;
+  }
+  await stEvent(env, p.id, 'recipe', { text: 'Recipe "' + recipe.name + '" started: ' + steps.map((s, i) => (i + 1) + '. ' + s.stage).join(', ') + ' (estimated ' + est.calls + ' model call' + (est.calls === 1 ? '' : 's') + ', ' + est.renders + ' image' + (est.renders === 1 ? '' : 's') + '). Each step waits for the one before; if one fails, the rest stop and say why.', recipe: recipe.id, jobs }, who);
+  return { ok: true, run: runId, jobs, estimate: est };
+}
+/** A job whose upstream step failed or was cancelled cannot run on a broken input: it fails, naming the step. */
+async function stJobGate(env, job) {
+  if (!job || !job.after) return 'ok';
+  const dep = await env.MIND_DB.prepare('SELECT id, stage, state, error FROM studio_jobs WHERE id=?').bind(job.after).first();
+  if (!dep) return 'ok';
+  if (dep.state === 'done') return 'ok';
+  if (dep.state === 'failed' || dep.state === 'cancelled') {
+    await env.MIND_DB.prepare("UPDATE studio_jobs SET state='failed', lease_until=0, error=?, updated=? WHERE id=? AND state='queued'").bind(stStr('upstream_failed: the ' + dep.stage + ' step it depends on ' + dep.state + (dep.error ? ' (' + dep.error + ')' : '') + ' (not retried)', 300), Date.now(), job.id).run();
+    return 'failed';
+  }
+  return 'waiting';
+}
+/** Actual usage on a project: model calls and images by stage, sizes, failures, and what is still queued. */
+async function stUsage(env, p) {
+  const rows = (await env.MIND_DB.prepare('SELECT stage, state, cost, result, input FROM studio_jobs WHERE project=?').bind(p.id).all()).results || [];
+  const by = {}; let calls = 0, renders = 0; const sizes = {}; let failed = 0, queued = 0;
+  rows.forEach(r => { const s = by[r.stage] = by[r.stage] || { done: 0, failed: 0, queued: 0, calls: 0 }; if (r.state === 'done') s.done++; else if (r.state === 'failed') { s.failed++; failed++; } else if (r.state === 'queued' || r.state === 'running') { s.queued++; queued++; }
+    if (r.state === 'done') { if (r.stage === 'render') { renders++; const res = pjs(r.result, {}); const z = res.size || pjs(r.input, {}).size || '2K'; sizes[z] = (sizes[z] || 0) + 1; } else { const c = Number(r.cost) || (r.stage === 'export' ? 0 : 1); s.calls += c; calls += c; } } });
+  const versions = (await env.MIND_DB.prepare("SELECT kind, COUNT(*) AS n FROM studio_versions WHERE project=? GROUP BY kind").bind(p.id).all()).results || [];
+  const free = versions.filter(v => v.kind !== 'render').reduce((n, v) => n + v.n, 0), paidV = versions.filter(v => v.kind === 'render').reduce((n, v) => n + v.n, 0);
+  return { ok: true, calls, renders, sizes, failed, queued, byStage: by, versions: { free, rendered: paidV }, note: 'Model calls are counted as the jobs record them; images are the renders that finished. A text or layout edit is a version with no model call.' };
+}
+/** What an upstream change has made stale, asset by asset, with the remedy and whether it costs a model call. */
+async function stImpact(env, p) {
+  await ensureBrand(env);
+  const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const revs = ((await env.MIND_DB.prepare('SELECT at, summary FROM brand_revisions WHERE ns=? ORDER BY at').bind(p.ns).all()).results || []).map(r => ({ at: r.at, summary: pjs(r.summary, []) }));
+  const st = (p.brief || {}).strategy; const out = [];
+  for (const r of assets) {
+    const a = stAssetRow(r); const v = await stCurrent(env, a); if (!v) continue; const reasons = [];
+    // the version that made the words: its context says which kit and strategy it saw
+    let gen = v, hops = 0; while (gen && !(gen.context && gen.context.kitUpdated != null) && gen.parent && hops < 20) { gen = await stVersion(env, gen.parent); hops++; }
+    const ctx = (gen && gen.context) || {};
+    if (ctx.kitUpdated != null) { const later = revs.filter(x => x.at > ctx.kitUpdated && x.summary.some(s => /^facts|banned terms|standing rules|^voice/.test(s))); if (later.length) reasons.push({ code: 'kit_changed', text: 'The kit changed since the words were written (' + Array.from(new Set(later.reduce((acc, x) => acc.concat(x.summary.filter(s => /^facts|banned terms|standing rules|^voice/.test(s))), []))).join('; ') + ').', remedy: 'recheck', paid: false, then: 'rewrite the copy if the checks now flag it (one model call)' }); }
+    if (st && st.status === 'confirmed' && st.at && gen && gen.created < (p.brief.strategy.confirmedAt || st.at) && ctx.how) reasons.push({ code: 'strategy_changed', text: 'The strategy was confirmed after this asset was made.', remedy: 'revise', paid: true });
+    if (v.context && v.context.master) { const m = await stAsset(env, v.context.master); const mv = m ? await stCurrent(env, m.asset) : null; if (mv && (v.context.masterVersion || String(v.context.adaptedFrom || '').split(':')[1]) && mv.id !== (v.context.masterVersion || String(v.context.adaptedFrom || '').split(':')[1])) reasons.push({ code: 'master_changed', text: 'The master it was adapted from has a newer version.', remedy: 'readapt', paid: true }); }
+    if (v.mode !== 'copy' && v.layout && Array.isArray(v.layout.layers)) { const rd = await stReadiness(env, p, a, v); if (rd.technical === 'stale') reasons.push({ code: 'measurement_stale', text: 'The words, layout, imagery, mark files or fonts changed since the last measurement.', remedy: 'measure', paid: false }); }
+    try { const cd = await stClientDecision(env, a); if (cd && cd.kind === 'approve' && !cd.current) reasons.push({ code: 'client_approved_earlier', text: 'The client approved an earlier version.', remedy: 'share', paid: false }); } catch (e) {}
+    if (reasons.length) out.push({ asset: a.id, title: a.title, version: v.id, locks: Object.keys(a.locks || {}).filter(k => a.locks[k]), reasons });
+  }
+  return { ok: true, assets: out, note: 'Free remedies (re-check, re-measure, share again) spend nothing; a rewrite, revision or re-adaptation is one model call and keeps locked fields as they are.' };
+}
+/** The free remedy for a kit change: recompute the version's checks against today's facts, banned terms and ledger. */
+async function stRecheck(env, p, a) { const v = await stCurrent(env, a); if (!v) return { error: 'no_version', status: 400 }; const checks = await stVersionChecks(env, p, a, v); await stEvent(env, p.id, 'recheck', { text: 'Checks of ' + a.title + ' recomputed against the kit as it is now (no model call): ' + (checks.filter(c => c.state !== 'matches' && c.state !== 'fact').map(c => c.state + ' ' + c.text).join('; ') || 'clean') + '.', asset: a.id }, 'studio'); return { ok: true, checks }; }
 // -- inventory, models, status -----------------------------------------------------------------
 async function stInventory(env) {
   await ensureStudio(env);
@@ -8254,7 +8366,7 @@ async function stReviseStage(env, job, p, log) {
       const aid = stId('a'); const title = ST_CHANNELS[channel].label + ' ' + (copyOnly ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
       await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, from.asset.family, channel, format, title, '', JSON.stringify(from.asset.locks || {}), 1, now, now).run();
       const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
-      const v = await stAppendVersion(env, a, { kind: copyOnly ? 'text' : 'layout', note: 'adapted from ' + from.asset.title + (planIn ? ' (plan re-composed for ' + format + ')' : ''), copy, layout, image: src.mode === 'artwork' ? null : src.image, mode: src.mode === 'artwork' ? 'composition' : src.mode, context: Object.assign({}, src.context || {}, { job: job.id, adaptedFrom: from.asset.id + ':' + src.id, instruction: instruction.slice(0, 300), model: r.model, master: from.asset.id }) }, 'studio');
+      const v = await stAppendVersion(env, a, { kind: copyOnly ? 'text' : 'layout', note: 'adapted from ' + from.asset.title + (planIn ? ' (plan re-composed for ' + format + ')' : ''), copy, layout, image: src.mode === 'artwork' ? null : src.image, mode: src.mode === 'artwork' ? 'composition' : src.mode, context: Object.assign({}, src.context || {}, { job: job.id, adaptedFrom: from.asset.id + ':' + src.id, instruction: instruction.slice(0, 300), model: r.model, master: from.asset.id, masterVersion: src.id }) }, 'studio');
       await stVersionChecks(env, p, a, v);
       made.push(aid);
     }
@@ -11125,6 +11237,10 @@ export default {
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
           if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
           if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
+          if (path === '/studio/recipes') { await ensureRecipes(env); const ns = relNs(qf('ns')); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_recipes WHERE ns=? ORDER BY updated DESC').bind(ns).all()).results || []; return jsonResp({ ok: true, builtin: ST_BUILTIN_RECIPES, recipes: rows.map(r => ({ id: r.id, campaign: r.campaign || '', name: r.name, steps: pjs(r.steps, []), note: r.note || '', who: r.who, updated: r.updated })) }); }
+          if (path === '/studio/recipe/estimate') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rc = await stRecipeGet(env, p.ns, qf('recipe')); if (!rc) return jsonResp({ error: 'unknown_recipe' }, 404); return jsonResp(Object.assign({ ok: true, recipe: rc }, await stRecipeEstimate(env, p, rc))); }
+          if (path === '/studio/impact') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stImpact(env, p)); }
+          if (path === '/studio/usage') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stUsage(env, p)); }
           if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
           if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
@@ -11240,6 +11356,16 @@ export default {
           await stEvent(env, pair.project.id, 'version', { text: (patch.kind === 'restore' ? 'Restored ' : patch.kind === 'render' ? 'New image on ' : patch.kind === 'layout' ? 'Layout change on ' : 'Text change on ') + pair.asset.title + ': ' + (patch.note || '') + (patch.kind === 'render' ? '' : ' (no render)'), asset: pair.asset.id, version: v.id, render: patch.kind === 'render' }, who);
           return jsonResp({ ok: true, version: v, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
         }
+        if (path === '/studio/recipe') {
+          await ensureRecipes(env); const ns = relNs(sb.ns); const steps = stRecipeSteps(sb.steps); if (!steps.length) return jsonResp({ error: 'steps_required', detail: 'A recipe needs at least one step: ' + ST_RECIPE_STAGES.join(', ') + '.' }, 400);
+          const id = sb.id ? stClean(sb.id, 30) : stId('rc'); const now = Date.now(); const had = sb.id ? await env.MIND_DB.prepare('SELECT id FROM studio_recipes WHERE id=? AND ns=?').bind(id, ns).first() : null;
+          if (sb.id && !had) return jsonResp({ error: 'unknown_recipe' }, 404);
+          if (had) await env.MIND_DB.prepare('UPDATE studio_recipes SET name=?, campaign=?, steps=?, note=?, who=?, updated=? WHERE id=?').bind(stStr(sb.name || 'Recipe', 80), kitSlug(sb.campaign || ''), JSON.stringify(steps), stStr(sb.note, 300), stStr(who, 40), now, id).run();
+          else await env.MIND_DB.prepare('INSERT INTO studio_recipes(id,ns,campaign,name,steps,note,who,created,updated) VALUES(?,?,?,?,?,?,?,?,?)').bind(id, ns, kitSlug(sb.campaign || ''), stStr(sb.name || 'Recipe', 80), JSON.stringify(steps), stStr(sb.note, 300), stStr(who, 40), now, now).run();
+          return jsonResp({ ok: true, recipe: await stRecipeGet(env, ns, id) });
+        }
+        if (path === '/studio/recipe/run') { const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const r = await stRecipeRun(env, p, sb, who); if (!r.error) await stBump(env, p.id); return jsonResp(r, r.status || 200); }
+        if (path === '/studio/recheck') { const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const r = await stRecheck(env, pair.project, pair.asset); await stBump(env, pair.project.id); return jsonResp(r, r.status || 200); }
         if (path === '/studio/share' || path === '/studio/share/revoke' || path === '/studio/review/resolve') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
           if (path === '/studio/share') { const r = await stShareCreate(env, p, sb, who); return jsonResp(r, r.status || 200); }

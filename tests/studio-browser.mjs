@@ -522,6 +522,32 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   await page.waitForFunction(v => [...document.querySelectorAll('#studio-root .st-copydeck tbody tr')].some(r => /LinkedIn post/.test(r.textContent) && new RegExp(', v' + (v + 1) + '(?!\\d)').test(r.textContent)), v0, { timeout: 15000 });
   await shot(page, 'studio-canvas');
 });
+await t('P14: Production lists what a kit change made stale with a free re-check, estimates recipes before they run, asks before a recipe that renders, runs a chained recipe step after step and counts what the project actually spent', async () => {
+  await api('POST', '/brand/kit', { ns: 'mca', banned: [{ term: 'subsidy', use: 'credit', why: 'it is not one', allowNegated: true }, { term: 'handout', use: 'credit', why: 'house style' }] });
+  await page.click(R + '.st-railbtn:has-text("Production")'); await page.waitForSelector(R + '.st-prod table[aria-label="Recipes"]');
+  const impact = await texts(page, R + '.st-prod table[aria-label="Impact"] tbody tr'); ok(impact.some(x => /kit changed since the words were written/.test(x) && /banned terms/.test(x) && /free/.test(x)), JSON.stringify(impact).slice(0, 400));
+  const a0 = calls.anthropic, g0 = calls.gemini;
+  await page.locator(R + '.st-prod table[aria-label="Impact"] tbody tr').filter({ hasText: 'kit changed' }).first().locator('button:has-text("Re-check")').click();
+  await page.waitForSelector(R + '.st-prod-done'); ok(/Re-checked/.test(await page.textContent(R + '.st-prod-done')));
+  eq([calls.anthropic, calls.gemini], [a0, g0], 'the re-check made no model call');
+  // a recipe that renders is announced first; dismissing it starts nothing
+  let asked = ''; page.once('dialog', d => { asked = d.message(); d.dismiss(); });
+  const rel = page.locator(R + '.st-prod table[aria-label="Recipes"] tbody tr').filter({ hasText: 'Release to a coordinated set' });
+  await rel.locator('button:has-text("Run")').click(); await page.waitForFunction(() => !/Starting/.test(document.querySelector('#studio-root .st-prod table[aria-label="Recipes"]').textContent));
+  ok(/would generate about \d+ image/.test(asked), 'asked first: ' + asked); ok(/\d+ calls?, \d+ images?/.test(await rel.textContent()), 'the estimate is shown');
+  eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_jobs WHERE recipe='builtin:release-set'").get().n, 0, 'nothing started');
+  // a recipe with no image runs without a prompt, each step after the one before
+  const seq = page.locator(R + '.st-prod table[aria-label="Recipes"] tbody tr').filter({ hasText: 'four-asset sequence' });
+  await seq.locator('button:has-text("estimate")').click(); await page.waitForFunction(() => /2 calls, 0 images/.test([...document.querySelectorAll('#studio-root .st-prod table[aria-label="Recipes"] tbody tr')].find(r => /four-asset sequence/.test(r.textContent)).textContent));
+  const g1 = calls.gemini; await seq.locator('button:has-text("Run")').click();
+  for (let i = 0; i < 80; i++) { const rows = env.MIND_DB.db.prepare("SELECT state FROM studio_jobs WHERE recipe='builtin:sequence'").all(); if (rows.length === 2 && rows.every(r => r.state === 'done')) break; await new Promise(r => setTimeout(r, 250)); }
+  const jobs = env.MIND_DB.db.prepare("SELECT id, stage, state, after FROM studio_jobs WHERE recipe='builtin:sequence' ORDER BY created").all();
+  eq(jobs.map(j => j.stage + ':' + j.state), ['strategy:done', 'sequence:done']); eq(jobs[1].after, jobs[0].id, 'the sequence waited for the strategy'); eq(calls.gemini, g1, 'no image for this recipe');
+  await page.waitForFunction(() => /model calls?/.test((document.querySelector('#studio-root .st-prod-use') || {}).textContent || ''));
+  const use = await page.textContent(R + '.st-prod-use'); ok(/\d+ model calls?/.test(use) && /free versions/.test(use), use);
+  ok(/Recipe "Strategy, then a four-asset sequence/.test(await page.textContent(R + '.st-thread')), 'the run is on the thread');
+  await shot(page, 'studio-production');
+});
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {
   const p2 = await open('read');

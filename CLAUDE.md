@@ -1328,6 +1328,39 @@ headline, support, CTA and caption in one table, edited in place as text
 versions with the checks beside them). Harness: the P13 case in
 `tests/studio-browser.mjs` (21).
 
+**Recipes, impact and usage (build `studio-p14`; `CREATIVE-STUDIO.md`
+s.20).** A recipe is a saved order of stages, not a node graph: D1
+`studio_recipes` (ns, optional campaign, name, `steps [{stage, input,
+label}]` from extract / strategy / direct / sequence / copy / export, note)
+plus four built in (`ST_BUILTIN_RECIPES`: guided, release-set, sequence,
+deliver). Inputs may say `$latestSource` or `$briefChannels`
+(`stRecipeResolve`). `GET /studio/recipe/estimate?project=&recipe=`
+(`stStepEstimate`: model calls with one inspection per image, renders at the
+brief's size, `missing` inputs) comes before anything runs; `POST
+/studio/recipe/run {project, recipe, confirm}` answers 409 `confirm_spend`
+when the estimate renders and `confirm` is absent, 409 `other_campaign` for
+another campaign's recipe, and otherwise queues one job per step with
+`studio_jobs.after` naming the step before and `recipe` the recipe.
+`stJobClaim` will not claim a job whose upstream is unfinished (the step
+answers "waiting for the step before it"); `stJobGate` fails it with
+`upstream_failed ... (not retried)` when the upstream failed or was
+cancelled. `GET /studio/impact?project=` (`stImpact`) lists per asset what an
+upstream change made stale - `kit_changed` (facts, banned terms, rules or
+voice revised in `brand_revisions` after the words were written; remedy
+`recheck`, free), `strategy_changed` (revise, paid), `master_changed`
+(adaptations record `masterVersion`; readapt, paid), `measurement_stale`
+(measure, free), `client_approved_earlier` (share, free) - with the asset's
+locks; `POST /studio/recheck {asset}` recomputes the checks against today's
+kit with no model call. `GET /studio/usage?project=` counts what actually ran
+(calls by stage, images by size, failed, waiting, free versions against
+rendered ones). In-app: the **Production** rail view (recipes with estimate
+and Run, a confirm naming images and calls before a recipe that renders,
+Save a recipe for the client or its campaign; Needs attention with the
+remedy and a free / paid chip; usage). The browser's pump leaves a step
+whose upstream is still queued for its next round. Harnesses:
+`tests/studio-p14-worker.mjs` (4) and the P14 case in the browser harness
+(22).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

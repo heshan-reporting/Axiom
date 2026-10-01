@@ -158,7 +158,7 @@
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     return html`<nav class="st-rail" aria-label="Project">
       <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['board', 'Board', p.assets.length || null], ['copy', 'Copy deck'], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
+      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['board', 'Board', p.assets.length || null], ['copy', 'Copy deck'], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['production', 'Production'], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
       <${Lbl}>Assets</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
         <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
@@ -549,6 +549,62 @@
             ${r.kind === 'approve' ? (r.version === a.current ? html` <${Chip} kind="ok">stands: current version</${Chip}>` : html` <${Chip}>of an earlier version</${Chip}>`) : r.status === 'resolved' ? html` <${Chip} kind="ok">${r.resolvedVersion ? 'addressed in v' + vnum(a, a.versions.find(x => x.id === r.resolvedVersion) || {}) : 'answered'}</${Chip}>${r.resolvedNote ? html` <span class="ov-dim">${r.resolvedNote}</span>` : null}`
               : rw ? html`<div class="st-know-acts"><input class="st-in" placeholder="note for the client" value=${notes[r.id] || ''} onInput=${e => setNotes(Object.assign({}, notes, { [r.id]: e.target.value }))} aria-label="Resolution note" />${cur && cur.id !== r.version ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => act('Not resolved', () => call('/studio/review/resolve', { project: p.id, id: r.id, version: cur.id, note: notes[r.id] || '' }))}>Addressed in v${vnum(a, cur)}</button>` : html`<span class="ov-dim">make the change as a new version, then mark it addressed</span>`}<button class="btn sm ghost" disabled=${!!busy || !(notes[r.id] || '').trim()} onClick=${() => act('Not answered', () => call('/studio/review/resolve', { project: p.id, id: r.id, decision: 'wontfix', note: notes[r.id] }))}>Answer without a change</button></div>` : null}</li>`)}</ol></div></div>`; })}
       ${!(rows || []).length ? html`<div class="ov-dim">No client comments yet.</div>` : null}
+    </div>`;
+  }
+  /* Production: recipes (a saved order of stages, each waiting for the one before), what an upstream change made stale with
+     its remedy and whether it costs a call, and what the project has actually spent. No node graph: a list, in order. */
+  const RECIPE_STAGE = { extract: { label: 'Read the latest source', input: { source: '$latestSource' } }, strategy: { label: 'Draft the strategy', input: {} }, direct: { label: 'Propose three directions', input: { n: 3 } }, sequence: { label: 'Plan a four-asset sequence (no images)', input: { count: 4, channels: '$briefChannels' } }, copy: { label: 'Write and lay out a set (renders imagery)', input: { channels: '$briefChannels', deliverable: 'set' } }, export: { label: 'Package what the client approved', input: { requireClient: true } } };
+  const REMEDY = { recheck: 'Re-check (no model call)', measure: 'Open to measure again (no model call)', share: 'Share the current version again', revise: 'Revise to the confirmed strategy (one model call)', readapt: 'Re-adapt from the master (one model call)' };
+  function ProductionView({ p, onRun, onOpen, onReview, onRevise }) {
+    const [lib, setLib] = useState(null); const [imp, setImp] = useState(null); const [use, setUse] = useState(null); const [est, setEst] = useState({}); const [n, setN] = useState(0);
+    const [busy, setBusy] = useState(''); const [form, setForm] = useState(null); const [done, setDone] = useState({}); const rw = canWrite() && !p.readOnly;
+    useEffect(() => { let live = true; Promise.all([call('/studio/recipes?ns=' + encodeURIComponent(p.ns)), call('/studio/impact?project=' + encodeURIComponent(p.id)), call('/studio/usage?project=' + encodeURIComponent(p.id))]).then(([r, i, u]) => { if (live) { setLib(r); setImp(i); setUse(u); } }).catch(e => { if (live) { setLib({ builtin: [], recipes: [] }); setImp({ assets: [] }); setUse(null); toastMsg(e.message, true); } }); return () => { live = false; }; }, [p.id, p.revision, n]);
+    const again = () => setN(x => x + 1);
+    const estimate = async (id) => { try { const d = await call('/studio/recipe/estimate?project=' + encodeURIComponent(p.id) + '&recipe=' + encodeURIComponent(id)); setEst(s => Object.assign({}, s, { [id]: d })); return d; } catch (e) { setEst(s => Object.assign({}, s, { [id]: { error: e.message } })); return null; } };
+    const run = async (rc) => {
+      setBusy('run:' + rc.id);
+      try {
+        const e = est[rc.id] && !est[rc.id].error ? est[rc.id] : await estimate(rc.id); if (!e) return;
+        if (e.missing && e.missing.length) { toastMsg('Cannot run: ' + e.missing.join('; '), true); return; }
+        // anything that renders is said out loud first: images and calls, as an estimate
+        if (e.renders > 0 && !window.confirm('"' + rc.name + '" would generate about ' + e.renders + ' image' + (e.renders === 1 ? '' : 's') + ' and ' + e.calls + ' model call' + (e.calls === 1 ? '' : 's') + ' (an estimate; a plan with several image regions renders more). Run it?')) return;
+        const r = await call('/studio/recipe/run', { project: p.id, recipe: rc.id, confirm: e.renders > 0 ? true : undefined });
+        toastMsg('Recipe started: ' + r.jobs.length + ' step' + (r.jobs.length === 1 ? '' : 's') + ', each waiting for the one before'); await onRun(r); again();
+      } catch (e) { toastMsg(e.message, true); } finally { setBusy(''); }
+    };
+    const save = async () => { setBusy('save'); try { await call('/studio/recipe', { ns: p.ns, name: form.name, campaign: form.campaignOnly ? p.campaign : '', note: form.note, steps: form.steps.map(s => ({ stage: s, input: RECIPE_STAGE[s].input, label: RECIPE_STAGE[s].label })) }); toastMsg('Recipe saved for ' + p.ns.toUpperCase()); setForm(null); again(); } catch (e) { toastMsg(e.message, true); } finally { setBusy(''); } };
+    const remedy = async (x, r) => {
+      const key = x.asset + ':' + r.code; setBusy(key);
+      try {
+        if (r.remedy === 'recheck') { const d = await call('/studio/recheck', { asset: x.asset }); const flags = (d.checks || []).filter(c => ['matches', 'fact'].indexOf(c.state) < 0); setDone(s => Object.assign({}, s, { [key]: flags.length ? 'Re-checked: ' + flags.map(c => c.state + ' ' + c.text).join('; ') + '. Rewrite only if this matters (one model call).' : 'Re-checked: clean against the kit as it is now. No rewrite needed.' })); again(); }
+        else if (r.remedy === 'measure') onOpen(x.asset);
+        else if (r.remedy === 'share') onReview();
+        else if (window.confirm(REMEDY[r.remedy] + ' for "' + x.title + '"?' + (x.locks.length ? ' Locked fields (' + x.locks.join(', ') + ') stay as they are.' : ''))) { await onRevise(x, r); again(); }
+      } catch (e) { toastMsg(e.message, true); } finally { setBusy(''); }
+    };
+    if (!lib) return html`<div class="st-centre-pad"><div class="ov-empty">Reading recipes, impact and usage...</div></div>`;
+    const all = (lib.builtin || []).map(r => Object.assign({ builtin: true }, r)).concat((lib.recipes || []).filter(r => !r.campaign || r.campaign === p.campaign));
+    return html`<div class="st-centre-pad st-prod" aria-label="Production">
+      <div class="ov-sechead"><span class="ov-title">Production</span></div>
+      <div class="ov-why">A recipe is a saved order of stages. Each step waits for the one before; if one fails the rest stop and say why. Estimates come before anything renders, and actual usage is counted from the jobs afterwards.</div>
+      <${Lbl}>Needs attention (${(imp.assets || []).length})</${Lbl}>
+      ${(imp.assets || []).length ? html`<table class="ov-table" aria-label="Impact"><thead><tr><th>Asset</th><th>What changed</th><th>Remedy</th></tr></thead><tbody>${imp.assets.map(x => x.reasons.map((r, i) => html`<tr key=${x.asset + r.code}>${i === 0 ? html`<td rowSpan=${x.reasons.length}><button class="ov-link" onClick=${() => onOpen(x.asset)}>${x.title}</button>${x.locks.length ? html`<div class="ov-dim">locked: ${x.locks.join(', ')}</div>` : null}</td>` : null}<td>${r.text}${done[x.asset + ':' + r.code] ? html`<div class="ov-dim st-prod-done">${done[x.asset + ':' + r.code]}</div>` : null}</td><td>${rw || r.remedy === 'measure' ? html`<button class=${'btn sm' + (r.paid ? '' : ' ghost')} disabled=${!!busy} onClick=${() => remedy(x, r)}>${REMEDY[r.remedy] || r.remedy}</button>` : null} <${Chip} kind=${r.paid ? 'warn' : 'ok'}>${r.paid ? 'paid' : 'free'}</${Chip}>${r.then ? html`<div class="ov-dim">then: ${r.then}</div>` : null}</td></tr>`))}</tbody></table>` : html`<div class="ov-dim">Nothing is stale: no kit, strategy, master or measurement change since these versions were made.</div>`}
+      <${Lbl}>Recipes</${Lbl}>
+      <table class="ov-table" aria-label="Recipes"><thead><tr><th>Recipe</th><th>Steps</th><th>Estimate</th><th></th></tr></thead><tbody>${all.map(rc => { const e = est[rc.id]; return html`<tr key=${rc.id}><td><b>${rc.name}</b>${rc.builtin ? html` <${Chip}>built in</${Chip}>` : html` <${Chip}>${rc.campaign ? rc.campaign + ' only' : p.ns.toUpperCase()}</${Chip}>`}${rc.note ? html`<div class="ov-dim">${rc.note}</div>` : null}</td><td><ol class="st-prod-steps">${(rc.steps || []).map((s, i) => html`<li key=${i}>${s.label || (RECIPE_STAGE[s.stage] || {}).label || s.stage}</li>`)}</ol></td>
+        <td>${!e ? html`<button class="ov-link" onClick=${() => estimate(rc.id)}>estimate</button>` : e.error ? html`<span class="ov-dim">${e.error}</span>` : html`<span class="st-prod-est">${e.calls} call${e.calls === 1 ? '' : 's'}, ${e.renders} image${e.renders === 1 ? '' : 's'}</span>${e.missing && e.missing.length ? html`<div class="ov-dim">cannot run: ${e.missing.join('; ')}</div>` : null}`}</td>
+        <td>${rw ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => run(rc)}>${busy === 'run:' + rc.id ? 'Starting...' : 'Run'}</button>` : null}</td></tr>`; })}</tbody></table>
+      ${rw && !form ? html`<button class="btn sm ghost" onClick=${() => setForm({ name: '', steps: ['strategy', 'direct'], note: '', campaignOnly: !!p.campaign })}>Save a recipe for ${p.ns.toUpperCase()}</button>` : null}
+      ${form ? html`<div class="st-offer-box" aria-label="New recipe">
+        <input class="st-in" placeholder="Recipe name" value=${form.name} onInput=${e => setForm(Object.assign({}, form, { name: e.target.value }))} aria-label="Recipe name" />
+        <ol class="st-prod-steps">${form.steps.map((s, i) => html`<li key=${i}>${RECIPE_STAGE[s].label} <button class="ov-link" onClick=${() => setForm(Object.assign({}, form, { steps: form.steps.filter((x, j) => j !== i) }))}>remove</button></li>`)}</ol>
+        <div class="st-nd-row"><select class="st-sel" value="" onChange=${e => { if (e.target.value) setForm(Object.assign({}, form, { steps: form.steps.concat(e.target.value).slice(0, 8) })); }} aria-label="Add a step"><option value="">add a step...</option>${Object.keys(RECIPE_STAGE).map(k => html`<option key=${k} value=${k}>${RECIPE_STAGE[k].label}</option>`)}</select>
+          ${p.campaign ? html`<label class="st-check"><input type="checkbox" checked=${form.campaignOnly} onChange=${e => setForm(Object.assign({}, form, { campaignOnly: e.target.checked }))} /> ${p.campaign} only</label>` : null}</div>
+        <input class="st-in" placeholder="Note (optional)" value=${form.note} onInput=${e => setForm(Object.assign({}, form, { note: e.target.value }))} aria-label="Recipe note" />
+        <div><button class="btn sm" disabled=${!!busy || !form.name.trim() || !form.steps.length} onClick=${save}>Save the recipe</button> <button class="btn sm ghost" onClick=${() => setForm(null)}>Cancel</button></div></div>` : null}
+      <${Lbl}>Usage on this project</${Lbl}>
+      ${use ? html`<div class="sen-strip st-prod-use" aria-label="Usage"><span><b>${use.calls}</b> model call${use.calls === 1 ? '' : 's'}</span><span><b>${use.renders}</b> image${use.renders === 1 ? '' : 's'}${Object.keys(use.sizes || {}).length ? ' (' + Object.keys(use.sizes).map(k => use.sizes[k] + ' at ' + k).join(', ') + ')' : ''}</span><span><b>${use.versions.free}</b> free versions</span><span><b>${use.failed}</b> failed</span><span><b>${use.queued}</b> waiting</span></div>
+        <table class="ov-table"><thead><tr><th>Stage</th><th class="num">Done</th><th class="num">Failed</th><th class="num">Waiting</th><th class="num">Model calls</th></tr></thead><tbody>${Object.keys(use.byStage || {}).map(k => { const s = use.byStage[k]; return html`<tr key=${k}><td>${k}</td><td class="num">${s.done}</td><td class="num">${s.failed}</td><td class="num">${s.queued}</td><td class="num">${k === 'render' ? '-' : s.calls}</td></tr>`; })}</tbody></table>
+        <div class="ov-dim">${use.note}</div>` : html`<div class="ov-dim">Usage unavailable.</div>`}
     </div>`;
   }
   function JobsView({ p, onRetry, onCancel, onStep, budget }) {
@@ -1001,12 +1057,15 @@
     const runJob = useCallback(async (id, label) => {
       if (stepping.current.has(id)) return null; stepping.current.add(id);
       try {
+        let waits = 0;
         for (let i = 0; i < 60; i++) {
           if (label) setBusy(label + ' (job ' + id + '; you can close the tab, the tick finishes it)');
           let j;
           try { j = (await call('/studio/job/step', { id })).job; } catch (e) { toastMsg(e.message, true); break; }
           await reload();
           if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') { if (j.state === 'failed') toastMsg('Job ' + j.stage + ' failed: ' + j.error, true); return j; }
+          // a recipe step waits for the one before it: that one is stepped in its turn (or by the tick), so this one is left, not spun
+          if (j.note && /waiting for the step before/.test(j.note)) { if (++waits >= 4) return j; await sleep(2500); continue; }
           await sleep(j.note && /another runner/.test(j.note) ? 3000 : 600);
         }
       } finally { stepping.current.delete(id); setBusy(''); }
@@ -1029,8 +1088,11 @@
     const pump = useCallback(async (d) => {
       // a finished render queues an inspection, an applied concept queues renders: keep going while new work appears (bounded)
       let cur = d || p; const seen = new Set();
-      for (let round = 0; round < 4 && cur; round++) {
-        const jobs = (cur.jobs || []).filter(j => j.state === 'queued' && !stepping.current.has(j.id) && !seen.has(j.id)).sort((x, y) => x.created - y.created);
+      // a recipe is a chain: up to eight steps, each of which may queue renders and inspections of its own
+      for (let round = 0; round < 10 && cur; round++) {
+        // a step whose upstream has not finished is left for the next round, when that one has run
+        const st = {}; (cur.jobs || []).forEach(j => { st[j.id] = j.state; });
+        const jobs = (cur.jobs || []).filter(j => j.state === 'queued' && !stepping.current.has(j.id) && !seen.has(j.id) && !(j.after && (st[j.after] === 'queued' || st[j.after] === 'running'))).sort((x, y) => x.created - y.created);
         if (!jobs.length) break;
         for (const j of jobs) { seen.add(j.id); if (pidRef.current !== j.project) return; if (j.stage === 'inspect') await composeExport(cur, j.asset, (j.input || {}).version); await runJob(j.id, (j.stage === 'render' ? 'Rendering ' + (((j.input || {}).approach === 'artwork') ? 'the full artwork' : (j.input || {}).region && (j.input || {}).region !== 'bg' ? 'the ' + (j.input || {}).regionRole + ' image' : 'the background') + ' at ' + ((j.input || {}).size || '2K') : j.stage === 'inspect' ? 'The art director inspects the result' : 'Running ' + j.stage) + (cur.assets || []).filter(x => x.id === j.asset).map(x => ' for ' + x.title).join('')); }
         cur = await reload();
@@ -1111,6 +1173,8 @@
     const render = async (as, prompt, edit, size) => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: ['1K', '2K', '4K'].indexOf(size) >= 0 ? size : (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e); } };
     const note = async (text, tgt) => { try { await call('/studio/note', { project: p.id, text, target: tgt }); await reload(); } catch (e) { fail(e); } };
     const directTeam = async (text, tgt) => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + p.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { setSelAsset(j.result.changed[0]); setView('asset'); } } catch (e) { fail(e); } };
+    /* the paid remedies of the impact list: one revise call on that asset, locked fields kept by the stage itself */
+    const reviseFromImpact = async (x, r) => { const ins = r.remedy === 'readapt' ? 'The master this was adapted from has changed. Bring this asset\'s words in line with the master\'s current version, fitted to this channel and format. Keep the locked fields.' : 'The creative strategy was confirmed after this asset was made. Bring the words in line with the confirmed strategy (proposition, audience, tone). Keep the locked fields.'; await job('revise', { target: 'asset', asset: x.asset, instruction: ins }, null, 'revise:' + x.asset + ':' + r.code + ':' + x.version, (r.remedy === 'readapt' ? 'Re-adapting ' : 'Revising ') + x.title); await reload(); };
     const pickAlternative = async (assetId, field, option) => { try { const as = p.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); setView('asset'); } catch (e) { fail(e); } };
     const decideProposal = async (eid, decision) => { try { const r = await call('/studio/proposal', { project: p.id, eid, decision }); const d = await reload(); if (decision === 'do' && r.jobs && r.jobs.length) pump(d); } catch (e) { fail(e); } };
     const remember = async (eid, scope, offer) => { try { const ta = document.getElementById('offer-' + eid); const rule = ta ? ta.value.trim() : offer.rule; const r = await call('/studio/remember', { project: p.id, eid, scope, rule, task: offer.task, campaign: offer.campaign, instruction: offer.instruction }); toastMsg(r.saved ? 'Saved as ' + (r.scope === 'campaign' ? 'a campaign preference for ' + r.campaign : 'a lasting ' + p.ns.toUpperCase() + ' rule') : 'Not saved; applied to this work only'); await reload(); } catch (e) { fail(e); } };
@@ -1164,6 +1228,7 @@
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
     else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
+    else if (view === 'production') centre = html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${id => { setSelAsset(id); setView('asset'); }} onReview=${() => setView('review')} onRevise=${reviseFromImpact} />`;
     else if (view === 'review') centre = html`<${ReviewView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
     else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;

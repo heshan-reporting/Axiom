@@ -369,6 +369,32 @@ It measures the working layout with the same `validate()` the readiness uses, at
 **Views.** Board, the asset's canvas, the Copy deck and Client review are the four views the request named. Technical job logs stay under Jobs, out of the creative path.
 
 **Not yet:**
-- recipes with selective re-runs, and outcome metrics (s.20)
+- recipes with selective re-runs (s.20), and outcome metrics
 - image editing on a selected region, which needs Gemini's semantic (text-described) masking, with preservation compared afterwards
+
+## 20. Recipes, impact and usage (build studio-p14)
+
+The fifth slice is s.16.3, Phase 3: dependable production without a node graph.
+
+**Recipes.** A recipe is a list of stages in order, saved for a client or for one of its campaigns. Four come built in: a guided campaign (strategy, then three directions), release to a coordinated set (read the latest source, then write and lay out a piece per channel), strategy then a four-asset sequence with no images, and deliver what the client approved. A step may name `$latestSource` or `$briefChannels` and the project fills it in.
+
+**Cost first.** The estimate comes before the run: model calls (counting one inspection per image), images, and the size from the brief. It is an estimate, and says so: a plan with several image regions renders more. A recipe that renders is refused without `confirm`, and the Studio asks in words ("would generate about 4 images and 6 model calls") before sending it. Usage afterwards is counted from the jobs that ran, not from the estimate, so the two can be compared.
+
+**Chains that fail honestly.** Each step is a durable job that names the step before it. It is not claimed until that one is done. If the upstream fails or is cancelled, the step fails as `upstream_failed` and is not retried, so nothing runs on a broken input. The browser leaves a waiting step for the next round, and the cron finishes a chain when the tab closes.
+
+**Impact: selective re-runs.** The Production view lists what an upstream change made stale, asset by asset, with the remedy and whether it costs anything:
+- **Kit changed** (facts, banned terms, standing rules or voice revised after the words were written): re-check, free. The checks are recomputed against today's kit, and a rewrite is offered only if they now flag something.
+- **Strategy confirmed later:** revise, one model call.
+- **Master changed** (an adaptation's master has a newer version): re-adapt, one model call.
+- **Measurement stale:** open the asset to measure it again, free.
+- **Client approved an earlier version:** share again, free.
+
+Locked fields are named beside each asset, and the paid remedies keep them.
+
+**Proof.** `tests/studio-p14-worker.mjs` covers estimate, confirm, chained claiming, upstream failure, impact and usage. The P14 case in the browser harness covers the kit-change re-check with no model call, the confirm on a rendering recipe (dismissing it starts nothing), and a two-step recipe running in order with no image.
+
+**Not yet:**
+- outcome metrics with baselines
+- the six-step demonstration
+- region editing through Gemini's semantic masking
 
