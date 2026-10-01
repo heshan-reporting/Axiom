@@ -33,7 +33,9 @@ let d = null; try { d = JSON.parse(String(r.stdout).trim().split('\n').pop()); }
 ok(d && d.ok && d.composed.length === 1, 'one composition drawn: ' + JSON.stringify(d && (d.composed || d)));
 const row = d && d.composed[0];
 ok(row && fs.existsSync(row.file) && fs.statSync(row.file).size > 1000, 'written to disk at native size');
-ok(row && row.saved === 'studio/' + p.id + '/' + a.asset.id + '/' + a.asset.current + '-export.png' && r2.has(row.saved), 'saved as the version\'s export');
+ok(row && row.saved === 'studio/' + p.id + '/' + a.asset.id + '/' + a.asset.current + '-export.png' && r2.has(row.saved), 'saved as the version\'s export: ' + JSON.stringify(row && (row.saveError || row.validation)));
+ok(row && row.validation && row.validation.technical, 'the measurement was filed and re-judged by the worker: ' + JSON.stringify(row && row.validation));
+ok(row && row.fonts && Array.isArray(row.fonts.fallback), 'the fonts used are reported, fallback included: ' + JSON.stringify(row && row.fonts));
 ok(row && !row.missing, 'the wordmark image was fetched and drawn');
 const png = row && row.file ? fs.readFileSync(row.file) : Buffer.alloc(32); ok(png.readUInt32BE(16) === 1080 && png.readUInt32BE(20) === 1080, 'native 1080 x 1080');
 server.close(); console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

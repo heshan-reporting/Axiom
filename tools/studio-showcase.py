@@ -42,6 +42,19 @@ RELEASE = ("MEDIA RELEASE\n\nFuel tax credits keep regional Australia moving\n\n
            "The credit is used by more than 150,000 businesses of all sizes, including farmers, fishers, builders, wineries, tourism operators and tradies.\n\nENDS")
 
 
+def issue_text(ins):
+    """An inspection's findings as one line: since P9 each carries a severity ({text, severity}); older events were plain strings."""
+    out = []
+    for i in ins.get('issues') or []:
+        out.append('%s (%s)' % (i.get('text', ''), i.get('severity', 'material')) if isinstance(i, dict) else str(i))
+    return '; '.join(out)
+
+
+def assessed(ins):
+    """The verdict with what stands beside it: a ship that names problems is inconsistent and is printed as such."""
+    return ins.get('verdict', '') + (' (INCONSISTENT: ship with unresolved problems)' if ins.get('assessment') == 'inconsistent' else '') + ((', technical validation ' + ins['technical']) if ins.get('technical') else '')
+
+
 def http(base, key, method, path, body=None, raw=False):
     req = urllib.request.Request(base + path, method=method, headers={'Content-Type': 'application/json', 'X-Axiom-Key': key, 'User-Agent': UA},
                                  data=json.dumps(body).encode() if body is not None else None)
@@ -195,7 +208,7 @@ def run_case(base, key, args, case):
         pump(base, key, pid, 'inspect', stages=['inspect'])
     if not args.no_inspect:
         for ins in [e for e in http(base, key, 'GET', '/studio/get?id=' + pid)['thread'] if e.get('kind') == 'inspection' and e.get('fix')][-2:]:
-            print('  inspection: %s - %s; correction (%s): %s' % (ins['verdict'], '; '.join(ins.get('issues') or []), ins['fix']['kind'], ins['fix']['instruction']))
+            print('  inspection: %s - %s; correction (%s): %s' % (assessed(ins), issue_text(ins), (ins.get('fix') or {}).get('kind', 'none'), (ins.get('fix') or {}).get('instruction', '')))
             if ins['verdict'] in ('fix', 'redo') and args.apply_fixes:
                 http(base, key, 'POST', '/studio/inspection/apply', {'project': pid, 'eid': ins['eid']})
                 pump(base, key, pid, 'correction', stages=['revise', 'render'])
@@ -240,7 +253,7 @@ def write_index(args, snaps):
         L.append('</div>')
         for ins in s.get('inspections') or []:
             sc = ins.get('scores') or {}
-            L.append('<pre>inspection round %s (%s): %s - %s\n%s%s</pre>' % (ins.get('round'), 'the composed tile' if ins.get('composed') else 'imagery only', ins.get('verdict'), ', '.join('%s %s' % (k, sc.get(k)) for k in ('fidelity', 'hierarchy', 'readability', 'relevance', 'identity')), html.escape('; '.join(ins.get('issues') or [])), ('\nwording not in the approved copy: ' + html.escape(', '.join(ins['words']['wrong']))) if (ins.get('words') or {}).get('wrong') else ''))
+            L.append('<pre>inspection round %s (%s): %s - %s\n%s%s</pre>' % (ins.get('round'), 'the composed tile' if ins.get('composed') else 'imagery only', html.escape(assessed(ins)), ', '.join('%s %s' % (k, sc.get(k)) for k in ('fidelity', 'hierarchy', 'readability', 'relevance', 'identity')), html.escape(issue_text(ins)), ('\nwording not in the approved copy: ' + html.escape(', '.join(ins['words']['wrong']))) if (ins.get('words') or {}).get('wrong') else ''))
     open(os.path.join(args.out, 'index.html'), 'w').write('\n'.join(L))
 
 

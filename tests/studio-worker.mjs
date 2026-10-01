@@ -4,6 +4,7 @@
  * SQLite behind the D1 API (d1lite.mjs), stub KV and R2, and a stub Gemini.
  * Run: node --experimental-sqlite tests/studio-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { validateAsset } from './studio-measure-stub.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -98,18 +99,23 @@ await t('a supplied namespace or project id cannot cross a boundary: the asset\'
   eq((await req('GET', '/studio/list?ns=aep')).d.projects.map(p => p.title), ['AEP project']);
   eq((await req('GET', '/studio/get?id=' + other.d.id)).d.assets[0].versions[0].copy.headline, 'gas', 'the other client\'s work is intact');
 });
-await t('approvals name the content they accept: a copy edit drops the copy approval and leaves design standing; withdraw and reject record reasons; restore keeps history', async () => {
+await t('approvals name the content they accept: design approval needs a passing validation of this composition; a caption edit drops the copy approval and leaves design standing; a displayed-copy edit drops design too; withdraw and reject record reasons; restore keeps history', async () => {
   eq((await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve' })).status, 400, 'a reason is required');
   const ap = await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' }); eq(ap.status, 200); ok(ap.d.approvals.copy && ap.d.approvals.copy.reason === 'client asked for the plain ask');
-  await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'fine' });
-  let g = await req('GET', '/studio/get?id=' + P); ok(g.d.assets[0].approvals.copy && g.d.assets[0].approvals.design, 'both stand');
-  const cur = g.d.assets[0];
+  const nv = await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'fine' }); eq(nv.status, 409); eq(nv.d.error, 'not_validated', 'no measurement, no design approval');
+  const vd = await validateAsset(req, P, A); eq(vd.status, 200, JSON.stringify(vd.d)); ok(vd.d.validation.ok, JSON.stringify(vd.d.validation.issues));
+  eq((await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'fine' })).status, 200);
+  let g = await req('GET', '/studio/get?id=' + P); ok(g.d.assets[0].approvals.copy && g.d.assets[0].approvals.design, 'both stand'); eq(g.d.assets[0].readiness.technical, 'passed');
+  let cur = g.d.assets[0];
+  await req('POST', '/studio/version', { asset: A, revision: cur.revision, copy: { caption: 'Mining paid $74 billion, said again.' }, note: 'caption tweak' });
+  g = await req('GET', '/studio/get?id=' + P); ok(!g.d.assets[0].approvals.copy, 'copy approval no longer stands'); ok(g.d.assets[0].approvals.design && g.d.assets[0].approvals.design.carried === true, 'design approval carried: a caption is not on the tile'); eq(g.d.assets[0].readiness.technical, 'passed', 'the tile is unchanged, so its measurement carries to the caption-only version');
+  cur = g.d.assets[0];
   await req('POST', '/studio/version', { asset: A, revision: cur.revision, copy: { cta: 'Learn more today' }, note: 'cta tweak' });
-  g = await req('GET', '/studio/get?id=' + P); ok(!g.d.assets[0].approvals.copy, 'copy approval no longer stands'); ok(g.d.assets[0].approvals.design && g.d.assets[0].approvals.design.carried === true, 'design approval carried: its content is unchanged');
+  g = await req('GET', '/studio/get?id=' + P); ok(!g.d.assets[0].approvals.design, 'a CTA edit changes the words on the tile, so the design approval no longer stands'); eq(g.d.assets[0].readiness.technical, 'stale', 'and the measurement is of other words');
   await req('POST', '/studio/version', { asset: A, revision: g.d.assets[0].revision, image: { key: 'studio/x/y/new.png', model: 'gemini-3-pro-image', size: '2K' }, kind: 'render', note: 'new background' });
   g = await req('GET', '/studio/get?id=' + P); ok(!g.d.assets[0].approvals.design, 'a new image drops the design approval');
-  const vs = g.d.assets[0].versions; eq(vs.length, 5);
-  const rs = await req('POST', '/studio/version', { asset: A, revision: g.d.assets[0].revision, restoreFrom: vs[1].id }); eq(rs.status, 200); eq(rs.d.version.kind, 'restore'); eq(rs.d.version.restoredFrom, vs[1].id); eq(rs.d.version.copy.headline, 'Not a subsidy. Never was.'); eq(rs.d.asset.versions.length, 6, 'restore appends; nothing is deleted');
+  const vs = g.d.assets[0].versions; eq(vs.length, 6);
+  const rs = await req('POST', '/studio/version', { asset: A, revision: g.d.assets[0].revision, restoreFrom: vs[1].id }); eq(rs.status, 200); eq(rs.d.version.kind, 'restore'); eq(rs.d.version.restoredFrom, vs[1].id); eq(rs.d.version.copy.headline, 'Not a subsidy. Never was.'); eq(rs.d.asset.versions.length, 7, 'restore appends; nothing is deleted');
   const rj = await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'reject', reason: 'no trucks on HOOF organic' }); eq(rj.status, 200); ok(!rj.d.approvals.copy);
   const ev = (await req('GET', '/studio/get?id=' + P)).d.thread; ok(ev.some(e => /Rejected copy .* no trucks on HOOF organic\. Recorded as client acceptance or feedback, not performance/.test(e.text)), JSON.stringify(ev.slice(-2)));
 });

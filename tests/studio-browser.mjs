@@ -184,12 +184,19 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
   await page.click(R + '.st-appr button:has-text("Approve design")');
   await page.fill(R + '.st-dialog textarea', 'fine as is'); await page.click(R + '.st-dialog button:has-text("Record")');
   await page.waitForFunction(() => (document.querySelector('#studio-root .st-approve').textContent.match(/approved/g) || []).length === 2);
-  await page.fill(R + '.st-field:nth-of-type(3) input', 'Learn more today');
+  // a caption is posted beside the tile: editing it drops the copy approval, and the design (the same tile) carries with its evidence
+  await page.fill(R + '.st-field:nth-of-type(4) textarea', 'Not a subsidy. A road tax returned.');
   await page.waitForFunction(() => (document.querySelector('#studio-root .st-approve').textContent.match(/approved/g) || []).length === 1, null, { timeout: 15000 });
   ok(/design.*approved/.test(await page.textContent(R + '.st-approve')) && /unchanged since, so it stands/.test(await page.textContent(R + '.st-approve')), 'design carried, copy dropped');
-  await page.click(R + '.st-appr button:has-text("Approve copy")');
-  await page.fill(R + '.st-dialog textarea', 'ok after the CTA'); await page.click(R + '.st-dialog button:has-text("Record")');
-  await page.waitForFunction(() => (document.querySelector('#studio-root .st-approve').textContent.match(/approved/g) || []).length === 2);
+  ok(/Technical validation\s*passed/.test(await page.textContent(R + '.st-ready')), 'the measurement carries to a caption-only version');
+  // P9: words on the tile are the design too - a CTA edit drops both approvals and the composition is measured again before design approval
+  await page.fill(R + '.st-field:nth-of-type(3) input', 'Learn more today');
+  await page.waitForFunction(() => !/approved/.test(document.querySelector('#studio-root .st-approve').textContent), null, { timeout: 15000 });
+  await page.waitForFunction(() => !document.querySelector('#studio-root .st-appr:nth-child(2) button').disabled && /Technical validation\s*passed/.test(document.querySelector('#studio-root .st-ready').textContent), null, { timeout: 15000 });
+  for (const [part, why] of [['copy', 'ok after the CTA'], ['design', 'measured again after the CTA']]) {
+    await page.click(R + '.st-appr button:has-text("Approve ' + part + '")'); await page.fill(R + '.st-dialog textarea', why); await page.click(R + '.st-dialog button:has-text("Record")');
+    await page.waitForFunction(p => new RegExp(p + '\\s*approved').test(document.querySelector('#studio-root .st-approve').textContent), part);
+  }
   await page.click(R + '.st-head button:has-text("Export")');
   await page.waitForSelector(R + '.st-dialog');
   const rows = await texts(page, R + '.st-dialog tbody tr'); eq(rows.filter(r => /included/.test(r)).length, 1); ok(/Facebook post/.test(rows.find(r => /included/.test(r))));

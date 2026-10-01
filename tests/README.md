@@ -22,6 +22,8 @@ node --experimental-sqlite tests/studio-variations-demo.mjs  # draws five compos
 node --experimental-sqlite tests/studio-p7-worker.mjs     # design beyond the preset: wordmarks and policy, expressive plans, carousels, references to the image model, artwork mode, edits, inspection, new designs
 node --experimental-sqlite tests/studio-plan-demo.mjs     # draws the plan engine's mechanics with synthetic imagery to tests/shot-plans.png (not finished quality)
 node --experimental-sqlite tests/studio-p8-worker.mjs     # production-quality workflow: plan-engine production, brief check and sourced suggestions, mark policy enforced, reference packs, retain, replanning, Gemini gaps, composed inspection
+node --experimental-sqlite tests/studio-p9-worker.mjs     # production readiness: measurements re-judged by the worker, readiness states, approval and export gates, inconsistent inspections, painted words, figure checks, wordmark variants
+node --experimental-sqlite tests/studio-layout-browser.mjs  # the renderer's measurement, validation and repair in real Chromium (HOOF reconstruction, worker layouts in four formats, fonts, marks); writes tests/shot-layout-repair.png
 node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export
 node --experimental-sqlite tests/studio-showcase-test.mjs # tools/studio-showcase.py end to end with stub models: nothing without --approve-budget, the render cap, compose before inspect
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
@@ -115,6 +117,35 @@ it at the end.
   image; no edit history replayed to another model; the inspection of the
   composed export with the whole text inventory; stale corrections refused;
   ship never approves; adaptation re-planned from the master's plan.
+- `studio-p9-worker.mjs`: production readiness (build studio-p9). A
+  measurement report is refused when it describes other words, another output
+  size, moved geometry, an impossible wrap, another mark file or a missing
+  layer; a truthful report of the HOOF reconstruction fails on the shared rules
+  whatever the client claimed; readiness keeps not validated / stale / failed /
+  passed apart from the art director's assessment and from approval; design
+  approval and export need a passing validation of exactly this composition; a
+  caption edit carries the evidence and a displayed-copy edit or a new mark file
+  makes it stale; ship over a blocker or with a material finding is
+  inconsistent and needs a person's acknowledgement, which never overrides a
+  technical blocker; painted words must be read back; figures in free text,
+  another campaign's or a pending fact, brief-only numbers, units and periods;
+  suggested figures flagged; wordmark variants and the logo under immutable
+  versioned keys; a region render whose region is gone branches; a render with
+  no image writes nothing; a layout repair spends nothing.
+- `studio-layout-browser.mjs`: `docs/studio-render.js` in headless Chromium.
+  The layout rules are byte-identical in the renderer and the worker; the app
+  fonts (served from `FONT_DIR`, OFL) are waited for and the face used is
+  reported, a late or missing face is a disclosed fallback; the HOOF
+  reconstruction is caught (headline overflow, headline/support collision,
+  wordmark at 3.05:1) and repaired with no request, the same words, the same
+  layers and imagery and the white variant; preview, export PNG and the
+  inspected file are the same pixels; the worker's own house layouts in 1:1,
+  4:5, 9:16 and 16:9 with short and long copy; explicit breaks, long addresses,
+  multi-line CTAs, free text, scoped overlap exceptions, rotation, highlight,
+  hidden layers, duplicate ids, impossible geometry, off-canvas, the story safe
+  area, unreadable type; missing, late and failed marks; baked artwork not drawn
+  twice; manual moves, locked layers, carousel frames. Everything drawn is
+  synthetic and the sheet says so.
 - `studio-compose-test.mjs` and `studio-showcase-test.mjs`: the two Mac tools
   against the worker module served over HTTP in-process (stub models, real
   headless Chromium for the renderer).

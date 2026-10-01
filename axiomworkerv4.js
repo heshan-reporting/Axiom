@@ -2960,6 +2960,8 @@ function bufFromB64(b64) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
 }
+/** A short content hash: a mark file's version, so a replaced file never hides behind the same URL. */
+async function stContentV(buf) { try { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return Date.now().toString(36); } }
 async function brandSave(env, ns, body, who) {
   const cur = (await brandKit(env, ns)) || {};
   const pick = (v, n) => String(v == null ? '' : v).slice(0, n);
@@ -2984,6 +2986,8 @@ async function brandSave(env, ns, body, who) {
     if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
     if (buf.byteLength < 64) throw new Error('logo file is empty');
     await env.MIND_DOCS.put('brand/' + ns + '/logo', buf, { httpMetadata: { contentType: mime } });
+    // the same bytes under an immutable, versioned key: compositions reference the version they were made with
+    kit.logoV = await stContentV(buf); await env.MIND_DOCS.put('brand/' + ns + '/logo@' + kit.logoV, buf, { httpMetadata: { contentType: mime } });
     kit.logoMime = mime; kit.hasLogo = true;
   }
   if (body.removeLogo && env.MIND_DOCS) { try { await env.MIND_DOCS.delete('brand/' + ns + '/logo'); } catch (e) {} kit.hasLogo = false; kit.logoMime = ''; }
@@ -2998,10 +3002,28 @@ async function brandSave(env, ns, body, who) {
       const buf = bufFromB64(body.wordmarkB64);
       if (buf.byteLength > 2 * 1024 * 1024) throw new Error('wordmark larger than 2 MB');
       if (buf.byteLength < 64) throw new Error('wordmark file is empty');
-      await env.MIND_DOCS.put('brand/' + ns + '/wordmark/' + cid, buf, { httpMetadata: { contentType: mime } });
+      const wv = await stContentV(buf); const variant = kitSlug(body.wordmarkVariant || '');
+      if (variant) {
+        // an approved colour variant of the campaign's wordmark, kept beside the others under an immutable key
+        const key = 'brand/' + ns + '/wordmark/' + cid + '/' + variant + '/' + wv;
+        await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+        const tone = ['light', 'dark', 'colour'].indexOf(body.wordmarkTone) >= 0 ? body.wordmarkTone : 'colour';
+        camp.wordmarks = (Array.isArray(camp.wordmarks) ? camp.wordmarks : []).filter(w => w.variant !== variant).concat([{ variant, v: wv, key, mime, tone, at: Date.now() }]);
+        if (!camp.wordmarkDefault || body.wordmarkDefault) camp.wordmarkDefault = variant;
+      } else {
+        await env.MIND_DOCS.put('brand/' + ns + '/wordmark/' + cid, buf, { httpMetadata: { contentType: mime } });
+        await env.MIND_DOCS.put('brand/' + ns + '/wordmark/' + cid + '@' + wv, buf, { httpMetadata: { contentType: mime } }); camp.wordmarkV = wv;
+      }
       camp.hasWordmark = true; camp.wordmarkMime = mime; if (!body.campaigns && (camp.logoPolicy === 'logo' || !camp.logoPolicy)) camp.logoPolicy = 'wordmark';
-    } else if (body.removeWordmark) { try { await env.MIND_DOCS.delete('brand/' + ns + '/wordmark/' + cid); } catch (e) {} camp.hasWordmark = false; camp.wordmarkMime = ''; if (camp.logoPolicy === 'wordmark' || camp.logoPolicy === 'both') camp.logoPolicy = 'logo'; }
+    } else if (body.removeWordmark) {
+      const variant = kitSlug(body.wordmarkVariant || '');
+      // removing takes the mark off new compositions; the immutable versioned copies stay, so approved work keeps its exact mark
+      if (variant) { camp.wordmarks = (camp.wordmarks || []).filter(w => w.variant !== variant); if (camp.wordmarkDefault === variant) camp.wordmarkDefault = (camp.wordmarks[0] || {}).variant || ''; }
+      else { try { await env.MIND_DOCS.delete('brand/' + ns + '/wordmark/' + cid); } catch (e) {} camp.wordmarkV = ''; }
+      camp.hasWordmark = !!((camp.wordmarks || []).length || (!variant ? false : camp.wordmarkV)); if (!camp.hasWordmark) { camp.wordmarkMime = ''; if (camp.logoPolicy === 'wordmark' || camp.logoPolicy === 'both') camp.logoPolicy = 'logo'; }
+    }
     if (['logo', 'wordmark', 'both', 'none'].indexOf(body.logoPolicy) >= 0) camp.logoPolicy = body.logoPolicy;
+    if (body.wordmarkDefault && !body.wordmarkB64 && kitSlug(body.wordmarkVariant) && (camp.wordmarks || []).some(w => w.variant === kitSlug(body.wordmarkVariant))) camp.wordmarkDefault = kitSlug(body.wordmarkVariant);
   }
   await kvPut(env.AXIOM_KV, 'brand_' + ns, JSON.stringify(kit), 10 * 365 * 86400);
   return kit;
@@ -3386,7 +3408,7 @@ function kitStructured(body, cur) {
   // (which mark goes on its tiles: the client logo, the campaign wordmark, both, or none) and an identity note (colours, devices)
   const prev = id => ((cur.campaigns || []).find(x => x && x.id === id) || {});
   out.campaigns = (camps || cur.campaigns || []).map(c => { if (!c || typeof c !== 'object') return null; const id = kitSlug(c.id) || kitSlug(c.name); const was = prev(id); return ({ id, name: pick(c.name, 90), url: pick(c.url, 120), signoff: pick(c.signoff, 160), cta: pick(c.cta, 160),
-    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', active: c.active !== false }); }).filter(c => c && c.id);
+    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
   const facts = arr(body.facts, 80);
   out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? ({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }) : null).filter(f => f && f.text);
   const banned = arr(body.banned, 60);
@@ -6673,7 +6695,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p8';
+const AXIOM_BUILD = '2026-10-01.studio-p9';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -6704,6 +6726,8 @@ async function ensureStudio(env) {
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_jobs_st ON studio_jobs(state, lease_until)'),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_jobs_p ON studio_jobs(project, created)'),
     env.MIND_DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS studio_jobs_idem ON studio_jobs(idem)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_validations(id TEXT PRIMARY KEY, project TEXT, asset TEXT, version TEXT, sig TEXT, ok INTEGER, blocking INTEGER, warnings INTEGER, issues TEXT, report TEXT, export_key TEXT, who TEXT, created INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_validations_av ON studio_validations(asset, version, created)'),
   ]);
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN analysis TEXT').run(); } catch (e) {}   // art direction: what the vision pass saw in a reference
@@ -6718,7 +6742,7 @@ function stStr(v, n) { return String(v == null ? '' : v).slice(0, n || 400); }
 /** What an approval accepts: the copy of a version, or its image and layout. */
 function stSig(part, v) {
   const c = v.copy || {};
-  return part === 'copy' ? JSON.stringify([c.headline || '', c.support || '', c.body || '', c.cta || '', c.caption || '', c.alt || '']) : JSON.stringify([(v.image && v.image.key) || '', v.layout || {}, v.mode || '']);
+  return part === 'copy' ? JSON.stringify([c.headline || '', c.support || '', c.body || '', c.cta || '', c.caption || '', c.alt || '']) : JSON.stringify([(v.image && v.image.key) || '', v.layout || {}, v.mode || '', stDisplayed(v).map(d => d.id + '=' + d.text)]);
 }
 function stCopy(c) {
   c = c && typeof c === 'object' ? c : {};
@@ -6786,7 +6810,10 @@ async function stAssetView(env, a, opts) {
   opts = opts || {};
   const versions = ((await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE asset=? ORDER BY created ASC, id ASC LIMIT ?').bind(a.id, opts.versions || 60).all()).results || []).map(stVersionRow);
   const approvals = await stStanding(env, a);
-  return Object.assign({}, a, { versions, approvals, current: a.current || (versions.length ? versions[versions.length - 1].id : '') });
+  const curId = a.current || (versions.length ? versions[versions.length - 1].id : '');
+  const project = opts.project || await stProject(env, a.project);
+  let readiness = null; try { readiness = project ? await stReadiness(env, project, a, versions.find(x => x.id === curId) || null, opts.kit) : null; } catch (e) { readiness = { technical: 'unknown', error: String(e.message || e).slice(0, 120) }; }
+  return Object.assign({}, a, { versions, approvals, readiness, current: curId });
 }
 /** The whole project as the workspace reads it. */
 async function stGet(env, id, opts) {
@@ -6808,7 +6835,8 @@ async function stGet(env, id, opts) {
     assets: [], thread: (events.results || []).reverse().map(r => Object.assign({ id: r.id, kind: r.kind, who: r.who, at: r.created }, pjs(r.data, {}))),
     jobs: (jobs.results || []).map(stJobRow),
   });
-  for (const a of (assets.results || [])) out.assets.push(await stAssetView(env, stAssetRow(a)));
+  const kitR = (assets.results || []).length ? (await brandKit(env, p.ns)) || {} : {};
+  for (const a of (assets.results || [])) out.assets.push(await stAssetView(env, stAssetRow(a), { project: p, kit: kitR }));
   return out;
 }
 async function stList(env, f) {
@@ -7165,8 +7193,8 @@ async function stContextView(env, p) {
     note: 'Recorded with every generation as a context snapshot. Source accuracy and mandatory requirements outrank preferences. Nothing here comes from another client.' };
 }
 // -- the claim ledger: every figure and quotation in a source, tied to its passage ---------------------
-const ST_UNIT = { bn: 'billion', b: 'billion', billion: 'billion', m: 'million', mn: 'million', million: 'million', k: 'thousand', thousand: 'thousand', '%': 'per cent', percent: 'per cent', 'per cent': 'per cent', pc: 'per cent', jobs: 'jobs', job: 'jobs', australians: 'people', people: 'people', workers: 'people', employees: 'people', businesses: 'businesses', business: 'businesses', companies: 'businesses', years: 'years', year: 'years', tonnes: 'tonnes', hectares: 'hectares', homes: 'homes', households: 'households', members: 'members', mines: 'mines' };
-const ST_NUM_RX = /(?:\$|A\$|AUD\s?)?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(billion|million|thousand|bn|mn|\bm\b|\bk\b|per ?cent|percent|%|pc\b|jobs?|australians|people|workers|employees|businesses|business|companies|years?|tonnes|hectares|homes|households|members|mines)?/gi;
+const ST_UNIT = { dollars: 'dollars', dollar: 'dollars', 'dollars a litre': 'dollars', 'dollars per litre': 'dollars', cents: 'cents', cent: 'cents', c: 'cents', 'c/l': 'cents', 'cents a litre': 'cents', 'cents per litre': 'cents', bn: 'billion', b: 'billion', billion: 'billion', m: 'million', mn: 'million', million: 'million', k: 'thousand', thousand: 'thousand', '%': 'per cent', percent: 'per cent', 'per cent': 'per cent', pc: 'per cent', jobs: 'jobs', job: 'jobs', australians: 'people', people: 'people', workers: 'people', employees: 'people', businesses: 'businesses', business: 'businesses', companies: 'businesses', years: 'years', year: 'years', tonnes: 'tonnes', hectares: 'hectares', homes: 'homes', households: 'households', members: 'members', mines: 'mines' };
+const ST_NUM_RX = /(?:\$|A\$|AUD\s?)?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(dollars (?:a|per) litre|dollars?|cents (?:a|per) litre|cents?|c\/L|c\b|billion|million|thousand|bn|mn|\bm\b|\bk\b|per ?cent|percent|%|pc\b|jobs?|australians|people|workers|employees|businesses|business|companies|years?|tonnes|hectares|homes|households|members|mines)?/gi;
 function stNumbers(text) {
   const out = []; const rx = new RegExp(ST_NUM_RX.source, 'gi'); let m; const t = String(text || '');
   while ((m = rx.exec(t))) {
@@ -7175,7 +7203,7 @@ function stNumbers(text) {
     if (/[\d-]/.test(before)) continue;                                                          // the tail of a range or a longer number (2023-24)
     if (!unit && /^(19|20)\d\d$/.test(m[1]) && !/^\s*(jobs|people)/.test(after)) continue;   // a year
     if (!unit && /^-\d\d/.test(after)) continue;                                              // 2023-24
-    if (!unit && !/\$/.test(raw) && val < 1000 && m[1].indexOf(',') < 0) continue;              // bare small numbers (dates, counts) are not claims
+    if (!unit && !/\$/.test(raw) && val < 1000 && m[1].indexOf(',') < 0 && m[1].indexOf('.') < 0) continue;   // bare small whole numbers (dates, counts) are not claims; a decimal is
     if (/\$/.test(raw) && !unit && val < 10) continue;
     out.push({ raw, value: val, unit, money: /\$/.test(raw), at: m.index });
   }
@@ -7262,6 +7290,57 @@ function stWrapLines(text, charsPerLine) {
   words.forEach(w => { const l = w.length; if (cur && cur + 1 + l > charsPerLine) { lines++; cur = l; } else cur = cur ? cur + 1 + l : l; if (l > charsPerLine) { lines += Math.floor(l / charsPerLine); cur = l % charsPerLine; } });
   return words.length ? lines : 0;
 }
+/* The layout rules, shared with docs/studio-render.js: the text between the markers is identical in both files
+   (tests/studio-layout-browser.mjs compares them), so the worker derives the verdict from measured boxes exactly as the
+   browser does, and a client's own verdict is never taken on trust. */
+/* RULES:BEGIN */
+function layoutRules(boxes, o) {
+  o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
+  var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
+  var tol = Math.max(1, W * 0.0015);
+  var safe = o.format === '9:16' && o.channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+  var live = [], i, j;
+  for (i = 0; i < boxes.length; i++) {
+    var b = boxes[i];
+    if (b.dup) add('duplicate_id', 'blocking', [b.id], 'two layers share the id ' + b.id + '; edits, locks and checks cannot tell them apart');
+    if (b.valid === false) { add('invalid_geometry', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' layer has missing or impossible geometry'); continue; }
+    if (b.hidden || b.empty) continue;
+    if (b.type === 'text' || b.mark) live.push(b);
+    if (b.type === 'text') {
+      if (b.overflowH) add('text_overflow', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' needs ' + Math.round(b.contentH) + ' px over ' + b.lines + ' lines; its box is ' + Math.round(b.ah) + ' px, so it runs into whatever sits below');
+      if (b.overflowW) add('text_too_wide', 'blocking', [b.id], 'a line of the ' + (b.role || 'text') + ' is wider than its box even when broken');
+      if (b.broken) add('word_broken', 'warning', [b.id], 'a word or address in the ' + (b.role || 'text') + ' is too long for the box and is broken across lines');
+      var pct = b.px / W * 100;
+      if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
+      else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
+      if (typeof b.contrast === 'number') { var large = pct >= 4; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (large ? 3 : 4.5)) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (large ? 3 : 4.5) + ':1 wanted)'); }
+    }
+    if (b.mark) {
+      if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
+      if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
+    }
+    if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
+    if (b.type === 'text' || b.mark) {
+      if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
+      else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top 14%, bottom 20%)' : 'inside the 3% margin'));
+    }
+  }
+  for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
+    var a = live[i], c = live[j];
+    if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
+    var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
+    if (iw > tol && ih > tol) {
+      var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
+      add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
+    }
+  }
+  if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
+  if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
+  var rank = { blocking: 0, warning: 1, info: 2 };
+  out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
+  return out;
+}
+/* RULES:END */
 /** Does the text fit its layer? Sizes are per cent of the stage width, heights per cent of the stage height. */
 function stFit(layout, copy, format) {
   const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const out = [];
@@ -7271,7 +7350,7 @@ function stFit(layout, copy, format) {
     const charsPerLine = Math.max(6, Math.floor(l.w / (l.size * (l.role === 'headline' ? 0.52 : 0.48))));
     const lineH = l.size * 1.12 * (f.w / f.h); const maxLines = Math.max(1, Math.floor(l.h / lineH));
     const lines = stWrapLines(text, charsPerLine);
-    if (lines > maxLines) out.push({ state: 'overflow', text: String(text).slice(0, 60), note: 'The ' + l.role + ' needs ' + lines + ' lines at this size; ' + maxLines + ' fit at ' + format + ' (about ' + (charsPerLine * maxLines) + ' characters). Shorten it, or accept a smaller type size.' });
+    if (lines > maxLines) out.push({ state: 'overflow', text: String(text).slice(0, 60), note: 'The ' + l.role + ' needs ' + lines + ' lines at this size; ' + maxLines + ' fit at ' + format + ' (about ' + (charsPerLine * maxLines) + ' characters). Shorten it, or accept a smaller type size. (An estimate from character counts; the technical validation measures the real font.)' });
     if (l.size < 2.4) out.push({ state: 'small_type', text: l.role, note: 'Type at ' + l.size + '% of the width is under the 2.4% minimum for a feed.' });
   });
   const logo = (layout && layout.layers || []).find(l => l.role === 'logo');
@@ -7281,19 +7360,32 @@ function stFit(layout, copy, format) {
 function stChecks(copy, ledger, opts) {
   opts = opts || {}; const out = [];
   copy = copy || {};
-  const fields = ['headline', 'support', 'cta', 'caption', 'body', 'title']; const text = fields.map(k => copy[k]).filter(Boolean).join(' \n ');
+  const fields = ['headline', 'support', 'cta', 'caption', 'body', 'title'];
+  // every word shown on the tile is checked: kickers, labels, myth and fact lines, source strips and free text carry claims too
+  const freeText = opts.layout && Array.isArray(opts.layout.layers) ? opts.layout.layers.filter(l => l.type === 'text' && !l.hidden && l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => l.text) : [];
+  const text = fields.map(k => copy[k]).filter(Boolean).concat(freeText).join(' \n ');
   const factClaims = (Array.isArray(opts.facts) ? opts.facts : []).flatMap(f => stNumbers(String(f.text || '')).map(n => ({ id: 'fact:' + (f.id || ''), value: n.value, unit: n.unit, passage: 'approved fact' + (f.id ? ' ' + f.id : ''), period: '', verified: true, fact: true })));
   const claims = (Array.isArray(ledger) ? ledger : []).concat(factClaims);
   const allowedFlat = String(opts.allowed || '').replace(/[\s,]/g, '').toLowerCase();
   stNumbers(text).forEach(num => {
     const exact = claims.find(c => c.value === num.value && (c.unit === num.unit || (!c.unit && !num.unit)));
-    if (exact) { out.push(exact.fact ? { state: 'fact', text: num.raw, claim: exact.id, note: exact.passage + (exact.id.slice(5) ? '' : '') } : { state: 'matches', text: num.raw, claim: exact.id, note: 'matches the source, ' + exact.passage + (exact.period ? ', ' + exact.period : '') + (exact.verified === false ? ' (a claim the source does not carry as written)' : '') }); return; }
-    const sameNum = claims.find(c => c.value === num.value && c.unit && num.unit && c.unit !== num.unit);
-    if (sameNum) { out.push({ state: 'differs', text: num.raw, claim: sameNum.id, note: 'unit differs: the ' + (sameNum.fact ? 'approved fact' : 'source') + ' says ' + sameNum.value.toLocaleString('en-AU') + ' ' + sameNum.unit + ' (' + sameNum.passage + ')' }); return; }
+    if (exact) {
+      // the period travels with the figure: a different year beside it in the copy is not the same claim
+      const near = text.slice(Math.max(0, num.at - 60), num.at + 80); const per = String(exact.period || ''); const years = near.match(/\b(?:FY\s?)?(19|20)\d\d(?:-\d\d)?\b/g) || [];
+      if (per && years.length && !years.some(y => y.replace(/\s/g, '').indexOf(per.replace(/\s/g, '')) >= 0 || per.indexOf(y.replace(/^FY\s?/, '')) >= 0)) { out.push({ state: 'differs', text: num.raw, claim: exact.id, note: 'period differs: the source gives it for ' + per + ' (' + exact.passage + '); the copy says ' + years.join(', ') }); return; }
+      out.push(exact.fact ? { state: 'fact', text: num.raw, claim: exact.id, note: exact.passage } : { state: 'matches', text: num.raw, claim: exact.id, note: 'matches the source, ' + exact.passage + (exact.period ? ', ' + exact.period : '') + (exact.verified === false ? ' (a claim the source does not carry as written)' : '') }); return;
+    }
+    // the same number in another unit (or with its unit dropped) is a different claim: 50.8 dollars is not 50.8 cents
+    const sameNum = claims.find(c => c.value === num.value && c.unit && c.unit !== num.unit && !(num.money && !num.unit));
+    if (sameNum) { out.push({ state: 'differs', text: num.raw, claim: sameNum.id, note: (num.unit ? 'unit differs' : 'unit missing') + ': the ' + (sameNum.fact ? 'approved fact' : 'source') + ' says ' + sameNum.value.toLocaleString('en-AU') + ' ' + sameNum.unit + ' (' + sameNum.passage + ')' + (num.unit ? '; the copy says ' + num.unit : '') }); return; }
     const sameUnit = num.unit ? claims.filter(c => c.unit === num.unit && c.value !== num.value) : [];
     if (sameUnit.length === 1) { out.push({ state: 'differs', text: num.raw, claim: sameUnit[0].id, note: 'value differs: the ' + (sameUnit[0].fact ? 'approved fact' : 'source') + ' says ' + sameUnit[0].value.toLocaleString('en-AU') + ' ' + sameUnit[0].unit + ' (' + sameUnit[0].passage + ')' }); return; }
     const needle = String(num.value).replace(/\.0+$/, '');
-    if (allowedFlat && allowedFlat.indexOf(needle) >= 0) { out.push({ state: 'fact', text: num.raw, claim: null, note: 'in the approved facts, the brief or the kit (not in a source passage)' }); return; }
+    // a fact still pending review, or approved for another campaign, is not evidence for this one
+    const other = (Array.isArray(opts.otherFacts) ? opts.otherFacts : []).find(f => stNumbers(String(f.text || '')).some(n => n.value === num.value));
+    if (other) { out.push({ state: 'unsupported', text: num.raw, claim: null, note: other.status === 'pending' ? 'only in a fact still pending review ("' + stStr(other.text, 80) + '"); approve it first' : 'an approved fact of another campaign (' + (other.campaign || 'unscoped') + '), not of this one' }); return; }
+    // a number that only appears in the brief or the kit's prose is not a verified figure: it needs an approved fact or a source passage
+    if (allowedFlat && allowedFlat.indexOf(needle) >= 0) { out.push({ state: 'unsupported', text: num.raw, claim: null, note: 'it appears in the brief or the kit text, but not in an approved fact or a source passage; add it as a fact for review or cite the source' }); return; }
     out.push({ state: 'unsupported', text: num.raw, claim: null, note: claims.length ? 'not supported by the supplied sources or the approved facts' : 'no source in this project supports it' });
   });
   const qrx = /["\u201c]([^"\u201d]{12,})["\u201d]/g; let q;
@@ -7313,7 +7405,8 @@ async function stVersionChecks(env, project, asset, v) {
   const led = await stLedger(env, project.id);
   const kit = (await brandKit(env, project.ns)) || {};
   const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
-  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(f => f.status !== 'pending'), channel: asset.channel, format: asset.format, layout: v.layout });
+  const inScope = f => f.status !== 'pending' && (!f.campaign || f.campaign === project.campaign);
+  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(inScope), otherFacts: (kit.facts || []).filter(f => !inScope(f)), channel: asset.channel, format: asset.format, layout: v.layout });
   try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(JSON.stringify(checks).slice(0, 8000), v.id).run(); } catch (e) {}
   return checks;
 }
@@ -7365,9 +7458,12 @@ function stSpecNormalise(spec, base, kit) {
 function stStyleWord(spec) { const c = spec.composition; return c.style === 'panel' ? (c.coverage === 'large' ? 'large' : c.coverage === 'compact' ? 'compact' : 'same') : c.style; }
 function stFillOf(kit, fill) { if (fill === 'kit') return (kit.palette && kit.palette.primary) || ST_TEMPLATES.plain.fill; if (fill === 'dark') return '#141A22'; return (ST_TEMPLATES[fill] || ST_TEMPLATES.plain).fill; }
 /** Where the words go, as a box in per cent of the stage, for a format, zone, coverage and style. */
+/* The interface margins of a format: a 9:16 tile is shown as a story or reel, where the platform's own controls cover the
+ * top 14% and the bottom 20% (the renderer's rules hold Instagram stories to exactly this), so words and marks start clear of them. */
+function stSafeInset(format) { return format === '9:16' ? { top: 14, bottom: 20, side: 6 } : { top: 4, bottom: 4, side: 5 }; }
 function stTextZone(format, spec) {
   const c = spec.composition; const zone = c.zone, cov = c.coverage, style = c.style;
-  const geo = format === '9:16' ? { x: 7, y: 58, w: 74, h: 30 } : format === '16:9' ? { x: 6, y: 34, w: 52, h: 54 } : format === '4:5' ? { x: 6, y: 54, w: 74, h: 34 } : { x: 6, y: 50, w: 74, h: 38 };
+  const geo = format === '9:16' ? { x: 7, y: 47, w: 80, h: 31 } : format === '16:9' ? { x: 6, y: 34, w: 52, h: 54 } : format === '4:5' ? { x: 6, y: 54, w: 74, h: 34 } : { x: 6, y: 50, w: 74, h: 38 };
   const margin = 100 - geo.y - geo.h;
   if (cov === 'large') { geo.x = 5; geo.w = Math.min(90, geo.w + 14); geo.h = Math.min(100 - geo.y - 4, geo.h + 8); }
   if (cov === 'compact') { geo.w = Math.max(44, geo.w - 18); geo.h = Math.max(18, geo.h - 8); }
@@ -7421,7 +7517,9 @@ function stLayoutFromSpec(kit, ns, format, spec, copy, base, campaign) {
   const cSize = format === '16:9' ? 1.9 : 2.5;
   const hFloor = Math.max(3.0, hSize - 0.8);
   const minH = format === '16:9' || style === 'typographic' ? 4 : 3, minS = c.coverage === 'compact' ? 2 : 3;
-  const fixedH = () => pad * aspect + 1.2 * aspect + 1.4 * aspect + lineH(cSize) * 1.6 + pad * aspect;
+  // a CTA button carries its own padding (0.45 of its type size above and below): its box is 1.85 line heights, not 1.6, or every button overflows
+  const ctaH = spec.cta.style === 'text' ? lineH(cSize) * 1.2 : lineH(cSize) * 1.85;
+  const fixedH = () => pad * aspect + 1.2 * aspect + 1.4 * aspect + ctaH + pad * aspect;
   let hLines = minH, sLines = minS, stackH = 0;
   for (let k = 0; k < 12; k++) {
     const cplH = Math.max(6, Math.floor(innerW / (hSize * 0.52))), cplS = Math.max(8, Math.floor(innerW / (sSize * 0.48)));
@@ -7448,12 +7546,13 @@ function stLayoutFromSpec(kit, ns, format, spec, copy, base, campaign) {
   layers.push({ id: 'support', type: 'text', role: 'support', x: geo.x + pad, y, w: innerW, h: lineH(sSize) * sLines, size: sSize, weight: 500, color: textCol, align, font: 'body', text: copy.support || '' }); y += lineH(sSize) * sLines + 1.4 * aspect;
   const cW = Math.min(innerW, 40);
   layers.push(spec.cta.style === 'text'
-    ? { id: 'cta', type: 'text', role: 'cta', x: align === 'center' ? geo.x + (geo.w - cW) / 2 : geo.x + pad, y, w: cW, h: lineH(cSize) * 1.6, size: cSize, weight: 700, color: textCol, align, font: 'body', text: copy.cta || '' }
-    : { id: 'cta', type: 'text', role: 'cta', x: align === 'center' ? geo.x + (geo.w - cW) / 2 : geo.x + pad, y, w: cW, h: lineH(cSize) * 1.6, size: cSize, weight: 650, color: onGold ? '#FFFFFF' : '#0F1420', bg: onGold ? '#141414' : '#FFFFFF', align: 'center', font: 'body', text: copy.cta || '' });
+    ? { id: 'cta', type: 'text', role: 'cta', x: align === 'center' ? geo.x + (geo.w - cW) / 2 : geo.x + pad, y, w: cW, h: ctaH, size: cSize, weight: 700, color: textCol, align, font: 'body', text: copy.cta || '' }
+    : { id: 'cta', type: 'text', role: 'cta', x: align === 'center' ? geo.x + (geo.w - cW) / 2 : geo.x + pad, y, w: cW, h: ctaH, size: cSize, weight: 650, color: onGold ? '#FFFFFF' : '#0F1420', bg: onGold ? '#141414' : '#FFFFFF', align: 'center', font: 'body', text: copy.cta || '' });
   // the marks follow the campaign's logo policy (client logo, campaign wordmark, both, none), placed exactly from their files
   let markNotes = [], markState = null;
   { const lw = 17, lh = 8 * aspect; const corner = spec.logo.corner;
-    const pos = corner === 'bl' ? { x: 5, y: 100 - 4 - lh } : corner === 'tr' ? { x: 100 - 5 - lw, y: 4 } : corner === 'tl' ? { x: 5, y: 4 } : corner === 'panel' ? { x: geo.x + geo.w - pad - lw, y: geo.y + geo.h - pad * aspect - lh } : null;
+    const si = stSafeInset(format);
+    const pos = corner === 'bl' ? { x: si.side, y: 100 - si.bottom - lh } : corner === 'tr' ? { x: 100 - si.side - lw, y: si.top } : corner === 'tl' ? { x: si.side, y: si.top } : corner === 'panel' ? { x: geo.x + geo.w - pad - lw, y: geo.y + geo.h - pad * aspect - lh } : null;
     const marks = stMarkLayers(kit, ns, campaign || (base && base.marks && base.marks.campaign) || '', format, null, pos ? { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 } : null, { placement: spec.logo.corner === 'br' && base && base.markPlacement && base.markPlacement.basis === 'observed' ? base.markPlacement : null });
     marks.layers.forEach(l => layers.push(l)); markNotes = marks.notes; spec.marksPolicy = marks.policy; markState = marks; }
   const image = stImageBox(format, spec, geo);
@@ -7753,9 +7852,11 @@ async function stExportStage(env, job, p, log) {
     const missing = need.filter(k => !ap[k]);
     if (missing.length) { excluded.push({ asset: a.id, title: a.title, why: missing.join(' and ') + ' not approved on the current version' }); continue; }
     if (cur.mode !== 'copy' && cur.layout && Array.isArray(cur.layout.incomplete) && cur.layout.incomplete.length) { excluded.push({ asset: a.id, title: a.title, why: 'incomplete: ' + cur.layout.incomplete.map(i => i.text).join('; ') }); continue; }
-    const exportKey = 'studio/' + p.id + '/' + a.id + '/' + cur.id + '-export.png';
+    const rd = cur.mode === 'copy' ? null : await stReadiness(env, p, a, cur);
+    if (rd && rd.technical !== 'passed') { excluded.push({ asset: a.id, title: a.title, why: rd.reasons.join(' ') || 'not validated' }); continue; }
+    const exportKey = (rd && rd.validation && rd.validation.exportKey) || 'studio/' + p.id + '/' + a.id + '/' + cur.id + '-export.png';
     let hasExport = false; try { hasExport = !!(env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {}
-    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {} });
+    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' });
   }
   const id = stId('e'); const base = 'studio/' + p.id + '/export/' + id;
   const sheet = stCopySheet(p, items);
@@ -8023,13 +8124,18 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   let policy;
   if (camp) { policy = ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo'; if (want && want !== 'campaign' && ST_MARK_POLICIES.indexOf(want) >= 0 && want !== policy) { overridden = true; notes.push('the plan asked for the mark "' + want + '"; the ' + (camp.name || camp.id) + ' policy (' + policy + ') is mandatory and was applied instead'); } }
   else policy = want && want !== 'campaign' && ST_MARK_POLICIES.indexOf(want) >= 0 ? want : 'logo';
-  const lw = 17, lh = 8 * aspect; const corners = { br: { x: 78, y: 100 - 4 - lh }, bl: { x: 5, y: 100 - 4 - lh }, tr: { x: 100 - 5 - lw, y: 4 }, tl: { x: 5, y: 4 } };
+  const lw = 17, lh = 8 * aspect; const si = stSafeInset(format); const corners = { br: { x: Math.min(78, 100 - si.side - lw), y: 100 - si.bottom - lh }, bl: { x: si.side, y: 100 - si.bottom - lh }, tr: { x: 100 - si.side - lw, y: si.top }, tl: { x: si.side, y: si.top } };
   const placement = opts.placement && corners[opts.placement.corner] ? opts.placement : null;
   const at = pos || (placement ? corners[placement.corner] : corners.br);
   const layers = [];
   const wantLogo = policy === 'logo' || policy === 'both', wantMark = policy === 'wordmark' || policy === 'both';
-  if (wantLogo) { if (kit.hasLogo) layers.push({ id: 'logo', type: 'img', role: 'logo', asset: 'logo', x: at.x, y: at.y, w: lw, h: lh, src: '/brand/logo?ns=' + ns, exact: true, name: 'Client logo (exact, from the brand kit)' }); else { notes.push('the client logo is not on file; nothing was drawn in its place'); if (camp) incomplete.push({ code: 'mark_missing', mark: 'logo', text: 'the client logo the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + '); nothing drawn in its place, no other mark substituted' }); } }
-  if (wantMark) { if (camp && camp.hasWordmark) layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - 5 - 24), y: at.y, w: 24, h: lh, src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id, exact: true, name: (camp.name || camp.id) + ' wordmark (exact, from the brand kit)' }); else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
+  if (wantLogo) { if (kit.hasLogo) layers.push({ id: 'logo', type: 'img', role: 'logo', asset: 'logo', x: at.x, y: at.y, w: lw, h: lh, src: '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : ''), exact: true, name: 'Client logo (exact, from the brand kit)' }); else { notes.push('the client logo is not on file; nothing was drawn in its place'); if (camp) incomplete.push({ code: 'mark_missing', mark: 'logo', text: 'the client logo the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + '); nothing drawn in its place, no other mark substituted' }); } }
+  if (wantMark) { if (camp && camp.hasWordmark) {
+    const vars = (camp.wordmarks || []).map(w => ({ variant: w.variant, tone: w.tone || 'colour', src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v }));
+    // over a known dark ground a light variant, over a light ground a dark one; otherwise the campaign's default (the browser measures and may switch)
+    const pick = vars.length ? (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
+    layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - 24), y: at.y, w: 24, h: lh, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
+  } else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
   return { layers, policy, notes, campaign: camp, incomplete, overridden, placement: pos ? { corner: 'given', basis: 'plan' } : placement ? { corner: placement.corner, basis: placement.basis, text: placement.text } : { corner: 'br', basis: 'default' } };
 }
 /** A plan as the models wrote it becomes a layout the renderer can draw; everything it cannot draw is named in `unsupported`. */
@@ -8060,7 +8166,9 @@ function stPlanNormalise(plan, format, opts) {
   // regions that are not the background become image layers the renderer fills when their image lands, and show as sketched boxes until then
   regions.filter(r => r.role !== 'background').forEach(r => layers.unshift({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }));
   const bgRegion = regions.find(r => r.role === 'background') || null;
-  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, null, { placement: opts.placement });
+  const groundHex = typeof bg === 'string' ? bg : bg && bg.to ? bg.to : '';
+  const groundL = /^#[0-9a-fA-F]{6}$/.test(groundHex) ? (() => { const n = parseInt(groundHex.slice(1), 16); return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; })() : null;
+  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, null, { placement: opts.placement, ground: groundL == null ? (regions.some(r => r.role === 'background') ? '' : 'dark') : groundL < 0.45 ? 'dark' : 'light' });
   marks.layers.forEach(l => layers.push(l)); marks.notes.forEach(n => unsupported.push(n));
   // references a region names must be on the project; an unknown id is dropped and said
   if (Array.isArray(opts.refs)) { const known = new Set(opts.refs.map(r => r.id)); regions.forEach(rg => { const bad = rg.refs.filter(x => !known.has(x.id)); if (bad.length) { unsupported.push('region ' + rg.id + ' names ' + bad.length + ' reference' + (bad.length === 1 ? '' : 's') + ' not on the project (' + bad.map(x => x.id).join(', ') + '); ignored'); rg.refs = rg.refs.filter(x => known.has(x.id)); } }); }
@@ -8468,9 +8576,12 @@ async function stRenderJob(env, job, pair, done, fail) {
   // a region render merges into whatever the asset's current version is now (a sibling region may have landed meanwhile);
   // only a whole-image render for a version the asset has moved past is filed as a branch
   const isRegion = !!(inp.region && inp.region !== 'bg');
-  const live = isRegion ? (await stCurrent(env, a)) || cur : cur;
-  const stale = !isRegion && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
+  let live = isRegion ? (await stCurrent(env, a)) || cur : cur;
+  // a region the current layout no longer has (a newer design replaced it) must not touch that design: branch off the version it was asked for
+  const regionGone = isRegion && !!(live && live.layout && Array.isArray(live.layout.layers) && !live.layout.layers.some(x => x.type === 'img' && x.region === inp.region));
+  const stale = (!isRegion || regionGone) && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
   const baseV = stale ? await stVersion(env, job.inputVersion) : null;
+  if (regionGone && baseV) live = baseV;
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
@@ -8497,7 +8608,128 @@ async function stRenderJob(env, job, pair, done, fail) {
   return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable' }, cost: 1 });
 }
 // -- inspection: the art director reads the rendered result against the concept and offers one bounded correction -------
-const ST_INSPECT_SYS = 'You are the art director inspecting a rendered social tile for an Australian political communications agency. You see the image (the generated imagery, or the whole artwork when the words are part of it) and are told the words, the plan and the campaign identity. Judge the actual result, not the intention. Answer as strict JSON only: {"fidelity":1,"hierarchy":1,"readability":1,"relevance":1,"identity":1,"words":{"present":["words you can read in the image"],"wrong":["words in the image that are not in the approved copy, or misspelt"]},"issues":["<=16 words each, most important first, at most four"],"verdict":"ship|fix|redo","fix":{"kind":"design|render|edit|copy|none","instruction":"<=45 words: one precise, bounded correction the team can apply as written"},"note":"<=40 words for the team"}. Scores are 1 to 5. fidelity = the image carries the concept; hierarchy = what reads first is what should; readability = the words (or the room left for them) are legible against the ground; relevance = the imagery belongs to the message and the client\'s world; identity = the campaign\'s colours, devices and mark are right and no other client\'s. fix.kind: design = change the composition or type (no new image); render = make the image again with a changed brief; edit = a targeted edit of this image (keep everything else); copy = the words; none when the verdict is ship. Australian English, no exclamation marks.';
+// -- Technical validation, readiness and evidence (build studio-p9) ------------------------------------------------
+// Three things decide whether a composition may leave the building, and they are kept apart: the deterministic
+// technical validation (measured in a browser or headless Chromium with the real renderer and the fonts it could load,
+// then re-judged here with the shared layout rules over the reported boxes - a client never just says "passed"), the art
+// director's visual assessment (an opinion with a verdict), and a person's approval. Evidence is tied to the exact
+// composition: the version, the words actually displayed, the layout, the imagery, the mark files and their versions,
+// the fonts asked for and the output size (stCompSig). Anything older or different reads as stale, never as passed.
+function stDisplayedText(L, l, copy) {
+  if (!l || l.type !== 'text' || l.hidden) return '';
+  if (l.role && Array.isArray(L && L.baked) && L.baked.indexOf(l.role) >= 0) return '';
+  const t = l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text;
+  return String(t == null ? '' : t);
+}
+/** The words a version shows as live type, by layer: what a reader sees, so what wrapping and hierarchy depend on. */
+function stDisplayed(v) {
+  const L = (v && v.layout) || {}; const out = [];
+  (Array.isArray(L.layers) ? L.layers : []).forEach((l, i) => { const t = stDisplayedText(L, l, (v && v.copy) || {}); if (t) out.push({ id: String(l.id || ('layer' + i)), role: l.role || '', text: t }); });
+  return out;
+}
+/** The words a full artwork should show in its pixels (they were set from the copy when it was painted). */
+function stBakedWords(v) { const L = (v && v.layout) || {}; return (Array.isArray(L.baked) ? L.baked : []).map(r => ({ role: r, text: String(((v && v.copy) || {})[r] || '') })).filter(x => x.text); }
+function stSigHash(s) { s = String(s || ''); return arcHash(s) + '.' + arcHash(s.split('').reverse().join('')) + '.' + s.length.toString(36); }
+/** The exact composition a piece of evidence is about: version content, displayed words, layout, imagery, marks and their file versions, fonts, output size. */
+function stCompSig(a, v, kit) {
+  kit = kit || {}; const L = (v && v.layout) || {};
+  const marks = (Array.isArray(L.layers) ? L.layers : []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')).map(l => l.src || '');
+  const campaignMarks = (kit.campaigns || []).map(c => [c.id, c.wordmarkV || '', (c.wordmarks || []).map(w => w.variant + ':' + w.v).join(',')]);
+  return stSigHash(JSON.stringify([stSig('design', v), a.format, L.stage || null, marks, kit.logoV || (kit.hasLogo ? 'legacy:' + (kit.logoMime || '') : ''), campaignMarks, L.fonts || null]));
+}
+const ST_TOL_PX = 1.6;
+/** Re-judge a browser's measurement report against the version it claims to be about; problems mean the report is refused. */
+function stValidationJudge(a, v, rep) {
+  const L = (v && v.layout) || {}; const stage = L.stage || ST_FORMATS[a.format] || { w: 1080, h: 1080 }; const W = stage.w, H = stage.h;
+  const problems = [];
+  if (!rep || typeof rep !== 'object' || !Array.isArray(rep.boxes)) return { problems: ['no measurement report'], issues: [], ok: false, W, H };
+  if (Number(rep.W) !== W || Number(rep.H) !== H) problems.push('measured at ' + rep.W + 'x' + rep.H + '; the output size is ' + W + 'x' + H);
+  const num = x => typeof x === 'number' && isFinite(x);
+  const seen = {}; const boxes = []; const ids = new Set();
+  (Array.isArray(L.layers) ? L.layers : []).forEach((l, i) => {
+    const id = String(l.id || ('layer' + i)); const dup = !!seen[id]; seen[id] = true; ids.add(id);
+    const valid = num(l.x) && num(l.y) && num(l.w) && l.w > 0 && (l.h == null || (num(l.h) && l.h >= 0)) && (l.type !== 'text' || (num(l.size) && l.size > 0));
+    const b = { id, role: l.role || '', type: l.type, hidden: !!l.hidden, dup, valid, overlaps: Array.isArray(l.overlaps) ? l.overlaps.map(String) : [], rotate: l.rotate || 0 };
+    if (valid) { b.ax = l.x / 100 * W; b.ay = l.y / 100 * H; b.aw = l.w / 100 * W; b.ah = (l.h || 0) / 100 * H; b.x = b.ax; b.y = b.ay; b.w = b.aw; b.h = b.ah; }
+    if (!valid || l.hidden) { boxes.push(b); return; }
+    const rb = rep.boxes.find(x => x && String(x.id) === id) || null;
+    const isMark = l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark');
+    const text = l.type === 'text' ? stDisplayedText(L, l, v.copy || {}) : '';
+    if (l.type === 'text' && !text) { b.empty = true; boxes.push(b); return; }
+    if (!rb) { if (l.type === 'text' || isMark) problems.push('the ' + (l.role || l.type) + ' layer ' + id + ' is not in the report'); boxes.push(b); return; }
+    if (Math.abs(Number(rb.ax) - b.ax) > ST_TOL_PX || Math.abs(Number(rb.ay) - b.ay) > ST_TOL_PX || Math.abs(Number(rb.aw) - b.aw) > ST_TOL_PX) problems.push('layer ' + id + ' was measured at another position or width: the report belongs to another layout');
+    if (l.type === 'text') {
+      const px = l.size / 100 * W;
+      if (Number(rb.chars) !== text.length) problems.push('the ' + (l.role || 'text') + ' was measured with other words (' + rb.chars + ' characters; this version shows ' + text.length + ')');
+      if (!num(rb.px) || Math.abs(rb.px - px) > 0.6) problems.push('the ' + (l.role || 'text') + ' was measured at another type size');
+      const lines = Math.max(1, Math.round(Number(rb.lines) || 0));
+      // even a very narrow face needs this many lines; fewer means the measurement is not of this text at this size
+      const avail = Math.max(10, b.aw - (l.bg ? px * 1.6 : 0)); const minLines = Math.max(1, Math.ceil(text.length * px * 0.3 / avail));
+      if (lines < minLines) problems.push('the ' + (l.role || 'text') + ' was reported on ' + lines + ' line' + (lines === 1 ? '' : 's') + '; at ' + l.size + '% of the width it cannot take fewer than ' + minLines);
+      const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * 1.12);
+      const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
+      Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken });
+      if (num(rb.contrast)) b.contrast = rb.contrast;
+    } else if (l.type === 'img') {
+      b.mark = isMark; const sameSrc = String(rb.src || '') === String(l.src || '');
+      if (isMark && !sameSrc) problems.push('the ' + l.role + ' was measured from ' + (rb.src || 'nothing') + '; this version places ' + (l.src || 'nothing'));
+      b.asset = rb.asset === 'loaded' && (sameSrc || !isMark) ? 'loaded' : (rb.asset === 'sketch' ? 'sketch' : 'missing');
+      if (num(rb.contrast)) b.contrast = rb.contrast;
+    }
+    boxes.push(b);
+  });
+  rep.boxes.forEach(x => { if (x && x.id != null && !ids.has(String(x.id))) problems.push('the report has a layer ' + String(x.id).slice(0, 24) + ' this version does not'); });
+  const imageryMissing = !v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image));
+  const fonts = rep.fonts && typeof rep.fonts === 'object' ? { fallback: (Array.isArray(rep.fonts.fallback) ? rep.fonts.fallback : []).map(s => stStr(s, 160)).slice(0, 6), roles: rep.fonts.roles && typeof rep.fonts.roles === 'object' ? rep.fonts.roles : undefined } : null;
+  const issues = layoutRules(boxes, { W, H, format: a.format, channel: a.channel, production: true, fonts, imageryMissing });
+  (Array.isArray(L.incomplete) ? L.incomplete : []).forEach(i => issues.unshift({ code: 'mark_missing', severity: 'blocking', layers: [], detail: i.text }));
+  if (!fonts) issues.push({ code: 'fonts_unreported', severity: 'warning', layers: [], detail: 'the report does not say which fonts were used; fidelity to the kit fonts is unknown' });
+  if (v.mode === 'artwork') issues.push({ code: 'baked_text', severity: 'info', layers: [], detail: 'the words ' + ((L.baked || []).join(', ') || 'on the tile') + ' are painted into the image; geometry cannot check them, the inspection reads them' });
+  return { problems, issues, ok: !problems.length && !issues.some(i => i.severity === 'blocking'), W, H, fonts, boxes };
+}
+async function stValidationSubmit(env, pair, body, who) {
+  const p = pair.project, a = pair.asset;
+  const v = await stVersion(env, body.version || a.current); if (!v || v.asset !== a.id) return { error: 'unknown_version', status: 404 };
+  if (v.mode === 'copy' || !(v.layout && Array.isArray(v.layout.layers))) return { error: 'copy_only', status: 400, detail: 'A copy-only asset has no composition to validate.' };
+  const j = stValidationJudge(a, v, body.report);
+  if (j.problems.length) return { error: 'report_mismatch', status: 422, detail: 'The measurement does not describe this version, so it was not recorded: ' + j.problems.slice(0, 4).join('; ') + '. Measure the current version again.', problems: j.problems };
+  const kit = (await brandKit(env, p.ns)) || {}; const sig = stCompSig(a, v, kit);
+  let exportKey = '';
+  if (body.imageB64 && env.MIND_DOCS) { const buf = bufFromB64(body.imageB64); if (buf.byteLength >= 64 && buf.byteLength <= 12 * 1024 * 1024) { exportKey = 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export.png'; await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } }); } }
+  const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
+  const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
+  const id = stId('val'); const now = Date.now();
+  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, asset: b.asset })) };
+  await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, JSON.stringify(j.issues).slice(0, 12000), JSON.stringify(slim).slice(0, 20000), exportKey, stStr(who, 40), now).run();
+  try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
+  const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
+  if (!prev || prev.sig !== sig || !!prev.ok !== j.ok || JSON.stringify(pjs(prev.issues, []).map(i => i.code + ':' + (i.layers || []).join(','))) !== codes) await stEvent(env, p.id, 'validation', { asset: a.id, version: v.id, ok: j.ok, blocking: blocking.length, warnings: warnings.length, text: 'Technical validation of ' + a.title + ' (version ' + v.id + ', ' + j.W + 'x' + j.H + '): ' + (j.ok ? 'passed' + (warnings.length ? ' with ' + warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') + ' (' + warnings.map(i => i.code).join(', ') + ')' : '') : 'failed - ' + blocking.map(i => i.code + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')) + (j.fonts && j.fonts.fallback.length ? '. Fonts: ' + j.fonts.fallback.join('; ') : '') + '.' }, who);
+  return { ok: true, validation: { id, ok: j.ok, sig, issues: j.issues, exportKey, at: now }, readiness: await stReadiness(env, p, a, v, kit) };
+}
+/** Where a version stands: technical validation, the art director's assessment, baked words, and whether it may be handed off. */
+async function stReadiness(env, p, a, v, kit) {
+  if (!v) return { technical: 'none', inspection: { state: 'none' }, production: false, reasons: ['no version'] };
+  if (v.mode === 'copy' || !(v.layout && Array.isArray(v.layout.layers))) return { technical: 'not_applicable', inspection: { state: 'not_applicable' }, production: v.mode === 'copy', reasons: v.mode === 'copy' ? [] : ['no composition'] };
+  kit = kit || (await brandKit(env, p.ns)) || {}; const sig = stCompSig(a, v, kit); const reasons = [];
+  // evidence follows the composition, not the version number: a caption-only version shows the same tile, so its measurement carries
+  let row = null; try { row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? AND sig=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, sig).first(); if (!row) row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first(); if (!row) row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id).first(); } catch (e) {}
+  const issues = row ? pjs(row.issues, []) : [];
+  const technical = !row ? 'not_validated' : row.sig !== sig ? 'stale' : row.ok ? 'passed' : 'failed';
+  if (technical === 'not_validated') reasons.push('not validated: no measurement of this version at its output size yet');
+  if (technical === 'stale') reasons.push('not validated: the last measurement was of different words, layout, imagery, marks or fonts');
+  if (technical === 'failed') reasons.push('technical validation failed: ' + issues.filter(i => i.severity === 'blocking').map(i => i.code + (i.layers && i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; '));
+  let ins = null; try { const r = (await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='inspection' AND data LIKE ? AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"asset":"' + a.id + '"%', '%"sig":"' + sig + '"%').first()) || await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='inspection' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + v.id + '"%').first(); ins = r ? pjs(r.data, null) : null; } catch (e) {}
+  const inspection = !ins ? { state: 'none' } : { state: ins.sig && ins.sig !== sig ? 'stale' : ins.imageryOnly ? 'imagery_only' : ins.assessment === 'inconsistent' ? 'inconsistent' : ins.verdict || 'none', verdict: ins.verdict, eid: ins.eid, composed: !!ins.composed, material: (ins.issues || []).filter(i => i && typeof i === 'object' && (i.severity === 'blocking' || i.severity === 'material')).length };
+  if (inspection.state === 'inconsistent') reasons.push('the art director answered ship while naming unresolved problems: review it');
+  let baked = null;
+  if (v.mode === 'artwork') {
+    const words = stBakedWords(v); const ok = !!(ins && inspection.state !== 'stale' && ins.composed !== false && ins.baked && ins.baked.verified);
+    baked = { words: words.map(w => w.role), verified: ok, why: ok ? 'the inspection read every painted word as approved' : !ins ? 'no inspection has read the painted words yet' : inspection.state === 'stale' ? 'the inspection is of an earlier composition' : 'the inspection could not confirm every painted word' + (ins.baked && ins.baked.missing && ins.baked.missing.length ? ' (not read: ' + ins.baked.missing.join(', ') + ')' : '') + (ins.words && ins.words.wrong && ins.words.wrong.length ? ' (unapproved: ' + ins.words.wrong.join(', ') + ')' : '') };
+    if (!ok) reasons.push('painted words not verified: ' + baked.why);
+  }
+  return { sig, technical, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '' } : null, inspection, baked, production: technical === 'passed' && (!baked || baked.verified), reasons };
+}
+const ST_INSPECT_SYS = 'You are the art director inspecting a rendered social tile for an Australian political communications agency. You see the image (the generated imagery, or the whole artwork when the words are part of it) and are told the words, the plan and the campaign identity. Judge the actual result, not the intention. Answer as strict JSON only: {"fidelity":1,"hierarchy":1,"readability":1,"relevance":1,"identity":1,"words":{"present":["words you can read in the image"],"wrong":["words in the image that are not in the approved copy, misspelt, duplicated or garbled"],"missing":["approved words you cannot find or cannot read"]},"issues":[{"text":"<=16 words","severity":"blocking|material|cosmetic"}],"verdict":"ship|fix|redo","fix":{"kind":"design|render|edit|copy|none","instruction":"<=45 words: one precise, bounded correction the team can apply as written"},"note":"<=40 words for the team"}. Look for: words that overlap each other or a mark, words missing, duplicated, misspelt or illegible, poor hierarchy, cramped spacing and awkward line breaks, low contrast against what is actually behind the words or the mark, a mark that is wrong, obscured, distorted or badly placed, lettering, logos or badges the image model invented, an important subject obscured or awkwardly cropped, imagery off the message or from another campaign, and for a carousel frame, inconsistency with its siblings. Severity: blocking = it cannot go out like this (overlapping or illegible words, a wrong or missing mark, invented lettering); material = a real defect a designer must fix; cosmetic = taste. The verdict is ship only when nothing blocking or material remains; the deterministic checks you are given are measurements of this exact tile, so do not contradict them. Scores are 1 to 5. fidelity = the image carries the concept; hierarchy = what reads first is what should; readability = the words (or the room left for them) are legible against the ground; relevance = the imagery belongs to the message and the client\'s world; identity = the campaign\'s colours, devices and mark are right and no other client\'s. fix.kind: design = change the composition or type (no new image); render = make the image again with a changed brief; edit = a targeted edit of this image (keep everything else); copy = the words; none when the verdict is ship. Australian English, no exclamation marks.';
 async function stInspectStage(env, job, p, log) {
   const inp = job.input || {};
   const pair = await stAsset(env, job.asset || inp.asset); if (!pair || pair.project.id !== p.id) throw new Error('asset_required (not retried)');
@@ -8507,13 +8739,19 @@ async function stInspectStage(env, job, p, log) {
   if (round >= 2) { await stEvent(env, p.id, 'inspection', { asset: a.id, version: v.id, round, verdict: 'stop', text: 'Two corrections have been applied on this line already; the next step is a designer\'s eye, not another pass.', bounded: true }, 'studio'); return { verdict: 'stop', round }; }
   // the composed export (the one renderer's drawing of words, marks and imagery, saved by the browser) is what a reader sees;
   // when none is saved yet the imagery alone is judged and the event says so
-  let im = null, composed = false; const exportKey = 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export.png';
+  // the export the current evidence points at: a caption-only version shows the same tile, so its validation (and export) carries
+  const rdy0 = await stReadiness(env, p, a, v);
+  let im = null, composed = false; const exportKey = rdy0.validation && rdy0.technical !== 'stale' && rdy0.validation.exportKey ? rdy0.validation.exportKey : 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export.png';
   if (env.MIND_DOCS && inp.composed !== false) { try { const obj = await env.MIND_DOCS.get(exportKey); if (obj) { const buf = await obj.arrayBuffer(); if (buf.byteLength > 64 && buf.byteLength < 4500000) { im = { mime: (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', b64: b64FromBuf(buf) }; composed = true; } else if (buf.byteLength) await log('info', 'the composed export is ' + Math.round(buf.byteLength / 1024) + ' KB, too large to show the model; the imagery is judged instead'); } } catch (e) {} }
   if (!im) im = await stVersionImage(env, v, log);
   if (!im) throw new Error('no_image: nothing rendered to inspect (not retried)');
   if (!composed) await log('info', 'no composed export saved for this version: the imagery alone is inspected (the words and marks are described, not seen)');
   const ctx = await stContext(env, p, { channels: [a.channel], log });
   const camp = ctx.block.campaign || null; const L = v.layout || {};
+  // the deterministic evidence for exactly this composition, when a browser has measured it
+  const rdy = await stReadiness(env, p, a, v, ctx.kit);
+  const tech = rdy.validation && rdy.technical !== 'stale' ? rdy.validation.blocking.concat(rdy.validation.warnings) : [];
+  const baked = v.mode === 'artwork' ? stBakedWords(v) : [];
   // the whole text inventory: the copy fields on the tile, every free text layer (kicker, label, myth, fact, caption, free) and, for a frame, its siblings
   const textLayers = (L.layers || []).filter(l => l.type === 'text' && !l.hidden);
   const inventory = ['headline', 'support', 'cta'].filter(k => v.copy[k] && (v.mode === 'artwork' || textLayers.some(l => l.role === k))).map(k => k + ' "' + v.copy[k] + '"').concat(textLayers.filter(l => l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => (l.role || 'text') + ' "' + l.text + '"'));
@@ -8522,6 +8760,8 @@ async function stInspectStage(env, job, p, log) {
   if (L.frame && L.frame.of > 1) { try { const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? ORDER BY created').bind(p.id, a.family).all()).results || []; for (const r of rows) { if (r.id === a.id) continue; const sv = r.current ? await stVersion(env, r.current) : null; if (sv) siblings.push((sv.layout && sv.layout.frame ? 'frame ' + (sv.layout.frame.index + 1) : r.title) + ': "' + (sv.copy.headline || '') + '"' + (sv.layout && sv.layout.bg ? ', ground ' + (typeof sv.layout.bg === 'string' ? sv.layout.bg : sv.layout.bg.from + ' to ' + sv.layout.bg.to) : '') + (sv.image ? ', imagery on file' : ', no imagery')); } } catch (e) {} }
   const user = 'THE TILE: ' + a.title + ', ' + a.format + '. ' + (composed ? 'You see the COMPOSED TILE exactly as it will be exported: imagery, words, shapes and marks drawn by the renderer. Judge the whole: hierarchy, legibility, spacing, the mark, every word.' : v.mode === 'artwork' ? 'This is a full artwork: the words are painted into the image. Baked: ' + ((L.baked || []).join(', ') || 'all') + '.' : 'This is the IMAGERY ONLY (no composed export saved yet); the words and marks will be composed over it as live layers' + (L.v === 5 ? ' at: ' + textLayers.map(l => (l.role || 'text') + ' ' + l.x + ',' + l.y + ' ' + l.w + 'x' + l.h).join('; ') : L.design ? ' (' + stDescribeSpec(L.design) + ')' : '') + '. Judge the imagery and the room it leaves; do not score words you cannot see.')
     + '\nAPPROVED WORDS (the complete inventory; anything else legible is unapproved): ' + (inventory.join('; ') || '(none)') + (v.copy.caption ? '. The caption is posted beside the tile, not on it.' : '')
+    + (baked.length ? '\nPAINTED WORDS TO READ BACK (they are part of the bitmap; list in words.missing any you cannot read exactly): ' + baked.map(b => b.role + ' "' + b.text + '"').join('; ') : '')
+    + '\nDETERMINISTIC CHECKS OF THIS TILE (' + (rdy.technical === 'passed' || rdy.technical === 'failed' ? 'measured with the renderer at ' + ((L.stage || {}).w || '') + 'x' + ((L.stage || {}).h || '') + ', technical validation ' + rdy.technical : 'not measured yet: ' + rdy.technical.replace('_', ' ')) + '): ' + (tech.length ? tech.map(i => i.severity + ' ' + i.code + (i.layers && i.layers.length ? ' [' + i.layers.join(', ') + ']' : '') + ': ' + i.detail).join(' | ') : rdy.technical === 'passed' ? 'none' : '(none recorded)')
     + '\nMARKS THAT SHOULD APPEAR: ' + (marksOn.join(' and ') || (L.incomplete && L.incomplete.length ? 'none drawn - the required mark is not on file (incomplete)' : 'none')) + (camp && camp.logoPolicy === 'wordmark' ? '. The client logo must not appear on this campaign.' : '')
     + (siblings.length ? '\nCAROUSEL: this is frame ' + (L.frame.index + 1) + ' of ' + L.frame.of + '. Sibling frames: ' + siblings.join(' | ') + '. Judge consistency with them (type, colour, grid, mark) as part of identity.' : '')
     + '\nPLAN: ' + (L.v === 5 ? L.mediumName + ', ' + L.approach + '. ' + (L.story || '') + ' ' + (L.focal || '') + ' ' + (L.typography || '') + ' ' + (L.devices || '') : L.design ? stDescribeSpec(L.design) : L.templateName || 'house panel') + (v.context && v.context.prompt ? '\nIMAGE BRIEF GIVEN: ' + String(v.context.prompt).slice(0, 700) : '')
@@ -8537,11 +8777,19 @@ async function stInspectStage(env, job, p, log) {
   const words = { present: (Array.isArray(j.words && j.words.present) ? j.words.present : []).map(x => stStr(x, 80)).slice(0, 20), wrong: (Array.isArray(j.words && j.words.wrong) ? j.words.wrong : []).map(x => stStr(x, 80)).slice(0, 10) };
   const verdict = ['ship', 'fix', 'redo'].indexOf(j.verdict) >= 0 ? j.verdict : 'fix';
   const fix = j.fix && typeof j.fix === 'object' && ['design', 'render', 'edit', 'copy'].indexOf(j.fix.kind) >= 0 && verdict !== 'ship' ? { kind: j.fix.kind, instruction: stStr(j.fix.instruction, 400) } : null;
-  const issues = (Array.isArray(j.issues) ? j.issues : []).map(x => stStr(x, 160)).slice(0, 4);
+  // findings carry a severity; a plain string is treated as material, since nobody said it was only taste
+  const issues = (Array.isArray(j.issues) ? j.issues : []).map(x => x && typeof x === 'object' ? { text: stStr(x.text, 160), severity: ['blocking', 'material', 'cosmetic'].indexOf(x.severity) >= 0 ? x.severity : 'material' } : { text: stStr(x, 160), severity: 'material' }).filter(x => x.text).slice(0, 6);
+  words.missing = (Array.isArray(j.words && j.words.missing) ? j.words.missing : []).map(x => stStr(x, 80)).slice(0, 10);
   const unapproved = words.wrong.length ? words.wrong : [];
-  await stEvent(env, p.id, 'inspection', { eid: stId('e'), asset: a.id, version: v.id, round: round + 1, scores, words, issues, verdict, fix, composed, imageryOnly: !composed, inventory, siblings: siblings.length || undefined, note: stStr(j.note, 300), model: r.model, job: job.id, text: 'Inspection of ' + a.title + ' (version ' + v.id + ', ' + (composed ? 'the composed export' : 'imagery only - no composed export saved yet') + '): ' + verdict + ' - fidelity ' + scores.fidelity + ', hierarchy ' + scores.hierarchy + ', readability ' + scores.readability + ', relevance ' + scores.relevance + ', identity ' + scores.identity + ' of 5.' + (issues.length ? ' ' + issues.join(' ') : '') + (unapproved.length ? ' Wording in the image that is not approved copy: ' + unapproved.join(', ') + '.' : '') + (fix ? ' Correction offered (' + fix.kind + '): ' + fix.instruction : '') + (verdict === 'ship' ? ' A ship verdict is the art director\'s opinion, not an approval: approval stays a person\'s decision.' : '') }, 'studio');
+  const serious = issues.filter(x => x.severity !== 'cosmetic');
+  const techBlocking = rdy.validation && rdy.technical !== 'stale' ? rdy.validation.blocking : [];
+  // a ship verdict that names real defects, or sits over a failed measurement, is not an assessment anyone can act on
+  const assessment = verdict === 'ship' && (serious.length || unapproved.length || words.missing.length || techBlocking.length) ? 'inconsistent' : 'consistent';
+  const bakedCheck = baked.length ? { words: baked.map(b => b.role), missing: words.missing, verified: !!(composed && !unapproved.length && !words.missing.length && words.present.length) } : undefined;
+  const issueLine = issues.map(x => x.text + (x.severity !== 'material' ? ' (' + x.severity + ')' : ''));
+  await stEvent(env, p.id, 'inspection', { eid: stId('e'), asset: a.id, version: v.id, sig: rdy.sig, round: round + 1, scores, words, issues, verdict, assessment, technical: rdy.technical, baked: bakedCheck, fix, composed, imageryOnly: !composed, inventory, siblings: siblings.length || undefined, note: stStr(j.note, 300), model: r.model, job: job.id, text: 'Inspection of ' + a.title + ' (version ' + v.id + ', ' + (composed ? 'the composed export' : 'imagery only - no composed export saved yet') + '): ' + verdict + (assessment === 'inconsistent' ? ' (INCONSISTENT: the verdict is ship but ' + (techBlocking.length ? 'the technical validation is failing' : 'it names unresolved problems') + ' - review it)' : '') + ' - fidelity ' + scores.fidelity + ', hierarchy ' + scores.hierarchy + ', readability ' + scores.readability + ', relevance ' + scores.relevance + ', identity ' + scores.identity + ' of 5.' + (issueLine.length ? ' ' + issueLine.join(' ') : '') + (unapproved.length ? ' Wording in the image that is not approved copy: ' + unapproved.join(', ') + '.' : '') + (fix ? ' Correction offered (' + fix.kind + '): ' + fix.instruction : '') + (verdict === 'ship' ? ' A ship verdict is the art director\'s opinion, not an approval: approval stays a person\'s decision.' : '') }, 'studio');
   await log('out', 'inspection: ' + verdict + ' (' + Object.keys(scores).map(k => k + ' ' + scores[k]).join(', ') + ')' + (fix ? '; a ' + fix.kind + ' correction is offered, not applied' : ''));
-  return { verdict, scores, issues, fix, words, composed, round: round + 1, model: r.model };
+  return { verdict, assessment, technical: rdy.technical, scores, issues, fix, words, composed, round: round + 1, model: r.model };
 }
 // -- Suggested next directions: specific, editable instructions for this tile, split into design and imagery ----
 const ST_SUGGEST_SYS = 'You are the art director of an Australian political communications agency suggesting the next things the team might ask for on one social tile. You see the tile (attached when on file), its words, the brief, the campaign, the brand kit, the references and the recent feedback. Answer as strict JSON only, no prose: {"design":[{"text":"<=40 words: one imperative instruction about the composition, layout, panel, mark or CTA, specific to this tile and ready to send as written","why":"<=12 words","refs":["reference ids it draws on"],"basis":"rule|preference|reference|inferred","changes":"<=8 words: what changes","preserves":"<=8 words: what stays","paid":false}],"image":[{"text":"<=40 words: one photograph to make - subject, setting, framing, light, and where the quiet space for the words is","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":true}],"typography":[{"text":"<=30 words: one change to hierarchy, size, weight, case or emphasis","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":false}],"copy":[{"text":"<=30 words: one change to the words, in the client voice, figures only from the facts given","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":false}],"concept":[{"text":"<=40 words: one different concept worth exploring (medium, idea, composition)","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":true}]}. Two or three of each, each a different idea; design and typography suggestions never regenerate the imagery (paid false); image and concept suggestions cost a render (paid true); keep the campaign message; respect the brand rules, the brand and approved references and any recorded preferences; say for each what it is based on; Australian English, no exclamation marks.';
@@ -8568,7 +8816,10 @@ async function stSuggest(env, p, asset, opts) {
   if (!j || (!Array.isArray(j.design) && !Array.isArray(j.image))) return { ok: false, error: 'suggest_unparseable', detail: llmExcerpt(r.text).slice(0, 150), sig };
   const refNames = {}; refs.rows.forEach(x => { refNames[x.id] = x.name; });
   const clean = (arr, withRefs, paidDefault) => (Array.isArray(arr) ? arr : []).map(s => ({ text: stStr(s && s.text, 320).trim(), why: stStr(s && s.why, 120), refs: withRefs ? (Array.isArray(s && s.refs) ? s.refs : []).map(x => stClean(x, 24)).filter(x => refNames[x]).map(x => ({ id: x, name: refNames[x] })) : undefined, basis: ['rule', 'preference', 'reference', 'inferred'].indexOf(s && s.basis) >= 0 ? s.basis : 'inferred', changes: stStr(s && s.changes, 80) || undefined, preserves: stStr(s && s.preserves, 80) || undefined, paid: s && s.paid != null ? !!s.paid : paidDefault })).filter(s => s.text).slice(0, 4);
-  const out = { sig, at: Date.now(), asset: asset.id, version: v.id, design: clean(j.design, true, false), image: clean(j.image, false, true), typography: clean(j.typography, true, false), copy: clean(j.copy, false, false), concept: clean(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed };
+  const led = await stLedger(env, p.id); const facts = (ctx.kit.facts || []).filter(f => f.status !== 'pending' && (!f.campaign || f.campaign === p.campaign));
+  const figureCheck = list => list.map(sg => { const bad = stChecks({ body: sg.text }, led.claims, { facts }).filter(c => c.state === 'unsupported' || c.state === 'differs').map(c => c.text); return bad.length ? Object.assign(sg, { unverifiedFigures: bad, basis: sg.basis === 'rule' ? 'inferred' : sg.basis }) : sg; });
+  const _clean = clean; const cleanF = (arr, withRefs, paid) => figureCheck(_clean(arr, withRefs, paid));
+  const out = { sig, at: Date.now(), asset: asset.id, version: v.id, design: cleanF(j.design, true, false), image: cleanF(j.image, false, true), typography: cleanF(j.typography, true, false), copy: cleanF(j.copy, false, false), concept: cleanF(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed };
   try { await kvPut(env.AXIOM_KV, key, JSON.stringify(out), 6 * 3600); } catch (e) {}
   return Object.assign({ ok: true, cached: false }, out);
 }
@@ -10092,6 +10343,8 @@ export default {
           return jsonResp({ ok: true, ns: ns2, kit: kit || null, hasLogo: !!(kit && kit.hasLogo), logoUrl: kit && kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + (kit.updated || 0) : '' });
         }
         if (path === '/brand/logo') {
+          const lv = String(reqUrl.searchParams.get('v') || '').replace(/[^a-f0-9]/g, '').slice(0, 16);
+          if (lv && env.MIND_DOCS) { const o = await env.MIND_DOCS.get('brand/' + ns2 + '/logo@' + lv); if (o) return new Response(await o.arrayBuffer(), { headers: Object.assign({}, CORS, { 'Content-Type': (o.httpMetadata && o.httpMetadata.contentType) || 'image/png', 'Cache-Control': 'private, max-age=31536000, immutable' }) }); }
           const lg = await brandLogo(env, ns2);
           if (!lg) return jsonResp({ error: 'no_logo' }, 404);
           return new Response(lg.bytes, { headers: Object.assign({}, CORS, { 'Content-Type': lg.mime, 'Cache-Control': 'private, max-age=300' }) });
@@ -10099,7 +10352,12 @@ export default {
         if (path === '/brand/wordmark') {
           const cid = kitSlug(reqUrl.searchParams.get('campaign') || '');
           if (!cid || !env.MIND_DOCS) return jsonResp({ error: 'no_wordmark' }, 404);
-          const obj = await env.MIND_DOCS.get('brand/' + ns2 + '/wordmark/' + cid);
+          const wvar = kitSlug(reqUrl.searchParams.get('variant') || ''); const wv = String(reqUrl.searchParams.get('v') || '').replace(/[^a-f0-9]/g, '').slice(0, 16);
+          let obj = null;
+          if (wvar) { const kitW = await brandKit(env, ns2); const camp = ((kitW && kitW.campaigns) || []).find(c => c.id === cid); const ent = camp && (camp.wordmarks || []).find(w => w.variant === wvar); obj = await env.MIND_DOCS.get('brand/' + ns2 + '/wordmark/' + cid + '/' + wvar + '/' + (wv || (ent && ent.v) || '')); }
+          else if (wv) obj = await env.MIND_DOCS.get('brand/' + ns2 + '/wordmark/' + cid + '@' + wv);
+          if (obj && (wv || wvar)) return new Response(await obj.arrayBuffer(), { headers: Object.assign({}, CORS, { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', 'Cache-Control': wv ? 'private, max-age=31536000, immutable' : 'private, max-age=300' }) });
+          if (!obj && !wvar) obj = await env.MIND_DOCS.get('brand/' + ns2 + '/wordmark/' + cid);
           if (!obj) return jsonResp({ error: 'no_wordmark', detail: 'No wordmark on file for campaign ' + cid + '; upload one with tools/brand-logo.py --campaign ' + cid + ' --wordmark.' }, 404);
           return new Response(await obj.arrayBuffer(), { headers: Object.assign({}, CORS, { 'Content-Type': (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/png', 'Cache-Control': 'private, max-age=300' }) });
         }
@@ -10335,6 +10593,7 @@ export default {
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
           if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
           if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
+          if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
           if (path === '/studio/brief/check') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const ns0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_sources WHERE project=?').bind(p.id).first(); const nd0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_directions WHERE project=?').bind(p.id).first(); return jsonResp(Object.assign({ ok: true }, await stBriefCheck(env, p, null, { hasSource: Number((ns0 || {}).n) > 0, hasDirection: Number((nd0 || {}).n) > 0, instruction: qf('instruction') }))); }
           if (path === '/studio/brief/suggest') { const p = qf('project') ? await stProject(env, qf('project')) : null; if (qf('project') && !p) return jsonResp({ error: 'unknown_project' }, 404); if (!p && !qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); if (qf('ai') === '1' && auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Model suggestions spend a call; a full key is needed. The sourced suggestions are read-role.' }, 403); return jsonResp(await stBriefSuggest(env, p, { ns: qf('ns'), campaign: qf('campaign'), ai: qf('ai') === '1' })); }
@@ -10454,7 +10713,15 @@ export default {
           const cur = await stCurrent(env, pair.asset); if (!cur) return jsonResp({ error: 'no_version' }, 400);
           if (part === 'design' && decision === 'approve' && cur.layout && Array.isArray(cur.layout.incomplete) && cur.layout.incomplete.length) return jsonResp({ error: 'incomplete', detail: 'The composition is incomplete: ' + cur.layout.incomplete.map(i => i.text).join('; ') + '. Upload the mark and re-lay out, then approve.', incomplete: cur.layout.incomplete }, 409);
           if (/^(ai|model|inspection|studio)$/i.test(String(who))) return jsonResp({ error: 'human_only', detail: 'Approval is a person\'s decision; a model verdict never approves.' }, 403);
-          await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(sb.reason, 400), who, now).run();
+          let ackNote = '';
+          if (part === 'design' && decision === 'approve') {
+            const rd = await stReadiness(env, pair.project, pair.asset, cur);
+            if (rd.technical !== 'passed' && rd.technical !== 'not_applicable') return jsonResp({ error: rd.technical === 'failed' ? 'validation_failed' : rd.technical === 'stale' ? 'validation_stale' : 'not_validated', detail: rd.reasons.join(' ') + ' Design approval waits for a passing technical validation of exactly this composition.', readiness: rd }, 409);
+            if (rd.baked && !rd.baked.verified && !sb.acknowledgeInspection) return jsonResp({ error: 'baked_text_unverified', detail: 'The words are painted into this artwork and ' + rd.baked.why + '. Look at the tile, then approve with acknowledgeInspection if every word is right.', readiness: rd }, 409);
+            if (rd.inspection.state === 'inconsistent' && !sb.acknowledgeInspection) return jsonResp({ error: 'inspection_inconsistent', detail: 'The art director answered ship while naming unresolved problems. Review the inspection, then approve with acknowledgeInspection if you accept it.', readiness: rd }, 409);
+            if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote = ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
+          }
+          await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(stStr(sb.reason, 360) + ackNote, 400), who, now).run();
           await stBump(env, pair.project.id);
           let outcome = '';
           if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
@@ -10506,6 +10773,14 @@ export default {
           const text = String(sb.text || '').trim().slice(0, 2000); if (!text) return jsonResp({ error: 'empty_note' }, 400);
           await stEvent(env, p.id, 'note', { text, target: stStr(sb.target, 80) }, who); await stBump(env, p.id);
           return jsonResp({ ok: true });
+        }
+        // a browser's measurement of one version at its output size (and, optionally, the composed PNG): re-judged here, recorded against the exact composition
+        if (path === '/studio/validation') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project' }, 403);
+          const r = await stValidationSubmit(env, pair, sb, who);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '', problems: r.problems }, r.status || 400);
+          return jsonResp(r);
         }
         if (path === '/studio/render/save') {
           // the browser rendered a composition (the one renderer, at the stage's native size) and hands the PNG back for export

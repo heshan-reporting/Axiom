@@ -180,7 +180,7 @@ await t('first production: the creative team may choose a composition per channe
 await t('the spec engine covers every format: zones and styles place the words and the photograph consistently, locked and hidden layers carry through, and the house default for each format is what it was', async () => {
   const mk = async (format, channel) => (await req('POST', '/studio/asset', { project: P, family: 'F', channel, format, title: 'T ' + format, copy: { headline: 'H', support: 'S', cta: 'C' }, image: { key: 'studio/x/y/fisher.png', url: '', model: 'm', size: '2K' }, mode: 'composition' })).d.asset;
   const sq = await mk('1:1', 'linkedin'), wide = await mk('16:9', 'x'), tall = await mk('9:16', 'instagram');
-  eq(geoOf(sq.versions[0].layout), [6, 50, 74, 38]); eq(geoOf(wide.versions[0].layout), [6, 34, 52, 54]); eq(geoOf(tall.versions[0].layout), [7, 58, 74, 30]);
+  eq(geoOf(sq.versions[0].layout), [6, 50, 74, 38]); eq(geoOf(wide.versions[0].layout), [6, 34, 52, 54]); eq(geoOf(tall.versions[0].layout), [7, 47, 80, 31], 'P9: the story zone sits clear of the platform interface (top 14%, bottom 20%)');
   // a direction on the landscape: split keeps the words left and the photograph right whatever the zone word, a gradient on the left darkens from the left
   const wj = await jobRun(P, 'revise', { target: 'asset', asset: wide.id, instruction: 'Use a split layout and create a wider photograph' }); eq(wj.state, 'done', wj.error);
   const w = (await get(P)).assets.find(x => x.id === wide.id); const wl = w.versions[w.versions.length - 1].layout; eq(geoOf(wl), [0, 0, 48, 100]); eq(wl.image, { x: 48, y: 0, w: 52, h: 100 });

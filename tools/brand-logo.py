@@ -13,6 +13,17 @@ A campaign can carry its own mark. Hands Off Our Fuel tiles show the HANDS OFF O
   python3 tools/brand-logo.py path/to/hoof-wordmark.png --ns mca --campaign hoof --wordmark --key $AXIOM_KEY
   python3 tools/brand-logo.py --ns mca --campaign hoof --policy wordmark --key $AXIOM_KEY   # logo | wordmark | both | none
 
+A campaign can hold several approved colour variants of its wordmark (each stored under its own immutable, versioned
+key; uploading one never replaces another). The Studio offers them all on the mark layer, picks the one that suits a
+known ground, and the browser's measurement switches to the variant with the best real contrast when it fixes a layout:
+
+  python3 tools/brand-logo.py hoof-wordmark-blue.png  --ns mca --campaign hoof --wordmark --variant blue  --tone colour --default --key $AXIOM_KEY
+  python3 tools/brand-logo.py hoof-wordmark-white.png --ns mca --campaign hoof --wordmark --variant white --tone light --key $AXIOM_KEY
+  python3 tools/brand-logo.py hoof-wordmark-black.png --ns mca --campaign hoof --wordmark --variant black --tone dark  --key $AXIOM_KEY
+
+--tone says what the variant is (light for a white mark, dark for a black one, colour otherwise); --default makes it
+the variant used when the ground is unknown.
+
 The policy decides which mark the Studio places on that campaign's compositions (uploading a wordmark sets it to
 "wordmark" unless the campaign already had a policy). Nothing else in the kit is touched: campaigns, facts, banned
 terms, palette and fonts stay as they are.
@@ -45,12 +56,17 @@ def main():
     ap.add_argument('--worker', default=DEFAULT_WORKER); ap.add_argument('--check', action='store_true')
     ap.add_argument('--campaign', help='campaign id the wordmark or policy belongs to'); ap.add_argument('--wordmark', action='store_true', help='upload the file as that campaign\'s wordmark')
     ap.add_argument('--policy', choices=['logo', 'wordmark', 'both', 'none'], help='which mark that campaign\'s compositions carry')
+    ap.add_argument('--variant', help='with --wordmark: the name of this approved colour variant (blue, white, black...)')
+    ap.add_argument('--tone', choices=['light', 'dark', 'colour'], help='with --variant: light for a white mark, dark for a black one, colour otherwise')
+    ap.add_argument('--default', action='store_true', help='with --variant: the variant used when the ground is unknown')
     a = ap.parse_args()
     base = a.worker.rstrip('/')
     if a.policy and not a.campaign:
         raise SystemExit('--policy needs --campaign')
     if a.wordmark and not a.campaign:
         raise SystemExit('--wordmark needs --campaign')
+    if a.variant and not a.wordmark:
+        raise SystemExit('--variant goes with --wordmark')
     if a.policy and not a.file:
         k = http(base, a.key, 'POST', '/brand/kit', {'ns': a.ns, 'removeWordmark': False, 'wordmarkCampaign': a.campaign, 'logoPolicy': a.policy, 'wordmarkB64': ''})
         camp = next((c for c in (k.get('kit') or {}).get('campaigns') or [] if c.get('id') == a.campaign), None)
@@ -63,7 +79,8 @@ def main():
         kit = k.get('kit') or {}
         print('%s: %s; logo %s; %d campaigns, %d facts, %d banned terms' % (a.ns, kit.get('name') or 'no kit', 'on file (' + str(kit.get('logoMime')) + ')' if k.get('hasLogo') else 'not on file', len(kit.get('campaigns') or []), len(kit.get('facts') or []), len(kit.get('banned') or [])))
         for c in kit.get('campaigns') or []:
-            print('  campaign %s: mark policy %s, wordmark %s' % (c.get('id'), c.get('logoPolicy') or 'logo', 'on file' if c.get('hasWordmark') else 'not on file'))
+            vs = c.get('wordmarks') or []
+            print('  campaign %s: mark policy %s, wordmark %s%s' % (c.get('id'), c.get('logoPolicy') or 'logo', 'on file' if c.get('hasWordmark') else 'not on file', ('; variants ' + ', '.join('%s (%s%s, v %s)' % (w.get('variant'), w.get('tone'), ', default' if w.get('variant') == c.get('wordmarkDefault') else '', w.get('v')) for w in vs)) if vs else ''))
         if not a.file:
             return
     if not os.path.isfile(a.file):
@@ -78,10 +95,17 @@ def main():
         b64 = base64.b64encode(fh.read()).decode()
     if a.wordmark:
         body = {'ns': a.ns, 'wordmarkB64': b64, 'wordmarkMime': mime, 'wordmarkCampaign': a.campaign}
+        if a.variant:
+            body['wordmarkVariant'] = a.variant; body['wordmarkTone'] = a.tone or 'colour'; body['wordmarkDefault'] = bool(a.default)
         if a.policy:
             body['logoPolicy'] = a.policy
         r = http(base, a.key, 'POST', '/brand/kit', body)
         camp = next((c for c in (r.get('kit') or {}).get('campaigns') or [] if c.get('id') == a.campaign), {})
+        if a.variant:
+            ent = next((w for w in camp.get('wordmarks') or [] if w.get('variant') == a.variant.lower()), {})
+            print('wordmark variant %s stored for %s / %s: %s, %d KB, tone %s, version %s%s; mark policy %s' % (ent.get('variant'), a.ns, a.campaign, mime, size // 1024, ent.get('tone'), ent.get('v'), ' (default)' if camp.get('wordmarkDefault') == ent.get('variant') else '', camp.get('logoPolicy')))
+            print('variants on file: ' + ', '.join(w.get('variant') for w in camp.get('wordmarks') or []))
+            return
         print('wordmark stored for %s / %s: %s, %d KB, served at /brand/wordmark?ns=%s&campaign=%s; mark policy %s' % (a.ns, a.campaign, mime, size // 1024, a.ns, a.campaign, camp.get('logoPolicy')))
         print('every new composition on this campaign places it exactly from this file%s; existing versions keep their layout until re-laid out' % (' and never the client logo' if camp.get('logoPolicy') == 'wordmark' else ''))
         return

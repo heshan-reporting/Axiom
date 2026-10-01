@@ -1156,6 +1156,57 @@ re-normalises the master's plan per format (`context.master`).
   `tests/studio-compose-test.mjs` (5), `tests/studio-showcase-test.mjs` (10),
   the P8 case in the browser harness (18).
 
+**Typography, validation and production readiness (build `studio-p9`;
+`CREATIVE-STUDIO.md` s.15).** The renderer measures what it draws:
+`layoutText()` gives each text layer its lines, size, padding and the space it
+really occupies (emphasis and rotation included; explicit line breaks kept,
+long words and addresses broken and reported); `measure()` reports every layer
+at the output size; `layoutRules()` judges the boxes - overflow, collisions
+between any words and marks (an `overlaps: [id]` exception covers that pair
+only), off the stage, the Instagram 9:16 interface (top 14%, bottom 20%),
+unreadable type and contrast, duplicate ids, impossible geometry, unloaded
+marks and sketch imagery (blocking in production), font fallbacks. The same
+function is in the worker between `/* RULES:BEGIN */` and `/* RULES:END */`
+and must stay byte-identical (the layout harness checks it). `ensureFonts()`
+waits for the faces and reports, per role and weight, the family that drew.
+`validate()` is the whole check; `repair()` is the smallest geometric fix that
+never changes a word (fit boxes, restack with gaps, lift clear of the safe area
+and marks, refit panels, widen, move a mark only without an observed
+placement, bounded type steps, the approved mark variant that measures best;
+locked layers named, copy too long says by how much) and is saved as a layout
+version with no render. **Evidence is the server's:** `POST /studio/validation
+{asset, version, report, imageB64}` (full) re-judges the report against the
+version (`stValidationJudge`: size, layers, geometry within 1.6 px, displayed
+characters, type size, plausible lines, mark file; a mismatch is 422
+`report_mismatch`) with the shared rules and stores it in D1
+`studio_validations` under `stCompSig` (displayed words, layout, imagery, mark
+files and versions, fonts, format, stage); the PNG becomes the export the
+inspection reads. `GET /studio/readiness?asset=&version=` (read) keeps
+technical (not_validated / stale / failed / passed), the art director's
+assessment (none / stale / imagery_only / inconsistent / verdict), painted
+words (artwork mode) and approval apart. Design approval is 409 without a
+passing validation of exactly the current composition, without painted words
+read back, or on an inconsistent inspection unless `acknowledgeInspection`
+(which never overrides a technical blocker); export leaves out anything not
+technically passed. A caption-only version carries the evidence; a displayed
+word or a new mark file makes it stale (`stSig('design')` includes the
+displayed words, so approvals made before p9 drop on deploy). The inspection
+records severities and `assessment: inconsistent` for ship with problems.
+`stChecks` reads every displayed layer, the campaign's approved facts only
+(pending and other campaigns named), units (dollars are not cents, a dropped
+unit differs) and periods. Wordmark variants: `POST /brand/kit
+{wordmarkCampaign, wordmarkVariant, wordmarkTone light|dark|colour,
+wordmarkDefault, wordmarkB64}` -> R2 `brand/<ns>/wordmark/<campaign>/<variant>/<v>`,
+served by `/brand/wordmark?ns=&campaign=&variant=&v=`; the logo has immutable
+`logo@<v>` copies (`/brand/logo?v=`); `tools/brand-logo.py --variant --tone
+--default`. In-app: the Readiness panel (three states, Fix layout (no render),
+Measure again, Download draft PNG), measured on opening and filed when there
+is no evidence. Harnesses: `tests/studio-layout-browser.mjs` (64, real
+Chromium; writes `tests/shot-layout-repair.png`, synthetic) and
+`tests/studio-p9-worker.mjs` (14); `tests/fixtures/studio-layouts.mjs` holds the
+labelled HOOF reconstruction and `tests/studio-measure-stub.mjs` a measurement
+for worker-only harnesses.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

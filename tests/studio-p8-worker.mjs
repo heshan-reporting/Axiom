@@ -139,7 +139,7 @@ await t('a missing mandatory mark blocks design approval with the reason; copy a
   const w = await req('POST', '/brand/kit', { ns: 'mca', wordmarkB64: PNG, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' }); eq(w.status, 200);
   const j = await jobRun(P, 'copy', { channels: ['instagram'], deliverable: 'set', render: false }); eq(j.state, 'done', j.error);
   const g = await get(P); const a = g.assets[g.assets.length - 1]; const v = cur(g, a.id);
-  eq(v.layout.incomplete, []); const wm = layerOf(v.layout, 'wordmark'); ok(wm && wm.src === '/brand/wordmark?ns=mca&campaign=hoof' && wm.exact, 'the exact wordmark'); eq(wm.x, 5, 'bottom left, as observed'); eq(v.layout.markPlacement.basis, 'observed'); ok(!layerOf(v.layout, 'logo'), 'never the MCA logo on HOOF');
+  eq(v.layout.incomplete, []); const wm = layerOf(v.layout, 'wordmark'); ok(wm && /^\/brand\/wordmark\?ns=mca&campaign=hoof&v=[a-f0-9]+$/.test(wm.src) && wm.exact, 'the exact wordmark'); eq(wm.x, 5, 'bottom left, as observed'); eq(v.layout.markPlacement.basis, 'observed'); ok(!layerOf(v.layout, 'logo'), 'never the MCA logo on HOOF');
 });
 
 await t('the campaigns stay apart: a national project carries the client logo and no wordmark; an AEP project sees none of MCA\'s references, marks or facts; another campaign\'s reference is excluded from a recommended pack and named', async () => {

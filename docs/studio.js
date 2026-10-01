@@ -38,27 +38,45 @@
   const isClear = t => /^(adapt|write|make|produce|resize|shorten|draft|three|two|one|give me|turn|create)\b/i.test(String(t || '').trim());
 
   /* ------------------------------------------------------------ images behind the key */
-  const imgCache = new Map();
+  /* images behind the key: cached by URL (mark URLs carry the file's version, so a replaced logo or wordmark is a new URL);
+     a failed load is remembered as a failure, shown, and tried again later - never cached as an image that is not there */
+  const imgCache = new Map(); const imgFailed = new Map();
   async function keyedImage(url) {
     if (!url) return null;
     if (imgCache.has(url)) return imgCache.get(url);
-    const pr = (async () => { try { const b = await blobUrl(url); return await R.loadImage(b); } catch (e) { return null; } })();
+    const pr = (async () => { try { const b = await blobUrl(url); const im = await R.loadImage(b); imgFailed.delete(url); return im; } catch (e) { imgFailed.set(url, String((e && e.message) || e).slice(0, 120)); imgCache.delete(url); return null; } })();
     imgCache.set(url, pr); return pr;
   }
   async function loadImages(v, ns) {
     const layout = (v && v.layout) || {}; const want = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src);
     const [bg, logo, ...rest] = await Promise.all([keyedImage(v && v.image && v.image.url), keyedImage(ns ? '/brand/logo?ns=' + encodeURIComponent(ns) : '')].concat(want.map(l => keyedImage(l.src))));
-    const out = { bg, logo }; want.forEach((l, i) => { if (rest[i]) out[l.id] = rest[i]; }); return out;
+    const out = { bg, logo }; want.forEach((l, i) => { if (rest[i]) out[l.id] = rest[i]; });
+    const failed = [v && v.image && v.image.url].concat(want.map(l => l.src)).filter(u => u && imgFailed.has(u));
+    return Object.defineProperty(out, '_failed', { value: failed, enumerable: false });
   }
-  /* the background from the version, and every image layer (the client logo, a campaign wordmark, an image region) from its own src, keyed by layer id */
-  function useImages(v, ns, layoutOverride) {
-    const [imgs, setImgs] = useState({ bg: null, logo: null });
-    const bgUrl = v && v.image && v.image.url; const logoUrl = ns ? '/brand/logo?ns=' + encodeURIComponent(ns) : '';
+  /* everything a composition needs before it is drawn for real: every image layer (keyed by layer id) and the fonts its words use.
+     The canvas is drawn at once (a draft) and again when the fonts or any image arrive; `ready` says measurement may begin. */
+  function useComposition(v, ns, layoutOverride, copy) {
     const layout = layoutOverride || (v && v.layout) || {};
+    const bgUrl = v && v.image && v.image.url;
     const srcs = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src).map(l => l.id + '=' + l.src).join('|');
-    useEffect(() => { let live = true; (async () => { const want = srcs ? srcs.split('|').map(s => { const i = s.indexOf('='); return [s.slice(0, i), s.slice(i + 1)]; }) : []; const [bg, logo, ...rest] = await Promise.all([keyedImage(bgUrl), keyedImage(logoUrl)].concat(want.map(([, u]) => keyedImage(u)))); if (!live) return; const out = { bg, logo }; want.forEach(([id], i) => { if (rest[i]) out[id] = rest[i]; }); setImgs(out); })(); return () => { live = false; }; }, [bgUrl, logoUrl, srcs]);
-    return imgs;
+    const words = JSON.stringify((Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'text').map(l => [l.font, l.weight])) + JSON.stringify(layout.fonts || {});
+    const [st, setSt] = useState({ imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: '' });
+    useEffect(() => {
+      let live = true; setSt(s => Object.assign({}, s, { ready: false }));
+      (async () => {
+        const imgs = await loadImages(Object.assign({}, v || {}, { layout }), ns);
+        const fonts = layout.layers ? await R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 4000 }) : null;
+        if (live) setSt({ imgs, fonts, failed: imgs._failed || [], ready: true, key: (bgUrl || '') + '|' + srcs + '|' + words + '|' + Date.now() });
+      })();
+      // a face that finishes loading later still changes the measure: redraw and re-measure
+      const onFonts = () => { if (live && layout.layers) R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 1500 }).then(fonts => { if (live) setSt(s => Object.assign({}, s, { fonts, key: s.key + '+f' })); }); };
+      if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', onFonts);
+      return () => { live = false; if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', onFonts); };
+    }, [bgUrl, srcs, words, ns]);
+    return st;
   }
+  function useImages(v, ns, layoutOverride) { return useComposition(v, ns, layoutOverride).imgs; }
 
   /* ------------------------------------------------------------ small parts */
   const Lbl = ({ children }) => html`<div class="st-lbl">${children}</div>`;
@@ -68,16 +86,16 @@
   /** The composition: the one renderer at preview size. A copy-only version is a text card; a flattened legacy tile is its image. */
   function Composition({ v, a, ns, size, copy }) {
     const layout = v && v.layout && v.layout.layers ? v.layout : null; const c = copy || (v && v.copy) || {};
-    const ref = useRef(null); const imgs = useImages(v, ns, layout);
+    const ref = useRef(null); const comp = useComposition(v, ns, layout, c); const imgs = comp.imgs;
     useEffect(() => {
       const el = ref.current; if (!el) return;
       if (layout) { const w = size === 'thumb' ? 192 : size === 'card' ? 480 : Math.min(1080, Math.max(320, Math.round((el.parentElement ? el.parentElement.clientWidth : 520) * 2))); R.render(layout, c, imgs, w, el); }
       else if (imgs.bg) { el.width = imgs.bg.naturalWidth; el.height = imgs.bg.naturalHeight; el.getContext('2d').drawImage(imgs.bg, 0, 0); }
-    }, [layout, JSON.stringify(c), imgs.bg, imgs.logo, size]);
+    }, [layout, JSON.stringify(c), comp.key, size]);
     if (!layout && !(v && v.image)) return html`<div class=${'st-copycard' + (size === 'thumb' ? ' thumb' : '')}><div class="st-copycard-h">${c.headline || c.title || '(no headline)'}</div>${size !== 'thumb' ? html`<div class="st-copycard-b">${c.caption || c.body || ''}</div>` : null}<div class="st-comp-tag">copy only</div></div>`;
     return html`<div class=${'st-comp' + (size === 'thumb' ? ' thumb' : '')} role="img" aria-label=${c.alt || c.headline || ''}>
       <canvas class="st-canvas" ref=${ref}></canvas>
-      ${size !== 'thumb' && size !== 'card' ? html`<div class="st-comp-tag">${v.mode === 'artwork' ? 'full artwork, words in the bitmap' + (layout && layout.layers.some(l => l.role === 'logo' || l.role === 'wordmark') ? ', mark live' : '') : layout ? (layout.v === 5 ? (v.image || (layout.regions || []).every(r => /keep the current/i.test(r.prompt || '')) ? 'editable composition, ' : 'sketch (imagery not generated yet), ') + (layout.mediumName || 'plan') : 'editable composition, ' + (layout.templateName || layout.template)) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') + (v.image.fallback ? ' (fallback from ' + (v.image.requested || 'the requested model') + ')' : '') + ((v.context || {}).size && v.image.size && v.context.size !== v.image.size ? ', asked ' + v.context.size : '') : layout ? ' - no imagery yet' : ''}${layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : ''}</div>` : null}
+      ${size !== 'thumb' && size !== 'card' ? html`<div class="st-comp-tag">${v.mode === 'artwork' ? 'full artwork, words in the bitmap' + (layout && layout.layers.some(l => l.role === 'logo' || l.role === 'wordmark') ? ', mark live' : '') : layout ? (layout.v === 5 ? (v.image || (layout.regions || []).every(r => /keep the current/i.test(r.prompt || '')) ? 'editable composition, ' : 'sketch (imagery not generated yet), ') + (layout.mediumName || 'plan') : 'editable composition, ' + (layout.templateName || layout.template)) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') + (v.image.fallback ? ' (fallback from ' + (v.image.requested || 'the requested model') + ')' : '') + ((v.context || {}).size && v.image.size && v.context.size !== v.image.size ? ', asked ' + v.context.size : '') : layout ? ' - no imagery yet' : ''}${layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : ''}${comp.failed.length ? ' - ' + comp.failed.length + ' image' + (comp.failed.length === 1 ? '' : 's') + ' failed to load' : ''}${comp.fonts && comp.fonts.fallback.length ? ' - fallback fonts' : ''}</div>` : null}
     </div>`;
   }
 
@@ -386,7 +404,25 @@
       <div class="st-family-row">${list.map(x => html`<button key=${x.id} class=${'st-family-item' + (x.id === a.id ? ' on' : '')} onClick=${() => onOpen && onOpen(x.id)} title=${x.title}><${Composition} v=${current(x)} a=${x} ns=${p.ns} size="thumb" /><span>${frameOf(x) ? frameOf(x) + '. ' : ''}${x.title}</span></button>`)}${adapted.filter(x => x.family !== a.family).map(x => html`<button key=${x.id} class="st-family-item" onClick=${() => onOpen && onOpen(x.id)}><${Composition} v=${current(x)} a=${x} ns=${p.ns} size="thumb" /><span>adaptation: ${x.title}</span></button>`)}</div>
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen }) {
+  const TECH_WORD = { passed: 'passed', failed: 'failed', stale: 'not validated (stale)', not_validated: 'not validated', not_applicable: 'not applicable', unknown: 'unknown', none: 'not validated' };
+  const TECH_KIND = { passed: 'ok', failed: 'bad', stale: 'warn', not_validated: 'warn' };
+  const INS_WORD = { none: 'not inspected', stale: 'inspected an earlier composition', imagery_only: 'imagery only (not a finished-layout review)', inconsistent: 'inconsistent: ship with unresolved problems', ship: 'ship', fix: 'fix', redo: 'redo', stop: 'bounded: a designer next' };
+  /** Three things kept apart: the measured technical validation, the art director's opinion, and a person's approval. */
+  function Readiness({ a, v, val, measuring, ro, onRepair, onMeasure, onDraft, repairing, repairNote }) {
+    const rd = a.readiness || {}; const ins = rd.inspection || { state: 'none' }; const appr = standing(a, 'design');
+    const layoutCodes = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
+    const fixable = val && val.issues.some(i => layoutCodes[i.code] || i.code === 'mark_low_contrast');
+    return html`<div class="st-ready" aria-label="Readiness">
+      <div class="st-ready-row"><b>Technical validation</b> <${Chip} kind=${TECH_KIND[rd.technical] || ''}>${TECH_WORD[rd.technical] || rd.technical || 'not validated'}</${Chip}>${measuring ? html` <span class="ov-dim">measuring at ${v.layout && v.layout.stage ? v.layout.stage.w + 'x' + v.layout.stage.h : 'native size'}...</span>` : rd.validation ? html` <span class="ov-dim">${aest(rd.validation.at)}, ${rd.validation.who}</span>` : null}</div>
+      ${val ? html`<ul class="st-vallist st-val">${val.issues.length ? val.issues.map((i, k) => html`<li key=${k}><${Chip} kind=${i.severity === 'blocking' ? 'bad' : i.severity === 'warning' ? 'warn' : ''}>${i.code.replace(/_/g, ' ')}</${Chip}> ${i.layers.length ? html`<b>${i.layers.join(', ')}</b> ` : null}<span class="ov-dim">${i.detail}</span></li>`) : html`<li><span class="ov-dim">No collisions, overflow, clipping or missing assets measured at the output size.</span></li>`}${val.fonts ? html`<li class="ov-dim">Fonts: ${Object.keys(val.fonts.roles || {}).map(k => k + ' ' + val.fonts.roles[k].used + (val.fonts.roles[k].fallback ? ' (asked ' + val.fonts.roles[k].requested + ')' : '')).join('; ') || 'none needed'}</li>` : null}</ul>` : null}
+      ${rd.technical && rd.technical !== 'passed' && rd.reasons && rd.reasons.length ? html`<div class="ov-dim">${rd.reasons.join(' ')}</div>` : null}
+      ${!ro ? html`<div class="st-ready-acts">${fixable ? html`<button class="btn sm" disabled=${repairing} onClick=${onRepair} title="Fit boxes to their measured lines, restack, widen, move a mark, a bounded type step, a better approved mark variant - never the words; a layout version, no render">Fix layout (no render)</button>` : null}<button class="btn sm ghost" disabled=${measuring} onClick=${onMeasure}>Measure again</button><button class="btn sm ghost" onClick=${onDraft} title="A PNG labelled as a draft: not validated production artwork">Download draft PNG</button></div>` : null}
+      ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict ? ' warn' : '')}>${repairNote.text}</div>` : null}
+      <div class="st-ready-row"><b>Art direction</b> <${Chip} kind=${ins.state === 'ship' ? 'ok' : ins.state === 'inconsistent' || ins.state === 'redo' ? 'bad' : ins.state === 'none' ? '' : 'warn'}>${INS_WORD[ins.state] || ins.state}</${Chip}>${rd.baked ? html` <${Chip} kind=${rd.baked.verified ? 'ok' : 'warn'}>${rd.baked.verified ? 'painted words read back' : 'painted words not verified'}</${Chip}>` : null} <span class="ov-dim">an opinion; it never approves and never outranks the measurements</span></div>
+      <div class="st-ready-row"><b>Human approval</b> <${Chip} kind=${appr ? 'ok' : ''}>${appr ? 'design approved by ' + appr.by : 'design not approved'}</${Chip}>${appr && rd.technical !== 'passed' && rd.technical !== 'not_applicable' ? html` <span class="ov-dim">the approval stands, but export waits for a passing validation</span>` : null}</div>
+    </div>`;
+  }
+  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair }) {
     const v = current(a);
     const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.id, a.current]);
@@ -401,6 +437,20 @@
     // on a full artwork the words are in the bitmap: the fields show them but cannot change them
     const baked = v.mode === 'artwork' ? new Set((v.layout || {}).baked || ['headline', 'support', 'cta']) : new Set();
     const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
+    const comp = useComposition(v, p.ns, v.layout, v.copy);
+    const [val, setVal] = useState(null); const [measuring, setMeasuring] = useState(false); const [repairing, setRepairing] = useState(false); const [repairNote, setRepairNote] = useState(null);
+    const filed = useRef('');
+    const measure = useCallback(async (force) => {
+      if (!v || !v.layout || !Array.isArray(v.layout.layers) || !comp.ready) return;
+      const r = R.validate(v.layout, v.copy, comp.imgs, { fonts: comp.fonts, channel: a.channel, format: a.format }); setVal(r);
+      const rd = a.readiness || {}; const sigKey = v.id + '|' + r.issues.map(i => i.code + ':' + i.layers.join(',')).join(';') + '|' + (comp.fonts ? comp.fonts.fallback.join(',') : '');
+      // file the evidence when the worker has none for this composition, or when what was measured disagrees with what it holds
+      const disagrees = (rd.technical === 'passed' && !r.ok) || (rd.technical === 'failed' && r.ok);
+      if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && filed.current !== sigKey) { filed.current = sigKey; setMeasuring(true); try { await onValidate(a, v, r, comp); } finally { setMeasuring(false); } }
+    }, [v && v.id, comp.key, comp.ready, a.readiness && a.readiness.technical]);
+    useEffect(() => { measure(false); }, [measure]);
+    const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
+    const draftPng = async () => { const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u = URL.createObjectURL(blob); const el = document.createElement('a'); el.href = u; el.download = (a.title + '-v' + vnum(a, v) + '-DRAFT-not-validated.png').replace(/[^a-z0-9.-]+/gi, '_'); document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
     return html`<div class="st-asset">
       <div class="st-asset-head">
         <div><b>${a.title}</b> <span class="ov-dim">${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}, ${a.family}; v${vnum(a, v)} of ${a.versions.length}, ${v.note}${v.who ? ', ' + v.who : ''}</span></div>
@@ -421,6 +471,7 @@
         ${v.context && v.context.regions ? html`<div class="st-flatnote">${Object.keys(v.context.regions).map(k => 'region ' + k + ': ' + v.context.regions[k].model + (v.context.regions[k].size ? ' ' + v.context.regions[k].size : '') + (v.context.regions[k].alpha === false ? ' - opaque, no transparency' : v.context.regions[k].alpha ? ' - transparent' : '')).join('; ')}</div>` : null}
         ${!copyOnly && !flat && !v.image ? html`<div class="st-flatnote">No background yet: ${(p.jobs || []).some(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) ? 'a render job is ' + ((p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) || {}).state + ' (see Jobs).' : 'the composition is drawn over a plain ground until one is rendered.'}</div>` : null}
       </div>
+      ${!copyOnly && !flat && v.layout && v.layout.layers ? html`<${Readiness} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} />` : null}
       <${FamilyStrip} p=${p} a=${a} onOpen=${onOpen} />
       <div class="st-copy">
         ${fields.map(([k, label]) => html`<div key=${k} class=${'st-field' + (sel === k ? ' on' : '') + (a.locks[k] ? ' locked' : '')} onClick=${() => setSel(k)}>
@@ -441,7 +492,7 @@
         </div>
         <div class="st-approve">
           ${['copy', 'design'].filter(part => part === 'copy' || !copyOnly).map(part => html`<div key=${part} class="st-appr"><span><b>${part}</b> ${ap[part] ? html`<${Chip} kind="ok">approved</${Chip}> <span class="ov-dim">on v${a.versions.findIndex(x => x.id === ap[part].version) + 1} by ${ap[part].by}, ${ap[part].reason}${ap[part].carried ? ' (unchanged since, so it stands)' : ''}</span>` : html`<span class="ov-dim">draft</span>`}</span>
-            ${!ro ? html`<span>${ap[part] ? html`<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'withdraw')}>Withdraw</button>` : html`<button class="btn sm ghost" disabled=${part === 'design' && v.layout && (v.layout.incomplete || []).length > 0} title=${part === 'design' && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file: the design cannot be approved until it is' : ''} onClick=${() => onApprove(a, part, 'approve')}>Approve ${part}</button>`}<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'reject')}>Reject</button></span>` : null}
+            ${!ro ? html`<span>${ap[part] ? html`<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'withdraw')}>Withdraw</button>` : html`<button class="btn sm ghost" disabled=${part === 'design' && ((v.layout && (v.layout.incomplete || []).length > 0) || !a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable'))} title=${part === 'design' && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file: the design cannot be approved until it is' : part === 'design' && a.readiness && a.readiness.technical !== 'passed' ? 'Design approval waits for a passing technical validation of this composition' : ''} onClick=${() => onApprove(a, part, 'approve')}>Approve ${part}</button>`}<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'reject')}>Reject</button></span>` : null}
           </div>`)}
         </div>
       </div>
@@ -471,7 +522,9 @@
           ${m.changed || m.render != null ? html`<div class="st-msg-foot">${m.changed && m.changed.length ? m.changed.length + ' asset' + (m.changed.length === 1 ? '' : 's') + ' changed ' : ''}${m.kind === 'proposal' ? html`<${Chip} kind="warn">render proposed, nothing spent</${Chip}>` : m.kind === 'decided' ? html`<${Chip} kind="warn">${(m.jobs || []).length} render${(m.jobs || []).length === 1 ? '' : 's'} queued</${Chip}>` : m.render ? html`<${Chip} kind="warn">render spent</${Chip}>` : m.render === false ? html`<${Chip} kind="ok">no render</${Chip}>` : null}${m.locked ? html` <span class="ov-dim">kept locked: ${m.locked.join(', ')}</span>` : null}</div>` : null}
           ${m.kind === 'inspection' && m.scores ? html`<div class="st-insp"><div class="st-insp-scores">${['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'].map(k => html`<span key=${k} class=${'st-insp-score s' + m.scores[k]} title=${k + ' ' + m.scores[k] + ' of 5'}>${k} <b>${m.scores[k]}</b></span>`)}<${Chip} kind=${m.verdict === 'ship' ? 'ok' : m.verdict === 'redo' ? 'bad' : 'warn'}>${m.verdict}</${Chip}><span class="ov-dim">round ${m.round} of 2</span>${m.composed ? html`<${Chip} kind="ok" title="the art director saw the tile exactly as it exports: imagery, words, shapes and marks">composed tile</${Chip}>` : m.scores ? html`<${Chip} kind="warn" title="no composed export was saved for this version; the words and marks were described, not seen">imagery only</${Chip}>` : null}${(() => { const ia = p.assets.find(x => x.id === m.asset); return ia && m.version && ia.current !== m.version ? html`<${Chip} kind="warn" title="the asset has moved on since this inspection">inspected an earlier version</${Chip}>` : null; })()}</div>
             ${m.verdict === 'ship' ? html`<div class="ov-dim">Ship is the art director's opinion, not an approval: approval stays a person's decision below the tile.</div>` : null}
-            ${(m.issues || []).length ? html`<ul class="st-ul">${m.issues.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>` : null}
+            ${m.assessment === 'inconsistent' ? html`<div class="st-insp-incons"><${Chip} kind="bad">inconsistent assessment</${Chip}> <span class="ov-dim">the verdict is ship, but ${m.technical === 'failed' ? 'the measured validation fails' : 'it names unresolved problems'}. It approves nothing; review the tile.</span></div>` : null}
+            ${(m.issues || []).length ? html`<ul class="st-ul">${m.issues.map((x, i) => typeof x === 'string' ? html`<li key=${i}>${x}</li>` : html`<li key=${i}><${Chip} kind=${x.severity === 'blocking' ? 'bad' : x.severity === 'material' ? 'warn' : ''}>${x.severity}</${Chip}> ${x.text}</li>`)}</ul>` : null}
+            ${m.words && (m.words.missing || []).length ? html`<div class="st-insp-words"><${Chip} kind="warn">approved words not read</${Chip}> ${m.words.missing.join(', ')}</div>` : null}
             ${m.words && (m.words.wrong || []).length ? html`<div class="st-insp-words"><${Chip} kind="bad">wording in the image not in the approved copy</${Chip}> ${m.words.wrong.join(', ')}</div>` : null}
             ${m.fix ? (() => { const done = p.thread.find(e => e.kind === 'inspection_applied' && e.eid === m.eid); return done ? html`<${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}>` : !ro ? html`<div class="st-offer-box"><div class="ov-dim">Correction offered (${m.fix.kind}${m.fix.kind === 'design' || m.fix.kind === 'copy' ? ', no render' : m.fix.kind === 'edit' ? ', one render: an edit of this image' : ', one render: a re-brief'}); edit before applying:</div><textarea class="st-ta" rows="2" id=${'fix-' + m.eid} defaultValue=${m.fix.instruction}></textarea><div>${(() => { const ia = p.assets.find(x => x.id === m.asset); const old = ia && m.version && ia.current !== m.version; return html`<button class=${'btn sm' + (old ? ' ghost' : '')} disabled=${!!busy} title=${old ? 'This inspection judged an earlier version; applying it to the current one is a deliberate choice' : ''} onClick=${() => { if (old && !window.confirm('This inspection judged an earlier version. Apply its correction to the current version anyway?')) return; const ta = document.getElementById('fix-' + m.eid); onApplyInspection(m.eid, ta ? ta.value.trim() : m.fix.instruction, old); }}>${old ? 'Apply the correction to the current version anyway' : 'Apply the correction'}</button>${m.fix.kind === 'render' || m.fix.kind === 'edit' ? html` <span class="ov-dim">spends one render</span>` : null}`; })()}</div></div>` : null; })() : null}
             ${m.verdict === 'stop' ? html`<div class="ov-dim">Bounded: two corrections have run on this line; the next step is a designer's eye.</div>` : null}
@@ -535,11 +588,11 @@
 
   /* ------------------------------------------------------------ dialogs */
   function ExportDialog({ p, client, onClose, onClickup, onExport, state }) {
-    const rows = p.assets.map(a => { const v = current(a); const c = standing(a, 'copy'), d = standing(a, 'design'); const copyOnly = v && v.mode === 'copy'; return { a, v, c, d, ok: !!(c && (d || copyOnly)), partly: !!(c || d) }; });
+    const rows = p.assets.map(a => { const v = current(a); const c = standing(a, 'copy'), d = standing(a, 'design'); const copyOnly = v && v.mode === 'copy'; const tech = (a.readiness || {}).technical; const valid = copyOnly || tech === 'passed'; return { a, v, c, d, valid, tech, ok: !!(c && (d || copyOnly) && valid), partly: !!(c || d) }; });
     const ready = rows.filter(x => x.ok);
     return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Export"><div class="st-dialog-box">
       <div class="ov-sechead"><span class="ov-title">Export</span><span class="ov-why">approved versions only; the export records the exact version it took</span><button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${onClose}>Close</button></div>
-      <table class="ov-table"><thead><tr><th>Asset</th><th>Version</th><th>Copy</th><th>Design</th><th>Export</th></tr></thead><tbody>${rows.map(x => html`<tr key=${x.a.id}><td>${x.a.title}</td><td class="ov-dim">v${vnum(x.a, x.v)}</td><td>${x.c ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.v && x.v.mode === 'copy' ? html`<span class="ov-dim">copy only</span>` : x.d ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.ok ? html`<${Chip} kind="ok">included</${Chip}>` : html`<span class="ov-dim">left out${x.partly ? ' (partly approved)' : ''}</span>`}</td></tr>`)}</tbody></table>
+      <table class="ov-table"><thead><tr><th>Asset</th><th>Version</th><th>Copy</th><th>Design</th><th>Export</th></tr></thead><tbody>${rows.map(x => html`<tr key=${x.a.id}><td>${x.a.title}</td><td class="ov-dim">v${vnum(x.a, x.v)}</td><td>${x.c ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.v && x.v.mode === 'copy' ? html`<span class="ov-dim">copy only</span>` : x.d ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.ok ? html`<${Chip} kind="ok">included</${Chip}>` : html`<span class="ov-dim">left out${x.c && (x.d || (x.v && x.v.mode === 'copy')) && !x.valid ? ' (approved, but ' + (x.tech === 'failed' ? 'its technical validation fails' : 'not validated') + ')' : x.partly ? ' (partly approved)' : ''}</span>`}</td></tr>`)}</tbody></table>
       <div class="st-pad"><b>${ready.length}</b> asset${ready.length === 1 ? '' : 's'} ready: each composition drawn at its native size by the same renderer as the preview, one copy sheet (headline, support, CTA, caption, alt text, checks, approvals), the manifest with the context snapshot. ${state && state.msg ? html`<div class="ov-dim">${state.msg}</div>` : null}</div>
       <div class="st-dialog-acts"><button class="btn sm" disabled=${!ready.length || (state && state.busy)} onClick=${() => onExport(ready)}>${state && state.busy ? 'Preparing...' : state && state.url ? 'Prepare again' : 'Prepare bundle'}</button>${state && state.url ? html`<a class="btn sm" href=${state.url} download=${state.name}>Download ${state.name} (${Math.round(state.size / 1024)} KB)</a>` : null}<button class="btn sm ghost" disabled=${!ready.length || !canWrite()} onClick=${() => onClickup(ready)}>Send to ClickUp...</button><span class="ov-dim">Export never creates a task or sends anything by itself; the hand-off is its own step.</span></div>
     </div></div>`;
@@ -635,9 +688,12 @@
       try {
         const as = (d.assets || []).find(x => x.id === assetId); if (!as) return false; const v = versionId ? as.versions.find(x => x.id === versionId) : current(as);
         if (!v || !v.layout || !Array.isArray(v.layout.layers) || !canWrite() || d.readOnly) return false;
-        const imgs = await loadImages(v, d.ns); const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
+        // the art director sees exactly what the export will be: fonts loaded, every image in, measured and filed as this version's evidence
+        const imgs = await loadImages(v, d.ns); const fonts = await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+        const val = R.validate(v.layout, v.copy, imgs, { fonts, channel: as.channel, format: as.format });
+        const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
         let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
-        await call('/studio/render/save', { asset: as.id, version: v.id, imageB64: btoa(bin), mime: 'image/png' }); return true;
+        await call('/studio/validation', { asset: as.id, version: v.id, report: R.report(v, val), imageB64: btoa(bin), mime: 'image/png' }); return true;
       } catch (e) { return false; }
     }, []);
     /* anything queued (renders the copy stage enqueued) is run in turn while the tab is open */
@@ -686,11 +742,39 @@
     const propose = async (as, feedback, refine, opts) => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The art director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The art director refines ' : 'The art director explores variations of ') + as.title); await reload(); } catch (e) { fail(e); } };
     const applyInspection = async (eid, instruction, force) => { try { const r = await call('/studio/inspection/apply', { project: p.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the art director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e); } };
     const applyConcept = async (eid, index, render, imageFrom, size) => { try { const r = await call('/studio/concept/apply', { project: p.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e); } };
+    /* a measurement of one version at its output size, with the composed PNG: the worker re-judges it with the shared rules */
+    const fileValidation = async (as, v, val, comp) => {
+      try {
+        const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
+        let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+        await call('/studio/validation', { asset: as.id, version: v.id, report: R.report(v, val), imageB64: btoa(bin), mime: 'image/png' });
+        await reload();
+      } catch (e) { toastMsg('Validation not filed: ' + e.message, true); }
+    };
+    /* the smallest geometric fix, measured with the real renderer, saved as a layout version: no image call is made */
+    const repairLayout = async (as, v, comp) => {
+      try {
+        const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
+        const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, variants: Object.keys(variants).length ? variants : undefined });
+        if (!r.changed) return { text: r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix geometrically.', conflict: !!r.conflict };
+        await call('/studio/version', { asset: as.id, revision: as.revision, layout: r.layout, kind: 'layout', note: 'layout repaired: ' + r.steps.join('; ').slice(0, 170) });
+        await reload();
+        return { text: (r.ok ? 'Fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.', conflict: !r.ok };
+      } catch (e) { toastMsg(e.message, true); return { text: 'The fix failed: ' + e.message, conflict: true }; }
+    };
     const saveLayout = async (as, layout) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'layout edited by hand' }); await reload(); } catch (e) { fail(e); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)' }); await reload(); } catch (e) { fail(e); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e); } };
     const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(fail); return; } setDialog({ kind: 'reason', part, what, asset: as.id }); };
-    const recordDecision = async (why) => { const d = dialog; setDialog(null); if (!why) return; try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why }); await reload(); } catch (e) { fail(e); } };
+    const recordDecision = async (why) => {
+      const d = dialog; setDialog(null); if (!why) return;
+      try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why }); await reload(); }
+      catch (e) {
+        // painted words nobody could verify, or an inconsistent inspection: a person may still approve, having looked
+        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && window.confirm((e.detail || e.message) + '\n\nApprove anyway, having checked the tile yourself?')) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2); } }
+        else fail(e);
+      }
+    };
     const restore = async (as, vid) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, restoreFrom: vid }); await reload(); setCmp(null); } catch (e) { fail(e); } };
     const render = async (as, prompt, edit) => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e); } };
     const note = async (text, tgt) => { try { await call('/studio/note', { project: p.id, text, target: tgt }); await reload(); } catch (e) { fail(e); } };
@@ -747,7 +831,7 @@
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
+    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
     else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
 
     return html`<div class="st">

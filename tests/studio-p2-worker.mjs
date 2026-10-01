@@ -5,6 +5,7 @@
  * are stubs that answer by what the prompt asks for and record every request.
  * Run: node --experimental-sqlite tests/studio-p2-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { validateAsset } from './studio-measure-stub.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -142,10 +143,11 @@ await t('a campaign set: editable compositions in the campaign template with the
   const g = await req('GET', '/studio/get?id=' + P); SET = g.d.assets.filter(a => a.family === 'Campaign set'); eq(SET.length, 2);
   const ig = SET.find(a => a.channel === 'instagram'), fb = SET.find(a => a.channel === 'facebook'); eq(ig.format, '9:16'); eq(ig.title, 'Instagram story'); eq(fb.format, '1:1');
   const v = ig.versions[0]; eq(v.mode, 'composition'); eq(v.layout.template, 'teal'); eq(v.layout.stage, { w: 1080, h: 1920 }); eq(v.layout.fonts.display, 'Bricolage Grotesque');
-  const logo = v.layout.layers.find(l => l.role === 'logo'); ok(logo && logo.exact === true && logo.src === '/brand/logo?ns=mca' && logo.type === 'img', 'the logo is an exact image layer from the kit: ' + JSON.stringify(logo));
+  const logo = v.layout.layers.find(l => l.role === 'logo'); ok(logo && logo.exact === true && /^\/brand\/logo\?ns=mca&v=[a-f0-9]+$/.test(logo.src) && logo.type === 'img', 'the logo is an exact image layer from the kit: ' + JSON.stringify(logo));
   ok(v.layout.layers.find(l => l.role === 'panel').fill === '#0E6A6E', 'teal panel');
   ok(v.layout.layers.find(l => l.role === 'headline').text === v.copy.headline, 'the headline layer carries the copy');
-  ok(v.checks.some(c => c.state === 'overflow' && /needs \d+ lines/.test(c.note) && /9:16/.test(c.note)), 'the long headline overflows at 9:16: ' + JSON.stringify(v.checks));
+  // P9: the story layout keeps its words and marks clear of the platform interface; real overflow is measured by the renderer (studio-layout-browser.mjs)
+  const tx = v.layout.layers.filter(l => l.type === 'text' || l.role === 'logo'); ok(tx.every(l => l.y >= 14 && l.y + (l.h || 0) <= 80.05), 'clear of the story interface: ' + JSON.stringify(tx.map(l => [l.role, l.y, l.h])));
   ok(!fb.versions[0].checks.some(c => c.state === 'overflow'), 'the short headline fits at 1:1');
   const jobs = (await req('GET', '/studio/jobs?project=' + P)).d.jobs.filter(x => x.stage === 'render'); eq(jobs.length, 2); ok(jobs.every(x => x.state === 'queued' && /^render:a/.test(x.idem) && /no text, letters, numbers, logos/i.test(x.input.prompt) && /MCA-TILE-RULE-NO-TRUCKS/.test(x.input.prompt)), JSON.stringify(jobs.map(x => [x.state, x.idem])));
   eq(jobs.find(x => x.asset === ig.id).input.aspect, '9:16');
@@ -190,8 +192,14 @@ await t('a deployment that refuses the thinking fields gets the same call again 
 await t('export takes exactly the approved versions: an unapproved asset is left out with the reason, the manifest and copy sheet land in R2, the browser\'s composition PNG is referenced, and nothing is sent anywhere', async () => {
   const fb = SET.find(a => a.channel === 'facebook'); const ig = SET.find(a => a.channel === 'instagram');
   const other = calls.other.length;
+  // an earlier case lengthened this headline by hand without re-laying the tile: measured, it overruns its box, so validation fails until the words or the layout change
+  const fail = await validateAsset(req, P, fb.id); eq(fail.status, 200); eq(fail.d.validation.ok, false); ok(fail.d.validation.issues.some(i => i.code === 'text_overflow' && i.layers.indexOf('headline') >= 0), JSON.stringify(fail.d.validation.issues.map(i => i.code)));
+  eq((await req('POST', '/studio/approve', { asset: fb.id, part: 'design', decision: 'approve', reason: 'fine' })).d.error, 'validation_failed');
+  const fbNow = (await req('GET', '/studio/get?id=' + P)).d.assets.find(x => x.id === fb.id);
+  await req('POST', '/studio/version', { asset: fb.id, revision: fbNow.revision, copy: { headline: 'Fuel tax credits are not a subsidy.' }, note: 'shorter headline' });
   await req('POST', '/studio/approve', { asset: fb.id, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' });
-  await req('POST', '/studio/approve', { asset: fb.id, part: 'design', decision: 'approve', reason: 'fine' });
+  const vd = await validateAsset(req, P, fb.id); eq(vd.status, 200, JSON.stringify(vd.d)); ok(vd.d.validation.ok, JSON.stringify(vd.d.validation.issues));
+  eq((await req('POST', '/studio/approve', { asset: fb.id, part: 'design', decision: 'approve', reason: 'fine' })).status, 200);
   let g = await req('GET', '/studio/get?id=' + P); const cur = g.d.assets.find(x => x.id === fb.id).current;
   const sv = await req('POST', '/studio/render/save', { asset: fb.id, version: cur, imageB64: PNG, mime: 'image/png' }); eq(sv.status, 200, JSON.stringify(sv.d)); ok(/-export\.png$/.test(sv.d.key)); ok(r2.has(sv.d.key));
   eq((await req('POST', '/studio/render/save', { asset: fb.id, version: 'v_nope', imageB64: PNG })).status, 404);
@@ -201,7 +209,7 @@ await t('export takes exactly the approved versions: an unapproved asset is left
   ok(done.result.excluded.some(x => /LinkedIn copy/.test(x.title) && /copy not approved/.test(x.why)), 'copy-only assets need copy approval only');
   ok(r2.has(done.result.files.manifest) && r2.has(done.result.files.copySheet));
   const man = JSON.parse(r2.get(done.result.files.manifest).v); eq(man.assets.length, 1); eq(man.assets[0].approvals.copy.reason, 'client asked for the plain ask'); ok(/created no task and sent nothing/.test(man.note));
-  ok(/COPY SHEET - Fuel tax credit spike/.test(done.result.sheet) && /HEADLINE: Fuel tax credits are not a subsidy/.test(done.result.sheet) && /CHECKS: .*overflow/.test(done.result.sheet), done.result.sheet.slice(0, 400));
+  ok(/COPY SHEET - Fuel tax credit spike/.test(done.result.sheet) && /HEADLINE: Fuel tax credits are not a subsidy/.test(done.result.sheet) && /CHECKS: /.test(done.result.sheet) && !/CHECKS: [^\n]*overflow/.test(done.result.sheet), done.result.sheet.slice(0, 400));
   const f = await req('GET', '/studio/file?key=' + encodeURIComponent(done.result.files.copySheet), null, 'read-key'); eq(f.status, 200); ok(/text\/plain/.test(f.res.headers.get('content-type')));
   eq(calls.other.length, other, 'no call left the worker (no ClickUp, no Slack)');
   g = await req('GET', '/studio/get?id=' + P); ok(g.d.thread.some(e => /Export e.*: 1 approved asset, 3 not approved and left out/.test(e.text) && /Nothing was sent/.test(e.text)), JSON.stringify(g.d.thread.slice(-1)));
