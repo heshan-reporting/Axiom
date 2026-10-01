@@ -269,6 +269,13 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   const items = await texts(page, R + '.st-le-item'); ok(items.some(x => /panel/.test(x)) && items.some(x => /headline/.test(x)) && items.every(x => /hide|show/.test(x) && /lock/.test(x)), JSON.stringify(items));
   await page.click(R + '.st-asset-acts button:has-text("Close layout editor")');
   await shot(page, 'studio-artdirection');
+  // the resolution select governs what is paid for: the card costs follow it, and a re-render is queued at it
+  await page.selectOption(R + '.st-size select', '4K'); await page.waitForFunction(() => /1 render at 4K/.test(document.querySelector('#studio-root .st-ad-card:nth-child(3) .st-ad-cost').textContent));
+  await page.click(R + '.st-ad-quick .ov-link'); await page.click(R + '.st-ad-quick button:has-text("Do this (one render at 4K)")');
+  await page.waitForFunction(() => /Rendering new imagery/.test(document.querySelector('#studio-root').textContent) || true);
+  let rj = null; for (let i = 0; i < 40 && !rj; i++) { await new Promise(r => setTimeout(r, 250)); const pid = (await api('GET', '/studio/list?ns=mca')).projects.map(x => x.id); for (const id of pid) { const js = (await api('GET', '/studio/jobs?project=' + id)).jobs || []; rj = js.find(j => j.stage === 'render' && /imagery as directed/.test(JSON.stringify(j.input))) || rj; } }
+  eq(rj && rj.input.size, '4K', 'the re-render is queued at the chosen 4K, not the previous size');
+  await page.selectOption(R + '.st-size select', '2K');
 });
 await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
   await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
@@ -322,7 +329,7 @@ await t('the jobs view lists every job with its log; the client context lists th
   await page.click(R + '.st-railbtn:has-text("Jobs")');
   await page.waitForSelector(R + '.st-centre table');
   const stages = await texts(page, R + '.st-centre tbody tr td:nth-child(2)'); const states = await texts(page, R + '.st-centre tbody tr td:nth-child(4) .st-status');
-  ok(stages.length >= 7, String(stages.length)); eq(stages.filter(s => s === 'render').length, 5); ok(stages.indexOf('extract') >= 0 && stages.indexOf('copy') >= 0 && stages.indexOf('export') >= 0, JSON.stringify(stages)); ok(states.every(s => s === 'done'), JSON.stringify(states));
+  ok(stages.length >= 7, String(stages.length)); eq(stages.filter(s => s === 'render').length, 6); ok(stages.indexOf('extract') >= 0 && stages.indexOf('copy') >= 0 && stages.indexOf('export') >= 0, JSON.stringify(stages)); ok(states.every(s => s === 'done'), JSON.stringify(states));
   for (const s of await page.$$(R + '.st-centre summary')) await s.click();
   ok(/claude claude-/.test((await texts(page, R + '.st-joblog')).join(' ')), 'the job logs name the model calls');
   await page.click(R + '.st-railbtn:has-text("Client context")');
