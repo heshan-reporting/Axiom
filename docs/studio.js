@@ -277,8 +277,21 @@
     useEffect(() => { let live = true; if (r.url) blobUrl(r.url).then(x => { if (live) setU(x); }).catch(() => {}); return () => { live = false; }; }, [r.url]);
     return u ? html`<img class="st-ref-thumb" src=${u} alt="" />` : html`<div class=${'st-ref-thumb ' + r.kind}>${r.kind}</div>`;
   }
-  function ReferencesView({ p, onAdd, onAnalyse, busy }) {
-    const [purpose, setPurpose] = useState('composition'); const [note, setNote] = useState('');
+  const REF_COMPONENTS = ['typography', 'colour', 'composition', 'hierarchy', 'imagery', 'image treatment', 'panels', 'spacing', 'mark placement', 'copy tone'];
+  /** A reference recipe: per component, borrow it, leave it, or say nothing; the models see the recipe on the reference's line. */
+  function RecipeEditor({ r, onSave, busy }) {
+    const rc0 = r.recipe || { borrow: [], exclude: [], note: '' };
+    const [st, setSt] = useState(() => { const m = {}; REF_COMPONENTS.forEach(c => { m[c] = rc0.borrow.indexOf(c) >= 0 ? 'borrow' : rc0.exclude.indexOf(c) >= 0 ? 'exclude' : ''; }); return m; });
+    const [note, setNote] = useState(rc0.note || '');
+    return html`<div class="st-recipe" aria-label=${'Recipe for ' + r.name}>
+      <div class="ov-dim">Per component: take it from this reference, leave it, or say nothing (the purpose decides).</div>
+      <div class="st-recipe-grid">${REF_COMPONENTS.map(c => html`<label key=${c} class="st-recipe-row"><span>${c}</span><select class="st-sel" value=${st[c]} onChange=${e => setSt(Object.assign({}, st, { [c]: e.target.value }))} aria-label=${c + ' from ' + r.name}><option value="">-</option><option value="borrow">borrow</option><option value="exclude">do not take</option></select></label>`)}</div>
+      <input class="st-in" value=${note} onInput=${e => setNote(e.target.value)} placeholder="Note for the designers and the models (optional)" aria-label="Recipe note" />
+      <div><button class="btn sm" disabled=${!!busy} onClick=${() => onSave(r.id, { borrow: REF_COMPONENTS.filter(c => st[c] === 'borrow'), exclude: REF_COMPONENTS.filter(c => st[c] === 'exclude'), note: note.trim() })}>Save recipe</button></div>
+    </div>`;
+  }
+  function ReferencesView({ p, onAdd, onAnalyse, onRecipe, busy }) {
+    const [purpose, setPurpose] = useState('composition'); const [note, setNote] = useState(''); const [rcOpen, setRcOpen] = useState(null);
     const [own, setOwn] = useState(!!p.campaign);
     // over 4.5 MB the models cannot be shown the original: a smaller JPEG is prepared here and sent beside it; the original is kept exactly
     const prepare = (dataUrl) => new Promise(res => { const im = new Image(); im.onload = () => { const k = Math.min(1, 2400 / Math.max(im.naturalWidth, im.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg', 0.86).split(',')[1]); }; im.onerror = () => res(null); im.src = dataUrl; });
@@ -286,8 +299,10 @@
     return html`<div class="st-centre-pad"><div class="ov-title">References</div>
       ${!p.references.length ? html`<div class="ov-empty">No references. The client logo comes from the brand kit and is placed exactly, never redrawn.</div>` : null}
       <div class="st-refs">${p.references.map(r => { const an = r.analysis; return html`<div key=${r.id} class="st-ref"><${RefThumb} r=${r} /><div><b>${r.name}</b> <${Chip} kind=${r.purpose === 'brand' || r.purpose === 'approved' ? 'ok' : ''} title=${r.purpose === 'brand' || r.purpose === 'approved' ? 'a constraint: the client\'s requirements' : 'an example in this one respect'}>${r.purpose}</${Chip}>${r.campaign ? html` <${Chip} title="a concept on another campaign leaves it out of the recommended pack">${r.campaign}</${Chip}>` : null}${r.prepKey ? html` <${Chip} title="the original is over 4.5 MB; the models see a prepared copy and the original is kept">prepared copy</${Chip}>` : null}<div class="ov-dim">${r.note ? r.note + '; ' : ''}added by ${r.who}, ${aest(r.created)}</div>
-        ${an && !an.error ? html`<div class="st-ref-an"><div>${an.summary}</div>${an.typography ? html`<div><b>Type</b> ${an.typography}</div>` : null}${an.colour && (an.colour.palette.length || an.colour.relationships) ? html`<div><b>Colour</b> ${an.colour.palette.map((c, i) => html`<span key=${i} class="st-swatch" style=${'background:' + c} title=${c}></span>`)} ${an.colour.relationships}</div>` : null}${an.composition ? html`<div><b>Composition</b> ${an.composition}</div>` : null}${an.hierarchy ? html`<div><b>Hierarchy</b> ${an.hierarchy}</div>` : null}${an.imageTreatment ? html`<div><b>Image</b> ${an.imageTreatment}</div>` : null}${an.panels ? html`<div><b>Panels</b> ${an.panels}</div>` : null}${an.spacing ? html`<div><b>Spacing</b> ${an.spacing}</div>` : null}${an.logo ? html`<div><b>Logo</b> ${an.logo}</div>` : null}${(an.takeaways || []).length ? html`<div><b>Take</b> ${an.takeaways.join('; ')}</div>` : null}<div class="ov-dim">read by ${an.model || 'the vision pass'}; this is what the models are told about it</div></div>`
+        ${an && !an.error ? html`<div class="st-ref-an"><div>${an.summary}</div>${an.typography ? html`<div><b>Type</b> ${an.typography}</div>` : null}${an.colour && (an.colour.palette.length || an.colour.relationships) ? html`<div><b>Colour</b> ${an.colour.palette.map((c, i) => html`<span key=${i} class="st-swatch" style=${{ background: c }} title=${c}></span>`)} ${an.colour.relationships}</div>` : null}${an.composition ? html`<div><b>Composition</b> ${an.composition}</div>` : null}${an.hierarchy ? html`<div><b>Hierarchy</b> ${an.hierarchy}</div>` : null}${an.imageTreatment ? html`<div><b>Image</b> ${an.imageTreatment}</div>` : null}${an.panels ? html`<div><b>Panels</b> ${an.panels}</div>` : null}${an.spacing ? html`<div><b>Spacing</b> ${an.spacing}</div>` : null}${an.logo ? html`<div><b>Logo</b> ${an.logo}</div>` : null}${(an.takeaways || []).length ? html`<div><b>Take</b> ${an.takeaways.join('; ')}</div>` : null}<div class="ov-dim">read by ${an.model || 'the vision pass'}; this is what the models are told about it</div></div>`
         : html`<div class="st-ref-an limited"><${Chip} kind="warn">not analysed</${Chip}> <span class="ov-dim">${an && an.error ? an.error : 'no vision pass yet'}; the models know its name and purpose only.</span> ${canWrite() && !p.readOnly && r.key && onAnalyse ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => onAnalyse(r.id)}>Analyse now</button>` : null}</div>`}
+        <div class="st-ref-recipe">${r.recipe ? html`<span><b>Recipe</b> ${r.recipe.borrow.length ? 'borrow ' + r.recipe.borrow.join(', ') : ''}${r.recipe.borrow.length && r.recipe.exclude.length ? '; ' : ''}${r.recipe.exclude.length ? 'do not take ' + r.recipe.exclude.join(', ') : ''}${r.recipe.note ? ' - ' + r.recipe.note : ''}</span>${r.recipe.conflict ? html` <${Chip} kind="warn" title=${r.recipe.conflict}>constraint still holds</${Chip}>` : null}` : html`<span class="ov-dim">No recipe: the purpose decides what the models take from it.</span>`} ${canWrite() && !p.readOnly && onRecipe ? html`<button class="ov-link" onClick=${() => setRcOpen(rcOpen === r.id ? null : r.id)}>${r.recipe ? 'edit recipe' : 'set a recipe'}</button>` : null}</div>
+        ${rcOpen === r.id ? html`<${RecipeEditor} r=${r} busy=${busy} onSave=${(id, rc) => { onRecipe(id, rc); setRcOpen(null); }} />` : null}
       </div></div>`; })}</div>
       ${canWrite() && !p.readOnly ? html`<div class="st-field"><${Lbl}>Add a reference</${Lbl}><div class="st-seg">${['brand', 'composition', 'mood', 'imagery', 'typography', 'inspiration', 'approved'].map(k => html`<button key=${k} class=${'st-segbtn' + (purpose === k ? ' on' : '')} onClick=${() => setPurpose(k)}>${k}</button>`)}</div><input class="st-in" value=${note} onInput=${e => setNote(e.target.value)} placeholder="Note (what to take from it)" /><div class="st-drop"><input type="file" accept="image/png,image/jpeg,image/webp" onChange=${pick} disabled=${!!busy} aria-label="Reference image" /> PNG, JPEG or WebP up to 12 MB; over 4.5 MB a smaller copy is prepared for the models and the original kept. Competitor work is inspiration only: no logos, claims or exact layouts reused.</div>${p.campaign ? html`<label class="st-check"><input type="checkbox" checked=${own} onChange=${e => setOwn(e.target.checked)} /> belongs to the campaign ${p.campaign}</label>` : null}</div>` : null}
     </div>`;
@@ -530,6 +545,21 @@
     </div>`;
   }
   /** What the Studio used to make this version: references, rules, facts, marks, models, assumptions. Fetched when opened. */
+  /** The compiled instructions behind a version: per job, exactly what each model call was sent (read from the worker's record). */
+  function CompiledList({ list }) {
+    const [open, setOpen] = useState(null); const [d, setD] = useState({});
+    const load = async j => { setOpen(open === j ? null : j); if (d[j]) return; try { const x = await call('/studio/compiled?job=' + encodeURIComponent(j)); setD(s => Object.assign({}, s, { [j]: x })); } catch (e) { setD(s => Object.assign({}, s, { [j]: { error: e.message } })); } };
+    if (!list.length) return html`<div class="ov-dim"><b>Compiled instructions</b> none recorded for this version (made by hand, or before build studio-p21).</div>`;
+    return html`<div class="st-compiled" aria-label="Compiled instructions"><b>Compiled instructions</b> ${list.map(c => html`<button key=${c.job} class="ov-link" onClick=${() => load(c.job)}>${c.why} (${c.stage}${c.recorded ? ', ' + c.calls + ' call' + (c.calls === 1 ? '' : 's') : ', not recorded'})</button> `)}
+      ${open && d[open] ? (x => x.error ? html`<div class="ov-dim">${x.error}</div>` : !(x.calls || []).length ? html`<div class="ov-dim">${x.note || 'No call recorded.'}</div>` : html`<div class="st-compiled-calls">${x.calls.map((c, i) => html`<div key=${i} class="st-compiled-call">
+        <div><b>${c.provider === 'google' ? 'Image model' : 'Language model'}</b> ${c.op || ''} - asked ${c.model}${c.answered && c.answered !== c.model ? ', answered by ' + c.answered : ''}${c.fallback ? ' (fallback)' : ''}${c.effort ? ', effort ' + c.effort : ''}${c.thinking && c.thinking !== 'off' ? ', thinking ' + c.thinking : ''}${c.imageConfig && c.imageConfig.imageSize ? ', size ' + c.imageConfig.imageSize + (c.capped ? ' (asked ' + c.capped + ', capped)' : '') : ''}${c.historyTurns ? ', ' + c.historyTurns + ' earlier turns ' + (c.historyReplayed ? 'replayed' : 'not replayed') : ''}${c.error ? html` <${Chip} kind="bad">${c.error}</${Chip}>` : null}</div>
+        ${c.plain ? html`<div class="ov-dim">${c.plain}</div>` : null}${c.areaNote ? html`<div class="ov-dim">${c.areaNote}</div>` : null}
+        ${(c.images || []).length ? html`<div class="ov-dim">Images sent: ${c.images.map(im => (im.name || im.role || 'image') + (im.kb ? ' (' + im.kb + ' KB' + (im.prepared ? ', prepared copy' : '') + ')' : im.role && im.name ? ' - ' + im.role : '')).join('; ')}</div>` : null}
+        ${c.system ? html`<details><summary class="ov-link">system (${c.system.length} characters)</summary><pre class="st-pre">${c.system}</pre></details>` : null}
+        <details><summary class="ov-link">${c.provider === 'google' ? 'prompt' : 'user'} (${(c.user || c.text || '').length} characters)</summary><pre class="st-pre">${c.user || c.text || ''}</pre></details>
+      </div>`)}</div>`)(d[open]) : null}
+    </div>`;
+  }
   function UsedPanel({ a, v }) {
     const [open, setOpen] = useState(false); const [u, setU] = useState(null);
     useEffect(() => { if (!open) return; let live = true; setU(null); call('/studio/used?asset=' + encodeURIComponent(a.id) + '&version=' + encodeURIComponent(v.id)).then(d => { if (live) setU(d); }).catch(e => { if (live) setU({ error: e.message }); }); return () => { live = false; }; }, [open, a.id, v.id]);
@@ -544,6 +574,8 @@
         <div><b>Rules applied</b> ${u.rules.length ? html`<ul class="st-ul">${u.rules.map(r => html`<li key=${r.id}>${r.rule} <span class="ov-dim">${r.task || ''}${r.campaign ? ', campaign ' + r.campaign : ''}${r.activeNow ? '' : ', since switched off'}</span></li>`)}</ul>` : html`<span class="ov-dim">no learned corrections were in force</span>`}</div>
         <div><b>Knowledge</b> ${u.facts != null ? u.facts + ' approved fact' + (u.facts === 1 ? '' : 's') : 'facts not recorded'}, ${u.banned != null ? u.banned + ' banned term' + (u.banned === 1 ? '' : 's') : ''}${u.campaign ? ', campaign ' + u.campaign : ''}${u.kit.revision ? html`; the kit as revised ${aest(u.kit.revision.at)} <span class="ov-dim">(${u.kit.revision.summary.slice(0, 3).join('; ')})</span>` : ''}.</div>
         <div><b>Marks</b> ${u.marks.length ? u.marks.map(m => m.role + (m.variant ? ' ' + m.variant : '') + (m.version ? ' v' + m.version : '') + (m.hidden ? ' (hidden)' : '')).join(', ') + ' - placed exactly from the file' : html`<span class="ov-dim">none on the tile</span>`}</div>
+        ${(u.concept && (u.concept.influence || []).length) ? html`<div><b>Reference influence</b> ${u.concept.influence.map(x => x.component + ' from ' + x.name + (x.outsideRecipe ? ' (outside the recipe)' : '')).join('; ')}</div>` : null}
+        <${CompiledList} list=${u.compiled || []} />
         ${u.assumptions.length ? html`<div><b>Assumptions</b> ${u.assumptions.join('; ')}${u.acknowledged ? ' (gaps acknowledged before producing)' : ''}</div>` : null}
       </div>`}</details>`;
   }
@@ -591,6 +623,16 @@
      its remedy and whether it costs a call, and what the project has actually spent. No node graph: a list, in order. */
   const RECIPE_STAGE = { extract: { label: 'Read the latest source', input: { source: '$latestSource' } }, strategy: { label: 'Draft the strategy', input: {} }, direct: { label: 'Propose three directions', input: { n: 3 } }, sequence: { label: 'Plan a four-asset sequence (no images)', input: { count: 4, channels: '$briefChannels' } }, copy: { label: 'Write and lay out a set (renders imagery)', input: { channels: '$briefChannels', deliverable: 'set' } }, export: { label: 'Package what the client approved', input: { requireClient: true } } };
   const REMEDY = { recheck: 'Re-check (no model call)', measure: 'Open to measure again (no model call)', share: 'Share the current version again', revise: 'Revise to the confirmed strategy (one model call)', readapt: 'Re-adapt from the master (one model call)' };
+  /** What each operation can and cannot do on this worker, as the worker states it; reachability is the models probe. */
+  function CapabilitiesPanel() {
+    const [c, setC] = useState(null);
+    useEffect(() => { let live = true; call('/studio/capabilities').then(d => { if (live) setC(d); }).catch(e => { if (live) setC({ error: e.message }); }); return () => { live = false; }; }, []);
+    return html`<div class="st-caps" aria-label="Capabilities"><${Lbl}>What each operation can do here</${Lbl}>
+      ${!c ? html`<div class="ov-dim">Reading...</div>` : c.error ? html`<div class="ov-dim">Capabilities unavailable: ${c.error}</div>` : html`
+      <table class="ov-table"><thead><tr><th>Operation</th><th>Model</th><th>Takes</th><th>Cannot</th><th>Shown how</th></tr></thead><tbody>${c.operations.map(o => html`<tr key=${o.op}><td><b>${o.op}</b><div class="ov-dim">${o.what}</div></td><td>${o.model || o.provider}${o.fallbacks ? html`<div class="ov-dim">then ${o.fallbacks.join(', ')}</div>` : null}${o.configured ? '' : html` <${Chip} kind="warn">not configured</${Chip}>`}</td><td class="ov-dim">${Object.keys(o.accepts || {}).map(k => k + ': ' + (Array.isArray(o.accepts[k]) ? o.accepts[k].join(', ') : o.accepts[k])).join('; ')}</td><td class="ov-dim">${(o.cannot || []).join('; ') || '-'}</td><td class="ov-dim">${o.verified}</td></tr>`)}</tbody></table>
+      <div class="ov-dim">Pixel masks: ${c.masks ? 'supported' : 'not supported - area edits are described in words and measured afterwards'}. ${c.note}</div>`}
+    </div>`;
+  }
   function ProductionView({ p, onRun, onOpen, onReview, onRevise }) {
     const [lib, setLib] = useState(null); const [imp, setImp] = useState(null); const [use, setUse] = useState(null); const [est, setEst] = useState({}); const [n, setN] = useState(0);
     const [busy, setBusy] = useState(''); const [form, setForm] = useState(null); const [done, setDone] = useState({}); const rw = canWrite() && !p.readOnly;
@@ -641,6 +683,7 @@
       ${use ? html`<div class="sen-strip st-prod-use" aria-label="Usage"><span><b>${use.calls}</b> model call${use.calls === 1 ? '' : 's'}</span><span><b>${use.renders}</b> image${use.renders === 1 ? '' : 's'}${Object.keys(use.sizes || {}).length ? ' (' + Object.keys(use.sizes).map(k => use.sizes[k] + ' at ' + k).join(', ') + ')' : ''}</span><span><b>${use.versions.free}</b> free versions</span><span><b>${use.failed}</b> failed</span><span><b>${use.queued}</b> waiting</span></div>
         <table class="ov-table"><thead><tr><th>Stage</th><th class="num">Done</th><th class="num">Failed</th><th class="num">Waiting</th><th class="num">Model calls</th></tr></thead><tbody>${Object.keys(use.byStage || {}).map(k => { const s = use.byStage[k]; return html`<tr key=${k}><td>${k}</td><td class="num">${s.done}</td><td class="num">${s.failed}</td><td class="num">${s.queued}</td><td class="num">${k === 'render' ? '-' : s.calls}</td></tr>`; })}</tbody></table>
         <div class="ov-dim">${use.note}</div>` : html`<div class="ov-dim">Usage unavailable.</div>`}
+      <${CapabilitiesPanel} />
     </div>`;
   }
   function JobsView({ p, onRetry, onCancel, onStep, budget }) {
@@ -731,6 +774,7 @@
           ${o.copy && o.copy.headline ? html`<div class="st-ad-line"><b>Headline</b> ${o.copy.headline}</div>` : null}
           <div class="st-ad-line"><b>Keeps</b> ${(o.keeps || []).join(', ') || '-'} <b>Changes</b> ${(o.changes || []).join(', ') || '-'}</div>
           ${(o.refs || []).length ? html`<div class="st-ad-line"><b>Draws on</b> ${o.refs.map(r => r.name).join(', ')}</div>` : null}
+          ${(o.influence || []).length ? html`<div class="st-ad-line st-influence"><b>Influence</b> ${o.influence.map((x, i) => html`<${Chip} key=${i} kind=${x.outsideRecipe ? 'warn' : ''} title=${x.outsideRecipe || 'within the reference\'s recipe'}>${x.component} from ${x.name}${x.outsideRecipe ? ' (outside the recipe)' : ''}</${Chip}>`)}</div>` : null}
           <div class="st-ad-basis">${(o.basis || []).map((b, i) => html`<${Chip} key=${i} kind=${basisKind(b)} title=${basisTitle(b)}>${b.kind}${b.ref ? ' ' + b.ref : ''}: ${b.claim}</${Chip}>`)}${(o.missing || []).length ? html`<span class="ov-dim">Missing: ${o.missing.join('; ')}</span>` : null}</div>
           ${(o.unsupported || []).length ? html`<div class="st-ad-basis">${o.unsupported.map((u, i) => html`<${Chip} key=${i} kind="warn" title="the renderer cannot draw this part of the plan; it is not quietly replaced">cannot draw: ${u}</${Chip}>`)}</div>` : null}
           <div class="st-ad-cost">${renders ? html`<${Chip} kind="warn">${renders} render${renders === 1 ? '' : 's'} at ${size}${o.approach === 'artwork' ? ', words in the bitmap' : ''}</${Chip}>` : html`<${Chip} kind="ok">${o.cost}</${Chip}>`}${o.layoutLocked ? html` <span class="ov-dim">layout locked: create a new design instead</span>` : null}</div>
@@ -1252,6 +1296,7 @@
     const saveBrief = async (b) => { try { await call('/studio/project/update', { id: p.id, revision: p.revision, patch: { brief: b } }); await reload(); } catch (e) { fail(e); if (e.status === 409) reload(); } };
     const addSource = async (name, text) => { try { const s = await call('/studio/source', { project: p.id, kind: 'text', name, text }); await reload(); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading ' + name); } catch (e) { fail(e); } };
     const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e); } finally { setBusy(''); } };
+    const saveRecipe = async (id, recipe) => { try { setBusy('Saving the recipe'); const d = await call('/studio/reference/recipe', Object.assign({ id, project: p.id }, recipe)); await reload(); toastMsg(d.recipe && d.recipe.conflict ? 'Saved, with a note: ' + d.recipe.conflict : 'Recipe saved', !!(d.recipe && d.recipe.conflict)); } catch (e) { fail(e); } finally { setBusy(''); } };
     const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e); } finally { setBusy(''); } };
     const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e); } };
     const editAsset = async (as, patch) => { try { const cur = p.assets.find(x => x.id === as.id) || as; const changed = {}; Object.keys(patch).forEach(k => { if ((current(cur).copy || {})[k] !== patch[k]) changed[k] = patch[k]; }); if (!Object.keys(changed).length) return; await call('/studio/version', { asset: as.id, revision: cur.revision, copy: changed, note: 'hand edit: ' + Object.keys(changed).join(', ') }); await reload(); } catch (e) { fail(e); if (e.status === 409 || e.code === 'locked') reload(); } };
@@ -1350,7 +1395,7 @@
     else if (view === 'copy') centre = html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
     else if (view === 'sequence') centre = html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${id => { setSelAsset(id); setView('asset'); }} busy=${busy} />`;
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
-    else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
+    else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if (view === 'production') centre = html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${id => { setSelAsset(id); setView('asset'); }} onReview=${() => setView('review')} onRevise=${reviseFromImpact} />`;
     else if (view === 'review') centre = html`<${ReviewView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;

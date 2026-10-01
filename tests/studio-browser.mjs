@@ -48,6 +48,7 @@ const LAYOUTS = { critique: 'The words sit on the subject.', options: [
   { name: 'Right column', concept: 'Words in the quiet right third', rationale: 'The eye lands on the subject first, then reads down the column', composition: 'right column', keeps: ['photograph', 'words'], changes: ['placement'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'col', type: 'shape', role: 'panel', shape: 'rect', x: 58, y: 0, w: 42, h: 100, fill: '#0E6A6E', opacity: 0.8 }, LT('hl', 'headline', 61, 8, 36, 40, 5), LT('sp', 'support', 61, 52, 36, 20, 2.6), LT('cta', 'cta', 61, 80, 36, 6, 2.4)] } },
   { name: 'Bottom band', concept: 'A band across the foot', rationale: 'The photograph keeps the top two thirds; the message reads as a caption to it', composition: 'bottom band', keeps: ['photograph', 'words'], changes: ['panel'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'band', type: 'shape', role: 'panel', shape: 'rect', x: 0, y: 66, w: 100, h: 34, fill: '#0E6A6E' }, LT('hl', 'headline', 4, 68, 92, 14, 4.6), LT('sp', 'support', 4, 83, 64, 8, 2.4), LT('cta', 'cta', 70, 86, 26, 6, 2.4)] } },
   { name: 'Centred statement', concept: 'One statement over a dark overlay', rationale: 'A single line at the centre carries the claim with nothing competing', composition: 'centre', keeps: ['photograph', 'words'], changes: ['hierarchy'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'ov', type: 'shape', role: 'overlay', shape: 'rect', x: 0, y: 0, w: 100, h: 100, fill: 'rgba(0,0,0,0.45)' }, LT('hl', 'headline', 8, 30, 84, 24, 5.6, { align: 'center' }), LT('sp', 'support', 12, 56, 76, 10, 2.6, { align: 'center' }), LT('cta', 'cta', 30, 70, 40, 6, 2.4, { align: 'center' })] } }] };
+const withInfluence = (A, user) => { const ref = (user.match(/\[(r[a-z0-9]+)\] Editorial grid/) || [])[1]; return ref ? Object.assign({}, A, { options: A.options.map((o, i) => i === 0 ? Object.assign({}, o, { influence: [{ ref, component: 'typography' }, { ref, component: 'colour' }] }) : o) }) : A; };
 const CONCEPTS = { critique: 'The photograph is generic; the panel holds.', options: [
   { name: 'No box, darker image', concept: 'Words over a darkened photograph', rationale: 'Editorial', imagery: 'keep the current photograph', composition: 'Top left', typography: 'Larger', colour: 'Dark overlay', textPlacement: 'top left', layout: { style: 'none', placement: 'top', template: 'same', headline: 'larger' }, keeps: ['photograph'], changes: ['panel removed'], needsImage: false, prompt: '', basis: [{ claim: 'White type on dark reads', kind: 'inferred' }], missing: [] },
   { name: 'Split field', concept: 'Message on a teal field below', rationale: 'Clean separation', imagery: 'keep the current photograph', composition: 'Split', typography: 'Same', colour: 'Teal', textPlacement: 'bottom band', layout: { style: 'split', placement: 'bottom', template: 'teal', headline: 'same' }, keeps: ['photograph'], changes: ['split'], needsImage: false, prompt: '', basis: [{ claim: 'Teal is the campaign colour', kind: 'rule' }], missing: [] },
@@ -61,7 +62,7 @@ globalThis.fetch = async (url, init) => {
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
-    const answer = /EXPLORE DIFFERENT LAYOUTS/.test(user) ? LAYOUTS : /creative strategist/.test(sys) ? STRATEGY : /planning a campaign sequence/.test(sys) ? SEQ : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+    const answer = /EXPLORE DIFFERENT LAYOUTS/.test(user) ? withInfluence(LAYOUTS, user) : /creative strategist/.test(sys) ? STRATEGY : /planning a campaign sequence/.test(sys) ? SEQ : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -631,6 +632,34 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v2, { timeout: 15000 });
   eq(calls.gemini, g0, 'no image call for any of it');
   await shot(page, 'studio-p20');
+});
+await t('P21: a reference recipe is set in the References view and reaches the concepts, whose cards name each influence and mark one outside the recipe; the asset lists the compiled instructions behind it and opens one; Production states what each operation cannot do', async () => {
+  const pid = env.MIND_DB.db.prepare("SELECT id FROM studio_projects WHERE title LIKE 'Fuel tax credits keep regional Australia moving%' ORDER BY created LIMIT 1").get().id;
+  await api('POST', '/studio/reference', { project: pid, name: 'Editorial grid', purpose: 'typography', imageB64: PNG, mime: 'image/png' });
+  await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-railbtn:has-text("References")'); await page.waitForSelector(R + '.st-ref:has-text("Editorial grid")');
+  await page.click(R + '.st-ref:has-text("Editorial grid") .ov-link:has-text("set a recipe")'); await page.waitForSelector(R + '.st-recipe');
+  await page.selectOption(R + '.st-recipe select[aria-label="typography from Editorial grid"]', 'borrow');
+  await page.selectOption(R + '.st-recipe select[aria-label="colour from Editorial grid"]', 'exclude');
+  await page.click(R + '.st-recipe .btn:has-text("Save recipe")');
+  await page.waitForFunction(() => /borrow typography; do not take colour/.test((document.querySelector('#studio-root .st-ref-recipe') ? [...document.querySelectorAll('#studio-root .st-ref')].map(x => x.textContent).join(' ') : '')), null, { timeout: 15000 });
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
+  await page.waitForSelector(R + '.st-influence', { timeout: 20000 });
+  const inf = await page.textContent(R + '.st-influence'); ok(/typography from Editorial grid/.test(inf) && /colour from Editorial grid \(outside the recipe\)/.test(inf), inf);
+  const cj = env.MIND_DB.db.prepare("SELECT id FROM studio_jobs WHERE stage='concepts' ORDER BY created DESC LIMIT 1").get().id;
+  const rec = await api('GET', '/studio/compiled?job=' + cj); ok(/Editorial grid \(typography\) BORROW ONLY: typography\. DO NOT TAKE: colour\./.test(rec.calls[0].user), 'the recipe was in the prompt the model received');
+  await page.click(R + '.st-ad-card:has-text("Right column") .btn:has-text("Apply layout only")');
+  await page.waitForFunction(() => /applied as version/.test((document.querySelector('#studio-root .st-ad-card') || {}).textContent || '') || [...document.querySelectorAll('#studio-root .st-ad-card')].some(c => /applied as version/.test(c.textContent)), null, { timeout: 15000 });
+  await page.click(R + '.st-used summary'); await page.waitForSelector(R + '.st-compiled', { timeout: 15000 });
+  const cl = await page.textContent(R + '.st-compiled'); ok(/Compiled instructions/.test(cl) && /the concept \(concepts, \d+ calls?\)/.test(cl), cl);
+  await page.click(R + '.st-compiled .ov-link:has-text("the concept")'); await page.waitForSelector(R + '.st-compiled-call');
+  const one = await page.textContent(R + '.st-compiled-call'); ok(/Language model/.test(one) && /effort high/.test(one) && /system \(\d+ characters\)/.test(one), one);
+  ok((await page.textContent(R + '.st-used')).includes('Reference influence'), 'the used panel names the influences');
+  await page.click(R + '.st-railbtn:has-text("Production")'); await page.waitForSelector(R + '.st-caps table', { timeout: 15000 });
+  const caps = await page.textContent(R + '.st-caps'); ok(/Pixel masks: not supported/.test(caps) && /render/.test(caps) && /real output not reviewed/.test(caps), caps.slice(0, 300));
+  await shot(page, 'studio-p21');
 });
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {

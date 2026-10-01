@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p20';
+const AXIOM_BUILD = '2026-10-01.studio-p21';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -6746,7 +6746,8 @@ async function ensureStudio(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN analysis TEXT').run(); } catch (e) {}   // art direction: what the vision pass saw in a reference
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN campaign TEXT').run(); } catch (e) {}   // P8: the campaign a reference belongs to (another campaign's references are excluded from a pack)
-  try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN prep_key TEXT').run(); } catch (e) {}   // P8: a prepared (smaller) copy of an original over the models' limit; the original is kept untouched
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN prep_key TEXT').run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN recipe TEXT').run(); } catch (e) {}   // P21: what to borrow from this reference and what to leave   // P8: a prepared (smaller) copy of an original over the models' limit; the original is kept untouched
   STUDIO_READY = true;
   return true;
 }
@@ -6763,7 +6764,7 @@ function stCopy(c) {
   const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
   return out;
 }
-function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ['area', 'background', 'restyle'].indexOf(im.meta.edit.kind) >= 0 ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined }; return out; }
+function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ['area', 'background', 'restyle'].indexOf(im.meta.edit.kind) >= 0 ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined }; return out; }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -6846,7 +6847,7 @@ async function stGet(env, id, opts) {
   ]);
   const out = Object.assign({}, p, {
     sources: (src.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, text: opts && opts.light ? undefined : r.text, chars: (r.text || '').length, passages: pjs(r.passages, {}), claims: pjs(r.claims, []), provenance: r.provenance || '', who: r.who, created: r.created })),
-    references: (refs.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, purpose: r.purpose, key: r.key || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', prepKey: r.prep_key || '', prepUrl: r.prep_key ? '/studio/file?key=' + encodeURIComponent(r.prep_key) : '', campaign: r.campaign || '', note: r.note || '', analysis: pjs(r.analysis, null), who: r.who, created: r.created })),
+    references: (refs.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, purpose: r.purpose, key: r.key || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', prepKey: r.prep_key || '', prepUrl: r.prep_key ? '/studio/file?key=' + encodeURIComponent(r.prep_key) : '', campaign: r.campaign || '', note: r.note || '', analysis: pjs(r.analysis, null), recipe: pjs(r.recipe, null), who: r.who, created: r.created })),
     directions: (dirs.results || []).map(r => Object.assign({ id: r.id, chosen: !!r.chosen, who: r.who, created: r.created }, pjs(r.data, {}))),
     assets: [], thread: (events.results || []).reverse().map(r => Object.assign({ id: r.id, kind: r.kind, who: r.who, at: r.created }, pjs(r.data, {}))),
     jobs: (jobs.results || []).map(stJobRow),
@@ -7389,9 +7390,15 @@ async function stClaude(env, o) {
     const d = await r.json().catch(() => ({}));
     return { status: r.status, d };
   };
+  // the compiled instruction: exactly what this call sent (system, user text, the images by name and size, the settings), kept per job
+  const rec = { at: Date.now(), provider: 'anthropic', op: o.op || '', role: o.role || 'creative', model, effort: rich.output_config ? rich.output_config.effort : null, thinking: rich.thinking ? 'adaptive' : 'off', maxTok: base.max_tokens,
+    images: imgs.map(im => ({ name: im.name || im.ref || (im.purpose ? im.purpose + ' reference' : 'the artwork'), purpose: im.purpose || '', mime: im.mime || 'image/png', kb: Math.round(String(im.b64).length * 0.75 / 1024), prepared: im.prepared || undefined })), system: String(o.system || ''), user: String(o.user || '') };
+  if (o.log && Array.isArray(o.log.compiled)) o.log.compiled.push(rec);
   let res = await once(rich);
-  if (res.d.error && res.status === 400 && rich !== base && /thinking|output_config|effort|adaptive/i.test(String(res.d.error.message || ''))) { if (o.log) await o.log('info', 'the model refused the thinking/effort fields (' + String(res.d.error.message || '').slice(0, 80) + '); repeated as a plain request'); res = await once(base); }
+  if (res.d.error && res.status === 400 && rich !== base && /thinking|output_config|effort|adaptive/i.test(String(res.d.error.message || ''))) { if (o.log) await o.log('info', 'the model refused the thinking/effort fields (' + String(res.d.error.message || '').slice(0, 80) + '); repeated as a plain request'); rec.plain = 'the model refused the thinking and effort fields; repeated as a plain request'; rec.effort = null; rec.thinking = 'off'; res = await once(base); }
+  rec.answered = res.d.model || model; rec.usage = res.d.usage || undefined; rec.stop = res.d.stop_reason || undefined;
   if (res.d.error) {
+    rec.error = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     const m = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     if (/credit balance|spend limit|billing|usage limit/i.test(m)) throw new Error('account_limit: ' + m + ' (not retried)');
     if (res.status === 429 || res.status >= 500 || /overloaded/i.test(m)) throw new Error('overloaded: ' + m);
@@ -8906,10 +8913,27 @@ async function stRefAnalyse(env, p, ref, log) {
   await log(analysis.error ? 'info' : 'out', 'reference "' + (ref.name || ref.id) + '" ' + (analysis.error ? 'not analysed: ' + analysis.error : 'analysed: ' + analysis.summary.slice(0, 90)));
   return analysis;
 }
+/* -- reference recipes (P21): per reference, the team says which components to borrow and which to leave. The models see it
+   on the reference's line; each concept names which reference influenced which component, and an influence outside a recipe
+   is marked, not hidden. A brand or approved reference stays a constraint: excluding a component from one is recorded as a
+   conflict, because the kit's requirement still holds. */
+const ST_REF_COMPONENTS = ['typography', 'colour', 'composition', 'hierarchy', 'imagery', 'image treatment', 'panels', 'spacing', 'mark placement', 'copy tone'];
+function stRecipeNorm(x, purpose) {
+  if (!x || typeof x !== 'object') return null;
+  const pick = a => Array.from(new Set((Array.isArray(a) ? a : []).map(c => String(c || '').toLowerCase().trim()).filter(c => ST_REF_COMPONENTS.indexOf(c) >= 0)));
+  let borrow = pick(x.borrow); const exclude = pick(x.exclude); const both = borrow.filter(c => exclude.indexOf(c) >= 0);
+  borrow = borrow.filter(c => exclude.indexOf(c) < 0);
+  const out = { borrow, exclude, note: stStr(x.note, 300), at: Date.now(), who: stStr(x.who, 60) };
+  if (both.length) out.overlap = both;
+  if ((purpose === 'brand' || purpose === 'approved') && exclude.length) out.conflict = 'a ' + purpose + ' reference carries requirements: leaving out ' + exclude.join(', ') + ' does not lift what the kit and the campaign require';
+  return borrow.length || exclude.length || out.note ? out : null;
+}
+function stRecipeText(rc) { if (!rc) return ''; return (rc.borrow.length ? ' BORROW ONLY: ' + rc.borrow.join(', ') + '.' : '') + (rc.exclude.length ? ' DO NOT TAKE: ' + rc.exclude.join(', ') + '.' : '') + (rc.note ? ' Team note: ' + rc.note : ''); }
 function stRefLine(r, an) {
   const head = '[' + r.id + '] ' + r.name + ' (' + r.purpose + (r.note ? '; ' + r.note : '') + ')';
-  if (!an || an.error) return head + ' - not analysed' + (an && an.error ? ': ' + an.error : '') + '; only its name and purpose are known.';
-  return head + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
+  const rc = stRecipeText(r.recipe);
+  if (!an || an.error) return head + rc + ' - not analysed' + (an && an.error ? ': ' + an.error : '') + '; only its name and purpose are known.';
+  return head + rc + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
 }
 /** The project's references as the models receive them: ranked by purpose, analysed (lazily, up to two a call), the strongest attached as images. */
 async function stRefBundle(env, p, opts) {
@@ -8920,7 +8944,7 @@ async function stRefBundle(env, p, opts) {
   for (const r of rows) {
     let an = pjs(r.analysis, null);
     if ((!an || (an.error && !/over 4.5 MB|no image/.test(an.error) && Date.now() - (an.at || 0) > 600000)) && r.key && opts.analyse !== false && analysed < 2) { an = await stRefAnalyse(env, p, r, log); analysed++; }
-    const ref = { id: r.id, name: r.name, purpose: r.purpose, note: r.note || '', key: r.key || '', campaign: r.campaign || '', prepKey: r.prep_key || '', analysis: an };
+    const ref = { id: r.id, name: r.name, purpose: r.purpose, note: r.note || '', key: r.key || '', campaign: r.campaign || '', prepKey: r.prep_key || '', analysis: an, recipe: pjs(r.recipe, null) };
     out.rows.push(ref); out.used.push({ id: r.id, name: r.name, purpose: r.purpose, analysed: !!(an && !an.error) });
     if (!an || an.error) out.unanalysed.push(r.name + (an && an.error ? ' (' + an.error + ')' : ''));
     if (out.images.length < max && r.key) { const im = await stRefImage(env, r); if (im) { out.images.push(Object.assign(im, { ref: r.id, purpose: r.purpose, name: r.name })); ref.attached = true; ref.prepared = !!im.prepared; } else ref.unavailable = true; }
@@ -9207,7 +9231,7 @@ async function stUsed(env, p, a, v) {
   const ctx = (textGen && textGen.context) || {};
   // the concept card that made it, when the words or plan came from one
   let refPack = ctx.refPack || null, concept = null;
-  for (const x of chain.slice(0, 12)) { if (refPack && concept) break; try { const ap = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='applied' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + x.id + '"%').first(); const apd = ap ? pjs(ap.data, null) : null; if (apd && apd.eid) { const ce = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + apd.eid + '"%').first(); const ced = ce ? pjs(ce.data, null) : null; if (ced) { if (!refPack && ced.refPack) refPack = ced.refPack; concept = concept || { eid: ced.eid, mode: ced.mode, model: ced.model, option: (ced.options || [])[apd.index] ? ced.options[apd.index].name : '', version: x.id }; } } } catch (e) {} }
+  for (const x of chain.slice(0, 12)) { if (refPack && concept) break; try { const ap = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='applied' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + x.id + '"%').first(); const apd = ap ? pjs(ap.data, null) : null; if (apd && apd.eid) { const ce = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + apd.eid + '"%').first(); const ced = ce ? pjs(ce.data, null) : null; if (ced) { if (!refPack && ced.refPack) refPack = ced.refPack; concept = concept || { eid: ced.eid, mode: ced.mode, model: ced.model, job: ced.job || '', option: (ced.options || [])[apd.index] ? ced.options[apd.index].name : '', influence: (ced.options || [])[apd.index] ? ced.options[apd.index].influence || [] : [], version: x.id }; } } } catch (e) {} }
   const refRows = (await env.MIND_DB.prepare('SELECT id, name, purpose, campaign FROM studio_references WHERE project=?').bind(p.id).all()).results || [];
   const refName = id => { const r = refRows.find(x => x.id === id); return r ? { id, name: r.name, purpose: r.purpose, campaign: r.campaign || '' } : { id, name: id, purpose: '', campaign: '' }; };
   const ruleIds = Array.from(new Set([].concat((ctx.rules && ctx.rules.copy) || [], (ctx.rules && ctx.rules.tiles) || [])));
@@ -9218,6 +9242,14 @@ async function stUsed(env, p, a, v) {
   let kitRev = null; if (ctx.kitUpdated) { try { await ensureBrand(env); const r = await env.MIND_DB.prepare('SELECT id, at, summary FROM brand_revisions WHERE ns=? AND at<=? ORDER BY at DESC LIMIT 1').bind(p.ns, ctx.kitUpdated).first(); kitRev = r ? { id: r.id, at: r.at, summary: pjs(r.summary, []) } : null; } catch (e) {} }
   const im = (imageGen && imageGen.image) || v.image || null; const meta = (im && im.meta) || {};
   const imagery = imageGen ? { version: imageGen.id, note: imageGen.note, model: meta.model || im.model || '', size: meta.size || im.size || '', pixels: meta.pixels, fallback: !!(im.fallback || meta.fallback), references: meta.references || [], prompt: stStr((imageGen.context || {}).prompt || (imageGen.context || {}).visual || '', 400), historyReplayed: meta.historyReplayed } : null;
+  // the jobs whose compiled instructions stand behind this version: the one that wrote the words and plan, the concept call, the render
+  const WHY = { render: 'the imagery', concepts: 'the concept', inspect: 'the inspection', copy: 'words and plan', sequence: 'words and plan', revise: 'the direction', direct: 'the direction', strategy: 'the strategy' };
+  const cj = []; const addJ = async id => { id = stClean(id, 24); if (!id || cj.some(x => x.job === id)) return; const jr = await env.MIND_DB.prepare('SELECT id, stage, progress FROM studio_jobs WHERE id=? AND project=?').bind(id, p.id).first(); if (!jr) return; const pr = pjs(jr.progress, {}); cj.push({ job: jr.id, stage: jr.stage, why: WHY[jr.stage] || jr.stage, calls: pr.compiled ? pr.compiled.calls : 0, recorded: !!pr.compiled }); };
+  if (meta.compiled && meta.compiled.job) await addJ(meta.compiled.job);
+  // only the versions that made what this one shows: up to the generation of the words and of the imagery, not older history
+  const lastGen = Math.max(chain.indexOf(textGen), chain.indexOf(imageGen));
+  for (const x of chain.slice(0, lastGen >= 0 ? lastGen + 1 : 1)) if (x.context && x.context.job) await addJ(x.context.job);
+  if (concept && concept.job) await addJ(concept.job);
   const parts = [textGen ? 'the words and plan were made in version ' + textGen.id : '', imageGen ? 'the imagery was rendered in version ' + imageGen.id : ''].filter(Boolean);
   return { ok: true, asset: a.id, version: v.id,
     generatedBy: textGen ? { version: textGen.id, note: textGen.note, kind: textGen.kind, created: textGen.created } : null, imagery, editsSince: edits,
@@ -9225,7 +9257,7 @@ async function stUsed(env, p, a, v) {
     references: refPack ? { mode: refPack.mode, attached: (refPack.attached || []).map(refName), read: (refPack.read || []).map(refName), excluded: refPack.excluded || [], unavailable: refPack.unavailable || [] } : null,
     rules, facts: ctx.facts != null ? ctx.facts : null, banned: ctx.banned != null ? ctx.banned : null, examples: ctx.examples != null ? ctx.examples : null,
     marks, models: { text: ctx.model || (concept && concept.model) || '', image: imagery ? imagery.model : '', imageSize: imagery ? imagery.size : '', pixels: imagery ? imagery.pixels : undefined, fallback: imagery ? imagery.fallback : false },
-    concept, assumptions: (ctx.brief && ctx.brief.assumptions) || [], gaps: (ctx.brief && ctx.brief.gaps) || [], acknowledged: !!(ctx.brief && ctx.brief.acknowledged), how: ctx.how || '', medium: ctx.medium || '', size: ctx.size || '',
+    concept, compiled: cj, assumptions: (ctx.brief && ctx.brief.assumptions) || [], gaps: (ctx.brief && ctx.brief.gaps) || [], acknowledged: !!(ctx.brief && ctx.brief.acknowledged), how: ctx.how || '', medium: ctx.medium || '', size: ctx.size || '',
     note: parts.length ? 'Recorded when ' + parts.join(' and ') + (edits.length ? '; ' + edits.length + ' later hand edit' + (edits.length === 1 ? '' : 's') + ' used no model and no new knowledge' : '') + '. Nothing from another client is ever in the context.' : 'This version was not generated by the Studio (an import or a hand-made layout): no model context was used.' };
 }
 /** The reference pack a concept sees: the project's references grouped by what they are for, in one of three modes -
@@ -9295,8 +9327,8 @@ const ST_CONCEPT_SYS = 'You are the art director of an Australian political comm
   + '"design":"only instead of plan, for a quick preset variant: ' + ST_SPEC_SCHEMA.replace(/"/g, '\'') + '",'
   + '"copy":{"headline":"only when a sharper headline is part of the direction, in the client voice, else omit"},'
   + '"keeps":["<=8 words each"],"changes":["<=8 words each"],"needsImage":true,'
-  + '"basis":[{"claim":"<=14 words","kind":"rule|preference|reference|inferred","ref":"reference id when kind is reference"}],"refs":["reference ids this concept draws on"],"missing":["<=12 words each: what the brief, the kit or the references do not give and you did not invent"]}]}\n'
-  + 'RULES. When exploring, three concepts that differ visibly - in medium, composition, hierarchy and devices - not three names for one layout; at least one reuses the current photograph when one is on file (its region prompt then says \'keep the current image\'), the others may call for new imagery; assess your own set and merge two that would look alike. When refining, one or two concepts that keep the current idea and improve it in named ways. When creating a new design, start from the brief and the campaign identity, not from the current panel or layout; honour what the team said to retain. Every concept serves the message and the campaign identity (a myth-busting format is content, not identity: the campaign\'s own colours, devices and mark define identity); new imagery depicts the world of the message (no sport, leisure or lifestyle stock); white type needs a dark ground; the subject stays visible beside the words; locked elements stay where they are. Brand and approved references are constraints; other references lend only their stated respect; where the kit and the references are silent, say so under missing. Mark each basis item as a stated rule, a recorded preference, a named reference or your inference. Australian English, no exclamation marks.\n' + ST_PLAN_RULES + '\n' + ST_SPEC_RULES;
+  + '"basis":[{"claim":"<=14 words","kind":"rule|preference|reference|inferred","ref":"reference id when kind is reference"}],"refs":["reference ids this concept draws on"],"influence":[{"ref":"reference id","component":"' + ST_REF_COMPONENTS.join('|') + '"}],"missing":["<=12 words each: what the brief, the kit or the references do not give and you did not invent"]}]}\n'
+  + 'RULES. When exploring, three concepts that differ visibly - in medium, composition, hierarchy and devices - not three names for one layout; at least one reuses the current photograph when one is on file (its region prompt then says \'keep the current image\'), the others may call for new imagery; assess your own set and merge two that would look alike. When refining, one or two concepts that keep the current idea and improve it in named ways. When creating a new design, start from the brief and the campaign identity, not from the current panel or layout; honour what the team said to retain. Every concept serves the message and the campaign identity (a myth-busting format is content, not identity: the campaign\'s own colours, devices and mark define identity); new imagery depicts the world of the message (no sport, leisure or lifestyle stock); white type needs a dark ground; the subject stays visible beside the words; locked elements stay where they are. Brand and approved references are constraints; other references lend only their stated respect; where the kit and the references are silent, say so under missing. Mark each basis item as a stated rule, a recorded preference, a named reference or your inference. Name under influence which reference shaped which component; take from a reference only what its recipe borrows and never what it says DO NOT TAKE. Australian English, no exclamation marks.\n' + ST_PLAN_RULES + '\n' + ST_SPEC_RULES;
 /** Resolve a plan's region references (ids on the project) to images with roles, for the image model. */
 async function stRefsForGemini(env, p, refs) {
   const out = [];
@@ -9400,13 +9432,16 @@ async function stConceptsStage(env, job, p, log) {
     const countRenders = L => L.approach === 'artwork' ? 1 : (L.regions || []).filter(rg => !/keep the current/i.test(rg.prompt || '')).length;
     const renders = planIn ? (layout.frames ? layout.frames.reduce((n, fr) => n + countRenders(fr.layout), 0) : countRenders(layout)) : (needsImage ? 1 : 0);
     const refIds = (Array.isArray(o.refs) ? o.refs : []).map(x => stClean(x, 24)).filter(x => refNames[x]).slice(0, 4);
+    const recipeOf = id => (refs.rows.find(x => x.id === id) || {}).recipe || null;
+    const influence = (Array.isArray(o.influence) ? o.influence : []).map(x => ({ ref: stClean(x && x.ref, 24), component: String((x && x.component) || '').toLowerCase().trim() })).filter(x => refNames[x.ref] && ST_REF_COMPONENTS.indexOf(x.component) >= 0).slice(0, 8)
+      .map(x => { const rc = recipeOf(x.ref); const outside = rc ? (rc.exclude.indexOf(x.component) >= 0 ? 'the recipe says not to take ' + x.component : rc.borrow.length && rc.borrow.indexOf(x.component) < 0 ? x.component + ' is not among what the recipe borrows' : '') : ''; return Object.assign({ name: refNames[x.ref] }, x, outside ? { outsideRecipe: outside } : {}); });
     const summary = planIn ? layout.mediumName + ', ' + layout.approach + (layout.frames ? ', ' + layout.frames.length + ' frames' : '') + ', ' + layout.layers.filter(l => l.type === 'text').length + ' text groups, ' + (layout.regions || []).length + ' image region' + ((layout.regions || []).length === 1 ? '' : 's') + (layout.marks ? ', mark ' + layout.marks.policy : '') : stDescribeSpec(design);
     return { i, name: stStr(o.name, 60) || 'Concept ' + (i + 1), concept: stStr(o.concept, 400), rationale: stStr(o.rationale, 400), imagery: stStr(o.imagery, 300), composition: stStr(o.composition, 240), typography: stStr(o.typography, 200), colour: stStr(o.colour, 160), devices: stStr(o.devices, 200), mark: stStr(o.mark, 120),
       kind: planIn ? 'plan' : 'preset', medium: layout.medium || (design ? 'photo-documentary' : ''), approach: layout.approach || 'editable', design, planIn: planIn ? JSON.parse(JSON.stringify(planIn)) : undefined, summary, layout, copy: copyWant, frames: layout.frames ? layout.frames.length : 0,
       keeps: (Array.isArray(o.keeps) ? o.keeps : []).map(x => stStr(x, 80)).slice(0, 6), changes: (Array.isArray(o.changes) ? o.changes : []).map(x => stStr(x, 80)).slice(0, 6), needsImage, renders,
       prompt: planIn ? '' : needsImage ? stStr(o.prompt || (design && [design.image.subject, design.image.setting, design.image.framing, design.image.lighting, design.image.mood].filter(Boolean).join('; ')), 900) : '',
       basis: (Array.isArray(o.basis) ? o.basis : []).map(b => ({ claim: stStr(b && b.claim, 120), kind: ['rule', 'preference', 'reference', 'inferred'].indexOf(b && b.kind) >= 0 ? b.kind : 'inferred', ref: b && b.ref && refNames[stClean(b.ref, 24)] ? refNames[stClean(b.ref, 24)] : undefined })).filter(b => b.claim).slice(0, 6),
-      refs: refIds.map(id => ({ id, name: refNames[id] })), missing: (Array.isArray(o.missing) ? o.missing : []).map(x => stStr(x, 120)).slice(0, 4), unsupported: layout.unsupported || [], incomplete: layout.incomplete && layout.incomplete.length ? layout.incomplete : undefined, kept: kept.length ? kept : undefined, setAside: aside.length ? aside : undefined, markOverridden: layout.markOverridden || undefined,
+      refs: refIds.map(id => ({ id, name: refNames[id] })), influence: influence.length ? influence : undefined, missing: (Array.isArray(o.missing) ? o.missing : []).map(x => stStr(x, 120)).slice(0, 4), unsupported: layout.unsupported || [], incomplete: layout.incomplete && layout.incomplete.length ? layout.incomplete : undefined, kept: kept.length ? kept : undefined, setAside: aside.length ? aside : undefined, markOverridden: layout.markOverridden || undefined,
       cost: renders ? renders + ' render' + (renders === 1 ? '' : 's') + ' at ' + size + (layout.approach === 'artwork' ? ' (full artwork, words in the bitmap)' : '') + ' plus a layout version' : 'layout only, no render', layoutLocked: !!a.locks.layout && mode !== 'new', fresh: mode === 'new' };
   };
   // a layouts exploration is also measured against the layout it starts from: a "new" arrangement that draws like the current one is a look-alike
@@ -9551,7 +9586,8 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
   if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
   const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
-  if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''));
+  const compiledKey = out.sent ? await stCompiledSave(env, job, [Object.assign({ at: Date.now(), op: areaEdit ? 'area edit (' + areaEdit.kind + ')' : inp.approach === 'artwork' ? 'artwork render' : 'render ' + (inp.region || 'bg'), answered: out.ok ? out.model : '', fallback: !!out.fallback, error: out.ok ? undefined : out.error + (out.detail ? ': ' + out.detail : ''), masks: false, areaNote: areaEdit ? 'the area is described in words; no pixel mask is sent' : undefined }, out.sent)]) : '';
+  if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''), compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : undefined);
   const again = await stJob(env, job.id);
   if (!again || again.state !== 'running') return again;   // cancelled while the render ran: the image is not filed
   const vid = stId('v'); const key = 'studio/' + p.id + '/' + a.id + '/' + vid + '.png'; let convKey = '';
@@ -9572,6 +9608,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
   const meta = { references: references.map(r => r.name || r.role).filter(Boolean).slice(0, 8), model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
+  if (compiledKey) meta.compiled = { job: job.id, key: compiledKey };
   if (areaEdit) meta.edit = Object.assign({}, areaEdit, { of: editOf, preservation: 'pending', limits: 'Described-area editing (semantic masking): the image model is asked to leave everything outside the area alone, with no pixel mask to hold it there. What changed outside the area is measured afterwards.' });
   const image = { key, url: '/studio/file?key=' + encodeURIComponent(key), model: out.model, requested: out.requested, fallback: !!out.fallback, size: meta.size, conv: convKey || undefined, editOf: editOf || undefined, meta };
   const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: (areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '')).slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0 } }) };
@@ -9592,7 +9629,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : inp.approach === 'artwork' ? ', full artwork - the words are part of the bitmap' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
   if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
-  return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable' }, cost: 1 });
+  return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable' }, cost: 1, progress: compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : {} });
 }
 // -- inspection: the art director reads the rendered result against the concept and offers one bounded correction -------
 // -- Technical validation, readiness and evidence (build studio-p9) ------------------------------------------------
@@ -9811,10 +9848,45 @@ async function stSuggest(env, p, asset, opts) {
   return Object.assign({ ok: true, cached: false }, out);
 }
 /** Stage dispatch for the production stages; the render stage and echo stay in stJobRun. */
+/* -- compiled instructions (P21): what each model call of a job was actually sent, kept in R2 beside the project ----------
+   The record is the evidence behind "the model was told X": the system and user text as compiled (kit, rules, references,
+   recipes, ledger included), the images by name and size, the model asked for and the one that answered, the effort, a plain
+   retry or an image-model fallback. Never a key or a secret. A job that made no model call files nothing. */
+function stCompiledKey(job) { return 'studio/' + job.project + '/compiled/' + job.id + '.json'; }
+async function stCompiledSave(env, job, calls, extra) {
+  if (!env.MIND_DOCS || !Array.isArray(calls) || !calls.length) return '';
+  const key = stCompiledKey(job);
+  try { await env.MIND_DOCS.put(key, JSON.stringify(Object.assign({ job: job.id, stage: job.stage, project: job.project, asset: job.asset || '', build: AXIOM_BUILD, at: Date.now(), calls }, extra || {})), { httpMetadata: { contentType: 'application/json' } }); } catch (e) { return ''; }
+  return key;
+}
+/* -- the capability registry (P21): what each operation can and cannot do here, so a plan never assumes a feature ---------
+   "configured" is what this worker is set to call; "verified" says what has been shown and how: the harnesses run every
+   path against stub models, and no real-output review is recorded in the code. Reachability is GET /studio/models. */
+function stCapabilities(env) {
+  const SIZES = ['1K', '2K', '4K']; const cap = SIZES.indexOf(env.IMAGE_SIZE_MAX) !== -1 ? env.IMAGE_SIZE_MAX : '';
+  const sizes = cap ? SIZES.slice(0, SIZES.indexOf(cap) + 1) : SIZES;
+  const stub = 'integration-tested against stub models; real output not reviewed in code';
+  return { ok: true, build: AXIOM_BUILD, operations: [
+    { op: 'plan', what: 'directions, strategy, concepts, layouts, sequences, first production, revisions by instruction', provider: 'anthropic', model: stModel(env, 'creative'), configured: !!env.ANTHROPIC_API_KEY,
+      accepts: { images: 'up to 4 per call (the artwork first, then references), each under 4.5 MB (a prepared copy is sent for larger originals)', effort: 'low / medium / high (adaptive thinking on 5.x models; repeated plain if refused)', output: 'strict JSON plans: regions, elements with ids, marks, frames' },
+      cannot: ['see a reference that has no image or no prepared copy (its analysis is read instead)', 'place a mark the campaign policy forbids (the policy wins and says so)'], verified: stub },
+    { op: 'extract', what: 'claim ledger, reference analysis, suggestions, brief suggestions', provider: 'anthropic', model: stModel(env, 'extract'), configured: !!env.ANTHROPIC_API_KEY, accepts: { images: 'one reference image per analysis' }, cannot: [], verified: stub },
+    { op: 'inspect', what: 'the art director reads a rendered tile: scores, wording read back, verdict, one bounded correction', provider: 'anthropic', model: stModel(env, 'creative'), configured: !!env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0',
+      accepts: { images: 'the composed export when the browser saved one, else the imagery alone (said on the card)' }, cannot: ['approve anything: a ship verdict is an opinion, approval is a person\'s'], verified: stub },
+    { op: 'render', what: 'imagery for a region or a whole artwork', provider: 'google', model: 'gemini-3-pro-image', fallbacks: ['gemini-3.1-flash-image', 'gemini-2.5-flash-image'], configured: !!env.GEMINI_KEY,
+      accepts: { sizes, defaultSize: SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : '2K', capped: cap || null, aspects: ['1:1', '4:5', '9:16', '16:9', '3:4', '4:3'], references: 'up to 6 images, each with its role stated in the prompt', history: 'multi-turn edits replay the earlier turns only to the model that made them; another model gets the current image instead' },
+      cannot: ['pixel masks: there is no mask input. "Edit an area" describes the area in words (semantic masking) and measures afterwards what changed outside it; nothing outside is guaranteed', 'guaranteed transparency: a cutout is asked for with alpha and the PNG is checked; an opaque answer is marked', 'exact lettering as live type: words painted in artwork mode are a bitmap, read back by the inspection, not editable', 'the gemini-2.5 fallback ignores the size setting'],
+      fallback: 'disclosed on the version note, the thread and the asset view (model asked for and model that answered)', verified: stub },
+    { op: 'compose', what: 'the words, shapes and marks drawn over the imagery, measured and validated', provider: 'browser (docs/studio-render.js)', model: '', configured: true,
+      accepts: { fonts: 'the kit fonts when the browser can load them, else the app fallbacks (reported per role)', framing: 'focal point and zoom per image', layers: 'text, shapes, rules, gradients, image regions, marks as exact files' }, cannot: ['effects the plan names but the renderer cannot draw (recorded as unsupported, never replaced in silence)'], verified: 'measured in real Chromium by tests/studio-layout-browser.mjs; preview and export are the same drawing' }],
+    masks: false, note: 'What an operation cannot do is stated, not worked around in silence. A capability marked integration-tested has run its whole path against stub models; it says nothing about the quality of real output.' };
+}
 async function stStageRun(env, job, done, fail) {
   const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
+  log.compiled = [];
   const p = await stProject(env, job.project);
   if (!p) return done('failed', { error: 'project gone (not retried)' });
+  const filed = async () => { const c = await stCompiledSave(env, job, log.compiled); return c ? { key: c, calls: log.compiled.length } : undefined; };
   try {
     let result;
     if (job.stage === 'extract') result = await stExtractStage(env, job, p, log);
@@ -9829,11 +9901,11 @@ async function stStageRun(env, job, done, fail) {
     else return done('failed', { error: 'unknown stage ' + job.stage });
     const again = await stJob(env, job.id);
     if (!again || again.state !== 'running') return again;
-    return done('done', { result, cost: (lines.filter(l => l.kind === 'cmd').length), progress: { lines } });
+    return done('done', { result, cost: (lines.filter(l => l.kind === 'cmd').length), progress: { lines, compiled: await filed() } });
   } catch (e) {
     const m = String((e && e.message) || e).slice(0, 220);
     await log('err', m);
-    return fail(m, { lines });
+    return fail(m, { lines, compiled: await filed().catch(() => undefined) });
   }
 }
 
@@ -10052,14 +10124,16 @@ async function nanoRender(env, opts) {
   const cap = SIZES.indexOf(env.IMAGE_SIZE_MAX) !== -1 ? env.IMAGE_SIZE_MAX : '';
   const size = cap && SIZES.indexOf(asked) > SIZES.indexOf(cap) ? cap : asked; const capped = size !== asked ? asked : '';
   imgCfg.imageSize = size;
-  let lastDetail = '', lastModel = chain[0], lastCode = 0;
+  let lastDetail = '', lastModel = chain[0], lastCode = 0; let lastSent = null;
+  // what was sent, for the compiled-instruction record: the text, the images by role (never their bytes), the settings
+  const sentOf = (model, parts, replay, history) => ({ provider: 'google', model, chain, text: (parts[0] && parts[0].text) || '', images: parts.slice(1).map((pt, i) => ({ role: i === 0 && pt.inline_data && opts.currentImage && !replay && history0.length ? 'the current image to edit' : (refs[i - (opts.currentImage && !replay && history0.length ? 1 : 0)] || {}).role || 'reference', name: (refs[i - (opts.currentImage && !replay && history0.length ? 1 : 0)] || {}).name || '' })), historyTurns: history.length, historyReplayed: replay, imageConfig: Object.assign({}, imgCfg), sizeAsked: asked, capped: capped || undefined, aspect: opts.aspect || '' });
   for (const model of chain) {
     lastModel = model;
     const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length) ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
     const replay = history0.length > 0 && (!opts.historyModel || opts.historyModel === model);
     const history = replay ? history0 : [];
     const parts = mkParts(!replay && history0.length > 0);
-    const payload = JSON.stringify({ contents: history.concat([{ role: 'user', parts }]), generationConfig: cfg });
+    const payload = JSON.stringify({ contents: history.concat([{ role: 'user', parts }]), generationConfig: cfg }); lastSent = sentOf(model, parts, replay, history);
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -10080,14 +10154,14 @@ async function nanoRender(env, opts) {
         const imgPart = imgParts[imgParts.length - 1];
         const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
         const um = data.usageMetadata || {};
-        if (inl && inl.data) return { ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts }, historyReplayed: replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
+        if (inl && inl.data) return { ok: true, sent: sentOf(model, parts, replay, history), imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts }, historyReplayed: replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
         lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
         if (cand.finishReason && cand.finishReason !== 'STOP') continue;
       } catch (e) { lastDetail = String((e && e.name) || e).slice(0, 60); }
     }
   }
   // the error names the provider's last status so a caller can tell a transient refusal (503, 429) from bad input (400) or a key problem (403)
-  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel };
+  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel, sent: lastSent };
 }
 async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -11637,6 +11711,15 @@ export default {
           if (path === '/studio/brief/suggest') { const p = qf('project') ? await stProject(env, qf('project')) : null; if (qf('project') && !p) return jsonResp({ error: 'unknown_project' }, 404); if (!p && !qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); if (qf('ai') === '1' && auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Model suggestions spend a call; a full key is needed. The sourced suggestions are read-role.' }, 403); return jsonResp(await stBriefSuggest(env, p, { ns: qf('ns'), campaign: qf('campaign'), ai: qf('ai') === '1' })); }
           if (path === '/studio/identity') { const ns = relNs(qf('ns')); if (!qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); return jsonResp(await stIdentityAudit(env, ns)); }
           if (path === '/studio/models') return jsonResp(await stModels(env));
+          if (path === '/studio/capabilities') return jsonResp(stCapabilities(env));
+          if (path === '/studio/compiled') {
+            // what a job's model calls were sent, read through the job's project (a job id from another project is not found)
+            const job = await stJob(env, qf('job')); if (!job) return jsonResp({ error: 'unknown_job' }, 404);
+            const p = await stProject(env, job.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+            const obj = env.MIND_DOCS ? await env.MIND_DOCS.get(stCompiledKey(job)) : null;
+            if (!obj) return jsonResp({ ok: true, job: job.id, stage: job.stage, calls: [], note: 'No model call was recorded for this job (it made none, or it ran before build studio-p21).' });
+            const d = pjs(new TextDecoder().decode(await obj.arrayBuffer()), {}); return jsonResp(Object.assign({ ok: true }, d, { ns: p.ns }));
+          }
           if (path === '/studio/job') { const j = await stJob(env, qf('id')); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
           if (path === '/studio/jobs') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all()).results || []; return jsonResp({ ok: true, jobs: rows.map(stJobRow) }); }
           if (path === '/studio/file') {
@@ -11821,6 +11904,16 @@ export default {
           return jsonResp({ ok: true, job, kind, round: ins.round });
         }
         // (re)run the vision pass over one reference
+        if (path === '/studio/reference/recipe') {
+          const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!ref) return jsonResp({ error: 'unknown_reference' }, 404);
+          const p = await stProject(env, ref.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== p.id) return jsonResp({ error: 'cross_project' }, 403);
+          const recipe = stRecipeNorm(Object.assign({}, sb, { who }), ref.purpose);
+          await env.MIND_DB.prepare('UPDATE studio_references SET recipe=? WHERE id=?').bind(recipe ? JSON.stringify(recipe) : null, ref.id).run();
+          await stEvent(env, p.id, 'reference_recipe', { ref: ref.id, recipe, text: recipe ? 'Recipe for ' + ref.name + ':' + stRecipeText(recipe) + (recipe.conflict ? ' Note: ' + recipe.conflict + '.' : '') : 'Recipe cleared for ' + ref.name + '.' }, who);
+          await stBump(env, p.id);
+          return jsonResp({ ok: true, id: ref.id, recipe, components: ST_REF_COMPONENTS });
+        }
         if (path === '/studio/reference/analyse') {
           const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!ref) return jsonResp({ error: 'unknown_reference' }, 404);
           const p = await stProject(env, ref.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
