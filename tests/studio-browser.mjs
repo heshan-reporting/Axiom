@@ -548,6 +548,17 @@ await t('P14: Production lists what a kit change made stale with a free re-check
   ok(/Recipe "Strategy, then a four-asset sequence/.test(await page.textContent(R + '.st-thread')), 'the run is on the thread');
   await shot(page, 'studio-production');
 });
+await t('P15: the library shows outcome metrics for the client against the previous window and the desks, with the isolation audit, at no model cost', async () => {
+  const a0 = calls.anthropic, g0 = calls.gemini;
+  await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-metrics .ov-link:has-text("Outcome metrics")'); await page.waitForSelector(R + 'table[aria-label="Outcome metrics"]');
+  const rows = await texts(page, R + 'table[aria-label="Outcome metrics"] tbody tr');
+  ok(rows.some(r => /Work started/.test(r) && /projects?/.test(r)) && rows.some(r => /Time to first draft/.test(r) && /\(n \d+\)/.test(r)) && rows.some(r => /Spend per approved asset/.test(r) && /not recorded/.test(r)), JSON.stringify(rows).slice(0, 600));
+  ok(/Isolation: clean/.test(await page.textContent(R + '.st-iso')), await page.textContent(R + '.st-iso'));
+  ok(/The desks never recorded/.test(await page.textContent(R + '.st-metrics')));
+  eq([calls.anthropic, calls.gemini], [a0, g0], 'metrics cost nothing');
+  await shot(page, 'studio-metrics');
+});
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {
   const p2 = await open('read');

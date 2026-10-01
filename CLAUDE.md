@@ -1361,6 +1361,32 @@ whose upstream is still queued for its next round. Harnesses:
 `tests/studio-p14-worker.mjs` (4) and the P14 case in the browser harness
 (22).
 
+**Outcome metrics (build `studio-p15`; `CREATIVE-STUDIO.md` s.21).** `GET
+/studio/metrics?ns=&days=` (read role; `stMetrics`) counts recorded rows for
+one client and window, never estimates: per project the time from creation
+to its first version (`timeToFirstDraft`), its first passing technical
+validation (`timeToFirstValidated`) and its first agency approval
+(`timeToFirstApproval`), each `{n, median, mean}`; versions up to the
+standing approval of each fully approved asset (`versionsPerApproved`);
+finished model calls and images divided by fully approved assets
+(`costPerApproved`, null with `costNote` when none); constraint adherence
+(current versions with no `differs`, `unsupported`, `banned` or
+`mark_missing` check, `ST_ADHERENCE_BAD`); validation pass rate; agency
+rejections; client changes asked and approvals. Legacy imports and archived
+projects are left out. Baselines: `baseline.earlier` (the same client's
+previous window of the same length) and `baseline.legacy` / `legacyAll`
+(release packs and content sets: first Approve from `engine_outcomes`,
+revisions per set, flagged pieces, approved and killed, and `notRecorded`
+naming what the desks never measured). `isolation` (`stIsolationAudit`)
+reads every rule id, reference id and mark layer on the client's current
+versions and lists any belonging to another client, a recommended reference
+of another campaign, or another campaign's wordmark. `definitions` says what
+each figure counts. In-app: **Outcome metrics** under the project library
+(7 / 30 / 90 days; measure, this window, the window before, the desks;
+"none yet" with n, "not recorded" for the desks; the isolation line).
+Harnesses: `tests/studio-p15-worker.mjs` (7), the P15 case in the browser
+harness (23).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

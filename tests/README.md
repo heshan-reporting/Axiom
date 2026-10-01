@@ -27,6 +27,7 @@ node --experimental-sqlite tests/studio-p10-worker.mjs    # the Brand Workspace:
 node --experimental-sqlite tests/studio-p11-worker.mjs    # client review: private scoped links (hash only), allow-list, pins, stale versions, approval after the agency, resolution by version, delivery, revocation, lockout
 node --experimental-sqlite tests/studio-p12-worker.mjs    # strategy drafted and confirmed, the exploration budget and diversity, the campaign sequence with no render
 node --experimental-sqlite tests/studio-p14-worker.mjs    # recipes: estimate, confirm before renders, chained steps that wait and stop on an upstream failure; impact with free remedies; actual usage
+node --experimental-sqlite tests/studio-p15-worker.mjs    # outcome metrics against the previous window and the desks, n beside every median, the isolation audit (rules, references, marks)
 node --experimental-sqlite tests/studio-review-browser.mjs # docs/review.html and the Studio Client review view in Chromium through the worker module
 node --experimental-sqlite tests/studio-layout-browser.mjs  # the renderer's measurement, validation and repair in real Chromium (HOOF reconstruction, worker layouts in four formats, fonts, marks); writes tests/shot-layout-repair.png
 node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export

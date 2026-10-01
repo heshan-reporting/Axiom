@@ -394,7 +394,38 @@ Locked fields are named beside each asset, and the paid remedies keep them.
 **Proof.** `tests/studio-p14-worker.mjs` covers estimate, confirm, chained claiming, upstream failure, impact and usage. The P14 case in the browser harness covers the kit-change re-check with no model call, the confirm on a rendering recipe (dismissing it starts nothing), and a two-step recipe running in order with no image.
 
 **Not yet:**
-- outcome metrics with baselines
+- outcome metrics with baselines (s.21)
 - the six-step demonstration
 - region editing through Gemini's semantic masking
+
+## 21. Outcome metrics against a baseline (build studio-p15)
+
+The request asked for metrics with baselines and no fake certainty. Each figure is a count over rows the Studio already records. Nothing is a model's impression, and nothing is estimated.
+
+**What is measured, per client and window:**
+
+| Measure | Counted from |
+|---|---|
+| Time to first draft | project created to its first version |
+| Time to a validated composition | project created to the first validation with `ok=1` |
+| Time to first approval | project created to the first agency approval |
+| Versions per approved asset | versions up to the standing approval (copy, and design unless copy only) |
+| Spend per approved asset | finished model calls and images over fully approved assets |
+| Constraint adherence | current versions with no figure that differs, nothing unsupported, no banned term, no missing mandatory mark |
+| Technical validation passed | latest validation of each current composition |
+| Rejections and client decisions | agency rejections; client changes asked and approvals |
+
+**Baselines.**
+- **The same client's previous window** of the same length.
+- **The Release and Content Desks** over the same window, measured the same way where they recorded something: first Approve, revisions per content set, figure and banned-term flags.
+
+Where the desks recorded nothing, the table says "not recorded", not zero. They never measured a composition, never kept versions of a tile, never counted spend per pack and had no client review.
+
+**Reading it.** Every median carries its n. A project without the event is left out of the median, not counted as zero. Small numbers are small numbers.
+
+**Isolation, audited.** Every rule, reference and mark recorded on the client's current versions is read back and checked against the client. Recommended references and wordmarks are also checked against the asset's campaign, so an MCA tile carrying an AEP rule, an AEP logo or the national wordmark on a HOOF asset is named.
+
+**Proof.** `tests/studio-p15-worker.mjs` builds two windows and the desks' rows and checks each figure. It also checks the wall between clients, and that the audit names a planted rule, logo and wordmark. The P15 browser case reads the panel.
+
+**Limits.** Until the deployed Studio has run real projects, these metrics describe test data. The first honest reading comes after a few weeks of real work. Comparisons with the desks are fair only for approval time, revisions and figure and banned-term adherence.
 

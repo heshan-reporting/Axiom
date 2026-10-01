@@ -113,7 +113,42 @@
         ${legacy.map(l => html`<tr key=${l.id} class="st-legacy"><td><b>${l.title}</b><div class="ov-dim">legacy ${l.kind === 'legacy_release' ? 'release pack' : 'content set'}, read-only; ${l.assets} ${l.kind === 'legacy_release' ? 'flattened tiles' : 'pieces'}${l.imported ? '; imported' : ''}</div></td><td>${l.campaign || '-'}</td><td><span class="st-status legacy">${l.status}</span></td><td>${l.owner || '-'}</td><td class="ov-dim">${ago(l.updated)} ago</td><td class="ov-go">${l.imported ? html`<button class="ov-link" onClick=${() => onOpen(l.imported)}>open import</button>` : html`<button class="ov-link" onClick=${() => onOpen(l.id)}>view</button>`}${canWrite() && !l.imported ? html` <button class="ov-link" onClick=${() => onImport(l)}>import to Studio</button>` : null}</td></tr>`)}
       </tbody></table>
       <div class="ov-dim st-foot">Legacy items open read-only. Importing copies one into a Studio project under this client, keeps the original untouched, and is idempotent.</div>
+      <${MetricsPanel} client=${client} />
     </div>`;
+  }
+  /* Outcomes: counts over recorded rows against the client's previous window and the desks the Studio replaced. A figure
+     the records cannot support is shown as "not recorded" or with its n, never as a zero or a guess. */
+  const dur = ms => ms == null ? '-' : ms < 3600000 ? Math.max(1, Math.round(ms / 60000)) + ' min' : ms < 172800000 ? Math.round(ms / 360000) / 10 + ' h' : Math.round(ms / 8640000) / 10 + ' d';
+  function MetricsPanel({ client }) {
+    const [open, setOpen] = useState(false); const [days, setDays] = useState('30'); const [m, setM] = useState(null);
+    useEffect(() => { if (!open) return; let live = true; setM(null); call('/studio/metrics?ns=' + encodeURIComponent(client.id) + '&days=' + days).then(d => { if (live) setM(d); }).catch(e => { if (live) setM({ error: e.message }); }); return () => { live = false; }; }, [open, days, client.id]);
+    if (!open) return html`<div class="st-metrics"><button class="ov-link" onClick=${() => setOpen(true)}>Outcome metrics for ${client.name}</button></div>`;
+    const st = x => !x ? '-' : x.n ? dur(x.median) + ' (n ' + x.n + ')' : html`<span class="ov-dim">none yet</span>`;
+    const num = x => !x ? '-' : x.n ? x.median + ' (n ' + x.n + ', mean ' + x.mean + ')' : html`<span class="ov-dim">none yet</span>`;
+    const cost = (w) => w.costPerApproved ? w.costPerApproved.calls + ' calls, ' + w.costPerApproved.images + ' images' : html`<span class="ov-dim">${w.costNote || 'none approved'}</span>`;
+    const pct = (o, a, b) => o && o.share != null ? o.share + '% (' + o[a] + ' of ' + o[b] + ')' : html`<span class="ov-dim">none yet</span>`;
+    const NR = html`<span class="ov-dim">not recorded</span>`;
+    let body = null;
+    if (!m) body = html`<div class="ov-dim">Counting...</div>`;
+    else if (m.error) body = html`<div class="ov-dim">Metrics unavailable: ${m.error}</div>`;
+    else { const c = m.current, e = m.baseline.earlier, L = m.baseline.legacy, D = m.definitions || {};
+      const rows = [
+        ['Work started', c.projects + ' project' + (c.projects === 1 ? '' : 's') + ', ' + c.assets + ' assets', e.projects + ' project' + (e.projects === 1 ? '' : 's') + ', ' + e.assets + ' assets', L.packs + ' pack' + (L.packs === 1 ? '' : 's') + ', ' + L.sets + ' set' + (L.sets === 1 ? '' : 's') + ', ' + L.pieces + ' pieces', ''],
+        ['Time to first draft', st(c.timeToFirstDraft), st(e.timeToFirstDraft), NR, D.timeToFirstDraft],
+        ['Time to a validated composition', st(c.timeToFirstValidated), st(e.timeToFirstValidated), NR, D.timeToFirstValidated],
+        ['Time to first approval', st(c.timeToFirstApproval), st(e.timeToFirstApproval), st(L.timeToFirstApproval), D.timeToFirstApproval],
+        ['Versions per approved asset', num(c.versionsPerApproved), num(e.versionsPerApproved), L.revisionsPerSet.n ? html`${num(L.revisionsPerSet)} <span class="ov-dim">revisions per set</span>` : num(L.revisionsPerSet), D.versionsPerApproved],
+        ['Spend per approved asset', cost(c), cost(e), NR, D.costPerApproved],
+        ['Constraint adherence', pct(c.adherence, 'clean', 'current'), pct(e.adherence, 'clean', 'current'), L.adherence.pieces ? html`${pct(L.adherence, 'clean', 'pieces')} <span class="ov-dim">figures and banned terms only</span>` : pct(L.adherence, 'clean', 'pieces'), D.adherence],
+        ['Technical validation passed', pct(c.validation, 'passed', 'measured'), pct(e.validation, 'passed', 'measured'), NR, ''],
+        ['Agency rejections', String(c.rejections), String(e.rejections), L.killed + ' killed', ''],
+        ['Client: changes asked / approvals', c.client.changesRequested + ' / ' + c.client.approvals, e.client.changesRequested + ' / ' + e.client.approvals, NR, ''],
+      ];
+      body = html`<table class="ov-table" aria-label="Outcome metrics"><thead><tr><th>Measure</th><th>Last ${m.days} days</th><th>The ${m.days} days before</th><th>Release and Content Desks, last ${m.days} days</th></tr></thead><tbody>${rows.map(r => html`<tr key=${r[0]}><td title=${r[4] || ''}>${r[0]}</td><td class="num">${r[1]}</td><td class="num">${r[2]}</td><td class="num">${r[3]}</td></tr>`)}</tbody></table>
+        <div class=${'st-iso' + (m.isolation.clean ? '' : ' bad')} aria-label="Isolation audit"><b>Isolation:</b> ${m.isolation.clean ? 'clean' : m.isolation.violations.length + ' item' + (m.isolation.violations.length === 1 ? '' : 's') + ' belonging elsewhere'} across ${m.isolation.versions} current version${m.isolation.versions === 1 ? '' : 's'} (${m.isolation.checked.rules} rules, ${m.isolation.checked.references} references, ${m.isolation.checked.marks} marks read).
+          ${m.isolation.violations.length ? html`<ul>${m.isolation.violations.map((v, i) => html`<li key=${i}>${v.asset}: ${v.kind} - ${v.detail}</li>`)}</ul>` : null}</div>
+        <div class="ov-dim">The desks never recorded: ${L.notRecorded.join('; ')}. ${m.note} Hover a measure for its definition.</div>`; }
+    return html`<div class="st-metrics" aria-label="Outcome metrics panel"><div class="ov-sechead"><span class="ov-title">Outcomes for ${client.name}</span><select class="st-sel" value=${days} onChange=${e => setDays(e.target.value)} aria-label="Metrics window"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select><button class="ov-link" onClick=${() => setOpen(false)}>fold</button></div>${body}</div>`;
   }
   function Intake({ client, kit, onCreate, onCancel, preset }) {
     const pr = preset || {};

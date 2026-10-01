@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p14';
+const AXIOM_BUILD = '2026-10-01.studio-p15';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7184,6 +7184,95 @@ async function stImpact(env, p) {
 }
 /** The free remedy for a kit change: recompute the version's checks against today's facts, banned terms and ledger. */
 async function stRecheck(env, p, a) { const v = await stCurrent(env, a); if (!v) return { error: 'no_version', status: 400 }; const checks = await stVersionChecks(env, p, a, v); await stEvent(env, p.id, 'recheck', { text: 'Checks of ' + a.title + ' recomputed against the kit as it is now (no model call): ' + (checks.filter(c => c.state !== 'matches' && c.state !== 'fact').map(c => c.state + ' ' + c.text).join('; ') || 'clean') + '.', asset: a.id }, 'studio'); return { ok: true, checks }; }
+// -- Outcome metrics (P15): what the Studio changed, against what came before ----------------------
+/* Every figure is a count over recorded rows: projects, versions, validations, approvals, jobs, client
+   review. A figure the records cannot support is returned as null with the reason, never estimated. */
+const ST_ADHERENCE_BAD = ['differs', 'unsupported', 'banned', 'mark_missing'];
+function stMedian(xs) { const a = xs.filter(x => typeof x === 'number' && isFinite(x)).sort((x, y) => x - y); if (!a.length) return null; const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2); }
+function stStat(xs) { const a = xs.filter(x => typeof x === 'number' && isFinite(x)); return { n: a.length, median: stMedian(a), mean: a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length * 10) / 10 : null }; }
+async function stMetricsWindow(env, ns, from, to) {
+  const projects = ((await env.MIND_DB.prepare("SELECT id, campaign, created FROM studio_projects WHERE ns=? AND created>=? AND created<? AND COALESCE(legacy_id,'')='' AND COALESCE(archived,0)=0").bind(ns, from, to).all()).results || []);
+  const out = { projects: projects.length, assets: 0, approvedAssets: 0, firstDraftMs: [], firstValidatedMs: [], firstApprovalMs: [], versionsToApproval: [], calls: 0, images: 0, current: 0, clean: 0, byState: {}, measured: 0, passed: 0, rejections: 0, clientChanges: 0, clientApprovals: 0 };
+  for (const p of projects) {
+    const one = async (sql, ...b) => env.MIND_DB.prepare(sql).bind(...b).first();
+    const fv = await one('SELECT MIN(created) AS t FROM studio_versions WHERE project=?', p.id); if (fv && fv.t) out.firstDraftMs.push(fv.t - p.created);
+    const fl = await one('SELECT MIN(created) AS t FROM studio_validations WHERE project=? AND ok=1', p.id); if (fl && fl.t) out.firstValidatedMs.push(fl.t - p.created);
+    const fa = await one("SELECT MIN(created) AS t FROM studio_approvals WHERE project=? AND decision='approve'", p.id); if (fa && fa.t) out.firstApprovalMs.push(fa.t - p.created);
+    const rj = await one("SELECT COUNT(*) AS n FROM studio_approvals WHERE project=? AND decision='reject'", p.id); out.rejections += (rj && rj.n) || 0;
+    const jobs = (await env.MIND_DB.prepare("SELECT stage, cost FROM studio_jobs WHERE project=? AND state='done'").bind(p.id).all()).results || [];
+    jobs.forEach(j => { if (j.stage === 'render') out.images++; else if (j.stage !== 'export') out.calls += Number(j.cost) || 1; });
+    try { const cr = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) AS n FROM studio_review WHERE project=? GROUP BY kind').bind(p.id).all()).results || []; cr.forEach(r => { if (r.kind === 'changes') out.clientChanges += r.n; if (r.kind === 'approve') out.clientApprovals += r.n; }); } catch (e) {}
+    const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=?').bind(p.id).all()).results || [];
+    out.assets += assets.length;
+    for (const r of assets) {
+      const a = stAssetRow(r); const v = await stCurrent(env, a); if (!v) continue;
+      out.current++; const bad = (v.checks || []).filter(c => ST_ADHERENCE_BAD.indexOf(c.state) >= 0); bad.forEach(c => { out.byState[c.state] = (out.byState[c.state] || 0) + 1; }); if (!bad.length) out.clean++;
+      if (v.mode !== 'copy') { const val = await one('SELECT ok FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 1', a.id, v.id); if (val) { out.measured++; if (val.ok) out.passed++; } }
+      const st = await stStanding(env, a); const approved = st.copy && (v.mode === 'copy' || st.design);
+      if (approved) { out.approvedAssets++; const at = Math.max(st.copy.at || 0, (st.design || {}).at || 0); const n = await one('SELECT COUNT(*) AS n FROM studio_versions WHERE asset=? AND created<=?', a.id, at); out.versionsToApproval.push((n && n.n) || 0); }
+    }
+  }
+  const per = out.approvedAssets ? { calls: Math.round(out.calls / out.approvedAssets * 10) / 10, images: Math.round(out.images / out.approvedAssets * 10) / 10 } : null;
+  return { projects: out.projects, assets: out.assets, approvedAssets: out.approvedAssets,
+    timeToFirstDraft: stStat(out.firstDraftMs), timeToFirstValidated: stStat(out.firstValidatedMs), timeToFirstApproval: stStat(out.firstApprovalMs),
+    versionsPerApproved: stStat(out.versionsToApproval), spend: { calls: out.calls, images: out.images }, costPerApproved: per, costNote: per ? '' : 'no asset fully approved in this window',
+    adherence: { current: out.current, clean: out.clean, share: out.current ? Math.round(out.clean / out.current * 100) : null, byState: out.byState },
+    validation: { measured: out.measured, passed: out.passed, share: out.measured ? Math.round(out.passed / out.measured * 100) : null },
+    rejections: out.rejections, client: { changesRequested: out.clientChanges, approvals: out.clientApprovals } };
+}
+/** The desks the Studio replaced, over the same window: what they recorded, and what they never did. */
+async function stMetricsLegacy(env, ns, from, to) {
+  const out = { packs: 0, sets: 0, pieces: 0, flagged: 0, approved: 0, killed: 0, firstApprovalMs: [], revisionsPerSet: [] };
+  try {
+    const packs = (await env.MIND_DB.prepare('SELECT id, tiles, created FROM release_packs WHERE ns=? AND created>=? AND created<?').bind(ns, from, to).all()).results || [];
+    out.packs = packs.length;
+    for (const k of packs) { const tiles = pjs(k.tiles, []); out.pieces += tiles.length; out.flagged += tiles.filter(t => t && t.check && t.check.ok === false).length;
+      const fo = await env.MIND_DB.prepare("SELECT MIN(created) AS t FROM engine_outcomes WHERE ns=? AND surface='release' AND ref=? AND verdict='approved'").bind(ns, k.id).first(); if (fo && fo.t) out.firstApprovalMs.push(fo.t - k.created); }
+  } catch (e) {}
+  try {
+    const sets = (await env.MIND_DB.prepare('SELECT id, items, history, created FROM content_sets WHERE ns=? AND created>=? AND created<?').bind(ns, from, to).all()).results || [];
+    out.sets = sets.length;
+    for (const s of sets) { const items = pjs(s.items, []); out.pieces += items.length; out.flagged += items.filter(it => it && it.check && it.check.ok === false).length; out.revisionsPerSet.push(pjs(s.history, []).length);
+      const fo = await env.MIND_DB.prepare("SELECT MIN(created) AS t FROM engine_outcomes WHERE ns=? AND surface='content' AND ref=? AND verdict='approved'").bind(ns, s.id).first(); if (fo && fo.t) out.firstApprovalMs.push(fo.t - s.created); }
+  } catch (e) {}
+  try { const v = (await env.MIND_DB.prepare("SELECT verdict, COUNT(*) AS n FROM engine_outcomes WHERE ns=? AND surface IN ('release','content') AND created>=? AND created<? GROUP BY verdict").bind(ns, from, to).all()).results || []; v.forEach(r => { if (r.verdict === 'approved') out.approved = r.n; else out.killed = r.n; }); } catch (e) {}
+  return { packs: out.packs, sets: out.sets, pieces: out.pieces, approved: out.approved, killed: out.killed, timeToFirstApproval: stStat(out.firstApprovalMs), revisionsPerSet: stStat(out.revisionsPerSet),
+    adherence: { pieces: out.pieces, clean: out.pieces - out.flagged, share: out.pieces ? Math.round((out.pieces - out.flagged) / out.pieces * 100) : null, note: 'the desks checked figures (and, for the Content Desk, banned terms); a fair comparison is with the Studio\'s figure and banned-term checks' },
+    notRecorded: ['time to a validated composition (the desks never measured a composition)', 'versions per approved piece (a pack tile had no version history)', 'model calls and images per approved piece (not counted per pack)', 'client decisions (there was no client review)'] };
+}
+/** Isolation, audited over every current version the client holds: rules, references and marks must all be its own. */
+async function stIsolationAudit(env, ns) {
+  const vs = (await env.MIND_DB.prepare("SELECT v.id, v.context, v.layout, a.title, p.id AS project, p.campaign FROM studio_versions v JOIN studio_assets a ON a.current=v.id JOIN studio_projects p ON p.id=a.project WHERE p.ns=?").bind(ns).all()).results || [];
+  const violations = []; let rules = 0, refs = 0, marks = 0;
+  for (const r of vs) {
+    const ctx = pjs(r.context, {}); const L = pjs(r.layout, {});
+    const ids = [].concat(((ctx.rules || {}).copy) || [], ((ctx.rules || {}).tiles) || []);
+    for (const id of ids.slice(0, 80)) { rules++; const f = await env.MIND_DB.prepare('SELECT ns, scope FROM engine_fixes WHERE id=?').bind(String(id)).first(); if (f && f.ns !== ns && f.scope !== 'all') violations.push({ version: r.id, asset: r.title, kind: 'rule', id, detail: 'a rule of ' + f.ns }); }
+    const pack = ctx.refPack || null;
+    for (const id of ((pack && pack.attached) || []).concat((pack && pack.read) || []).slice(0, 40)) { refs++; const f = await env.MIND_DB.prepare('SELECT r.project, r.campaign, p.ns FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE r.id=?').bind(String(id)).first(); if (!f) continue; if (f.ns !== ns) violations.push({ version: r.id, asset: r.title, kind: 'reference', id, detail: 'a reference of ' + f.ns }); else if (pack.mode === 'recommended' && f.campaign && r.campaign && f.campaign !== r.campaign) violations.push({ version: r.id, asset: r.title, kind: 'reference', id, detail: 'a ' + f.campaign + ' reference recommended for ' + r.campaign }); }
+    for (const l of (Array.isArray(L.layers) ? L.layers : [])) { const m = /\/brand\/(logo|wordmark)\?ns=([a-z0-9_-]+)(?:&campaign=([a-z0-9_-]+))?/.exec(String(l.src || '')); if (!m) continue; marks++; if (m[2] !== ns) violations.push({ version: r.id, asset: r.title, kind: 'mark', id: l.id, detail: 'the ' + m[1] + ' of ' + m[2] }); else if (m[1] === 'wordmark' && m[3] && r.campaign && m[3] !== r.campaign) violations.push({ version: r.id, asset: r.title, kind: 'mark', id: l.id, detail: 'the ' + m[3] + ' wordmark on a ' + r.campaign + ' asset' }); }
+  }
+  return { versions: vs.length, checked: { rules, references: refs, marks }, violations: violations.slice(0, 50), clean: !violations.length };
+}
+async function stMetrics(env, ns, opts) {
+  opts = opts || {}; await ensureStudio(env); try { await ensureReview(env); } catch (e) {}
+  const days = Math.max(1, Math.min(365, parseInt(opts.days, 10) || 30)); const now = opts.now || Date.now(); const span = days * 86400000;
+  const current = await stMetricsWindow(env, ns, now - span, now + 1);
+  const earlier = await stMetricsWindow(env, ns, now - 2 * span, now - span);
+  const legacy = await stMetricsLegacy(env, ns, now - span, now + 1);
+  const legacyAll = await stMetricsLegacy(env, ns, 0, now + 1);
+  const isolation = await stIsolationAudit(env, ns);
+  return { ok: true, ns, days, at: now, current, baseline: { earlier, legacy, legacyAll }, isolation,
+    definitions: {
+      timeToFirstDraft: 'project created to its first version of any asset (median)',
+      timeToFirstValidated: 'project created to the first composition that passed technical validation at its output size',
+      timeToFirstApproval: 'project created to the first agency approval (copy or design); for the desks, created to the first Approve on a tile or piece',
+      versionsPerApproved: 'versions of an asset up to its standing approval (copy, and design unless copy only)',
+      costPerApproved: 'model calls and images that finished on the window\'s projects, divided by the assets fully approved; failed and queued jobs not counted',
+      adherence: 'current versions with no figure that differs from its source, no unsupported figure or quotation, no banned term and no missing mandatory mark',
+      isolation: 'every rule, reference and mark recorded on a current version belongs to this client (and, for recommended references and wordmarks, to the asset\'s campaign)' },
+    note: 'Counts over recorded rows. Medians are of projects or assets with the event; a project without one is not counted as zero. Small numbers are small numbers: read n beside every median.' };
+}
 // -- inventory, models, status -----------------------------------------------------------------
 async function stInventory(env) {
   await ensureStudio(env);
@@ -11240,6 +11329,7 @@ export default {
           if (path === '/studio/recipes') { await ensureRecipes(env); const ns = relNs(qf('ns')); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_recipes WHERE ns=? ORDER BY updated DESC').bind(ns).all()).results || []; return jsonResp({ ok: true, builtin: ST_BUILTIN_RECIPES, recipes: rows.map(r => ({ id: r.id, campaign: r.campaign || '', name: r.name, steps: pjs(r.steps, []), note: r.note || '', who: r.who, updated: r.updated })) }); }
           if (path === '/studio/recipe/estimate') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rc = await stRecipeGet(env, p.ns, qf('recipe')); if (!rc) return jsonResp({ error: 'unknown_recipe' }, 404); return jsonResp(Object.assign({ ok: true, recipe: rc }, await stRecipeEstimate(env, p, rc))); }
           if (path === '/studio/impact') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stImpact(env, p)); }
+          if (path === '/studio/metrics') { const ns = relNs(qf('ns')); return jsonResp(await stMetrics(env, ns, { days: qf('days') })); }
           if (path === '/studio/usage') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stUsage(env, p)); }
           if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
