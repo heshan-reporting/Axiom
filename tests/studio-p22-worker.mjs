@@ -2,6 +2,8 @@
  * reason; a score the model did not give is "not scored" (null), never a quiet 3; the inspection is bound to the
  * version it saw (id, number, signature) and becomes stale when the asset moves on; "round N of 2" counts the applied
  * corrections and a third look is refused as bounded; the card says whether it saw the composed tile or the imagery.
+ * Also (p22a): a cut-off answer is retried once with more room, a second cut-off fails without retries, and a
+ * permanent failure whose name contains "rate" (strategy) is not mistaken for a rate limit.
  * Run: node --experimental-sqlite tests/studio-p22-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
@@ -18,10 +20,15 @@ const env = {
 };
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
 let INSPECT = { fidelity: 4, hierarchy: 2, readability: 5, relevance: 4, reasons: { fidelity: 'The paddock at dusk carries the farming idea', hierarchy: 'The support line competes with the headline at the same weight', readability: 'White type on the dark sky reads cleanly', relevance: 'Farm imagery matches the message' }, words: { present: ['Not a subsidy.'], wrong: [], missing: [] }, issues: [{ text: 'Support competes with headline', severity: 'material' }], verdict: 'fix', fix: { kind: 'design', instruction: 'Make the support line lighter and smaller' }, note: 'n' };
+const SENT = []; const STRAT = [];
+const STRATEGY = { problem: 'p', audience: { who: 'w', now: 'n', wanted: 'x', insight: 'i' }, idea: 'It is a road tax refund', proposition: 'p', proof: [], tone: 't', avoid: [], risks: [], measures: [], questions: [] };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) return new Response('{}', { status: 500 });
-  if (u.indexOf('api.anthropic.com/v1/messages') >= 0) { const sys = String(JSON.parse(init.body).system || ''); const a = /art director inspecting a rendered social tile/.test(sys) ? INSPECT : {}; return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(a) }], stop_reason: 'end_turn' }), { status: 200 }); }
+  if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
+    const b = JSON.parse(init.body); const sys = String(b.system || ''); SENT.push({ sys, max: b.max_tokens });
+    if (/creative strategist/.test(sys)) { const a = STRAT.shift() || ['{}', 'end_turn']; return new Response(JSON.stringify({ content: [{ type: 'text', text: a[0] }], stop_reason: a[1] }), { status: 200 }); }
+    const a = /art director inspecting a rendered social tile/.test(sys) ? INSPECT : {}; return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(a) }], stop_reason: 'end_turn' }), { status: 200 }); }
   return new Response('', { status: 404 });
 };
 const mod = await import(WORKER); const handler = mod.default; const ctx = { waitUntil() {} };
@@ -67,6 +74,19 @@ await t('rounds count the corrections applied on this line; after two the next l
   let calls = 0; const f0 = globalThis.fetch; globalThis.fetch = async (u, i) => { if (String(u).indexOf('anthropic') >= 0) calls++; return f0(u, i); };
   const j = await inspect(P, A); globalThis.fetch = f0; eq(j.state, 'done', j.error); eq(calls, 0, 'no model call for a bounded line');
   const ev = await last(P); eq([ev.verdict, ev.round, ev.bounded], ['stop', 2, true]); ok(/designer's eye/.test(ev.text), ev.text);
+});
+const runStrategy = async () => { const r = await req('POST', '/studio/job', { project: P, stage: 'strategy', input: { instruction: 'draft it' }, idem: 'st:' + Math.random() }); return step(r.d.job.id); };
+await t('an answer cut off at its token limit is asked for once more with twice the room, and the high-effort call starts with room for thinking', async () => {
+  STRAT.push(['{"problem":"Regional voters half-believe the subsidy line', 'max_tokens'], [JSON.stringify(STRATEGY), 'end_turn']);
+  const n = SENT.length; const j = await runStrategy(); eq(j.state, 'done', j.error);
+  const calls = SENT.slice(n).filter(x => /creative strategist/.test(x.sys)); eq(calls.length, 2); ok(calls[0].max >= 16000 && calls[1].max === calls[0].max * 2, JSON.stringify(calls.map(c => c.max)));
+  ok(j.progress.lines.some(l => /cut off; asked once more/.test(l.text)), 'the log says so');
+});
+await t('cut off twice is a failure with no retry; a strategy that is not JSON fails once - "strategy" is not a rate limit', async () => {
+  STRAT.push(['{"problem":"a', 'max_tokens'], ['{"problem":"a', 'max_tokens']);
+  let n = SENT.length; let j = await runStrategy(); eq([j.state, j.attempts], ['failed', 1]); ok(/answer_truncated/.test(j.error) && !/will retry/.test(j.error), j.error); eq(SENT.slice(n).length, 2);
+  STRAT.push(['{"problem":"' + 'x'.repeat(400) + '"', 'end_turn']);
+  n = SENT.length; j = await runStrategy(); eq([j.state, j.attempts], ['failed', 1]); ok(/strategy_unparseable/.test(j.error) && /not retried/.test(j.error), j.error); eq(SENT.slice(n).length, 1, 'one call, not three');
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

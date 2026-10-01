@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p22';
+const AXIOM_BUILD = '2026-10-01.studio-p22a';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7019,7 +7019,7 @@ async function stJobClaim(env, id) {
   const r = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='running', lease_until=?, attempts=attempts+1, updated=? WHERE id=? AND attempts<? AND (state='queued' OR (state='running' AND lease_until<?))").bind(now + ST_LEASE_MS, now, id, ST_MAX_ATTEMPTS, now).run();
   return !!(r && r.meta && r.meta.changes);
 }
-function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|rate/i.test(String(err || '')); }
+function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
 /** Run one claimed job to its end state. Never writes over a version the asset has moved past. */
 async function stJobRun(env, job) {
   const done = async (state, patch) => {
@@ -7047,7 +7047,7 @@ async function stJobRun(env, job) {
     }
     if (ST_STAGES.indexOf(job.stage) >= 0) return stStageRun(env, job, done, fail);
     return done('failed', { error: 'unknown stage ' + job.stage });
-  } catch (e) { return fail(String((e && e.message) || e).slice(0, 200)); }
+  } catch (e) { const full = String((e && e.message) || e); return fail(/\(not retried\)/.test(full) && full.length > 200 ? full.slice(0, 180) + '... (not retried)' : full.slice(0, 200)); }
 }
 /** One synchronous step: claim if free, run. Returns the job either way. */
 async function stJobStep(env, id) {
@@ -7383,7 +7383,11 @@ async function stClaude(env, o) {
   const imgs = (Array.isArray(o.images) ? o.images : []).filter(im => im && im.b64).slice(0, 4);
   const content = imgs.length ? imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime || 'image/png', data: im.b64 } })).concat([{ type: 'text', text: o.user }]) : o.user;
   const base = { model, max_tokens: o.maxTok || 6000, system: o.system, messages: [{ role: 'user', content }] };
-  const rich = stIsV5(model) ? Object.assign({}, base, { thinking: { type: 'adaptive' }, output_config: { effort: ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium') } }) : base;
+  const effort = ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium');
+  // adaptive thinking is paid out of max_tokens: at high effort a small cap leaves the JSON cut off mid-sentence, so the cap has
+  // a floor by effort (only tokens actually produced are billed; a higher cap costs nothing unless it is used)
+  const floor = { low: 4000, medium: 8000, high: 16000, max: 32000 }[effort];
+  const rich = stIsV5(model) ? Object.assign({}, base, { max_tokens: Math.max(base.max_tokens, floor), thinking: { type: 'adaptive' }, output_config: { effort } }) : base;
   const once = async (body) => {
     await stSpend(env);
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined });
@@ -7396,6 +7400,13 @@ async function stClaude(env, o) {
   if (o.log && Array.isArray(o.log.compiled)) o.log.compiled.push(rec);
   let res = await once(rich);
   if (res.d.error && res.status === 400 && rich !== base && /thinking|output_config|effort|adaptive/i.test(String(res.d.error.message || ''))) { if (o.log) await o.log('info', 'the model refused the thinking/effort fields (' + String(res.d.error.message || '').slice(0, 80) + '); repeated as a plain request'); rec.plain = 'the model refused the thinking and effort fields; repeated as a plain request'; rec.effort = null; rec.thinking = 'off'; res = await once(base); }
+  // an answer that ran out of room is asked for once more with twice the room; a second cut-off is a failure, never parsed as partial JSON
+  if (!res.d.error && res.d.stop_reason === 'max_tokens') {
+    const sent = rec.plain ? base : rich; const bigger = Math.min(64000, (sent.max_tokens || base.max_tokens) * 2);
+    if (o.log) await o.log('info', 'the answer reached its limit of ' + sent.max_tokens + ' tokens and was cut off; asked once more with ' + bigger);
+    rec.truncatedFirst = sent.max_tokens; res = await once(Object.assign({}, sent, { max_tokens: bigger })); rec.maxTok = bigger;
+    if (!res.d.error && res.d.stop_reason === 'max_tokens') { rec.error = 'truncated at ' + bigger + ' tokens'; rec.answered = res.d.model || model; throw new Error('answer_truncated: the model ran out of room twice (' + bigger + ' tokens) before finishing its answer (not retried)'); }
+  }
   rec.answered = res.d.model || model; rec.usage = res.d.usage || undefined; rec.stop = res.d.stop_reason || undefined;
   if (res.d.error) {
     rec.error = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
@@ -7881,7 +7892,7 @@ async function stStrategyStage(env, job, p, log) {
   const sys = 'You are the creative strategist of an Australian political communications agency working for ' + ctx.client + '. From the brief, the source ledger and the client context you write the creative strategy the art director and copywriter will work from: specific to this audience and this argument, never generic. Return strict JSON only: {"problem":"<=40 words: the communication problem, not the business goal","audience":{"who":"<=25 words","now":"<=25 words: what they believe or do now","wanted":"<=25 words: what we want them to believe or do","insight":"<=35 words: the human truth that makes the idea land"},"idea":"<=20 words: the campaign idea in one line","proposition":"<=25 words: the single thing to say","proof":["ledger claim ids or fact:<id> that support it"],"tone":"<=20 words","avoid":["what not to say or show"],"risks":["how an opponent attacks it"],"measures":["qualitative signals the team will look for; no forecasts, no numbers you do not have"],"questions":["what the team must decide that the brief does not settle"]}. Figures only from the ledger or approved facts. No exclamation marks.' + ctx.text;
   const user = 'BRIEF:\n' + stBriefText(p) + (job.input.instruction ? '\n\nINSTRUCTION FROM THE TEAM: ' + stStr(job.input.instruction, 1200) : '') + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source in the project)') + '\n\nWrite the strategy.';
   await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): the creative strategy from the brief, ' + led.claims.length + ' ledger claims and the client context');
-  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 3500, timeoutMs: 150000, effort: 'high', log });
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 8000, timeoutMs: 170000, effort: 'high', log });
   const j = relJson(r.text); if (!j || !j.idea) throw new Error('strategy_unparseable: the model did not return a strategy as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '" (not retried)');
   const st = Object.assign(stStrategyNorm(j, known), { status: 'proposed', model: r.model, at: Date.now(), job: job.id, source: 'ai' });
   const cur = await stProject(env, p.id); const brief = Object.assign({}, cur.brief || {}, { strategy: st });
@@ -9909,7 +9920,9 @@ async function stStageRun(env, job, done, fail) {
     if (!again || again.state !== 'running') return again;
     return done('done', { result, cost: (lines.filter(l => l.kind === 'cmd').length), progress: { lines, compiled: await filed() } });
   } catch (e) {
-    const m = String((e && e.message) || e).slice(0, 220);
+    const full = String((e && e.message) || e); let m = full.slice(0, 220);
+    // a shortened message must keep its "(not retried)": without it a permanent failure is retried and paid for again
+    if (/\(not retried\)/.test(full) && !/\(not retried\)/.test(m)) m = full.slice(0, 200) + '... (not retried)';
     await log('err', m);
     return fail(m, { lines, compiled: await filed().catch(() => undefined) });
   }
