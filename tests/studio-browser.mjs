@@ -39,9 +39,15 @@ const DIRS = { directions: [
   { title: 'Who it really is', message: 'The credit is used by 150,000 businesses of all sizes.', insight: 'Naming tradies moves the frame.', headline: 'Farmers. Tradies. Tourism operators.', opening: 'Who uses the fuel tax credit?', visual: 'A tradie at a rural bowser', rationale: 'Approved usage wording', claims: ['c3'], uncertainty: 'Portraits need releases' }] };
 const pieces = user => ({ pieces: ['linkedin', 'facebook', 'instagram', 'x'].filter(c => new RegExp('- ' + c + ' \\(').test(user)).map(c => ({ channel: c, headline: c === 'instagram' ? 'Who uses the fuel tax credit? Farmers, tradies and tourism operators across regional Australia do' : 'Not a subsidy. A tax that never applied.', support: 'Businesses do not pay a road fuel tax on fuel used off-road.', cta: 'Get the facts', caption: 'Mining paid $74 billion in company tax and royalties in 2023-24, more than any other industry. Hands Off Our Fuel.', alt: 'Teal fact panel over a harvester at dusk', visual: 'Harvester at dusk, restrained', claims: ['c1'], hashtags: [] })) });
 const decide = user => { const ins = (user.match(/TEAM LEAD[^\n]*\):\n([^\n]+)/) || [])[1] || ''; const A = Array.from(user.matchAll(/^\[(a[a-z0-9]+)\]/gm)).map(m => m[1]);
+  if (/move only the cta/i.test(ins)) { const id = (user.match(/\n\s+([\w-]+): text\/cta at/) || [])[1] || 'cta'; return { kind: 'layers', reply: 'Moved the call to action.', layers: { asset: A[0], ops: [{ id, x: 50 }], keeps: ['headline', 'photograph'] } }; }
   if (/alternative/i.test(ins)) return { kind: 'alternatives', reply: 'Three openings, each within the limit.', alternatives: { asset: A[0], field: 'caption', options: ['Who uses the fuel tax credit? Probably someone you know.', 'Mining paid $74 billion in company tax and royalties in 2023-24. Hands Off Our Fuel.', 'Fuel tax credits are not a subsidy. Here is what they are.'] }, memory: { standing: false } };
   if (/restrained/i.test(ins)) return { kind: 'render', reply: 'A quieter photograph reads better under the panel.', render: { assets: [A[0]], visual: 'A quiet regional road at dusk, no machinery', steps: ['Simplify the background', 'Keep the panel, headline and logo'] }, memory: { standing: true, rule: 'No haul trucks in Hands Off Our Fuel imagery.', scope: 'campaign', confidence: 0.9 } };
   return { kind: 'text', reply: 'Headline sharpened; layout and image kept.', changes: [{ asset: A[0], copy: { headline: 'Not a subsidy. Never was.' }, note: 'sharper' }], memory: { standing: false } }; };
+const LT = (id, role, x, y, w, h, size, extra) => Object.assign({ id, type: 'text', role, x, y, w, h, size, color: '#FFFFFF' }, extra || {});
+const LAYOUTS = { critique: 'The words sit on the subject.', options: [
+  { name: 'Right column', concept: 'Words in the quiet right third', rationale: 'The eye lands on the subject first, then reads down the column', composition: 'right column', keeps: ['photograph', 'words'], changes: ['placement'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'col', type: 'shape', role: 'panel', shape: 'rect', x: 58, y: 0, w: 42, h: 100, fill: '#0E6A6E', opacity: 0.8 }, LT('hl', 'headline', 61, 8, 36, 40, 5), LT('sp', 'support', 61, 52, 36, 20, 2.6), LT('cta', 'cta', 61, 80, 36, 6, 2.4)] } },
+  { name: 'Bottom band', concept: 'A band across the foot', rationale: 'The photograph keeps the top two thirds; the message reads as a caption to it', composition: 'bottom band', keeps: ['photograph', 'words'], changes: ['panel'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'band', type: 'shape', role: 'panel', shape: 'rect', x: 0, y: 66, w: 100, h: 34, fill: '#0E6A6E' }, LT('hl', 'headline', 4, 68, 92, 14, 4.6), LT('sp', 'support', 4, 83, 64, 8, 2.4), LT('cta', 'cta', 70, 86, 26, 6, 2.4)] } },
+  { name: 'Centred statement', concept: 'One statement over a dark overlay', rationale: 'A single line at the centre carries the claim with nothing competing', composition: 'centre', keeps: ['photograph', 'words'], changes: ['hierarchy'], plan: { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image' }], elements: [{ id: 'ov', type: 'shape', role: 'overlay', shape: 'rect', x: 0, y: 0, w: 100, h: 100, fill: 'rgba(0,0,0,0.45)' }, LT('hl', 'headline', 8, 30, 84, 24, 5.6, { align: 'center' }), LT('sp', 'support', 12, 56, 76, 10, 2.6, { align: 'center' }), LT('cta', 'cta', 30, 70, 40, 6, 2.4, { align: 'center' })] } }] };
 const CONCEPTS = { critique: 'The photograph is generic; the panel holds.', options: [
   { name: 'No box, darker image', concept: 'Words over a darkened photograph', rationale: 'Editorial', imagery: 'keep the current photograph', composition: 'Top left', typography: 'Larger', colour: 'Dark overlay', textPlacement: 'top left', layout: { style: 'none', placement: 'top', template: 'same', headline: 'larger' }, keeps: ['photograph'], changes: ['panel removed'], needsImage: false, prompt: '', basis: [{ claim: 'White type on dark reads', kind: 'inferred' }], missing: [] },
   { name: 'Split field', concept: 'Message on a teal field below', rationale: 'Clean separation', imagery: 'keep the current photograph', composition: 'Split', typography: 'Same', colour: 'Teal', textPlacement: 'bottom band', layout: { style: 'split', placement: 'bottom', template: 'teal', headline: 'same' }, keeps: ['photograph'], changes: ['split'], needsImage: false, prompt: '', basis: [{ claim: 'Teal is the campaign colour', kind: 'rule' }], missing: [] },
@@ -55,7 +61,7 @@ globalThis.fetch = async (url, init) => {
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
-    const answer = /creative strategist/.test(sys) ? STRATEGY : /planning a campaign sequence/.test(sys) ? SEQ : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+    const answer = /EXPLORE DIFFERENT LAYOUTS/.test(user) ? LAYOUTS : /creative strategist/.test(sys) ? STRATEGY : /planning a campaign sequence/.test(sys) ? SEQ : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -578,6 +584,53 @@ await t('P17: an area of the imagery is marked by typing it, edited with one ima
   eq(row[0].copy, row[1].copy, 'the words were not touched'); ok(JSON.parse(row[0].image).meta.edit.area.x === 55, 'the area travelled to the worker');
   await page.click(R + '.st-preserve .ov-link:has-text("compare")'); await page.waitForSelector(R + '.st-compare, ' + R + '.st-cmp', { timeout: 5000 }).catch(() => {});
   await shot(page, 'studio-area-edit');
+});
+await t('P20: the canvas resizes a text box without changing its type, sets line height, panel opacity and the framing of the photograph with no render; Explore layouts proposes arrangements of the same photograph and words; a focused Partner edit names what moved and what was left', async () => {
+  await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-stage canvas');
+  const head = async () => +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1];
+  const v0 = await head(); const g0 = calls.gemini;
+  const latest = () => JSON.parse(env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 1").get().layout);
+  const L0 = latest(); const hl0 = L0.layers.find(l => l.role === 'headline');
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-tools');
+  ok(!(await page.isChecked(R + '.st-le-tools input[aria-label="Resize scales type"]')), 'resizing the box leaves the type alone by default');
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
+  const hb = await page.$(R + '.st-le-layer[aria-label="Layer headline"] .st-le-h'); const bb = await hb.boundingBox();
+  await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x - 60, bb.y + 30, { steps: 4 }); await page.mouse.up();
+  await page.waitForSelector(R + '.st-le-type[aria-label="Position and size"]');
+  const wNow = +(await page.inputValue(R + '.st-le-type input[aria-label="Width, per cent of the stage"]'));
+  ok(wNow < hl0.w, 'the box is narrower: ' + wNow + ' < ' + hl0.w); eq(+(await page.inputValue(R + '.st-le-type input[aria-label="Type size, per cent of the width"]')), hl0.size, 'the type kept its size');
+  await page.fill(R + '.st-le-type input[aria-label="Line height, times the type size"]', '1.3'); await page.press(R + '.st-le-type input[aria-label="Line height, times the type size"]', 'Enter');
+  await page.fill(R + '.st-le-type input[aria-label="X, per cent of the stage"]', '9'); await page.press(R + '.st-le-type input[aria-label="X, per cent of the stage"]', 'Enter');
+  const shapeRole = (L0.layers.find(l => l.type === 'shape' && !l.locked && !l.hidden) || {}).role;
+  if (shapeRole) { await page.click(R + '.st-le-item .ov-link:text-is("' + shapeRole + '")'); await page.fill(R + '.st-le-type input[aria-label="Panel opacity"]', '0.6'); await page.press(R + '.st-le-type input[aria-label="Panel opacity"]', 'Enter'); }
+  await page.waitForSelector(R + '.st-le-type[aria-label="Image framing"]');
+  await page.fill(R + '.st-le-type input[aria-label="Image zoom"]', '1.5'); await page.press(R + '.st-le-type input[aria-label="Image zoom"]', 'Enter');
+  ok(/no render/.test(await page.textContent(R + '.st-le-type[aria-label="Image framing"]')), 'reframing says it spends nothing');
+  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v0, { timeout: 15000 });
+  const L1 = latest(); const hl1 = L1.layers.find(l => l.role === 'headline');
+  eq([hl1.size, hl1.lineHeight, hl1.x, L1.imageFocus && L1.imageFocus.zoom], [hl0.size, 1.3, 9, 1.5]); ok(hl1.w < hl0.w, 'the narrower box saved');
+  if (shapeRole) eq(L1.layers.find(l => l.role === shapeRole).opacity, 0.6);
+  // Explore layouts: the same photograph and words, three arrangements, layout only
+  const v1 = await head();
+  await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
+  await page.waitForFunction(() => /Layouts/.test((document.querySelector('#studio-root .st-ad-crit') || {}).textContent || ''), null, { timeout: 20000 });
+  ok(/Same photograph and approved words in each/.test(await page.textContent(R + '.st-ad-crit')), 'the card set says what is held');
+  const cards = await texts(page, R + '.st-ad-card'); eq(cards.length, 3); ok(cards.every(c => /layout only, no render/.test(c) && /% from current/.test(c)), cards.join(' || '));
+  await page.click(R + '.st-ad-card:has-text("Bottom band") .btn:has-text("Apply layout only")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v1, { timeout: 15000 });
+  const rows = env.MIND_DB.db.prepare("SELECT v.copy, v.image, v.kind FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 2").all();
+  eq([rows[0].kind, rows[0].copy, JSON.parse(rows[0].image).key], ['layout', rows[1].copy, JSON.parse(rows[1].image).key], 'same words and photograph');
+  // a focused Partner edit: only the CTA moves, and the thread says what moved, what was left and that nothing rendered
+  const v2 = await head();
+  await page.fill(R + '.st-composer textarea', 'Move only the CTA to the right'); await page.click(R + '.st-composer .btn:has-text("Send")');
+  await page.waitForSelector(R + '.st-focused', { timeout: 20000 });
+  const fx = await page.textContent(R + '.st-focused'); ok(/Changed/.test(fx) && /x/.test(fx) && /Left as they were: .*headline|Left as they were/.test(fx) && /no render/.test(fx), fx);
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v2, { timeout: 15000 });
+  eq(calls.gemini, g0, 'no image call for any of it');
+  await shot(page, 'studio-p20');
 });
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {

@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p19';
+const AXIOM_BUILD = '2026-10-01.studio-p20';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8697,11 +8697,18 @@ const ST_SHAPE_KEYS = ['id', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius
 function stPickKeys(o, keys) { const out = {}; keys.forEach(k => { if (o[k] !== undefined && o[k] !== null && o[k] !== '') out[k] = o[k]; }); return out; }
 function stWords(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
 /** Any layout - a plan, a preset spec, a hand-edited composition - read back as a plan with the same element ids. */
+/** Image framing: the focal point (per cent across and down the image) and a zoom of 1-3; nothing when it is the centre at 1. */
+function stFocus(f) {
+  if (!f || typeof f !== 'object') return undefined;
+  const o = { x: stNum(f.x, 0, 100, 50), y: stNum(f.y, 0, 100, 50), zoom: stNum(f.zoom, 1, 3, 1) };
+  return o.x === 50 && o.y === 50 && o.zoom === 1 ? undefined : o;
+}
 function stLayoutToPlan(L, v) {
   L = L || {}; const layers = Array.isArray(L.layers) ? L.layers : [];
   const hasImage = !!(v && v.image && v.image.key);
   let regions = Array.isArray(L.regions) && L.regions.length ? JSON.parse(JSON.stringify(L.regions)) : (hasImage ? [{ id: 'bg', role: 'background', x: L.image ? L.image.x : 0, y: L.image ? L.image.y : 0, w: L.image ? L.image.w : 100, h: L.image ? L.image.h : 100, fit: 'cover', prompt: 'keep the current image', refs: [] }] : []);
   if (hasImage) regions.forEach(r => { if (r.role === 'background') r.prompt = 'keep the current image'; });
+  regions.forEach(r => { const ly = layers.find(l => l.type === 'img' && l.role === 'region' && (l.region === r.id || l.id === r.id)); if (ly) { r.x = ly.x; r.y = ly.y; r.w = ly.w; r.h = ly.h; if (ly.focus) r.focus = ly.focus; else delete r.focus; } });
   const elements = [];
   layers.forEach(l => {
     if (l.type === 'img') return; // marks are placed from the kit; region images come back through their regions
@@ -8793,13 +8800,13 @@ function stPlanNormalise(plan, format, opts) {
   let bg = null;
   if (plan.bg && typeof plan.bg === 'object') { const from = stColour(plan.bg.from, ''), to = stColour(plan.bg.to, ''); if (from) bg = to ? { from, to, dir: ['down', 'right', 'up', 'left'].indexOf(plan.bg.dir) >= 0 ? plan.bg.dir : 'down' } : from; }
   else if (plan.bg) bg = stColour(plan.bg, null);
-  const regions = (Array.isArray(plan.regions) ? plan.regions : []).slice(0, 4).map((r, i) => r && typeof r === 'object' ? ({ id: stClean(r.id, 16) || (i === 0 ? 'bg' : 'r' + (i + 1)), role: ['background', 'cutout', 'inset'].indexOf(r.role) >= 0 ? r.role : (i === 0 ? 'background' : 'inset'), x: stNum(r.x, 0, 100, 0), y: stNum(r.y, 0, 100, 0), w: stNum(r.w, 2, 100, 100), h: stNum(r.h, 2, 100, 100), fit: r.fit === 'contain' ? 'contain' : 'cover', prompt: stStr(r.prompt, 1200), refs: (Array.isArray(r.refs) ? r.refs : []).map(x => x && typeof x === 'object' ? { id: stClean(x.id, 24), role: stStr(x.role, 120) } : { id: stClean(x, 24), role: '' }).filter(x => x.id).slice(0, 4) }) : null).filter(Boolean);
+  const regions = (Array.isArray(plan.regions) ? plan.regions : []).slice(0, 4).map((r, i) => r && typeof r === 'object' ? ({ id: stClean(r.id, 16) || (i === 0 ? 'bg' : 'r' + (i + 1)), role: ['background', 'cutout', 'inset'].indexOf(r.role) >= 0 ? r.role : (i === 0 ? 'background' : 'inset'), x: stNum(r.x, 0, 100, 0), y: stNum(r.y, 0, 100, 0), w: stNum(r.w, 2, 100, 100), h: stNum(r.h, 2, 100, 100), fit: r.fit === 'contain' ? 'contain' : 'cover', focus: stFocus(r.focus), prompt: stStr(r.prompt, 1200), refs: (Array.isArray(r.refs) ? r.refs : []).map(x => x && typeof x === 'object' ? { id: stClean(x.id, 24), role: stStr(x.role, 120) } : { id: stClean(x, 24), role: '' }).filter(x => x.id).slice(0, 4) }) : null).filter(Boolean);
   const layers = [];
   (Array.isArray(plan.elements) ? plan.elements : []).slice(0, 24).forEach((e, i) => {
     if (!e || typeof e !== 'object') return;
     const type = e.type === 'shape' || e.type === 'rule' ? 'shape' : e.type === 'text' ? 'text' : null;
     if (!type) { unsupported.push('element ' + (i + 1) + ' of type "' + stStr(e.type, 20) + '" cannot be drawn'); return; }
-    const base = { id: stClean(e.id, 24) || (type + (i + 1)), type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: stNum(e.opacity, 0, 1, 1), rotate: stNum(e.rotate, -20, 20, 0) };
+    const base = { id: stClean(e.id, 24) || (type + (i + 1)), type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: isFinite(Number(e.opacity)) && e.opacity !== null && e.opacity !== '' ? Math.round(Math.min(1, Math.max(0, Number(e.opacity))) * 100) / 100 : 1, rotate: stNum(e.rotate, -20, 20, 0) };
     if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24);
     if (type === 'text') {
       const role = ST_ROLES.indexOf(e.role) >= 0 ? e.role : 'free';
@@ -8813,7 +8820,7 @@ function stPlanNormalise(plan, format, opts) {
   });
   // regions that are not the background become image layers the renderer fills when their image lands, and show as sketched boxes until then
   const rsrc = opts.regionSrc || {};
-  regions.filter(r => r.role !== 'background').forEach(r => layers.unshift(Object.assign({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }, rsrc[r.id] ? { src: rsrc[r.id].src, key: rsrc[r.id].key, opaque: rsrc[r.id].opaque } : {})));
+  regions.filter(r => r.role !== 'background').forEach(r => layers.unshift(Object.assign({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, focus: r.focus, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }, rsrc[r.id] ? { src: rsrc[r.id].src, key: rsrc[r.id].key, opaque: rsrc[r.id].opaque } : {})));
   const bgRegion = regions.find(r => r.role === 'background') || null;
   const groundHex = typeof bg === 'string' ? bg : bg && bg.to ? bg.to : '';
   const groundL = /^#[0-9a-fA-F]{6}$/.test(groundHex) ? (() => { const n = parseInt(groundHex.slice(1), 16); return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; })() : null;
@@ -8827,7 +8834,7 @@ function stPlanNormalise(plan, format, opts) {
   let partsL = { layers }; if (layers.some(l => l.part != null)) { const pr = stPartsReconcile({ layers }, opts.copy || {}); partsL = pr.layout; pr.collapsed.forEach(role => unsupported.push('the ' + role + ' was split across layers in words that do not reproduce the approved ' + role + ' exactly; kept as one block (the copy is never rewritten by a layout)')); }
   const finalLayers = partsL.layers;
   const frames = Array.isArray(plan.frames) && plan.frames.length > 1 ? plan.frames.slice(0, 8).map((fr, i) => { const sub = stPlanNormalise(Object.assign({}, plan, { frames: [], medium: medium === 'carousel' ? 'editorial' : medium }, fr || {}), format, Object.assign({}, opts, { copy: Object.assign({}, opts.copy || {}, stCopy((fr || {}).copy || {})) })); return { name: stStr((fr || {}).name, 60) || 'Frame ' + (i + 1), copy: stCopy((fr || {}).copy || {}), layout: sub }; }) : null;
-  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: plan.imageFocus && typeof plan.imageFocus === 'object' ? { x: stNum(plan.imageFocus.x, 0, 100, 50), y: stNum(plan.imageFocus.y, 0, 100, 50) } : undefined, layers: finalLayers, frames: frames || undefined, unsupported };
+  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: stFocus(plan.imageFocus), layers: finalLayers, frames: frames || undefined, unsupported };
 }
 /** Where the words and the images sit, as a coarse grid, plus the medium and approach: two plans that share it are the same design in other clothes. */
 function stPlanSignature(L) {
@@ -9300,15 +9307,39 @@ async function stRefsForGemini(env, p, refs) {
   }
   return out;
 }
+/** Explore different layouts: the plan may move, resize and restyle the words, shapes and panels, never the imagery or the approved words.
+ * Only the background region survives (keeping the current image), a carousel collapses to its first frame, and free text is kept only
+ * when it repeats words the version already shows. Returns the held plan and what was set aside. */
+function stPlanLayoutsOnly(plan, v, kit) {
+  const out = JSON.parse(JSON.stringify(plan || {})); const dropped = [];
+  if (Array.isArray(out.frames) && out.frames.length) { const f0 = out.frames[0] || {}; if (!Array.isArray(out.regions) || !out.regions.length) out.regions = f0.regions || []; if (!Array.isArray(out.elements) || !out.elements.length) out.elements = f0.elements || []; if (out.frames.length > 1) dropped.push((out.frames.length - 1) + ' further frame' + (out.frames.length === 2 ? '' : 's') + ' (a layout is one tile)'); delete out.frames; }
+  const regions = Array.isArray(out.regions) ? out.regions : [];
+  const extra = regions.filter(r => r && r.role && r.role !== 'background'); if (extra.length) dropped.push(extra.length + ' new image region' + (extra.length === 1 ? '' : 's'));
+  if (v && v.image) { const bg = regions.find(r => r && r.role === 'background') || { id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover' }; bg.prompt = 'keep the current image'; bg.refs = []; out.regions = [bg]; }
+  else { out.regions = []; const n = stPlanNoImagery(out, kit); Object.assign(out, n.plan); }
+  if (out.approach === 'artwork') { out.approach = 'editable'; dropped.push('painted lettering (the words stay live layers)'); }
+  const norm = t => String(t == null ? '' : t).toLowerCase().replace(/[^a-z0-9%$]+/g, ' ').trim();
+  const shown = stDisplayed(v || {}).map(t => norm(t.text)).concat(['headline', 'support', 'cta', 'caption'].map(k => norm(((v || {}).copy || {})[k]))).filter(Boolean);
+  const freeRoles = ['kicker', 'label', 'myth', 'fact', 'caption', 'free'];
+  const kept = []; let freeDropped = 0;
+  (Array.isArray(out.elements) ? out.elements : []).forEach(e => {
+    if (e && e.type === 'text' && freeRoles.indexOf(e.role) >= 0) { const t = norm(e.text); if (!t || !shown.some(s => s.indexOf(t) >= 0)) { freeDropped++; return; } }
+    kept.push(e);
+  });
+  if (freeDropped) dropped.push(freeDropped + ' text element' + (freeDropped === 1 ? '' : 's') + ' with words the version does not carry');
+  out.elements = kept;
+  return { plan: out, dropped };
+}
 async function stConceptsStage(env, job, p, log) {
   const inp = job.input || {};
-  const mode = ['explore', 'refine', 'new'].indexOf(inp.mode) >= 0 ? inp.mode : 'explore';
+  const mode = ['explore', 'refine', 'new', 'layouts'].indexOf(inp.mode) >= 0 ? inp.mode : 'explore';
   const pair = await stAsset(env, inp.asset); if (!pair || pair.project.id !== p.id) throw new Error('asset_required: name the asset the request is about (not retried)');
   const a = pair.asset; const v = await stCurrent(env, a); if (!v) throw new Error('no_version: the asset has no version yet (not retried)');
   if (v.mode === 'copy') throw new Error('copy_only: this is a copy-only asset; there is no artwork to direct (not retried)');
-  const feedback = stStr(inp.feedback || inp.instruction, 1500).trim() || (mode === 'refine' ? 'Refine this design: keep the idea, improve the finish' : mode === 'new' ? 'Create a new design from the brief' : 'Give me different variations');
+  const feedback = stStr(inp.feedback || inp.instruction, 1500).trim() || (mode === 'refine' ? 'Refine this design: keep the idea, improve the finish' : mode === 'new' ? 'Create a new design from the brief' : mode === 'layouts' ? 'Show me different layouts of this tile' : 'Give me different variations');
   const keepExplicit = !!(inp.keep && typeof inp.keep === 'object');
-  const keep = keepExplicit ? { imagery: !!inp.keep.imagery, copy: inp.keep.copy !== false, composition: !!inp.keep.composition, explicit: true } : { imagery: mode !== 'new', copy: true, composition: mode === 'refine', explicit: false };
+  // a layouts exploration binds the imagery and the approved words whatever the request says: only the arrangement may change
+  const keep = mode === 'layouts' ? { imagery: true, copy: true, composition: false, explicit: true } : keepExplicit ? { imagery: !!inp.keep.imagery, copy: inp.keep.copy !== false, composition: !!inp.keep.composition, explicit: true } : { imagery: mode !== 'new', copy: true, composition: mode === 'refine', explicit: false };
   const ctx = await stContext(env, p, { channels: [a.channel], log });
   const led = await stLedger(env, p.id);
   const refs = await stRefBundle(env, p, { log, images: 2 });
@@ -9325,6 +9356,7 @@ async function stConceptsStage(env, job, p, log) {
   const images = (art ? [art] : []).concat(refs.images);
   const camp = ctx.block.campaign || (ctx.kit.campaigns || []).find(c => c.id === p.campaign) || null;
   const user = (mode === 'new' ? 'CREATE A NEW DESIGN. FEEDBACK FROM THE TEAM: ' + feedback + '\nRetain: ' + (keep.imagery ? 'the current imagery' : 'not the imagery') + ', ' + (keep.copy ? 'the current copy' : 'not the copy (write new words in the client voice from the ledger and facts)') + ', ' + (keep.composition ? 'the current composition' : 'not the composition - start fresh, do not inherit the panel or layout') + '.'
+    : mode === 'layouts' ? 'EXPLORE DIFFERENT LAYOUTS. FEEDBACK FROM THE TEAM: ' + feedback + '\nKeep the current photograph exactly (the background region prompt is "keep the current image"; no other image regions) and the approved words exactly (headline, support and cta take the copy; split a line across layers only with the exact words). Change the arrangement: hierarchy, where the words sit, panel or no panel and its treatment, the relationship between the words and the subject of the photograph, the CTA treatment, scale and spacing. Each layout must be a different answer to where the eye goes first and why; say that why in rationale (the reason this arrangement serves the message) and name what changes against the current layout under changes. Do not add words the tile does not carry. Look at the photograph: keep the subject visible and the words on its quiet areas.'
     : mode === 'refine' ? 'REFINE THIS DESIGN. FEEDBACK FROM THE TEAM: ' + feedback + (refine ? '\nThe direction being refined: ' + JSON.stringify(refine) : '') : 'EXPLORE VARIATIONS. FEEDBACK FROM THE TEAM: ' + feedback + (refine ? '\n\nREFINE THIS DIRECTION rather than starting over: ' + JSON.stringify(refine) : ''))
     + '\n\n' + stTileBrief(a, v, imageSeen) + (v.layout && v.layout.v === 5 ? '\nIt was made from a plan: ' + v.layout.mediumName + ', ' + v.layout.approach + (v.layout.story ? ' - ' + v.layout.story : '') : '')
     + '\n\nBRIEF: ' + ['objective', 'audience', 'message'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('; ')
@@ -9333,7 +9365,7 @@ async function stConceptsStage(env, job, p, log) {
     + '\nFORMAT: ' + a.format + ' (' + a.channel + ')' + (placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : '')
     + refs.text + (refs.images.length ? '\n(Reference images are attached' + (art ? ' after the artwork' : '') + ', in the order listed.)' : '') + mem.text
     + '\nLEDGER: ' + (led.claims.slice(0, 12).map(c => '[' + c.id + '] ' + c.text.slice(0, 120)).join(' | ') || 'no source')
-    + '\n\n' + (mode === 'explore' ? 'Give three distinct concepts.' : mode === 'refine' ? 'Give one or two refined concepts.' : 'Give one to three new concepts.');
+    + '\n\n' + (mode === 'explore' ? 'Give three distinct concepts.' : mode === 'layouts' ? 'Give three distinct layouts, each a full plan.' : mode === 'refine' ? 'Give one or two refined concepts.' : 'Give one to three new concepts.');
   await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): ' + mode + ' for ' + a.title + (imageSeen ? ' (the artwork attached' + (refs.images.length ? ', ' + refs.images.length + ' reference image' + (refs.images.length === 1 ? '' : 's') : '') + ')' : refs.images.length ? ' (' + refs.images.length + ' reference images attached)' : '') + '; ' + pack.summary + (mem.count ? ', ' + mem.count + ' past artworks' : '') + ' - "' + feedback.slice(0, 80) + '"');
   if (refs.unanalysed.length) await log('info', 'references without an analysis: ' + refs.unanalysed.join('; ') + ' - the model knows their name and purpose only');
   const noImg = inp.imagery === 'none' || ((v.context || {}).imagery === 'none' && !v.image);
@@ -9347,9 +9379,10 @@ async function stConceptsStage(env, job, p, log) {
     // keeps the current image behind every plan, a kept composition keeps the current layers and takes only the imagery
     const copyWant = !(keep.explicit && keep.copy) && o.copy && typeof o.copy === 'object' && o.copy.headline && !a.locks.headline ? { headline: stStr(o.copy.headline, 140) } : {};
     const copy = Object.assign({}, v.copy, copyWant);
-    let layout, design = null, planIn = null; const kept = [];
+    let layout, design = null, planIn = null; const kept = []; const aside = [];
     if (o.plan && typeof o.plan === 'object' && (Array.isArray(o.plan.elements) || Array.isArray(o.plan.regions) || Array.isArray(o.plan.frames))) {
       planIn = JSON.parse(JSON.stringify(o.plan)); if (noImg) planIn = stPlanNoImagery(planIn, ctx.kit).plan;
+      if (mode === 'layouts') { const held = stPlanLayoutsOnly(planIn, v, ctx.kit); planIn = held.plan; if (held.dropped.length) aside.push.apply(aside, held.dropped); }
       if (keep.explicit && keep.imagery && v.image && !Array.isArray(planIn.frames)) { const rgs = Array.isArray(planIn.regions) ? planIn.regions : (planIn.regions = []); let bg = rgs.find(x => x && x.role === 'background'); if (!bg) { bg = { id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100 }; rgs.unshift(bg); } if (!/keep the current/i.test(String(bg.prompt || ''))) { bg.prompt = 'keep the current image'; kept.push('imagery'); } if (planIn.approach === 'artwork') { planIn.approach = 'editable'; kept.push('editable (the current image is retained, so the words stay live layers)'); } }
       layout = stPlanNormalise(planIn, a.format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement, refs: refs.rows, copy: Object.assign({}, v.copy, copyWant), regionSrc: stRegionSrc(v.layout) });
       if (keep.explicit && keep.composition && v.layout && Array.isArray(v.layout.layers) && !layout.frames) { const imagery = layout.layers.filter(l => l.type === 'img' && l.role === 'region'); layout = Object.assign({}, v.layout, { regions: layout.regions, image: layout.image, medium: layout.medium, mediumName: layout.mediumName, story: layout.story, unsupported: (v.layout.unsupported || []).concat(layout.unsupported || []), layers: imagery.concat(v.layout.layers.filter(l => !(l.type === 'img' && l.role === 'region'))) }); kept.push('composition'); }
@@ -9373,19 +9406,21 @@ async function stConceptsStage(env, job, p, log) {
       keeps: (Array.isArray(o.keeps) ? o.keeps : []).map(x => stStr(x, 80)).slice(0, 6), changes: (Array.isArray(o.changes) ? o.changes : []).map(x => stStr(x, 80)).slice(0, 6), needsImage, renders,
       prompt: planIn ? '' : needsImage ? stStr(o.prompt || (design && [design.image.subject, design.image.setting, design.image.framing, design.image.lighting, design.image.mood].filter(Boolean).join('; ')), 900) : '',
       basis: (Array.isArray(o.basis) ? o.basis : []).map(b => ({ claim: stStr(b && b.claim, 120), kind: ['rule', 'preference', 'reference', 'inferred'].indexOf(b && b.kind) >= 0 ? b.kind : 'inferred', ref: b && b.ref && refNames[stClean(b.ref, 24)] ? refNames[stClean(b.ref, 24)] : undefined })).filter(b => b.claim).slice(0, 6),
-      refs: refIds.map(id => ({ id, name: refNames[id] })), missing: (Array.isArray(o.missing) ? o.missing : []).map(x => stStr(x, 120)).slice(0, 4), unsupported: layout.unsupported || [], incomplete: layout.incomplete && layout.incomplete.length ? layout.incomplete : undefined, kept: kept.length ? kept : undefined, markOverridden: layout.markOverridden || undefined,
+      refs: refIds.map(id => ({ id, name: refNames[id] })), missing: (Array.isArray(o.missing) ? o.missing : []).map(x => stStr(x, 120)).slice(0, 4), unsupported: layout.unsupported || [], incomplete: layout.incomplete && layout.incomplete.length ? layout.incomplete : undefined, kept: kept.length ? kept : undefined, setAside: aside.length ? aside : undefined, markOverridden: layout.markOverridden || undefined,
       cost: renders ? renders + ' render' + (renders === 1 ? '' : 's') + ' at ' + size + (layout.approach === 'artwork' ? ' (full artwork, words in the bitmap)' : '') + ' plus a layout version' : 'layout only, no render', layoutLocked: !!a.locks.layout && mode !== 'new', fresh: mode === 'new' };
   };
-  const measure = list => { list.forEach(o => { o.sig = stPlanSignature(o.layout); o.similar = undefined; o.distance = undefined; }); list.forEach((o, i) => { for (let k = 0; k < i; k++) { const dist = stPlanDistance(o.sig, list[k].sig); if (dist < 0.2) { o.similar = list[k].name; o.distance = Math.round(dist * 100) / 100; } } }); };
+  // a layouts exploration is also measured against the layout it starts from: a "new" arrangement that draws like the current one is a look-alike
+  const curSig = mode === 'layouts' ? stPlanSignature(v.layout) : '';
+  const measure = list => { list.forEach(o => { o.sig = stPlanSignature(o.layout); o.similar = undefined; o.distance = undefined; if (curSig) { const dc = stPlanDistance(o.sig, curSig); o.fromCurrent = Math.round(dc * 100) / 100; if (dc < 0.2) { o.similar = 'the current layout'; o.distance = o.fromCurrent; } } }); list.forEach((o, i) => { for (let k = 0; k < i; k++) { const dist = stPlanDistance(o.sig, list[k].sig); if (dist < 0.2) { o.similar = list[k].name; o.distance = Math.round(dist * 100) / 100; } } }); };
   let options = j.options.slice(0, 4).map(build); let replanned = 0; let model2 = '';
   // distinctness is measured on the drawn result (medium, approach, where the words and images sit), not on the names
   measure(options);
   // one bounded replanning round: when exploring, a concept that would look like another is sent back once with the measure, never silently kept or dropped
-  if (mode === 'explore' && !(keep.explicit && keep.composition) && inp.replan !== false && options.some(o => o.similar)) {
+  if ((mode === 'explore' || mode === 'layouts') && !(keep.explicit && keep.composition) && inp.replan !== false && options.some(o => o.similar)) {
     const dup = options.filter(o => o.similar);
     await log('info', dup.length + ' concept' + (dup.length === 1 ? '' : 's') + ' would look alike (' + dup.map(o => o.name + ' ~ ' + o.similar).join(', ') + '); asking once for replacements that differ in the drawn result');
     try {
-      const again = await stClaude(env, { role: 'creative', system: ST_CONCEPT_SYS + ctx.text + (noImg ? ST_NO_IMAGERY_LINE : ''), user: user + '\n\nREPLAN. Of the concepts you proposed, these would look alike on the stage (same medium, approach and placement of words and images), measured on the drawn result: ' + dup.map(o => '"' + o.name + '" resembles "' + o.similar + '"').join('; ') + '. The others stand: ' + options.filter(o => !o.similar).map(o => '"' + o.name + '" (' + o.summary + ')').join(', ') + '. Propose ' + dup.length + ' replacement concept' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in medium or approach or in where the words and the images sit. Answer with the same JSON shape, options holding only the replacements.', images, maxTok: 14000, timeoutMs: 170000, effort: 'high', log });
+      const again = await stClaude(env, { role: 'creative', system: ST_CONCEPT_SYS + ctx.text + (noImg ? ST_NO_IMAGERY_LINE : ''), user: user + '\n\nREPLAN. Of the concepts you proposed, these would look alike on the stage (same medium, approach and placement of words and images), measured on the drawn result: ' + dup.map(o => '"' + o.name + '" resembles "' + o.similar + '"').join('; ') + '. The others stand: ' + options.filter(o => !o.similar).map(o => '"' + o.name + '" (' + o.summary + ')').join(', ') + '. Propose ' + dup.length + ' replacement concept' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one' + (mode === 'layouts' ? ' and from the current layout in where the words sit, their hierarchy and the panel treatment (the photograph and the words stay as they are)' : ' in medium or approach or in where the words and the images sit') + '. Answer with the same JSON shape, options holding only the replacements.', images, maxTok: 14000, timeoutMs: 170000, effort: 'high', log });
       const j2 = relJson(again.text); model2 = again.model;
       if (j2 && Array.isArray(j2.options) && j2.options.length) {
         const fresh = j2.options.slice(0, dup.length).map((o, k) => build(o, options.length + k));
@@ -9397,9 +9432,9 @@ async function stConceptsStage(env, job, p, log) {
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
   }
   const distinct = options.filter(o => !o.similar).length;
-  await stEvent(env, p.id, 'concepts', { eid, mode, asset: a.id, version: v.id, feedback, keep, size, critique: stStr(j.critique, 600), options, imageSeen, refsUsed: refs.used, unanalysed: refs.unanalysed, refPack: pack.record, placement, memory: mem.count, model: r.model, replanned: replanned || undefined, job: job.id, refine: refine ? refine.name : '', text: (mode === 'new' ? 'New design for ' : mode === 'refine' ? 'Refinement of ' : 'Variations for ') + a.title + ': ' + options.length + ' concept' + (options.length === 1 ? '' : 's') + ' - ' + options.map(o => o.name + ' (' + o.summary + ')').join('; ') + '. Proposed as sketches, not applied; nothing spent beyond ' + (replanned ? 'two calls (one replanning round)' : 'this call') + '.' + (replanned ? ' ' + replanned + ' look-alike concept' + (replanned === 1 ? ' was' : 's were') + ' replanned once.' : '') + (distinct < options.length ? ' ' + (options.length - distinct) + ' would still look alike and ' + (options.length - distinct === 1 ? 'is' : 'are') + ' marked.' : '') + (refs.used.length ? ' Read ' + refs.used.length + ' reference' + (refs.used.length === 1 ? '' : 's') + (refs.unanalysed.length ? ' (' + refs.unanalysed.length + ' by name only)' : '') + '.' : '') + ' ' + pack.summary.charAt(0).toUpperCase() + pack.summary.slice(1) + '.' + (options.some(o => o.kept) ? ' Retained as asked: ' + Array.from(new Set(options.flatMap(o => o.kept || []))).join(', ') + '.' : '') + (options.some(o => o.incomplete) ? ' The campaign mark is not on file: these compositions are incomplete until it is uploaded.' : '') }, 'studio');
+  await stEvent(env, p.id, 'concepts', { eid, mode, asset: a.id, version: v.id, feedback, keep, size, critique: stStr(j.critique, 600), options, imageSeen, refsUsed: refs.used, unanalysed: refs.unanalysed, refPack: pack.record, placement, memory: mem.count, model: r.model, replanned: replanned || undefined, job: job.id, refine: refine ? refine.name : '', text: (mode === 'new' ? 'New design for ' : mode === 'refine' ? 'Refinement of ' : mode === 'layouts' ? 'Layouts for ' : 'Variations for ') + a.title + ': ' + options.length + ' concept' + (options.length === 1 ? '' : 's') + ' - ' + options.map(o => o.name + ' (' + o.summary + ')').join('; ') + '. Proposed as sketches, not applied; nothing spent beyond ' + (replanned ? 'two calls (one replanning round)' : 'this call') + '.' + (replanned ? ' ' + replanned + ' look-alike concept' + (replanned === 1 ? ' was' : 's were') + ' replanned once.' : '') + (distinct < options.length ? ' ' + (options.length - distinct) + ' would still look alike and ' + (options.length - distinct === 1 ? 'is' : 'are') + ' marked.' : '') + (refs.used.length ? ' Read ' + refs.used.length + ' reference' + (refs.used.length === 1 ? '' : 's') + (refs.unanalysed.length ? ' (' + refs.unanalysed.length + ' by name only)' : '') + '.' : '') + ' ' + pack.summary.charAt(0).toUpperCase() + pack.summary.slice(1) + '.' + (mode === 'layouts' ? ' Same photograph and approved words in each; ' + (options.some(o => o.renders) ? 'a render is still called for by ' + options.filter(o => o.renders).map(o => o.name).join(', ') : 'no render needed') + '.' + (options.some(o => o.setAside) ? ' Set aside from the answers: ' + Array.from(new Set(options.flatMap(o => o.setAside || []))).join('; ') + '.' : '') : '') + (options.some(o => o.kept) ? ' Retained as asked: ' + Array.from(new Set(options.flatMap(o => o.kept || []))).join(', ') + '.' : '') + (options.some(o => o.incomplete) ? ' The campaign mark is not on file: these compositions are incomplete until it is uploaded.' : '') }, 'studio');
   await log('out', options.length + ' concept' + (options.length === 1 ? '' : 's') + ' (' + distinct + ' visibly distinct' + (replanned ? ', ' + replanned + ' replanned' : '') + '): ' + options.map(o => o.name + ' = ' + o.summary + (o.unsupported.length ? ' [cannot draw: ' + o.unsupported.join('; ') + ']' : '')).join(' | ') + (imageSeen ? '; the model saw the current artwork' : ''));
-  return { eid, mode, asset: a.id, critique: stStr(j.critique, 600), options: options.map(o => ({ i: o.i, name: o.name, kind: o.kind, medium: o.medium, approach: o.approach, needsImage: o.needsImage, renders: o.renders, cost: o.cost, summary: o.summary, similar: o.similar, kept: o.kept, incomplete: !!o.incomplete })), distinct, replanned, imageSeen, refs: refs.used.length, pack: pack.record, model: r.model, model2: model2 || undefined };
+  return { eid, mode, asset: a.id, critique: stStr(j.critique, 600), options: options.map(o => ({ i: o.i, name: o.name, kind: o.kind, medium: o.medium, approach: o.approach, needsImage: o.needsImage, renders: o.renders, cost: o.cost, summary: o.summary, similar: o.similar, fromCurrent: o.fromCurrent, kept: o.kept, setAside: o.setAside, incomplete: !!o.incomplete })), distinct, replanned, imageSeen, refs: refs.used.length, pack: pack.record, model: r.model, model2: model2 || undefined };
 }
 /** Queue the image work a plan needs for one asset version: one render per region that does not keep the current image, or one full-artwork render. */
 async function stPlanRenders(env, p, a, v, layout, planIn, opts) {

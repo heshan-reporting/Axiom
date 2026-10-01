@@ -98,11 +98,14 @@
     return { text, lines, widths, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
   }
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
-  function cover(ctx, img, W, H, box) {
+  /** Cover the box with the image. focus {x, y} (per cent of the image) is the point kept in view as the crop moves toward it,
+   *  zoom (1-3) enlarges the image inside the box; the centre at 1 is the plain cover crop. */
+  function cover(ctx, img, W, H, box, focus) {
     const bx = box ? box.x : 0, by = box ? box.y : 0, bw = box ? box.w : W, bh = box ? box.h : H;
-    const s = Math.max(bw / img.naturalWidth, bh / img.naturalHeight); const w = img.naturalWidth * s, h = img.naturalHeight * s;
+    const f = focus || {}; const zoom = Math.max(1, Math.min(3, +f.zoom || 1)); const fx = f.x == null ? 50 : Math.max(0, Math.min(100, +f.x)), fy = f.y == null ? 50 : Math.max(0, Math.min(100, +f.y));
+    const s = Math.max(bw / img.naturalWidth, bh / img.naturalHeight) * zoom; const w = img.naturalWidth * s, h = img.naturalHeight * s;
     ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
-    ctx.drawImage(img, bx + (bw - w) / 2, by + (bh - h) / 2, w, h); ctx.restore();
+    ctx.drawImage(img, bx - (w - bw) * fx / 100, by - (h - bh) * fy / 100, w, h); ctx.restore();
   }
   function contain(ctx, img, x, y, w, h) {
     const s = Math.min(w / img.naturalWidth, h / img.naturalHeight); const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
@@ -122,7 +125,7 @@
     const bgFill = layout.bg && typeof layout.bg === 'object' ? (() => { const d = layout.bg.dir || 'down'; const g = d === 'right' ? ctx.createLinearGradient(0, 0, W, 0) : d === 'left' ? ctx.createLinearGradient(W, 0, 0, 0) : d === 'up' ? ctx.createLinearGradient(0, H, 0, 0) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, layout.bg.from || '#0f171d'); g.addColorStop(1, layout.bg.to || layout.bg.from || '#0f171d'); return g; })() : layout.bg || null;
     const planNoBg = layout.v === 5 && !(layout.regions || []).some(r => r.role === 'background');
     if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
-    if (images.bg) cover(ctx, images.bg, W, H, ib);
+    if (images.bg) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
     else if (!planNoBg) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
     const overflow = [];
     const sketch = s => { ctx.setLineDash([W * 0.01, W * 0.008]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, W * 0.003); ctx.strokeRect(s.x + 1, s.y + 1, s.w - 2, s.h - 2); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '500 ' + Math.max(10, W * 0.018) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2); };
@@ -143,7 +146,7 @@
       }
       else if (l.type === 'img') {
         const img = isMark(l) ? markImage(images, l) : images[l.id];
-        if (img) { if (l.fit === 'cover') cover(ctx, img, W, H, { x, y, w, h }); else contain(ctx, img, x, y, w, h); }
+        if (img) { if (l.fit === 'cover') cover(ctx, img, W, H, { x, y, w, h }, l.focus); else contain(ctx, img, x, y, w, h); }
         else if (isMark(l)) { ctx.fillStyle = 'rgba(255,255,255,.9)'; roundRect(ctx, x, y, w, h, 2); ctx.fill(); ctx.fillStyle = '#333'; ctx.font = '600 ' + Math.max(10, h * 0.32) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(l.role === 'wordmark' ? 'WORDMARK MISSING' : 'LOGO MISSING', x + w / 2, y + h / 2); }
         else sketch({ x, y, w, h, label: (l.name || l.id || 'image') + ' - sketch' });
       } else if (l.type === 'text') {

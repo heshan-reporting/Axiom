@@ -316,6 +316,33 @@ ok(!more.frames[0].length && more.frames[1].some(x => x.startsWith('text_overflo
 ok(more.framesAfter.every(x => !x.length) && JSON.stringify(more.framesChanged) === '[false,true,false]', 'only the overfull frame changes, and every frame passes');
 ok(more.counter > 10, 'the frame counter is drawn on every carousel frame');
 
+/* ------------------------------------------------------------------ P20: framing, line height, box versus type */
+section('9. framing the photograph, line height, and a text box resized without its type');
+const p20 = await page.evaluate(async ({ L, C }) => {
+  const R = window.STRender; const im = await window.__load(); const out = {}; const images = { bg: im.photo, wordmark: im.white };
+  const pix = cv => cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; const diff = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 30) n++; return n / (a.length / 4); };
+  const plain = JSON.parse(JSON.stringify(L)); delete plain.imageFocus;
+  const centre = Object.assign(JSON.parse(JSON.stringify(L)), { imageFocus: { x: 50, y: 50, zoom: 1 } });
+  const framed = Object.assign(JSON.parse(JSON.stringify(L)), { imageFocus: { x: 0, y: 0, zoom: 2 } });
+  const a = pix(R.render(plain, C, images, null).canvas), b = pix(R.render(centre, C, images, null).canvas), c = pix(R.render(framed, C, images, null).canvas);
+  out.centreSame = diff(a, b); out.framedMoved = diff(a, c);
+  // the preview and the export are the same drawing at two widths: the framed preview, scaled up, matches the export far better than the unframed one does
+  const small = R.render(framed, C, images, 360).canvas; const up = document.createElement('canvas'); up.width = small.width * 3; up.height = small.height * 3; up.getContext('2d').drawImage(small, 0, 0, up.width, up.height);
+  const big = R.render(framed, C, images, up.width).canvas; const bigPlain = R.render(plain, C, images, up.width).canvas;
+  out.parityFramed = diff(pix(up), pix(big)); out.parityPlain = diff(pix(up), pix(bigPlain));
+  const ctx = document.createElement('canvas').getContext('2d'); const W = 1080, H = 1350; const hl = L.layers.find(l => l.id === 'headline');
+  const t1 = R.layoutText(ctx, L, Object.assign({}, hl, { lineHeight: 1.12 }), C, W, H), t2 = R.layoutText(ctx, L, Object.assign({}, hl, { lineHeight: 1.5 }), C, W, H);
+  out.lh = [t1.lh, t2.lh, t1.contentH, t2.contentH, t1.lines.length];
+  const narrow = R.layoutText(ctx, L, Object.assign({}, hl, { w: hl.w * 0.6 }), C, W, H);
+  out.box = [t1.px, narrow.px, t1.lines.length, narrow.lines.length];
+  return out;
+}, { L: hoof.layout, C: HOOF_COPY });
+ok(p20.centreSame === 0, 'framing at the centre and zoom 1 draws exactly the plain cover crop');
+ok(p20.framedMoved > 0.05, 'a focal point at the top left and zoom 2 moves the crop (' + Math.round(p20.framedMoved * 100) + '% of pixels changed)');
+ok(p20.parityFramed < p20.parityPlain, 'the preview and the export draw the same framing (preview vs export ' + Math.round(p20.parityFramed * 100) + '% apart, vs ' + Math.round(p20.parityPlain * 100) + '% against the unframed export)');
+ok(Math.abs(p20.lh[1] / p20.lh[0] - 1.5 / 1.12) < 0.01 && (p20.lh[4] < 2 || p20.lh[3] > p20.lh[2]), 'line height sets the line pitch the renderer measures (' + p20.lh.slice(0, 2).map(x => Math.round(x)).join(' -> ') + ' px)');
+ok(p20.box[0] === p20.box[1] && p20.box[3] >= p20.box[2], 'a narrower text box keeps the type size and rewraps (' + p20.box[2] + ' -> ' + p20.box[3] + ' lines at ' + Math.round(p20.box[0]) + ' px)');
+
 /* ------------------------------------------------------------------ the evidence sheet */
 section('evidence: tests/shot-layout-repair.png (synthetic fixture, real renderer)');
 {
