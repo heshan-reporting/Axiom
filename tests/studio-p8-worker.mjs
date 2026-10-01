@@ -278,7 +278,7 @@ await t('adaptation recomposes: an asset made from a plan is re-planned for the 
   globalThis.fetch = async (url, init) => { if (String(url).indexOf('api.anthropic.com/v1/messages') >= 0 && /decide what the instruction asks/.test(String(JSON.parse(init.body).system || ''))) return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ kind: 'adapt', reply: 'Adapted.', adapt: { from: src.id, pieces: [{ channel: 'x', format: '16:9', copy: { caption: 'For X' } }] }, memory: { standing: false } }) }], stop_reason: 'end_turn' }), { status: 200 }); return orig(url, init); };
   const j = await jobRun(P, 'revise', { target: 'asset', asset: src.id, instruction: 'adapt this for X' }); globalThis.fetch = orig; eq(j.state, 'done', j.error);
   const g2 = await get(P); const ad = g2.assets[g2.assets.length - 1]; const v = cur(g2, ad.id);
-  eq([ad.format, v.layout.v, v.layout.stage.w], ['16:9', 5, 1920]); ok(/plan re-composed for 16:9/.test(v.note), v.note); eq(v.context.master, src.id); eq(layerOf(v.layout, 'kicker').text, 'MYTH BUSTED', 'the plan\'s own elements carry across');
+  eq([ad.format, v.layout.v, v.layout.stage.w], ['16:9', 5, 1920]); ok(/re-composed for 16:9/.test(v.note), v.note); eq(v.context.master, src.id); eq(layerOf(v.layout, 'kicker').text, 'MYTH BUSTED', 'the plan\'s own elements carry across');
 });
 
 await t('a read key can check the brief, read the sourced suggestions and the identity audit, but not produce, upload references or apply corrections', async () => {

@@ -3422,7 +3422,7 @@ function kitStructured(body, cur) {
   // (which mark goes on its tiles: the client logo, the campaign wordmark, both, or none) and an identity note (colours, devices)
   const prev = id => ((cur.campaigns || []).find(x => x && x.id === id) || {});
   out.campaigns = (camps || cur.campaigns || []).map(c => { if (!c || typeof c !== 'object') return null; const id = kitSlug(c.id) || kitSlug(c.name); const was = prev(id); return ({ id, name: pick(c.name, 90), url: pick(c.url, 120), signoff: pick(c.signoff, 160), cta: pick(c.cta, 160),
-    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
+    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), markRule: (r => r && ['tl', 'tr', 'bl', 'br'].indexOf(r.corner) >= 0 ? { corner: r.corner, mandatory: !!r.mandatory, note: pick(r.note, 200) } : undefined)(c.markRule !== undefined ? c.markRule : was.markRule), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
   const facts = arr(body.facts, 80);
   out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? ({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }) : null).filter(f => f && f.text);
   const banned = arr(body.banned, 60);
@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p18';
+const AXIOM_BUILD = '2026-10-01.studio-p19';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -6814,6 +6814,8 @@ async function stAppendVersion(env, asset, patch, who, opts) {
     copy: Object.assign({}, base ? base.copy : {}, stCopy(patch.copy || {})), layout: patch.layout && typeof patch.layout === 'object' ? patch.layout : (base ? base.layout : {}), image: patch.image === undefined ? (base ? base.image : null) : stImage(patch.image),
     mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : (base ? base.checks || [] : []), context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
   };
+  // approved words split across layers must still read as the copy: a copy edit that breaks the split undoes it, never rewrites words
+  if (v.layout && Array.isArray(v.layout.layers) && v.layout.layers.some(l => l.part != null)) { const pr = stPartsReconcile(v.layout, v.copy); if (pr.collapsed.length) { v.layout = pr.layout; v.note = stStr(v.note + ' (the ' + pr.collapsed.join(' and ') + ' split across layers no longer matched the words; kept as one block)', 200); } }
   await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), JSON.stringify(v.layout).slice(0, 20000), v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks).slice(0, 8000), JSON.stringify(v.context).slice(0, 8000), v.restored_from, v.who, v.created).run();
   if (!opts.branch) await env.MIND_DB.prepare('UPDATE studio_assets SET current=?, revision=revision+1, updated=? WHERE id=?').bind(v.id, Date.now(), asset.id).run();
@@ -7583,9 +7585,9 @@ function stFit(layout, copy, format) {
   const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const out = [];
   (layout && Array.isArray(layout.layers) ? layout.layers : []).forEach(l => {
     if (l.type !== 'text' || !l.role || !l.h || l.hidden) return;
-    const text = copy[l.role] != null ? copy[l.role] : l.text; if (!text) return;
+    const text = l.part != null && l.text ? l.text : copy[l.role] != null ? copy[l.role] : l.text; if (!text) return;
     const charsPerLine = Math.max(6, Math.floor(l.w / (l.size * (l.role === 'headline' ? 0.52 : 0.48))));
-    const lineH = l.size * 1.12 * (f.w / f.h); const maxLines = Math.max(1, Math.floor(l.h / lineH));
+    const lineH = l.size * (l.lineHeight || 1.12) * (f.w / f.h); const maxLines = Math.max(1, Math.floor(l.h / lineH));
     const lines = stWrapLines(text, charsPerLine);
     if (lines > maxLines) out.push({ state: 'overflow', text: String(text).slice(0, 60), note: 'The ' + l.role + ' needs ' + lines + ' lines at this size; ' + maxLines + ' fit at ' + format + ' (about ' + (charsPerLine * maxLines) + ' characters). Shorten it, or accept a smaller type size. (An estimate from character counts; the technical validation measures the real font.)' });
     if (l.size < 2.4) out.push({ state: 'small_type', text: l.role, note: 'Type at ' + l.size + '% of the width is under the 2.4% minimum for a feed.' });
@@ -7895,7 +7897,7 @@ async function stSequenceStage(env, job, p, log) {
   const ctx = await stContext(env, p, { channels, log }); const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
   let direction = null; if (inp.direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=? AND project=?').bind(stClean(inp.direction, 24), p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
   if (!direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE project=? AND chosen=1 ORDER BY created DESC LIMIT 1').bind(p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
-  const sys = 'You are the creative director of an Australian political communications agency planning a campaign sequence for ' + ctx.client + ': a set of assets that tell one argument in order across channels, each with a job in the sequence - not several unrelated posts. Return strict JSON only: {"name":"<=6 words","arc":"<=40 words: how the sequence moves the audience from the first asset to the last","cadence":"<=20 words: timing across days","items":[{"order":1,"role":"' + ST_SEQ_ROLES.join('|') + '","channel":"' + channels.join('|') + '","format":"1:1|4:5|9:16|16:9","day":0,"purpose":"<=20 words: this asset\'s job","relation":"<=20 words: how it carries the master idea","headline":"in the client voice","support":"<=25 words","cta":"<=6 words","caption":"for the channel","alt":"<=20 words","claims":["ledger ids"]}]}. Exactly ' + count + ' items, ordered. Figures only from the ledger or approved facts, quoted exactly. Headlines within the fit for each format: ' + Object.keys(ST_HEADLINE_FIT).map(f => f + ' ' + ST_HEADLINE_FIT[f] + ' chars').join(', ') + '. No exclamation marks.' + ctx.text;
+  const sys = 'You are the creative director of an Australian political communications agency planning a campaign sequence for ' + ctx.client + ': a set of assets that tell one argument in order across channels, each with a job in the sequence - not several unrelated posts. Return strict JSON only: {"name":"<=6 words","arc":"<=40 words: how the sequence moves the audience from the first asset to the last","cadence":"<=20 words: timing across days","items":[{"order":1,"role":"' + ST_SEQ_ROLES.join('|') + '","channel":"' + channels.join('|') + '","format":"1:1|4:5|9:16|16:9","day":0,"purpose":"<=20 words: this asset\'s job","relation":"<=20 words: how it carries the master idea","headline":"in the client voice","support":"<=25 words","cta":"<=6 words","caption":"for the channel","alt":"<=20 words","claims":["ledger ids"]' + (inp.deliverable === 'copy' ? '' : ',"plan":' + ST_PLAN_SCHEMA) + '}]}. Exactly ' + count + ' items, ordered.' + (inp.deliverable === 'copy' ? '' : ' Each item has its own composition for its job in the sequence - an opener, a proof, a response or a call to action are designed differently, with their own hierarchy, medium and placement of every element - not one template repeated; the set still reads as one campaign. ' + ST_PLAN_RULES + (inp.imagery === 'none' ? ST_NO_IMAGERY_LINE : '')) + ' Figures only from the ledger or approved facts, quoted exactly. Headlines within the fit for each format: ' + Object.keys(ST_HEADLINE_FIT).map(f => f + ' ' + ST_HEADLINE_FIT[f] + ' chars').join(', ') + '. No exclamation marks.' + ctx.text;
   const user = 'BRIEF:\n' + stBriefText(p) + (direction ? '\n\nCHOSEN DIRECTION: ' + direction.title + ' - ' + direction.message + ' (headline "' + direction.headline + '"; visual: ' + direction.visual + ')' : '') + (inp.instruction ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1200) : '') + '\n\nCHANNELS: ' + channels.join(', ') + '\nLEDGER:\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text).join('\n') || '(none)') + '\n\nPlan the ' + count + '-asset sequence.';
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': a ' + count + '-asset sequence on ' + channels.join(', ') + (direction ? ' from the direction "' + direction.title + '"' : ''));
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 6000, timeoutMs: 170000, log });
@@ -7907,19 +7909,27 @@ async function stSequenceStage(env, job, p, log) {
     const it = sorted[i]; const channel = ST_CHANNELS[it.channel] ? it.channel : channels[i % channels.length]; const format = ST_FORMATS[it.format] ? it.format : ST_CHANNELS[channel].format;
     const role = ST_SEQ_ROLES.indexOf(it.role) >= 0 ? it.role : 'other';
     const copy = stCopy({ headline: it.headline, support: it.support, cta: it.cta, caption: it.caption, alt: it.alt });
-    const layout = inp.deliverable === 'copy' ? {} : stLayout(kit, p.ns, format, template, copy, { campaign: p.campaign });
+    // each item's own composition from its plan; the house composition only when the plan is missing or places no words, and then said
+    let layout = {}, how = 'copy', planIn = null, why = '';
+    if (inp.deliverable !== 'copy') {
+      let pl = it.plan && typeof it.plan === 'object' && Array.isArray(it.plan.elements) ? JSON.parse(JSON.stringify(it.plan)) : null;
+      if (pl && inp.imagery === 'none') pl = stPlanNoImagery(pl, kit).plan;
+      const L = pl ? stPlanNormalise(pl, format, { kit, ns: p.ns, campaign: p.campaign, copy }) : null;
+      if (L && L.layers.some(l => l.type === 'text')) { layout = L; how = 'plan'; planIn = pl; }
+      else { layout = stLayout(kit, p.ns, format, template, copy, { campaign: p.campaign }); how = 'house'; why = pl ? 'its plan placed no words' : 'no plan came back for it'; }
+    }
     const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel, format, layout: inp.deliverable === 'copy' ? null : layout });
     const aid = stId('a'); const title = (i + 1) + '. ' + role + ' - ' + ST_CHANNELS[channel].label + ' ' + format;
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, 'Sequence: ' + name, channel, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
-    const v = await stAppendVersion(env, a, { kind: 'text', note: 'sequence ' + name + ', ' + (i + 1) + ' of ' + sorted.length + ' (' + role + '), house composition, no imagery yet', copy, layout, image: null, mode: inp.deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, sequence: seqId, order: i + 1, of: sorted.length, role, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), day: Number(it.day) || 0, direction: direction ? direction.id : '', claims: (Array.isArray(it.claims) ? it.claims : []).map(String).filter(x => known.has(x)), how: 'house', template }) }, 'studio');
-    items.push({ order: i + 1, role, channel, format, day: Number(it.day) || 0, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), asset: aid, version: v.id, headline: copy.headline || '' });
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'sequence ' + name + ', ' + (i + 1) + ' of ' + sorted.length + ' (' + role + '), ' + (how === 'plan' ? layout.mediumName + ' planned for its role' : how === 'house' ? 'house composition (' + why + '; not a bespoke design)' : 'copy') + ', no imagery yet', copy, layout, image: null, mode: inp.deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, sequence: seqId, order: i + 1, of: sorted.length, role, how, planIn: planIn || undefined, bespoke: how === 'plan' ? true : how === 'house' ? false : undefined, fallbackReason: why || undefined, medium: how === 'plan' ? layout.medium : undefined, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), day: Number(it.day) || 0, direction: direction ? direction.id : '', claims: (Array.isArray(it.claims) ? it.claims : []).map(String).filter(x => known.has(x)), template: how === 'plan' ? 'plan' : template }) }, 'studio');
+    items.push({ order: i + 1, role, channel, format, day: Number(it.day) || 0, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), asset: aid, version: v.id, headline: copy.headline || '', how, medium: how === 'plan' ? layout.medium : undefined });
   }
   const seq = { id: seqId, name, arc: stStr(j.arc, 400), cadence: stStr(j.cadence, 200), direction: direction ? direction.id : '', items, at: now, model: r.model, job: job.id };
   const cur = await stProject(env, p.id); const seqs = Array.isArray((cur.brief || {}).sequences) ? cur.brief.sequences : [];
   const brief = Object.assign({}, cur.brief || {}, { sequences: seqs.concat([seq]).slice(-8) });
   await env.MIND_DB.prepare("UPDATE studio_projects SET brief=?, status=CASE WHEN status IN ('brief','directions') THEN 'production' ELSE status END, revision=revision+1, updated=? WHERE id=?").bind(JSON.stringify(brief).slice(0, 60000), Date.now(), p.id).run();
-  await stEvent(env, p.id, 'sequence', { text: 'Sequence "' + name + '": ' + items.map(x => x.order + '. ' + x.role + ' (' + ST_CHANNELS[x.channel].label + ' ' + x.format + ', day ' + x.day + ')').join('; ') + '. ' + (seq.arc ? seq.arc.replace(/[.\s]+$/, '') + '. ' : '') + 'Made as editable compositions with no image spent: ask for imagery per asset, or ' + items.length + ' render' + (items.length === 1 ? '' : 's') + ' for the whole sequence.', job: job.id, sequence: seqId, assets: items.map(x => x.asset), model: r.model }, 'studio');
+  await stEvent(env, p.id, 'sequence', { text: 'Sequence "' + name + '": ' + items.map(x => x.order + '. ' + x.role + ' (' + ST_CHANNELS[x.channel].label + ' ' + x.format + ', day ' + x.day + ')').join('; ') + '. ' + (seq.arc ? seq.arc.replace(/[.\s]+$/, '') + '. ' : '') + 'Made as editable compositions with no image spent' + (items.some(x => x.how === 'plan') ? ', each planned for its role (' + items.filter(x => x.how === 'plan').map(x => x.order + ' ' + ST_MEDIA_WORDS[x.medium]).join(', ') + ')' : '') + (items.some(x => x.how === 'house') ? '; house composition for ' + items.filter(x => x.how === 'house').map(x => x.order).join(', ') + ', which came back without a usable plan and are not bespoke designs' : '') + ': ask for imagery per asset, or ' + items.length + ' render' + (items.length === 1 ? '' : 's') + ' for the whole sequence.', job: job.id, sequence: seqId, assets: items.map(x => x.asset), model: r.model }, 'studio');
   await log('out', 'sequence "' + name + '": ' + items.length + ' assets, no renders spent');
   return { sequence: seqId, assets: items.map(x => x.asset), model: r.model };
 }
@@ -7930,7 +7940,7 @@ async function stDirectStage(env, job, p, log) {
   const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","idea":"<=15 words: the campaign idea","copyApproach":"<=20 words: how the words work (hierarchy, register, device)","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","references":["reference names it draws on"],"plan":["<=12 words each: the production steps"],"renders":0}]}. The directions must differ in what is drawn as well as in what is argued: change the medium and composition when the argument allows, never only the photograph behind the same panel. "renders" is the number of images the first asset would need (0 for typography-led or diagram work). Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
   const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
-    + (await stRefBundle(env, p, { log, images: 0 })).text + (await stArtMemory(env, p.ns, 4)).text
+    + (await stRefBundle(env, p, { log, images: 0 })).text + (await stArtMemory(env, p.ns, 4, p.campaign)).text
     + '\n\nGive ' + n + ' directions.';
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + n + ' directions for an open brief, grounded in ' + led.claims.length + ' ledger claims, the references and the client context');
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log });
@@ -8114,6 +8124,22 @@ async function stCopyStage(env, job, p, log) {
   if (!j || !Array.isArray(j.pieces) || !j.pieces.length) throw new Error('copy_unparseable: the model did not return the pieces as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   const allowed = [led.text, ctx.block.facts.map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(p.brief || {}), ctx.block.campaign ? [ctx.block.campaign.name, ctx.block.campaign.url, ctx.block.campaign.cta, ctx.block.campaign.sourceLine].join(' ') : '', ctx.kit.voice || '', ctx.kit.rules || ''].join(' ');
   const known = new Set(led.claims.map(c => c.id));
+  // a channel whose plan is missing or places no words gets one bounded correction before anything falls back to the house layout
+  let replanned = 0;
+  if (deliverable !== 'copy') {
+    const usable = pc => pc && pc.plan && typeof pc.plan === 'object' && (pc.plan.approach === 'artwork' || (Array.isArray(pc.plan.elements) && pc.plan.elements.some(e => e && e.type === 'text')) || (Array.isArray(pc.plan.frames) && pc.plan.frames.length > 1));
+    const pieceFor = c => j.pieces.find(x => String(x.channel || '').toLowerCase() === c);
+    const missing = channels.filter(c => !usable(pieceFor(c)));
+    if (missing.length) {
+      await log('info', 'no usable plan for ' + missing.join(', ') + ' (' + missing.map(c => pieceFor(c) ? (pieceFor(c).plan ? 'the plan places no words' : 'no plan') : 'no piece').join('; ') + '); asking once for the plan before any house layout');
+      try {
+        const r2 = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. Your answer gave no usable composition for: ' + missing.join(', ') + ' (a plan needs elements with their positions, and text elements for the headline, support and CTA). Answer with the same JSON shape, pieces holding only those channels, each with its complete plan.', images: refs.images, maxTok: 12000, timeoutMs: 170000, effort: 'high', log });
+        const j2 = relJson(r2.text);
+        (j2 && Array.isArray(j2.pieces) ? j2.pieces : []).forEach(pc => { const c = String(pc.channel || '').toLowerCase(); if (missing.indexOf(c) < 0 || !usable(pc)) return; const cur = pieceFor(c); if (cur) cur.plan = pc.plan; else j.pieces.push(pc); replanned++; });
+        await log('info', replanned + ' of ' + missing.length + ' plan' + (missing.length === 1 ? '' : 's') + ' recovered by the correction');
+      } catch (e) { await log('info', 'the correction did not answer (' + String(e.message || e).slice(0, 120) + '); the house layout is used and labelled'); }
+    }
+  }
   const assets = [], versions = [], renders = [], mediums = [], fallbacks = []; let flagged = 0, incomplete = 0; const now = Date.now();
   for (const c of channels) {
     const piece = j.pieces.find(x => String(x.channel || '').toLowerCase() === c) || j.pieces.find(x => !x._used) || j.pieces[0]; piece._used = true;
@@ -8127,7 +8153,7 @@ async function stCopyStage(env, job, p, log) {
         let planFixed = JSON.parse(JSON.stringify(piece.plan)); (Array.isArray(planFixed.regions) ? planFixed.regions : []).forEach(rg => { if (rg && /keep the current/i.test(String(rg.prompt || ''))) rg.prompt = stStr(piece.visual, 400) || String(planFixed.story || ''); });
         if (Array.isArray(planFixed.frames)) planFixed.frames.forEach(fr => (fr && Array.isArray(fr.regions) ? fr.regions : []).forEach(rg => { if (rg && /keep the current/i.test(String(rg.prompt || ''))) rg.prompt = stStr(piece.visual, 400); }));
         if (inp.imagery === 'none') { const ni = stPlanNoImagery(planFixed, ctx.kit); planFixed = ni.plan; if (ni.dropped) log('  ' + c + ': no imagery - ' + ni.dropped + ' image region' + (ni.dropped === 1 ? '' : 's') + ' left out of the plan'); }
-        const L = stPlanNormalise(planFixed, format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement, refs: refs.rows });
+        const L = stPlanNormalise(planFixed, format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement, refs: refs.rows, copy });
         if (L.layers.some(l => l.type === 'text') || L.approach === 'artwork') { layout = L; planIn = planFixed; how = 'plan'; }
         else { fallbacks.push(c + ': the plan placed no words'); }
       }
@@ -8144,7 +8170,7 @@ async function stCopyStage(env, job, p, log) {
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
     const bgRegion = how === 'plan' ? (layout.regions || []).find(x => x.role === 'background') : null;
-    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
     assets.push(aid); versions.push(v.id);
     if (deliverable !== 'copy' && inp.render !== false) {
       if (how === 'plan') renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true }));
@@ -8155,8 +8181,8 @@ async function stCopyStage(env, job, p, log) {
   if (fallbacks.length) await log('info', 'house composition used for ' + fallbacks.join('; ') + ' - not a plan, shown as such on the version');
   if (incomplete) await log('info', incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete: the campaign mark is not on file; nothing drawn in its place, approval and export wait for the file');
   await log('out', assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ' written' + (mediums.length ? ' (' + mediums.join('; ') + ')' : '') + (flagged ? ', ' + flagged + ' with checks to look at' : ', every figure traced') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued at ' + size : deliverable === 'copy' ? '; copy only, no renders' : '; no renders queued'));
-  await stEvent(env, p.id, 'produced', { text: 'Produced ' + assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ': ' + channels.map(c => ST_CHANNELS[c].label + ' ' + formats[c]).join(', ') + '. One argument adapted per channel' + (direction ? ' from the direction "' + direction.title + '"' : '') + '; ' + ctx.snapshot.rules.copy.length + ' learned corrections and ' + ctx.snapshot.facts + ' approved facts in play' + (deliverable === 'copy' ? '. Copy only: no render spent.' : (mediums.length ? '. Planned by the creative team: ' + mediums.join('; ') + (fallbacks.length ? '; house composition for ' + fallbacks.map(f => f.split(':')[0]).join(', ') : '') + (ctx.kit.hasLogo || (camp && camp.hasWordmark) ? '; marks placed exactly from the kit by the campaign policy' : '; no mark on file for this client') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued as jobs at ' + size + '.' : '.') : '. Compositions laid out as editable ' + ST_TEMPLATES[template].name + 's' + (ctx.kit.hasLogo ? ' with the kit logo placed exactly' : ' (no logo on file for this client)') + (renders.length ? '; ' + renders.length + ' background render' + (renders.length === 1 ? '' : 's') + ' queued as jobs at ' + size + '.' : '.'))) + (incomplete ? ' ' + incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete until the campaign mark is uploaded.' : '') + (check.assumptions.length ? ' Assumptions recorded: ' + check.assumptions.map(a => a.text).join('; ') + '.' : '') + (!check.ok ? ' Mandatory gaps were acknowledged by the team.' : '') + (pack ? ' ' + pack.summary + '.' : '') + (flagged ? ' ' + flagged + ' asset' + (flagged === 1 ? ' has' : 's have') + ' checks to look at.' : ''), job: job.id, assets, changed: assets, render: false, mediums, fallbacks, incomplete, assumptions: check.assumptions, refPack: pack ? pack.record : undefined }, 'studio');
-  return { assets, versions, renders, flagged, incomplete, channels, deliverable, template: deliverable === 'copy' ? '' : template, mediums, fallbacks, size, model: r.model, assumptions: check.assumptions };
+  await stEvent(env, p.id, 'produced', { text: 'Produced ' + assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ': ' + channels.map(c => ST_CHANNELS[c].label + ' ' + formats[c]).join(', ') + '. One argument adapted per channel' + (direction ? ' from the direction "' + direction.title + '"' : '') + '; ' + ctx.snapshot.rules.copy.length + ' learned corrections and ' + ctx.snapshot.facts + ' approved facts in play' + (deliverable === 'copy' ? '. Copy only: no render spent.' : (mediums.length ? '. Planned by the creative team: ' + mediums.join('; ') + (fallbacks.length ? '; house composition for ' + fallbacks.map(f => f.split(':')[0]).join(', ') + ' (no usable plan even after one correction: not a bespoke design, shown as such)' : '') + (replanned ? '; ' + replanned + ' plan' + (replanned === 1 ? '' : 's') + ' recovered by one correction' : '') + (ctx.kit.hasLogo || (camp && camp.hasWordmark) ? '; marks placed exactly from the kit by the campaign policy' : '; no mark on file for this client') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued as jobs at ' + size + '.' : '.') : '. Compositions laid out as editable ' + ST_TEMPLATES[template].name + 's' + (ctx.kit.hasLogo ? ' with the kit logo placed exactly' : ' (no logo on file for this client)') + (renders.length ? '; ' + renders.length + ' background render' + (renders.length === 1 ? '' : 's') + ' queued as jobs at ' + size + '.' : '.'))) + (incomplete ? ' ' + incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete until the campaign mark is uploaded.' : '') + (fallbacks.length && !mediums.length ? ' No usable plan came back even after one correction (' + fallbacks.join('; ') + '), so these are house layouts: not a bespoke design, shown as such.' : '') + (check.assumptions.length ? ' Assumptions recorded: ' + check.assumptions.map(a => a.text).join('; ') + '.' : '') + (!check.ok ? ' Mandatory gaps were acknowledged by the team.' : '') + (pack ? ' ' + pack.summary + '.' : '') + (flagged ? ' ' + flagged + ' asset' + (flagged === 1 ? ' has' : 's have') + ' checks to look at.' : ''), job: job.id, assets, changed: assets, render: false, mediums, fallbacks, incomplete, assumptions: check.assumptions, refPack: pack ? pack.record : undefined }, 'studio');
+  return { assets, versions, renders, flagged, incomplete, channels, deliverable, template: deliverable === 'copy' ? '' : template, mediums, fallbacks, replanned, size, model: r.model, assumptions: check.assumptions };
 }
 // -- export: exactly the approved versions, a copy sheet, the context; nothing is sent anywhere -------------
 function stCopySheet(p, items) {
@@ -8333,7 +8359,7 @@ async function stClientDecision(env, a) {
 // not applied), a new image (proposed with its steps, run only on confirmation), an adaptation to other channels
 // or formats (new assets in the family that reuse the image), a layout change, or a question back. A standing
 // preference is offered as a rule, never saved without an answer: campaign preference, lasting client rule, or no.
-const ST_REVISE_KINDS = ['text', 'alternatives', 'render', 'adapt', 'layout', 'design', 'question'];
+const ST_REVISE_KINDS = ['text', 'alternatives', 'render', 'adapt', 'layout', 'layers', 'design', 'question'];
 const ST_COPY_FIELDS = ['headline', 'support', 'cta', 'caption', 'alt'];
 function stCampaignOf(fix) { const m = /:campaign:([a-z0-9_-]+)$/.exec(String((fix && fix.source) || '')); return m ? m[1] : ''; }
 async function stProjectAssets(env, p) {
@@ -8347,7 +8373,8 @@ function stAssetBrief(t) {
   const locks = Object.keys(a.locks || {}).filter(k => a.locks[k]);
   const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
   return '[' + a.id + '] ' + a.title + ' - ' + a.channel + ' ' + a.format + ', mode ' + (v.mode || 'copy') + (locks.length ? ', LOCKED: ' + locks.join(', ') : '') + (hl ? ', headline size ' + hl.size + '% (' + (v.layout.templateName || v.layout.template) + ')' : '')
-    + '\n' + ST_COPY_FIELDS.filter(k => v.copy && v.copy[k]).map(k => '  ' + k + ': ' + v.copy[k]).join('\n') + (v.context && v.context.visual ? '\n  background: ' + v.context.visual : '');
+    + '\n' + ST_COPY_FIELDS.filter(k => v.copy && v.copy[k]).map(k => '  ' + k + ': ' + v.copy[k]).join('\n') + (v.context && v.context.visual ? '\n  background: ' + v.context.visual : '')
+    + (v.layout && Array.isArray(v.layout.layers) && v.mode !== 'copy' ? '\n  composition: ' + (v.layout.v === 5 ? (v.layout.mediumName || v.layout.medium) + (v.layout.story ? ' - ' + v.layout.story.slice(0, 120) : '') : v.layout.design ? stDescribeSpec(v.layout.design) : v.layout.templateName || 'house') + (v.image ? ', photograph on file' : ', no photograph') + (v.layout.markPlacement ? ', mark ' + (v.layout.markPlacement.basis === 'rule' ? 'held by the approved placement rule' : v.layout.markPlacement.basis === 'plan' ? 'placed by the plan' : v.layout.markPlacement.basis + ' placement') : '') + stLayerList(v.layout, v.copy) : '');
 }
 async function stReviseStage(env, job, p, log) {
   const inp = job.input || {};
@@ -8370,7 +8397,7 @@ async function stReviseStage(env, job, p, log) {
   const ctx = await stContext(env, p, { channels, log });
   const led = await stLedger(env, p.id);
   const refs = await stRefBundle(env, p, { log, images: 1 });
-  const mem = await stArtMemory(env, p.ns, 4);
+  const mem = await stArtMemory(env, p.ns, 4, p.campaign);
   const art = targets[0].version && targets[0].version.mode !== 'copy' ? await stVersionImage(env, targets[0].version, log) : null;
   const sys = 'You are the creative team (creative director, copywriter, designer) of an Australian political communications agency, working for ' + ctx.client + '. The team lead gives you a direction about one or more assets. First decide what the instruction asks for, then answer with strict JSON only, no prose:\n'
     + '{"kind":"text|alternatives|render|adapt|layout|design|question",'
@@ -8380,10 +8407,11 @@ async function stReviseStage(env, job, p, log) {
     + '"render":{"assets":["id"],"visual":"<=160 characters of art direction for the new photograph, no text, no logos","steps":["<=12 words each: what changes, what is kept"]},'
     + '"adapt":{"from":"id","pieces":[{"channel":"instagram","format":"4:5|1:1|9:16|16:9","copy":{"headline":"...","support":"...","cta":"...","caption":"...","alt":"..."}}]},'
     + '"layout":{"assets":["id"],"headlineSize":"smaller|larger|same"},'
-    + '"design":{"assets":["id"],"spec":' + ST_SPEC_SCHEMA + ',"image":null,"steps":["<=12 words each: what changes, what is kept"],"refs":["reference ids drawn on"]},'
+    + '"layers":{"asset":"id","ops":[{"id":"layer id from the list","x":0,"y":0,"w":0,"h":0,"size":0,"lineHeight":1.12,"align":"left|center|right","opacity":1,"color":"#hex","fill":"#hex or rgba()","bg":"#hex or empty","emphasis":"none|highlight|underline|box|caps","hidden":false}],"remove":["layer id"],"add":["plan elements (shapes, rules, labels) as in the plan schema"],"keeps":["<=8 words each: what stays exactly as it is"]},'
+    + '"design":{"assets":["id"],"plan":' + ST_PLAN_SCHEMA.replace(/\}$/, ',"markPlace":{"corner":"tl|tr|bl|br","x":0,"y":0,"w":17}}') + ',"image":null,"why":"<=30 words: why this composition serves the message","steps":["<=12 words each: what changes, what is kept"],"refs":["reference ids drawn on"]},'
     + '"question":"<=40 words when the direction cannot be applied without an answer",'
     + '"memory":{"standing":false,"rule":"one imperative sentence, <=40 words, general enough for future work but no broader than the instruction supports","scope":"campaign|client","confidence":0.0}}\n'
-    + 'KINDS. text: the words change (headline, support, CTA, caption, alt) - give the full new value of every field you change, only for the assets named, never a locked field (say in reply what stayed locked). alternatives: the lead asks for options or variants for one field - give two to four, apply nothing. render: the lead wants a different image, background, photograph, mood or visual - describe it and the steps; the render is not yours to run. adapt: the lead wants the asset on other channels or formats - write the adapted copy per channel in its register, same argument. layout: only a bigger or smaller headline. design: the lead wants a different composition or treatment - the panel, an overlay, a split, a typography-led tile, where the words sit, how much they cover, alignment, the logo corner, the CTA treatment - or a combination of layout and imagery changes ("use a split layout and create a wider photograph"): give the whole spec for the assets named; set image to null to reuse the current photograph, or to {"subject","setting","framing","lighting","mood","focal"} when a new photograph is part of it (the layout is applied at once, the photograph is proposed for confirmation). question: only when nothing can be done without an answer.\n' + ST_SPEC_RULES + '\n'
+    + 'KINDS. text: the words change (headline, support, CTA, caption, alt) - give the full new value of every field you change, only for the assets named, never a locked field (say in reply what stayed locked). alternatives: the lead asks for options or variants for one field - give two to four, apply nothing. render: the lead wants a different image, background, photograph, mood or visual - describe it and the steps; the render is not yours to run. adapt: the lead wants the asset on other channels or formats - write the adapted copy per channel in its register, same argument. layout: only a bigger or smaller headline. layers: the lead names particular elements to move, resize, restyle, hide or add and everything else stays ("move only the CTA to the left", "make the panel smaller and translucent", "put the headline in the upper-right negative space and the support at the bottom"): give ops for the named layers by their id from the list, with absolute values in per cent; nothing else; never a locked layer; the words themselves change through a text edit, not here. design: the lead wants a different composition ("three completely different layouts" belongs to the art direction area; here, one new composition): give the whole plan for the assets named - every element with its own position and size in per cent, the panel, gradient or devices, the reading order - keeping the current photograph unless a new one is asked for (the background region prompt then says "keep the current image"); reuse the element ids from the layer list for elements that carry over; when the lead says the new composition must not inherit the current one, do not copy its positions; set image to null to reuse the current photograph, or to {"subject","setting","framing","lighting","mood","focal"} when a new photograph is part of it (the composition is applied at once, the photograph is proposed for confirmation). markPlace says where the campaign mark goes (a corner, or x, y and width); the mark is placed from its file, never drawn, and an approved placement rule keeps it where the rule says.\n' + ST_PLAN_RULES + ' question: only when nothing can be done without an answer.\n' + ST_SPEC_RULES + '\n'
     + 'RULES. Australian English, sentence case, no exclamation marks. Every figure comes from the LEDGER or the APPROVED FACTS, quoted exactly; never invent, round or update one. Quotations verbatim or not at all. Keep the sign-off and the source line the client uses. Do not favour a political party. memory.standing is true only for a preference that should shape future work for this client (a wording, a term, a tone, an always or a never, an imagery rule); false for a one-off (this figure, this asset, this time). Scope campaign when it is about this campaign\'s identity, client when it holds for everything the client does.'
     + ctx.text;
   const user = 'INSTRUCTION FROM THE TEAM LEAD (target: ' + (target === 'set' ? 'the whole set' : target === 'family' ? 'the family ' + targets[0].asset.family : 'one asset') + '):\n' + instruction
@@ -8400,7 +8428,7 @@ async function stReviseStage(env, job, p, log) {
   const reply = stStr(j.reply, 400) || 'Done.';
   const inScope = id => targets.find(t => t.asset.id === stClean(id, 24));
   let offer = null;
-  if (j.memory && typeof j.memory === 'object' && j.memory.standing && Number(j.memory.confidence) >= 0.6 && String(j.memory.rule || '').trim()) offer = { rule: stStr(j.memory.rule, 300), scope: j.memory.scope === 'campaign' && p.campaign ? 'campaign' : 'client', campaign: p.campaign || '', task: kind === 'render' || kind === 'layout' || kind === 'design' ? 'tiles' : 'copy', instruction };
+  if (j.memory && typeof j.memory === 'object' && j.memory.standing && Number(j.memory.confidence) >= 0.6 && String(j.memory.rule || '').trim()) offer = { rule: stStr(j.memory.rule, 300), scope: j.memory.scope === 'campaign' && p.campaign ? 'campaign' : 'client', campaign: p.campaign || '', task: kind === 'render' || kind === 'layout' || kind === 'layers' || kind === 'design' ? 'tiles' : 'copy', instruction };
   const base = { eid, instruction, target, model: r.model, job: job.id, offer: offer || undefined };
   const changed = [], kept = [];
   if (kind === 'text' || kind === 'layout') {
@@ -8426,6 +8454,23 @@ async function stReviseStage(env, job, p, log) {
     await log('out', changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' changed as ' + kind + (kept.length ? '; kept locked: ' + kept.join(', ') : '') + (offer ? '; a standing preference is offered, not saved' : ''));
     return { kind, eid, changed, kept, offer: !!offer };
   }
+  if (kind === 'layers') {
+    const lz = j.layers || {}; const t = inScope(lz.asset) || targets[0];
+    if (!t.version || !t.version.layout || !Array.isArray(t.version.layout.layers) || t.version.mode === 'copy') { await stEvent(env, p.id, 'question', Object.assign({}, base, { text: reply + ' ' + t.asset.title + ' has no composition to edit. Produce a visual first.' }), 'studio'); return { kind: 'question', eid, changed: [] }; }
+    if (t.asset.locks.layout) { await stEvent(env, p.id, 'revise', Object.assign({}, base, { text: reply + ' Nothing changed: the layout of ' + t.asset.title + ' is locked.', changed: [], render: false, locked: [t.asset.title + '/layout'] }), 'studio'); return { kind, eid, changed: [], kept: [t.asset.title + '/layout'] }; }
+    const camp = (ctx.kit.campaigns || []).find(c => c.id === p.campaign) || null;
+    const res = stApplyLayerOps(t.version.layout, lz.ops, { remove: lz.remove, add: lz.add, format: t.asset.format, kit: ctx.kit, markRule: camp && camp.markRule });
+    const keeps = (Array.isArray(lz.keeps) ? lz.keeps : []).map(x => stStr(x, 80)).filter(Boolean).slice(0, 6);
+    const unchanged = t.version.layout.layers.filter(l => !res.changed.some(c => c.id === l.id)).map(l => l.id);
+    if (res.changed.length) {
+      const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + res.changed.map(c => c.id + ' (' + c.fields.join(', ') + ')').join('; ').slice(0, 150), layout: res.layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model }) }, 'studio');
+      await stVersionChecks(env, p, t.asset, v); changed.push(t.asset.id);
+    }
+    const text = reply + (res.changed.length ? ' Changed only ' + res.changed.map(c => c.id + ' (' + c.fields.join(', ') + ')').join('; ') + ' on ' + t.asset.title + '; ' + unchanged.length + ' other layer' + (unchanged.length === 1 ? '' : 's') + ' and the photograph unchanged, no render spent.' : ' Nothing changed.') + (res.refused.length ? ' Not done: ' + res.refused.map(x => x.id + ' - ' + x.why).join('; ') + '.' : '');
+    await stEvent(env, p.id, 'revise', Object.assign({}, base, { text, changed, render: false, layers: res.changed, unchanged, refused: res.refused.length ? res.refused : undefined, keeps: keeps.length ? keeps : undefined, asset: t.asset.id }), 'studio');
+    await log('out', (res.changed.length ? 'layers changed on ' + t.asset.title + ': ' + res.changed.map(c => c.id).join(', ') : 'no layer changed') + (res.refused.length ? '; refused: ' + res.refused.map(x => x.id).join(', ') : ''));
+    return { kind, eid, changed, layers: res.changed, refused: res.refused };
+  }
   if (kind === 'design') {
     // the composition changes now as a layout version on the current image; a new photograph, when asked for, is proposed and confirmed like any render
     const dz = j.design || {}; const ids = (Array.isArray(dz.assets) ? dz.assets : []).map(x => stClean(x, 24)).filter(inScope);
@@ -8434,25 +8479,39 @@ async function stReviseStage(env, job, p, log) {
     const imageSpec = dz.image && typeof dz.image === 'object' && (dz.image.subject || dz.image.setting) ? { keep: false, subject: stStr(dz.image.subject, 200), setting: stStr(dz.image.setting, 160), framing: stStr(dz.image.framing, 160), lighting: stStr(dz.image.lighting, 120), mood: stStr(dz.image.mood, 120), focal: stPick(ST_DESIGN.focals, dz.image.focal, 'centre') } : null;
     const steps = (Array.isArray(dz.steps) ? dz.steps : []).map(s => stStr(s, 120)).filter(Boolean).slice(0, 5);
     const refIds = (Array.isArray(dz.refs) ? dz.refs : []).map(x => stClean(x, 24)).filter(x => refs.rows.some(r => r.id === x)).map(x => ({ id: x, name: (refs.rows.find(r => r.id === x) || {}).name }));
-    let design = null;
+    let design = null; const planNotes = [];
+    const dplan = dz.plan && typeof dz.plan === 'object' && (Array.isArray(dz.plan.elements) || Array.isArray(dz.plan.frames)) ? dz.plan : null;
     for (const t of scope) {
       if (t.asset.locks.layout) { kept.push(t.asset.title + '/layout'); continue; }
+      if (dplan) {
+        let pl = JSON.parse(JSON.stringify(dplan)); const hasImg = !!(t.version.image && t.version.image.key);
+        if (!imageSpec && hasImg) { const rgs = Array.isArray(pl.regions) ? pl.regions : (pl.regions = []); let bg = rgs.find(x => x && x.role === 'background'); if (!bg) { bg = { id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100 }; rgs.unshift(bg); } bg.prompt = 'keep the current image'; }
+        if ((t.version.context || {}).imagery === 'none' && !hasImg) pl = stPlanNoImagery(pl, ctx.kit).plan;
+        const L0 = stPlanNormalise(pl, t.asset.format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement: stMarkPlacement(refs.rows), refs: refs.rows, copy: t.version.copy, regionSrc: stRegionSrc(t.version.layout) });
+        if (!L0.layers.some(l => l.type === 'text') && L0.approach !== 'artwork') { planNotes.push(t.asset.title + ': the plan placed no words, so it was not applied'); continue; }
+        const cl = stCarryLocked(L0, t.version.layout); const layout = cl.layout;
+        if (cl.carried.length) kept.push(t.asset.title + '/' + cl.carried.join(','));
+        const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(dz.why || pl.story || instruction, 80), layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model, planIn: pl, how: 'plan', medium: layout.medium }) }, 'studio');
+        await stVersionChecks(env, p, t.asset, v);
+        changed.push(t.asset.id); design = design || { summary: layout.mediumName + (layout.story ? ': ' + layout.story.slice(0, 120) : '') + (layout.unsupported && layout.unsupported.length ? ' (noted: ' + layout.unsupported.slice(0, 2).join('; ') + ')' : '') };
+        continue;
+      }
       const spec = stSpecNormalise(Object.assign({}, dz.spec && typeof dz.spec === 'object' ? dz.spec : {}, { image: Object.assign({}, (dz.spec && dz.spec.image) || {}, imageSpec || { keep: true }) }), t.version.layout, ctx.kit);
-      spec.image.keep = !imageSpec; design = design || spec;
+      spec.image.keep = !imageSpec; design = design || spec; planNotes.push(t.asset.title + ': answered with a preset spec, not a plan');
       const layout = stLayoutFromSpec(ctx.kit, p.ns, t.asset.format, spec, t.version.copy, t.version.layout, p.campaign);
       const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(spec.concept || instruction, 80), layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model, design: stDescribeSpec(spec) }) }, 'studio');
       await stVersionChecks(env, p, t.asset, v);
       changed.push(t.asset.id);
     }
-    const summary = design ? stDescribeSpec(design) : '';
+    const summary = design ? (design.summary || stDescribeSpec(design)) : '';
     if (imageSpec && changed.length) {
       const visual = [imageSpec.subject, imageSpec.setting, imageSpec.framing, imageSpec.lighting, imageSpec.mood].filter(Boolean).join('; ');
-      await stEvent(env, p.id, 'proposal', Object.assign({}, base, { text: reply + ' The composition is applied now (' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' at a new layout version on the current photograph: ' + summary + '). The new photograph is the costly part: confirm and it runs as one render per asset (' + changed.length + ' at ' + (env.IMAGE_SIZE || '2K') + '), text and layout unchanged.' + (kept.length ? ' Kept locked: ' + kept.join(', ') + '.' : ''), assets: changed, visual, steps: steps.length ? steps : ['Apply the composition as a layout version (done, image reused)', 'Render the new photograph to the composition\'s quiet zone'], spec: design, design: true, refs: refIds, changed, render: true }), 'studio');
+      await stEvent(env, p.id, 'proposal', Object.assign({}, base, { text: reply + ' The composition is applied now (' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' at a new layout version on the current photograph: ' + summary + '). The new photograph is the costly part: confirm and it runs as one render per asset (' + changed.length + ' at ' + (env.IMAGE_SIZE || '2K') + '), text and layout unchanged.' + (kept.length ? ' Kept locked: ' + kept.join(', ') + '.' : ''), assets: changed, visual, steps: steps.length ? steps : ['Apply the composition as a layout version (done, image reused)', 'Render the new photograph to the composition\'s quiet zone'], spec: design && design.composition ? design : undefined, design: true, refs: refIds, changed, render: true, notes: planNotes.length ? planNotes : undefined }), 'studio');
       await log('out', 'design applied as layout versions on ' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' (' + summary + '); the new photograph is proposed, nothing spent until confirmed' + (kept.length ? '; kept locked: ' + kept.join(', ') : ''));
       return { kind, eid, changed, kept, proposed: true, visual, offer: !!offer };
     }
     const text = reply + (changed.length ? ' Design change: ' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' at a new layout version (' + summary + '), the photograph reused, no render spent.' : ' Nothing changed' + (kept.length ? ': the layout is locked.' : '.')) + (kept.length ? ' Kept locked: ' + kept.join(', ') + '.' : '') + (refIds.length ? ' Drawn from ' + refIds.map(x => x.name).join(', ') + '.' : '');
-    await stEvent(env, p.id, 'revise', Object.assign({}, base, { text, changed, render: false, design: summary, refs: refIds, locked: kept.length ? kept : undefined }), 'studio');
+    await stEvent(env, p.id, 'revise', Object.assign({}, base, { text: text + (planNotes.length ? ' Note: ' + planNotes.join('; ') + '.' : ''), changed, render: false, design: summary, why: stStr(dz.why, 200) || undefined, refs: refIds, locked: kept.length ? kept : undefined, notes: planNotes.length ? planNotes : undefined }), 'studio');
     await log('out', changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' redesigned (' + summary + ')' + (kept.length ? '; kept locked: ' + kept.join(', ') : '') + (offer ? '; a standing preference is offered, not saved' : ''));
     return { kind, eid, changed, kept, offer: !!offer };
   }
@@ -8487,13 +8546,17 @@ async function stReviseStage(env, job, p, log) {
       const copy = Object.assign({}, src.copy, stCopy(pc.copy || {}));
       const copyOnly = src.mode === 'copy';
       // a plan-built master is re-normalised for the new format (same plan, the stage's own geometry); a spec-built one is re-laid from its spec; the house panel otherwise
-      const planIn = src.layout && src.layout.v === 5 && src.context && src.context.planIn && typeof src.context.planIn === 'object' ? src.context.planIn : null;
-      const layout = copyOnly ? {} : planIn ? stPlanNormalise(planIn, format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement: src.layout.markPlacement && src.layout.markPlacement.basis === 'observed' ? src.layout.markPlacement : null }) : src.layout && src.layout.design ? stLayoutFromSpec(ctx.kit, p.ns, format, src.layout.design, copy, null, p.campaign) : stLayout(ctx.kit, p.ns, format, (src.layout && src.layout.template) || stTemplateFor(ctx.kit, p.campaign), copy, { campaign: p.campaign });
+      // the master as it stands - its hand edits, locks and every element's own position - read back as a plan and moved to the
+      // new stage (type rescaled to the stage's short side); a full artwork cannot be re-flowed, so it restarts from its first plan
+      const asStands = !copyOnly && src.mode !== 'artwork' && src.layout && Array.isArray(src.layout.layers) && src.layout.layers.some(l => l.type === 'text') ? stPlanForFormat(stLayoutToPlan(src.layout, src), from.asset.format, format) : null;
+      const planIn = asStands || (src.layout && src.layout.v === 5 && src.context && src.context.planIn && typeof src.context.planIn === 'object' ? src.context.planIn : null);
+      const layout = copyOnly ? {} : planIn ? stPlanNormalise(planIn, format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement: src.layout.markPlacement && src.layout.markPlacement.basis === 'observed' ? src.layout.markPlacement : null, copy, regionSrc: stRegionSrc(src.layout) }) : src.layout && src.layout.design ? stLayoutFromSpec(ctx.kit, p.ns, format, src.layout.design, copy, null, p.campaign) : stLayout(ctx.kit, p.ns, format, (src.layout && src.layout.template) || stTemplateFor(ctx.kit, p.campaign), copy, { campaign: p.campaign });
+      if (asStands && src.layout.v !== 5) { layout.template = src.layout.template || layout.template; layout.templateName = (src.layout.templateName || 'composition') + ', re-composed for ' + format; }
       if (planIn && (layout.regions || []).some(x => x.role === 'background')) { (layout.regions || []).forEach(x => { if (x.role === 'background') x.prompt = 'keep the current image'; }); }
       const aid = stId('a'); const title = ST_CHANNELS[channel].label + ' ' + (copyOnly ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
       await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, from.asset.family, channel, format, title, '', JSON.stringify(from.asset.locks || {}), 1, now, now).run();
       const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
-      const v = await stAppendVersion(env, a, { kind: copyOnly ? 'text' : 'layout', note: 'adapted from ' + from.asset.title + (planIn ? ' (plan re-composed for ' + format + ')' : ''), copy, layout, image: src.mode === 'artwork' ? null : src.image, mode: src.mode === 'artwork' ? 'composition' : src.mode, context: Object.assign({}, src.context || {}, { job: job.id, adaptedFrom: from.asset.id + ':' + src.id, instruction: instruction.slice(0, 300), model: r.model, master: from.asset.id, masterVersion: src.id }) }, 'studio');
+      const v = await stAppendVersion(env, a, { kind: copyOnly ? 'text' : 'layout', note: 'adapted from ' + from.asset.title + (asStands ? ' (the master as it stands, re-composed for ' + format + ')' : planIn ? ' (plan re-composed for ' + format + ')' : ''), copy, layout, image: src.mode === 'artwork' ? null : src.image, mode: src.mode === 'artwork' ? 'composition' : src.mode, context: Object.assign({}, src.context || {}, { job: job.id, adaptedFrom: from.asset.id + ':' + src.id, planIn: planIn || undefined, how: planIn ? 'plan' : (src.context || {}).how, instruction: instruction.slice(0, 300), model: r.model, master: from.asset.id, masterVersion: src.id }) }, 'studio');
       await stVersionChecks(env, p, a, v);
       made.push(aid);
     }
@@ -8536,7 +8599,8 @@ async function stProposalDecide(env, p, body, who) {
     const template = (cur.layout && cur.layout.template) || stTemplateFor(ctx.kit, p.campaign);
     // the photograph follows the composition it will sit in: the applied layout's design (with the proposal's image brief), not a fixed lower third
     const spec = cur.layout && cur.layout.design ? Object.assign({}, cur.layout.design, prop.spec && prop.spec.image ? { image: prop.spec.image } : {}) : (prop.spec || null);
-    const r = await stJobCreate(env, { project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt: stArtPrompt({ visual: stStr(prop.visual, 300), headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, template, spec), aspect: pair.asset.format, size: env.IMAGE_SIZE || '2K', note: 'directed: ' + stStr(prop.instruction, 60) }, idem: 'render:' + eid + ':' + pair.asset.id }, who);
+    const planPrompt = cur.layout && cur.layout.v === 5 ? stRegionPrompt(cur.layout, { role: 'background', prompt: stStr(prop.visual, 600) }, { headline: cur.copy.headline, support: cur.copy.support }, ctx, pair.asset.format) : null;
+    const r = await stJobCreate(env, { project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt: planPrompt || stArtPrompt({ visual: stStr(prop.visual, 300), headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, template, spec), aspect: pair.asset.format, size: env.IMAGE_SIZE || '2K', note: 'directed: ' + stStr(prop.instruction, 60) }, idem: 'render:' + eid + ':' + pair.asset.id }, who);
     if (r.job) jobs.push(r.job.id);
   }
   await stEvent(env, p.id, 'decided', { eid, decision: 'do', jobs, text: 'Confirmed: ' + jobs.length + ' render' + (jobs.length === 1 ? '' : 's') + ' queued as jobs; text and layout stay as they are. Design approval on those assets will need renewing when the image lands.', render: true }, who);
@@ -8577,6 +8641,29 @@ function stMarkPlacement(rows) {
 /** The mark layers for a campaign: the client logo, the campaign wordmark, both, or none - each an exact image layer from its original asset.
  *  A campaign's logo policy is mandatory: a plan that asks for another mark is overruled and the note says so. A mark the policy wants
  *  but that is not on file is never drawn, substituted or replaced by another campaign's: the layout is marked incomplete instead. */
+/** Where a plan wants the mark: a corner or a position and a width. The mark itself is never changed, only placed. An
+ *  approved placement rule on the campaign (kit campaigns[].markRule {corner, mandatory}) wins over the plan and the conflict is
+ *  said; an observed position from references is a preference the plan may move away from. */
+function stMarkPlace(want, format, kit, campaign) {
+  const camp = ((kit || {}).campaigns || []).find(c => c.id === campaign) || null; const rule = camp && camp.markRule && camp.markRule.corner ? camp.markRule : null;
+  const out = { pos: null, w: null, rule, notes: [] };
+  if (!want || typeof want !== 'object') { if (rule && rule.mandatory) out.pos = stCornerPos(rule.corner, format); return out; }
+  const si = stSafeInset(format);
+  if (want.w != null) out.w = stNum(want.w, 8, 40, null);
+  let pos = null;
+  if (['tl', 'tr', 'bl', 'br'].indexOf(want.corner) >= 0) pos = stCornerPos(want.corner, format, out.w);
+  else if (want.x != null && want.y != null) pos = { x: stNum(want.x, si.side, 96, si.side), y: stNum(want.y, si.top, 96, si.top) };
+  if (rule && rule.mandatory) {
+    const rp = stCornerPos(rule.corner, format, out.w);
+    if (pos && (Math.abs(pos.x - rp.x) > 6 || Math.abs(pos.y - rp.y) > 6)) out.notes.push('the plan moved the mark; the ' + ((camp && camp.name) || campaign) + ' placement rule keeps it ' + ({ tl: 'top left', tr: 'top right', bl: 'bottom left', br: 'bottom right' })[rule.corner] + (rule.note ? ' (' + rule.note + ')' : '') + ', so it stays there');
+    pos = rp;
+  }
+  out.pos = pos; return out;
+}
+function stCornerPos(corner, format, w) {
+  const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const si = stSafeInset(format); const lw = w || 17, lh = 8 * (f.w / f.h) * (lw / 17);
+  return { tl: { x: si.side, y: si.top }, tr: { x: 100 - si.side - lw, y: si.top }, bl: { x: si.side, y: 100 - si.bottom - lh }, br: { x: 100 - si.side - lw, y: 100 - si.bottom - lh } }[corner] || null;
+}
 const ST_MARK_POLICIES = ['logo', 'wordmark', 'both', 'none'];
 function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   opts = opts || {}; kit = kit || {}; const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const aspect = f.w / f.h;
@@ -8585,7 +8672,7 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   let policy;
   if (camp) { policy = ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo'; if (want && want !== 'campaign' && ST_MARK_POLICIES.indexOf(want) >= 0 && want !== policy) { overridden = true; notes.push('the plan asked for the mark "' + want + '"; the ' + (camp.name || camp.id) + ' policy (' + policy + ') is mandatory and was applied instead'); } }
   else policy = want && want !== 'campaign' && ST_MARK_POLICIES.indexOf(want) >= 0 ? want : 'logo';
-  const lw = 17, lh = 8 * aspect; const si = stSafeInset(format); const corners = { br: { x: Math.min(78, 100 - si.side - lw), y: 100 - si.bottom - lh }, bl: { x: si.side, y: 100 - si.bottom - lh }, tr: { x: 100 - si.side - lw, y: si.top }, tl: { x: si.side, y: si.top } };
+  const lw = opts.w || 17, lh = 8 * aspect * (lw / 17); const si = stSafeInset(format); const corners = { br: { x: Math.min(78, 100 - si.side - lw), y: 100 - si.bottom - lh }, bl: { x: si.side, y: 100 - si.bottom - lh }, tr: { x: 100 - si.side - lw, y: si.top }, tl: { x: si.side, y: si.top } };
   const placement = opts.placement && corners[opts.placement.corner] ? opts.placement : null;
   const at = pos || (placement ? corners[placement.corner] : corners.br);
   const layers = [];
@@ -8595,9 +8682,106 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
     const vars = (camp.wordmarks || []).map(w => ({ variant: w.variant, tone: w.tone || 'colour', src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v }));
     // over a known dark ground a light variant, over a light ground a dark one; otherwise the campaign's default (the browser measures and may switch)
     const pick = vars.length ? (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
-    layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - 24), y: at.y, w: 24, h: lh, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
+    layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - (opts.w || 24)), y: at.y, w: opts.w || 24, h: Math.round(8 * aspect * ((opts.w || 24) / 24) * 10) / 10, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
   } else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
-  return { layers, policy, notes, campaign: camp, incomplete, overridden, placement: pos ? { corner: 'given', basis: 'plan' } : placement ? { corner: placement.corner, basis: placement.basis, text: placement.text } : { corner: 'br', basis: 'default' } };
+  return { layers, policy, notes, campaign: camp, incomplete, overridden, placement: pos ? (opts.rule && opts.rule.mandatory ? { corner: opts.rule.corner, basis: 'rule', text: 'the approved placement rule' + (opts.rule.note ? ': ' + opts.rule.note : '') } : { corner: 'given', basis: 'plan', x: pos.x, y: pos.y, w: lw }) : placement ? { corner: placement.corner, basis: placement.basis, text: placement.text } : { corner: 'br', basis: 'default' } };
+}
+// -- P19: freeform everywhere ---------------------------------------------------------------------------------
+/* Revision, adaptation and sequencing used to send a freeform composition back through the preset spec (or rebuild it
+   from the plan it was first made from, dropping hand edits). These helpers keep the composition as it stands: any
+   layout reads back as a plan with the same element ids, a plan moves between formats with its type rescaled to the
+   new stage, focused edits address layers by id, locked layers are carried through, and approved words split across
+   several layers are held to reproduce the copy exactly. */
+const ST_TEXT_KEYS = ['id', 'role', 'text', 'x', 'y', 'w', 'h', 'size', 'weight', 'color', 'bg', 'align', 'font', 'emphasis', 'emphasisColor', 'letterSpacing', 'lineHeight', 'part', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
+const ST_SHAPE_KEYS = ['id', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius', 'x', 'y', 'w', 'h', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
+function stPickKeys(o, keys) { const out = {}; keys.forEach(k => { if (o[k] !== undefined && o[k] !== null && o[k] !== '') out[k] = o[k]; }); return out; }
+function stWords(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+/** Any layout - a plan, a preset spec, a hand-edited composition - read back as a plan with the same element ids. */
+function stLayoutToPlan(L, v) {
+  L = L || {}; const layers = Array.isArray(L.layers) ? L.layers : [];
+  const hasImage = !!(v && v.image && v.image.key);
+  let regions = Array.isArray(L.regions) && L.regions.length ? JSON.parse(JSON.stringify(L.regions)) : (hasImage ? [{ id: 'bg', role: 'background', x: L.image ? L.image.x : 0, y: L.image ? L.image.y : 0, w: L.image ? L.image.w : 100, h: L.image ? L.image.h : 100, fit: 'cover', prompt: 'keep the current image', refs: [] }] : []);
+  if (hasImage) regions.forEach(r => { if (r.role === 'background') r.prompt = 'keep the current image'; });
+  const elements = [];
+  layers.forEach(l => {
+    if (l.type === 'img') return; // marks are placed from the kit; region images come back through their regions
+    if (l.type === 'text') elements.push(Object.assign({ type: 'text' }, stPickKeys(l, ST_TEXT_KEYS)));
+    else if (l.type === 'shape') elements.push(Object.assign({ type: l.shape === 'rule' ? 'rule' : 'shape' }, stPickKeys(l, ST_SHAPE_KEYS)));
+  });
+  const mk = layers.find(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && !l.hidden);
+  return { medium: L.medium || (L.design && L.design.composition && L.design.composition.style === 'typographic' ? 'typographic' : hasImage ? 'photo-documentary' : 'typographic'), approach: L.approach === 'artwork' ? 'artwork' : 'editable', story: L.story || '', focal: L.focal || '', typography: L.typography || '', devices: L.devices || '', mark: (L.marks && L.marks.policy) || 'campaign', bg: L.bg || null, imageFocus: L.imageFocus || undefined, regions, elements, markPlace: mk ? { x: mk.x, y: mk.y, w: mk.w } : undefined };
+}
+/** The images already made for a layout's regions, by region id, so re-composition keeps them. */
+function stRegionSrc(L) { const out = {}; ((L && L.layers) || []).forEach(l => { if (l.type === 'img' && l.region && l.src) out[l.region] = { src: l.src, key: l.key, opaque: l.opaque }; }); return out; }
+/** A plan moved to another format: per-cent geometry stays, type keeps its pixel size relative to the stage's short side. */
+function stPlanForFormat(plan, from, to) {
+  const A = ST_FORMATS[from] || ST_FORMATS['1:1'], B = ST_FORMATS[to] || ST_FORMATS['1:1'];
+  if (from === to) return plan;
+  const k = (Math.min(B.w, B.h) / Math.min(A.w, A.h)) * (A.w / B.w);
+  const out = JSON.parse(JSON.stringify(plan));
+  const scale = els => (els || []).forEach(e => { if (e && e.type === 'text' && e.size) e.size = Math.round(Math.max(1.6, e.size * k) * 10) / 10; });
+  scale(out.elements); (out.frames || []).forEach(f => f && scale(f.elements));
+  if (out.markPlace && out.markPlace.w) out.markPlace.w = Math.round(Math.max(8, out.markPlace.w * k) * 10) / 10;
+  return out;
+}
+/** Words split across layers (role + part) must reproduce the copy exactly; otherwise the split is undone, never rewritten. */
+function stPartsReconcile(L, copy) {
+  if (!L || !Array.isArray(L.layers)) return { layout: L, collapsed: [] };
+  const collapsed = []; let layers = L.layers;
+  ['headline', 'support', 'cta'].forEach(role => {
+    const parts = layers.filter(l => l.type === 'text' && l.role === role && l.part != null);
+    if (!parts.length) return;
+    const joined = stWords(parts.slice().sort((a, b) => a.part - b.part).map(l => l.text).join(' '));
+    if (joined === stWords((copy || {})[role])) return;
+    // undo the split: one layer over the parts' union, its words from the copy
+    const x0 = Math.min.apply(null, parts.map(l => l.x)), y0 = Math.min.apply(null, parts.map(l => l.y)), x1 = Math.max.apply(null, parts.map(l => l.x + l.w)), y1 = Math.max.apply(null, parts.map(l => l.y + (l.h || 0)));
+    const first = parts.slice().sort((a, b) => a.part - b.part)[0];
+    const one = Object.assign({}, first, { x: x0, y: y0, w: x1 - x0, h: y1 - y0, text: '' }); delete one.part;
+    layers = layers.filter(l => parts.indexOf(l) < 0 || l === first).map(l => l === first ? one : l);
+    collapsed.push(role);
+  });
+  return { layout: collapsed.length ? Object.assign({}, L, { layers }) : L, collapsed };
+}
+/** Locked layers of the composition as it stands are carried into a new one, in place, by id. */
+function stCarryLocked(newL, oldL) {
+  const locked = ((oldL && oldL.layers) || []).filter(l => l.locked);
+  if (!locked.length || !newL || !Array.isArray(newL.layers)) return { layout: newL, carried: [] };
+  const layers = newL.layers.filter(l => !locked.some(k => k.id === l.id));
+  locked.forEach(k => layers.push(JSON.parse(JSON.stringify(k))));
+  return { layout: Object.assign({}, newL, { layers }), carried: locked.map(l => l.id) };
+}
+/** The layers of a composition as the models see them: stable ids, roles, boxes, type and locks. */
+function stLayerList(L, copy) {
+  const ls = (L && L.layers) || []; if (!ls.length) return '';
+  return '\n  layers (per cent of the stage; address them by id):' + ls.map(l => '\n    ' + l.id + ': ' + l.type + (l.role ? '/' + l.role : '') + (l.part != null ? ' part ' + l.part : '') + ' at x ' + l.x + ', y ' + l.y + ', w ' + l.w + ', h ' + (l.h || 0)
+    + (l.type === 'text' ? ', size ' + l.size + (l.align ? ', ' + l.align : '') + ', "' + String((l.part != null ? l.text : l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text) || '').slice(0, 50) + '"' : '')
+    + (l.type === 'shape' ? ', ' + (l.shape || 'rect') + ' ' + (l.fill || '') + (l.opacity != null && l.opacity !== 1 ? ' at ' + l.opacity : '') : '') + (l.locked ? ' LOCKED' : '') + (l.hidden ? ' hidden' : '')).join('');
+}
+const ST_LAYER_OPS = { x: [-10, 110], y: [-10, 110], w: [1, 120], h: [0.5, 120], size: [1.5, 18], lineHeight: [0.8, 2], letterSpacing: [-0.1, 0.6], opacity: [0, 1], rotate: [-20, 20], weight: [300, 900], radius: [0, 50] };
+/** Focused edits by layer id: only the named layers change, only in the named properties; a locked layer and the words of a
+ *  copy role are refused and named (words change through a text edit); a mark moves or resizes as its exact file, never redrawn. */
+function stApplyLayerOps(L, ops, opts) {
+  opts = opts || {}; const layout = JSON.parse(JSON.stringify(L || {})); const changed = [], refused = [];
+  if (!Array.isArray(layout.layers)) return { layout, changed, refused: [{ id: '*', why: 'this version has no layers to edit' }] };
+  (Array.isArray(ops) ? ops : []).slice(0, 24).forEach(op => {
+    if (!op || typeof op !== 'object') return; const l = layout.layers.find(x => x.id === stClean(op.id, 24));
+    if (!l) { refused.push({ id: stStr(op.id, 24), why: 'no layer with that id' }); return; }
+    if (l.locked) { refused.push({ id: l.id, why: 'the layer is locked' }); return; }
+    const isMark = l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark');
+    if (isMark && opts.markRule && opts.markRule.mandatory && (op.x != null || op.y != null)) { refused.push({ id: l.id, why: 'the approved placement rule for this campaign keeps the mark ' + opts.markRule.corner + (opts.markRule.note ? ' (' + opts.markRule.note + ')' : '') }); return; }
+    const fields = [];
+    Object.keys(ST_LAYER_OPS).forEach(k => { if (op[k] != null && isFinite(Number(op[k]))) { const [lo, hi] = ST_LAYER_OPS[k]; const n = Math.min(hi, Math.max(lo, Math.round(Number(op[k]) * 100) / 100)); if (n !== l[k]) { l[k] = n; fields.push(k); } } });
+    if (isMark && op.w != null) { const r = (l.h || 1) / (l.w || 1); l.h = Math.round(l.w * r * 10) / 10; }
+    if (op.align && ['left', 'center', 'right'].indexOf(String(op.align).replace('centre', 'center')) >= 0 && l.type === 'text') { l.align = String(op.align).replace('centre', 'center'); fields.push('align'); }
+    ['color', 'bg', 'fill', 'emphasisColor'].forEach(k => { if (op[k] != null && !isMark) { const c = stColour(op[k], null); if (c !== null || op[k] === '') { l[k] = c || undefined; fields.push(k); } } });
+    if (op.emphasis && ST_EMPHASIS.indexOf(op.emphasis) >= 0 && l.type === 'text') { l.emphasis = op.emphasis === 'none' ? undefined : op.emphasis; fields.push('emphasis'); }
+    if (op.hidden != null) { l.hidden = !!op.hidden || undefined; fields.push('hidden'); }
+    if (op.text != null && l.type === 'text') { if (l.role && l.role !== 'free' && ['headline', 'support', 'cta'].indexOf(l.role) >= 0 && l.part == null) refused.push({ id: l.id, why: 'the words of the ' + l.role + ' change through a text edit, so the checks run on them' }); else { l.text = stStr(op.text, 400); fields.push('text'); } }
+    if (fields.length) changed.push({ id: l.id, role: l.role || l.type, fields: Array.from(new Set(fields)) });
+  });
+  (Array.isArray(opts.remove) ? opts.remove : []).slice(0, 8).forEach(id => { const i = layout.layers.findIndex(x => x.id === stClean(id, 24)); if (i < 0) return; const l = layout.layers[i]; if (l.locked || (l.type === 'text' && ['headline', 'support', 'cta'].indexOf(l.role) >= 0) || (l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark'))) { refused.push({ id: l.id, why: l.locked ? 'the layer is locked' : l.type === 'img' ? 'the campaign mark is required by its policy' : 'the ' + l.role + ' carries approved words; hide it or edit the copy instead' }); return; } layout.layers.splice(i, 1); changed.push({ id: l.id, role: l.role || l.type, fields: ['removed'] }); });
+  if (Array.isArray(opts.add) && opts.add.length) { const extra = stPlanNormalise({ elements: opts.add.slice(0, 6), mark: 'none', medium: layout.medium || 'editorial' }, opts.format, { kit: opts.kit }).layers.filter(l => l.type === 'shape' || (l.type === 'text' && ['headline', 'support', 'cta'].indexOf(l.role) < 0)); extra.forEach(l => { let id = l.id; while (layout.layers.some(x => x.id === id)) id = id + 'b'; l.id = id; layout.layers.push(l); changed.push({ id, role: l.role || l.type, fields: ['added'] }); }); }
+  return { layout, changed, refused };
 }
 /** A plan as the models wrote it becomes a layout the renderer can draw; everything it cannot draw is named in `unsupported`. */
 function stPlanNormalise(plan, format, opts) {
@@ -8615,27 +8799,35 @@ function stPlanNormalise(plan, format, opts) {
     if (!e || typeof e !== 'object') return;
     const type = e.type === 'shape' || e.type === 'rule' ? 'shape' : e.type === 'text' ? 'text' : null;
     if (!type) { unsupported.push('element ' + (i + 1) + ' of type "' + stStr(e.type, 20) + '" cannot be drawn'); return; }
-    const base = { id: stClean(e.id, 16) || (type + (i + 1)), type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: stNum(e.opacity, 0, 1, 1), rotate: stNum(e.rotate, -20, 20, 0) };
+    const base = { id: stClean(e.id, 24) || (type + (i + 1)), type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: stNum(e.opacity, 0, 1, 1), rotate: stNum(e.rotate, -20, 20, 0) };
+    if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24);
     if (type === 'text') {
       const role = ST_ROLES.indexOf(e.role) >= 0 ? e.role : 'free';
-      layers.push(Object.assign(base, { role, text: role === 'headline' || role === 'support' || role === 'cta' ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stNum(e.letterSpacing, -0.1, 0.6, 0) || undefined }));
+      const part = (role === 'headline' || role === 'support' || role === 'cta') && e.part != null && isFinite(Number(e.part)) ? Math.max(0, Math.min(9, parseInt(e.part, 10))) : null;
+      if (part != null) base.part = part; if (e.lineHeight != null) base.lineHeight = stNum(e.lineHeight, 0.8, 2, 1.12);
+      layers.push(Object.assign(base, { role, text: (role === 'headline' || role === 'support' || role === 'cta') && part == null ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stNum(e.letterSpacing, -0.1, 0.6, 0) || undefined }));
     } else {
       const shape = ['rect', 'pill', 'circle', 'rule'].indexOf(e.shape) >= 0 ? e.shape : (e.type === 'rule' ? 'rule' : 'rect');
       layers.push(Object.assign(base, { role: ['panel', 'overlay', 'device'].indexOf(e.role) >= 0 ? e.role : 'device', shape, fill: stColour(e.fill, 'rgba(0,0,0,0.5)'), gradient: !!e.gradient, dir: ['up', 'down', 'left', 'right'].indexOf(e.dir) >= 0 ? e.dir : undefined, radius: e.radius != null ? stNum(e.radius, 0, 50, 0) : undefined }));
     }
   });
   // regions that are not the background become image layers the renderer fills when their image lands, and show as sketched boxes until then
-  regions.filter(r => r.role !== 'background').forEach(r => layers.unshift({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }));
+  const rsrc = opts.regionSrc || {};
+  regions.filter(r => r.role !== 'background').forEach(r => layers.unshift(Object.assign({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }, rsrc[r.id] ? { src: rsrc[r.id].src, key: rsrc[r.id].key, opaque: rsrc[r.id].opaque } : {})));
   const bgRegion = regions.find(r => r.role === 'background') || null;
   const groundHex = typeof bg === 'string' ? bg : bg && bg.to ? bg.to : '';
   const groundL = /^#[0-9a-fA-F]{6}$/.test(groundHex) ? (() => { const n = parseInt(groundHex.slice(1), 16); return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; })() : null;
-  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, null, { placement: opts.placement, ground: groundL == null ? (regions.some(r => r.role === 'background') ? '' : 'dark') : groundL < 0.45 ? 'dark' : 'light' });
+  const mp = stMarkPlace(plan.markPlace, format, kit, opts.campaign);
+  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, mp.pos, { placement: opts.placement, w: mp.w, rule: mp.rule, ground: groundL == null ? (regions.some(r => r.role === 'background') ? '' : 'dark') : groundL < 0.45 ? 'dark' : 'light' });
+  mp.notes.forEach(n => unsupported.push(n));
   marks.layers.forEach(l => layers.push(l)); marks.notes.forEach(n => unsupported.push(n));
   // references a region names must be on the project; an unknown id is dropped and said
   if (Array.isArray(opts.refs)) { const known = new Set(opts.refs.map(r => r.id)); regions.forEach(rg => { const bad = rg.refs.filter(x => !known.has(x.id)); if (bad.length) { unsupported.push('region ' + rg.id + ' names ' + bad.length + ' reference' + (bad.length === 1 ? '' : 's') + ' not on the project (' + bad.map(x => x.id).join(', ') + '); ignored'); rg.refs = rg.refs.filter(x => known.has(x.id)); } }); }
   if (!layers.some(l => l.type === 'text') && approach === 'editable') unsupported.push('the plan places no text elements; the words would not appear');
-  const frames = Array.isArray(plan.frames) && plan.frames.length > 1 ? plan.frames.slice(0, 8).map((fr, i) => { const sub = stPlanNormalise(Object.assign({}, plan, { frames: [], medium: medium === 'carousel' ? 'editorial' : medium }, fr || {}), format, opts); return { name: stStr((fr || {}).name, 60) || 'Frame ' + (i + 1), copy: stCopy((fr || {}).copy || {}), layout: sub }; }) : null;
-  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, layers, frames: frames || undefined, unsupported };
+  let partsL = { layers }; if (layers.some(l => l.part != null)) { const pr = stPartsReconcile({ layers }, opts.copy || {}); partsL = pr.layout; pr.collapsed.forEach(role => unsupported.push('the ' + role + ' was split across layers in words that do not reproduce the approved ' + role + ' exactly; kept as one block (the copy is never rewritten by a layout)')); }
+  const finalLayers = partsL.layers;
+  const frames = Array.isArray(plan.frames) && plan.frames.length > 1 ? plan.frames.slice(0, 8).map((fr, i) => { const sub = stPlanNormalise(Object.assign({}, plan, { frames: [], medium: medium === 'carousel' ? 'editorial' : medium }, fr || {}), format, Object.assign({}, opts, { copy: Object.assign({}, opts.copy || {}, stCopy((fr || {}).copy || {})) })); return { name: stStr((fr || {}).name, 60) || 'Frame ' + (i + 1), copy: stCopy((fr || {}).copy || {}), layout: sub }; }) : null;
+  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: plan.imageFocus && typeof plan.imageFocus === 'object' ? { x: stNum(plan.imageFocus.x, 0, 100, 50), y: stNum(plan.imageFocus.y, 0, 100, 50) } : undefined, layers: finalLayers, frames: frames || undefined, unsupported };
 }
 /** Where the words and the images sit, as a coarse grid, plus the medium and approach: two plans that share it are the same design in other clothes. */
 function stPlanSignature(L) {
@@ -9061,11 +9253,15 @@ function stReferencePack(refs, opts) {
 }
 /** The client's artwork memory: past creatives the Engine has catalogued (descriptions, never another client's). */
 async function stArtMemory(env, ns, limit, campaign) {
+  // another campaign's artwork is not identity guidance for this one (HOOF and the MCA national campaign both run myth/fact
+  // content and must not borrow each other's look): only this campaign's work and work filed without a campaign are offered
   try {
-    const rows = (await env.MIND_DB.prepare("SELECT title, description, meta FROM engine_art WHERE ns=? AND description NOT LIKE '[not yet described]%' ORDER BY (json_extract(meta,'$.campaign')=?) DESC, created DESC LIMIT ?").bind(ns, String(campaign || ''), limit || 6).all()).results || [];
-    if (!rows.length) return { text: '', count: 0 };
-    const same = rows.filter(r => campaign && String((pjs(r.meta, {}) || {}).campaign || '') === String(campaign)).length;
-    return { count: rows.length, sameCampaign: same, text: '\nPAST ARTWORK ON FILE FOR THIS CLIENT (' + rows.length + ', from the Engine\'s artwork memory' + (campaign ? '; ' + same + ' from the campaign ' + campaign + ', listed first' : '') + '; conventions to respect or vary deliberately, not templates):' + rows.map(r => { const m = pjs(r.meta, {}) || {}; return '\n- ' + (r.title || 'untitled') + (m.campaign ? ' [' + m.campaign + ']' : '') + ': ' + String(r.description || '').replace(/\s+/g, ' ').slice(0, 260); }).join('') };
+    const camp = String(campaign || '');
+    const rows = (await env.MIND_DB.prepare("SELECT title, description, meta FROM engine_art WHERE ns=? AND description NOT LIKE '[not yet described]%' AND (?='' OR COALESCE(json_extract(meta,'$.campaign'),'')='' OR json_extract(meta,'$.campaign')=?) ORDER BY (json_extract(meta,'$.campaign')=?) DESC, created DESC LIMIT ?").bind(ns, camp, camp, camp, limit || 6).all()).results || [];
+    let other = 0; if (camp) { try { other = ((await env.MIND_DB.prepare("SELECT COUNT(*) AS n FROM engine_art WHERE ns=? AND COALESCE(json_extract(meta,'$.campaign'),'')<>'' AND json_extract(meta,'$.campaign')<>?").bind(ns, camp).first()) || {}).n || 0; } catch (e) {} }
+    if (!rows.length) return { text: other ? '\nPAST ARTWORK: none on file for the campaign ' + camp + ' (' + other + ' from other campaigns left out: another campaign\'s look is not this one\'s identity).' : '', count: 0, otherCampaigns: other };
+    const same = rows.filter(r => camp && String((pjs(r.meta, {}) || {}).campaign || '') === camp).length;
+    return { count: rows.length, sameCampaign: same, otherCampaigns: other, text: '\nPAST ARTWORK ON FILE FOR THIS CLIENT (' + rows.length + ', from the Engine\'s artwork memory' + (camp ? '; ' + same + ' from the campaign ' + camp + ', the rest filed without a campaign; ' + other + ' from other campaigns left out, since another campaign\'s look is not this one\'s identity' : '') + '; conventions to respect or vary deliberately, not templates):' + rows.map(r => { const m = pjs(r.meta, {}) || {}; return '\n- ' + (r.title || 'untitled') + (m.campaign ? ' [' + m.campaign + ']' : ' [client-wide]') + ': ' + String(r.description || '').replace(/\s+/g, ' ').slice(0, 420); }).join('') };
   } catch (e) { return { text: '', count: 0 }; }
 }
 function stDescribeSpec(d) {
@@ -9155,7 +9351,7 @@ async function stConceptsStage(env, job, p, log) {
     if (o.plan && typeof o.plan === 'object' && (Array.isArray(o.plan.elements) || Array.isArray(o.plan.regions) || Array.isArray(o.plan.frames))) {
       planIn = JSON.parse(JSON.stringify(o.plan)); if (noImg) planIn = stPlanNoImagery(planIn, ctx.kit).plan;
       if (keep.explicit && keep.imagery && v.image && !Array.isArray(planIn.frames)) { const rgs = Array.isArray(planIn.regions) ? planIn.regions : (planIn.regions = []); let bg = rgs.find(x => x && x.role === 'background'); if (!bg) { bg = { id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100 }; rgs.unshift(bg); } if (!/keep the current/i.test(String(bg.prompt || ''))) { bg.prompt = 'keep the current image'; kept.push('imagery'); } if (planIn.approach === 'artwork') { planIn.approach = 'editable'; kept.push('editable (the current image is retained, so the words stay live layers)'); } }
-      layout = stPlanNormalise(planIn, a.format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement, refs: refs.rows });
+      layout = stPlanNormalise(planIn, a.format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement, refs: refs.rows, copy: Object.assign({}, v.copy, copyWant), regionSrc: stRegionSrc(v.layout) });
       if (keep.explicit && keep.composition && v.layout && Array.isArray(v.layout.layers) && !layout.frames) { const imagery = layout.layers.filter(l => l.type === 'img' && l.role === 'region'); layout = Object.assign({}, v.layout, { regions: layout.regions, image: layout.image, medium: layout.medium, mediumName: layout.mediumName, story: layout.story, unsupported: (v.layout.unsupported || []).concat(layout.unsupported || []), layers: imagery.concat(v.layout.layers.filter(l => !(l.type === 'img' && l.role === 'region'))) }); kept.push('composition'); }
       if (layout.frames) layout.frames.forEach(fr => { fr.copy = Object.assign({}, copy, fr.copy); });
     } else {
@@ -9374,7 +9570,7 @@ async function stRenderJob(env, job, pair, done, fail) {
 function stDisplayedText(L, l, copy) {
   if (!l || l.type !== 'text' || l.hidden) return '';
   if (l.role && Array.isArray(L && L.baked) && L.baked.indexOf(l.role) >= 0) return '';
-  const t = l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text;
+  const t = l.part != null && l.text ? l.text : l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text;
   return String(t == null ? '' : t);
 }
 /** The words a version shows as live type, by layer: what a reader sees, so what wrapping and hierarchy depend on. */
@@ -9422,7 +9618,7 @@ function stValidationJudge(a, v, rep) {
       // even a very narrow face needs this many lines; fewer means the measurement is not of this text at this size
       const avail = Math.max(10, b.aw - (l.bg ? px * 1.6 : 0)); const minLines = Math.max(1, Math.ceil(text.length * px * 0.3 / avail));
       if (lines < minLines) problems.push('the ' + (l.role || 'text') + ' was reported on ' + lines + ' line' + (lines === 1 ? '' : 's') + '; at ' + l.size + '% of the width it cannot take fewer than ' + minLines);
-      const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * 1.12);
+      const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * (l.lineHeight || 1.12));
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
       Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken });
       if (num(rb.contrast)) b.contrast = rb.contrast;
@@ -9560,7 +9756,7 @@ async function stSuggest(env, p, asset, opts) {
   if (!opts.refresh) { try { const c = JSON.parse((await kvGet(env.AXIOM_KV, key)) || 'null'); if (c && c.sig === sig) return Object.assign({ ok: true, cached: true }, c); } catch (e) {} }
   const ctx = await stContext(env, p, { channels: [asset.channel], log });
   const refs = await stRefBundle(env, p, { log, images: 1 });
-  const mem = await stArtMemory(env, p.ns, 4);
+  const mem = await stArtMemory(env, p.ns, 4, p.campaign);
   const art = await stVersionImage(env, v, log);
   const recent = ((await env.MIND_DB.prepare("SELECT kind, data FROM studio_events WHERE project=? AND kind IN ('revise','proposal','concepts','applied','question','note','alternatives') AND data LIKE ? ORDER BY id DESC LIMIT 5").bind(p.id, '%' + asset.id + '%').all()).results || []).map(r => { const d = pjs(r.data, {}); return r.kind + ': ' + (d.instruction || d.feedback || d.text || '').slice(0, 160); });
   const user = stTileBrief(asset, v, !!art) + '\n\nBRIEF: ' + ['objective', 'audience', 'message'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('; ') + (p.campaign ? '\nCAMPAIGN: ' + p.campaign : '') + '\nPALETTE: ' + JSON.stringify(ctx.kit.palette || {}) + refs.text + mem.text + (recent.length ? '\n\nRECENT FEEDBACK ON THIS ASSET:\n' + recent.join('\n') : '') + '\n\nGive two or three suggestions in each group: design, image, typography, copy, concept.';

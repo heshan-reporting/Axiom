@@ -30,7 +30,8 @@
     if (!l || l.type !== 'text' || l.hidden) return '';
     const baked = Array.isArray(layout && layout.baked) ? layout.baked : [];
     if (l.role && baked.indexOf(l.role) >= 0) return '';
-    const t = l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text;
+    // a part of approved words split across layers shows its own words (the worker holds the parts to the copy)
+    const t = l.part != null && l.text ? l.text : l.role && l.role !== 'free' && copy && copy[l.role] != null ? copy[l.role] : l.text;
     return String(t == null ? '' : t);
   }
   /* break one over-long word: after / . - ? & = first, otherwise between characters */
@@ -72,7 +73,7 @@
     ctx.font = font; if ('letterSpacing' in ctx) ctx.letterSpacing = l.letterSpacing ? (l.letterSpacing * px) + 'px' : '0px';
     const padX = l.bg ? px * 0.8 : 0, padY = l.bg ? px * 0.45 : 0;
     const avail = Math.max(10, w - padX * 2);
-    const wr = wrapText(ctx, text, avail); const lines = wr.lines; const lh = px * 1.12;
+    const wr = wrapText(ctx, text, avail); const lines = wr.lines; const lh = px * (l.lineHeight || 1.12);
     const widths = lines.map(s => ctx.measureText(s).width); const maxLineW = widths.length ? Math.max.apply(null, widths) : 0;
     const contentH = lines.length * lh + padY * 2;
     const align = l.align || 'left';

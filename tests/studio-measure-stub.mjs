@@ -15,7 +15,7 @@ export function stubReport(version, asset, opts) {
       if (!t) return Object.assign(b, { empty: true });
       const px = l.size / 100 * W; const per = Math.max(4, Math.floor((b.aw - (l.bg ? px * 1.6 : 0)) / (px * (l.role === 'headline' ? 0.52 : 0.48))));
       let lines = 1, cur = 0; t.split(/\s+/).filter(Boolean).forEach(w => { if (cur && cur + 1 + w.length > per) { lines++; cur = w.length; } else cur = cur ? cur + 1 + w.length : w.length; });
-      const contentH = lines * px * 1.12 + (l.bg ? px * 0.9 : 0);
+      const contentH = lines * px * (l.lineHeight || 1.12) + (l.bg ? px * 0.9 : 0);
       Object.assign(b, { lines, chars: t.length, px, contentH, h: Math.max(contentH, 1), overflowH: !!(b.ah && contentH > b.ah + 0.5), contrast: opts.contrast != null ? opts.contrast : 7 });
     } else if (l.type === 'img') { b.mark = l.role === 'logo' || l.role === 'wordmark'; b.asset = l.src ? 'loaded' : (b.mark ? 'missing' : 'sketch'); b.src = l.src || ''; if (b.mark) b.contrast = opts.markContrast != null ? opts.markContrast : 6; }
     return b;

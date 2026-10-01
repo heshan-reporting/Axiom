@@ -4,5 +4,6 @@
   "description": "Local tooling only (not deployed): Playwright for tools/studio-compose.mjs, tools/studio-demo.py, tools/studio-showcase.py and the browser harnesses in tests/.",
   "devDependencies": {
     "playwright": "^1.48.0"
-  }
+  },
+  "type": "module"
 }
