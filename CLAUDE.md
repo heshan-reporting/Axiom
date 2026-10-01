@@ -1088,6 +1088,74 @@ the facts (model, resolution, fallback, baked words, wording checks) to
 `showcase/index.html`. Harnesses: `tests/studio-p7-worker.mjs` (6) and the
 three-actions case in the browser harness (17).
 
+**A production-quality, client-aware workflow (build `studio-p8`;
+`CREATIVE-STUDIO.md` s.14).** First production (`stCopyStage`) plans each
+channel with `ST_PLAN_SCHEMA` at high effort, lays it out with
+`stPlanNormalise` and queues `stPlanRenders` (`forceAll`) at `input.size`;
+no plan, or a plan without words, falls back to the house composition with
+`context.how: 'house'` and a note. `context.planIn` is kept on the version
+(and carried through hand edits on `/studio/version`) so adaptation
+re-normalises the master's plan per format (`context.master`).
+- **The brief.** `stBriefNorm` keeps objective, audience, message, action,
+  deliverables, `<field>Source` and `requirements {mandatory, preferred,
+  open}` (items `{text, source approved|preference|previous|reference|team|
+  ai, from}`). `stBriefCheck` (`GET /studio/brief/check?project=`) returns
+  gaps (`campaign_unconfirmed` mandatory with two or more campaigns,
+  `objective/message_missing` mandatory only when there is also no source,
+  direction or instruction, `mark_missing` level `blocking`), assumptions and
+  the campaign's marks; the copy stage fails `brief_incomplete` (not retried)
+  on a mandatory gap unless `acknowledge:true`. `stBriefSuggest` (`GET
+  /studio/brief/suggest?project=|ns=&campaign=&ai=1`) answers sourced
+  suggestions; `ai=1` is one extraction-model call and needs a full key.
+- **Identity.** `stMarkLayers(kit, ns, campaign, format, want, pos,
+  {placement})`: the campaign policy wins over `plan.mark` (noted,
+  `markOverridden`); a missing mandatory mark adds `layout.incomplete[]`
+  (`stChecks` state `mark_missing`); `/studio/approve` refuses design with
+  409 `incomplete`; export leaves it out. `stMarkPlacement(refs)` reads corner
+  words from approved and brand reference analyses (`basis observed`, else
+  `default`). `GET /studio/identity?ns=` (`stIdentityAudit`, read) and
+  `tools/studio-identity.py` report what is in R2 per campaign.
+- **References.** `studio_references` gained `campaign` and `prep_key` (a
+  browser-prepared copy under 4.5 MB; the original kept; upload up to 12 MB
+  with `prepB64`). `stReferencePack(refs, {mode recommended|chosen|none,
+  chosen, campaign})` groups the pack, excludes another campaign's references
+  in recommended mode, and records `{attached, read, excluded, unavailable}`
+  on the concepts and produced events (`refPack`).
+- **Concepts.** `keep` binds only when sent (`keep.explicit`): kept imagery
+  rewrites the plan's background to keep the current image, kept copy refuses
+  the model's headline, kept composition keeps the current layers; apply
+  honours the same. Look-alikes in explore get one `REPLAN.` call
+  (`replanned`). `size` travels from `/studio/concept/apply` to the renders.
+- **Render.** `nanoRender` replays history only when `historyModel` is the
+  answering model (else `currentImage` is attached), picks the last non-thought
+  image part, returns `ms`, `usage`, `historyReplayed`. `stRenderJob` merges a
+  region render into the live current version (no branch), checks a cutout's
+  PNG colour type for alpha (`opaque` on the layer), and stores `image.meta`
+  `{references, model, requested, size, fallback, ms, usage, historyReplayed,
+  alpha}`.
+- **Inspection.** `stInspectStage` reads `studio/<p>/<a>/<v>-export.png` when
+  saved (`composed:true`), else the imagery (`imageryOnly`); the prompt carries
+  the full text inventory, the marks that should (and must not) appear and a
+  carousel's sibling frames. `/studio/inspection/apply` answers 409 `stale`
+  when the asset has moved past the inspected version (`force:true` applies it
+  anyway); a ship verdict never approves. The island composes and saves the
+  export before it runs an inspect job (`composeExport` in `pump`).
+- **In-app.** Intake asks for the campaign when the kit has several; the brief
+  view has `Combo` fields with source chips, the requirement bands, the check
+  panel and a 1K draft / 2K / 4K final select; cards show states (queued,
+  generating, generated, reviewed, approved, failed), retained, incomplete and
+  the reference pack with thumbnails; Generate has a resolution select; the
+  asset view has the family strip and the render record; suggestions are
+  grouped (design, type, copy, concepts) with basis, changes, keeps and paid;
+  the client context shows the identity audit.
+- **Tools.** `tools/studio-compose.mjs` draws a project's tiles with
+  `docs/studio-render.js` in headless Chromium and saves them as exports.
+  `tools/studio-showcase.py` prints an estimate and runs nothing paid without
+  `--approve-budget N`, holds renders past the cap, composes before inspecting
+  and compares composed tiles. Harnesses: `tests/studio-p8-worker.mjs` (14),
+  `tests/studio-compose-test.mjs` (5), `tests/studio-showcase-test.mjs` (10),
+  the P8 case in the browser harness (18).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

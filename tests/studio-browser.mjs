@@ -303,6 +303,9 @@ await t('three visible actions: Create a new design opens a form that names what
   const insp = await page.textContent(R + '.st-insp'); ok(/fidelity/.test(insp) && /readability/.test(insp) && /round 1 of 2/.test(insp), insp.slice(0, 200));
   ok(/support line sits too close/.test(await page.textContent(R + '.st-insp')), 'the issue is named');
   const fixBox = await page.$(R + 'textarea[id^="fix-"]'); ok(fixBox, 'the correction is editable before it is applied'); eq(await fixBox.inputValue(), 'Add a line of space between the headline and the support line; keep everything else.');
+  // the inspection judged the render's version; the asset has moved on since (a concept was applied), so the card says so and applying is a confirmed choice
+  ok(/inspected an earlier version/.test(await page.textContent(R + '.st-insp')), 'a stale inspection is marked');
+  page.once('dialog', d => d.accept());
   await page.click(R + '.st-insp button:has-text("Apply the correction")');
   await page.waitForFunction(() => /correction applied/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
   ok((await page.$$(R + '.st-insp button:has-text("Apply the correction")')).length < (await page.$$(R + '.st-insp')).length, 'an applied correction offers no second button');
@@ -413,6 +416,38 @@ await t('a read-only key reviews everything and changes nothing: no composer, lo
   ok(!(await p2.$(R + '.st-lock')), 'no locks'); ok(!(await p2.$(R + '.st-appr .btn')), 'no approve buttons');
   ok(await p2.$(R + '.st-head button:has-text("Export")'), 'export available');
   await p2.close();
+});
+await t('P8: with two campaigns the intake chooses none until the team does; the brief offers sourced suggestions in editable fields, design requirements in three bands and the check before anything is spent; the art director inspected the composed tile, not the imagery alone', async () => {
+  await api('POST', '/brand/kit', { ns: 'mca', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', signoff: 'Hands Off Our Fuel.', cta: 'handsoffourfuel.com.au' }, { id: 'national', name: 'Australian mining' }] });
+  const pg = await open();
+  await pg.selectOption(R + '.st-head select', 'aep'); await pg.waitForFunction(() => /Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib-head') || {}).textContent || ''));
+  await pg.selectOption(R + '.st-head select', 'mca'); await pg.waitForSelector(R + '.st-lib tbody tr');
+  await pg.click(R + '.st-lib-head .btn'); await pg.waitForSelector(R + '.st-intake');
+  eq(await pg.inputValue(R + '.st-intake select'), '__', 'no campaign is assumed'); ok(/the first is not assumed/.test(await pg.textContent(R + '.st-intake')));
+  await pg.click(R + '.st-segbtn:has-text("A brief or one line")'); await pg.fill(R + '.st-intake textarea', 'Something about the subsidy framing');
+  ok(await pg.isDisabled(R + '.st-intake-foot .btn:has-text("Create project")'), 'create waits for the campaign');
+  await pg.selectOption(R + '.st-intake select', 'hoof'); ok(!(await pg.isDisabled(R + '.st-intake-foot .btn:has-text("Create project")')));
+  await pg.click(R + '.st-intake-foot .btn:has-text("Create project")');
+  await pg.waitForSelector(R + '.st-dir', { timeout: 30000 });
+  await pg.click(R + '.st-railbtn:has-text("Brief")'); await pg.waitForSelector(R + '.st-combo');
+  await pg.waitForFunction(() => /Suggestions come from/.test(document.querySelector('#studio-root .st-centre').textContent));
+  const actionOpts = await texts(pg, R + '.st-field:has(#brief-action) .st-combo-opt'); ok(actionOpts.some(o => /approved/.test(o) && /handsoffourfuel\.com\.au/.test(o)), JSON.stringify(actionOpts));
+  await pg.locator(R + '.st-field:has(#brief-action) .st-combo-opt').filter({ hasText: 'handsoffourfuel.com.au' }).first().click();
+  eq(await pg.inputValue(R + '#brief-action'), 'handsoffourfuel.com.au'); ok(/approved/.test(await pg.textContent(R + '.st-field:has(#brief-action) .st-lbl')), 'the source travels with the value');
+  ok(/mandatory/.test(await pg.textContent(R + '.st-reqs')) && /preferred/.test(await pg.textContent(R + '.st-reqs')) && /open/.test(await pg.textContent(R + '.st-reqs')), 'three bands');
+  await pg.fill(R + '#req-mandatory', 'Red MYTH label'); await pg.click(R + '.st-req-band.mandatory .ov-link:has-text("add as written")');
+  ok(/Red MYTH label/.test(await pg.textContent(R + '.st-req-band.mandatory')));
+  await pg.click(R + '.ov-sechead .btn:has-text("Save brief")'); await pg.waitForFunction(() => !document.querySelector('#studio-root .ov-sechead .btn'));
+  const pj = env.MIND_DB.db.prepare("SELECT brief FROM studio_projects ORDER BY created DESC LIMIT 1").get(); const b = JSON.parse(pj.brief);
+  eq([b.action, b.actionSource, b.requirements.mandatory[0].text, b.requirements.mandatory[0].source], ['handsoffourfuel.com.au', 'approved', 'Red MYTH label', 'team']);
+  await pg.waitForFunction(() => /Before anything is spent/.test(document.querySelector('#studio-root .st-check-panel').textContent) && !/Checking the brief/.test(document.querySelector('#studio-root .st-check-panel').textContent));
+  ok(/Campaign Hands Off Our Fuel: mark policy/.test(await pg.textContent(R + '.st-check-panel')), await pg.textContent(R + '.st-check-panel'));
+  eq(await pg.inputValue(R + '.st-produce select'), '2K'); await pg.selectOption(R + '.st-produce select', '1K');
+  // the inspections that ran in this session saw the composed tile the browser saved before they ran
+  const ins = env.MIND_DB.db.prepare("SELECT data FROM studio_events WHERE kind='inspection'").all().map(r => JSON.parse(r.data)).filter(d => d.scores);
+  ok(ins.length && ins.every(d => d.composed === true), 'every inspection read the composed export: ' + JSON.stringify(ins.map(d => d.composed)));
+  ok(Array.from(r2.keys()).some(k => /-export\.png$/.test(k)), 'the composed PNG was saved');
+  await shot(pg, 'studio-brief'); await pg.close();
 });
 await browser.close(); server.kill();
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

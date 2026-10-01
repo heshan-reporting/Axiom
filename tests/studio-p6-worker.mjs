@@ -110,7 +110,7 @@ await t('"Give me different variations": the art director sees the artwork and t
   const j = await jobRun(P, 'concepts', { asset: A, feedback: 'Give me different variations' }, A); eq(j.state, 'done', j.error);
   const body = anth.calls[anth.calls.length - 1]; eq(anth.calls.length, n0 + 1); eq(body.model, 'claude-opus-5-5');
   eq(imagesOf(body), 3, 'the artwork and two reference images are attached'); const user = textOf(body);
-  ok(/REFERENCES ON THE PROJECT \(3\)/.test(user), 'the references block'); ok(user.indexOf(REF.summary) >= 0 && /Typography: Bold grotesque/.test(user) && /Take: Flat colour field/.test(user), 'the analysis reaches the model');
+  ok(/REFERENCE PACK - 3 references in the pack \(recommended\)/.test(user), 'the reference pack block: ' + user.slice(user.indexOf('REFERENCE'), user.indexOf('REFERENCE') + 200)); ok(user.indexOf(REF.summary) >= 0 && /Typography: Bold grotesque/.test(user) && /Take: Flat colour field/.test(user), 'the analysis reaches the model');
   ok(new RegExp('\\[' + R3 + '\\] Mood: quiet dawn \\(mood; early light, no machinery\\) - not analysed').test(user), 'the unanalysed reference is a limitation, not a silent gap: ' + user.slice(user.indexOf('REFERENCES'), user.indexOf('REFERENCES') + 900));
   ok(/brand and approved references carry the client's requirements[^.]*constraints/.test(user), 'purpose semantics'); ok(/\[attached as an image\]/.test(user));
   ok(/PAST ARTWORK ON FILE FOR THIS CLIENT \(1/.test(user) && /HOOF harvester tile/.test(user) && user.indexOf('AEP gas tile') < 0, 'artwork memory for this client only');
@@ -168,7 +168,7 @@ await t('suggested next directions: three design and three photograph suggestion
 await t('first production: the creative team may choose a composition per channel (a design spec on the piece), and the photograph prompt follows it; a piece without one gets the house panel', async () => {
   const p = await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Production design', brief: { objective: 'answer the subsidy framing', message: 'not a subsidy', channels: ['linkedin', 'facebook'] } }); const P2 = p.d.id;
   const j = await jobRun(P2, 'copy', { channels: ['linkedin', 'facebook'], deliverable: 'set', render: true }); eq(j.state, 'done', j.error);
-  const body = anth.calls[anth.calls.length - 1]; ok(/DESIGN\. For each composition choose the composition/.test(body.system), 'production is taught the spec'); ok(/REFERENCES: none on the project/.test(textOf(body)) && /PAST ARTWORK ON FILE/.test(textOf(body)));
+  const body = anth.calls[anth.calls.length - 1]; ok(/THE DESIGN\. For each channel the plan is the whole composition/.test(body.system) && /PLAN\. Coordinates are per cent/.test(body.system), 'production is taught the plan'); ok(/REFERENCES: none on the project/.test(textOf(body)) && /PAST ARTWORK ON FILE/.test(textOf(body)));
   const g = await get(P2); const li = g.assets.find(x => x.channel === 'linkedin'), fb = g.assets.find(x => x.channel === 'facebook');
   eq(li.versions[0].layout.style, 'same'); eq(li.versions[0].layout.image, null);
   eq(fb.versions[0].layout.design.composition.style, 'split'); eq(fb.versions[0].layout.image, { x: 0, y: 0, w: 100, h: 54 }, 'split bottom on a square: the photograph above');

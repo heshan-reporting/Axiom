@@ -21,6 +21,9 @@ node --experimental-sqlite tests/studio-p6-worker.mjs     # art direction as des
 node --experimental-sqlite tests/studio-variations-demo.mjs  # draws five compositions of one message to tests/shot-variations.png (the creative outcome, to look at)
 node --experimental-sqlite tests/studio-p7-worker.mjs     # design beyond the preset: wordmarks and policy, expressive plans, carousels, references to the image model, artwork mode, edits, inspection, new designs
 node --experimental-sqlite tests/studio-plan-demo.mjs     # draws the plan engine's mechanics with synthetic imagery to tests/shot-plans.png (not finished quality)
+node --experimental-sqlite tests/studio-p8-worker.mjs     # production-quality workflow: plan-engine production, brief check and sourced suggestions, mark policy enforced, reference packs, retain, replanning, Gemini gaps, composed inspection
+node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export
+node --experimental-sqlite tests/studio-showcase-test.mjs # tools/studio-showcase.py end to end with stub models: nothing without --approve-budget, the render cap, compose before inspect
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
 node --experimental-sqlite tests/artwork-worker.mjs       # artwork memory
 node --experimental-sqlite tests/overview-worker.mjs      # the front page and the daily brief
@@ -96,6 +99,25 @@ it at the end.
   signatures; 4K is honoured and a fallback is visible; every render is
   inspected and one bounded correction can be applied; Create a new design
   starts from the brief with the chosen references and inherits no panel.
+- `studio-p8-worker.mjs`: the production-quality workflow (build studio-p8).
+  First production through the plan engine with a house fallback that says so
+  and the chosen resolution forwarded; the brief check before spending (no
+  silent first campaign, nothing-to-write-from refused, acknowledgement
+  recorded); sourced brief suggestions (approved, preference, previous,
+  reference, ai on request); the campaign mark policy enforced (a plan cannot
+  override it, a missing mandatory mark makes the composition incomplete and
+  blocks design approval, never substituted) and placement learned from
+  approved references; campaign isolation and the identity audit; the reference
+  pack in three modes with another campaign's references excluded and a large
+  original shown through a prepared copy; retain controls in planning and
+  application; one bounded replanning round; size forwarding; region renders
+  merging instead of branching; cutout transparency; the final, non-thought
+  image; no edit history replayed to another model; the inspection of the
+  composed export with the whole text inventory; stale corrections refused;
+  ship never approves; adaptation re-planned from the master's plan.
+- `studio-compose-test.mjs` and `studio-showcase-test.mjs`: the two Mac tools
+  against the worker module served over HTTP in-process (stub models, real
+  headless Chromium for the renderer).
 - `studio-plan-demo.mjs`: the plan engine's mechanics drawn with synthetic
   imagery to `tests/shot-plans.png`. Not finished creative quality: the
   finished renders come from `tools/studio-showcase.py` on the live worker.

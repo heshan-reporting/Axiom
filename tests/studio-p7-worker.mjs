@@ -143,7 +143,7 @@ await t('the carousel applies as one asset per frame; Generate queues the image 
 await t('full artwork: the image model paints the whole piece from the exact words; the version is marked artwork with its baked roles and only the mark stays a live layer; an edit replays the conversation with the model\'s parts; 4K is honoured; a fallback is recorded and visible', async () => {
   const r = await req('POST', '/studio/concept/apply', { project: P, eid: EV.eid, index: 2, render: true, size: '4K' }); eq(r.status, 200, JSON.stringify(r.d)); eq(r.d.jobs.length, 1);
   const job = (await req('GET', '/studio/job?id=' + r.d.jobs[0])).d.job; eq(job.input.approach, 'artwork'); eq(job.input.baked, ['headline', 'support']); ok(/Set the words exactly as given/.test(job.input.prompt) && /headline "Fact: They're used by small businesses too"/.test(job.input.prompt) && /do not paint a logo or a wordmark/.test(job.input.prompt), job.input.prompt);
-  eq(job.input.size, '2K', 'the concept render keeps the house size unless the input says otherwise');
+  eq(job.input.size, '4K', 'the size chosen on Generate travels through concept/apply to the plan render');
   const done = await run(job); eq(done.state, 'done', done.error);
   let a = (await get(P)).assets.find(x => x.id === A); let v = a.versions[a.versions.length - 1]; eq(v.mode, 'artwork'); eq(v.layout.baked, ['headline', 'support']); eq(v.layout.layers.map(l => l.role), ['wordmark'], 'only the mark is a live layer'); eq(v.layout.approach, 'artwork');
   ok(/full artwork - the words are part of the bitmap/.test((await events(P, 'job')).filter(e => e.render).pop().text));
