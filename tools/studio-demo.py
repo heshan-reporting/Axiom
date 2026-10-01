@@ -245,11 +245,15 @@ def run_case(base, key, args, cid, rec):
     if not dirs:
         raise Stop('no direction came back')
     want_type = SPEND['cap_renders'] == 0
-    pick = next((d for d in dirs if want_type and str(d.get('medium') or '').startswith('typographic')), dirs[0])
+    # with no images approved, a direction that needs no photograph: type first, then a diagram or infographic; never a carousel of photographs
+    rank = {'typographic': 0, 'diagram': 1, 'infographic': 2}
+    pick = sorted(dirs, key=lambda d: rank.get(str(d.get('medium') or ''), 9))[0] if want_type else dirs[0]
+    if want_type and str(pick.get('medium') or '') not in rank:
+        print('  ! no direction works without a photograph; "%s" (%s) will need imagery, which no approved render can supply' % (pick['title'], pick.get('medium')))
     http(base, key, 'POST', '/studio/direction/choose', {'id': pick['id']})
     # 3. production, then a refinement that keeps the imagery
     j = job(base, key, pid, 'copy', {'channels': c['channels'], 'deliverable': 'set', 'direction': pick['id'], 'size': args.size, 'render': SPEND['cap_renders'] > 0,
-                                     'instruction': 'Typographic: no photograph; the words and the mark carry it.' if want_type else ''}, 'writing and laying out the master')
+                                     'instruction': ('No photograph: the words, shapes and the mark carry it (' + str(pick.get('medium') or 'typographic') + '). One tile per channel, not a carousel.') if want_type else ''}, 'writing and laying out the master')
     if not j or j['state'] != 'done':
         raise Stop('production failed: ' + ((j or {}).get('error') or 'no answer'))
     r0 = SPEND['renders']; pump(base, key, pid)
@@ -259,13 +263,16 @@ def run_case(base, key, args, cid, rec):
     applied = None
     if cj and cj['state'] == 'done':
         cev = [e for e in get(base, key, pid)['thread'] if e.get('kind') == 'concepts'][-1]
-        opt = next((o for o in cev['options'] if not o.get('needsImage')), cev['options'][0])
+        opt = next((o for o in cev['options'] if not o.get('needsImage') and not o.get('frames')), next((o for o in cev['options'] if not o.get('needsImage')), cev['options'][0]))
         applied = http(base, key, 'POST', '/studio/concept/apply', {'project': pid, 'eid': cev['eid'], 'index': opt['i'], 'render': False})
+    n0 = len(master['versions'])
     g = get(base, key, pid); master = next(a for a in g['assets'] if a['id'] == master['id']); v1 = current(master)
-    say(3, 'Produced "%s" (%s, %s) from "%s"%s; refined to v%d "%s" as a layout version on the same imagery: %d new image call%s for the refinement.' % (
+    fresh = applied and applied.get('asset') and applied.get('asset') != master['id']
+    how = ('refined to v%d "%s" as a layout version on the same imagery' % (len(master['versions']), opt['name'])) if applied and len(master['versions']) > n0 else ('refined as a new asset "%s" (the card asked for a fresh composition, so the master stays at v%d)' % (opt['name'], len(master['versions']))) if fresh else 'the refinement was not applied'
+    say(3, 'Produced "%s" (%s, %s) from "%s"%s; %s: %d new image call%s for the refinement.' % (
         master['title'], master['format'], (v0.get('layout') or {}).get('mediumName') or v0.get('mode'), pick['title'],
         (' with %d render%s' % (SPEND['renders'] - r0, '' if SPEND['renders'] - r0 == 1 else 's')) if SPEND['renders'] - r0 else ' with no render',
-        len(master['versions']), (opt['name'] if applied else 'not applied'), SPEND['renders'] - renders_before, '' if SPEND['renders'] - renders_before == 1 else 's'),
+        how, SPEND['renders'] - renders_before, '' if SPEND['renders'] - renders_before == 1 else 's'),
         imageSame=(v0.get('image') or {}).get('key') == (v1.get('image') or {}).get('key'), version=v1['id'])
     # 4. the coordinated set
     aj = job(base, key, pid, 'revise', {'target': 'asset', 'asset': master['id'], 'instruction': 'Adapt this for %s: the same argument, re-composed for each format, nothing re-rendered.' % ' and '.join(c['adapt'])}, 'adapting the master for ' + ', '.join(c['adapt']))

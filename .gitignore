@@ -8,3 +8,6 @@ tests/shot-*.png
 # Studio showcase and demonstration output (client creative; kept out of the repo)
 showcase/
 demo/
+# local tooling installs (package.json lists Playwright for the compose tool and harnesses)
+node_modules/
+package-lock.json
