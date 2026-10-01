@@ -24,17 +24,20 @@ DEFAULT_WORKER = 'https://newsaus.heshan-998.workers.dev'
 
 
 def http(base, key, method, path, body=None):
-    req = urllib.request.Request(base + path, method=method, headers={'Content-Type': 'application/json', 'X-Axiom-Key': key},
+    # Cloudflare refuses Python's default User-Agent with an empty 403, so name the tool.
+    req = urllib.request.Request(base + path, method=method, headers={'Content-Type': 'application/json', 'X-Axiom-Key': key, 'User-Agent': 'axiom-studio-golden/1.0'},
                                  data=json.dumps(body).encode() if body is not None else None)
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
             return json.loads(r.read().decode() or '{}')
     except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors='replace')
         try:
-            d = json.loads(e.read().decode() or '{}')
+            d = json.loads(raw or '{}')
         except Exception:
             d = {}
-        raise SystemExit('%s %s -> HTTP %s %s %s' % (method, path, e.code, d.get('error', ''), d.get('detail', '')))
+        why = (d.get('error', '') + ' ' + d.get('detail', '')).strip() or ('(no JSON body: %s)' % (raw[:160].replace('\n', ' ') or 'empty'))
+        raise SystemExit('%s %s -> HTTP %s %s' % (method, path, e.code, why))
 
 
 def step_until_done(base, key, job_id, label):
