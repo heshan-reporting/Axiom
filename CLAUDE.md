@@ -1409,6 +1409,30 @@ validation use `tools/studio-compose.mjs` (Node + Playwright). Output folders
 `demo/` and `showcase/` are gitignored. Harness: `tests/studio-demo-test.mjs`
 (20).
 
+**Editing the imagery by area (build `studio-p17`; `CREATIVE-STUDIO.md`
+s.23).** Gemini edits by described area (semantic masking), never a pixel
+mask, so a render job with `edit: true, editKind: 'area'|'background'|
+'restyle', area {x,y,w,h} (per cent), instruction` gets its prompt from
+`stAreaPrompt` (the area in words and numbers via `stAreaWords`, "everything
+outside it must stay exactly as it is", no text or logos; a background swap
+keeps the subject; a restyle keeps every element), the current image is
+attached, and `image.meta.edit {kind, area, instruction, of, preservation,
+limits}` records it (kept through `stImage`). No image, or no instruction,
+fails before any call. The words and marks are layers and are untouched.
+The browser then measures both images at 160 px (`measurePreservation`:
+mean change outside and inside the area, share of outside pixels moved by
+more than 10%) and files `POST /studio/preservation {asset, version,
+against, outside, inside, changedOutside}` (full role; `stPreservation`):
+the baseline must be the version the edit came from; an area edit is
+`held` (outside <= 2% and moved <= 3%), `drifted` (<= 6% / 15%) or
+`changed`, with a warning when almost nothing changed inside; a background
+swap or restyle is `measured`, for a person to judge. Event `preservation`
+(field `editKind`, since `kind` would clobber the thread's). In-app: **Edit
+an area of the imagery** under Art direction (drag a box or type it in per
+cent, three kinds, resolution, the limit stated before spending) and the
+preservation card on the asset with a compare link. Harnesses:
+`tests/studio-p17-worker.mjs` (5), the P17 case in the browser harness (24).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

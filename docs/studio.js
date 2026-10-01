@@ -745,6 +745,65 @@
     </div>`;
   }
 
+  /* Edit the imagery by area (P17): mark a rectangle (drag on the image, or type it), or choose a background swap or a
+     restyle, and say what to change. Gemini edits by described area, not a pixel mask, so nothing outside the area is
+     promised: the result is measured against the version it came from and the difference is shown before approval. */
+  const EDIT_KINDS = [['area', 'Change a marked area'], ['background', 'New background, keep the subject'], ['restyle', 'Restyle, keep the content']];
+  function AreaEdit({ a, v, busy, onEdit }) {
+    const [open, setOpen] = useState(false); const [kind, setKind] = useState('area'); const [box, setBox] = useState(null); const [ins, setIns] = useState('');
+    const [size, setSize] = useState((v.image && v.image.size) || '2K'); const [src, setSrc] = useState(null); const drag = useRef(null); const ref = useRef(null);
+    useEffect(() => { let live = true; setSrc(null); if (open && v.image && v.image.url) blobUrl(v.image.url).then(u => { if (live) setSrc(u); }).catch(() => {}); return () => { live = false; }; }, [open, v.id]);
+    if (!v.image || !v.image.url || v.mode === 'artwork') return null;
+    if (!open) return html`<div class="st-ad-quick"><button class="ov-link" onClick=${() => setOpen(true)}>Edit an area of the imagery</button> <span class="ov-dim">(one image call; the rest of the photograph is measured afterwards)</span></div>`;
+    const r1 = n => Math.round(n * 10) / 10;
+    const pt = e => { const r = ref.current.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)), y: Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100)) }; };
+    const down = e => { if (kind !== 'area') return; e.preventDefault(); const p0 = pt(e); drag.current = p0; setBox({ x: r1(p0.x), y: r1(p0.y), w: 0, h: 0 }); };
+    const move = e => { if (!drag.current) return; const p1 = pt(e), p0 = drag.current; setBox({ x: r1(Math.min(p0.x, p1.x)), y: r1(Math.min(p0.y, p1.y)), w: r1(Math.abs(p1.x - p0.x)), h: r1(Math.abs(p1.y - p0.y)) }); };
+    const up = () => { drag.current = null; };
+    const setNum = (k, val) => setBox(Object.assign({ x: 0, y: 0, w: 0, h: 0 }, box || {}, { [k]: Math.max(0, Math.min(100, +val || 0)) }));
+    const ready = !!ins.trim() && (kind !== 'area' || (box && box.w >= 2 && box.h >= 2));
+    return html`<div class="st-areaedit" aria-label="Edit an area">
+      <div class="st-lbl">Edit the imagery</div>
+      <div class="st-seg" role="group" aria-label="What kind of edit">${EDIT_KINDS.map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (kind === k ? ' on' : '')} aria-pressed=${kind === k} onClick=${() => setKind(k)}>${l}</button>`)}</div>
+      <div class="st-area-stage" ref=${ref} style=${{ aspectRatio: String(a.format || '1:1').replace(':', ' / ') }} onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${up}>
+        ${src ? html`<img src=${src} alt="The current imagery" draggable="false" />` : html`<div class="ov-dim">Loading the imagery...</div>`}
+        ${kind === 'area' && box && box.w > 0 ? html`<div class="st-area-box" style=${{ left: box.x + '%', top: box.y + '%', width: box.w + '%', height: box.h + '%' }}></div>` : null}
+      </div>
+      ${kind === 'area' ? html`<div class="st-nd-row st-area-nums">${[['x', 'from left'], ['y', 'from top'], ['w', 'width'], ['h', 'height']].map(([k, l]) => html`<label key=${k} class="ov-dim">${l} <input class="st-in st-le-num" type="number" min="0" max="100" step="1" value=${box ? box[k] : ''} onInput=${e => setNum(k, e.target.value)} aria-label=${'Area ' + l + ', per cent'} />%</label>`)}</div><div class="ov-dim">${box && box.w >= 2 && box.h >= 2 ? 'Marked: ' + box.w + '% x ' + box.h + '% of the frame.' : 'Drag on the image, or type the area in per cent.'}</div>`
+        : html`<div class="ov-dim">${kind === 'background' ? 'The subject should stay as it is; what is behind it changes.' : 'Everything stays where it is; only the treatment (palette, light, style) changes.'}</div>`}
+      <textarea class="st-ta" rows="2" value=${ins} onInput=${e => setIns(e.target.value)} placeholder=${kind === 'area' ? 'What to change in the area, e.g. "remove the sign"' : kind === 'background' ? 'The new background, e.g. "a regional town street at dusk"' : 'The new treatment, e.g. "warmer, late afternoon light"'} aria-label="What to change"></textarea>
+      <div class="st-nd-row"><select class="st-sel" value=${size} onChange=${e => setSize(e.target.value)} aria-label="Edit resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option></select>
+        <button class="btn sm" disabled=${!!busy || !ready} onClick=${() => { onEdit(a, { kind, area: kind === 'area' ? box : undefined, instruction: ins.trim(), size }); setOpen(false); setIns(''); setBox(null); }}>Edit (1 image at ${size})</button>
+        <button class="btn sm ghost" onClick=${() => setOpen(false)}>Cancel</button></div>
+      <div class="ov-dim">The image model edits by described area, not a pixel mask: it is asked to leave everything else alone and cannot promise to. The words and marks are layers and are not touched. The result is a new version, measured against this one.</div>
+    </div>`;
+  }
+  /** What an area edit changed, measured here: both images drawn small, the mean change outside and inside the area and the share of pixels outside it that moved visibly. */
+  async function measurePreservation(a, v) {
+    const ed = ((v.image || {}).meta || {}).edit; if (!ed) return null; const base = a.versions.find(x => x.id === ed.of); if (!base || !base.image || !base.image.url) return null;
+    const [A, B] = await Promise.all([keyedImage(base.image.url), keyedImage(v.image.url)]); if (!A || !B) return null;
+    const W = 160, H = Math.max(16, Math.round(160 * (B.naturalHeight || B.height) / Math.max(1, B.naturalWidth || B.width)));
+    const px = img => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.drawImage(img, 0, 0, W, H); return g.getImageData(0, 0, W, H).data; };
+    const P = px(A), Q = px(B); const ar = ed.kind === 'area' ? ed.area : null; let so = 0, no = 0, si = 0, ni = 0, mv = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4; const d = (Math.abs(P[i] - Q[i]) + Math.abs(P[i + 1] - Q[i + 1]) + Math.abs(P[i + 2] - Q[i + 2])) / 765;
+      const inA = ar && (x + 0.5) / W * 100 >= ar.x && (x + 0.5) / W * 100 <= ar.x + ar.w && (y + 0.5) / H * 100 >= ar.y && (y + 0.5) / H * 100 <= ar.y + ar.h;
+      if (inA) { si += d; ni++; } else { so += d; no++; if (d > 0.1) mv++; }
+    }
+    return { asset: a.id, version: v.id, against: ed.of, outside: no ? so / no : 0, inside: ni ? si / ni : undefined, changedOutside: no ? mv / no : 0, size: W + 'x' + H };
+  }
+  function Preservation({ p, a, v, ro, onCompare, onFile }) {
+    const ed = ((v.image || {}).meta || {}).edit; const filing = useRef('');
+    const ev = ed ? (p.thread || []).filter(e => e.kind === 'preservation' && e.version === v.id).pop() : null;
+    useEffect(() => { if (!ed || ev || ro || filing.current === v.id) return; filing.current = v.id; measurePreservation(a, v).then(m => { if (m) onFile(m); }); }, [v.id, !!ev]);
+    if (!ed) return null;
+    const from = a.versions.findIndex(x => x.id === ed.of) + 1;
+    return html`<div class=${'st-preserve ' + (ev ? ev.verdict : 'pending')} aria-label="Preservation">
+      <b>${ed.kind === 'area' ? 'Area edit' : ed.kind === 'background' ? 'Background swap' : 'Restyle'}</b> of v${from}: "${ed.instruction}".
+      ${ev ? html` <${Chip} kind=${ev.verdict === 'held' ? 'ok' : ev.verdict === 'changed' ? 'bad' : 'warn'}>${ev.verdict === 'measured' ? 'measured' : ev.verdict}</${Chip}> <span>${ev.text}</span>` : html` <span class="ov-dim">${ro ? 'Not measured yet.' : 'Measuring what changed outside the area...'}</span>`}
+      <button class="ov-link" onClick=${() => onCompare(ed.of, v.id)}>compare v${from} and this version</button>
+      <div class="ov-dim">${ed.limits || ''}</div></div>`;
+  }
   /** The family an asset belongs to: carousel frames in order, a master and its adaptations - each a thumbnail drawn by the renderer. */
   function FamilyStrip({ p, a, onOpen }) {
     const fam = p.assets.filter(x => x.family === a.family);
@@ -775,7 +834,7 @@
       <div class="st-ready-row"><b>Human approval</b> <${Chip} kind=${appr ? 'ok' : ''}>${appr ? 'design approved by ' + appr.by : 'design not approved'}</${Chip}>${appr && rd.technical !== 'passed' && rd.technical !== 'not_applicable' ? html` <span class="ov-dim">the approval stands, but export waits for a passing validation</span>` : null}</div>
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair }) {
+  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onAreaEdit, onPreservation }) {
     const v = current(a);
     const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.id, a.current]);
@@ -825,6 +884,7 @@
         ${!copyOnly && !flat && !v.image ? html`<div class="st-flatnote">No background yet: ${(p.jobs || []).some(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) ? 'a render job is ' + ((p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) || {}).state + ' (see Jobs).' : 'the composition is drawn over a plain ground until one is rendered.'}</div>` : null}
       </div>
       ${!copyOnly && !flat && v.layout && v.layout.layers ? html`<${Readiness} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} />` : null}
+      <${Preservation} p=${p} a=${a} v=${v} ro=${ro} onCompare=${onCompare} onFile=${onPreservation} />
       ${!flat ? html`<${UsedPanel} a=${a} v=${v} />` : null}
       <${FamilyStrip} p=${p} a=${a} onOpen=${onOpen} />
       <div class="st-copy">
@@ -837,6 +897,7 @@
           <div class="ov-dim">${copyOnly ? 'copy only: no tile' : flat ? 'not editable (flattened)' : v.layout && v.layout.layers ? 'editable composition: ' + v.layout.templateName + ', headline ' + (hl ? hl.size : '-') + '% of the width, ' + v.layout.layers.length + ' layers' + (v.layout.layers.some(l => l.role === 'logo') ? ', kit logo placed exactly' : ', no logo on file') + '.' : 'no layout'}
             ${!ro && hl && !a.locks.layout ? html` <button class="ov-link" onClick=${() => onLayout(a, -0.6)}>headline smaller</button> <button class="ov-link" onClick=${() => onLayout(a, 0.6)}>larger</button> <span class="ov-dim">(a layout version, no render)</span>` : null}</div></div>
         ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
+        ${!copyOnly && !flat && !ro ? html`<${AreaEdit} a=${a} v=${v} busy=${busy} onEdit=${onAreaEdit} />` : null}
         <div class="st-field"><${Lbl}>Checks on this version</${Lbl}>
           <ul class="st-checks">
             ${(v.checks || []).map((c, i) => html`<li key=${i} class=${c.state}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <b>${c.text}</b> <span class="ov-dim">${c.note}</span></li>`)}
@@ -1207,6 +1268,8 @@
     };
     const restore = async (as, vid) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, restoreFrom: vid }); await reload(); setCmp(null); } catch (e) { fail(e); } };
     const render = async (as, prompt, edit, size) => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: ['1K', '2K', '4K'].indexOf(size) >= 0 ? size : (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e); } };
+    const areaEdit = async (as, o) => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (o.kind === 'area' ? 'area edit: ' : o.kind === 'background' ? 'background swap: ' : 'restyle: ') + o.instruction.slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (o.kind === 'area' ? 'Editing the marked area of ' : o.kind === 'background' ? 'Changing the background of ' : 'Restyling ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e); } };
+    const filePreservation = async (m) => { try { await call('/studio/preservation', m); await reload(); } catch (e) { toastMsg('Preservation not filed: ' + e.message, true); } };
     const note = async (text, tgt) => { try { await call('/studio/note', { project: p.id, text, target: tgt }); await reload(); } catch (e) { fail(e); } };
     const directTeam = async (text, tgt) => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + p.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { setSelAsset(j.result.changed[0]); setView('asset'); } } catch (e) { fail(e); } };
     /* the paid remedies of the impact list: one revise call on that asset, locked fields kept by the stage itself */
@@ -1269,7 +1332,7 @@
     else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
+    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
     else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
 
     return html`<div class="st">

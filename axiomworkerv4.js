@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p16';
+const AXIOM_BUILD = '2026-10-01.studio-p17';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -6763,7 +6763,7 @@ function stCopy(c) {
   const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
   return out;
 }
-function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined }; return out; }
+function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ['area', 'background', 'restyle'].indexOf(im.meta.edit.kind) >= 0 ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined }; return out; }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -7184,6 +7184,23 @@ async function stImpact(env, p) {
 }
 /** The free remedy for a kit change: recompute the version's checks against today's facts, banned terms and ledger. */
 async function stRecheck(env, p, a) { const v = await stCurrent(env, a); if (!v) return { error: 'no_version', status: 400 }; const checks = await stVersionChecks(env, p, a, v); await stEvent(env, p.id, 'recheck', { text: 'Checks of ' + a.title + ' recomputed against the kit as it is now (no model call): ' + (checks.filter(c => c.state !== 'matches' && c.state !== 'fact').map(c => c.state + ' ' + c.text).join('; ') || 'clean') + '.', asset: a.id }, 'studio'); return { ok: true, checks }; }
+/** The browser's measurement of an area edit: mean change outside and inside the area against the image it edited, and
+    the share of outside pixels that moved visibly. Held, drifted or changed; advisory - a person decides what it means. */
+async function stPreservation(env, p, a, body, who) {
+  const v = await stVersion(env, body.version); if (!v || v.asset !== a.id) return { error: 'unknown_version', status: 404 };
+  const ed = v.image && v.image.meta && v.image.meta.edit; if (!ed) return { error: 'not_an_area_edit', status: 400, detail: 'Only a version made by an area edit has something to compare.' };
+  if (String(body.against || '') !== String(ed.of || '')) return { error: 'wrong_baseline', status: 409, detail: 'The comparison must be against the version the edit was made from (' + ed.of + ').' };
+  const f = (x) => (typeof x === 'number' && isFinite(x) && x >= 0 && x <= 1 ? Math.round(x * 10000) / 10000 : null);
+  const outside = f(body.outside), inside = f(body.inside), moved = f(body.changedOutside);
+  if (outside == null || moved == null) return { error: 'bad_measurement', status: 400, detail: 'outside and changedOutside are fractions from 0 to 1.' };
+  const verdict = outside <= 0.02 && moved <= 0.03 ? 'held' : outside <= 0.06 && moved <= 0.15 ? 'drifted' : 'changed';
+  const word = { held: 'held: the rest of the image is essentially as it was', drifted: 'drifted: small changes outside the area (light, grain or edges) - look before approving', changed: 'changed: the image moved outside the area - compare the versions before using it' }[verdict];
+  const where = ed.kind === 'area' ? 'outside the marked area' : ed.kind === 'background' ? 'across the whole frame (a background swap: the subject should hold, the rest should change)' : 'across the whole frame (a restyle changes everything by design)';
+  const data = { asset: a.id, version: v.id, against: ed.of, editKind: ed.kind, area: ed.area, outside, inside, changedOutside: moved, size: stStr(body.size, 20), verdict: ed.kind === 'area' ? verdict : 'measured',
+    text: 'Preservation of ' + a.title + ' (' + ST_EDIT_KINDS[ed.kind] + '): mean change ' + where + ' ' + (outside * 100).toFixed(1) + '%' + (inside != null ? ', inside ' + (inside * 100).toFixed(1) + '%' : '') + ', ' + (moved * 100).toFixed(1) + '% of pixels moved visibly. ' + (ed.kind === 'area' ? word.charAt(0).toUpperCase() + word.slice(1) + '.' : 'Recorded for comparison; a person judges whether the subject held.') + (ed.kind === 'area' && inside != null && inside < 0.01 ? ' Almost nothing changed inside the area either: the edit may not have taken.' : '') };
+  await stEvent(env, p.id, 'preservation', data, who);
+  return Object.assign({ ok: true }, data);
+}
 // -- Outcome metrics (P15): what the Studio changed, against what came before ----------------------
 /* Every figure is a count over recorded rows: projects, versions, validations, approvals, jobs, client
    review. A figure the records cannot support is returned as null with the reason, never estimated. */
@@ -9246,6 +9263,29 @@ async function stConceptApply(env, p, body, who) {
   return { ok: true, version: first.v.id, asset: first.a.id, assets: made, jobs, job: jobs[0] || null, render: jobs.length > 0, fresh, frames: frames ? frames.length : 0, imageFrom: src ? src.i : undefined };
 }
 // -- the render job: imagery for a region or a whole artwork, with the references and their roles, in the plan's own terms --
+/* Edits by described area (P17). Gemini's image models edit by semantic, text-described masking: there is no pixel mask
+   to send, so an "area" is said in words and nothing outside it is guaranteed to stay. The prompt asks for it plainly,
+   the record says so, and the browser measures what changed outside the area afterwards (POST /studio/preservation). */
+const ST_EDIT_KINDS = { area: 'change only the marked area', background: 'change the background, keep the subject', restyle: 'restyle the imagery, keep its content' };
+function stEditArea(a) {
+  if (!a || typeof a !== 'object') return null; const n = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round((Number(v) || 0) * 10) / 10));
+  const x = n(a.x, 0, 98), y = n(a.y, 0, 98); const w = n(a.w, 2, 100 - x), h = n(a.h, 2, 100 - y);
+  return { x, y, w, h };
+}
+function stAreaWords(r) {
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  const col = cx < 34 ? 'left' : cx > 66 ? 'right' : 'centre'; const row = cy < 34 ? 'upper' : cy > 66 ? 'lower' : 'middle';
+  const where = row === 'middle' && col === 'centre' ? 'the centre' : row === 'middle' ? 'the ' + col + ' side' : 'the ' + row + ' ' + (col === 'centre' ? 'middle' : col);
+  return where + ' of the image (the rectangle from ' + r.x + '% to ' + Math.round((r.x + r.w) * 10) / 10 + '% across from the left edge and ' + r.y + '% to ' + Math.round((r.y + r.h) * 10) / 10 + '% down from the top, about ' + Math.round(r.w * r.h / 100) + '% of the frame)';
+}
+function stAreaPrompt(inp) {
+  const ins = String(inp.instruction || '').trim().slice(0, 1200); const kind = ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area';
+  const tail = ' Return the whole image at the same framing, aspect and resolution. Add no text, lettering, logos or watermarks.';
+  if (kind === 'background') return 'EDIT THE CURRENT IMAGE: keep the main subject exactly as it is - its shape, pose, colours, the light falling on it and its position and size in the frame. Replace only what is behind it: ' + ins + '. Match the new background\'s light direction and colour temperature to the subject so it sits naturally; do not move, crop or resize the subject.' + tail;
+  if (kind === 'restyle') return 'EDIT THE CURRENT IMAGE: keep every element, its position, the composition and the framing. Change only the treatment - palette, light, rendering style: ' + ins + '. Nothing is added or removed.' + tail;
+  const r = stEditArea(inp.area) || { x: 0, y: 0, w: 100, h: 100 };
+  return 'EDIT ONLY ONE AREA OF THE CURRENT IMAGE: ' + stAreaWords(r) + '. In that area: ' + ins + '. Everything outside it - subject, edges, colours, light, grain, perspective - must stay exactly as it is, as close to pixel for pixel as you can.' + tail;
+}
 async function stRenderJob(env, job, pair, done, fail) {
   const inp = job.input || {}; const p = pair.project; const a = pair.asset;
   if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
@@ -9259,7 +9299,10 @@ async function stRenderJob(env, job, pair, done, fail) {
     // the current image is read in either case: it stands in when the history cannot be replayed (another model answers)
     if (cur.image.key) { const im = await stVersionImage(env, cur); if (im) { currentImage = { data: im.b64, mime: im.mime }; editOf = editOf || cur.id; if (!history.length) references.unshift({ data: im.b64, mime: im.mime, role: 'the current image to edit; change only what the instruction says' }); } }
   }
-  const out = await nanoRender(env, { prompt: String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
+  const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
+  if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
+  if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
+  const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
   if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''));
   const again = await stJob(env, job.id);
   if (!again || again.state !== 'running') return again;   // cancelled while the render ran: the image is not filed
@@ -9281,8 +9324,9 @@ async function stRenderJob(env, job, pair, done, fail) {
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
   const meta = { references: references.map(r => r.name || r.role).filter(Boolean).slice(0, 8), model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
+  if (areaEdit) meta.edit = Object.assign({}, areaEdit, { of: editOf, preservation: 'pending', limits: 'Described-area editing (semantic masking): the image model is asked to leave everything outside the area alone, with no pixel mask to hold it there. What changed outside the area is measured afterwards.' });
   const image = { key, url: '/studio/file?key=' + encodeURIComponent(key), model: out.model, requested: out.requested, fallback: !!out.fallback, size: meta.size, conv: convKey || undefined, editOf: editOf || undefined, meta };
-  const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: String(inp.prompt || '').slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0 } }) };
+  const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: (areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '')).slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0 } }) };
   if (isRegion && live && live.layout && Array.isArray(live.layout.layers)) {
     // a cutout or inset lands in its own layer; the background and everything else stay as they are
     const layout = JSON.parse(JSON.stringify(live.layout)); const l = layout.layers.find(x => x.type === 'img' && x.region === inp.region);
@@ -11460,6 +11504,7 @@ export default {
           return jsonResp({ ok: true, recipe: await stRecipeGet(env, ns, id) });
         }
         if (path === '/studio/recipe/run') { const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const r = await stRecipeRun(env, p, sb, who); if (!r.error) await stBump(env, p.id); return jsonResp(r, r.status || 200); }
+        if (path === '/studio/preservation') { const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const r = await stPreservation(env, pair.project, pair.asset, sb, who); if (!r.error) await stBump(env, pair.project.id); return jsonResp(r, r.status || 200); }
         if (path === '/studio/recheck') { const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const r = await stRecheck(env, pair.project, pair.asset); await stBump(env, pair.project.id); return jsonResp(r, r.status || 200); }
         if (path === '/studio/share' || path === '/studio/share/revoke' || path === '/studio/review/resolve') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);

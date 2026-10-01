@@ -559,6 +559,26 @@ await t('P15: the library shows outcome metrics for the client against the previ
   eq([calls.anthropic, calls.gemini], [a0, g0], 'metrics cost nothing');
   await shot(page, 'studio-metrics');
 });
+await t('P17: an area of the imagery is marked by typing it, edited with one image call that leaves the words alone, and the change outside the area is measured in the browser and shown against the version it came from', async () => {
+  await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-stage canvas');
+  const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
+  await page.click(R + '.st-ad-quick .ov-link:has-text("Edit an area of the imagery")'); await page.waitForSelector(R + '.st-areaedit');
+  ok(/not a pixel mask/.test(await page.textContent(R + '.st-areaedit')), 'the limit is said before anything is spent');
+  ok(await page.isDisabled(R + '.st-areaedit .btn:has-text("Edit (1 image")'), 'nothing to edit until the area and the instruction are given');
+  for (const [k, val] of [['from left', '55'], ['from top', '5'], ['width', '40'], ['height', '30']]) await page.fill(R + '.st-areaedit input[aria-label="Area ' + k + ', per cent"]', val);
+  ok(await page.$(R + '.st-area-box'), 'the area is drawn on the image');
+  await page.fill(R + '.st-areaedit textarea', 'remove the sign on the fence'); await page.selectOption(R + '.st-areaedit select', '1K');
+  await page.click(R + '.st-areaedit .btn:has-text("Edit (1 image at 1K)")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 20000 });
+  eq(calls.gemini - g0, 1, 'one image call');
+  await page.waitForFunction(() => /mean change outside the marked area/.test((document.querySelector('#studio-root .st-preserve') || {}).textContent || ''), null, { timeout: 15000 });
+  const card = await page.textContent(R + '.st-preserve'); ok(/Area edit/.test(card) && /remove the sign on the fence/.test(card) && /(held|drifted|changed)/.test(card) && /compare v\d+ and this version/.test(card), card);
+  const row = env.MIND_DB.db.prepare("SELECT v.copy, v.image FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 2").all();
+  eq(row[0].copy, row[1].copy, 'the words were not touched'); ok(JSON.parse(row[0].image).meta.edit.area.x === 55, 'the area travelled to the worker');
+  await page.click(R + '.st-preserve .ov-link:has-text("compare")'); await page.waitForSelector(R + '.st-compare, ' + R + '.st-cmp', { timeout: 5000 }).catch(() => {});
+  await shot(page, 'studio-area-edit');
+});
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {
   const p2 = await open('read');

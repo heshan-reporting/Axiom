@@ -463,3 +463,40 @@ The first run of the test caught a real issue: the synthetic navy logo was unrea
 
 **Not shown:** whether the work is good. With stub models, the words and layouts are placeholders. The real demonstration is the same command on the Mac against the deployed worker, with an approved call budget.
 
+## 23. Editing the imagery by area, with preservation measured (build studio-p17)
+
+The request asked to "verify provider support for masks, editing and preservation before implementing", and to disclose and measure where preservation cannot be guaranteed.
+
+**What the provider supports.** Gemini's image models edit by semantic, text-described masking: the area is described in words. There is no pixel mask to send, so nothing guarantees that the rest of the image holds. This comes from Google's own documentation, read through search excerpts (s.16.1), not first-hand.
+
+**What was built.** An area edit is a render job on the current image, of one of three kinds:
+- **A marked area.** The rectangle is said in words and in per cent ("the upper right of the image, from 60% to 95% across...").
+- **A new background, keeping the subject.**
+- **A restyle, keeping the content.**
+
+The prompt asks for everything else to stay as it is and for no text or logos. The current image is attached. The version records the edit, the version it came from and the limit. The words and marks are layers, and an image edit never touches them. An edit with no image or no instruction fails before any call.
+
+**Measured, not promised.** When the edited version arrives, the browser draws it and its source at 160 px. It measures:
+- the mean change outside the area
+- the mean change inside the area
+- the share of pixels outside the area that moved visibly
+
+The worker files a verdict:
+- **held:** outside under 2%, and under 3% of pixels moved
+- **drifted:** look before approving
+- **changed:** compare the versions before using it
+
+It also warns when almost nothing changed inside the area. A background swap or restyle is recorded as measured, since the whole frame is meant to change, and a person judges whether the subject held. The card on the asset links to the side-by-side compare.
+
+**Already in place from earlier phases:**
+- **Panel size, opacity and placement, and removing the panel:** concepts and the layout editor (P6-P7, P13)
+- **Replacing a mark with another approved variant:** P9's wordmark variants
+
+**Not built:** a dedicated crop and negative-space control. Moving the photograph's focal region in a composition works only through split layouts and the layout editor.
+
+**Proof:**
+- `tests/studio-p17-worker.mjs` (5) covers the prompt, the record, the clamp, nothing spent on a bad edit, the verdicts and the baseline rule.
+- The P17 browser case covers marking an area by keyboard, one image call, words untouched, the preservation card and the compare.
+
+**Not proven:** how well Gemini actually holds the rest of a real photograph. The stub returns the same image. The first real edits on the Mac will show what the verdicts look like in practice, and the thresholds may need tuning against them.
+
