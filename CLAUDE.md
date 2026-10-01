@@ -1309,6 +1309,25 @@ Directions with the new card lines and the set's diversity, and the
 **Sequence** board. Harnesses: `tests/studio-p12-worker.mjs` (5) and the P12
 case in `tests/studio-browser.mjs` (20).
 
+**The canvas, Board and Copy deck (build `studio-p13`; `CREATIVE-STUDIO.md`
+s.19).** `LayoutEditor` is now a canvas with a history (every finished
+gesture or command is one step; Undo / Redo buttons and Ctrl or Cmd+Z,
+Shift+Z, Y), multi-select (Shift-click), align left / centre / right / top /
+middle / bottom (to the selection's bounds, or to the stage's 3% margin for
+one layer), distribute across and down, paint order (To front / Forward /
+Backward / To back for the whole selection, keeping its order), Group /
+Ungroup (`layer.group`; grouped layers move together), a typography panel
+for the text layer last clicked (size, weight, alignment, tracking, colour,
+emphasis), safe-area guides (the 3% margin, and the Instagram 9:16 story
+interface hatched), keyboard nudging of the selection (Shift for 2%), and the
+renderer's `validate()` on the working layout at the output size as it
+changes (blocking layers outlined). Saving is still one layout version, no
+render. The rail has **Board** (every asset by family, drawn by the renderer,
+with its validation and approvals) and **Copy deck** (every asset's
+headline, support, CTA and caption in one table, edited in place as text
+versions with the checks beside them). Harness: the P13 case in
+`tests/studio-browser.mjs` (21).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

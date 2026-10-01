@@ -348,3 +348,27 @@ The guided case in `tests/studio-browser.mjs` runs the same journey in the page.
 
 **Not yet.** The canvas upgrade (align, group, reorder, undo, typography controls, guides), recipes with selective re-runs, and outcome metrics.
 
+## 19. The canvas, Board and Copy deck (build studio-p13)
+
+The fourth slice brings the professional design workspace from s.16.3, Phase 2.
+
+**The canvas.** The layout editor is now a canvas:
+- **Undo and redo:** every finished gesture or command is one step, from buttons or the keyboard.
+- **Selection:** several layers at once (Shift-click).
+- **Align and distribute:** to the selection's bounds, or to the stage margin for one layer.
+- **Paint order:** for the whole selection, keeping its internal order.
+- **Groups:** grouped layers move together.
+- **Typography:** size, weight, alignment, tracking, colour and emphasis for the text layer last clicked, even inside a group.
+- **Safe-area guides:** the 3% margin, and the story interface hatched on a 9:16 Instagram tile.
+- **Keyboard:** nudges move the selection.
+
+It measures the working layout with the same `validate()` the readiness uses, at the output size, outlining any layer that blocks. A save is one layout version with no render, and the version then goes through technical validation like any other.
+
+**Board and Copy deck.** Board shows the whole project by family, each asset drawn by the renderer with where it stands. Copy deck holds every word in the project in one table, editable in place; each edit is a text version checked against the ledger, the facts and the banned terms.
+
+**Views.** Board, the asset's canvas, the Copy deck and Client review are the four views the request named. Technical job logs stay under Jobs, out of the creative path.
+
+**Not yet:**
+- recipes with selective re-runs, and outcome metrics (s.20)
+- image editing on a selected region, which needs Gemini's semantic (text-described) masking, with preservation compared afterwards
+

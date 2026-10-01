@@ -457,7 +457,7 @@ await t('the layout editor moves a layer by drag and saves a layout version with
   await page.waitForSelector(R + '.st-le-layer');
   const hl = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const bb = await hl.boundingBox();
   await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 60, bb.y + bb.height / 2 - 40, { steps: 6 }); await page.mouse.up();
-  await page.click(R + '.st-le .btn:has-text("Save layout")');
+  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
   ok(/layout edited by hand/.test(await page.textContent(R + '.st-asset-head'))); eq(calls.gemini, g0, 'no render for a layout edit');
   const proj = await page.evaluate(() => document.querySelector('#studio-root .st-head b').textContent);
@@ -476,6 +476,51 @@ await t('the layout editor moves a layer by drag and saves a layout version with
   await page.waitForFunction(() => /switch on/.test(document.querySelector('#studio-root .st-panel-dialog tbody tr:first-child').textContent), null, { timeout: 10000 });
   await page.click(R + '.st-panel-dialog button:has-text("Close")');
   await shot(page, 'studio-client');
+});
+await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a group, edits the type of one layer, shows safe-area guides and measures as it goes; Board and the Copy deck show the whole project', async () => {
+  await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-railbtn.asset:has-text("LinkedIn post")'); await page.waitForSelector(R + '.st-stage canvas');
+  const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-tools');
+  const layerOf = async role => (await page.$eval(R + '.st-le-layer[aria-label="Layer ' + role + '"]', el => ({ left: el.style.left, top: el.style.top })));
+  const h0 = await layerOf('headline');
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
+  await page.click(R + '.st-le-tools button:has-text("Align left")');
+  const h1 = await layerOf('headline'); eq(h1.left, '3%', 'one layer aligns to the stage margin');
+  await page.click(R + '.st-le-tools button:has-text("Undo")'); eq((await layerOf('headline')).left, h0.left, 'undo restores it');
+  await page.click(R + '.st-le-tools button:has-text("Redo")'); eq((await layerOf('headline')).left, '3%', 'redo applies it again');
+  await page.focus(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('Control+z'); eq((await layerOf('headline')).left, h0.left, 'Ctrl+Z undoes from the keyboard');
+  // select headline and support together (Shift-click), group them, then move the group with the keyboard
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-layer[aria-label="Layer support"]', { modifiers: ['Shift'] });
+  await page.click(R + '.st-le-tools button:has-text("Group")');
+  const s0 = await layerOf('support'); const hA = await layerOf('headline');
+  await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await page.keyboard.press('Shift+ArrowUp');
+  const s1 = await layerOf('support'), hB = await layerOf('headline');
+  ok(parseFloat(s1.top) === Math.round((parseFloat(s0.top) - 2) * 10) / 10 && parseFloat(hB.top) === Math.round((parseFloat(hA.top) - 2) * 10) / 10, 'the grouped layers moved together: ' + JSON.stringify([s0, s1, hA, hB]));
+  // reorder: the list runs front to back
+  const order0 = await texts(page, R + '.st-le-item'); await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-tools button:has-text("To back")');
+  const order1 = await texts(page, R + '.st-le-item'); ok(/headline|support/.test(order1[order1.length - 1]) && /headline|support/.test(order1[order1.length - 2]) && JSON.stringify(order0) !== JSON.stringify(order1), 'the headline and its group are now at the back: ' + order1.join(' | '));
+  await page.click(R + '.st-le-tools button:has-text("To front")');
+  // typography of one text layer
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.waitForSelector(R + '.st-le-type');
+  await page.fill(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', '5.2'); await page.press(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', 'Enter');
+  await page.selectOption(R + '.st-le-type select[aria-label="Text alignment"]', 'center');
+  ok(await page.$(R + '.st-le-guide'), 'the 3% guide is drawn');
+  await page.waitForSelector(R + '.st-le-val'); ok(/Measured at 1080x1080/.test(await page.textContent(R + '.st-le-val')), 'measured at the output size while editing');
+  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
+  await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
+  eq(calls.gemini, g0, 'no render for any of it');
+  const row = env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='LinkedIn post' ORDER BY v.created DESC LIMIT 1").get();
+  const L = JSON.parse(row.layout); const hl = L.layers.find(l => l.role === 'headline'), sp = L.layers.find(l => l.role === 'support');
+  ok(hl.size === 5.2 && hl.align === 'center' && hl.group && hl.group === sp.group, 'type, alignment and the group saved: ' + JSON.stringify([hl.size, hl.align, hl.group, sp.group]));
+  await page.click(R + '.st-railbtn:has-text("Board")'); await page.waitForSelector(R + '.st-board-card');
+  ok((await texts(page, R + '.st-board-card')).some(x => /LinkedIn post/.test(x) && /(validated|not validated|stale|failing)/.test(x)), 'the board shows each asset and where it stands');
+  await page.click(R + '.st-railbtn:has-text("Copy deck")'); await page.waitForSelector(R + '.st-copydeck table');
+  const cap = R + '.st-copydeck textarea[aria-label="caption of LinkedIn post"]'; const v0 = +((await texts(page, R + '.st-copydeck tbody tr')).find(x => /LinkedIn post/.test(x)).match(/v(\d+)/) || [])[1];
+  await page.fill(cap, 'Fuel tax credits return a road tax. That is all.'); await page.click(R + '.st-copydeck .ov-title');
+  await page.waitForFunction(v => [...document.querySelectorAll('#studio-root .st-copydeck tbody tr')].some(r => /LinkedIn post/.test(r.textContent) && new RegExp(', v' + (v + 1) + '(?!\\d)').test(r.textContent)), v0, { timeout: 15000 });
+  await shot(page, 'studio-canvas');
 });
 await page.close();
 await t('a read-only key reviews everything and changes nothing: no composer, locks, approvals or new project; export is offered', async () => {

@@ -158,7 +158,7 @@
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     return html`<nav class="st-rail" aria-label="Project">
       <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
+      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['board', 'Board', p.assets.length || null], ['copy', 'Copy deck'], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
       <${Lbl}>Assets</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
         <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
@@ -305,6 +305,32 @@
           <div><b>Job</b> ${it.purpose}</div><div class="ov-dim">${it.relation}</div>
           ${a ? html`<button class="ov-link" onClick=${() => onOpen(a.id)}>open ${a.title}</button>` : null}</div>`; })}</div></div>`)}
     </div>`;
+  }
+  /* ------------------------------------------------------------ Board and Copy: the whole project at a glance, and every word in one deck */
+  function BoardView({ p, onOpen }) {
+    const fams = {}; p.assets.forEach(a => { (fams[a.family] = fams[a.family] || []).push(a); });
+    const tech = a => { const v = current(a); if (!v) return ['none', '']; if (v.mode === 'copy') return ['copy', 'ok']; const t = (a.readiness || {}).technical; return [t === 'passed' ? 'validated' : t === 'failed' ? 'failing' : t === 'stale' ? 'stale' : 'not validated', t === 'passed' ? 'ok' : t === 'failed' ? 'bad' : 'warn']; };
+    return html`<div class="st-centre-pad st-board" aria-label="Board"><div class="ov-title">Board</div><div class="ov-why">Every asset in the project, by family, drawn by the one renderer, with where it stands: technical validation, the agency's approvals and the version.</div>
+      ${!p.assets.length ? html`<div class="ov-empty">No assets yet.</div>` : null}
+      ${Object.keys(fams).map(f => html`<div key=${f} class="st-board-fam"><${Lbl}>${f} (${fams[f].length})</${Lbl}><div class="st-board-grid">${fams[f].map(a => { const [tw, tk] = tech(a); return html`<button key=${a.id} class="st-board-card" onClick=${() => onOpen(a.id)} aria-label=${'Open ' + a.title}>
+        <${Composition} v=${current(a)} a=${a} ns=${p.ns} size="card" />
+        <span class="st-board-t">${a.title}</span><span class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${a.versions.length}</span>
+        <span class="st-know-h"><${Chip} kind=${tk}>${tw}</${Chip}>${standing(a, 'copy') ? html`<${Chip} kind="ok">copy approved</${Chip}>` : null}${standing(a, 'design') ? html`<${Chip} kind="ok">design approved</${Chip}>` : null}</span></button>`; })}</div></div>`)}
+    </div>`;
+  }
+  function CopyView({ p, onEdit, onOpen }) {
+    const ro = !canWrite() || p.readOnly; const [draft, setDraft] = useState({});
+    const key = (a, k) => a.id + ':' + k;
+    const val = (a, k) => draft[key(a, k)] != null ? draft[key(a, k)] : ((current(a) || {}).copy || {})[k] || '';
+    const save = (a, k) => { const d = draft[key(a, k)]; if (d == null) return; const cur = ((current(a) || {}).copy || {})[k] || ''; if (d !== cur) onEdit(a, { [k]: d }); setDraft(x => { const y = Object.assign({}, x); delete y[key(a, k)]; return y; }); };
+    const F = [['headline', 'Headline'], ['support', 'Support'], ['cta', 'CTA'], ['caption', 'Caption']];
+    return html`<div class="st-centre-pad st-copydeck" aria-label="Copy deck"><div class="ov-title">Copy</div><div class="ov-why">Every word in the project in one place. An edit here is a text version of that asset (no render), checked again against the ledger, the facts and the banned terms; a change to words on a tile asks for its validation again.</div>
+      <div class="st-copydeck-scroll"><table class="ov-table"><thead><tr><th>Asset</th>${F.map(([k, l]) => html`<th key=${k}>${l}</th>`)}<th>Checks</th></tr></thead><tbody>
+      ${p.assets.map(a => { const v = current(a) || {}; const flags = (v.checks || []).filter(c => c.state !== 'matches' && c.state !== 'fact'); const max = (CHANNELS[a.channel] || {}).max || 900;
+        return html`<tr key=${a.id}><td><button class="ov-link" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${a.versions.length}</div></td>
+          ${F.map(([k]) => html`<td key=${k}>${k !== 'cta' ? html`<textarea class="st-ta" rows=${k === 'caption' ? 3 : 2} disabled=${ro || (a.locks || {})[k]} value=${val(a, k)} onInput=${e => setDraft(Object.assign({}, draft, { [key(a, k)]: e.target.value }))} onBlur=${() => save(a, k)} aria-label=${k + ' of ' + a.title}></textarea>` : html`<input class="st-in" disabled=${ro || (a.locks || {})[k]} value=${val(a, k)} onInput=${e => setDraft(Object.assign({}, draft, { [key(a, k)]: e.target.value }))} onBlur=${() => save(a, k)} aria-label=${k + ' of ' + a.title} />`}${k === 'caption' ? html`<div class=${'ov-dim' + (val(a, k).length > max ? ' st-over' : '')}>${val(a, k).length} of ${max}</div>` : null}</td>`)}
+          <td>${flags.length ? flags.slice(0, 4).map((c, i) => html`<div key=${i}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <span class="ov-dim">${c.text}</span></div>`) : html`<${Chip} kind="ok">clean</${Chip}>`}</td></tr>`; })}
+      </tbody></table></div></div>`;
   }
   function DirectionsView({ p, onChoose, onMore, busy }) {
     return html`<div class="st-centre-pad"><div class="ov-title">Directions</div>
@@ -800,25 +826,92 @@
 
   /* ------------------------------------------------------------ the layout editor: drag, resize and nudge the layers over the same renderer */
   function LayoutEditor({ v, a, ns, onDone }) {
-    const [layout, setLayout] = useState(() => JSON.parse(JSON.stringify(v.layout)));
-    const [sel, setSel] = useState(null); const box = useRef(null); const act = useRef(null);
-    const layers = layout.layers.filter(l => l.type !== 'shape' || l.role !== 'panel' || true);
-    const upd = (id, patch) => setLayout(L => Object.assign({}, L, { layers: L.layers.map(l => (l.id === id ? Object.assign({}, l, patch) : l)) }));
-    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); const r = box.current.getBoundingClientRect(); act.current = { id: l.id, mode, sx: e.clientX, sy: e.clientY, ox: l.x, oy: l.y, ow: l.w, oh: l.h || 0, osz: l.size || 0, rw: r.width, rh: r.height }; setSel(l.id); try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
-    const move = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const l = layout.layers.find(x => x.id === c.id); if (!l) return;
-      if (c.mode === 'move') upd(c.id, { x: Math.round(Math.max(-l.w + 2, Math.min(98, c.ox + dx)) * 10) / 10, y: Math.round(Math.max(-2, Math.min(98, c.oy + dy)) * 10) / 10 });
-      else if (l.type === 'text') { const w = Math.max(10, c.ow + dx); upd(c.id, { w: Math.round(w * 10) / 10, size: Math.round(Math.max(2.4, c.osz * (w / c.ow)) * 10) / 10, h: Math.round((c.oh * (w / c.ow)) * 10) / 10 }); }
-      else upd(c.id, { w: Math.round(Math.max(4, c.ow + dx) * 10) / 10, h: Math.round(Math.max(2, c.oh + dy) * 10) / 10 }); };
-    const up = () => { act.current = null; };
-    const key = (e, l) => { const step = e.shiftKey ? 2 : 0.5; const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key]; if (!d) return; e.preventDefault(); upd(l.id, { x: Math.round((l.x + d[0]) * 10) / 10, y: Math.round((l.y + d[1]) * 10) / 10 }); };
+    // the working layout with its history: every finished gesture or command is one step that undo and redo walk
+    const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
+    const layout = hist.now;
+    const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides, setGuides] = useState(true); const box = useRef(null); const act = useRef(null);
+    const commit = next => setHist(h => ({ past: h.past.concat([h.now]).slice(-80), now: next, future: [] }));
+    const live = next => setHist(h => Object.assign({}, h, { now: next }));            // during a drag; the step is committed on release
+    const undo = () => setHist(h => h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now].concat(h.future) } : h);
+    const redo = () => setHist(h => h.future.length ? { past: h.past.concat([h.now]), now: h.future[0], future: h.future.slice(1) } : h);
+    const layers = layout.layers;
+    const byId = id => layers.find(l => l.id === id);
+    const groupOf = id => { const l = byId(id); return l && l.group ? layers.filter(x => x.group === l.group).map(x => x.id) : [id]; };
+    const selected = () => Array.from(new Set(sel.reduce((acc, id) => acc.concat(groupOf(id)), []))).map(byId).filter(Boolean);
+    const movable = l => l && !l.locked;
+    const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => (patches[l.id] ? Object.assign({}, l, patches[l.id]) : l)) });
+    const r1 = x => Math.round(x * 10) / 10;
+    const pick = (e, l) => { setFocus(l.id); setSelIds(s => e.shiftKey ? (s.indexOf(l.id) >= 0 ? s.filter(x => x !== l.id) : s.concat([l.id])) : (s.indexOf(l.id) >= 0 && s.length > 1 ? s : [l.id])); };
+    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); pick(e, l); if (l.locked) return; const r = box.current.getBoundingClientRect();
+      const ids = mode === 'move' ? Array.from(new Set((sel.indexOf(l.id) >= 0 ? sel : [l.id]).reduce((acc, id) => acc.concat(groupOf(id)), []))) : [l.id];
+      act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
+    const move = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
+      if (c.mode === 'move') c.ids.forEach(id => { const o = c.start.layers.find(x => x.id === id); if (movable(o)) patches[id] = { x: r1(Math.max(-o.w + 2, Math.min(98, o.x + dx))), y: r1(Math.max(-2, Math.min(98, o.y + dy))) }; });
+      else { const o = c.start.layers.find(x => x.id === c.id); if (o.type === 'text') { const w = Math.max(10, o.w + dx); patches[o.id] = { w: r1(w), size: r1(Math.max(2.4, o.size * (w / o.w))), h: r1((o.h || 0) * (w / o.w)) }; } else patches[o.id] = { w: r1(Math.max(4, o.w + dx)), h: r1(Math.max(2, (o.h || 0) + dy)) }; }
+      live(patchMany(c.start, patches)); };
+    const up = () => { const c = act.current; act.current = null; if (c && JSON.stringify(c.start) !== JSON.stringify(layout)) setHist(h => ({ past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] })); };
+    const nudge = (dx, dy) => { const s = selected().filter(movable); if (!s.length) return; const patches = {}; s.forEach(l => { patches[l.id] = { x: r1(l.x + dx), y: r1(l.y + dy) }; }); commit(patchMany(layout, patches)); };
+    // alignment: to the selection's bounds when two or more are chosen, to the stage's 3% margin when one is
+    const align = how => { const s = selected().filter(movable); if (!s.length) return; const one = s.length === 1; const m = 3;
+      const L0 = one ? m : Math.min.apply(null, s.map(l => l.x)), R0 = one ? 100 - m : Math.max.apply(null, s.map(l => l.x + l.w)), T0 = one ? m : Math.min.apply(null, s.map(l => l.y)), B0 = one ? 100 - m : Math.max.apply(null, s.map(l => l.y + (l.h || 0)));
+      const patches = {}; s.forEach(l => { const h = l.h || 0; patches[l.id] = how === 'left' ? { x: r1(L0) } : how === 'right' ? { x: r1(R0 - l.w) } : how === 'centre' ? { x: r1((L0 + R0) / 2 - l.w / 2) } : how === 'top' ? { y: r1(T0) } : how === 'bottom' ? { y: r1(B0 - h) } : { y: r1((T0 + B0) / 2 - h / 2) }; });
+      commit(patchMany(layout, patches)); };
+    const distribute = axis => { const s = selected().filter(movable).slice().sort((p, q) => axis === 'v' ? p.y - q.y : p.x - q.x); if (s.length < 3) return;
+      const size = l => axis === 'v' ? (l.h || 0) : l.w; const pos = l => axis === 'v' ? l.y : l.x; const first = s[0], last = s[s.length - 1];
+      const gap = (pos(last) + size(last) - pos(first) - s.reduce((n, l) => n + size(l), 0)) / (s.length - 1); let at = pos(first); const patches = {};
+      s.forEach(l => { patches[l.id] = axis === 'v' ? { y: r1(at) } : { x: r1(at) }; at += size(l) + gap; }); commit(patchMany(layout, patches)); };
+    // paint order: the selection (a group moves as one) goes to the front or back, or one step, keeping its own order
+    const reorder = how => { const s = selected(); if (!s.length) return; const set = new Set(s.map(l => l.id)); const rest = layers.filter(l => !set.has(l.id)); const block = layers.filter(l => set.has(l.id));
+      let at; const firstI = layers.findIndex(l => set.has(l.id)); const before = layers.slice(0, firstI).filter(l => !set.has(l.id)).length;
+      at = how === 'front' ? rest.length : how === 'back' ? 0 : how === 'forward' ? Math.min(rest.length, before + 1) : Math.max(0, before - 1);
+      commit(Object.assign({}, layout, { layers: rest.slice(0, at).concat(block, rest.slice(at)) })); };
+    const group = () => { const s = selected(); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
+    const ungroup = () => { const patches = {}; selected().forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
+    const setOne = (id, patch) => commit(patchMany(layout, { [id]: patch }));
+    const keyAll = e => { const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+      if (e.key === 'Escape') { setSelIds([]); return; }
+      const step = e.shiftKey ? 2 : 0.5; const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key]; if (d) { e.preventDefault(); nudge(d[0], d[1]); } };
+    // the same validation the readiness uses, at the output size, on the working layout (debounced)
+    const comp = useComposition(Object.assign({}, v, { layout }), ns, layout, v.copy);
+    const [val, setVal] = useState(null);
+    useEffect(() => { if (!comp.ready) return; const t = setTimeout(() => { try { setVal(R.validate(layout, v.copy, comp.imgs, { fonts: comp.fonts, channel: a.channel, format: a.format })); } catch (e) { setVal(null); } }, 250); return () => clearTimeout(t); }, [layout, comp.key, comp.ready]);
+    const bad = new Set(); (val ? val.issues : []).filter(i => i.severity === 'blocking').forEach(i => i.layers.forEach(id => bad.add(id)));
+    const story = a.format === '9:16' && a.channel === 'instagram';
     const changed = JSON.stringify(layout) !== JSON.stringify(v.layout);
-    return html`<div class="st-le" ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
-      <${Composition} v=${Object.assign({}, v, { layout })} a=${a} ns=${ns} />
-      ${layers.filter(l => !l.hidden).map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel === l.id ? ' sel' : '') + (l.locked ? ' locked' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => { if (l.locked) { e.preventDefault(); setSel(l.id); return; } down(e, l, 'move'); }} onKeyDown=${e => { if (!l.locked) key(e, l); }} onFocus=${() => setSel(l.id)}>
-        <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}</span>${!l.locked ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
-      </div>`)}
-      <div class="st-le-list">${layers.map(l => html`<span key=${l.id} class=${'st-le-item' + (sel === l.id ? ' on' : '')}><button class="ov-link" onClick=${() => setSel(l.id)}>${l.role || l.type}</button> <button class="st-lock" onClick=${() => upd(l.id, { hidden: !l.hidden })} title="Hide or show this element">${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => upd(l.id, { locked: !l.locked })} title="A locked element keeps its place through directions and hand edits">${l.locked ? 'locked' : 'lock'}</button></span>`)}</div>
-      <div class="st-msg-foot" style=${{ marginTop: 8 }}><span class="ov-dim">Drag to move, the corner to resize (text scales with its box), arrow keys nudge the focused layer (Shift for 2%).</span><button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
+    const one = selected().length === 1 ? selected()[0] : null;
+    // the type panel follows the layer last clicked, even inside a group (type is set per layer)
+    const typed = focusId && sel.length && byId(focusId) && byId(focusId).type === 'text' ? byId(focusId) : one;
+    const tb = (label, fn, dis, title) => html`<button class="btn sm ghost" disabled=${dis} title=${title || label} onClick=${fn}>${label}</button>`;
+    return html`<div class="st-le-wrap" onKeyDown=${keyAll}>
+      <div class="st-le-tools" role="toolbar" aria-label="Canvas tools">
+        ${tb('Undo', undo, !hist.past.length, 'Undo (Ctrl or Cmd+Z)')}${tb('Redo', redo, !hist.future.length, 'Redo (Ctrl or Cmd+Shift+Z)')}
+        <span class="st-le-sep"></span>${['left', 'centre', 'right', 'top', 'middle', 'bottom'].map(h => tb('Align ' + h, () => align(h), !selected().length, 'Align ' + h + (selected().length > 1 ? ' to the selection' : ' to the stage margin')))}
+        ${tb('Distribute across', () => distribute('h'), selected().length < 3)}${tb('Distribute down', () => distribute('v'), selected().length < 3)}
+        <span class="st-le-sep"></span>${tb('To front', () => reorder('front'), !selected().length)}${tb('Forward', () => reorder('forward'), !selected().length)}${tb('Backward', () => reorder('backward'), !selected().length)}${tb('To back', () => reorder('back'), !selected().length)}
+        <span class="st-le-sep"></span>${tb('Group', group, selected().length < 2)}${tb('Ungroup', ungroup, !selected().some(l => l.group))}
+        <label class="st-check"><input type="checkbox" checked=${guides} onChange=${e => setGuides(e.target.checked)} /> safe-area guides</label>
+      </div>
+      <div class="st-le" ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${e => { if (e.target === box.current) setSelIds([]); }}>
+        <${Composition} v=${Object.assign({}, v, { layout })} a=${a} ns=${ns} />
+        ${guides ? html`<div class="st-le-guide" style=${{ left: '3%', top: '3%', right: '3%', bottom: '3%' }} title="3% margin"></div>${story ? html`<div class="st-le-zone" style=${{ left: 0, right: 0, top: 0, height: '14%' }} title="Instagram story interface (top 14%)"></div><div class="st-le-zone" style=${{ left: 0, right: 0, bottom: 0, height: '20%' }} title="Instagram story interface (bottom 20%)"></div>` : null}` : null}
+        ${layers.filter(l => !l.hidden).map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (bad.has(l.id) ? ' bad' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
+          <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}${l.group ? ' (grouped)' : ''}</span>${!l.locked ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
+        </div>`)}
+      </div>
+      ${val ? html`<div class=${'st-le-val' + (val.ok ? '' : ' bad')} role="status">${val.ok ? 'Measured at ' + val.W + 'x' + val.H + ': no blocking issue' + (val.issues.length ? ' (' + val.issues.map(i => i.code.replace(/_/g, ' ')).join(', ') + ')' : '') : 'Measured at ' + val.W + 'x' + val.H + ': ' + val.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')}</div>` : null}
+      ${typed && typed.type === 'text' && !typed.locked ? (one => html`<div class="st-le-type" aria-label="Typography">
+        <span class="st-lbl">Type: ${one.role}</span>
+        <label>Size <input class="st-in" type="number" step="0.1" min="1" max="20" value=${one.size} onChange=${e => setOne(one.id, { size: r1(Math.max(1, +e.target.value || one.size)) })} aria-label="Type size, per cent of the width" /></label>
+        <label>Weight <select class="st-sel" value=${String(one.weight || 600)} onChange=${e => setOne(one.id, { weight: +e.target.value })} aria-label="Weight">${[400, 500, 600, 700, 800, 900].map(w => html`<option key=${w} value=${String(w)}>${w}</option>`)}</select></label>
+        <label>Align <select class="st-sel" value=${one.align || 'left'} onChange=${e => setOne(one.id, { align: e.target.value })} aria-label="Text alignment"><option value="left">left</option><option value="center">centre</option><option value="right">right</option></select></label>
+        <label>Tracking <input class="st-in" type="number" step="0.01" min="-0.05" max="0.3" value=${one.letterSpacing || 0} onChange=${e => setOne(one.id, { letterSpacing: Math.round((+e.target.value || 0) * 100) / 100 })} aria-label="Letter spacing, em" /></label>
+        <label>Colour <input class="st-in" value=${one.color || '#ffffff'} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value)) setOne(one.id, { color: e.target.value }); }} aria-label="Colour" /></label>
+        <label>Emphasis <select class="st-sel" value=${one.emphasis || ''} onChange=${e => setOne(one.id, { emphasis: e.target.value || undefined })} aria-label="Emphasis"><option value="">none</option><option value="caps">caps</option><option value="highlight">highlight</option><option value="underline">underline</option><option value="box">box</option></select></label>
+      </div>`)(typed) : null}
+      <div class="st-le-list">${layers.slice().reverse().map(l => html`<span key=${l.id} class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '')}><button class="ov-link" onClick=${e => pick(e, l)}>${l.role || l.type}</button> <button class="st-lock" onClick=${() => setOne(l.id, { hidden: !l.hidden })} title="Hide or show this element">${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => setOne(l.id, { locked: !l.locked })} title="A locked element keeps its place through directions and hand edits">${l.locked ? 'locked' : 'lock'}</button></span>`)}</div>
+      <div class="st-msg-foot" style=${{ marginTop: 8 }}><span class="ov-dim">Drag to move (Shift-click to select several; grouped layers move together), the corner to resize, arrow keys nudge (Shift for 2%), Ctrl or Cmd+Z undoes. The list runs from front to back.</span><button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
     </div>`;
   }
 
@@ -1065,6 +1158,8 @@
     else if (!p) centre = html`<div class="st-centre-pad"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
     else if (view === 'brief') centre = html`<${BriefView} p=${p} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} busy=${busy} />`;
+    else if (view === 'board') centre = html`<${BoardView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
+    else if (view === 'copy') centre = html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
     else if (view === 'sequence') centre = html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${id => { setSelAsset(id); setView('asset'); }} busy=${busy} />`;
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
     else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
