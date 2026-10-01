@@ -336,6 +336,21 @@
   /* ---------------------------------------------------------------- repair: the smallest geometric correction, never the words */
   const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
   const MIN_SIZE = { headline: 3.2, support: 2.4, cta: 2.2 };
+  function swapMarks(L, copy, images, opts, byId, steps) {
+    const v0 = validate(L, copy, images, opts);
+    v0.boxes.filter(b => b.mark && typeof b.contrast === 'number' && b.contrast < (b.role === 'wordmark' ? 4.5 : 3)).forEach(b => {
+      const l = byId[b.id]; const vars = (opts.variants || {})[b.id] || []; if (!l || l.locked || l.hidden || !vars.length) return;
+      let best = null; vars.forEach(vr => { if (!vr.img) return; const imgs = Object.assign({}, images, { [b.id]: vr.img }); const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, { src: vr.src }) : x) }), copy, imgs, opts); const tb = t.boxes.find(x => x.id === b.id); if (tb && typeof tb.contrast === 'number' && (!best || tb.contrast > best.c)) best = { vr, c: tb.contrast }; });
+      if (best && best.c > b.contrast + 0.3 && best.vr.src !== l.src) { l.src = best.vr.src; l.variant = best.vr.variant; images[b.id] = best.vr.img; steps.push('switched the ' + l.role + ' to its approved ' + best.vr.variant + ' variant (contrast ' + b.contrast.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
+    });
+  }
+  /** Only the marks: each approved variant is measured against what is actually behind the mark and the best one is taken.
+   *  Nothing else moves; the mark is never redrawn or recoloured, only exchanged for another approved file. */
+  function markVariants(layout0, copy, images, opts) {
+    opts = opts || {}; const L = JSON.parse(JSON.stringify(layout0 || {})); const byId = {}; (L.layers || []).forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
+    const steps = []; const imgs = Object.assign({}, images || {}); if (opts.variants && !(opts.locks && opts.locks.layout)) swapMarks(L, copy || {}, imgs, opts, byId, steps);
+    return { layout: L, changed: steps.length > 0, steps, images: imgs };
+  }
   function repair(layout0, copy, images, opts) {
     opts = opts || {}; copy = copy || {}; images = images || {};
     const L = JSON.parse(JSON.stringify(layout0 || {})); const { w: W, h: H } = stageSize(L, opts.width);
@@ -344,7 +359,10 @@
     const layoutIssues = r => r.issues.filter(i => LAYOUT_CODES[i.code] && i.severity === 'blocking');
     const steps = []; const result = (conflict) => { const after = validate(L, copy, images, opts); return { layout: L, changed: JSON.stringify(L) !== JSON.stringify(layout0), steps, before, after, ok: !layoutIssues(after).length, conflict: conflict || (layoutIssues(after).length ? 'unresolved' : '') }; };
     if (opts.locks && opts.locks.layout) return Object.assign(result('The layout is locked on this asset; unlock it to let the Studio move anything.'), { layout: layout0, changed: false });
-    if (!layoutIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
+    // unreadable words are always fixed; merely low contrast only when the person asked (opts.fixContrast), since a deliberate
+    // brand colour (a gold kicker) may sit just under the bar and is not the repair's to change on its own
+    const contrastIssues = r => r.issues.filter(i => i.code === 'unreadable_contrast' || (opts.fixContrast && i.code === 'low_contrast'));
+    if (!layoutIssues(before).length && !contrastIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
     const story = (opts.format || L.format) === '9:16' && opts.channel === 'instagram'; const sp = { top: story ? 14 : 3.2, bottom: story ? 20 : 3.2, side: story ? 6 : 3.2 };
@@ -428,14 +446,18 @@
     }
     if (scale < 1) steps.push('stepped the type in that column down to ' + Math.round(scale * 100) + '% of its size, hierarchy kept, above the readable minimum');
     // a mark that reads badly takes the approved variant that reads best against what is actually behind it
-    if (opts.variants) {
-      const v0 = validate(L, copy, images, opts);
-      v0.boxes.filter(b => b.mark && typeof b.contrast === 'number' && b.contrast < (b.role === 'wordmark' ? 4.5 : 3)).forEach(b => {
-        const l = byId[b.id]; const vars = opts.variants[b.id] || []; if (!movable(l) || !vars.length) return;
-        let best = null; vars.forEach(vr => { if (!vr.img) return; const imgs = Object.assign({}, images, { [b.id]: vr.img }); const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, { src: vr.src }) : x) }), copy, imgs, opts); const tb = t.boxes.find(x => x.id === b.id); if (tb && typeof tb.contrast === 'number' && (!best || tb.contrast > best.c)) best = { vr, c: tb.contrast }; });
-        if (best && best.c > b.contrast + 0.3 && best.vr.src !== l.src) { l.src = best.vr.src; l.variant = best.vr.variant; images[b.id] = best.vr.img; steps.push('switched the ' + l.role + ' to its approved ' + best.vr.variant + ' variant (contrast ' + b.contrast.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
-      });
-    }
+    if (opts.variants) swapMarks(L, copy, images, opts, byId, steps);
+    // words that do not read against what is behind them: first the colour (white or near-black, whichever reads), then, only
+    // if neither is enough, a backing plate behind the same words - the words, their size and their place are not touched
+    contrastIssues(validate(L, copy, images, opts)).forEach(iss => iss.layers.forEach(id => {
+      const l = byId[id]; if (!movable(l) || l.type !== 'text') return;
+      const read = (patch) => { const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, patch) : x) }), copy, images, opts); const tb = t.boxes.find(x => x.id === id); return { c: tb && typeof tb.contrast === 'number' ? tb.contrast : 0, clear: !contrastIssues(t).some(i => i.layers.indexOf(id) >= 0) }; };
+      const was = (validate(L, copy, images, opts).boxes.find(x => x.id === id) || {}).contrast || 0;
+      const colours = ['#FFFFFF', '#111111'].filter(c => String(l.color || '').toUpperCase() !== c);
+      let best = null; colours.forEach(c => { const r = read({ color: c }); if (!best || (r.clear && !best.clear) || (r.clear === best.clear && r.c > best.c)) best = Object.assign({ patch: { color: c } }, r); });
+      if (!(best && best.clear)) { const light = !best || best.patch.color === '#FFFFFF'; const patch = { color: light ? '#FFFFFF' : '#111111', bg: light ? 'rgba(10,14,22,0.72)' : 'rgba(255,255,255,0.86)' }; const r = read(patch); if (!best || r.c > best.c) best = Object.assign({ patch }, r); }
+      if (best && best.c > was + 0.3) { Object.assign(l, best.patch); steps.push((best.patch.bg ? 'put a backing plate behind' : 'changed the colour of') + ' the ' + (l.role || 'text') + ' ' + id + ' so it reads (contrast ' + was.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
+    }));
     now = validate(L, copy, images, vopts);
     if (layoutIssues(now).length) {
       const locked = layoutIssues(now).reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
@@ -469,5 +491,5 @@
   function report(v, val) {
     return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'rotate'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 100) / 100 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, report, zip };
+  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, report, zip };
 })();

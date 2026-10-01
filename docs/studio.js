@@ -868,7 +868,7 @@
   function Readiness({ a, v, val, measuring, ro, onRepair, onMeasure, onDraft, repairing, repairNote }) {
     const rd = a.readiness || {}; const ins = rd.inspection || { state: 'none' }; const appr = standing(a, 'design');
     const layoutCodes = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
-    const fixable = val && val.issues.some(i => layoutCodes[i.code] || i.code === 'mark_low_contrast');
+    const fixable = val && val.issues.some(i => layoutCodes[i.code] || /^(mark_low_contrast|mark_unreadable|low_contrast|unreadable_contrast)$/.test(i.code));
     return html`<div class="st-ready" aria-label="Readiness">
       <div class="st-ready-row"><b>Technical validation</b> <${Chip} kind=${TECH_KIND[rd.technical] || ''}>${TECH_WORD[rd.technical] || rd.technical || 'not validated'}</${Chip}>${measuring ? html` <span class="ov-dim">measuring at ${v.layout && v.layout.stage ? v.layout.stage.w + 'x' + v.layout.stage.h : 'native size'}...</span>` : rd.validation ? html` <span class="ov-dim">${aest(rd.validation.at)}, ${rd.validation.who}</span>` : null}</div>
       ${val ? html`<ul class="st-vallist st-val">${val.issues.length ? val.issues.map((i, k) => html`<li key=${k}><${Chip} kind=${i.severity === 'blocking' ? 'bad' : i.severity === 'warning' ? 'warn' : ''}>${i.code.replace(/_/g, ' ')}</${Chip}> ${i.layers.length ? html`<b>${i.layers.join(', ')}</b> ` : null}<span class="ov-dim">${i.detail}</span></li>`) : html`<li><span class="ov-dim">No collisions, overflow, clipping or missing assets measured at the output size.</span></li>`}${val.fonts ? html`<li class="ov-dim">Fonts: ${Object.keys(val.fonts.roles || {}).map(k => k + ' ' + val.fonts.roles[k].used + (val.fonts.roles[k].fallback ? ' (asked ' + val.fonts.roles[k].requested + ')' : '')).join('; ') || 'none needed'}</li>` : null}</ul>` : null}
@@ -879,7 +879,7 @@
       <div class="st-ready-row"><b>Human approval</b> <${Chip} kind=${appr ? 'ok' : ''}>${appr ? 'design approved by ' + appr.by : 'design not approved'}</${Chip}>${appr && rd.technical !== 'passed' && rd.technical !== 'not_applicable' ? html` <span class="ov-dim">the approval stands, but export waits for a passing validation</span>` : null}</div>
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onAreaEdit, onPreservation }) {
+  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onPreservation }) {
     const v = current(a);
     const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.id, a.current]);
@@ -896,10 +896,15 @@
     const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
     const comp = useComposition(v, p.ns, v.layout, v.copy);
     const [val, setVal] = useState(null); const [measuring, setMeasuring] = useState(false); const [repairing, setRepairing] = useState(false); const [repairNote, setRepairNote] = useState(null);
-    const filed = useRef('');
+    const filed = useRef(''); const autoMark = useRef('');
     const measure = useCallback(async (force) => {
       if (!v || !v.layout || !Array.isArray(v.layout.layers) || !comp.ready) return;
       const r = R.validate(v.layout, v.copy, comp.imgs, { fonts: comp.fonts, channel: a.channel, format: a.format }); setVal(r);
+      // a mark that does not read takes its best approved variant at once (blue, white or black, measured against what is behind
+      // it): an identity requirement, not a taste, so it needs no click; it is a layout version, no render, said on the version
+      if (!ro && onMarkVariant && !(a.locks || {}).layout && autoMark.current !== v.id && r.issues.some(i => (i.code === 'mark_unreadable' || i.code === 'mark_low_contrast') && i.layers.some(id => { const l = v.layout.layers.find(x => x.id === id); return l && !l.locked && Array.isArray(l.variants) && l.variants.length > 1; }))) {
+        autoMark.current = v.id; setMeasuring(true); try { if (await onMarkVariant(a, v, comp)) return; } finally { setMeasuring(false); }
+      }
       const rd = a.readiness || {}; const sigKey = v.id + '|' + r.issues.map(i => i.code + ':' + i.layers.join(',')).join(';') + '|' + (comp.fonts ? comp.fonts.fallback.join(',') : '');
       // file the evidence when the worker has none for this composition, or when what was measured disagrees with what it holds
       const disagrees = (rd.technical === 'passed' && !r.ok) || (rd.technical === 'failed' && r.ok);
@@ -1317,12 +1322,21 @@
     const repairLayout = async (as, v, comp) => {
       try {
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
-        const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, variants: Object.keys(variants).length ? variants : undefined });
+        const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
         if (!r.changed) return { text: r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix geometrically.', conflict: !!r.conflict };
         await call('/studio/version', { asset: as.id, revision: as.revision, layout: r.layout, kind: 'layout', note: 'layout repaired: ' + r.steps.join('; ').slice(0, 170) });
         await reload();
         return { text: (r.ok ? 'Fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.', conflict: !r.ok };
       } catch (e) { toastMsg(e.message, true); return { text: 'The fix failed: ' + e.message, conflict: true }; }
+    };
+    const markVariant = async (as, v, comp) => {
+      try {
+        const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
+        const r = R.markVariants(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, variants });
+        if (!r.changed) return false;
+        await call('/studio/version', { asset: as.id, revision: as.revision, layout: r.layout, kind: 'layout', note: 'mark variant chosen for contrast: ' + r.steps.join('; ').slice(0, 160) });
+        await reload(); toastMsg(r.steps.join('; ') + ' - no render'); return true;
+      } catch (e) { toastMsg('Mark variant not changed: ' + e.message, true); return false; }
     };
     const saveLayout = async (as, layout) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'layout edited by hand' }); await reload(); } catch (e) { fail(e); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)' }); await reload(); } catch (e) { fail(e); } };
@@ -1403,7 +1417,7 @@
     else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
+    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
     else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
 
     return html`<div class="st">

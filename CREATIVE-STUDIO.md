@@ -691,6 +691,20 @@ Harnesses: `tests/studio-p21-worker.mjs` (6), the P21 case in `tests/studio-brow
 
 Harnesses: `tests/studio-p22-worker.mjs` (4), `tests/studio-brand-gaps-test.mjs` (10), and the inspection assertions in `tests/studio-browser.mjs`.
 
+### 29a. From the first live render
+
+The first live HOOF render showed two faults:
+- the default blue wordmark sat on an orange road at 1.28:1;
+- a pale label sat on the sky at 2.15:1.
+
+The variant swap existed, but only inside "Fix layout", and that button was hidden for the worst case (`mark_unreadable`).
+
+Now:
+- **The mark.** The asset view swaps an unreadable mark for its best approved variant on its own (`STRender.markVariants`), as a layout version with no render. A locked mark or a locked layout is left alone.
+- **The words.** `repair()` makes words readable by colour first, then with a backing plate. The words, their place and their size never change.
+  - Unreadable words are always fixed.
+  - Merely low-contrast words are fixed only when someone presses Fix, so a deliberate brand colour such as a gold kicker is not changed on its own.
+
 ## 30. Report for the professional-platform request (builds studio-p19 to studio-p22)
 
 All work is on `claude/peaceful-gates-g1t4ss`. Nothing in P19 to P22 is deployed or merged, no paid call was made, and nothing was approved on anyone's behalf.

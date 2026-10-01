@@ -343,6 +343,35 @@ ok(p20.parityFramed < p20.parityPlain, 'the preview and the export draw the same
 ok(Math.abs(p20.lh[1] / p20.lh[0] - 1.5 / 1.12) < 0.01 && (p20.lh[4] < 2 || p20.lh[3] > p20.lh[2]), 'line height sets the line pitch the renderer measures (' + p20.lh.slice(0, 2).map(x => Math.round(x)).join(' -> ') + ' px)');
 ok(p20.box[0] === p20.box[1] && p20.box[3] >= p20.box[2], 'a narrower text box keeps the type size and rewraps (' + p20.box[2] + ' -> ' + p20.box[3] + ' lines at ' + Math.round(p20.box[0]) + ' px)');
 
+/* ------------------------------------------------------------------ p22b: the mark variant on its own, and words that do not read */
+section('10. an unreadable mark takes its approved variant on its own; words that do not read get a colour, then a plate - never new words');
+const p22b = await page.evaluate(async ({ L, C, F }) => {
+  const R = window.STRender; const im = await window.__load(); const fonts = await R.ensureFonts(L, C, { timeout: 6000 }); const out = {};
+  const variants = { wordmark: L.layers.find(l => l.id === 'wordmark').variants.map(v => ({ variant: v.variant, src: v.src, img: im[v.variant] })) };
+  const images = { bg: im.photo, wordmark: im.blue }; const o = { fonts, channel: 'instagram', format: '4:5', variants };
+  const mv = R.markVariants(L, C, Object.assign({}, images), o);
+  const others = l => JSON.stringify(l.layers.filter(x => x.id !== 'wordmark'));
+  const mark = mv.layout.layers.find(l => l.id === 'wordmark');
+  const after = R.validate(mv.layout, C, Object.assign({}, images, { wordmark: im[mark.variant] }), o);
+  out.mark = { changed: mv.changed, variant: mark.variant, steps: mv.steps, othersSame: others(mv.layout) === others(L), readable: !after.issues.some(i => /^mark_/.test(i.code)) };
+  const lockedL = JSON.parse(JSON.stringify(L)); lockedL.layers.find(l => l.id === 'wordmark').locked = true;
+  out.lockedChanged = R.markVariants(lockedL, C, Object.assign({}, images), o).changed;
+  // a pale label over the pale sky of the photograph
+  const T = JSON.parse(JSON.stringify(F)); T.layers.push({ id: 'pale', type: 'text', role: 'label', text: 'PUBLIC ROAD ENDS HERE', x: 50, y: 6, w: 44, h: 4, size: 2.6, weight: 600, color: '#F4E3C0', font: 'mono' });
+  const tImages = Object.assign({}, images, { wordmark: im.white }); const o2 = { fonts, channel: 'instagram', format: '4:5' }; const o3 = Object.assign({ fixContrast: true }, o2);
+  out.untouchedByDefault = !R.repair(T, C, Object.assign({}, tImages), o2).changed;
+  const before = R.validate(T, C, tImages, o2); out.textBefore = before.issues.filter(i => i.layers.indexOf('pale') >= 0).map(i => i.code);
+  const rep = R.repair(T, C, Object.assign({}, tImages), o3); const pl = rep.layout.layers.find(l => l.id === 'pale');
+  const aft = R.validate(rep.layout, C, tImages, o2);
+  out.text = { steps: rep.steps.filter(x => /pale/.test(x)), after: aft.issues.filter(i => i.layers.indexOf('pale') >= 0).map(i => i.code), sameWords: pl.text === 'PUBLIC ROAD ENDS HERE', samePlace: pl.x === 50 && pl.y === 6 && pl.size === 2.6, color: pl.color, bg: pl.bg || '' };
+  return out;
+}, { L: HOOF_REPRO, C: HOOF_COPY, F: hoof.layout });
+ok(p22b.mark.changed && p22b.mark.variant !== 'blue' && p22b.mark.othersSame && p22b.mark.readable, 'markVariants: the blue wordmark that does not read becomes the approved ' + p22b.mark.variant + ' variant, and nothing else on the tile moves (' + p22b.mark.steps.join('; ') + ')');
+ok(p22b.lockedChanged === false, 'a locked mark is left as it is');
+ok(p22b.textBefore.some(c => /contrast/.test(c)), 'the pale label over the sky is caught: ' + p22b.textBefore.join(', '));
+ok(p22b.untouchedByDefault, 'a merely low contrast is left alone unless the person asks (a deliberate brand colour may sit there): the Fix button asks');
+ok(!p22b.text.after.some(c => /contrast/.test(c)) && p22b.text.sameWords && p22b.text.samePlace && p22b.text.steps.length === 1, 'the repair makes it read with ' + (p22b.text.bg ? 'a backing plate' : 'a colour change') + ' (' + p22b.text.color + (p22b.text.bg ? ' on ' + p22b.text.bg : '') + '), same words, same place and size');
+
 /* ------------------------------------------------------------------ the evidence sheet */
 section('evidence: tests/shot-layout-repair.png (synthetic fixture, real renderer)');
 {

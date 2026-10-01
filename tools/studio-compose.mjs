@@ -65,17 +65,20 @@ for (const a of g.assets || []) {
   const imgs = { bg: await dataUrl(v.image && v.image.url), logo: await dataUrl('/brand/logo?ns=' + encodeURIComponent(g.ns)) };
   const missing = [];
   for (const l of v.layout.layers) { if (l.type === 'img' && l.src) { imgs[l.id] = await dataUrl(l.src); if (!imgs[l.id]) missing.push(l.id); } }
-  const draw = (layout, version, repair) => page.evaluate(async ({ layout, copy, imgs, channel, format, version, repair, locks }) => {
+  // the approved variants of each mark (blue, white, black...), so a repair can take the one that reads on this ground
+  const vars = {}; for (const l of v.layout.layers) { if (Array.isArray(l.variants) && l.variants.length > 1) vars[l.id] = await Promise.all(l.variants.map(async x => ({ variant: x.variant, src: x.src, data: await dataUrl(x.src) }))); }
+  const draw = (layout, version, repair) => page.evaluate(async ({ layout, copy, imgs, vars, channel, format, version, repair, locks }) => {
     const R = window.STRender; const loaded = {};
     for (const k of Object.keys(imgs)) loaded[k] = imgs[k] ? await R.loadImage(imgs[k]).catch(() => null) : null;
+    const variants = {}; for (const k of Object.keys(vars || {})) variants[k] = await Promise.all(vars[k].map(async x => ({ variant: x.variant, src: x.src, img: x.data ? await R.loadImage(x.data).catch(() => null) : null })));
     const fonts = await R.ensureFonts(layout, copy, { timeout: 8000 });
     const val = R.validate(layout, copy, loaded, { fonts, channel, format });
     // the same bounded, word-preserving repair as the app's "Fix layout (no render)"; the caller saves it as a layout version
-    if (repair && !val.ok) { const r = R.repair(layout, copy, Object.assign({}, loaded), { fonts, channel, format, locks }); if (r.changed) return { repaired: { layout: r.layout, steps: r.steps, ok: r.ok, conflict: r.conflict || '' } }; }
+    if (repair && !val.ok) { const r = R.repair(layout, copy, Object.assign({}, loaded), { fonts, channel, format, locks, variants: Object.keys(variants).length ? variants : undefined }); if (r.changed) return { repaired: { layout: r.layout, steps: r.steps, ok: r.ok, conflict: r.conflict || '' } }; }
     const blob = await R.toBlob(layout, copy, loaded);
     const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
     return { b64: btoa(s), report: R.report({ id: version }, val), ok: val.ok, issues: val.issues.map(i => i.severity + ' ' + i.code + (i.layers.length ? ' [' + i.layers.join(',') + ']' : '')), fonts };
-  }, { layout, copy: v.copy || {}, imgs, channel: a.channel, format: a.format, version, repair: !!repair, locks: a.locks || {} });
+  }, { layout, copy: v.copy || {}, imgs, vars, channel: a.channel, format: a.format, version, repair: !!repair, locks: a.locks || {} });
   let res = await draw(v.layout, v.id, args.repair && args.save && !(a.locks || {}).layout);
   let repairNote = null;
   if (res.repaired) {
@@ -86,6 +89,8 @@ for (const a of g.assets || []) {
       const g2 = await api('GET', '/studio/get?id=' + encodeURIComponent(args.project)); const a2 = g2.assets.find(x => x.id === a.id); v = a2.versions.find(x => x.id === (nv || a2.current)) || a2.versions.find(x => x.id === a2.current); Object.assign(a, { versions: a2.versions, revision: a2.revision, current: a2.current });
       repairNote = { steps: res.repaired.steps, fixed: res.repaired.ok, conflict: res.repaired.conflict || undefined, version: v.id };
     } catch (e) { repairNote = { error: String(e.message || e).slice(0, 200) }; }
+    // a switched mark variant is a different file: load each image layer again from the repaired version's own src
+    for (const l of v.layout.layers || []) { if (l.type === 'img' && l.src) imgs[l.id] = await dataUrl(l.src); }
     res = await draw(v.layout, v.id, false);
   }
   const b64 = res.b64;

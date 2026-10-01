@@ -1506,6 +1506,18 @@ readiness into a request for approved material (NEEDED BEFORE PRODUCTION,
 PLEASE CONFIRM) and analyses unanalysed references only within the
 approved call budget; `requests/` is gitignored. Harnesses:
 `tests/studio-p22-worker.mjs` (4), `tests/studio-brand-gaps-test.mjs` (10).
+From the first live HOOF render (a blue wordmark at 1.28:1 on an orange
+road, a pale label on the sky): the asset view now takes the approved mark
+variant that reads (`STRender.markVariants`, measured against what is
+behind the mark) by itself when a measurement finds `mark_unreadable` or
+`mark_low_contrast` - a layout version noted "mark variant chosen for
+contrast", no render, never a locked mark or layout; `repair()` makes words
+read by colour (white or near-black) and only then a backing plate, words,
+place and size untouched - always for `unreadable_contrast`, for
+`low_contrast` only with `fixContrast` (the Fix button), so a deliberate
+brand colour is not changed on its own; the Fix button now shows for every
+contrast finding; `tools/studio-compose.mjs --repair` passes the variants.
+Section 10 of `tests/studio-layout-browser.mjs`.
 
 Phase 1, the ground:
 
