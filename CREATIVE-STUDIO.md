@@ -500,3 +500,94 @@ It also warns when almost nothing changed inside the area. A background swap or 
 
 **Not proven:** how well Gemini actually holds the rest of a real photograph. The stub returns the same image. The first real edits on the Mac will show what the verdicts look like in practice, and the thresholds may need tuning against them.
 
+## 24. Report: implemented, simulated, tested, unverified
+
+This closes the request "Upgrade AXIOM Creative Studio into an agency-grade creative production platform" (builds studio-p10 to studio-p17, on top of P9). Everything is on the branch. Nothing has been deployed, merged or spent.
+
+### Implemented, by the request's own headings
+
+| Request | Where | State |
+|---|---|---|
+| Preserve the baseline (combos, identity, reference packs, plans, modes, retain, versions, approvals, renderer, inspection, budgets, Create a new design) | every earlier suite re-run each slice | kept, all suites pass |
+| One journey, quick and guided routes, searchable free-typed fields, requirement bands | intake routes (P12), brief combos and bands (P8) | built |
+| Campaign sets planned as a sequence | `sequence` stage, Sequence view (P12) | built |
+| Brand Workspace: provenance, scope, status, history; rules vs observations, preferences, decisions, inferences; reviewed memory; "What the Studio used" | P10 | built |
+| HOOF blue, white and black wordmarks as versioned assets; marks never redrawn | variant library and upload (P9-P10); marks are exact image layers | built; **the three HOOF files are not uploaded** (the team's step) |
+| Strategy, art direction, copy, design and production review as stages, Opus 5.5 for demanding work | strategy (P12), concepts (P6-P8), copy, layout, inspection (P7-P9); `CREATIVE_MODEL` defaults to `claude-opus-5-5` | built |
+| Three directions by default, adjustable budget, visible difference, diversity measured | P12 (1-5, default 3; plan-signature distance) | built |
+| Refine, explore, combine, new, keep | P6-P8 (combine = a card's layout with another card's photograph) | built |
+| Board, Canvas, Copy, Review views | P13, P11 | built |
+| Canvas: select, move, resize, align, group, reorder, lock, hide, undo, redo, compare, typography, safe areas, keyboard | P13 (compare from P2) | built |
+| Editing: modify a region, new background, restyle | P17, measured for preservation | built |
+| Editing: panel size, opacity, placement, removal; replace a mark with a variant | concepts and editor (P6-P7, P13); variants (P9) | built |
+| Editing: crop and negative space | - | **not built** as its own control |
+| Recipes without node graphs, dependencies, selective re-runs, durable jobs, estimated vs actual cost | P14 (impact names what is stale and the remedy; a person starts each re-run) | built; re-runs are proposed, not automatic |
+| Validation, visual review, human approval of exact versions; "ship" cannot override a blocking fault | P9 | built |
+| Client review: comments, pins, private, scoped, revocable, expiring links, audit, isolation | P11 | built |
+| Usage by project without leaking | `/studio/usage` (P14), metrics per client (P15) | built |
+| Asset rights and consent records; generated imagery never passed off as documentary | - | **not built** beyond the export manifest naming the model per image |
+| Metrics: first usable concept time, first-pass quality, revisions, cost per approved asset, constraint adherence, isolation, with baselines first | P15-P16 | built; baselines are the previous window and the old desks |
+| Boss-ready six-step demonstration, MCA/HOOF separation, a third client | `tools/studio-demo.py` (P16), synthetic client labelled as such | built |
+| Motion and video | - | not attempted, as the request allowed |
+
+### Simulated
+
+- **Every model call in every test** is a stub: Claude's answers and Gemini's images are fixed fixtures. The tests prove the plumbing, the gates and the records, not the quality of the creative.
+- **The third client** is invented ("Harbourline Ferries - SYNTHETIC DEMO CLIENT") and labelled wherever it appears.
+- **Preservation in tests** compares a stub image with itself, so "held" is the expected answer there.
+
+### Tested (all passing at studio-p17)
+
+- **Worker harnesses:**
+
+  | Harness | Tests |
+  |---|---|
+  | studio-worker | 15 |
+  | p2 | 11 |
+  | p3 | 11 |
+  | p6 | 8 |
+  | p7 | 6 |
+  | p8 | 14 |
+  | p9 | 15 |
+  | p10 | 9 |
+  | p11 | 8 |
+  | p12 | 5 |
+  | p14 | 4 |
+  | p15 | 7 |
+  | p17 | 5 |
+
+- **Tools:**
+  - studio-compose (7)
+  - studio-showcase (10)
+  - studio-demo (20)
+- **Browser, in real Chromium:**
+  - the Studio island (24 cases)
+  - the client review page (5)
+  - the renderer's layout and validation (64)
+- The rest of the worker's harnesses (content, narratives, sentiment, sources, overview, social, artwork) still pass. The worker stays pure ASCII.
+- The request's hard cases are covered:
+  - long copy and overflow
+  - delayed fonts and assets
+  - failed jobs and upstream failure
+  - stale versions and stale review links
+  - baked artwork
+  - adaptations
+  - read and full roles
+  - cross-client isolation
+  - spend gates
+
+### Unverified
+
+- **Real models.** The sandbox has no egress, so no Claude or Gemini call was made. The quality of directions, copy, imagery, inspections and area edits is unjudged. The way to judge it is to run `tools/studio-demo.py` (with `--approve-calls`, and `--approve-renders` for images) and `tools/studio-showcase.py` on the Mac against the deployed worker.
+- **Deployment.** The live worker is still on an older build. `tools/deploy-worker.sh` from the laptop ships studio-p17, and `/engine/status` will then report the build.
+- **Fonts.** Tests draw with fallback fonts because Google Fonts is unreachable here. The validator reports fallbacks rather than hiding them.
+- **Thresholds.** The preservation thresholds (2% / 6%) and the metric definitions are first settings, to be tuned against real edits and a few weeks of real projects.
+- **Research.** Higgsfield and Runway were read only through search excerpts (s.16.1), and are labelled as such.
+
+### Before using it with clients
+
+1. Deploy the worker.
+2. Upload the HOOF wordmark variants and the MCA logo through the Brand view, or with `tools/brand-logo.py`.
+3. Run the demonstration with a small approved budget.
+4. Look at the work.
+
