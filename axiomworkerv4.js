@@ -2954,6 +2954,15 @@ function b64FromBuf(buf) {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   return btoa(bin);
 }
+/** The pixel size of a PNG or JPEG (base64), read from its header: what the image model actually returned, not what was asked. */
+function imgPixels(b64) {
+  try {
+    const head = bufFromB64(String(b64).slice(0, 96000)); const u = new Uint8Array(head.buffer || head);
+    if (u[0] === 0x89 && u[1] === 0x50) { const dv = new DataView(u.buffer, u.byteOffset); return { w: dv.getUint32(16), h: dv.getUint32(20) }; }
+    if (u[0] === 0xff && u[1] === 0xd8) { let i = 2; while (i + 9 < u.length) { if (u[i] !== 0xff) { i++; continue; } const m = u[i + 1], len = (u[i + 2] << 8) | u[i + 3]; if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { w: (u[i + 7] << 8) | u[i + 8], h: (u[i + 5] << 8) | u[i + 6] }; i += 2 + len; } }
+  } catch (e) {}
+  return null;
+}
 function bufFromB64(b64) {
   const bin = atob(String(b64 || '').replace(/^data:[^;]+;base64,/, ''));
   const out = new Uint8Array(bin.length);
@@ -6749,7 +6758,7 @@ function stCopy(c) {
   const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
   return out;
 }
-function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined }; return out; }
+function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined }; return out; }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -8585,7 +8594,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
-  const meta = { references: references.map(r => r.name || r.role).filter(Boolean).slice(0, 8), model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
+  const meta = { references: references.map(r => r.name || r.role).filter(Boolean).slice(0, 8), model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
   const image = { key, url: '/studio/file?key=' + encodeURIComponent(key), model: out.model, requested: out.requested, fallback: !!out.fallback, size: meta.size, conv: convKey || undefined, editOf: editOf || undefined, meta };
   const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: String(inp.prompt || '').slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0 } }) };
   if (isRegion && live && live.layout && Array.isArray(live.layout.layers)) {
@@ -8602,7 +8611,7 @@ async function stRenderJob(env, job, pair, done, fail) {
     }
   }
   const v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined });
-  await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : inp.approach === 'artwork' ? ', full artwork - the words are part of the bitmap' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
+  await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : inp.approach === 'artwork' ? ', full artwork - the words are part of the bitmap' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
   if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
   return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable' }, cost: 1 });
@@ -9057,8 +9066,11 @@ async function nanoRender(env, opts) {
   const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
   const imgCfg = {};
   if (ASPECTS.indexOf(opts.aspect) !== -1) imgCfg.aspectRatio = opts.aspect;
-    // 2K is the house default on Gemini 3 Pro Image (the operator's choice, September 2026); the var IMAGE_SIZE overrides every render, a request may still ask for 1K or 4K
-  const size = SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : (SIZES.indexOf(opts.size) !== -1 ? opts.size : '2K');
+  // the size the team chose wins; the var IMAGE_SIZE is only the default when a request names none (2K, the operator's choice,
+  // September 2026). IMAGE_SIZE_MAX optionally caps spend: a request above it is made at the cap and the answer says so (capped).
+  const asked = SIZES.indexOf(opts.size) !== -1 ? opts.size : (SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : '2K');
+  const cap = SIZES.indexOf(env.IMAGE_SIZE_MAX) !== -1 ? env.IMAGE_SIZE_MAX : '';
+  const size = cap && SIZES.indexOf(asked) > SIZES.indexOf(cap) ? cap : asked; const capped = size !== asked ? asked : '';
   imgCfg.imageSize = size;
   let lastDetail = '', lastModel = chain[0], lastCode = 0;
   for (const model of chain) {
@@ -9088,7 +9100,7 @@ async function nanoRender(env, opts) {
         const imgPart = imgParts[imgParts.length - 1];
         const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
         const um = data.usageMetadata || {};
-        if (inl && inl.data) return { ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, content: cand.content || null, turn: { role: 'user', parts }, historyReplayed: replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
+        if (inl && inl.data) return { ok: true, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts }, historyReplayed: replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
         lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
         if (cand.finishReason && cand.finishReason !== 'STOP') continue;
       } catch (e) { lastDetail = String((e && e.name) || e).slice(0, 60); }

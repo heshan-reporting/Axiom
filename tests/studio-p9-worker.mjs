@@ -30,7 +30,7 @@ let SUGGEST = {};
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) {
-    gem.calls.push(u);
+    gem.calls.push(u); gem.bodies = (gem.bodies || []).concat([JSON.parse(init.body)]);
     const parts = gem.answer === 'image' ? [{ inlineData: { mimeType: 'image/png', data: png(9) } }] : [{ text: 'I cannot draw that.' }];
     return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts } }] }), { status: 200 });
   }
@@ -259,6 +259,19 @@ await t('a region render whose region has since been removed is filed as a branc
   const j2 = await run((await req('POST', '/studio/job', { project: P, asset: F.id, stage: 'render', input: { prompt: 'again', size: '1K' }, idem: 'reg-2' })).d.job);
   ok(j2.state !== 'done', 'no image is not success: ' + j2.state); eq((await curV(P, F.id)).a.versions.length, n0, 'no version was written'); gem.answer = 'image';
   eq((await req('POST', '/studio/job', { project: P, asset: F.id, stage: 'render', input: { prompt: 'again', size: '1K' }, idem: 'reg-2' })).d.job.id, j2.id, 'the same request is the same job: nothing paid twice');
+});
+
+await t('the size the team chose reaches the image model even when IMAGE_SIZE is set; IMAGE_SIZE_MAX caps it and the record says so; the pixels received are recorded', async () => {
+  const G = (await req('POST', '/studio/asset', { project: P, family: 'HOOF', channel: 'instagram', format: '1:1', title: 'Sizes', copy: { headline: 'Hands off our fuel', support: 'x', cta: 'y' }, mode: 'composition' })).d.asset.id;
+  env.IMAGE_SIZE = '2K'; gem.bodies = [];
+  const a = await run((await req('POST', '/studio/job', { project: P, asset: G, stage: 'render', input: { prompt: 'a paddock', size: '4K' }, idem: 'size-4k' })).d.job); eq(a.state, 'done', a.error);
+  eq(gem.bodies[0].generationConfig.imageConfig.imageSize, '4K', 'the house default does not override a chosen size');
+  let v = (await curV(P, G)).v; eq(v.image.meta.size, '4K'); ok(v.image.meta.pixels && v.image.meta.pixels.w > 0, 'pixels read from the returned file: ' + JSON.stringify(v.image.meta.pixels));
+  env.IMAGE_SIZE_MAX = '2K'; gem.bodies = [];
+  const b = await run((await req('POST', '/studio/job', { project: P, asset: G, stage: 'render', input: { prompt: 'a paddock again', size: '4K' }, idem: 'size-cap' })).d.job); eq(b.state, 'done', b.error);
+  eq(gem.bodies[0].generationConfig.imageConfig.imageSize, '2K'); v = (await curV(P, G)).v; eq([v.image.meta.size, v.image.meta.capped], ['2K', '4K']);
+  ok((await get(P)).thread.some(e => e.kind === 'job' && /asked 4K but capped at 2K by IMAGE_SIZE_MAX/.test(e.text)), 'the thread names the cap: ' + (await get(P)).thread.filter(e => e.kind === 'job').map(e => e.text).slice(-2).join(' / '));
+  delete env.IMAGE_SIZE; delete env.IMAGE_SIZE_MAX;
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
