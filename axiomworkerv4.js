@@ -6709,9 +6709,9 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p11';
+const AXIOM_BUILD = '2026-10-01.studio-p12';
 let STUDIO_READY = false;
-const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect'];   // render and echo run in stJobRun; the production stages in stStageRun
+const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
 const ST_MAX_ATTEMPTS = 3;
 const ST_PARTS = ['copy', 'design'];
@@ -7624,12 +7624,88 @@ function stArtPrompt(piece, direction, ctx, format, template, spec) {
 // -- directions: two or three genuinely different ways in, for an open brief ----------------------------
 function stTokens(s) { return new Set(String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 3)); }
 function stSimilar(a, b) { const A = stTokens(a), B = stTokens(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach(w => { if (B.has(w)) n++; }); return n / (A.size + B.size - n); }
+// -- Strategy and sequence (build studio-p12) ---------------------------------------------------------------
+// The creative strategy is one structured document on the brief (brief.strategy): the communication problem, the
+// audience as they are and as the work wants them to be, the insight, the campaign idea, the proposition, the proof
+// (ledger claim ids and approved facts), tone, what to avoid, risks, how the team will judge it (qualitative signals,
+// never forecasts) and the questions still open. A model drafts it as a proposal; the team edits and confirms it.
+// Every later stage - directions, sequences, copy, concepts - reads it from the brief. A campaign set is planned as a
+// sequence: each asset's place, role, channel, format, purpose and relation to the master idea, then made as editable
+// compositions with no image spent until someone asks for imagery.
+const ST_SEQ_ROLES = ['opener', 'explain', 'proof', 'response', 'voices', 'call-to-action', 'reminder', 'other'];
+function stStrategyNorm(s, known) {
+  s = s && typeof s === 'object' ? s : {}; const a = s.audience && typeof s.audience === 'object' ? s.audience : {};
+  const list = (v, n, m) => (Array.isArray(v) ? v : []).map(x => stStr(x, m || 200).trim()).filter(Boolean).slice(0, n || 6);
+  return { problem: stStr(s.problem, 400), audience: { who: stStr(a.who, 300), now: stStr(a.now || a.belief_now, 300), wanted: stStr(a.wanted || a.belief_wanted, 300), insight: stStr(a.insight, 400) }, idea: stStr(s.idea, 300), proposition: stStr(s.proposition, 300),
+    proof: list(s.proof, 8, 40).filter(id => !known || known.has(id) || /^fact:/.test(id)), tone: stStr(s.tone, 300), avoid: list(s.avoid, 8), risks: list(s.risks, 6), measures: list(s.measures, 6), questions: list(s.questions, 6) };
+}
+function stStrategyText(p) {
+  const s = (p.brief || {}).strategy; if (!s || !s.idea) return '';
+  return '\nCREATIVE STRATEGY (' + (s.status === 'confirmed' ? 'confirmed by the team - work within it' : 'proposed, not yet confirmed - follow it unless the brief contradicts it') + '):\nproblem: ' + s.problem + '\naudience: ' + s.audience.who + '; now: ' + s.audience.now + '; wanted: ' + s.audience.wanted + '\ninsight: ' + s.audience.insight + '\ncampaign idea: ' + s.idea + '\nproposition: ' + s.proposition + (s.proof.length ? '\nproof (claim ids): ' + s.proof.join(', ') : '') + '\ntone: ' + s.tone + (s.avoid.length ? '\navoid: ' + s.avoid.join('; ') : '');
+}
+async function stStrategyStage(env, job, p, log) {
+  const ctx = await stContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log });
+  const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
+  const sys = 'You are the creative strategist of an Australian political communications agency working for ' + ctx.client + '. From the brief, the source ledger and the client context you write the creative strategy the art director and copywriter will work from: specific to this audience and this argument, never generic. Return strict JSON only: {"problem":"<=40 words: the communication problem, not the business goal","audience":{"who":"<=25 words","now":"<=25 words: what they believe or do now","wanted":"<=25 words: what we want them to believe or do","insight":"<=35 words: the human truth that makes the idea land"},"idea":"<=20 words: the campaign idea in one line","proposition":"<=25 words: the single thing to say","proof":["ledger claim ids or fact:<id> that support it"],"tone":"<=20 words","avoid":["what not to say or show"],"risks":["how an opponent attacks it"],"measures":["qualitative signals the team will look for; no forecasts, no numbers you do not have"],"questions":["what the team must decide that the brief does not settle"]}. Figures only from the ledger or approved facts. No exclamation marks.' + ctx.text;
+  const user = 'BRIEF:\n' + stBriefText(p) + (job.input.instruction ? '\n\nINSTRUCTION FROM THE TEAM: ' + stStr(job.input.instruction, 1200) : '') + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source in the project)') + '\n\nWrite the strategy.';
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): the creative strategy from the brief, ' + led.claims.length + ' ledger claims and the client context');
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 3500, timeoutMs: 150000, effort: 'high', log });
+  const j = relJson(r.text); if (!j || !j.idea) throw new Error('strategy_unparseable: the model did not return a strategy as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '" (not retried)');
+  const st = Object.assign(stStrategyNorm(j, known), { status: 'proposed', model: r.model, at: Date.now(), job: job.id, source: 'ai' });
+  const cur = await stProject(env, p.id); const brief = Object.assign({}, cur.brief || {}, { strategy: st });
+  await env.MIND_DB.prepare('UPDATE studio_projects SET brief=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(brief).slice(0, 60000), Date.now(), p.id).run();
+  await stEvent(env, p.id, 'strategy', { text: 'Strategy proposed: ' + st.idea + ' - ' + st.proposition + ' (for ' + (st.audience.who || 'the audience') + '). Edit and confirm it on the brief; directions and production read it from there.' + (st.questions.length ? ' Open questions: ' + st.questions.join('; ') + '.' : ''), job: job.id, model: r.model }, 'studio');
+  await log('out', 'strategy proposed: ' + st.idea);
+  return { idea: st.idea, proposition: st.proposition, questions: st.questions, model: r.model };
+}
+/** How different a set of directions really is: 1 - the mean pairwise overlap of their arguments, with a penalty for one medium. */
+function stDiversity(dirs) {
+  if (dirs.length < 2) return { score: null, pairs: [] }; const pairs = []; let sum = 0, n = 0;
+  for (let i = 0; i < dirs.length; i++) for (let k = i + 1; k < dirs.length; k++) { const a = dirs[i], b = dirs[k]; const sim = Math.max(stSimilar(a.idea + ' ' + a.message + ' ' + a.headline, b.idea + ' ' + b.message + ' ' + b.headline), 0) * 0.75 + (a.medium && a.medium === b.medium ? 0.25 : 0); pairs.push({ a: i, b: k, similarity: Math.round(sim * 100) / 100 }); sum += sim; n++; }
+  return { score: Math.round((1 - sum / n) * 100) / 100, pairs };
+}
+async function stSequenceStage(env, job, p, log) {
+  const inp = job.input || {}; const kit = (await brandKit(env, p.ns)) || {};
+  const channels = (Array.isArray(inp.channels) && inp.channels.length ? inp.channels : ((p.brief || {}).channels || ['instagram', 'facebook', 'linkedin'])).filter(c => ST_CHANNELS[c]);
+  if (!channels.length) throw new Error('channels_required: name the channels the sequence runs on (not retried)');
+  const count = Math.max(2, Math.min(8, parseInt(inp.count, 10) || 4));
+  const ctx = await stContext(env, p, { channels, log }); const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
+  let direction = null; if (inp.direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=? AND project=?').bind(stClean(inp.direction, 24), p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
+  if (!direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE project=? AND chosen=1 ORDER BY created DESC LIMIT 1').bind(p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
+  const sys = 'You are the creative director of an Australian political communications agency planning a campaign sequence for ' + ctx.client + ': a set of assets that tell one argument in order across channels, each with a job in the sequence - not several unrelated posts. Return strict JSON only: {"name":"<=6 words","arc":"<=40 words: how the sequence moves the audience from the first asset to the last","cadence":"<=20 words: timing across days","items":[{"order":1,"role":"' + ST_SEQ_ROLES.join('|') + '","channel":"' + channels.join('|') + '","format":"1:1|4:5|9:16|16:9","day":0,"purpose":"<=20 words: this asset\'s job","relation":"<=20 words: how it carries the master idea","headline":"in the client voice","support":"<=25 words","cta":"<=6 words","caption":"for the channel","alt":"<=20 words","claims":["ledger ids"]}]}. Exactly ' + count + ' items, ordered. Figures only from the ledger or approved facts, quoted exactly. Headlines within the fit for each format: ' + Object.keys(ST_HEADLINE_FIT).map(f => f + ' ' + ST_HEADLINE_FIT[f] + ' chars').join(', ') + '. No exclamation marks.' + ctx.text;
+  const user = 'BRIEF:\n' + stBriefText(p) + (direction ? '\n\nCHOSEN DIRECTION: ' + direction.title + ' - ' + direction.message + ' (headline "' + direction.headline + '"; visual: ' + direction.visual + ')' : '') + (inp.instruction ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1200) : '') + '\n\nCHANNELS: ' + channels.join(', ') + '\nLEDGER:\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text).join('\n') || '(none)') + '\n\nPlan the ' + count + '-asset sequence.';
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': a ' + count + '-asset sequence on ' + channels.join(', ') + (direction ? ' from the direction "' + direction.title + '"' : ''));
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 6000, timeoutMs: 170000, log });
+  const j = relJson(r.text); if (!j || !Array.isArray(j.items) || !j.items.length) throw new Error('sequence_unparseable: the model did not return a sequence as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '" (not retried)');
+  const seqId = stId('sq'); const name = stStr(j.name || 'Campaign sequence', 60); const now = Date.now(); const items = []; const template = stTemplateFor(kit, p.campaign);
+  const allowed = [led.text, (kit.facts || []).map(f => f.text).join(' '), JSON.stringify(p.brief || {})].join(' ');
+  const sorted = j.items.slice(0, count).map((it, i) => Object.assign({}, it, { order: parseInt(it.order, 10) || i + 1 })).sort((a, b) => a.order - b.order);
+  for (let i = 0; i < sorted.length; i++) {
+    const it = sorted[i]; const channel = ST_CHANNELS[it.channel] ? it.channel : channels[i % channels.length]; const format = ST_FORMATS[it.format] ? it.format : ST_CHANNELS[channel].format;
+    const role = ST_SEQ_ROLES.indexOf(it.role) >= 0 ? it.role : 'other';
+    const copy = stCopy({ headline: it.headline, support: it.support, cta: it.cta, caption: it.caption, alt: it.alt });
+    const layout = inp.deliverable === 'copy' ? {} : stLayout(kit, p.ns, format, template, copy, { campaign: p.campaign });
+    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel, format, layout: inp.deliverable === 'copy' ? null : layout });
+    const aid = stId('a'); const title = (i + 1) + '. ' + role + ' - ' + ST_CHANNELS[channel].label + ' ' + format;
+    await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, 'Sequence: ' + name, channel, format, title, '', '{}', 1, now, now).run();
+    const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'sequence ' + name + ', ' + (i + 1) + ' of ' + sorted.length + ' (' + role + '), house composition, no imagery yet', copy, layout, image: null, mode: inp.deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, sequence: seqId, order: i + 1, of: sorted.length, role, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), day: Number(it.day) || 0, direction: direction ? direction.id : '', claims: (Array.isArray(it.claims) ? it.claims : []).map(String).filter(x => known.has(x)), how: 'house', template }) }, 'studio');
+    items.push({ order: i + 1, role, channel, format, day: Number(it.day) || 0, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), asset: aid, version: v.id, headline: copy.headline || '' });
+  }
+  const seq = { id: seqId, name, arc: stStr(j.arc, 400), cadence: stStr(j.cadence, 200), direction: direction ? direction.id : '', items, at: now, model: r.model, job: job.id };
+  const cur = await stProject(env, p.id); const seqs = Array.isArray((cur.brief || {}).sequences) ? cur.brief.sequences : [];
+  const brief = Object.assign({}, cur.brief || {}, { sequences: seqs.concat([seq]).slice(-8) });
+  await env.MIND_DB.prepare("UPDATE studio_projects SET brief=?, status=CASE WHEN status IN ('brief','directions') THEN 'production' ELSE status END, revision=revision+1, updated=? WHERE id=?").bind(JSON.stringify(brief).slice(0, 60000), Date.now(), p.id).run();
+  await stEvent(env, p.id, 'sequence', { text: 'Sequence "' + name + '": ' + items.map(x => x.order + '. ' + x.role + ' (' + ST_CHANNELS[x.channel].label + ' ' + x.format + ', day ' + x.day + ')').join('; ') + '. ' + (seq.arc ? seq.arc.replace(/[.\s]+$/, '') + '. ' : '') + 'Made as editable compositions with no image spent: ask for imagery per asset, or ' + items.length + ' render' + (items.length === 1 ? '' : 's') + ' for the whole sequence.', job: job.id, sequence: seqId, assets: items.map(x => x.asset), model: r.model }, 'studio');
+  await log('out', 'sequence "' + name + '": ' + items.length + ' assets, no renders spent');
+  return { sequence: seqId, assets: items.map(x => x.asset), model: r.model };
+}
 async function stDirectStage(env, job, p, log) {
-  const n = Math.min(Math.max(parseInt(job.input.n, 10) || 2, 2), 3);
+  const n = Math.min(Math.max(parseInt(job.input.n, 10) || 3, 1), 5);   // the exploration budget: three by default, one to five
   const ctx = await stContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log });
   const led = await stLedger(env, p.id);
-  const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give"}]}. Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
-  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
+  const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","idea":"<=15 words: the campaign idea","copyApproach":"<=20 words: how the words work (hierarchy, register, device)","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","references":["reference names it draws on"],"plan":["<=12 words each: the production steps"],"renders":0}]}. The directions must differ in what is drawn as well as in what is argued: change the medium and composition when the argument allows, never only the photograph behind the same panel. "renders" is the number of images the first asset would need (0 for typography-led or diagram work). Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
+  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
     + (await stRefBundle(env, p, { log, images: 0 })).text + (await stArtMemory(env, p.ns, 4)).text
     + '\n\nGive ' + n + ' directions.';
@@ -7638,14 +7714,16 @@ async function stDirectStage(env, job, p, log) {
   const j = relJson(r.text);
   if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   const known = new Set(led.claims.map(c => c.id)); const ids = []; const rows = []; let similar = 0;
-  const dirs = j.directions.slice(0, 3).map(d => ({ title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
-  dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6) { d.similar = dirs[k].title; similar++; } });
+  const MEDIA = ['photo-cinematic', 'photo-documentary', 'editorial', 'composite', 'cutout', 'collage', 'illustration', 'diagram', 'infographic', 'typographic', 'carousel'];
+  const dirs = j.directions.slice(0, n).map(d => ({ idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
+  dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6 || (d.medium && d.medium === dirs[k].medium && stSimilar(d.idea + ' ' + d.message, dirs[k].idea + ' ' + dirs[k].message) > 0.45)) { d.similar = dirs[k].title; similar++; break; } });
+  const diversity = stDiversity(dirs);
   for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(d).slice(0, 8000), 0, 'studio', Date.now())); }
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
   await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title).join(' / ') + (similar ? ' - ' + similar + ' read as close to another; ask for another' : ' - distinct arguments'));
-  await stEvent(env, p.id, 'directions', { text: dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids }, 'studio');
-  return { directions: ids, titles: dirs.map(d => d.title), similar, model: r.model };
+  await stEvent(env, p.id, 'directions', { diversity: diversity.score, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids }, 'studio');
+  return { directions: ids, titles: dirs.map(d => d.title), similar, diversity: diversity.score, model: r.model };
 }
 // -- the brief: what is settled, what is assumed, what blocks spending ------------------------------------------
 // A brief carries objective, audience, message, action and deliverables, plus design requirements in three bands
@@ -7663,6 +7741,8 @@ function stBriefNorm(b) {
   const rq = b.requirements && typeof b.requirements === 'object' ? b.requirements : {};
   out.requirements = { mandatory: stReqItems(rq.mandatory), preferred: stReqItems(rq.preferred), open: stReqItems(rq.open) };
   if (b.campaignConfirmed != null) out.campaignConfirmed = !!b.campaignConfirmed;
+  // the strategy: a team edit keeps its status (proposed, or confirmed by a person); its fields are bounded like the model's
+  if (b.strategy && typeof b.strategy === 'object') out.strategy = Object.assign(stStrategyNorm(b.strategy, null), { status: b.strategy.status === 'confirmed' ? 'confirmed' : 'proposed', model: stStr(b.strategy.model, 60), at: Number(b.strategy.at) || 0, job: stStr(b.strategy.job, 30), source: b.strategy.source === 'ai' ? 'ai' : 'team', confirmedBy: stStr(b.strategy.confirmedBy, 40) || undefined });
   ['objective', 'audience', 'message', 'action'].forEach(k => { const s = b[k + 'Source']; if (s && ST_REQ_SOURCES.indexOf(s) >= 0) out[k + 'Source'] = s; });
   return out;
 }
@@ -7670,7 +7750,7 @@ function stBriefText(p) {
   const b = p.brief || {}; const L = ST_BRIEF_FIELDS.map(k => k + ': ' + (b[k] || '(not given)'));
   const rq = b.requirements || {};
   ['mandatory', 'preferred', 'open'].forEach(band => { const items = stReqItems(rq[band]); if (items.length) L.push('design requirements, ' + band + ': ' + items.map(it => it.text + ' [' + it.source + (it.from ? ': ' + it.from : '') + ']').join('; ')); });
-  return L.join('\n');
+  return L.join('\n') + stStrategyText(p);
 }
 /** What the brief settles and what it leaves open, against the kit: campaign, marks, the fields, the requirements. */
 async function stBriefCheck(env, p, kit, opts) {
@@ -9241,6 +9321,8 @@ async function stStageRun(env, job, done, fail) {
     let result;
     if (job.stage === 'extract') result = await stExtractStage(env, job, p, log);
     else if (job.stage === 'direct') result = await stDirectStage(env, job, p, log);
+    else if (job.stage === 'strategy') result = await stStrategyStage(env, job, p, log);
+    else if (job.stage === 'sequence') result = await stSequenceStage(env, job, p, log);
     else if (job.stage === 'copy') result = await stCopyStage(env, job, p, log);
     else if (job.stage === 'export') result = await stExportStage(env, job, p, log);
     else if (job.stage === 'revise') result = await stReviseStage(env, job, p, log);
@@ -11083,7 +11165,7 @@ export default {
           const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {};
           const brief = patch.brief && typeof patch.brief === 'object' ? stBriefNorm(Object.assign({}, p.brief, patch.brief)) : p.brief;
           await env.MIND_DB.prepare('UPDATE studio_projects SET title=?, campaign=?, brief=?, status=?, revision=revision+1, updated=? WHERE id=?')
-            .bind(patch.title != null ? stStr(patch.title, 140) : p.title, patch.campaign != null ? stStr(patch.campaign, 40) : p.campaign, JSON.stringify(brief).slice(0, 12000), patch.status != null ? stStr(patch.status, 20) : p.status, now, p.id).run();
+            .bind(patch.title != null ? stStr(patch.title, 140) : p.title, patch.campaign != null ? stStr(patch.campaign, 40) : p.campaign, JSON.stringify(brief).slice(0, 60000), patch.status != null ? stStr(patch.status, 20) : p.status, now, p.id).run();
           await stEvent(env, p.id, 'edited', { text: 'Project ' + Object.keys(patch).join(', ') + ' edited.' }, who);
           return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true })));
         }

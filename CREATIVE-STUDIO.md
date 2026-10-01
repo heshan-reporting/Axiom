@@ -308,3 +308,43 @@ The second slice of the plan in s.16.3 is the agency-to-client loop.
 - Reviewer identity beyond the name typed (an email one-time code would be the next step if needed).
 - Comment threads with replies.
 
+## 18. Strategy, exploration and the campaign sequence (build studio-p12)
+
+The third slice of the plan in s.16.3 covers two routes into the work and three stages that make a campaign set a campaign.
+
+**Routes.** The intake asks which route the work takes:
+- **Quick production** is for a clear, approved brief and goes straight to production, as before.
+- **Guided campaign development** reads the source, drafts a creative strategy, and proposes three directions. Nothing is produced until someone chooses.
+
+**Creative strategy.** The strategy is one structured document on the brief:
+- the communication problem
+- the audience: who they are, what they believe now, what the work wants them to believe, and the insight
+- the campaign idea and the proposition
+- proof, limited to ledger claims the project actually holds
+- tone and what to avoid
+- risks
+- how the team will judge it, as signals rather than forecasts
+- the questions still open
+
+The model drafts it as a proposal; the team edits it and confirms it. Every later stage reads it: directions, the sequence, copy and concepts.
+
+**Exploration.** Directions take an exploration budget of one to five, three by default. Each direction carries:
+- its idea and copy approach
+- medium, composition, typography and colour
+- the references it draws on
+- a production plan and the images it would need
+
+The set's diversity is measured (1 minus the mean overlap between directions, with a penalty for sharing a medium). A look-alike is flagged rather than presented as new.
+
+**Sequence.** A campaign set is planned as one argument told in order. Each asset has a role, a channel and format, a day, a purpose and its relation to the idea. Every item is made as an editable composition in its own family with no image spent; imagery is asked for per asset when the team wants it.
+
+**Proof.** `tests/studio-p12-worker.mjs` (5) covers:
+- the strategy drafted, then confirmed and read downstream
+- the budget, the new direction fields and the diversity score
+- an ordered sequence made with no render
+- the brief kept whole
+
+The guided case in `tests/studio-browser.mjs` runs the same journey in the page.
+
+**Not yet.** The canvas upgrade (align, group, reorder, undo, typography controls, guides), recipes with selective re-runs, and outcome metrics.
+

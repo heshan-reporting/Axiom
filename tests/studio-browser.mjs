@@ -23,6 +23,11 @@ const env = {
 // a real 4x4 PNG (teal) so the browser can decode the background and the logo
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
 const RELEASE = 'MEDIA RELEASE - 30 September 2026\n\nFuel tax credits keep regional Australia moving\n\nThe Minerals Council of Australia today released new analysis showing that mining paid $74 billion in company tax and royalties in 2023-24, more than any other industry.\n\nMCA Chief Executive Officer Tania Constable said fuel tax credits were not a subsidy. "Businesses do not pay a road fuel tax on fuel used off-road. The credit simply returns a tax that was never meant to apply," Ms Constable said.\n\nThe analysis found the credit is used by more than 150,000 businesses of all sizes, including farmers, tradies and tourism operators.\n\nENDS';
+const STRATEGY = { problem: 'Voters hear subsidy and assume a handout.', audience: { who: 'Regional voters', now: 'It is a handout to miners', wanted: 'It is a road tax never meant for off-road fuel', insight: 'Farmers claim the same credit' }, idea: 'It is your tractor too', proposition: 'Not a subsidy: a road tax returned', proof: [], tone: 'plain, regional', avoid: ['the word subsidy unless denied'], risks: ['called a handout'], measures: ['regional comments turn'], questions: ['Lead with farmers or miners?'] };
+const SEQ = { name: 'Your tractor too', arc: 'From the myth to the farmer to the ask', cadence: 'over five days', items: [
+  { order: 1, role: 'opener', channel: 'instagram', format: '4:5', day: 0, purpose: 'name the myth', relation: 'sets up the idea', headline: 'Is it a subsidy?', support: 'Look at who uses it.', cta: 'See why', caption: 'A myth.', alt: 'a question', claims: [] },
+  { order: 2, role: 'proof', channel: 'facebook', format: '1:1', day: 2, purpose: 'show who uses it', relation: 'the farmer as proof', headline: 'Farmers use it too', support: 'Fuel used off-road.', cta: 'Learn more', caption: 'Who uses it?', alt: 'a farmer', claims: [] },
+  { order: 3, role: 'call-to-action', channel: 'facebook', format: '1:1', day: 4, purpose: 'ask for a signature', relation: 'closes the argument', headline: 'Hands off our fuel', support: 'Sign the petition.', cta: 'Sign', caption: 'Sign now.', alt: 'the ask', claims: [] }] };
 const LEDGER = { headline: 'Fuel tax credits keep regional Australia moving', claims: [
   { text: 'mining paid $74 billion in company tax and royalties in 2023-24', value: 74, unit: 'billion', subject: 'tax and royalties', period: '2023-24', passage: 'p3' },
   { text: 'Businesses do not pay a road fuel tax on fuel used off-road. The credit simply returns a tax that was never meant to apply', quote: true, who: 'Tania Constable', passage: 'p4' },
@@ -50,7 +55,7 @@ globalThis.fetch = async (url, init) => {
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
-    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+    const answer = /creative strategist/.test(sys) ? STRATEGY : /planning a campaign sequence/.test(sys) ? SEQ : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -384,12 +389,40 @@ await t('an open brief, copy only: two distinct directions first, nothing produc
   eq(await texts(page, R + '.st-railbtn.asset'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);
   ok(/from "The plain ask"/.test(await page.textContent(R + '.st-asset-head')));
 });
-await t('switching client shows only that client\'s work; coming back lists both MCA projects', async () => {
+await t('P12: the guided route drafts a creative strategy the team confirms, then directions with their medium, plan and diversity, then a campaign sequence planned in order and made with no image', async () => {
+  await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
+  await page.click(R + '.st-lib-head .btn');
+  await page.click(R + '.st-segbtn:has-text("Guided campaign development")'); await page.click(R + '.st-segbtn:has-text("A brief or one line")');
+  await page.fill(R + '.st-intake textarea', 'Answer the subsidy framing for regional voters');
+  ok(/Guided: a creative strategy to confirm, then three directions/.test(await page.textContent(R + '.st-intake-foot')));
+  const g0 = calls.gemini;
+  await page.click(R + '.st-intake-foot .btn:has-text("Create project")');
+  await page.waitForSelector(R + '.st-dir', { timeout: 30000 });
+  await page.click(R + '.st-railbtn:has-text("Brief")'); await page.waitForSelector(R + '.st-strategy');
+  const st = await page.textContent(R + '.st-strategy'); ok(/proposed - not yet confirmed/.test(st), st.slice(0, 200));
+  eq(await page.inputValue(R + '.st-strategy label:has-text("Campaign idea") input'), 'It is your tractor too');
+  await page.fill(R + '.st-strategy label:has-text("Campaign idea") input', 'It is your tractor too, and your truck');
+  await page.click(R + '.st-strategy button:has-text("Confirm the strategy")');
+  await page.waitForFunction(() => /confirmed/.test(document.querySelector('#studio-root .st-strategy .st-chip').textContent));
+  eq(await page.inputValue(R + '.st-strategy label:has-text("Campaign idea") input'), 'It is your tractor too, and your truck');
+  await page.click(R + '.st-railbtn:has-text("Directions")'); await page.waitForSelector(R + '.st-dir');
+  ok(await page.$(R + 'select[aria-label="Exploration budget"]') && await page.$(R + 'button:has-text("Explore further")'), 'the exploration budget');
+  await page.click(R + '.st-railbtn:has-text("Sequence")'); await page.waitForSelector(R + '.st-seq');
+  await page.selectOption(R + 'select[aria-label="Number of assets"]', '3');
+  await page.click(R + '.st-seq button:has-text("Plan the sequence")');
+  await page.waitForSelector(R + '.st-seq-card', { timeout: 30000 });
+  const cards = await texts(page, R + '.st-seq-card'); eq(cards.length, 3);
+  ok(/1\./.test(cards[0]) && /opener/.test(cards[0]) && /day 0/.test(cards[0]) && /name the myth/.test(cards[0]) && /call to action/.test(cards[2]), cards.join(' | ').slice(0, 400));
+  eq((await page.$$(R + '.st-seq-card canvas')).length, 3, 'each drawn as an editable composition');
+  eq(calls.gemini, g0, 'no image generated');
+  await shot(page, 'studio-sequence');
+});
+await t('switching client shows only that client\'s work; coming back lists all three MCA projects', async () => {
   await page.click(R + '.st-head .ov-link:has-text("projects")');
   await page.selectOption(R + '.st-head select', 'aep');
   await page.waitForFunction(() => { const h = document.querySelector('#studio-root .st-lib-head'); const l = document.querySelector('#studio-root .st-lib'); return h && l && /Australian Energy Producers/.test(h.textContent) && /Nothing yet for this client/.test(l.textContent); });
   await page.selectOption(R + '.st-head select', 'mca');
-  await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-lib tbody tr').length === 3);
+  await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-lib tbody tr').length === 4);   // three projects and the legacy pack
 });
 await t('a legacy pack imports once into a project whose tile is flattened and marked not editable', async () => {
   await page.locator(R + 'tr.st-legacy').first().locator('.ov-link:has-text("import to Studio")').click();

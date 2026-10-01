@@ -1282,6 +1282,33 @@ the tile, "Addressed in vN" and "Answer without a change"). Harnesses:
 `tests/studio-p11-worker.mjs` (8) and `tests/studio-review-browser.mjs` (5,
 both pages in Chromium).
 
+**Strategy, exploration and sequence (build `studio-p12`; `CREATIVE-STUDIO.md`
+s.18).** Stage `strategy {instruction}` (`stStrategyStage`, the creative model
+at high effort) writes `brief.strategy`: problem, audience (who, now, wanted,
+insight), idea, proposition, proof (ledger ids it holds only), tone, avoid,
+risks, measures (qualitative signals, never forecasts), questions - status
+`proposed`, source `ai`; the team edits and confirms it through
+`/studio/project/update` (status `confirmed`, `confirmedBy`; `stBriefNorm`
+bounds it), and `stBriefText` carries it (`stStrategyText`) into every later
+stage. Stage `direct {n}` takes an exploration budget of 1-5 (default 3) and
+each direction now carries idea, copyApproach, medium, composition,
+typography, colour, references, plan and `renders`; `stDiversity` scores the
+set (1 - mean pairwise overlap with a same-medium penalty; on the
+`directions` event) and a look-alike is flagged. Stage `sequence {direction,
+channels, count 2-8, deliverable, instruction}` (`stSequenceStage`) plans an
+ordered sequence (role opener / explain / proof / response / voices /
+call-to-action / reminder, channel, format, day, purpose, relation to the
+idea, copy) and makes each item an editable house composition in the family
+`Sequence: <name>` with `context.{sequence, order, of, role, day, purpose,
+relation}`, no render; the plan is kept in `brief.sequences`. The brief is
+stored up to 60,000 characters (it was cut at 12,000, which would have broken
+its JSON). In-app: the intake's **Route** (Quick production / Guided campaign
+development: strategy, then three directions), the **Creative strategy**
+panel on the brief (edit, Confirm, Draft again), the exploration budget on
+Directions with the new card lines and the set's diversity, and the
+**Sequence** board. Harnesses: `tests/studio-p12-worker.mjs` (5) and the P12
+case in `tests/studio-browser.mjs` (20).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

@@ -126,12 +126,14 @@
     const [text, setText] = useState(pr.text || ''); const [instruction, setInstruction] = useState(pr.instruction || '');
     const [chs, setChs] = useState({ linkedin: true, instagram: true, facebook: true, x: false });
     const [file, setFile] = useState(null);
+    const [route, setRoute] = useState(pr.route === 'guided' ? 'guided' : 'quick');
     const clear = start === 'brief' ? isClear(text) : start === 'release' ? !!instruction.trim() : true;
     const pick = e => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setFile({ name: f.name, mime: f.type || 'image/png', b64: String(rd.result).split(',')[1] }); rd.readAsDataURL(f); };
     return html`<div class="st-intake">
       <div class="ov-title">New project for ${client.name}</div>
       ${pr.from ? html`<div class="ov-dim">${pr.from === 'release' ? 'The Release Desk is this intake now: paste the release, the ledger is read, tiles and copy come out of the same project.' : pr.from === 'content' ? 'The Content Desk is this intake now: a brief in, copy per channel out, with the same checks and the same voice.' : pr.from === 'sentinel' ? 'Drafted from a Sentinel alert: the alert is the brief; edit it, pick the channels and create the project.' : ''}</div>` : null}
       <div class="st-intake-row">
+        <div><${Lbl}>Route</${Lbl}><div class="st-seg" role="radiogroup" aria-label="Route">${[['quick', 'Quick production', 'a clear, approved brief: straight to production'], ['guided', 'Guided campaign development', 'strategy first, then three directions, then a sequence']].map(([k, l, t]) => html`<button key=${k} class=${'st-segbtn' + (route === k ? ' on' : '')} title=${t} role="radio" aria-checked=${route === k} onClick=${() => setRoute(k)}>${l}</button>`)}</div></div>
         <div><${Lbl}>Start from</${Lbl}><div class="st-seg">${[['release', 'A release or source document'], ['brief', 'A brief or one line'], ['reference', 'Existing creative or references']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (start === k ? ' on' : '')} onClick=${() => setStart(k)}>${l}</button>`)}</div></div>
         <div><${Lbl}>Deliverable</${Lbl}><div class="st-seg">${[['copy', 'Copy only'], ['visual', 'Visual creative'], ['set', 'Coordinated campaign set']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (deliverable === k ? ' on' : '')} onClick=${() => setDeliverable(k)}>${l}</button>`)}</div></div>
         <div><${Lbl}>Campaign</${Lbl}><select class="st-sel" value=${campChosen ? campaign : '__'} onChange=${e => { if (e.target.value === '__') { setCampChosen(false); return; } setCampaign(e.target.value); setCampChosen(true); }} aria-label="Campaign">${!campChosen ? html`<option value="__">Choose the campaign...</option>` : null}<option value="">No campaign</option>${camps.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><div class="ov-dim">${!camps.length ? 'No campaigns in this client\'s brand kit yet.' : !campChosen ? 'The kit has ' + camps.length + ' campaigns; the first is not assumed. The campaign decides the mark, the colours and the facts in play.' : camps.length === 1 && campaign ? 'The kit\'s only campaign is shown chosen; pick "No campaign" if this work is not part of it.' : 'From the brand kit. Choosing a campaign never changes the client or its approved facts.'}</div></div>
@@ -142,9 +144,9 @@
       ${start === 'reference' ? html`<div class="st-drop"><input type="file" accept="image/png,image/jpeg,image/webp" onChange=${pick} aria-label="Reference image" /> ${file ? html`<span>${file.name} attached as a composition reference.</span>` : html`<span>Attach artwork or a reference image (PNG, JPEG, WebP). Competitor work is inspiration only.</span>`}</div>` : null}
       ${deliverable !== 'visual' ? html`<div><${Lbl}>Channels (edit freely)</${Lbl}><div class="st-seg">${Object.keys(CHANNELS).map(k => html`<button key=${k} class=${'st-segbtn' + (chs[k] ? ' on' : '')} onClick=${() => setChs(Object.assign({}, chs, { [k]: !chs[k] }))}>${CHANNELS[k].label} ${CHANNELS[k].format}</button>`)}</div></div>` : html`<div class="ov-dim">Visual creative: an Instagram 4:5 composition; adapt to other formats afterwards.</div>`}
       <div class="st-intake-foot">
-        <span class="ov-dim">${start === 'release' ? (clear ? 'Extraction first, then production from your instruction; no direction step.' : 'Extraction first, then two directions to choose from.') : start === 'brief' ? (clear && text ? 'Reads as a clear instruction: production starts without a direction step.' : 'Reads as an open brief: two directions first.') : 'Production from the reference and your instruction; no direction step.'}</span>
+        <span class="ov-dim">${route === 'guided' ? 'Guided: ' + (start === 'release' ? 'the source is read first, then ' : '') + 'a creative strategy to confirm, then three directions to choose from; nothing is produced until you choose.' : start === 'release' ? (clear ? 'Extraction first, then production from your instruction; no direction step.' : 'Extraction first, then two directions to choose from.') : start === 'brief' ? (clear && text ? 'Reads as a clear instruction: production starts without a direction step.' : 'Reads as an open brief: two directions first.') : 'Production from the reference and your instruction; no direction step.'}</span>
         <button class="btn sm ghost" onClick=${onCancel}>Cancel</button>
-        <button class="btn sm" disabled=${!text.trim() || !campChosen} title=${!campChosen ? 'Choose the campaign first' : ''} onClick=${() => onCreate({ start, deliverable, campaign, campaignConfirmed: campChosen, text: text.trim(), instruction: instruction.trim(), channels: deliverable === 'visual' ? ['instagram'] : Object.keys(chs).filter(k => chs[k]), clear, file })}>Create project</button>
+        <button class="btn sm" disabled=${!text.trim() || !campChosen} title=${!campChosen ? 'Choose the campaign first' : ''} onClick=${() => onCreate({ route, start, deliverable, campaign, campaignConfirmed: campChosen, text: text.trim(), instruction: instruction.trim(), channels: deliverable === 'visual' ? ['instagram'] : Object.keys(chs).filter(k => chs[k]), clear, file })}>Create project</button>
       </div>
     </div>`;
   }
@@ -156,7 +158,7 @@
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     return html`<nav class="st-rail" aria-label="Project">
       <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
+      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
       <${Lbl}>Assets</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
         <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
@@ -175,7 +177,7 @@
       ${!disabled && list.length ? html`<div class="st-combo-list" role="listbox" aria-label=${'Suggestions for ' + id}>${list.map((it, i) => html`<button key=${i} class="st-combo-opt" role="option" title=${it.from || ''} onClick=${() => { onChange(it.text, it.source, it); setOpen(false); }}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}</button>`)}${(items || []).length > list.length && !open ? html`<button class="ov-link" onClick=${() => setOpen(true)}>more (${items.length})</button>` : null}</div>` : null}
     </div>`;
   }
-  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, busy }) {
+  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, onStrategy, busy }) {
     const [b, setB] = useState(p.brief || {});
     useEffect(() => { setB(p.brief || {}); }, [p.id, p.revision]);
     const [sugg, setSugg] = useState(null); const [chk, setChk] = useState(null); const [ack, setAck] = useState(false); const [addTo, setAddTo] = useState({ mandatory: '', preferred: '', open: '' });
@@ -203,6 +205,7 @@
       </div>
       ${b.assumptions && b.assumptions.length ? html`<div class="st-field"><${Lbl}>Assumptions the Studio made (edit or remove)</${Lbl}><ul class="st-ul">${b.assumptions.map((a, i) => html`<li key=${i}>${a} ${!ro ? html`<button class="ov-link" onClick=${() => onSave(Object.assign({}, b, { assumptions: b.assumptions.filter((_, j) => j !== i) }))}>remove</button>` : null}</li>`)}</ul></div>` : null}
       ${(b.notRecorded || []).length ? html`<div class="ov-dim">Not recorded at the time: ${b.notRecorded.join(', ')}. Left blank rather than invented.</div>` : null}
+      <${StrategyPanel} p=${p} onDraft=${onStrategy} onSave=${st => onSave(Object.assign({}, p.brief || {}, { strategy: st }))} busy=${busy} />
       <div class="st-field st-check-panel" aria-label="Brief check"><${Lbl}>Before anything is spent</${Lbl}>
         ${!chk ? html`<div class="ov-dim">Checking the brief...</div>` : chk.error ? html`<div class="ov-dim">${chk.error}</div>` : html`<div>
           ${!chk.gaps.length ? html`<div><${Chip} kind="ok">complete</${Chip}> <span class="ov-dim">objective, message, audience, action and deliverables are set; the campaign and its mark are on file.</span></div>` : null}
@@ -253,9 +256,60 @@
       ${canWrite() && !p.readOnly ? html`<div class="st-field"><${Lbl}>Add a reference</${Lbl}><div class="st-seg">${['brand', 'composition', 'mood', 'imagery', 'typography', 'inspiration', 'approved'].map(k => html`<button key=${k} class=${'st-segbtn' + (purpose === k ? ' on' : '')} onClick=${() => setPurpose(k)}>${k}</button>`)}</div><input class="st-in" value=${note} onInput=${e => setNote(e.target.value)} placeholder="Note (what to take from it)" /><div class="st-drop"><input type="file" accept="image/png,image/jpeg,image/webp" onChange=${pick} disabled=${!!busy} aria-label="Reference image" /> PNG, JPEG or WebP up to 12 MB; over 4.5 MB a smaller copy is prepared for the models and the original kept. Competitor work is inspiration only: no logos, claims or exact layouts reused.</div>${p.campaign ? html`<label class="st-check"><input type="checkbox" checked=${own} onChange=${e => setOwn(e.target.checked)} /> belongs to the campaign ${p.campaign}</label>` : null}</div>` : null}
     </div>`;
   }
+  /* ------------------------------------------------------------ the creative strategy: drafted, edited, confirmed - every later stage reads it */
+  function StrategyPanel({ p, onDraft, onSave, busy }) {
+    const st = (p.brief || {}).strategy || null; const ro = !canWrite() || p.readOnly;
+    const [edit, setS] = useState(null); const [ins, setIns] = useState('');
+    useEffect(() => { setS(null); }, [p.id, p.revision]);
+    // the saved strategy until someone edits; then their working copy (never a null in between)
+    const s = edit || st || null;
+    const set = (k, v) => setS(Object.assign({}, s, { [k]: v })); const setA = (k, v) => setS(Object.assign({}, s, { audience: Object.assign({}, s.audience || {}, { [k]: v }) }));
+    const lines = v => (v || []).join('\n'); const unlines = v => String(v || '').split('\n').map(x => x.trim()).filter(Boolean);
+    const dirty = !!edit && JSON.stringify(edit) !== JSON.stringify(st);
+    if (!st) return html`<div class="st-field st-strategy" aria-label="Creative strategy"><${Lbl}>Creative strategy</${Lbl}><div class="ov-dim">No strategy yet. A strategy names the communication problem, the audience as they are and as the work wants them to be, the insight and the campaign idea; directions, sequences and copy then work within it.</div>
+      ${!ro ? html`<div class="st-nd-row"><input class="st-in" value=${ins} onInput=${e => setIns(e.target.value)} placeholder='Optional steer, e.g. "lead with regional voters"' aria-label="Strategy steer" /><button class="btn sm" disabled=${!!busy} onClick=${() => onDraft(ins.trim())}>Draft the strategy</button></div><div class="ov-dim">One model call at high effort; it is a proposal until you confirm it.</div>` : null}</div>`;
+    const F = (label, val, on, rows) => html`<label class="st-sfield"><span class="st-lbl">${label}</span>${rows ? html`<textarea class="st-ta" rows=${rows} value=${val || ''} disabled=${ro} onInput=${e => on(e.target.value)}></textarea>` : html`<input class="st-in" value=${val || ''} disabled=${ro} onInput=${e => on(e.target.value)} />`}</label>`;
+    return html`<div class="st-field st-strategy" aria-label="Creative strategy"><div class="st-field-head"><${Lbl}>Creative strategy</${Lbl}><${Chip} kind=${st.status === 'confirmed' ? 'ok' : 'warn'}>${st.status === 'confirmed' ? 'confirmed' + (st.confirmedBy ? ' by ' + st.confirmedBy : '') : 'proposed - not yet confirmed'}</${Chip}> <span class="ov-dim">${st.source === 'ai' ? 'drafted by ' + (st.model || 'a model') : 'edited by the team'}</span></div>
+      <div class="st-sgrid">
+        ${F('Campaign idea', s.idea, v => set('idea', v))}${F('Proposition', s.proposition, v => set('proposition', v))}
+        ${F('Communication problem', s.problem, v => set('problem', v), 2)}${F('Insight', s.audience.insight, v => setA('insight', v), 2)}
+        ${F('Audience', s.audience.who, v => setA('who', v))}${F('Tone', s.tone, v => set('tone', v))}
+        ${F('They believe now', s.audience.now, v => setA('now', v), 2)}${F('We want them to believe', s.audience.wanted, v => setA('wanted', v), 2)}
+        ${F('Avoid (one per line)', lines(s.avoid), v => set('avoid', unlines(v)), 3)}${F('Risks (one per line)', lines(s.risks), v => set('risks', unlines(v)), 3)}
+        ${F('How we will judge it (signals, not forecasts)', lines(s.measures), v => set('measures', unlines(v)), 3)}${F('Open questions for the team', lines(s.questions), v => set('questions', unlines(v)), 3)}
+      </div>
+      ${s.proof && s.proof.length ? html`<div class="ov-dim">Proof from the ledger: ${s.proof.join(', ')}</div>` : null}
+      ${!ro ? html`<div class="st-nd-row"><button class="btn sm ghost" disabled=${!!busy || !dirty} onClick=${() => onSave(Object.assign({}, s, { source: 'team' }))}>Save edits</button><button class="btn sm" disabled=${!!busy} onClick=${() => onSave(Object.assign({}, s, { status: 'confirmed', source: dirty ? 'team' : s.source }))}>${st.status === 'confirmed' ? 'Save and keep confirmed' : 'Confirm the strategy'}</button><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onDraft(ins.trim())}>Draft again</button></div>` : null}
+    </div>`;
+  }
+  /* ------------------------------------------------------------ the campaign sequence: one argument told in order across channels */
+  const ROLE_WORD = { opener: 'opener', explain: 'explain', proof: 'proof', response: 'response', voices: 'voices', 'call-to-action': 'call to action', reminder: 'reminder', other: 'other' };
+  function SequenceView({ p, onPlan, onOpen, busy }) {
+    const ro = !canWrite() || p.readOnly; const seqs = ((p.brief || {}).sequences || []).slice().reverse();
+    const chosen = p.directions.find(d => d.chosen);
+    const [f, setF] = useState({ direction: chosen ? chosen.id : '', channels: Object.assign({}, ...(((p.brief || {}).channels) || ['instagram', 'facebook', 'linkedin']).map(c => ({ [c]: true }))), count: '4', deliverable: 'composition', instruction: '' });
+    const assetOf = id => p.assets.find(a => a.id === id);
+    return html`<div class="st-centre-pad st-seq" aria-label="Campaign sequence"><div class="ov-title">Campaign sequence</div>
+      <div class="ov-why">A coordinated set planned as one argument told in order: each asset has a role, a channel and format, a day, a purpose and a relation to the idea. The plan is one model call; every asset is made as an editable composition with no image spent until you ask for imagery.</div>
+      ${!ro ? html`<div class="st-offer-box" aria-label="Plan a sequence"><div class="st-nd-row">
+        <label class="ov-dim">From <select class="st-sel" value=${f.direction} onChange=${e => setF(Object.assign({}, f, { direction: e.target.value }))} aria-label="Direction"><option value="">the brief and the strategy</option>${p.directions.map((d, i) => html`<option key=${d.id} value=${d.id}>${String.fromCharCode(65 + i)}) ${d.title}${d.chosen ? ' (chosen)' : ''}</option>`)}</select></label>
+        <label class="ov-dim">Assets <select class="st-sel" value=${f.count} onChange=${e => setF(Object.assign({}, f, { count: e.target.value }))} aria-label="Number of assets">${[2, 3, 4, 5, 6, 7, 8].map(n => html`<option key=${n} value=${n}>${n}</option>`)}</select></label>
+        <label class="ov-dim">Deliver <select class="st-sel" value=${f.deliverable} onChange=${e => setF(Object.assign({}, f, { deliverable: e.target.value }))} aria-label="Deliverable"><option value="composition">editable compositions</option><option value="copy">copy only</option></select></label></div>
+        <div class="st-seg">${Object.keys(CHANNELS).map(k => html`<button key=${k} class=${'st-segbtn' + (f.channels[k] ? ' on' : '')} onClick=${() => setF(Object.assign({}, f, { channels: Object.assign({}, f.channels, { [k]: !f.channels[k] }) }))}>${CHANNELS[k].label}</button>`)}</div>
+        <input class="st-in" value=${f.instruction} onInput=${e => setF(Object.assign({}, f, { instruction: e.target.value }))} placeholder='Optional, e.g. "open with the myth, close with the petition, five days"' aria-label="Sequence instruction" />
+        <div><button class="btn sm" disabled=${!!busy || !Object.values(f.channels).some(Boolean)} onClick=${() => onPlan({ direction: f.direction || undefined, channels: Object.keys(f.channels).filter(k => f.channels[k]), count: +f.count, deliverable: f.deliverable, instruction: f.instruction.trim() || undefined })}>Plan the sequence</button> <span class="ov-dim">one model call, no render</span></div></div>` : null}
+      ${!seqs.length ? html`<div class="ov-empty">No sequence yet.</div>` : null}
+      ${seqs.map(sq => html`<div key=${sq.id} class="st-seq-one"><div class="st-field-head"><b>${sq.name}</b> <span class="ov-dim">${aest(sq.at)}${sq.cadence ? ', ' + sq.cadence : ''}</span></div><div>${sq.arc}</div>
+        <div class="st-seq-board">${sq.items.map(it => { const a = assetOf(it.asset); return html`<div key=${it.asset} class="st-seq-card"><div class="st-know-h"><b>${it.order}.</b> <${Chip}>${ROLE_WORD[it.role] || it.role}</${Chip}> <span class="ov-dim">${chanLabel(it.channel)} ${it.format}, day ${it.day}</span></div>
+          ${a ? html`<${Composition} v=${current(a)} a=${a} ns=${p.ns} size="card" />` : html`<div class="ov-dim">asset removed</div>`}
+          <div><b>Job</b> ${it.purpose}</div><div class="ov-dim">${it.relation}</div>
+          ${a ? html`<button class="ov-link" onClick=${() => onOpen(a.id)}>open ${a.title}</button>` : null}</div>`; })}</div></div>`)}
+    </div>`;
+  }
   function DirectionsView({ p, onChoose, onMore, busy }) {
     return html`<div class="st-centre-pad"><div class="ov-title">Directions</div>
-      <div class="ov-why">Two or three genuinely different directions for an open brief, each citing the ledger claims it would use. Choose one, or ask for more. A clear production instruction skips this step.</div>
+      <div class="ov-why">Genuinely different directions for an open brief - three by default - each with its campaign idea, copy approach, medium, composition, type and colour, the references it draws on, a production plan and the images it would need. Diversity is measured, not claimed. Choose one, or explore further.</div>
+      ${(() => { const ev = p.thread.filter(e => e.kind === 'directions' && e.diversity != null).pop(); return ev ? html`<div class="ov-dim">Last set: diversity ${ev.diversity} (1 = nothing in common between the directions; under 0.5 they repeat each other).</div>` : null; })()}
       ${!p.directions.length ? html`<div class="ov-empty">No directions yet.</div>` : null}
       <div class="st-dirs">${p.directions.map((d, i) => html`<div key=${d.id} class=${'st-dir' + (d.chosen ? ' chosen' : '')}>
         <div class="st-dir-title">${String.fromCharCode(65 + i)}) ${d.title}${d.chosen ? html`<${Chip} kind="ok">chosen</${Chip}>` : d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to ${d.similar}</${Chip}>` : null}</div>
@@ -265,11 +319,15 @@
         <div class="st-dir-line"><b>Opening</b> ${d.opening}</div>
         <div class="st-dir-line"><b>Visual</b> ${d.visual}</div>
         <div class="st-dir-line"><b>Why</b> ${d.rationale}</div>
+        ${d.idea ? html`<div class="st-dir-line"><b>Idea</b> ${d.idea}</div>` : null}${d.copyApproach ? html`<div class="st-dir-line"><b>Copy</b> ${d.copyApproach}</div>` : null}
+        ${d.medium || d.composition ? html`<div class="st-dir-line"><b>Medium</b> ${d.medium ? html`<${Chip}>${d.medium}</${Chip}> ` : null}${d.composition}${d.typography ? '; type: ' + d.typography : ''}${d.colour ? '; colour: ' + d.colour : ''}</div>` : null}
+        ${(d.references || []).length ? html`<div class="st-dir-line"><b>Draws on</b> ${d.references.join(', ')}</div>` : null}
+        ${(d.plan || []).length ? html`<div class="st-dir-line"><b>Plan</b> ${d.plan.join(' / ')} <${Chip} kind=${d.renders ? 'warn' : 'ok'}>${d.renders ? d.renders + ' render' + (d.renders === 1 ? '' : 's') + ' per asset' : 'no render'}</${Chip}></div>` : null}
         <div class="st-dir-line"><b>Claims</b> ${(d.claims || []).join(', ') || 'none'} <span class="ov-dim">${d.uncertainty}</span></div>
         <div class="ov-dim">${d.model || ''}${d.who && d.who !== 'studio' ? ', recorded by ' + d.who : ''}</div>
         ${canWrite() && !p.readOnly && !d.chosen ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onChoose(d.id)}>Choose this direction</button>` : null}
       </div>`)}</div>
-      ${canWrite() && !p.readOnly ? html`<div class="st-pad"><button class="btn sm ghost" disabled=${!!busy} onClick=${onMore}>Two more directions</button> <span class="ov-dim">One model call; nothing is produced until you choose.</span></div>` : null}
+      ${canWrite() && !p.readOnly ? html`<div class="st-pad"><label class="ov-dim">Explore <select class="st-sel" id="st-dir-n" aria-label="Exploration budget" defaultValue="3">${[1, 2, 3, 4, 5].map(n => html`<option key=${n} value=${n}>${n} direction${n === 1 ? '' : 's'}</option>`)}</select></label> <button class="btn sm ghost" disabled=${!!busy} onClick=${() => onMore(+((document.getElementById('st-dir-n') || {}).value || 3))}>Explore further</button> <span class="ov-dim">One model call; nothing is produced until you choose.</span></div>` : null}
     </div>`;
   }
   function ContextView({ p, onVoice, onLearned, tick }) {
@@ -896,7 +954,9 @@
 
     const job = async (stage, input, asset, idem, label) => { const r = await call('/studio/job', { project: pidRef.current, asset: asset || undefined, stage, input, idem }); return runJob(r.job.id, label); };
     const produce = async (extra) => { const d = p || await reload(); const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]); if (!channels.length) { toastMsg('Choose channels in the brief first', true); return; } const j = await job('copy', { channels, deliverable: b.deliverable || 'set', formats: b.formats || {}, template: b.template || '', instruction: (extra && extra.instruction) || '', acknowledge: !!(extra && extra.acknowledge) || undefined, size: (extra && extra.size) || b.size || undefined, quick: !!(extra && extra.instruction) || undefined }, null, 'copy:' + pidRef.current + ':' + Date.now(), 'Writing ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' in the ' + (d.ns || '').toUpperCase() + ' voice' + ((b.deliverable || 'set') === 'copy' ? ', copy only' : ', then laying out compositions')); const d2 = await reload(); if (d2 && d2.assets.length) { setSelAsset(d2.assets[d2.assets.length - 1].id); setView('asset'); } if (j && j.state === 'done') pump(d2); };
-    const direct = async () => { await job('direct', { n: 2, channels: ((p && p.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing two directions from the brief and the ledger'); setView('directions'); };
+    const direct = async (n) => { n = Math.max(1, Math.min(5, +n || 3)); await job('direct', { n, channels: ((p && p.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing ' + n + ' direction' + (n === 1 ? '' : 's') + ' from the brief, the strategy and the ledger'); setView('directions'); };
+    const draftStrategy = async (instruction) => { await job('strategy', { instruction: instruction || undefined }, null, 'strategy:' + pidRef.current + ':' + Date.now(), 'Drafting the creative strategy'); setView('brief'); };
+    const planSequence = async (input) => { await job('sequence', input, null, 'sequence:' + pidRef.current + ':' + Date.now(), 'Planning the campaign sequence'); setView('sequence'); };
     const createProject = async (o) => {
       try {
         setBusy('Creating the project'); setIntake(false);
@@ -907,7 +967,8 @@
         if (o.start === 'release') { const s = await call('/studio/source', { project: pr.id, kind: 'release', name: 'Pasted release', text: o.text }); await reload(pr.id); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading the source: claims, figures and quotations with their passages'); }
         if (o.start === 'reference' && o.file) { await call('/studio/reference', { project: pr.id, kind: 'image', name: o.file.name, purpose: 'composition', imageB64: o.file.b64, mime: o.file.mime, note: 'from intake' }); }
         await reload(pr.id);
-        if (o.clear) await produce({ instruction: o.start === 'release' ? o.instruction : o.text }); else await direct();
+        if (o.route === 'guided') { await job('strategy', {}, null, 'strategy:' + pr.id, 'Drafting the creative strategy'); await direct(3); }
+        else if (o.clear) await produce({ instruction: o.start === 'release' ? o.instruction : o.text }); else await direct();
       } catch (e) { fail(e); } finally { setBusy(''); }
     };
     const setCampaign = async (cid, none) => { try { await call('/studio/project/update', { id: p.id, revision: p.revision, patch: { campaign: cid || '', brief: none ? { campaignConfirmed: true } : { campaignConfirmed: true } } }); await reload(); } catch (e) { fail(e); if (e.status === 409) reload(); } };
@@ -1003,7 +1064,8 @@
     if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} onOpen=${openProject} onNew=${() => setIntake(true)} onImport=${importLegacy} />`;
     else if (!p) centre = html`<div class="st-centre-pad"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
-    else if (view === 'brief') centre = html`<${BriefView} p=${p} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} busy=${busy} />`;
+    else if (view === 'brief') centre = html`<${BriefView} p=${p} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} busy=${busy} />`;
+    else if (view === 'sequence') centre = html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${id => { setSelAsset(id); setView('asset'); }} busy=${busy} />`;
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
     else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
