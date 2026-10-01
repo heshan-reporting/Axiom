@@ -41,15 +41,21 @@
     const pal = layout.palette || {};
     ctx.save(); ctx.clearRect(0, 0, W, H);
     const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : null;
-    if (images.bg) { if (ib) { ctx.fillStyle = pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); } cover(ctx, images.bg, W, H, ib); }
-    else { const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+    // the ground: the stage fill (a typography-led composition's brand colour, else the panel colour) under an image box, or nothing
+    if (ib) { ctx.fillStyle = layout.bg || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
+    if (images.bg) cover(ctx, images.bg, W, H, ib);
+    else { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
     const overflow = [];
     layers.forEach(l => {
       if (l.hidden) return;
       const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
       ctx.save(); ctx.globalAlpha = l.opacity == null ? 1 : l.opacity;
       if (l.type === 'shape') {
-        if (l.gradient) { const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, l.fill || 'rgba(0,0,0,.7)'); g.addColorStop(1, l.fill || 'rgba(0,0,0,.7)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
+        if (l.gradient) {
+          // dir: which way it darkens - up (default: clear at the top, solid at the bottom), down, left, right
+          const d = l.dir || 'up'; const g = d === 'down' ? ctx.createLinearGradient(0, y + h, 0, y) : d === 'left' ? ctx.createLinearGradient(x + w, 0, x, 0) : d === 'right' ? ctx.createLinearGradient(x, 0, x + w, 0) : ctx.createLinearGradient(0, y, 0, y + h);
+          g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, l.fill || 'rgba(0,0,0,.7)'); g.addColorStop(1, l.fill || 'rgba(0,0,0,.7)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+        }
         else { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
       }
       else if (l.type === 'img') {

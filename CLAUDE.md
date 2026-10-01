@@ -956,6 +956,58 @@ layer does not drag and keeps its place through directions).
 kit exactly as supplied. Harnesses: the art-direction case in
 `studio-p3-worker.mjs` and in the browser harness.
 
+**Design, not a template (build `studio-p6`; `CREATIVE-STUDIO.md` s.12).**
+Every composition carries `layout.design`, a spec the models fill in and
+`stLayoutFromSpec` draws: concept and objective; an image brief (`keep`, or
+subject / setting / framing / lighting / mood / `focal`); `composition`
+(`style` panel / translucent / none / gradient / split / typographic,
+`zone` top / middle / bottom / left / right, `coverage` compact / standard /
+large); `type` (`align`, a running headline `delta`); `panel` (`fill` teal /
+gold / plain / kit / dark, `opacity`); `logo.corner` (br / bl / tr / tl /
+panel); `cta.style` button / text. A gradient darkens from the zone edge
+(`dir`), a split gives the photograph `layout.image` and the renderer crops
+it there, a typography-led tile fills the stage with `layout.bg` and shows a
+small photograph opposite the words; type scales with the column and steps
+down until the stack fits, and boxes stay bounded by the zone so an
+over-long headline is still flagged `overflow`. `stLayout` builds a spec
+from its old arguments, so first production, adaptation and the variants
+share the path; the copy stage accepts a `design` per piece. `stArtPrompt`
+takes the spec and describes the photograph for its composition
+(`stQuietZone`: the quiet third, the half beside the words, or its own
+region for a split), never a fixed lower third.
+References reach the models: `studio_references.analysis` is a vision pass
+(`stRefAnalyse`, the extraction model) at upload or on `POST
+/studio/reference/analyse {id}` - summary, typography, colour palette and
+relationships, hierarchy, composition, image treatment, panels, spacing,
+logo, verbatim words, takeaways; a failure is stored as `{error}` and shown
+as "not analysed" with a retry. `stRefBundle` ranks by purpose, attaches
+the strongest as images beside the artwork, and states the purpose
+semantics (brand and approved are constraints; an approved layout is an
+example unless the note says mandatory; inspiration lends nothing exact);
+`stArtMemory` adds the client's catalogued artwork (`engine_art`, that
+client only). Concepts, revise, copy, direct and suggestions all receive
+them; events record `refsUsed` and `unanalysed`.
+The concepts stage returns a `design` per option (`summary` =
+`stDescribeSpec`), `refs` and basis kind `reference`; options must differ
+in composition and at least one keeps the photograph. `POST
+/studio/concept/apply {eid, index, render, imageFrom}` applies one card's
+layout with another card's photograph. The revise stage gained kind
+`design` (`{assets, spec, image|null, steps, refs}`): the composition is
+applied now as a layout version on the current image; an `image` becomes a
+`proposal` (`design:true`, `spec`) confirmed through `/studio/proposal`,
+whose render prompt follows the applied composition. `POST /studio/suggest
+{asset, refresh}` (full role; `stSuggest`, the extraction model, cached in
+KV `studio_sugg_<asset>` on version + references + last event) answers
+three `design` and three `image` suggestions with `why` and `refs`. In-app:
+cards show the spec summary, "Draws on" and a **Photograph from** select;
+**Suggested next directions** beside the Creative Partner fill the composer
+as editable text; **Suggested photographs** inside the re-render controls
+fill its description; the References view shows each analysis or its
+limitation with **Analyse now**. Harnesses: `tests/studio-p6-worker.mjs`
+(8), the suggestions case in the browser harness (16), and
+`tests/studio-variations-demo.mjs`, which draws five compositions of one
+message to `tests/shot-variations.png`.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

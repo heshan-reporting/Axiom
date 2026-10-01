@@ -17,6 +17,8 @@ through Playwright for the browser harnesses.
 node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1 (projects, versions, approvals, jobs, legacy)
 node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phase 2 (ledger, directions, copy, checks, layouts, export, budget)
 node --experimental-sqlite tests/studio-p3-worker.mjs     # Creative Studio Phases 3-4 (direction by instruction, Remember, outcomes, KV session import)
+node --experimental-sqlite tests/studio-p6-worker.mjs     # art direction as design: reference analysis, design specs, combined revisions, suggestions
+node --experimental-sqlite tests/studio-variations-demo.mjs  # draws five compositions of one message to tests/shot-variations.png (the creative outcome, to look at)
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
 node --experimental-sqlite tests/artwork-worker.mjs       # artwork memory
 node --experimental-sqlite tests/overview-worker.mjs      # the front page and the daily brief
@@ -64,6 +66,22 @@ it at the end.
   direction (the artwork shown to the model, distinct directions as layout
   variants with basis and cost, layout-only apply with no render, render only
   when asked, locked layers kept).
+- `studio-p6-worker.mjs`: art direction as design. References are read by a
+  vision pass at upload and stored (a failure is stored as the limitation),
+  and reach the concepts, revise, copy and suggestion prompts as images and
+  analyses with their purpose semantics; the client's artwork memory comes
+  with them and never another client's. A direction is a whole design spec
+  (image brief, composition style and zone, type, panel, logo corner, CTA)
+  laid out by `stLayoutFromSpec` for any format: gradient from the top, a
+  split with the words left, a typography-led tile, a compact panel on the
+  right; four distinct compositions, three on the current photograph; the
+  layout of one card with the photograph of another; a combined "split and
+  a wider photograph" direction applied as a layout version with the
+  photograph proposed; photograph prompts that follow the composition's
+  quiet zone; cached suggestions; locks and hidden layers carried through.
+- `studio-variations-demo.mjs`: not a test but the outcome to look at - one
+  message, one photograph, five compositions drawn by the one renderer onto
+  `tests/shot-variations.png`.
 - `studio-browser.mjs`: the same journey in a real browser. The page's calls
   to the worker are routed into the worker module running in the harness
   process, so intake, extraction, production, the renderer's preview, hand

@@ -41,7 +41,7 @@ globalThis.fetch = async (url, init) => {
   if (u.indexOf('generativelanguage') >= 0) { calls.gemini++; return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: PNG } }] } }] }), { status: 200 }); }
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     const body = JSON.parse(init.body); anth.calls.push(body);
-    const sys = String(body.system || ''), user = String(body.messages[0].content || '');
+    const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
     const answer = /decide what the instruction asks/.test(sys) ? decide(sys, user) : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS(ids(user)) : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }

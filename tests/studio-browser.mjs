@@ -41,13 +41,15 @@ const CONCEPTS = { critique: 'The photograph is generic; the panel holds.', opti
   { name: 'No box, darker image', concept: 'Words over a darkened photograph', rationale: 'Editorial', imagery: 'keep the current photograph', composition: 'Top left', typography: 'Larger', colour: 'Dark overlay', textPlacement: 'top left', layout: { style: 'none', placement: 'top', template: 'same', headline: 'larger' }, keeps: ['photograph'], changes: ['panel removed'], needsImage: false, prompt: '', basis: [{ claim: 'White type on dark reads', kind: 'inferred' }], missing: [] },
   { name: 'Split field', concept: 'Message on a teal field below', rationale: 'Clean separation', imagery: 'keep the current photograph', composition: 'Split', typography: 'Same', colour: 'Teal', textPlacement: 'bottom band', layout: { style: 'split', placement: 'bottom', template: 'teal', headline: 'same' }, keeps: ['photograph'], changes: ['split'], needsImage: false, prompt: '', basis: [{ claim: 'Teal is the campaign colour', kind: 'rule' }], missing: [] },
   { name: 'Regional road at dawn', concept: 'A new photograph of a regional road', rationale: 'Where the credit is used', imagery: 'Regional road at dawn', composition: 'Low horizon', typography: 'Same', colour: 'Teal panel', textPlacement: 'lower left', layout: { style: 'same', placement: 'bottom', template: 'same', headline: 'same' }, keeps: ['panel', 'copy'], changes: ['photograph'], needsImage: true, prompt: 'A quiet regional road at dawn', basis: [{ claim: 'Restrained imagery preferred', kind: 'preference' }], missing: ['Whether machinery may appear'] }] };
+const REFAN = { summary: 'A restrained editorial tile: large headline top left, photograph bleeding right, logo small bottom left.', typography: 'Bold grotesque headline, light body', colour: { palette: ['#0E6A6E', '#F4F1EA'], relationships: 'Teal ground, cream type' }, hierarchy: 'Headline first', composition: 'Words left, photograph right', imageTreatment: 'Documentary, warm', panels: 'None', spacing: 'Airy', logo: 'Bottom left, small', text: ['Hands Off Our Fuel'], takeaways: ['Flat colour field', 'Headline far larger than body'] };
+const SUGGEST = { design: [{ text: 'Keep the harvester visible. Replace the large teal panel with a compact translucent panel in the upper left and move the CTA below the headline.', why: 'The subject is covered', refs: [] }, { text: 'Use the flat colour field and the large headline from the approved tile, adapted to this square format.', why: 'Matches the approved reference', refs: [] }, { text: 'Set the words on a split teal field to the left and let the photograph fill the right half.', why: 'Clean separation', refs: [] }], image: [{ text: 'A wider documentary photograph with the harvester on the right and open paddock on the left for the headline.', why: 'Room for the words' }, { text: 'The same paddock at dusk, closer on the header, sky quiet above.', why: 'Human scale' }] };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) { calls.gemini++; if (/\/models\?/.test(u)) return new Response(JSON.stringify({ models: [{ name: 'models/gemini-3-pro-image' }] }), { status: 200 }); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: PNG } }] } }] }), { status: 200 }); }
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
-    calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = String(body.messages[0].content || '');
-    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+    calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
+    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -258,6 +260,27 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   const items = await texts(page, R + '.st-le-item'); ok(items.some(x => /panel/.test(x)) && items.some(x => /headline/.test(x)) && items.every(x => /hide|show/.test(x) && /lock/.test(x)), JSON.stringify(items));
   await page.click(R + '.st-asset-acts button:has-text("Close layout editor")');
   await shot(page, 'studio-artdirection');
+});
+await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
+  await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
+  const items = await texts(page, R + '.st-partner .st-sugg.design .st-sugg-item'); eq(items.length, 3); ok(/compact translucent panel in the upper left/.test(items[0]), items[0]); ok(/the artwork seen/.test(await page.textContent(R + '.st-partner .st-sugg-head')), 'the head says the model saw the artwork');
+  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link'); await useBtns[1].click();
+  eq(await page.inputValue(R + '.st-composer textarea'), SUGGEST.design[1].text, 'the suggestion is in the composer, editable, not sent');
+  await page.fill(R + '.st-composer textarea', '');
+  ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
+  await page.click(R + '.st-ad-quick > .ov-link'); await page.waitForSelector(R + '.st-ad-quick .st-sugg.image .st-sugg-item');
+  const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item .ov-link'); eq(img.length, 2); await img[0].click();
+  eq(await page.inputValue(R + '[aria-label="Photograph description"]'), SUGGEST.image[0].text);
+  await page.click(R + '.st-ad-quick button:has-text("Not now")');
+  const urls = await page.$$eval(R + '.st-ad-card canvas', cs => cs.map(c => c.toDataURL('image/png'))); eq(urls.length, 3); eq(new Set(urls).size, 3, 'three visibly different compositions');
+  // the export draws the same document with the same function at the stage's native size; a preview at that width is the same PNG
+  const check = await page.evaluate(async (L) => {
+    const layout = L.layout, copy = L.copy; const r1 = window.STRender.render(layout, copy, {}, null).canvas.toDataURL('image/png');
+    const blob = await window.STRender.toBlob(layout, copy, {}); const u = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+    return { w: window.STRender.render(layout, copy, {}, null).w, equal: r1 === u };
+  }, await (async () => { const d = await api('GET', '/studio/list?ns=mca'); const pr = d.projects.find(x => /Fuel tax credits keep regional Australia moving/.test(x.title)); const full = await api('GET', '/studio/get?id=' + pr.id); const a = full.assets.find(x => x.channel === 'facebook'); const v = a.versions[a.versions.length - 1]; return { layout: v.layout, copy: v.copy }; })());
+  eq(check.w, 1080); eq(check.equal, true, 'the export PNG and the preview at native width are the same drawing');
+  await shot(page, 'studio-suggestions');
 });
 await t('the jobs view lists every job with its log; the client context lists the kit, the facts, the banned terms and the learned rule', async () => {
   await page.click(R + '.st-railbtn:has-text("Jobs")');

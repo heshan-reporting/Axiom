@@ -169,12 +169,15 @@
     useEffect(() => { let live = true; if (r.url) blobUrl(r.url).then(x => { if (live) setU(x); }).catch(() => {}); return () => { live = false; }; }, [r.url]);
     return u ? html`<img class="st-ref-thumb" src=${u} alt="" />` : html`<div class=${'st-ref-thumb ' + r.kind}>${r.kind}</div>`;
   }
-  function ReferencesView({ p, onAdd, busy }) {
+  function ReferencesView({ p, onAdd, onAnalyse, busy }) {
     const [purpose, setPurpose] = useState('composition'); const [note, setNote] = useState('');
     const pick = e => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => onAdd({ name: f.name, mime: f.type || 'image/png', imageB64: String(rd.result).split(',')[1], purpose, note }); rd.readAsDataURL(f); e.target.value = ''; };
     return html`<div class="st-centre-pad"><div class="ov-title">References</div>
       ${!p.references.length ? html`<div class="ov-empty">No references. The client logo comes from the brand kit and is placed exactly, never redrawn.</div>` : null}
-      <div class="st-refs">${p.references.map(r => html`<div key=${r.id} class="st-ref"><${RefThumb} r=${r} /><div><b>${r.name}</b><div class="ov-dim">purpose: ${r.purpose}${r.note ? ' - ' + r.note : ''}; added by ${r.who}, ${aest(r.created)}</div></div></div>`)}</div>
+      <div class="st-refs">${p.references.map(r => { const an = r.analysis; return html`<div key=${r.id} class="st-ref"><${RefThumb} r=${r} /><div><b>${r.name}</b> <${Chip} kind=${r.purpose === 'brand' || r.purpose === 'approved' ? 'ok' : ''} title=${r.purpose === 'brand' || r.purpose === 'approved' ? 'a constraint: the client\'s requirements' : 'an example in this one respect'}>${r.purpose}</${Chip}><div class="ov-dim">${r.note ? r.note + '; ' : ''}added by ${r.who}, ${aest(r.created)}</div>
+        ${an && !an.error ? html`<div class="st-ref-an"><div>${an.summary}</div>${an.typography ? html`<div><b>Type</b> ${an.typography}</div>` : null}${an.colour && (an.colour.palette.length || an.colour.relationships) ? html`<div><b>Colour</b> ${an.colour.palette.map((c, i) => html`<span key=${i} class="st-swatch" style=${'background:' + c} title=${c}></span>`)} ${an.colour.relationships}</div>` : null}${an.composition ? html`<div><b>Composition</b> ${an.composition}</div>` : null}${an.hierarchy ? html`<div><b>Hierarchy</b> ${an.hierarchy}</div>` : null}${an.imageTreatment ? html`<div><b>Image</b> ${an.imageTreatment}</div>` : null}${an.panels ? html`<div><b>Panels</b> ${an.panels}</div>` : null}${an.spacing ? html`<div><b>Spacing</b> ${an.spacing}</div>` : null}${an.logo ? html`<div><b>Logo</b> ${an.logo}</div>` : null}${(an.takeaways || []).length ? html`<div><b>Take</b> ${an.takeaways.join('; ')}</div>` : null}<div class="ov-dim">read by ${an.model || 'the vision pass'}; this is what the models are told about it</div></div>`
+        : html`<div class="st-ref-an limited"><${Chip} kind="warn">not analysed</${Chip}> <span class="ov-dim">${an && an.error ? an.error : 'no vision pass yet'}; the models know its name and purpose only.</span> ${canWrite() && !p.readOnly && r.key && onAnalyse ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => onAnalyse(r.id)}>Analyse now</button>` : null}</div>`}
+      </div></div>`; })}</div>
       ${canWrite() && !p.readOnly ? html`<div class="st-field"><${Lbl}>Add a reference</${Lbl}><div class="st-seg">${['brand', 'composition', 'mood', 'imagery', 'typography', 'inspiration', 'approved'].map(k => html`<button key=${k} class=${'st-segbtn' + (purpose === k ? ' on' : '')} onClick=${() => setPurpose(k)}>${k}</button>`)}</div><input class="st-in" value=${note} onInput=${e => setNote(e.target.value)} placeholder="Note (what to take from it)" /><div class="st-drop"><input type="file" accept="image/png,image/jpeg,image/webp" onChange=${pick} disabled=${!!busy} aria-label="Reference image" /> PNG, JPEG or WebP up to 6 MB. Competitor work is inspiration only: no logos, claims or exact layouts reused.</div></div>` : null}
     </div>`;
   }
@@ -236,34 +239,53 @@
     </div>`;
   }
   /* ------------------------------------------------------------ art direction: the re-render area as an art director */
-  function ArtDirection({ p, a, v, ro, busy, onPropose, onApply, onRender, rr, setRr }) {
-    const [fb, setFb] = useState('Come up with a better creative'); const [refining, setRefining] = useState(null); const [refineText, setRefineText] = useState('');
+  /** Suggested next directions: specific, editable instructions the worker drew from this tile, its references and the recent feedback. */
+  function Suggestions({ kind, sugg, onUse, onRefresh, busy, compact }) {
+    const d = sugg && sugg.data; const items = d && Array.isArray(d[kind]) ? d[kind] : [];
+    const title = kind === 'image' ? 'Suggested photographs' : 'Suggested next directions';
+    return html`<div class=${'st-sugg ' + kind + (compact ? ' compact' : '')} aria-label=${title}>
+      <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? ', the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh ? html`<button class="ov-link" disabled=${!!busy || (sugg && sugg.loading)} onClick=${onRefresh}>refresh</button>` : null}</div>
+      ${sugg && sugg.err ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.err}</div>` : null}
+      ${d && !items.length && !sugg.loading ? html`<div class="ov-dim">Nothing suggested for this version.</div>` : null}
+      ${items.map((s, i) => html`<div key=${i} class="st-sugg-item"><div class="st-sugg-text">${s.text}</div><div class="st-sugg-foot"><span class="ov-dim">${s.why}${(s.refs || []).length ? ' - from ' + s.refs.map(r => r.name).join(', ') : ''}</span><button class="ov-link" disabled=${!!busy} onClick=${() => onUse(s.text)}>${kind === 'image' ? 'use as the description' : 'use'}</button></div></div>`)}
+      ${d && (d.unanalysed || []).length ? html`<div class="ov-dim">Not read: ${d.unanalysed.join('; ')}</div>` : null}
+    </div>`;
+  }
+  function ArtDirection({ p, a, v, ro, busy, onPropose, onApply, onRender, rr, setRr, sugg, onSuggRefresh }) {
+    const [fb, setFb] = useState('Come up with a better creative'); const [refining, setRefining] = useState(null); const [refineText, setRefineText] = useState(''); const [imgFrom, setImgFrom] = useState({});
     const ev = useMemo(() => p.thread.filter(e => e.kind === 'concepts' && e.asset === a.id).pop() || null, [p.thread, a.id]);
     const applied = useMemo(() => { const m = {}; p.thread.forEach(e => { if (e.kind === 'applied' && e.eid) m[e.eid + ':' + e.index] = e; }); return m; }, [p.thread]);
     const stale = ev && ev.version !== v.id;
+    const withImage = ev ? ev.options.filter(o => o.needsImage) : [];
+    const basisKind = b => b.kind === 'rule' ? 'ok' : b.kind === 'preference' || b.kind === 'reference' ? '' : 'warn';
+    const basisTitle = b => b.kind === 'rule' ? 'a stated brand rule' : b.kind === 'preference' ? 'a recorded preference' : b.kind === 'reference' ? 'a project reference' : 'inferred by the model';
     return html`<div class="st-field st-ad"><div class="st-field-head"><${Lbl}>Art direction</${Lbl}><span class="ov-dim">proposed directions are previews on the current photograph; nothing is applied or rendered until you choose</span></div>
-      ${!ro ? html`<div class="st-ad-ask"><input class="st-in" value=${fb} onInput=${e => setFb(e.target.value)} placeholder='Feedback for the art director, e.g. "Come up with a better creative", "the photo has nothing to do with fuel", "too much box"' /><button class="btn sm" disabled=${!!busy || !fb.trim()} onClick=${() => onPropose(a, fb.trim(), null)}>Propose directions</button><span class="ov-dim">one model call, the artwork is shown to it, no render</span></div>` : null}
-      ${ev ? html`<div class="st-ad-crit"><b>Critique</b> ${ev.critique}${ev.imageSeen ? '' : html` <span class="ov-dim">(the photograph was not shown to the model)</span>`}${stale ? html` <${Chip} kind="warn">proposed against an earlier version</${Chip}>` : null}</div>
-        <div class="st-ad-cards">${ev.options.map(o => { const ap = applied[ev.eid + ':' + o.i]; return html`<div key=${o.i} class=${'st-ad-card' + (ap ? ' applied' : '')}>
+      ${!ro ? html`<div class="st-ad-ask"><input class="st-in" value=${fb} onInput=${e => setFb(e.target.value)} placeholder='Feedback for the art director, e.g. "Come up with a better creative", "Give me different variations", "the photo has nothing to do with fuel"' /><button class="btn sm" disabled=${!!busy || !fb.trim()} onClick=${() => onPropose(a, fb.trim(), null)}>Propose directions</button><span class="ov-dim">one model call; the artwork and the references are shown to it; no render</span></div>` : null}
+      ${ev ? html`<div class="st-ad-crit"><b>Critique</b> ${ev.critique}${ev.imageSeen ? '' : html` <span class="ov-dim">(the photograph was not shown to the model)</span>`}${(ev.refsUsed || []).length ? html` <span class="ov-dim">Read ${ev.refsUsed.filter(r => r.analysed).length} of ${ev.refsUsed.length} references${(ev.unanalysed || []).length ? ' (by name only: ' + ev.unanalysed.join('; ') + ')' : ''}.</span>` : null}${stale ? html` <${Chip} kind="warn">proposed against an earlier version</${Chip}>` : null}</div>
+        <div class="st-ad-cards">${ev.options.map(o => { const ap = applied[ev.eid + ':' + o.i]; const src = imgFrom[o.i] != null && imgFrom[o.i] !== '' ? ev.options[imgFrom[o.i]] : null; const needs = src ? src.needsImage : o.needsImage; return html`<div key=${o.i} class=${'st-ad-card' + (ap ? ' applied' : '')}>
           <${Composition} v=${Object.assign({}, v, { layout: o.layout, copy: Object.assign({}, v.copy, o.copy || {}) })} a=${a} ns=${p.ns} size="card" />
           <div class="st-ad-name">${String.fromCharCode(65 + o.i)}) ${o.name} ${ap ? html`<${Chip} kind="ok">applied</${Chip}>` : html`<${Chip}>proposed</${Chip}>`}${o.similar ? html` <${Chip} kind="warn">close to ${o.similar}</${Chip}>` : null}</div>
           <div class="st-ad-line">${o.concept}</div>
+          ${o.summary ? html`<div class="st-ad-line st-ad-sum">${o.summary}</div>` : null}
           <div class="st-ad-line"><b>Why</b> ${o.rationale}</div>
           <div class="st-ad-line"><b>Imagery</b> ${o.imagery}</div>
           <div class="st-ad-line"><b>Composition</b> ${o.composition}${o.textPlacement ? '; ' + o.textPlacement : ''}</div>
           <div class="st-ad-line"><b>Type and colour</b> ${o.typography}${o.colour ? '; ' + o.colour : ''}</div>
           ${o.copy && o.copy.headline ? html`<div class="st-ad-line"><b>Headline</b> ${o.copy.headline}</div>` : null}
           <div class="st-ad-line"><b>Keeps</b> ${(o.keeps || []).join(', ') || '-'} <b>Changes</b> ${(o.changes || []).join(', ') || '-'}</div>
-          <div class="st-ad-basis">${(o.basis || []).map((b, i) => html`<${Chip} key=${i} kind=${b.kind === 'rule' ? 'ok' : b.kind === 'preference' ? '' : 'warn'} title=${b.kind === 'rule' ? 'a stated brand rule' : b.kind === 'preference' ? 'a recorded preference' : 'inferred by the model'}>${b.kind}: ${b.claim}</${Chip}>`)}${(o.missing || []).length ? html`<span class="ov-dim">Missing: ${o.missing.join('; ')}</span>` : null}</div>
-          <div class="st-ad-cost">${o.needsImage ? html`<${Chip} kind="warn">${o.cost}</${Chip}>` : html`<${Chip} kind="ok">${o.cost}</${Chip}>`}${o.layoutLocked ? html` <span class="ov-dim">layout locked: only copy would change</span>` : null}</div>
-          ${!ro && !ap ? html`<div class="st-ad-acts"><button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, false)}>Apply layout only</button>${o.needsImage ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, true)}>Apply and render (${o.cost.split(' plus')[0]})</button>` : null}<button class="btn sm ghost" onClick=${() => { setRefining(refining === o.i ? null : o.i); setRefineText(''); }}>Refine</button></div>` : ap ? html`<div class="ov-dim">applied as version ${ap.version}${ap.render ? ', render queued' : ''}</div>` : null}
+          ${(o.refs || []).length ? html`<div class="st-ad-line"><b>Draws on</b> ${o.refs.map(r => r.name).join(', ')}</div>` : null}
+          <div class="st-ad-basis">${(o.basis || []).map((b, i) => html`<${Chip} key=${i} kind=${basisKind(b)} title=${basisTitle(b)}>${b.kind}${b.ref ? ' ' + b.ref : ''}: ${b.claim}</${Chip}>`)}${(o.missing || []).length ? html`<span class="ov-dim">Missing: ${o.missing.join('; ')}</span>` : null}</div>
+          <div class="st-ad-cost">${needs ? html`<${Chip} kind="warn">${src ? '1 render plus a layout version' : o.cost}</${Chip}>` : html`<${Chip} kind="ok">${o.cost}</${Chip}>`}${o.layoutLocked ? html` <span class="ov-dim">layout locked: only copy would change</span>` : null}</div>
+          ${!ro && !ap && withImage.length && (withImage.length > 1 || !o.needsImage) ? html`<div class="st-ad-combine"><label class="ov-dim">Photograph from <select class="st-sel" value=${imgFrom[o.i] == null ? '' : imgFrom[o.i]} onChange=${e => setImgFrom(Object.assign({}, imgFrom, { [o.i]: e.target.value === '' ? '' : Number(e.target.value) }))} aria-label=${'Photograph for ' + o.name}><option value="">${o.needsImage ? 'this direction' : 'the current photograph'}</option>${withImage.filter(x => x.i !== o.i).map(x => html`<option key=${x.i} value=${x.i}>${String.fromCharCode(65 + x.i)}) ${x.name}</option>`)}</select></label></div>` : null}
+          ${!ro && !ap ? html`<div class="st-ad-acts"><button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, false, src ? src.i : undefined)}>Apply layout only</button>${needs ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onApply(ev.eid, o.i, true, src ? src.i : undefined)}>Apply and render (1 render at ${(v.image && v.image.size) || '2K'})</button>` : null}<button class="btn sm ghost" onClick=${() => { setRefining(refining === o.i ? null : o.i); setRefineText(''); }}>Refine</button></div>` : ap ? html`<div class="ov-dim">applied as version ${ap.version}${ap.render ? ', render queued' : ''}${ap.imageFrom != null ? ', photograph from ' + String.fromCharCode(65 + ap.imageFrom) : ''}</div>` : null}
           ${refining === o.i ? html`<div class="st-offer-box"><textarea class="st-ta" rows="2" value=${refineText} onInput=${e => setRefineText(e.target.value)} placeholder="What to change about this direction"></textarea><div><button class="btn sm" disabled=${!!busy || !refineText.trim()} onClick=${() => { onPropose(a, refineText.trim(), { eid: ev.eid, index: o.i }); setRefining(null); }}>Propose refinements</button></div></div>` : null}
         </div>`; })}</div>` : html`<div class="ov-dim">No directions proposed yet for this asset.</div>`}
-      ${!ro ? html`<div class="st-ad-quick">${rr === null ? html`<button class="ov-link" onClick=${() => setRr(String((v.context || {}).visual || ''))}>${v.image ? 'Just re-render the photograph from a description' : 'Render a photograph from a description'}</button>` : html`<div class="st-proposal"><div class="ov-dim">Art direction for the photograph (no text, no logos - the words are layers):</div><textarea class="st-ta" rows="2" value=${rr} onInput=${e => setRr(e.target.value)}></textarea><div><button class="btn sm" disabled=${!!busy} onClick=${() => { onRender(a, rr); setRr(null); }}>Do this (one render at ${(v.image && v.image.size) || '2K'})</button> <button class="btn sm ghost" onClick=${() => setRr(null)}>Not now</button></div></div>`}</div>` : null}
+      ${!ro ? html`<div class="st-ad-quick">${rr === null ? html`<button class="ov-link" onClick=${() => setRr(String((v.context || {}).visual || ''))}>${v.image ? 'Just re-render the photograph from a description' : 'Render a photograph from a description'}</button>${sugg && sugg.data && (sugg.data.image || []).length ? html` <span class="ov-dim">(${sugg.data.image.length} photograph suggestions inside)</span>` : null}` : html`<div class="st-proposal"><div class="ov-dim">Art direction for the photograph (no text, no logos - the words are layers; the composition's quiet zone is added for you):</div><textarea class="st-ta" rows="2" value=${rr} onInput=${e => setRr(e.target.value)} aria-label="Photograph description"></textarea><div><button class="btn sm" disabled=${!!busy} onClick=${() => { onRender(a, rr); setRr(null); }}>Do this (one render at ${(v.image && v.image.size) || '2K'})</button> <button class="btn sm ghost" onClick=${() => setRr(null)}>Not now</button></div>
+        <${Suggestions} kind="image" sugg=${sugg} busy=${busy} compact=${true} onUse=${t => setRr(t)} onRefresh=${onSuggRefresh} /></div>`}</div>` : null}
     </div>`;
   }
 
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, busy }) {
+  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy }) {
     const v = current(a);
     const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.id, a.current]);
@@ -300,7 +322,7 @@
         <div class="st-field"><div class="st-field-head"><${Lbl}>Layout</${Lbl}>${!ro && !copyOnly && !flat ? html`<button class=${'st-lock' + (a.locks.layout ? ' on' : '')} onClick=${() => onLock(a, 'layout', !a.locks.layout)} aria-pressed=${!!a.locks.layout}>${a.locks.layout ? 'locked' : 'lock'}</button>` : null}</div>
           <div class="ov-dim">${copyOnly ? 'copy only: no tile' : flat ? 'not editable (flattened)' : v.layout && v.layout.layers ? 'editable composition: ' + v.layout.templateName + ', headline ' + (hl ? hl.size : '-') + '% of the width, ' + v.layout.layers.length + ' layers' + (v.layout.layers.some(l => l.role === 'logo') ? ', kit logo placed exactly' : ', no logo on file') + '.' : 'no layout'}
             ${!ro && hl && !a.locks.layout ? html` <button class="ov-link" onClick=${() => onLayout(a, -0.6)}>headline smaller</button> <button class="ov-link" onClick=${() => onLayout(a, 0.6)}>larger</button> <span class="ov-dim">(a layout version, no render)</span>` : null}</div></div>
-        ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} />` : null}
+        ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
         <div class="st-field"><${Lbl}>Checks on this version</${Lbl}>
           <ul class="st-checks">
             ${(v.checks || []).map((c, i) => html`<li key=${i} class=${c.state}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <b>${c.text}</b> <span class="ov-dim">${c.note}</span></li>`)}
@@ -321,9 +343,11 @@
   }
 
   /* ------------------------------------------------------------ the right panel: the direction thread */
-  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, busy }) {
+  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, busy, sugg, onSuggRefresh, prefill }) {
     const [text, setText] = useState(''); const [offerOpen, setOfferOpen] = useState(null); const box = useRef(null);
     useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [p.thread.length, busy]);
+    // a chosen suggestion lands in the composer as an editable instruction, never sent on its own
+    useEffect(() => { if (prefill && prefill.text) setText(prefill.text); }, [prefill && prefill.at]);
     const targets = [['asset', 'This asset' + (a ? ': ' + a.title : '')], ['family', a ? 'The ' + a.family : 'Asset family'], ['set', 'The whole set']];
     const answered = useMemo(() => { const m = {}; p.thread.forEach(e => { if ((e.kind === 'decided' || e.kind === 'remembered' || e.kind === 'offer_declined') && e.eid) m[e.eid + ':' + (e.kind === 'decided' ? 'proposal' : 'offer')] = e; }); return m; }, [p.thread]);
     const send = () => { if (!text.trim()) return; onDirect(text.trim(), target); setText(''); };
@@ -343,6 +367,7 @@
         </div>`; })}
         ${busy ? html`<div class="st-msg studio"><div class="st-msg-text ov-dim">${busy}</div></div>` : null}
       </div>
+      ${!ro && a && sugg ? html`<${Suggestions} kind="design" sugg=${sugg} busy=${busy} onUse=${t => { setText(t); setTarget('asset'); }} onRefresh=${onSuggRefresh} />` : null}
       ${!ro ? html`<div class="st-composer">
         <select class="st-sel" value=${target} onChange=${e => setTarget(e.target.value)} aria-label="Target of the direction">${targets.map(([k, l]) => html`<option key=${k} value=${k} disabled=${k !== 'set' && !a}>${l}</option>`)}</select>
         <textarea class="st-ta" rows="2" value=${text} placeholder=${'Direct the team. e.g. "Keep the layout, sharpen the headline", "three alternative opening lines", "adapt this for Instagram", "more restrained visual"'} onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} aria-label="Direction"></textarea>
@@ -449,6 +474,16 @@
     const stepping = useRef(new Set()); const pidRef = useRef(null); pidRef.current = pid;
     const client = CLIENTS.find(c => c.id === clientId) || CLIENTS[0] || FALLBACK_CLIENTS[0];
     const a = p ? p.assets.find(x => x.id === selAsset) || null : null;
+    /* suggested next directions for the selected composition: one small, cached model call per version; refreshed when the asset, its version or the references change */
+    const [sugg, setSugg] = useState(null); const suggSig = useRef('');
+    const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() ? a.id + '|' + av.id + '|' + p.references.length : '';
+    const fetchSugg = useCallback(async (refresh) => {
+      if (!suggKey) { setSugg(null); return; }
+      suggSig.current = suggKey; setSugg(s => ({ loading: true, data: refresh ? null : (s && s.data) || null, err: '' }));
+      try { const d = await call('/studio/suggest', { project: pidRef.current, asset: suggKey.split('|')[0], refresh: !!refresh }); if (suggSig.current !== suggKey) return; if (d.ok) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: d.detail || d.error || 'no answer' }); }
+      catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
+    }, [suggKey]);
+    useEffect(() => { fetchSugg(false); }, [fetchSugg]);
 
     const loadLib = useCallback(async () => {
       setLib(null); setLibErr('');
@@ -511,11 +546,12 @@
     };
     const saveBrief = async (b) => { try { await call('/studio/project/update', { id: p.id, revision: p.revision, patch: { brief: b } }); await reload(); } catch (e) { fail(e); if (e.status === 409) reload(); } };
     const addSource = async (name, text) => { try { const s = await call('/studio/source', { project: p.id, kind: 'text', name, text }); await reload(); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading ' + name); } catch (e) { fail(e); } };
-    const addReference = async (r) => { try { await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg('Reference added'); } catch (e) { fail(e); } };
+    const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e); } finally { setBusy(''); } };
+    const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e); } finally { setBusy(''); } };
     const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e); } };
     const editAsset = async (as, patch) => { try { const cur = p.assets.find(x => x.id === as.id) || as; const changed = {}; Object.keys(patch).forEach(k => { if ((current(cur).copy || {})[k] !== patch[k]) changed[k] = patch[k]; }); if (!Object.keys(changed).length) return; await call('/studio/version', { asset: as.id, revision: cur.revision, copy: changed, note: 'hand edit: ' + Object.keys(changed).join(', ') }); await reload(); } catch (e) { fail(e); if (e.status === 409 || e.code === 'locked') reload(); } };
     const propose = async (as, feedback, refine) => { try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), 'The art director reads ' + as.title + ' and the feedback'); await reload(); } catch (e) { fail(e); } };
-    const applyConcept = async (eid, index, render) => { try { const r = await call('/studio/concept/apply', { project: p.id, eid, index, render }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e); } };
+    const applyConcept = async (eid, index, render, imageFrom) => { try { const r = await call('/studio/concept/apply', { project: p.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e); } };
     const saveLayout = async (as, layout) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'layout edited by hand' }); await reload(); } catch (e) { fail(e); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)' }); await reload(); } catch (e) { fail(e); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e); } };
@@ -574,11 +610,11 @@
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
     else if (view === 'brief') centre = html`<${BriefView} p=${p} onSave=${saveBrief} onDirect=${direct} onProduce=${() => produce({})} busy=${busy} />`;
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
-    else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} busy=${busy} />`;
+    else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} busy=${busy} />`;
+    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
     else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
 
     return html`<div class="st">
@@ -586,7 +622,7 @@
       <div class=${'st-body' + (p ? '' : ' lib')}>
         ${p ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => { setCmp(null); setView(v); }} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} />` : null}
         <main class="st-centre">${centre}</main>
-        ${p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} busy=${busy} />` : null}
+        ${p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} busy=${busy} sugg=${view === 'asset' || a ? sugg : null} onSuggRefresh=${() => fetchSugg(true)} />` : null}
       </div>
       ${dialog && dialog.kind === 'export' && p ? html`<${ExportDialog} p=${p} client=${client} onClose=${() => setDialog(null)} onClickup=${ready => setDialog({ kind: 'clickup', ready })} onExport=${doExport} state=${exportState} />` : null}
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
