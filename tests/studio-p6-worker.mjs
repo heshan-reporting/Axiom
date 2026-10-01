@@ -51,7 +51,7 @@ globalThis.fetch = async (url, init) => {
     let text;
     if (/describing one reference image/.test(sys)) text = refProse ? 'It is a lovely teal tile with a big headline.' : JSON.stringify(REF);
     else if (/suggesting the next things the team might ask for/.test(sys)) text = JSON.stringify(SUGGEST(user));
-    else if (/art director of an Australian political communications agency\. You are shown one social tile/.test(sys)) text = JSON.stringify(CONCEPTS(user));
+    else if (/art director of an Australian political communications agency, briefing/.test(sys)) text = JSON.stringify(CONCEPTS(user));
     else if (/decide what the instruction asks/.test(sys)) text = JSON.stringify(decide(user));
     else if (/producing a coordinated set/.test(sys)) text = JSON.stringify(pieces(user));
     else text = '{}';

@@ -41,42 +41,56 @@
     const pal = layout.palette || {};
     ctx.save(); ctx.clearRect(0, 0, W, H);
     const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : null;
-    // the ground: the stage fill (a typography-led composition's brand colour, else the panel colour) under an image box, or nothing
-    if (ib) { ctx.fillStyle = layout.bg || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
+    // the ground: the stage fill (a plan's colour or gradient, a typography-led composition's brand colour, else the panel colour) under an image box, or nothing
+    const bgFill = layout.bg && typeof layout.bg === 'object' ? (() => { const d = layout.bg.dir || 'down'; const g = d === 'right' ? ctx.createLinearGradient(0, 0, W, 0) : d === 'left' ? ctx.createLinearGradient(W, 0, 0, 0) : d === 'up' ? ctx.createLinearGradient(0, H, 0, 0) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, layout.bg.from || '#0f171d'); g.addColorStop(1, layout.bg.to || layout.bg.from || '#0f171d'); return g; })() : layout.bg || null;
+    const planNoBg = layout.v === 5 && !(layout.regions || []).some(r => r.role === 'background');
+    if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
     if (images.bg) cover(ctx, images.bg, W, H, ib);
-    else { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
+    else if (!planNoBg) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
     const overflow = [];
+    const sketch = s => { ctx.setLineDash([W * 0.01, W * 0.008]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, W * 0.003); ctx.strokeRect(s.x + 1, s.y + 1, s.w - 2, s.h - 2); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '500 ' + Math.max(10, W * 0.018) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2); };
     layers.forEach(l => {
       if (l.hidden) return;
       const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
       ctx.save(); ctx.globalAlpha = l.opacity == null ? 1 : l.opacity;
+      if (l.rotate) { ctx.translate(x + w / 2, y + h / 2); ctx.rotate(l.rotate * Math.PI / 180); ctx.translate(-(x + w / 2), -(y + h / 2)); }
       if (l.type === 'shape') {
         if (l.gradient) {
           // dir: which way it darkens - up (default: clear at the top, solid at the bottom), down, left, right
           const d = l.dir || 'up'; const g = d === 'down' ? ctx.createLinearGradient(0, y + h, 0, y) : d === 'left' ? ctx.createLinearGradient(x + w, 0, x, 0) : d === 'right' ? ctx.createLinearGradient(x, 0, x + w, 0) : ctx.createLinearGradient(0, y, 0, y + h);
           g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, l.fill || 'rgba(0,0,0,.7)'); g.addColorStop(1, l.fill || 'rgba(0,0,0,.7)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
         }
-        else { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
+        else if (l.shape === 'circle') { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill(); }
+        else if (l.shape === 'rule') { ctx.fillStyle = l.fill || '#fff'; ctx.fillRect(x, y, w, Math.max(1, h || W * 0.004)); }
+        else { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.radius ? l.radius / 100 * W : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
       }
       else if (l.type === 'img') {
-        const img = l.role === 'logo' ? images.logo : images[l.id];
-        if (img) contain(ctx, img, x, y, w, h);
-        else if (l.role === 'logo') { ctx.fillStyle = 'rgba(255,255,255,.9)'; roundRect(ctx, x, y, w, h, 2); ctx.fill(); ctx.fillStyle = '#333'; ctx.font = '600 ' + Math.max(10, h * 0.32) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText('LOGO', x + w / 2, y + h / 2); }
+        // marks (logo, wordmark) and image regions are keyed by layer id; the client logo also answers to the legacy images.logo
+        const img = images[l.id] || (l.role === 'logo' ? images.logo : null);
+        if (img) { if (l.fit === 'cover') cover(ctx, img, W, H, { x, y, w, h }); else contain(ctx, img, x, y, w, h); }
+        else if (l.role === 'logo' || l.role === 'wordmark') { ctx.fillStyle = 'rgba(255,255,255,.9)'; roundRect(ctx, x, y, w, h, 2); ctx.fill(); ctx.fillStyle = '#333'; ctx.font = '600 ' + Math.max(10, h * 0.32) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(l.role === 'wordmark' ? 'WORDMARK' : 'LOGO', x + w / 2, y + h / 2); }
+        else sketch({ x, y, w, h, label: (l.name || l.id || 'image') + ' - sketch' });
       } else if (l.type === 'text') {
-        const text = l.role && copy[l.role] != null ? copy[l.role] : l.text;
+        let text = l.role && copy[l.role] != null && l.role !== 'free' ? copy[l.role] : l.text;
         if (!text) { ctx.restore(); return; }
+        if (l.emphasis === 'caps') text = String(text).toUpperCase();
         const px = l.size / 100 * W; ctx.font = (l.weight || 600) + ' ' + px + 'px ' + fontFor(layout, l); ctx.textBaseline = 'top'; ctx.textAlign = l.align || 'left';
+        if (l.letterSpacing && 'letterSpacing' in ctx) ctx.letterSpacing = (l.letterSpacing * px) + 'px';
         const padX = l.bg ? px * 0.8 : 0, padY = l.bg ? px * 0.45 : 0;
         const lines = wrap(ctx, text, Math.max(10, w - padX * 2)); const lh = px * 1.12;
         const boxH = lines.length * lh + padY * 2;
         if (h && boxH > h + 0.5) overflow.push(l.role || l.id);
         if (l.bg) { const bw = l.align === 'center' || lines.length > 1 ? w : Math.min(w, Math.max.apply(null, lines.map(s => ctx.measureText(s).width)) + padX * 2); const bx = l.align === 'center' ? x + (w - bw) / 2 : l.align === 'right' ? x + w - bw : x; ctx.fillStyle = l.bg; roundRect(ctx, bx, y, bw, boxH, px * 0.35); ctx.fill(); }
-        ctx.fillStyle = l.color || '#fff';
         const tx = l.align === 'center' ? x + w / 2 : l.align === 'right' ? x + w - padX : x + padX;
+        // emphasis: a highlight band behind each line, a box around the block, or an underline under each line
+        if (l.emphasis === 'highlight' || l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || (l.emphasis === 'highlight' ? 'rgba(255,214,0,.85)' : l.color || '#fff'); lines.forEach((s, i) => { const lw = ctx.measureText(s).width; const lx = l.align === 'center' ? tx - lw / 2 : l.align === 'right' ? tx - lw : tx; if (l.emphasis === 'highlight') ctx.fillRect(lx - px * 0.15, y + padY + i * lh - px * 0.05, lw + px * 0.3, lh); else ctx.fillRect(lx, y + padY + i * lh + px * 1.02, lw, Math.max(1.5, px * 0.08)); }); }
+        if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, px * 0.08); ctx.strokeRect(x, y, w, boxH); }
+        ctx.fillStyle = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
         lines.forEach((s, i) => ctx.fillText(s, tx, y + padY + i * lh));
       }
       ctx.restore();
     });
+    if (layout.frame && layout.frame.of > 1) { ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '500 ' + Math.max(10, W * 0.02) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'top'; ctx.textAlign = 'right'; ctx.fillText(layout.frame.index + 1 + ' / ' + layout.frame.of, W - W * 0.025, H * 0.015); ctx.restore(); }
     ctx.restore();
     return { overflow };
   }

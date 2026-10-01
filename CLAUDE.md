@@ -1008,6 +1008,86 @@ limitation with **Analyse now**. Harnesses: `tests/studio-p6-worker.mjs`
 `tests/studio-variations-demo.mjs`, which draws five compositions of one
 message to `tests/shot-variations.png`.
 
+**Design beyond the preset (build `studio-p7`; `CREATIVE-STUDIO.md` s.13).**
+A concept decides the medium, not a template: layouts `v: 5` come from a
+**plan** (`ST_PLAN_SCHEMA`, `stPlanNormalise`): `medium` (photo-cinematic /
+photo-documentary / editorial / composite / cutout / collage / illustration /
+diagram / infographic / typographic / carousel), `approach` (`editable`: the
+image model makes each region's imagery and the renderer composes the
+words, shapes and marks as live layers; `artwork`: the image model paints
+the whole piece, words included, and the version is `mode: 'artwork'` with
+`layout.baked` naming the roles that are now bitmap and not editable - the
+app says so and disables those fields), `regions[]` (background / cutout /
+inset, each with its own image `prompt` and `refs` with roles), free
+`elements[]` (text roles headline / support / cta take the copy; kicker /
+label / myth / fact / caption / free carry their own text; `emphasis`
+highlight / underline / box / caps, `letterSpacing`, `rotate`; shapes rect /
+pill / circle / rule, gradients with `dir`), a stage `bg` colour or
+gradient, and `frames[]` for a carousel. Anything the renderer cannot draw
+is recorded in `layout.unsupported` and shown as "cannot draw", never
+reduced to a preset in silence. **Marks follow the campaign:** kit campaigns
+carry `identity`, `logoPolicy` (logo / wordmark / both / none) and a
+wordmark file (`POST /brand/kit {wordmarkB64, wordmarkMime,
+wordmarkCampaign, logoPolicy?}` -> R2 `brand/<ns>/wordmark/<campaign>`,
+served by `GET /brand/wordmark?ns=&campaign=`; `tools/brand-logo.py <file>
+--campaign hoof --wordmark`, `--policy`); `stMarkLayers` places the client
+logo, the campaign wordmark, both or none as exact image layers (HOOF
+carries its wordmark and never the MCA logo), on preset and plan layouts
+alike. The renderer draws gradient grounds, image regions (`fit` cover or
+contain, keyed by layer id, sketched as dashed boxes until their image
+lands), emphasis, rules and circles, rotation and a frame counter;
+`useImages` loads every image layer from its own `src`.
+**Three actions** on a composition: **Refine this design** (mode `refine`),
+**Explore variations** (`explore`: three concepts that must differ in the
+drawn result - `stPlanSignature` / `stPlanDistance` measure medium,
+approach, image region and a 4x4 occupancy grid of words and images; a
+look-alike is marked `similar`), **Create a new design** (`new`: a custom
+instruction, chosen `refs`, `keep {imagery, copy, composition}`; the
+panel and layout are never inherited; the result is a fresh asset in the
+family "New designs" or one asset per frame for a carousel). The concepts
+call runs the creative model at `effort: 'high'` with the artwork, the
+chosen reference images, the campaign identity, the facts and the
+preferences, and each option carries the full `plan`, `summary`, `renders`
+and `cost`. `POST /studio/concept/apply {eid, index, render, imageFrom,
+size}` applies (or creates) and, with `render`, queues the plan's image
+work through `stPlanRenders`: one render per region that does not keep the
+current image, or one full-artwork render.
+**The image model gets the plan.** `stRenderJob` resolves `referenceIds`
+to the reference images and passes them to Gemini with their roles
+(`nanoRender` lists "REFERENCE IMAGES, attached in this order" with each
+role and purpose); `stRegionPrompt` writes a concept-specific brief in the
+medium's own terms (no universal "documentary realism"), with the exact
+words when the approach is artwork and a reservation for the mark, which
+is placed afterwards from its file. Multi-turn edits (`input.edit`) replay
+the conversation the image came from - the model's parts and thought
+signatures are kept in R2 `.../<version>-conv.json` (`image.conv`) and
+`image.editOf` names the source. `image.requested`, `image.model`,
+`image.fallback` and `image.size` record what actually ran (1K / 2K / 4K;
+a fallback is named on the version note, the thread and the asset view).
+A cutout or inset lands in its own layer (`context.regions`) without
+touching the background.
+**Inspection.** Every render queues stage `inspect` (unless
+`STUDIO_INSPECT=0`): the creative model sees the rendered image and judges
+fidelity, hierarchy, readability, relevance and identity 1-5, lists the
+words it can read and any not in the approved copy, gives a verdict (ship
+/ fix / redo) and one bounded `fix {kind design|render|edit|copy,
+instruction}`; event `inspection`. `POST /studio/inspection/apply {eid,
+instruction?}` runs it once (a direction for design / copy, a render
+re-brief or an edit for the others), event `inspection_applied`
+(`fixKind`); after two applied corrections on a line the next inspection
+answers `stop`. In-app: the inspection card on the thread with scores,
+issues, wording, an editable correction and **Apply the correction**.
+**Showing it.** `tests/studio-plan-demo.mjs` draws the mechanics with
+synthetic imagery to `tests/shot-plans.png` (not finished quality: the
+sandbox cannot reach the models). `tools/studio-showcase.py --key --ref
+<file:purpose:note>...` runs the three demonstrations on the live worker
+with the real models - the MCA myth opener and fact-response carousel, the
+HOOF myth / fact creative with its wordmark, and a fresh concept through
+Create a new design - saving before and after PNGs, the inspections and
+the facts (model, resolution, fallback, baked words, wording checks) to
+`showcase/index.html`. Harnesses: `tests/studio-p7-worker.mjs` (6) and the
+three-actions case in the browser harness (17).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

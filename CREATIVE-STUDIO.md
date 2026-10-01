@@ -111,3 +111,23 @@ The compositions were one geometry: a panel in the lower third, white type, logo
 
 **Verified** in `tests/studio-p6-worker.mjs`, the suggestions and export-equals-preview case in the browser harness, and `tests/studio-variations-demo.mjs`, which draws the house default and four directions for one message onto one sheet.
 
+## 13. Design beyond the preset: the concept decides the medium
+
+The comparison sheet in section 12 proved layout mechanics. This slice removes the assumption behind them: that every creative is a photograph with words arranged into one of a few presets.
+
+**The plan.** A concept now arrives as a plan: a medium (cinematic or documentary photography, editorial design, surreal compositing, cutout imagery, collage, illustration, diagram, infographic, typography-led artwork, or a carousel), an approach, image regions each with its own instructions and references, free elements in per cent of the stage (text groups with emphasis, rules, shapes, overlays, gradients, rotation), a stage colour or gradient, and frames for a carousel. The normaliser keeps everything the renderer can draw and names what it cannot in `unsupported`, which the cards show as "cannot draw" rather than quietly falling back to a panel. The presets of section 12 remain starting points inside this vocabulary.
+
+**Two honest approaches.** *Editable composition*: the image model makes the imagery of each region and the shared renderer composes the words, shapes and marks as live layers; the finish comes from typography, hierarchy and layering, which the renderer now supports. *Full artwork*: the image model paints the whole designed piece, lettering included, from the exact approved words; the version is marked `artwork`, its baked roles are named, the fields are disabled with "in the artwork", and only the mark stays a live layer placed from its original file. Neither claims what it cannot deliver.
+
+**Campaign identity is not content type.** Kit campaigns carry an identity note, a logo policy and a wordmark file. Hands Off Our Fuel tiles carry the HANDS OFF OUR FUEL wordmark and never the MCA logo; MCA campaigns carry the MCA logo; myth-busting is a format either can use. The marks are placed exactly, on preset and plan layouts alike.
+
+**Three actions.** Refine this design keeps the idea and improves it in named ways. Explore variations develops three concepts that must differ in the drawn result, measured on medium, approach, image region and where the words and images sit, not on their names. Create a new design works independently of the cards: an instruction, the references to use, and what to retain (imagery, copy, composition); mandatory campaign requirements always carry forward; the panel and layout never do; the result is a fresh asset, or one asset per frame.
+
+**Claude as the art director.** The concepts call runs Claude Opus 5.5 at high effort with the artwork, the chosen reference images, the brief, the audience, the message, the campaign identity, the approved facts and the recorded preferences, and requires a critique and an executable plan per concept.
+
+**Gemini gets the whole plan.** Each region's brief is written in the medium's own terms, the universal "documentary realism, natural light" is gone, the reference images go to the image model with their roles spelled out, edits replay the conversation the image came from (the model's parts and thought signatures kept), 2K stays the default with 4K on request, and the model and resolution actually used, and any fallback, are recorded on the version and shown.
+
+**Inspection.** After every render the art director reads the actual result for fidelity, hierarchy, readability, image relevance and campaign identity, lists the words it can read against the approved copy, and offers one correction, applied once from the thread and bounded to two rounds per line.
+
+**Demonstration.** `tests/studio-plan-demo.mjs` draws the mechanics with synthetic imagery and says so on the sheet. The finished work, with the real models, comes from `tools/studio-showcase.py` against the live worker: the MCA myth opener and fact-response carousel, the HOOF myth / fact creative with its wordmark, and a fresh concept through Create a new design, saved before and after with the inspections and the facts about each render. The sandbox that builds AXIOM cannot reach the models, so that is where the quality is judged.
+

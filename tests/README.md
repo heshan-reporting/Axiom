@@ -19,6 +19,8 @@ node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phas
 node --experimental-sqlite tests/studio-p3-worker.mjs     # Creative Studio Phases 3-4 (direction by instruction, Remember, outcomes, KV session import)
 node --experimental-sqlite tests/studio-p6-worker.mjs     # art direction as design: reference analysis, design specs, combined revisions, suggestions
 node --experimental-sqlite tests/studio-variations-demo.mjs  # draws five compositions of one message to tests/shot-variations.png (the creative outcome, to look at)
+node --experimental-sqlite tests/studio-p7-worker.mjs     # design beyond the preset: wordmarks and policy, expressive plans, carousels, references to the image model, artwork mode, edits, inspection, new designs
+node --experimental-sqlite tests/studio-plan-demo.mjs     # draws the plan engine's mechanics with synthetic imagery to tests/shot-plans.png (not finished quality)
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
 node --experimental-sqlite tests/artwork-worker.mjs       # artwork memory
 node --experimental-sqlite tests/overview-worker.mjs      # the front page and the daily brief
@@ -82,6 +84,21 @@ it at the end.
 - `studio-variations-demo.mjs`: not a test but the outcome to look at - one
   message, one photograph, five compositions drawn by the one renderer onto
   `tests/shot-variations.png`.
+- `studio-p7-worker.mjs`: design beyond the preset. A campaign wordmark is
+  stored and served and its logo policy decides the mark on that campaign's
+  tiles; concepts arrive as expressive plans (medium, approach, regions with
+  their own image instructions and references, free text groups with
+  emphasis, devices, carousel frames) and are laid out without silently
+  reducing what cannot be drawn; distinctness is measured on the drawn
+  result; a carousel applies as one asset per frame; the image model receives
+  the reference images with their roles; the full-artwork approach marks its
+  words as part of the bitmap; an edit replays the model's parts and thought
+  signatures; 4K is honoured and a fallback is visible; every render is
+  inspected and one bounded correction can be applied; Create a new design
+  starts from the brief with the chosen references and inherits no panel.
+- `studio-plan-demo.mjs`: the plan engine's mechanics drawn with synthetic
+  imagery to `tests/shot-plans.png`. Not finished creative quality: the
+  finished renders come from `tools/studio-showcase.py` on the live worker.
 - `studio-browser.mjs`: the same journey in a real browser. The page's calls
   to the worker are routed into the worker module running in the harness
   process, so intake, extraction, production, the renderer's preview, hand

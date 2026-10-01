@@ -43,13 +43,14 @@ const CONCEPTS = { critique: 'The photograph is generic; the panel holds.', opti
   { name: 'Regional road at dawn', concept: 'A new photograph of a regional road', rationale: 'Where the credit is used', imagery: 'Regional road at dawn', composition: 'Low horizon', typography: 'Same', colour: 'Teal panel', textPlacement: 'lower left', layout: { style: 'same', placement: 'bottom', template: 'same', headline: 'same' }, keeps: ['panel', 'copy'], changes: ['photograph'], needsImage: true, prompt: 'A quiet regional road at dawn', basis: [{ claim: 'Restrained imagery preferred', kind: 'preference' }], missing: ['Whether machinery may appear'] }] };
 const REFAN = { summary: 'A restrained editorial tile: large headline top left, photograph bleeding right, logo small bottom left.', typography: 'Bold grotesque headline, light body', colour: { palette: ['#0E6A6E', '#F4F1EA'], relationships: 'Teal ground, cream type' }, hierarchy: 'Headline first', composition: 'Words left, photograph right', imageTreatment: 'Documentary, warm', panels: 'None', spacing: 'Airy', logo: 'Bottom left, small', text: ['Hands Off Our Fuel'], takeaways: ['Flat colour field', 'Headline far larger than body'] };
 const SUGGEST = { design: [{ text: 'Keep the harvester visible. Replace the large teal panel with a compact translucent panel in the upper left and move the CTA below the headline.', why: 'The subject is covered', refs: [] }, { text: 'Use the flat colour field and the large headline from the approved tile, adapted to this square format.', why: 'Matches the approved reference', refs: [] }, { text: 'Set the words on a split teal field to the left and let the photograph fill the right half.', why: 'Clean separation', refs: [] }], image: [{ text: 'A wider documentary photograph with the harvester on the right and open paddock on the left for the headline.', why: 'Room for the words' }, { text: 'The same paddock at dusk, closer on the header, sky quiet above.', why: 'Human scale' }] };
+const INSPECT = { fidelity: 4, hierarchy: 3, readability: 4, relevance: 4, identity: 5, words: { present: [], wrong: [] }, issues: ['The support line sits too close to the headline'], verdict: 'fix', fix: { kind: 'design', instruction: 'Add a line of space between the headline and the support line; keep everything else.' }, note: 'Close; one spacing fix.' };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) { calls.gemini++; if (/\/models\?/.test(u)) return new Response(JSON.stringify({ models: [{ name: 'models/gemini-3-pro-image' }] }), { status: 200 }); return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: PNG } }] } }] }), { status: 200 }); }
   if (u.indexOf('api.anthropic.com/v1/models') >= 0) return new Response(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-sonnet-5-5' }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
     calls.anthropic++; const body = JSON.parse(init.body); const sys = String(body.system || ''), user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
-    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+    const answer = /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /describing one reference image/.test(sys) ? REFAN : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
     return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn' }), { status: 200 });
   }
   return new Response('', { status: 404 });
@@ -225,7 +226,7 @@ await t('directing the team: a text direction lands as a version with no render;
   ok(/needs a new image, not a text change/.test(await page.textContent(R + '.st-thread')) && /Simplify the background/.test(await page.textContent(R + '.st-proposal')));
   eq(calls.gemini, g0, 'nothing spent before confirmation');
   await page.click(R + '.st-offer .ov-link:has-text("show wording")');
-  await page.waitForSelector(R + '.st-offer-box'); eq(await page.inputValue(R + '.st-offer-box textarea'), 'No haul trucks in Hands Off Our Fuel imagery.');
+  await page.waitForSelector(R + '.st-offer-box'); eq(await page.inputValue(R + 'textarea[id^="offer-"]'), 'No haul trucks in Hands Off Our Fuel imagery.');
   await page.click(R + '.st-offer-box button:has-text("Campaign preference (hoof)")');
   await page.waitForFunction(() => /Saved as a campaign preference for hoof/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 15000 });
   eq(env.MIND_DB.db.prepare("SELECT source FROM engine_fixes WHERE rule LIKE '%haul trucks%'").get().source.split(':campaign:')[1], 'hoof');
@@ -238,8 +239,9 @@ await t('directing the team: a text direction lands as a version with no render;
 await t('art direction: "Come up with a better creative" proposes distinct cards previewed on the current photograph with basis and cost; applying a layout-only card makes a layout version with no render; the render card shows its cost', async () => {
   await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-ad');
   const g0 = calls.gemini; const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1];
-  eq(await page.inputValue(R + '.st-ad-ask input'), 'Come up with a better creative');
-  await page.click(R + '.st-ad-ask .btn');
+  eq(await page.inputValue(R + '.st-ad-ask input'), '', 'the feedback line is optional');
+  ok(await page.$(R + '.st-ad-actions button:has-text("Refine this design")') && await page.$(R + '.st-ad-actions button:has-text("Create a new design")'), 'the three actions are visible');
+  await page.click(R + '.st-ad-actions button:has-text("Explore variations")');
   await page.waitForSelector(R + '.st-ad-card', { timeout: 30000 });
   const cards = await texts(page, R + '.st-ad-card'); eq(cards.length, 3);
   ok(/No box, darker image/.test(cards[0]) && /layout only, no render/.test(cards[0]) && /inferred: White type/.test(cards[0]), cards[0]);
@@ -247,7 +249,7 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   ok(/rule: Teal is the campaign colour/.test(cards[1]));
   ok(/Critique/.test(await page.textContent(R + '.st-ad-crit')) && /photograph is generic/.test(await page.textContent(R + '.st-ad-crit')));
   eq((await page.$$(R + '.st-ad-card canvas')).length, 3, 'each card previews on the current photograph');
-  ok(await page.$(R + '.st-ad-card:nth-child(3) button:has-text("Apply and render (1 render at 2K)")'), 'the render card names its cost');
+  ok(await page.$(R + '.st-ad-card:nth-child(3) button:has-text("Generate (1 render at 2K)")'), 'the render card names its cost');
   eq(calls.gemini, g0, 'proposing spends no render');
   await page.$eval(R + '.st-ad', el => el.scrollIntoView({ block: 'start' })); await shot(page, 'studio-artdirection-cards');
   await page.click(R + '.st-ad-card:nth-child(2) button:has-text("Apply layout only")');
@@ -281,6 +283,30 @@ await t('suggested next directions: design suggestions sit beside the creative p
   }, await (async () => { const d = await api('GET', '/studio/list?ns=mca'); const pr = d.projects.find(x => /Fuel tax credits keep regional Australia moving/.test(x.title)); const full = await api('GET', '/studio/get?id=' + pr.id); const a = full.assets.find(x => x.channel === 'facebook'); const v = a.versions[a.versions.length - 1]; return { layout: v.layout, copy: v.copy }; })());
   eq(check.w, 1080); eq(check.equal, true, 'the export PNG and the preview at native width are the same drawing');
   await shot(page, 'studio-suggestions');
+});
+await t('three visible actions: Create a new design opens a form that names what is retained and the references, proposes, and creates a new asset that inherits no panel; the art director\'s inspection of a render sits on the thread with an editable, bounded correction that applies once', async () => {
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-ad-actions');
+  const n0 = (await page.$$(R + '.st-railbtn.asset')).length;
+  await page.click(R + '.st-ad-actions button:has-text("Create a new design")'); await page.waitForSelector(R + '.st-newdesign');
+  ok(/Mandatory campaign requirements/.test(await page.textContent(R + '.st-newdesign')), 'the form says what always carries forward');
+  const checks = await texts(page, R + '.st-newdesign .st-check'); ok(checks.some(c => /the current imagery/.test(c)) && checks.some(c => /the current copy/.test(c)) && checks.some(c => /the current composition/.test(c)), JSON.stringify(checks));
+  await page.fill(R + '.st-newdesign textarea', 'Typography-led: the figure does the work, no photograph');
+  await page.click(R + '.st-newdesign button:has-text("Propose the new design")');
+  await page.waitForFunction(() => /New design/.test((document.querySelector('#studio-root .st-ad-crit') || {}).textContent || ''), null, { timeout: 30000 });
+  const cards = await texts(page, R + '.st-ad-card'); ok(cards.length >= 1); ok(/Create \(layout only\)|Create as a sketch/.test(cards[0]), 'a fresh concept creates rather than applies: ' + cards[0].slice(0, 200));
+  await page.click(R + '.st-ad-card:nth-child(1) button:has-text("Create")');
+  await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-railbtn.asset').length === n + 1, n0, { timeout: 15000 });
+  ok(/New designs/.test(await page.textContent(R + '.st-rail')), 'the new asset sits in its own family');
+  ok(/Created ".+" as a new design/.test(await page.textContent(R + '.st-thread')));
+  // the inspection a render queued earlier reached the thread with its scores and one correction
+  await page.waitForSelector(R + '.st-insp', { timeout: 20000 });
+  const insp = await page.textContent(R + '.st-insp'); ok(/fidelity/.test(insp) && /readability/.test(insp) && /round 1 of 2/.test(insp), insp.slice(0, 200));
+  ok(/support line sits too close/.test(await page.textContent(R + '.st-insp')), 'the issue is named');
+  const fixBox = await page.$(R + 'textarea[id^="fix-"]'); ok(fixBox, 'the correction is editable before it is applied'); eq(await fixBox.inputValue(), 'Add a line of space between the headline and the support line; keep everything else.');
+  await page.click(R + '.st-insp button:has-text("Apply the correction")');
+  await page.waitForFunction(() => /correction applied/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
+  ok((await page.$$(R + '.st-insp button:has-text("Apply the correction")')).length < (await page.$$(R + '.st-insp')).length, 'an applied correction offers no second button');
+  await shot(page, 'studio-newdesign');
 });
 await t('the jobs view lists every job with its log; the client context lists the kit, the facts, the banned terms and the learned rule', async () => {
   await page.click(R + '.st-railbtn:has-text("Jobs")');
