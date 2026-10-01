@@ -2985,7 +2985,7 @@ async function brandSave(env, ns, body, who) {
     fonts: { display: pick(body.fonts && body.fonts.display != null ? body.fonts.display : (cur.fonts || {}).display, 60), body: pick(body.fonts && body.fonts.body != null ? body.fonts.body : (cur.fonts || {}).body, 60) },
     voice: pick(body.voice != null ? body.voice : cur.voice, 4000),
     rules: pick(body.rules != null ? body.rules : cur.rules, 3000),
-    logoMime: cur.logoMime || '', hasLogo: !!cur.hasLogo, updated: Date.now(), by: String(who || '').slice(0, 40),
+    logoMime: cur.logoMime || '', hasLogo: !!cur.hasLogo, logoV: cur.logoV || undefined, logoVersions: Array.isArray(cur.logoVersions) ? cur.logoVersions : undefined, updated: Date.now(), by: String(who || '').slice(0, 40),
   }, kitStructured(body, cur));
   if (body.logoB64) {
     if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo');
@@ -2997,9 +2997,11 @@ async function brandSave(env, ns, body, who) {
     await env.MIND_DOCS.put('brand/' + ns + '/logo', buf, { httpMetadata: { contentType: mime } });
     // the same bytes under an immutable, versioned key: compositions reference the version they were made with
     kit.logoV = await stContentV(buf); await env.MIND_DOCS.put('brand/' + ns + '/logo@' + kit.logoV, buf, { httpMetadata: { contentType: mime } });
+    // every version stays under its own key; the list says which and when, so approved work can name the exact file it carried
+    kit.logoVersions = (Array.isArray(cur.logoVersions) ? cur.logoVersions : (cur.logoV ? [{ v: cur.logoV, mime: cur.logoMime || '', at: cur.updated || 0 }] : [])).filter(x => x.v !== kit.logoV).concat([{ v: kit.logoV, mime, at: Date.now(), by: String(who || '').slice(0, 40) }]).slice(-24);
     kit.logoMime = mime; kit.hasLogo = true;
   }
-  if (body.removeLogo && env.MIND_DOCS) { try { await env.MIND_DOCS.delete('brand/' + ns + '/logo'); } catch (e) {} kit.hasLogo = false; kit.logoMime = ''; }
+  if (body.removeLogo && env.MIND_DOCS) { try { await env.MIND_DOCS.delete('brand/' + ns + '/logo'); } catch (e) {} kit.hasLogo = false; kit.logoMime = ''; kit.logoV = undefined; }   // the versioned copies stay: approved work keeps its exact file
   // a campaign wordmark (Hands Off Our Fuel has its own mark and never carries the client logo): stored exactly as supplied, per campaign
   if (body.wordmarkB64 || body.removeWordmark || (body.logoPolicy && (body.wordmarkCampaign || body.campaign))) {
     const cid = kitSlug(body.wordmarkCampaign || body.campaign); const camp = (kit.campaigns || []).find(c => c.id === cid);
@@ -3017,7 +3019,9 @@ async function brandSave(env, ns, body, who) {
         const key = 'brand/' + ns + '/wordmark/' + cid + '/' + variant + '/' + wv;
         await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
         const tone = ['light', 'dark', 'colour'].indexOf(body.wordmarkTone) >= 0 ? body.wordmarkTone : 'colour';
-        camp.wordmarks = (Array.isArray(camp.wordmarks) ? camp.wordmarks : []).filter(w => w.variant !== variant).concat([{ variant, v: wv, key, mime, tone, at: Date.now() }]);
+        const prevW = (Array.isArray(camp.wordmarks) ? camp.wordmarks : []).find(w => w.variant === variant);
+        const history = prevW && prevW.v !== wv ? (Array.isArray(prevW.history) ? prevW.history : []).concat([{ v: prevW.v, at: prevW.at || 0, tone: prevW.tone }]).slice(-12) : (prevW && prevW.history) || [];
+        camp.wordmarks = (Array.isArray(camp.wordmarks) ? camp.wordmarks : []).filter(w => w.variant !== variant).concat([{ variant, v: wv, key, mime, tone, at: Date.now(), by: String(who || '').slice(0, 40), history }]);
         if (!camp.wordmarkDefault || body.wordmarkDefault) camp.wordmarkDefault = variant;
       } else {
         await env.MIND_DOCS.put('brand/' + ns + '/wordmark/' + cid, buf, { httpMetadata: { contentType: mime } });
@@ -3035,6 +3039,7 @@ async function brandSave(env, ns, body, who) {
     if (body.wordmarkDefault && !body.wordmarkB64 && kitSlug(body.wordmarkVariant) && (camp.wordmarks || []).some(w => w.variant === kitSlug(body.wordmarkVariant))) camp.wordmarkDefault = kitSlug(body.wordmarkVariant);
   }
   await kvPut(env.AXIOM_KV, 'brand_' + ns, JSON.stringify(kit), 10 * 365 * 86400);
+  try { await brKitRevision(env, ns, cur, kit, who); } catch (e) {}   // the kit's history: who changed what, when (brand_revisions)
   return kit;
 }
 
@@ -6704,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p9';
+const AXIOM_BUILD = '2026-10-01.studio-p10';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8294,7 +8299,9 @@ async function stIdentityAudit(env, ns) {
   const campaigns = [];
   for (const c of (kit.campaigns || [])) {
     const policy = ST_MARK_POLICIES.indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : 'logo';
-    const wm = c.hasWordmark ? await head('brand/' + ns + '/wordmark/' + c.id) : null;
+    // a named variant on file counts as the wordmark; the single (unnamed) slot is the fallback
+    const marks = await brMarks(env, ns, kit, c); const wmVar = marks.wordmark.variants.find(v => v.onFile && v.default) || marks.wordmark.variants.find(v => v.onFile);
+    const wm = wmVar ? { bytes: wmVar.bytes, mime: wmVar.mime, variant: wmVar.variant, variants: marks.wordmark.variants.map(v => ({ variant: v.variant, tone: v.tone, v: v.v, onFile: v.onFile, default: v.default })) } : (c.hasWordmark ? await head('brand/' + ns + '/wordmark/' + c.id) : null);
     const refs = refsFor(c.id); const byPurpose = {}; refs.forEach(r => { byPurpose[r.purpose] = (byPurpose[r.purpose] || 0) + 1; });
     const placement = stMarkPlacement(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, analysis: pjs(r.analysis, null) })));
     const prefs = fixes.filter(f => !stCampaignOf(f) || stCampaignOf(f) === c.id);
@@ -8309,6 +8316,271 @@ async function stIdentityAudit(env, ns) {
   }
   const unassigned = refRows.filter(r => !(r.campaign || r.project_campaign));
   return { ok: true, ns, kit: { name: kit.name || '', hasLogo: !!kit.hasLogo, logo: logo ? { onFile: true, bytes: logo.bytes, mime: logo.mime } : { onFile: false, kitSays: !!kit.hasLogo }, palette: kit.palette || {}, fonts: kit.fonts || {} }, campaigns, references: { total: refRows.length, unassigned: unassigned.length, byPurpose: refRows.reduce((acc, r) => Object.assign(acc, { [r.purpose]: (acc[r.purpose] || 0) + 1 }), {}) }, preferences: fixes.length, artworks: art.length, note: 'Every count is what the kit, R2, the references, the learned corrections and the artwork memory hold now. A policy is mandatory on its campaign; a mark the policy wants but R2 does not hold makes every composition on that campaign incomplete, never substituted. Placement knowledge comes only from approved and brand references that describe a mark position.' };
+}
+// -- The Brand Workspace (build studio-p10) ---------------------------------------------------------------
+// One campaign-scoped view of what the Studio knows about a client's brand and where each piece came from. The
+// stores stay where they are - the kit (KV brand_<ns>) for palette, fonts, voice, campaigns, facts and banned terms;
+// R2 for the marks; studio_references and engine_art for references; engine_fixes for learned corrections;
+// engine_outcomes for accepted and rejected work - and brand_items holds what had no home (likes, dislikes, visual
+// devices, placement guidance, terminology, notes, and the proposals the Studio makes from approvals and rejections).
+// Every item says what kind of authority it carries: an approved rule, a reference observation, a preference, a
+// project decision or an AI inference. Nothing becomes a standing rule by itself: proposals wait for a person, with
+// a scope (the client or one campaign). Kit edits keep a revision history (brand_revisions); items keep theirs.
+const BR_AUTH = ['rule', 'observation', 'preference', 'decision', 'inference'];
+const BR_AUTH_WORD = { rule: 'approved rule', observation: 'reference observation', preference: 'preference', decision: 'project decision', inference: 'AI inference' };
+const BR_KINDS = ['like', 'dislike', 'accepted', 'rejected', 'device', 'placement', 'term', 'typography', 'colour', 'imagery', 'voice', 'note'];
+const BR_STATUS = ['active', 'proposed', 'retired', 'outdated'];
+let BRAND_READY = false;
+async function ensureBrand(env) {
+  if (!env.MIND_DB) return false;
+  if (BRAND_READY) return true;
+  await env.MIND_DB.batch([
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS brand_items(id TEXT PRIMARY KEY, ns TEXT, campaign TEXT, kind TEXT, authority TEXT, status TEXT, title TEXT, body TEXT, data TEXT, source TEXT, who TEXT, created INTEGER, updated INTEGER, rev INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS brand_items_ns ON brand_items(ns, campaign, status, updated)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS brand_item_revisions(id TEXT PRIMARY KEY, item TEXT, ns TEXT, rev INTEGER, data TEXT, why TEXT, who TEXT, at INTEGER)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS brand_item_revisions_i ON brand_item_revisions(item, rev)'),
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS brand_revisions(id TEXT PRIMARY KEY, ns TEXT, at INTEGER, who TEXT, summary TEXT, kit TEXT)'),
+    env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS brand_revisions_ns ON brand_revisions(ns, at)'),
+  ]);
+  BRAND_READY = true;
+  return true;
+}
+/** What changed between two kits, in words a person can read in a history list. */
+function brKitDiff(a, b) {
+  a = a || {}; b = b || {}; const out = [];
+  const same = (x, y) => JSON.stringify(x == null ? null : x) === JSON.stringify(y == null ? null : y);
+  if (!same(a.name, b.name)) out.push('name');
+  if (!same(a.palette, b.palette)) out.push('palette');
+  if (!same(a.fonts, b.fonts)) out.push('fonts');
+  if (!same(a.voice, b.voice)) out.push('voice');
+  if (!same(a.rules, b.rules)) out.push('standing rules');
+  if (a.logoV !== b.logoV || !!a.hasLogo !== !!b.hasLogo) out.push(b.hasLogo ? 'logo (version ' + (b.logoV || 'unversioned') + ')' : 'logo removed');
+  const camps = list => { const m = {}; (list || []).forEach(c => { m[c.id] = c; }); return m; };
+  const ca = camps(a.campaigns), cb = camps(b.campaigns);
+  Object.keys(cb).forEach(id => {
+    if (!ca[id]) { out.push('campaign ' + id + ' added'); return; }
+    const x = ca[id], y = cb[id];
+    if (x.logoPolicy !== y.logoPolicy) out.push(id + ' mark policy ' + (x.logoPolicy || 'logo') + ' -> ' + (y.logoPolicy || 'logo'));
+    const wv = w => (w || []).map(v => v.variant + '@' + v.v).sort().join(',');
+    if (wv(x.wordmarks) !== wv(y.wordmarks)) { const before = new Set((x.wordmarks || []).map(v => v.variant + '@' + v.v)); (y.wordmarks || []).filter(v => !before.has(v.variant + '@' + v.v)).forEach(v => out.push(id + ' wordmark variant ' + v.variant + ' (' + v.tone + ', version ' + v.v + ')')); const after = new Set((y.wordmarks || []).map(v => v.variant)); (x.wordmarks || []).filter(v => !after.has(v.variant)).forEach(v => out.push(id + ' wordmark variant ' + v.variant + ' removed')); }
+    if (x.wordmarkV !== y.wordmarkV) out.push(id + ' single wordmark ' + (y.wordmarkV ? 'version ' + y.wordmarkV : 'removed'));
+    if (x.wordmarkDefault !== y.wordmarkDefault) out.push(id + ' default wordmark variant ' + (y.wordmarkDefault || 'none'));
+    ['identity', 'tone', 'cta', 'signoff', 'structure', 'notes', 'active'].forEach(k => { if (!same(x[k], y[k])) out.push(id + ' ' + k); });
+  });
+  Object.keys(ca).forEach(id => { if (!cb[id]) out.push('campaign ' + id + ' removed'); });
+  const fx = list => (list || []).map(f => f.text + '|' + (f.status || '') + '|' + (f.campaign || ''));
+  if (!same(fx(a.facts), fx(b.facts))) { const before = new Set(fx(a.facts)), after = new Set(fx(b.facts)); const add = fx(b.facts).filter(x => !before.has(x)).length, rem = fx(a.facts).filter(x => !after.has(x)).length; out.push('facts (' + [add ? add + ' added or changed' : '', rem ? rem + ' removed or changed' : ''].filter(Boolean).join(', ') + ')'); }
+  const bt = list => (list || []).map(x => x.term).sort().join('|');
+  if (bt(a.banned) !== bt(b.banned)) out.push('banned terms');
+  if (!same(a.platforms, b.platforms)) out.push('platform notes');
+  return out;
+}
+async function brKitRevision(env, ns, before, after, who) {
+  if (!(await ensureBrand(env))) return null;
+  const summary = brKitDiff(before, after); if (!summary.length && before && before.updated) return null;
+  const id = stId('kr'); const snap = JSON.stringify(after || {}).slice(0, 60000);
+  await env.MIND_DB.prepare('INSERT INTO brand_revisions(id,ns,at,who,summary,kit) VALUES(?,?,?,?,?,?)').bind(id, ns, (after && after.updated) || Date.now(), stStr(who, 40), JSON.stringify(summary.length ? summary : ['first record of the kit']), snap).run();
+  try { await env.MIND_DB.prepare('DELETE FROM brand_revisions WHERE ns=? AND id NOT IN (SELECT id FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 200)').bind(ns, ns).run(); } catch (e) {}
+  return id;
+}
+function brItemRow(r) {
+  if (!r) return null;
+  return { id: r.id, ns: r.ns, campaign: r.campaign || '', scope: r.campaign ? 'campaign' : 'client', kind: r.kind, authority: r.authority, authorityWord: BR_AUTH_WORD[r.authority] || r.authority, status: r.status, title: r.title || '', body: r.body || '', data: pjs(r.data, {}), source: pjs(r.source, {}), who: r.who || '', created: r.created, updated: r.updated, rev: r.rev || 1, native: true };
+}
+function brClean(body, cur) {
+  cur = cur || {}; body = body || {};
+  const kind = BR_KINDS.indexOf(body.kind) >= 0 ? body.kind : (cur.kind || 'note');
+  const authority = BR_AUTH.indexOf(body.authority) >= 0 ? body.authority : (cur.authority || 'decision');
+  const status = BR_STATUS.indexOf(body.status) >= 0 ? body.status : (cur.status || 'active');
+  const src = body.source && typeof body.source === 'object' ? { type: stClean(body.source.type, 20), id: stStr(body.source.id, 60), label: stStr(body.source.label, 200), project: stClean(body.source.project, 24) || undefined, asset: stClean(body.source.asset, 24) || undefined, version: stClean(body.source.version, 24) || undefined } : (cur.source || { type: 'team' });
+  return { kind, authority, status, title: stStr(body.title != null ? body.title : cur.title, 200), body: stStr(body.body != null ? body.body : cur.body, 2000), data: body.data && typeof body.data === 'object' ? body.data : (cur.data || {}), source: src, campaign: body.campaign != null ? kitSlug(body.campaign) : (cur.campaign || '') };
+}
+async function brItemGet(env, id) { await ensureBrand(env); return brItemRow(await env.MIND_DB.prepare('SELECT * FROM brand_items WHERE id=?').bind(stClean(id, 30)).first()); }
+async function brItemRevise(env, item, why, who) {
+  await env.MIND_DB.prepare('INSERT INTO brand_item_revisions(id,item,ns,rev,data,why,who,at) VALUES(?,?,?,?,?,?,?,?)').bind(stId('br'), item.id, item.ns, item.rev, JSON.stringify({ kind: item.kind, authority: item.authority, status: item.status, title: item.title, body: item.body, campaign: item.campaign, data: item.data, source: item.source }).slice(0, 8000), stStr(why, 300), stStr(who, 40), Date.now()).run();
+}
+/** A new knowledge item. An AI inference can only be created as a proposal; a person's item can carry any other authority. */
+async function brItemCreate(env, ns, body, who) {
+  await ensureBrand(env); const c = brClean(body);
+  if (!c.title && !c.body) return { error: 'empty', status: 400, detail: 'Say what the item is (a title or a body).' };
+  if (c.campaign) { const kit = (await brandKit(env, ns)) || {}; if (!(kit.campaigns || []).some(x => x.id === c.campaign)) return { error: 'unknown_campaign', status: 400, detail: 'The ' + ns + ' kit has no campaign "' + c.campaign + '".' }; }
+  if (c.authority === 'inference' && c.status === 'active') c.status = 'proposed';
+  const now = Date.now(); const id = stId('bi');
+  await env.MIND_DB.prepare('INSERT INTO brand_items(id,ns,campaign,kind,authority,status,title,body,data,source,who,created,updated,rev) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)').bind(id, ns, c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data).slice(0, 8000), JSON.stringify(c.source), stStr(who, 40), now, now).run();
+  const item = await brItemGet(env, id); await brItemRevise(env, item, body.why || (c.status === 'proposed' ? 'proposed' : 'created'), who);
+  return { ok: true, item };
+}
+/** Change an item; every change is a revision with a reason. The namespace given must be the item's own. */
+async function brItemUpdate(env, ns, body, who) {
+  const cur = await brItemGet(env, body.id); if (!cur || cur.ns !== ns) return { error: 'unknown_item', status: 404 };
+  const c = brClean(body, cur);
+  if (c.authority === 'inference' && c.status === 'active') return { error: 'inference_not_rule', status: 400, detail: 'An AI inference cannot be made active as it stands: review it and give it the authority a person stands behind (a preference, a decision or an approved rule).' };
+  const now = Date.now();
+  await env.MIND_DB.prepare('UPDATE brand_items SET campaign=?, kind=?, authority=?, status=?, title=?, body=?, data=?, source=?, updated=?, rev=rev+1 WHERE id=?').bind(c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data).slice(0, 8000), JSON.stringify(c.source), now, cur.id).run();
+  const item = await brItemGet(env, cur.id); await brItemRevise(env, item, body.why || 'edited', who);
+  return { ok: true, item };
+}
+/** Review a proposal: keep it (with the scope and authority the reviewer chooses) or dismiss it (with a reason). */
+async function brItemReview(env, ns, body, who) {
+  const cur = await brItemGet(env, body.id); if (!cur || cur.ns !== ns) return { error: 'unknown_item', status: 404 };
+  if (cur.status !== 'proposed') return { error: 'not_proposed', status: 409, detail: 'Only a proposal is reviewed; this item is ' + cur.status + '.' };
+  if (body.decision === 'keep') {
+    const authority = ['rule', 'preference', 'decision', 'observation'].indexOf(body.authority) >= 0 ? body.authority : 'preference';
+    const scope = body.scope === 'campaign' ? 'campaign' : 'client';
+    const campaign = scope === 'campaign' ? kitSlug(body.campaign || cur.campaign) : '';
+    if (scope === 'campaign' && !campaign) return { error: 'campaign_required', status: 400, detail: 'Name the campaign this is kept for, or keep it for the whole client.' };
+    return brItemUpdate(env, ns, { id: cur.id, status: 'active', authority, campaign, title: body.title, body: body.body, why: 'kept as a ' + BR_AUTH_WORD[authority] + ' for ' + (campaign ? 'the ' + campaign + ' campaign' : 'the whole client') + (body.reason ? ': ' + stStr(body.reason, 200) : '') }, who);
+  }
+  if (body.decision === 'dismiss') {
+    if (!String(body.reason || '').trim()) return { error: 'reason_required', status: 400, detail: 'Say why it is dismissed, so the same proposal is not made again blindly.' };
+    return brItemUpdate(env, ns, { id: cur.id, status: 'retired', why: 'dismissed: ' + stStr(body.reason, 300) }, who);
+  }
+  return { error: 'decision_required', status: 400, detail: 'decision keep or dismiss' };
+}
+/** A proposal from the Studio, made when a person approves or rejects work with a reason. It is never active until reviewed. */
+async function brPropose(env, ns, campaign, kind, title, body, source, who) {
+  try {
+    await ensureBrand(env);
+    const dup = await env.MIND_DB.prepare("SELECT id FROM brand_items WHERE ns=? AND status='proposed' AND body=? AND kind=? LIMIT 1").bind(ns, stStr(body, 2000), kind).first();
+    if (dup) return dup.id;
+    const r = await brItemCreate(env, ns, { kind, authority: 'decision', status: 'proposed', campaign: campaign || '', title, body, source, why: 'proposed by the Studio from ' + (source && source.type || 'a decision') }, who);
+    return r.item ? r.item.id : null;
+  } catch (e) { return null; }
+}
+async function brItems(env, ns, campaign, opts) {
+  opts = opts || {}; await ensureBrand(env);
+  const rows = (await env.MIND_DB.prepare('SELECT * FROM brand_items WHERE ns=? AND (campaign=? OR campaign=?) ' + (opts.all ? '' : "AND status!='retired' ") + 'ORDER BY updated DESC LIMIT 400').bind(ns, '', kitSlug(campaign || '')).all()).results || [];
+  return rows.map(brItemRow);
+}
+async function brItemHistory(env, ns, id) {
+  await ensureBrand(env); const cur = await brItemGet(env, id); if (!cur || cur.ns !== ns) return null;
+  const rows = (await env.MIND_DB.prepare('SELECT rev, data, why, who, at FROM brand_item_revisions WHERE item=? ORDER BY rev DESC, at DESC LIMIT 60').bind(cur.id).all()).results || [];
+  return { item: cur, revisions: rows.map(r => ({ rev: r.rev, why: r.why, who: r.who, at: r.at, data: pjs(r.data, {}) })) };
+}
+/** What a campaign's marks really are in R2: the client logo and its versions, every named wordmark variant, the legacy single slot. */
+async function brMarks(env, ns, kit, camp) {
+  const head = async key => { if (!env.MIND_DOCS || !key) return null; try { const o = await env.MIND_DOCS.get(key); if (!o) return null; const buf = await o.arrayBuffer(); return { bytes: buf.byteLength, mime: (o.httpMetadata && o.httpMetadata.contentType) || '' }; } catch (e) { return null; } };
+  const policy = camp ? (ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo') : 'logo';
+  const logoObj = await head(kit.logoV ? 'brand/' + ns + '/logo@' + kit.logoV : 'brand/' + ns + '/logo');
+  const logo = { onFile: !!logoObj, kitSays: !!kit.hasLogo, v: kit.logoV || '', mime: kit.logoMime || '', bytes: logoObj ? logoObj.bytes : 0, url: logoObj ? '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : '') : '', versions: Array.isArray(kit.logoVersions) ? kit.logoVersions.slice(-12).reverse() : [], required: policy === 'logo' || policy === 'both', forbidden: policy === 'wordmark' || policy === 'none' };
+  const variants = [];
+  for (const w of (camp && Array.isArray(camp.wordmarks) ? camp.wordmarks : [])) { const o = await head(w.key || ('brand/' + ns + '/wordmark/' + camp.id + '/' + w.variant + '/' + w.v)); variants.push({ variant: w.variant, tone: w.tone || 'colour', v: w.v, mime: w.mime || '', at: w.at || 0, default: camp.wordmarkDefault === w.variant, onFile: !!o, bytes: o ? o.bytes : 0, url: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v, history: Array.isArray(w.history) ? w.history.slice(-8).reverse() : [] }); }
+  const legacyObj = camp && (camp.wordmarkV || camp.hasWordmark) ? await head(camp.wordmarkV ? 'brand/' + ns + '/wordmark/' + camp.id + '@' + camp.wordmarkV : 'brand/' + ns + '/wordmark/' + camp.id) : null;
+  const legacy = camp && legacyObj ? { onFile: true, v: camp.wordmarkV || '', bytes: legacyObj.bytes, url: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), note: 'the single upload slot: one file with no name or tone. It is not a variant library; upload named variants (blue, white, black...) to let the Studio pick by contrast.' } : null;
+  return { policy, logo, wordmark: { required: policy === 'wordmark' || policy === 'both', variants, legacy, onFile: variants.some(v => v.onFile) || !!legacy, tones: Array.from(new Set(variants.filter(v => v.onFile).map(v => v.tone))) } };
+}
+/** Is the brand ready to produce for this campaign? Blocking (a required mark missing), gaps, conflicts and outdated knowledge, each with what to do. */
+function brReadiness(ws) {
+  const blocking = [], gaps = [], conflicts = [], outdated = []; const id = ws.identity, camp = ws.campaign;
+  if (camp && id.logo.required && !id.logo.onFile) blocking.push({ code: 'logo_missing', text: 'The ' + (camp.name || camp.id) + ' policy (' + id.policy + ') carries the client logo and none is on file' + (id.logo.kitSays ? ' (the kit says it is; storage has no file)' : '') + '.', fix: 'tools/brand-logo.py <file> --ns ' + ws.ns });
+  if (camp && id.wordmark.required && !id.wordmark.onFile) blocking.push({ code: 'wordmark_missing', text: 'The ' + (camp.name || camp.id) + ' policy (' + id.policy + ') carries its own wordmark and none is on file.', fix: 'Upload the approved variants here, or tools/brand-logo.py <file> --ns ' + ws.ns + ' --campaign ' + camp.id + ' --wordmark --variant <name> --tone light|dark|colour' });
+  if (!camp && !id.logo.onFile) gaps.push({ code: 'logo_missing', text: 'No client logo on file.' });
+  if (camp && id.wordmark.required && id.wordmark.onFile && !id.wordmark.variants.length) gaps.push({ code: 'wordmark_unnamed', text: 'Only the single (unnamed) wordmark is on file: no named variants, so contrast cannot be fixed by choosing another approved version.' });
+  if (camp && id.wordmark.required && id.wordmark.variants.length && !(id.wordmark.tones.indexOf('light') >= 0 && id.wordmark.tones.indexOf('dark') >= 0)) gaps.push({ code: 'wordmark_tones', text: 'The wordmark variants on file are ' + (id.wordmark.tones.join(', ') || 'none') + ': without both a light and a dark version, a tile on the other kind of ground has no approved mark that reads.' });
+  if (camp && id.wordmark.variants.length && id.wordmark.legacy) conflicts.push({ code: 'wordmark_two_sources', text: 'Both the single (unnamed) wordmark and named variants are on file; compositions use the named default (' + (id.wordmark.variants.find(v => v.default) || {}).variant + '). Remove the single upload if it is superseded.' });
+  if (!(ws.type.fonts.display || ws.type.fonts.body)) gaps.push({ code: 'fonts_missing', text: 'No kit fonts: the app families are used and disclosed as such.' });
+  if (!ws.colour.palette.primary) gaps.push({ code: 'palette_missing', text: 'No primary colour in the kit.' });
+  if (!ws.voice.items.some(i => i.kind === 'voice')) gaps.push({ code: 'voice_missing', text: 'No voice recorded for the client.' });
+  if (camp && !camp.identity) gaps.push({ code: 'identity_note_missing', text: 'No identity note (colours, devices, type) on the campaign.' });
+  const designRefs = ws.references.filter(r => r.purpose === 'brand' || r.purpose === 'approved');
+  if (!designRefs.length) gaps.push({ code: 'no_approved_reference', text: 'No brand or approved design reference ' + (camp ? 'for ' + (camp.name || camp.id) : 'for the client') + ' on any project.' });
+  const unanalysed = ws.references.filter(r => !r.analysed); if (unanalysed.length) outdated.push({ code: 'references_unanalysed', text: unanalysed.length + ' reference' + (unanalysed.length === 1 ? ' is' : 's are') + ' not analysed: the models read them by name only (' + unanalysed.slice(0, 4).map(r => r.name).join(', ') + ').' });
+  if (camp && ws.placement.basis !== 'observed') gaps.push({ code: 'placement_unobserved', text: 'Mark placement is not observed in any approved reference; the house default (bottom right) applies.' });
+  const claims = ws.words.items.filter(i => i.kind === 'claim');
+  if (camp && !claims.some(c => c.status === 'active')) gaps.push({ code: 'no_approved_facts', text: 'No approved facts for ' + (camp.name || camp.id) + ': every figure will need a source in the project.' });
+  // a banned term inside an approved fact, a campaign's own words, the standing rules or an active preference
+  const banned = ws.words.items.filter(i => i.kind === 'banned' && i.status === 'active').map(i => i.data);
+  const scan = [].concat(claims.filter(c => c.status === 'active').map(c => ['approved fact', c.body]), ws.voice.items.filter(i => i.kind !== 'voice').map(i => [i.title || 'campaign wording', i.body]), ws.preferences.filter(p => p.status === 'active').map(p => ['preference', p.body]));
+  scan.forEach(([where, text]) => { contentBannedCheck(text || '', banned).forEach(t => conflicts.push({ code: 'banned_in_knowledge', text: 'The banned term "' + t + '" is used in ' + where + ': "' + stStr(text, 120) + '".' })); });
+  // two approved facts that give one quantity two values
+  const nums = claims.filter(c => c.status === 'active').map(c => ({ c, n: stNumbers(c.body), words: new Set(String(c.body).toLowerCase().match(/[a-z]{4,}/g) || []) }));
+  for (let i = 0; i < nums.length; i++) for (let j = i + 1; j < nums.length; j++) {
+    const a = nums[i], b = nums[j]; const shared = Array.from(a.words).filter(w => b.words.has(w)).length; const overlap = shared / Math.max(1, Math.min(a.words.size, b.words.size));
+    if (overlap >= 0.6 && a.n.some(x => b.n.some(y => x.unit && x.unit === y.unit && x.value !== y.value))) conflicts.push({ code: 'facts_disagree', text: 'Two approved facts give different values for what reads as the same thing: "' + stStr(a.c.body, 90) + '" and "' + stStr(b.c.body, 90) + '".' });
+  }
+  // a preference that speaks of the client logo on a campaign that does not carry it
+  if (camp && id.logo.forbidden) ws.preferences.filter(p => p.status === 'active' && /\b(mca |client )?logo\b/i.test(p.body) && !/wordmark/i.test(p.body)).forEach(p => conflicts.push({ code: 'logo_preference_vs_policy', text: 'A recorded preference speaks of the logo ("' + stStr(p.body, 100) + '") but ' + (camp.name || camp.id) + ' carries ' + (id.policy === 'none' ? 'no mark' : 'its own wordmark, never the client logo') + '. The policy wins; edit or narrow the preference.' }));
+  // facts that name an old year, pending facts left waiting
+  const yr = Number(auDayKey().slice(0, 4));
+  claims.filter(c => c.status === 'active').forEach(c => { const ys = (String(c.body).match(/\b(19|20)\d\d\b/g) || []).map(Number); if (ys.length && Math.max.apply(null, ys) < yr - 2) outdated.push({ code: 'fact_dated', text: 'An approved fact names ' + Math.max.apply(null, ys) + ': "' + stStr(c.body, 100) + '". Check it is still current.' }); });
+  claims.filter(c => c.status === 'proposed').forEach(c => outdated.push({ code: 'fact_pending', text: 'A fact is still pending review and cannot be quoted: "' + stStr(c.body, 100) + '".' }));
+  ws.items.filter(i => i.status === 'proposed').length && gaps.push({ code: 'proposals_waiting', text: ws.items.filter(i => i.status === 'proposed').length + ' proposed memory update' + (ws.items.filter(i => i.status === 'proposed').length === 1 ? '' : 's') + ' waiting for review; none applies until a person keeps it.' });
+  return { state: blocking.length ? 'blocked' : (gaps.length || conflicts.length) ? 'gaps' : 'ready', blocking, gaps, conflicts, outdated };
+}
+/** The whole workspace for a client, or for one of its campaigns: every item normalised with its authority, scope, status and source. */
+async function brandWorkspace(env, ns, campaignId) {
+  await ensureBrand(env); await ensureStudio(env); try { await ensureEngine(env); } catch (e) {}
+  const kit = (await brandKit(env, ns)) || {}; const camp = campaignId ? (kit.campaigns || []).find(c => c.id === campaignId) || null : null;
+  if (campaignId && !camp) return { error: 'unknown_campaign', status: 404, detail: 'The ' + ns + ' kit has no campaign "' + campaignId + '".' };
+  const cid = camp ? camp.id : '';
+  const at = kit.updated || 0; const kitSrc = label => ({ type: 'kit', id: 'brand_' + ns, label, at });
+  const item = (o) => Object.assign({ status: 'active', scope: o.campaign ? 'campaign' : 'client', campaign: o.campaign || '', authorityWord: BR_AUTH_WORD[o.authority] || o.authority }, o);
+  const identity = await brMarks(env, ns, kit, camp);
+  // references: every project of this client; a campaign view shows that campaign's and the unassigned ones
+  const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
+  const refs = refRows.filter(r => { const c = r.campaign || r.pc || ''; return cid ? (c === cid || c === '') : true; }).map(r => { const an = pjs(r.analysis, null); return item({ id: r.id, kind: 'reference', authority: 'observation', campaign: r.campaign || r.pc || '', name: r.name, title: r.name, purpose: r.purpose, body: an && !an.error ? stStr(an.summary, 300) : (r.note || ''), analysed: !!(an && !an.error), project: r.project, projectTitle: r.ptitle, url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', source: { type: 'reference', id: r.id, label: 'reference on project ' + (r.ptitle || r.project), project: r.project }, created: r.created }); });
+  const placement = stMarkPlacement(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, analysis: pjs((refRows.find(x => x.id === r.id) || {}).analysis, null) })));
+  const voice = [];
+  if (kit.voice) voice.push(item({ id: 'kit:voice', kind: 'voice', authority: 'rule', title: 'Voice', body: stStr(kit.voice, 1500), source: kitSrc('brand kit voice') }));
+  String(kit.rules || '').split(/\n+/).map(s => s.trim()).filter(Boolean).forEach((r, i) => voice.push(item({ id: 'kit:rule:' + i, kind: 'rule', authority: 'rule', title: 'Standing rule', body: r, source: kitSrc('brand kit standing rules') })));
+  if (camp) ['tone', 'structure', 'cta', 'signoff', 'sourceLine', 'notes'].forEach(k => { if (camp[k]) voice.push(item({ id: 'kit:' + cid + ':' + k, kind: k === 'tone' ? 'voice' : 'wording', authority: 'rule', campaign: cid, title: (camp.name || cid) + ' ' + k, body: String(camp[k]), source: kitSrc('campaign ' + (camp.name || cid)) })); });
+  const words = [];
+  (kit.banned || []).forEach((b, i) => words.push(item({ id: 'kit:banned:' + i, kind: 'banned', authority: 'rule', title: b.term, body: (b.use ? 'say "' + b.use + '"' : '') + (b.why ? (b.use ? ' - ' : '') + b.why : '') + (b.allowNegated ? ' (allowed when negated)' : ''), data: b, source: kitSrc('brand kit banned terms') })));
+  let excludedFacts = 0;
+  (kit.facts || []).forEach((f, i) => { if (cid && f.campaign && f.campaign !== cid) { excludedFacts++; return; } words.push(item({ id: 'kit:fact:' + (f.id || i), kind: 'claim', authority: f.status === 'pending' ? 'inference' : 'rule', status: f.status === 'pending' ? 'proposed' : 'active', campaign: f.campaign || '', title: f.source ? 'Fact (' + f.source + ')' : 'Fact', body: f.text, data: { source: f.source || '', campaign: f.campaign || '' }, source: kitSrc('brand kit facts' + (f.source ? ', cited to ' + f.source : '')) })); });
+  // learned corrections from the team (Teach mode, the Content Desk, the Studio's Remember)
+  let fixes = []; try { fixes = await engineFixes(env, ns, null, true); } catch (e) {}
+  const preferences = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any').filter(f => { const c = stCampaignOf(f); return !cid ? true : (!c || c === cid); }).map(f => item({ id: 'fix:' + f.id, kind: 'preference', authority: 'preference', status: f.active ? 'active' : 'retired', campaign: stCampaignOf(f), title: 'Learned (' + f.task + ')', body: f.rule, data: { task: f.task, hits: f.hits || 0, why: f.why || '' }, who: f.who, created: f.created, source: { type: 'engine_fix', id: f.id, label: 'taught by ' + (f.who || 'the team') + (f.source ? ' via ' + String(f.source).split(':')[0] : '') } }));
+  let outcomes = []; try { outcomes = (await env.MIND_DB.prepare('SELECT id, surface, ref, verdict, why, headline, who, created FROM engine_outcomes WHERE ns=? ORDER BY created DESC LIMIT 40').bind(ns).all()).results || []; } catch (e) {}
+  const accepted = outcomes.map(o => item({ id: 'out:' + o.id, kind: /win|approve/i.test(o.verdict) ? 'accepted' : 'rejected', authority: 'decision', title: (o.headline || o.ref || 'work') + ' (' + o.surface + ')', body: o.why || '', who: o.who, created: o.created, source: { type: 'outcome', id: o.id, label: o.verdict + ' on ' + o.surface } }));
+  let art = []; try { art = (await env.MIND_DB.prepare('SELECT id, title, meta, created FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || []; } catch (e) {}
+  const artworks = art.filter(a => { const c = String((pjs(a.meta, {}) || {}).campaign || ''); return !cid || c === cid || c === ''; }).slice(0, 60).map(a => ({ id: a.id, title: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || ''), url: '/engine/art?id=' + a.id, created: a.created }));
+  const native = await brItems(env, ns, cid);
+  const ws = { ok: true, ns, client: kit.name || ns, campaign: camp ? { id: camp.id, name: camp.name || camp.id, identity: camp.identity || '', policy: identity.policy, active: camp.active !== false } : null, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name || c.id, policy: c.logoPolicy || 'logo', active: c.active !== false })),
+    identity, type: { fonts: kit.fonts || {}, note: camp ? camp.identity || '' : '' }, colour: { palette: kit.palette || {} }, references: refs, artworks, placement: { basis: placement.basis, corner: placement.corner, text: placement.text || '', supporting: refs.filter(r => r.analysed && (r.purpose === 'approved' || r.purpose === 'brand')).map(r => ({ id: r.id, name: r.name })) },
+    voice: { items: voice }, words: { items: words, excludedFacts }, preferences, accepted, items: native,
+    authorities: BR_AUTH.map(k => ({ id: k, word: BR_AUTH_WORD[k] })), kitUpdated: at };
+  ws.readiness = brReadiness(ws);
+  const revs = (await env.MIND_DB.prepare('SELECT id, at, who, summary FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 30').bind(ns).all()).results || [];
+  ws.revisions = revs.map(r => ({ id: r.id, at: r.at, who: r.who, summary: pjs(r.summary, []) })).filter(r => !cid || r.summary.some(s => s.indexOf(cid) === 0 || !(kit.campaigns || []).some(c => s.indexOf(c.id + ' ') === 0 || s.indexOf('campaign ' + c.id) === 0) || s.indexOf('campaign ' + cid) === 0));
+  const counts = {}; [].concat(voice, words, preferences, accepted, native, refs).forEach(i => { if (i.status === 'retired') return; counts[i.authority] = (counts[i.authority] || 0) + 1; }); ws.counts = counts;
+  ws.note = 'Only ' + (kit.name || ns) + (camp ? ', ' + (camp.name || camp.id) + ' and the client-wide knowledge' : '') + ' is shown; no other client\'s knowledge reaches this view or the models. Approved rules and the campaign policy outrank preferences; observations and inferences inform and never bind.';
+  return ws;
+}
+/** What the Studio used to make a version: walk back through hand edits to the version that was generated, then name its inputs. */
+async function stUsed(env, p, a, v) {
+  // two things made a composition: the words and plan (a production or concept with the client context) and the imagery
+  // (a render). Walk back through the parents to each; hand edits after them used no model and no new knowledge.
+  const chain = []; let cur = v;
+  while (cur && chain.length < 30) { chain.push(cur); cur = cur.parent ? await stVersion(env, cur.parent) : null; }
+  const isText = x => x && x.context && (x.context.kitUpdated != null || x.context.refPack || (x.context.rules && x.context.build));
+  const isImage = x => x && (x.kind === 'render' || (x.image && x.image.meta && x.image.meta.model));
+  const textGen = chain.find(isText) || null, imageGen = chain.find(isImage) || null;
+  const firstGen = chain.findIndex(x => x === textGen || x === imageGen);
+  const edits = (firstGen < 0 ? chain : chain.slice(0, firstGen)).map(x => ({ version: x.id, note: x.note, kind: x.kind })).reverse();
+  const ctx = (textGen && textGen.context) || {};
+  // the concept card that made it, when the words or plan came from one
+  let refPack = ctx.refPack || null, concept = null;
+  for (const x of chain.slice(0, 12)) { if (refPack && concept) break; try { const ap = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='applied' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + x.id + '"%').first(); const apd = ap ? pjs(ap.data, null) : null; if (apd && apd.eid) { const ce = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + apd.eid + '"%').first(); const ced = ce ? pjs(ce.data, null) : null; if (ced) { if (!refPack && ced.refPack) refPack = ced.refPack; concept = concept || { eid: ced.eid, mode: ced.mode, model: ced.model, option: (ced.options || [])[apd.index] ? ced.options[apd.index].name : '', version: x.id }; } } } catch (e) {} }
+  const refRows = (await env.MIND_DB.prepare('SELECT id, name, purpose, campaign FROM studio_references WHERE project=?').bind(p.id).all()).results || [];
+  const refName = id => { const r = refRows.find(x => x.id === id); return r ? { id, name: r.name, purpose: r.purpose, campaign: r.campaign || '' } : { id, name: id, purpose: '', campaign: '' }; };
+  const ruleIds = Array.from(new Set([].concat((ctx.rules && ctx.rules.copy) || [], (ctx.rules && ctx.rules.tiles) || [])));
+  const rules = [];
+  for (const id of ruleIds.slice(0, 40)) { try { const f = await env.MIND_DB.prepare('SELECT id, task, rule, source, active FROM engine_fixes WHERE id=? AND ns=?').bind(id, p.ns).first(); rules.push(f ? { id: f.id, task: f.task, rule: f.rule, campaign: stCampaignOf(f), activeNow: !!f.active } : { id, rule: '(no longer on file)', activeNow: false }); } catch (e) {} }
+  const L = v.layout || {};
+  const marks = (L.layers || []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')).map(l => { const q = String(l.src || '').split('?')[1] || ''; const prm = {}; q.split('&').forEach(kv => { const [k, val] = kv.split('='); if (k) prm[k] = decodeURIComponent(val || ''); }); return { role: l.role, src: l.src || '', variant: prm.variant || l.variant || '', version: prm.v || '', campaign: prm.campaign || '', hidden: !!l.hidden }; });
+  let kitRev = null; if (ctx.kitUpdated) { try { await ensureBrand(env); const r = await env.MIND_DB.prepare('SELECT id, at, summary FROM brand_revisions WHERE ns=? AND at<=? ORDER BY at DESC LIMIT 1').bind(p.ns, ctx.kitUpdated).first(); kitRev = r ? { id: r.id, at: r.at, summary: pjs(r.summary, []) } : null; } catch (e) {} }
+  const im = (imageGen && imageGen.image) || v.image || null; const meta = (im && im.meta) || {};
+  const imagery = imageGen ? { version: imageGen.id, note: imageGen.note, model: meta.model || im.model || '', size: meta.size || im.size || '', pixels: meta.pixels, fallback: !!(im.fallback || meta.fallback), references: meta.references || [], prompt: stStr((imageGen.context || {}).prompt || (imageGen.context || {}).visual || '', 400), historyReplayed: meta.historyReplayed } : null;
+  const parts = [textGen ? 'the words and plan were made in version ' + textGen.id : '', imageGen ? 'the imagery was rendered in version ' + imageGen.id : ''].filter(Boolean);
+  return { ok: true, asset: a.id, version: v.id,
+    generatedBy: textGen ? { version: textGen.id, note: textGen.note, kind: textGen.kind, created: textGen.created } : null, imagery, editsSince: edits,
+    campaign: ctx.campaign || p.campaign || '', kit: { name: ctx.kitName || '', updated: ctx.kitUpdated || 0, revision: kitRev },
+    references: refPack ? { mode: refPack.mode, attached: (refPack.attached || []).map(refName), read: (refPack.read || []).map(refName), excluded: refPack.excluded || [], unavailable: refPack.unavailable || [] } : null,
+    rules, facts: ctx.facts != null ? ctx.facts : null, banned: ctx.banned != null ? ctx.banned : null, examples: ctx.examples != null ? ctx.examples : null,
+    marks, models: { text: ctx.model || (concept && concept.model) || '', image: imagery ? imagery.model : '', imageSize: imagery ? imagery.size : '', pixels: imagery ? imagery.pixels : undefined, fallback: imagery ? imagery.fallback : false },
+    concept, assumptions: (ctx.brief && ctx.brief.assumptions) || [], gaps: (ctx.brief && ctx.brief.gaps) || [], acknowledged: !!(ctx.brief && ctx.brief.acknowledged), how: ctx.how || '', medium: ctx.medium || '', size: ctx.size || '',
+    note: parts.length ? 'Recorded when ' + parts.join(' and ') + (edits.length ? '; ' + edits.length + ' later hand edit' + (edits.length === 1 ? '' : 's') + ' used no model and no new knowledge' : '') + '. Nothing from another client is ever in the context.' : 'This version was not generated by the Studio (an import or a hand-made layout): no model context was used.' };
 }
 /** The reference pack a concept sees: the project's references grouped by what they are for, in one of three modes -
  *  none (the team chose to use no references), chosen (exactly the ids named), recommended (brand and approved always,
@@ -10350,6 +10622,11 @@ export default {
       const ns2 = relNs(reqUrl.searchParams.get('ns') || rbody2.ns);
       try {
         await ensureArchive(env); await ensureBridge(env); await ensureRelease(env);
+        // the Brand Workspace (read): the campaign-scoped knowledge with provenance, the readiness, the item and kit histories
+        if (path === '/brand/workspace') { const ws = await brandWorkspace(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || '')); return jsonResp(ws, ws.status || 200); }
+        if (path === '/brand/items' && req.method === 'GET') return jsonResp({ ok: true, ns: ns2, items: await brItems(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || ''), { all: reqUrl.searchParams.get('all') === '1' }) });
+        if (path === '/brand/item/history') { const h = await brItemHistory(env, ns2, reqUrl.searchParams.get('id')); return h ? jsonResp(Object.assign({ ok: true }, h)) : jsonResp({ error: 'unknown_item' }, 404); }
+        if (path === '/brand/revisions') { await ensureBrand(env); const rid = stClean(reqUrl.searchParams.get('id') || '', 30); const st = rid ? env.MIND_DB.prepare('SELECT id, at, who, summary, kit FROM brand_revisions WHERE ns=? AND id=?').bind(ns2, rid) : env.MIND_DB.prepare('SELECT id, at, who, summary FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 100').bind(ns2); const rows = (await st.all()).results || []; return jsonResp({ ok: true, ns: ns2, revisions: rows.map(r => ({ id: r.id, at: r.at, who: r.who, summary: pjs(r.summary, []), kit: r.kit ? pjs(r.kit, null) : undefined })) }); }
         if (path === '/brand/kit' && req.method === 'GET') {
           const kit = await brandKit(env, ns2);
           return jsonResp({ ok: true, ns: ns2, kit: kit || null, hasLogo: !!(kit && kit.hasLogo), logoUrl: kit && kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + (kit.updated || 0) : '' });
@@ -10397,6 +10674,9 @@ export default {
               cover: (t.find(x => x.image) ? '/release/tile?id=' + r.id + '&n=' + t.find(x => x.image).n + '&v=' + (t.find(x => x.image).image.ver || 1) : '') }; }) });
         }
         if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Building packs, rendering tiles and editing the brand kit need a full-access key.' }, 403);
+        if (path === '/brand/item' && req.method === 'POST') { const r = await brItemCreate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/item/update' && req.method === 'POST') { const r = await brItemUpdate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/item/review' && req.method === 'POST') { const r = await brItemReview(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
           const kit = await brandSave(env, ns2, rbody2, auth.name);
           return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
@@ -10605,9 +10885,10 @@ export default {
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
           if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
           if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
+          if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
-          if (path === '/studio/brief/check') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const ns0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_sources WHERE project=?').bind(p.id).first(); const nd0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_directions WHERE project=?').bind(p.id).first(); return jsonResp(Object.assign({ ok: true }, await stBriefCheck(env, p, null, { hasSource: Number((ns0 || {}).n) > 0, hasDirection: Number((nd0 || {}).n) > 0, instruction: qf('instruction') }))); }
+          if (path === '/studio/brief/check') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const ns0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_sources WHERE project=?').bind(p.id).first(); const nd0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_directions WHERE project=?').bind(p.id).first(); const chk = await stBriefCheck(env, p, null, { hasSource: Number((ns0 || {}).n) > 0, hasDirection: Number((nd0 || {}).n) > 0, instruction: qf('instruction') }); let brand = null; try { const ws = await brandWorkspace(env, p.ns, p.campaign || ''); if (ws && ws.readiness) brand = { state: ws.readiness.state, blocking: ws.readiness.blocking, gaps: ws.readiness.gaps.length, conflicts: ws.readiness.conflicts, outdated: ws.readiness.outdated.length }; } catch (e) {} return jsonResp(Object.assign({ ok: true, brand }, chk)); }
           if (path === '/studio/brief/suggest') { const p = qf('project') ? await stProject(env, qf('project')) : null; if (qf('project') && !p) return jsonResp({ error: 'unknown_project' }, 404); if (!p && !qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); if (qf('ai') === '1' && auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Model suggestions spend a call; a full key is needed. The sourced suggestions are read-role.' }, 403); return jsonResp(await stBriefSuggest(env, p, { ns: qf('ns'), campaign: qf('campaign'), ai: qf('ai') === '1' })); }
           if (path === '/studio/identity') { const ns = relNs(qf('ns')); if (!qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); return jsonResp(await stIdentityAudit(env, ns)); }
           if (path === '/studio/models') return jsonResp(await stModels(env));
@@ -10738,7 +11019,10 @@ export default {
           let outcome = '';
           if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
           await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome }, who);
-          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset) });
+          // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope
+          let proposal = null;
+          if (decision !== 'withdraw' && String(sb.reason || '').trim().length >= 12) proposal = await brPropose(env, pair.project.ns, pair.project.campaign || '', decision === 'approve' ? 'accepted' : 'rejected', (decision === 'approve' ? 'Accepted ' : 'Rejected ') + part + ': ' + stStr(pair.asset.title, 120), stStr(sb.reason, 600), { type: 'approval', id: pair.asset.id, label: (decision === 'approve' ? 'approval' : 'rejection') + ' of the ' + part + ' of ' + stStr(pair.asset.title, 80) + ' on project ' + stStr(pair.project.title, 80), project: pair.project.id, asset: pair.asset.id, version: cur.id }, who);
+          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal });
         }
         if (path === '/studio/remember' || path === '/studio/proposal' || path === '/studio/concept/apply') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);

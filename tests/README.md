@@ -23,6 +23,7 @@ node --experimental-sqlite tests/studio-p7-worker.mjs     # design beyond the pr
 node --experimental-sqlite tests/studio-plan-demo.mjs     # draws the plan engine's mechanics with synthetic imagery to tests/shot-plans.png (not finished quality)
 node --experimental-sqlite tests/studio-p8-worker.mjs     # production-quality workflow: plan-engine production, brief check and sourced suggestions, mark policy enforced, reference packs, retain, replanning, Gemini gaps, composed inspection
 node --experimental-sqlite tests/studio-p9-worker.mjs     # production readiness: measurements re-judged by the worker, readiness states, approval and export gates, inconsistent inspections, painted words, figure checks, wordmark variants
+node --experimental-sqlite tests/studio-p10-worker.mjs    # the Brand Workspace: authority, scope, readiness, reviewed memory, wordmark variants, kit history, isolation, what the Studio used
 node --experimental-sqlite tests/studio-layout-browser.mjs  # the renderer's measurement, validation and repair in real Chromium (HOOF reconstruction, worker layouts in four formats, fonts, marks); writes tests/shot-layout-repair.png
 node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export
 node --experimental-sqlite tests/studio-showcase-test.mjs # tools/studio-showcase.py end to end with stub models: nothing without --approve-budget, the render cap, compose before inspect
@@ -132,6 +133,17 @@ it at the end.
   suggested figures flagged; wordmark variants and the logo under immutable
   versioned keys; a region render whose region is gone branches; a render with
   no image writes nothing; a layout repair spends nothing.
+- `studio-p10-worker.mjs`: the Brand Workspace (build studio-p10). The kit's
+  revision history and a logo version that survives a palette edit; readiness
+  blocked by a missing required mark and carried on the brief check; the
+  wordmark variant library (tones, default, per-variant history, the single
+  slot named as a conflict beside variants, the identity audit seeing them);
+  authorities and scope on every item with other campaigns left out; conflicts
+  (a banned term in an approved fact, facts that disagree, a logo preference on
+  a wordmark campaign) and dated or pending facts; items with revisions, an
+  inference kept only as a proposal, keep and dismiss; approval reasons as
+  proposals that write no rule; namespace walls; what the Studio used through a
+  later hand edit.
 - `studio-layout-browser.mjs`: `docs/studio-render.js` in headless Chromium.
   The layout rules are byte-identical in the renderer and the worker; the app
   fonts (served from `FONT_DIR`, OFL) are waited for and the face used is

@@ -1207,6 +1207,48 @@ Chromium; writes `tests/shot-layout-repair.png`, synthetic) and
 labelled HOOF reconstruction and `tests/studio-measure-stub.mjs` a measurement
 for worker-only harnesses.
 
+**The Brand Workspace (build `studio-p10`; `CREATIVE-STUDIO.md` s.16, which
+also holds the research notes, the audit and the phased plan).** `GET
+/brand/workspace?ns=&campaign=` (read) assembles what the Studio knows for a
+client or one campaign, every item with `authority` (rule = approved rule,
+observation = reference observation, preference, decision = project decision,
+inference = AI inference), `scope` (client / campaign), `status` (active,
+proposed, retired, outdated) and `source`: the kit (voice, standing rules,
+campaign wording, banned terms, facts - pending facts are unreviewed
+inferences, another campaign's facts are left out and counted), the marks
+actually in R2 (`brMarks`: the logo and its `logoVersions`, each named wordmark
+variant with tone, version, default and per-variant `history`, the legacy
+single slot labelled as such), references across the client's projects
+(observations), learned corrections (preferences), engine outcomes (decisions),
+catalogued artwork, and D1 `brand_items` (`POST /brand/item`,
+`/brand/item/update`, `/brand/item/review {decision keep|dismiss, scope,
+authority, reason}`, full; `GET /brand/items`, `/brand/item/history`). An
+inference is always created as a proposal and cannot be made active as it
+stands; every change is a `brand_item_revisions` row with its reason.
+`brandSave` writes `brand_revisions` (a summary in words and the kit as saved;
+`GET /brand/revisions[?id=]`) and now keeps `logoV` across saves that do not
+upload a logo (it used to drop it). `brReadiness` reports blocking (a mark the
+policy requires is not on file), gaps, conflicts (single slot beside variants,
+a banned term inside approved knowledge, approved facts that disagree, a
+preference about the client logo on a campaign that does not carry it) and
+items to review; `/studio/brief/check` carries it as `brand`. An approval or
+rejection with a reason of twelve characters or more proposes an `accepted` /
+`rejected` item (`brPropose`, with project, asset and version) that nothing
+applies until a person keeps it. `GET /studio/used?asset=&version=` (read,
+`stUsed`) names the version that made the words and plan and the one that
+rendered the imagery (walking back through hand edits), the reference pack
+(attached, read, left out), the rules applied, facts and banned counts, the kit
+revision in force, the marks with variant and version, models, size and pixels,
+and the brief's assumptions. Renders now honour the requested size over the
+var `IMAGE_SIZE` (a default only); `IMAGE_SIZE_MAX` caps and is disclosed, and
+the pixels received are recorded. In-app: the **Brand** rail view (readiness,
+proposals with Keep / Dismiss, identity with the variant library and an
+uploader that names the variant and its tone, typography and colour,
+references and placement, voice and claims, preferences and decisions, kit
+history, item history) and **What the Studio used** on every asset.
+Harnesses: `tests/studio-p10-worker.mjs` (9) and the P10 case in
+`tests/studio-browser.mjs` (19).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

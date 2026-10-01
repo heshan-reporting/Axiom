@@ -156,7 +156,7 @@
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     return html`<nav class="st-rail" aria-label="Project">
       <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
+      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['brand', 'Brand'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
       <${Lbl}>Assets</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
         <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
@@ -209,6 +209,7 @@
           <ul class="st-ul">${chk.gaps.map((g, i) => html`<li key=${i}><${Chip} kind=${g.level === 'mandatory' || g.level === 'blocking' ? 'bad' : g.level === 'preferred' ? 'warn' : ''}>${g.level === 'blocking' ? 'blocks approval' : g.level}</${Chip}> ${g.text}${g.options && !ro && onCampaign ? html` <span class="st-seg">${g.options.map(o => html`<button key=${o.id} class="st-segbtn" onClick=${() => onCampaign(o.id)}>${o.name}</button>`)}<button class="st-segbtn" onClick=${() => onCampaign('', true)}>No campaign</button></span>` : null}</li>`)}</ul>
           ${chk.assumptions.length ? html`<div class="ov-dim">Production would proceed on: ${chk.assumptions.map(a => a.text).join('; ')}.</div>` : null}
           ${chk.campaign ? html`<div class="ov-dim">Campaign ${chk.campaign.name}: mark policy ${chk.campaign.policy}; client logo ${chk.campaign.logoOnFile ? 'on file' : 'not on file'}${chk.campaign.policy === 'wordmark' || chk.campaign.policy === 'both' ? '; wordmark ' + (chk.campaign.wordmarkOnFile ? 'on file' : 'not on file') : ''}.</div>` : null}
+          ${chk.brand ? html`<div class="st-brand-line" aria-label="Brand readiness"><${Chip} kind=${chk.brand.state === 'ready' ? 'ok' : chk.brand.state === 'blocked' ? 'bad' : 'warn'}>brand ${chk.brand.state === 'ready' ? 'ready' : chk.brand.state}</${Chip}> <span class="ov-dim">${[chk.brand.blocking.length ? chk.brand.blocking.map(x => x.text).join(' ') : '', chk.brand.conflicts.length ? chk.brand.conflicts.length + ' conflict' + (chk.brand.conflicts.length === 1 ? '' : 's') + ' in what the Studio knows' : '', chk.brand.gaps ? chk.brand.gaps + ' gap' + (chk.brand.gaps === 1 ? '' : 's') : '', chk.brand.outdated ? chk.brand.outdated + ' to review' : ''].filter(Boolean).join('; ') || 'nothing missing or conflicting'}. Open Brand in the rail for the detail.</span></div>` : null}
         </div>`}
       </div>
       ${!ro && !p.assets.length ? html`<div class="st-pad st-produce">
@@ -292,6 +293,139 @@
         <${Lbl}>Models</${Lbl}><div>directions and copy: ${c.models.creative}; extraction: ${c.models.extract}; images: ${c.models.image}. Reachability is checked by /studio/models, never assumed.</div>
       </div>
     </div>`;
+  }
+  /* ------------------------------------------------------------ the Brand Workspace: what the Studio knows, where it came from, what is missing */
+  const AUTH_KIND = { rule: 'ok', observation: '', preference: '', decision: '', inference: 'warn' };
+  const AUTH_TITLE = { rule: 'an approved rule: it binds', observation: 'seen in a reference: it informs, it does not bind', preference: 'a recorded preference: followed unless a rule says otherwise', decision: 'a decision on a project: it applies where it was made unless kept wider', inference: 'inferred by a model: it never binds until a person keeps it' };
+  function KnowRow({ i, onHistory, extra }) {
+    return html`<li class=${'st-know' + (i.status === 'retired' ? ' retired' : '')}>
+      <div class="st-know-h"><${Chip} kind=${AUTH_KIND[i.authority] || ''} title=${AUTH_TITLE[i.authority] || ''}>${i.authorityWord || i.authority}</${Chip}> <${Chip}>${i.scope === 'campaign' ? 'campaign ' + i.campaign : 'whole client'}</${Chip}>${i.status !== 'active' ? html` <${Chip} kind=${i.status === 'proposed' ? 'warn' : ''}>${i.status}</${Chip}>` : null} <b>${i.title || i.kind}</b>${i.rev > 1 ? html` <span class="ov-dim">rev ${i.rev}</span>` : null}</div>
+      ${i.body ? html`<div>${i.body}</div>` : null}
+      <div class="ov-dim">${i.source && i.source.label ? 'from ' + i.source.label : i.source && i.source.type ? 'from ' + i.source.type : ''}${i.who ? ', ' + i.who : ''}${i.updated || i.created ? ', ' + aest(i.updated || i.created) : ''}${onHistory && i.native ? html` <button class="ov-link" onClick=${() => onHistory(i)}>history</button>` : null}</div>
+      ${extra || null}
+    </li>`;
+  }
+  const fileB64 = f => new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1] || ''); rd.onerror = () => rej(new Error('could not read the file')); rd.readAsDataURL(f); });
+  function MarkThumb({ url, label }) {
+    const [src, setSrc] = useState(null); const [err, setErr] = useState('');
+    useEffect(() => { let live = true; if (!url) return; blobUrl(url).then(u => { if (live) setSrc(u); }).catch(e => { if (live) setErr(e.message || 'did not load'); }); return () => { live = false; }; }, [url]);
+    return html`<div class="st-mark" aria-label=${label}>${src ? html`<div class="st-mark-grounds"><span class="g light"><img src=${src} alt=${label} /></span><span class="g dark"><img src=${src} alt="" /></span></div>` : html`<div class="ov-dim">${err ? 'did not load: ' + err : 'loading...'}</div>`}</div>`;
+  }
+  function BrandView({ p, tick }) {
+    const [camp, setCamp] = useState(p.campaign || ''); const [ws, setWs] = useState(undefined); const [n, setN] = useState(0);
+    const [hist, setHist] = useState(null); const [busy, setBusy] = useState(''); const [up, setUp] = useState({ variant: '', tone: 'light', def: false, file: null });
+    const [add, setAdd] = useState(null); const [dismiss, setDismiss] = useState({}); const [keep, setKeep] = useState({});
+    useEffect(() => { let live = true; setWs(undefined); call('/brand/workspace?ns=' + encodeURIComponent(p.ns) + (camp ? '&campaign=' + encodeURIComponent(camp) : '')).then(d => { if (live) setWs(d); }).catch(e => { if (live) setWs({ error: e.message }); }); return () => { live = false; }; }, [p.ns, camp, n, tick]);
+    const again = () => setN(x => x + 1);
+    const act = async (label, fn) => { setBusy(label); try { await fn(); again(); } catch (e) { toastMsg(label + ': ' + e.message, true); } finally { setBusy(''); } };
+    const openHistory = i => call('/brand/item/history?ns=' + encodeURIComponent(p.ns) + '&id=' + encodeURIComponent(i.id)).then(setHist).catch(e => toastMsg(e.message, true));
+    if (ws === undefined) return html`<div class="st-centre-pad"><div class="ov-empty">Reading the ${p.ns} brand workspace...</div></div>`;
+    if (ws.error) return html`<div class="st-centre-pad"><div class="ov-empty">${ws.detail || ws.error}</div></div>`;
+    const rd = ws.readiness, id = ws.identity, rw = canWrite();
+    const proposals = ws.items.filter(i => i.status === 'proposed').concat(ws.words.items.filter(i => i.status === 'proposed'));
+    const upload = () => act('Wordmark variant not saved', async () => {
+      if (!camp) throw new Error('choose the campaign the wordmark belongs to');
+      if (!up.file || !up.variant.trim()) throw new Error('choose the file and name the variant (e.g. white)');
+      await call('/brand/kit', { ns: p.ns, wordmarkCampaign: camp, wordmarkVariant: up.variant.trim(), wordmarkTone: up.tone, wordmarkDefault: up.def, wordmarkB64: await fileB64(up.file), wordmarkMime: up.file.type || 'image/png' });
+      toastMsg('Saved the ' + up.variant.trim() + ' variant exactly as supplied (a new version; earlier versions stay on file)'); setUp({ variant: '', tone: 'light', def: false, file: null });
+    });
+    const RDY = { ready: 'ok', gaps: 'warn', blocked: 'bad' };
+    const issueList = (list, kind) => list.map((x, k) => html`<li key=${kind + k}><${Chip} kind=${kind === 'blocking' ? 'bad' : kind === 'conflict' ? 'bad' : kind === 'gap' ? 'warn' : ''}>${kind}</${Chip}> ${x.text}${x.fix ? html`<div class="ov-dim">${x.fix}</div>` : null}</li>`);
+    return html`<div class="st-centre-pad st-brand" aria-label="Brand workspace">
+      <div class="ov-sechead"><span class="ov-title">Brand workspace: ${ws.client}</span>
+        <label class="ov-dim" style=${{ marginLeft: 'auto' }}>Scope <select class="st-sel" value=${camp} onChange=${e => setCamp(e.target.value)} aria-label="Campaign scope"><option value="">whole client</option>${ws.campaigns.map(c => html`<option key=${c.id} value=${c.id}>${c.name}${c.active ? '' : ' (inactive)'}</option>`)}</select></label></div>
+      <div class="ov-why">${ws.note}</div>
+      <div class="st-brand-auth">${ws.authorities.map(a => html`<span key=${a.id}><${Chip} kind=${AUTH_KIND[a.id] || ''} title=${AUTH_TITLE[a.id]}>${a.word}</${Chip}> ${ws.counts[a.id] || 0}</span>`)}</div>
+
+      <section class="st-brand-sec" aria-label="Brand readiness"><${Lbl}>Readiness ${ws.campaign ? 'for ' + ws.campaign.name : 'for the client'}</${Lbl}>
+        <div><${Chip} kind=${RDY[rd.state]}>${rd.state === 'ready' ? 'ready to produce' : rd.state === 'blocked' ? 'blocked: production would be incomplete' : 'ready, with gaps to close'}</${Chip}></div>
+        ${rd.blocking.length + rd.conflicts.length + rd.gaps.length + rd.outdated.length ? html`<ul class="st-ul">${issueList(rd.blocking, 'blocking')}${issueList(rd.conflicts, 'conflict')}${issueList(rd.gaps, 'gap')}${issueList(rd.outdated, 'review')}</ul>` : html`<div class="ov-dim">Nothing missing, conflicting or out of date.</div>`}
+      </section>
+
+      ${proposals.length ? html`<section class="st-brand-sec" aria-label="Proposed memory updates"><${Lbl}>Proposed memory updates (${proposals.length}) - none applies until a person keeps it</${Lbl}>
+        <ul class="st-ul st-know-list">${proposals.map(i => html`<${KnowRow} key=${i.id} i=${i} onHistory=${openHistory} extra=${rw && i.native ? html`<div class="st-know-acts">
+          <select class="st-sel" value=${(keep[i.id] || {}).authority || 'preference'} onChange=${e => setKeep(Object.assign({}, keep, { [i.id]: Object.assign({}, keep[i.id], { authority: e.target.value }) }))} aria-label="Keep as"><option value="preference">keep as a preference</option><option value="decision">keep as a project decision</option><option value="rule">keep as an approved rule</option><option value="observation">keep as an observation</option></select>
+          <select class="st-sel" value=${(keep[i.id] || {}).scope || (camp ? 'campaign' : 'client')} onChange=${e => setKeep(Object.assign({}, keep, { [i.id]: Object.assign({}, keep[i.id], { scope: e.target.value }) }))} aria-label="Scope">${camp ? html`<option value="campaign">for ${ws.campaign.name}</option>` : null}<option value="client">for the whole client</option></select>
+          <button class="btn sm" disabled=${!!busy} onClick=${() => act('Not kept', () => { const k = keep[i.id] || {}; return call('/brand/item/review', { ns: p.ns, id: i.id, decision: 'keep', authority: k.authority || 'preference', scope: k.scope || (camp ? 'campaign' : 'client'), campaign: camp || i.campaign }); })}>Keep</button>
+          <input class="st-in" placeholder="why dismiss (required)" value=${dismiss[i.id] || ''} onInput=${e => setDismiss(Object.assign({}, dismiss, { [i.id]: e.target.value }))} aria-label="Reason to dismiss" />
+          <button class="btn sm ghost" disabled=${!!busy || !(dismiss[i.id] || '').trim()} onClick=${() => act('Not dismissed', () => call('/brand/item/review', { ns: p.ns, id: i.id, decision: 'dismiss', reason: dismiss[i.id] }))}>Dismiss</button></div>` : null} />`)}</ul></section>` : null}
+
+      <section class="st-brand-sec" aria-label="Identity"><${Lbl}>Identity and marks${ws.campaign ? ': mark policy ' + id.policy : ''}</${Lbl}>
+        ${ws.campaign && id.policy !== 'logo' && id.policy !== 'both' ? html`<div class="ov-dim">${ws.campaign.name} does not carry the ${ws.client} logo${id.policy === 'none' ? ' or any mark' : '; it carries its own wordmark'}. Format never decides identity: a myth-busting tile in this campaign still carries this campaign's mark.</div>` : null}
+        <div class="st-marks">
+          <div class="st-markcard"><b>Client logo</b><div class="st-know-h">${id.logo.required ? html`<${Chip} kind=${id.logo.onFile ? 'ok' : 'bad'}>${id.logo.onFile ? 'required, on file' : 'required, missing'}</${Chip}>` : id.logo.forbidden ? html`<${Chip}>not used on this campaign</${Chip}>` : null}</div>
+            ${id.logo.onFile ? html`<${MarkThumb} url=${id.logo.url} label="Client logo" /><div class="ov-dim">version ${id.logo.v || 'unversioned'}${id.logo.versions.length > 1 ? ', ' + id.logo.versions.length + ' versions on file (approved work keeps the one it carried)' : ''}</div>` : html`<div class="ov-dim">no logo file${id.logo.kitSays ? ' (the kit says there is one; storage has none)' : ''}</div>`}</div>
+          ${ws.campaign ? id.wordmark.variants.map(v => html`<div key=${v.variant} class="st-markcard"><b>${ws.campaign.name} wordmark: ${v.variant}</b><div class="st-know-h"><${Chip} kind=${v.onFile ? 'ok' : 'bad'}>${v.tone}</${Chip}>${v.default ? html`<${Chip} kind="ok">default</${Chip}>` : null}</div>
+            ${v.onFile ? html`<${MarkThumb} url=${v.url} label=${'Wordmark ' + v.variant} />` : html`<div class="ov-dim">file missing in storage</div>`}
+            <div class="ov-dim">version ${v.v}${v.at ? ', ' + aest(v.at) : ''}${v.history.length ? '; ' + v.history.length + ' earlier version' + (v.history.length === 1 ? '' : 's') + ' kept' : ''}</div>
+            ${rw && !v.default ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => act('Default not changed', () => call('/brand/kit', { ns: p.ns, wordmarkCampaign: camp, wordmarkVariant: v.variant, wordmarkDefault: true }))}>make default</button>` : null}</div>`) : null}
+          ${ws.campaign && id.wordmark.legacy ? html`<div class="st-markcard legacy"><b>${ws.campaign.name} wordmark: single upload slot</b><div class="st-know-h"><${Chip}>no name, no tone</${Chip}></div><${MarkThumb} url=${id.wordmark.legacy.url} label="Single-slot wordmark" /><div class="ov-dim">${id.wordmark.legacy.note}</div></div>` : null}
+        </div>
+        ${rw && ws.campaign ? html`<div class="st-upload" aria-label="Add a wordmark variant"><span class="st-lbl">Add an approved ${ws.campaign.name} wordmark variant</span>
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange=${e => setUp(Object.assign({}, up, { file: e.target.files && e.target.files[0] }))} aria-label="Wordmark file" />
+          <input class="st-in" placeholder="variant name, e.g. white" value=${up.variant} onInput=${e => setUp(Object.assign({}, up, { variant: e.target.value }))} aria-label="Variant name" />
+          <select class="st-sel" value=${up.tone} onChange=${e => setUp(Object.assign({}, up, { tone: e.target.value }))} aria-label="Tone"><option value="light">light (for dark grounds)</option><option value="dark">dark (for light grounds)</option><option value="colour">colour</option></select>
+          <label class="st-check"><input type="checkbox" checked=${up.def} onChange=${e => setUp(Object.assign({}, up, { def: e.target.checked }))} /> default</label>
+          <button class="btn sm" disabled=${!!busy} onClick=${upload}>Save variant</button>
+          <div class="ov-dim">Stored exactly as supplied under its own version; never redrawn. Uploading the same name again makes a new version and keeps the earlier one for work that carried it.</div></div>` : null}
+      </section>
+
+      <section class="st-brand-sec" aria-label="Type and colour"><${Lbl}>Typography and colour</${Lbl}>
+        <div>Display <b>${ws.type.fonts.display || 'not set'}</b>, body <b>${ws.type.fonts.body || 'not set'}</b> <span class="ov-dim">(the renderer reports a fallback whenever a face does not load)</span></div>
+        <div class="st-swatches">${Object.keys(ws.colour.palette).map(k => html`<span key=${k} class="st-swatch"><i style=${{ background: ws.colour.palette[k] }}></i>${k} ${ws.colour.palette[k]}</span>`)}</div>
+        ${ws.type.note ? html`<div><${Chip} kind="ok" title=${AUTH_TITLE.rule}>approved rule</${Chip}> ${ws.type.note}</div>` : null}
+      </section>
+
+      <section class="st-brand-sec" aria-label="References"><${Lbl}>Design and imagery references (${ws.references.length})</${Lbl}>
+        ${ws.references.length ? html`<ul class="st-ul st-know-list">${ws.references.map(r => html`<${KnowRow} key=${r.id} i=${Object.assign({}, r, { title: r.name + ' (' + r.purpose + ')' })} extra=${!r.analysed ? html`<div class="ov-dim">not analysed: the models read it by name only</div>` : null} />`)}</ul>` : html`<div class="ov-dim">No references ${ws.campaign ? 'for this campaign' : ''} on any project yet.</div>`}
+        <div><b>Mark placement</b> ${ws.placement.basis === 'observed' ? html`<${Chip} title=${AUTH_TITLE.observation}>reference observation</${Chip}> ${ws.placement.text} <span class="ov-dim">(${ws.placement.supporting.map(x => x.name).join(', ')})</span>` : html`<span class="ov-dim">not observed in an approved reference; the house default (bottom right) applies and the Studio may move the mark to clear words</span>`}</div>
+        ${ws.artworks.length ? html`<div class="ov-dim">${ws.artworks.length} catalogued artwork${ws.artworks.length === 1 ? '' : 's'} in the client's artwork memory${ws.campaign ? ' for this campaign or unassigned' : ''}.</div>` : null}
+      </section>
+
+      <section class="st-brand-sec" aria-label="Voice and words"><${Lbl}>Voice, wording and claims</${Lbl}>
+        <ul class="st-ul st-know-list">${ws.voice.items.map(i => html`<${KnowRow} key=${i.id} i=${i} />`)}${ws.words.items.map(i => html`<${KnowRow} key=${i.id} i=${Object.assign({}, i, { title: i.kind === 'banned' ? 'Never use "' + i.title + '"' : i.title })} />`)}</ul>
+        ${ws.words.excludedFacts ? html`<div class="ov-dim">${ws.words.excludedFacts} fact${ws.words.excludedFacts === 1 ? ' belongs' : 's belong'} to another campaign and ${ws.words.excludedFacts === 1 ? 'is' : 'are'} not used here.</div>` : null}
+      </section>
+
+      <section class="st-brand-sec" aria-label="Preferences and decisions"><${Lbl}>Preferences, decisions and accepted or rejected work</${Lbl}>
+        <ul class="st-ul st-know-list">${ws.items.filter(i => i.status !== 'proposed').map(i => html`<${KnowRow} key=${i.id} i=${i} onHistory=${openHistory} extra=${rw ? html`<div class="st-know-acts"><button class="ov-link" disabled=${!!busy} onClick=${() => act('Not retired', () => call('/brand/item/update', { ns: p.ns, id: i.id, status: 'retired', why: 'retired from the Brand workspace' }))}>retire</button></div>` : null} />`)}${ws.preferences.map(i => html`<${KnowRow} key=${i.id} i=${i} />`)}${ws.accepted.map(i => html`<${KnowRow} key=${i.id} i=${i} />`)}</ul>
+        ${!ws.items.length && !ws.preferences.length && !ws.accepted.length ? html`<div class="ov-dim">Nothing recorded yet.</div>` : null}
+        ${rw ? (add ? html`<div class="st-offer-box" aria-label="Add knowledge"><div class="st-nd-row">
+            <select class="st-sel" value=${add.kind} onChange=${e => setAdd(Object.assign({}, add, { kind: e.target.value }))} aria-label="Kind">${['like', 'dislike', 'device', 'placement', 'term', 'typography', 'colour', 'imagery', 'voice', 'note'].map(k => html`<option key=${k} value=${k}>${k}</option>`)}</select>
+            <select class="st-sel" value=${add.authority} onChange=${e => setAdd(Object.assign({}, add, { authority: e.target.value }))} aria-label="Authority"><option value="rule">approved rule</option><option value="preference">preference</option><option value="decision">project decision</option><option value="observation">reference observation</option></select>
+            <select class="st-sel" value=${add.scope} onChange=${e => setAdd(Object.assign({}, add, { scope: e.target.value }))} aria-label="Scope">${camp ? html`<option value="campaign">${ws.campaign.name}</option>` : null}<option value="client">whole client</option></select></div>
+          <input class="st-in" placeholder="Title" value=${add.title} onInput=${e => setAdd(Object.assign({}, add, { title: e.target.value }))} aria-label="Title" />
+          <textarea class="st-ta" rows="2" placeholder="What it says, in the client's terms" value=${add.body} onInput=${e => setAdd(Object.assign({}, add, { body: e.target.value }))} aria-label="Body"></textarea>
+          <input class="st-in" placeholder="Where it comes from (a guide, a meeting, an approved file)" value=${add.source} onInput=${e => setAdd(Object.assign({}, add, { source: e.target.value }))} aria-label="Source" />
+          <div><button class="btn sm" disabled=${!!busy || !(add.title.trim() || add.body.trim())} onClick=${() => act('Not saved', async () => { await call('/brand/item', { ns: p.ns, kind: add.kind, authority: add.authority, campaign: add.scope === 'campaign' ? camp : '', title: add.title, body: add.body, source: { type: 'team', label: add.source || 'the team' } }); setAdd(null); })}>Save</button> <button class="btn sm ghost" onClick=${() => setAdd(null)}>Cancel</button></div></div>`
+          : html`<button class="btn sm ghost" onClick=${() => setAdd({ kind: 'like', authority: 'preference', scope: camp ? 'campaign' : 'client', title: '', body: '', source: '' })}>Add knowledge</button>`) : null}
+      </section>
+
+      <section class="st-brand-sec" aria-label="Kit history"><${Lbl}>Kit history</${Lbl}>
+        ${ws.revisions.length ? html`<ul class="st-ul">${ws.revisions.slice(0, 15).map(r => html`<li key=${r.id}><span class="ov-dim">${aest(r.at)}${r.who ? ', ' + r.who : ''}:</span> ${r.summary.join('; ')}</li>`)}</ul>` : html`<div class="ov-dim">No recorded changes yet.</div>`}
+      </section>
+      ${hist ? html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Item history" onClick=${() => setHist(null)}><div class="st-dialog-box" onClick=${e => e.stopPropagation()}><div class="ov-sechead"><span class="ov-title">${hist.item.title || hist.item.kind}: history</span></div>
+        <ul class="st-ul">${hist.revisions.map(r => html`<li key=${r.rev + ':' + r.at}><b>rev ${r.rev}</b> <span class="ov-dim">${aest(r.at)}${r.who ? ', ' + r.who : ''}</span> - ${r.why}<div class="ov-dim">${r.data.authority} / ${r.data.status} / ${r.data.campaign ? 'campaign ' + r.data.campaign : 'whole client'}: ${r.data.body || r.data.title}</div></li>`)}</ul>
+        <div class="st-dialog-acts"><button class="btn sm ghost" onClick=${() => setHist(null)}>Close</button></div></div></div>` : null}
+    </div>`;
+  }
+  /** What the Studio used to make this version: references, rules, facts, marks, models, assumptions. Fetched when opened. */
+  function UsedPanel({ a, v }) {
+    const [open, setOpen] = useState(false); const [u, setU] = useState(null);
+    useEffect(() => { if (!open) return; let live = true; setU(null); call('/studio/used?asset=' + encodeURIComponent(a.id) + '&version=' + encodeURIComponent(v.id)).then(d => { if (live) setU(d); }).catch(e => { if (live) setU({ error: e.message }); }); return () => { live = false; }; }, [open, a.id, v.id]);
+    const refLine = r => r.name + (r.purpose ? ' (' + r.purpose + ')' : '');
+    return html`<details class="st-used" open=${open} onToggle=${e => setOpen(e.target.open)}><summary>What the Studio used</summary>
+      ${!open ? null : !u ? html`<div class="ov-dim">Reading...</div>` : u.error ? html`<div class="ov-dim">${u.error}</div>` : html`<div class="st-used-body">
+        <div class="ov-dim">${u.note}</div>
+        ${u.generatedBy ? html`<div><b>Words and plan</b> made as version ${vnum(a, a.versions.find(x => x.id === u.generatedBy.version) || {})} (${u.generatedBy.note})${u.models.text ? ' by ' + u.models.text : ''}${u.concept ? ' from the ' + u.concept.mode + ' card "' + u.concept.option + '"' : ''}.</div>` : html`<div><b>Words and plan</b> <span class="ov-dim">not generated by the Studio (an import or a hand-made layout)</span></div>`}
+        ${u.imagery ? html`<div><b>Imagery</b> rendered as version ${vnum(a, a.versions.find(x => x.id === u.imagery.version) || {})} by ${u.imagery.model || 'the image model'}${u.imagery.size ? ' at ' + u.imagery.size : ''}${u.imagery.pixels ? ' (' + u.imagery.pixels.w + 'x' + u.imagery.pixels.h + ' px received)' : ''}${u.imagery.fallback ? ', a fallback model' : ''}; ${u.imagery.references.length ? 'reference images given: ' + u.imagery.references.join(', ') : 'no reference images'}.${u.imagery.prompt ? html` <span class="ov-dim">Brief: ${u.imagery.prompt}</span>` : null}</div>` : html`<div><b>Imagery</b> <span class="ov-dim">none rendered for this composition</span></div>`}
+        ${u.editsSince.length ? html`<div class="ov-dim">Then ${u.editsSince.length} hand edit${u.editsSince.length === 1 ? '' : 's'}: ${u.editsSince.map(e => e.note).join('; ')}.</div>` : null}
+        <div><b>References</b> ${u.references ? html`${u.references.mode}: ${u.references.attached.length ? 'shown as images: ' + u.references.attached.map(refLine).join(', ') + '. ' : ''}${u.references.read.length ? 'read by analysis: ' + u.references.read.map(refLine).join(', ') + '. ' : ''}${!u.references.attached.length && !u.references.read.length ? 'none reached the model. ' : ''}${u.references.excluded.length ? html`<span class="ov-dim">Left out: ${u.references.excluded.map(x => x.name + ' (' + x.why + ')').join('; ')}.</span>` : null}` : html`<span class="ov-dim">no reference pack recorded</span>`}</div>
+        <div><b>Rules applied</b> ${u.rules.length ? html`<ul class="st-ul">${u.rules.map(r => html`<li key=${r.id}>${r.rule} <span class="ov-dim">${r.task || ''}${r.campaign ? ', campaign ' + r.campaign : ''}${r.activeNow ? '' : ', since switched off'}</span></li>`)}</ul>` : html`<span class="ov-dim">no learned corrections were in force</span>`}</div>
+        <div><b>Knowledge</b> ${u.facts != null ? u.facts + ' approved fact' + (u.facts === 1 ? '' : 's') : 'facts not recorded'}, ${u.banned != null ? u.banned + ' banned term' + (u.banned === 1 ? '' : 's') : ''}${u.campaign ? ', campaign ' + u.campaign : ''}${u.kit.revision ? html`; the kit as revised ${aest(u.kit.revision.at)} <span class="ov-dim">(${u.kit.revision.summary.slice(0, 3).join('; ')})</span>` : ''}.</div>
+        <div><b>Marks</b> ${u.marks.length ? u.marks.map(m => m.role + (m.variant ? ' ' + m.variant : '') + (m.version ? ' v' + m.version : '') + (m.hidden ? ' (hidden)' : '')).join(', ') + ' - placed exactly from the file' : html`<span class="ov-dim">none on the tile</span>`}</div>
+        ${u.assumptions.length ? html`<div><b>Assumptions</b> ${u.assumptions.join('; ')}${u.acknowledged ? ' (gaps acknowledged before producing)' : ''}</div>` : null}
+      </div>`}</details>`;
   }
   function JobsView({ p, onRetry, onCancel, onStep, budget }) {
     const jobs = (p.jobs || []).slice();
@@ -475,6 +609,7 @@
         ${!copyOnly && !flat && !v.image ? html`<div class="st-flatnote">No background yet: ${(p.jobs || []).some(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) ? 'a render job is ' + ((p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) || {}).state + ' (see Jobs).' : 'the composition is drawn over a plain ground until one is rendered.'}</div>` : null}
       </div>
       ${!copyOnly && !flat && v.layout && v.layout.layers ? html`<${Readiness} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} />` : null}
+      ${!flat ? html`<${UsedPanel} a=${a} v=${v} />` : null}
       <${FamilyStrip} p=${p} a=${a} onOpen=${onOpen} />
       <div class="st-copy">
         ${fields.map(([k, label]) => html`<div key=${k} class=${'st-field' + (sel === k ? ' on' : '') + (a.locks[k] ? ' locked' : '')} onClick=${() => setSel(k)}>
@@ -832,6 +967,7 @@
     else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
     else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} busy=${busy} />`;
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
+    else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
     else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;

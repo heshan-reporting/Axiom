@@ -179,3 +179,103 @@ Reviewed baseline: commit 2174332, build studio-p8. The defect that started it: 
 
 **Limits.** The live HOOF asset was not inspected; the reconstruction stands in. The worker trusts the measured boxes it is sent within its plausibility checks - it cannot run a font engine - so a full-role key could file a crafted report; the checks make an honest mistake impossible, not a deliberate forgery. Approvals recorded before this build will not stand after deploy for compositions (the design signature now includes the displayed words) and every composition needs one measurement, which the app files on opening.
 
+## 16. Toward an agency-grade production platform: research, audit, plan, and the first slice (build studio-p10)
+
+Reviewed baseline: commit 34efc4b (build studio-p9, merged to main 1 October 2026), plus the two fixes that followed: the resolution select now reaches every render path (a6a744e), and a request's size wins over the worker variable IMAGE_SIZE, which until then overrode every render (c1fb86a). Whether studio-p9 is deployed could not be checked from the build sandbox; the worker answers its build on `/engine/status`.
+
+### 16.1 What the reference products show (and how sure we are)
+
+The five pages named in the request could not be fetched: the sandbox's egress proxy refuses higgsfield.ai, runwayml.com and runway.com, and ai.google.dev as well. What follows comes from web-search excerpts of those vendors' own help and product pages, and is labelled by how sure it is.
+
+- **Verified from the vendors' own pages (via search excerpts).** Runway Workflows are node graphs: nodes take inputs from other nodes, content types are colour coded, and workflows can be published as apps or endpoints. Runway References use up to three reference images per generation; a reference can be tagged with a name and recalled with @name in any prompt. Runway's Team plan gives a shared workspace where assets, references and Brand Kits live in shared projects, with pooled credits and frame-accurate comments. Higgsfield Marketing Studio starts from a product URL and a chosen format (product shots, UGC, ads, posters and others), with reusable, pinned avatars across campaigns. Gemini 3 Pro Image takes up to 14 reference images (Google: up to 6 object, 5 character and 3 style images), edits by semantic, text-described masking rather than a pixel mask, and makes interim "thought images" before the final one.
+- **Third-party claims, not relied on.** Figures such as "94% text accuracy" or a "16-bit colour pipeline" come from review sites, not the vendors. A Google developer-forum thread reports `imageSize` being ignored by one SDK. Our worker sends `imageConfig.imageSize` over REST and now records the pixels it receives, so the question is answered by measurement, not belief.
+- **Architectural inference, not knowledge.** Nothing here says how those products orchestrate models internally, and nothing is assumed about their APIs.
+- **Our decisions, translated.**
+  - Named, reusable references become the Brand Workspace: references with authority and scope, recalled by campaign.
+  - Guided creation becomes the two routes: quick production and guided development.
+  - Workflow graphs become recipes over a dependency graph that ordinary users never have to draw.
+  - Team consistency becomes campaign-scoped memory with reviewed updates.
+  - Semantic editing becomes instruction-led edits whose preservation is compared afterwards, since no pixel mask is available.
+
+### 16.2 Audit of the Studio against the request
+
+- **Already working and preserved:**
+  - sourced brief combos with requirement bands and a check before spending (P8)
+  - campaign identity enforcement and reference packs (P8)
+  - free-form plans and diverse concepts: explore, refine and Create a new design (P7)
+  - editable composition, full artwork and flattened legacy assets, kept distinct
+  - retain controls, immutable versions and component approvals
+  - durable jobs with leases, idempotency, the stale guard and budgets
+  - the shared renderer, composed-tile inspection, and P9's measured validation, repair and server-enforced readiness (verified present on main)
+- **Incomplete:**
+  - brand knowledge was scattered across the kit, R2, references, engine_fixes and outcomes, with no provenance, authority or history in one place
+  - wordmark variants had a back end but no interface, and the identity audit ignored them
+  - a kit save without a new logo dropped the logo's version (fixed here)
+  - nothing showed what a production actually used
+  - strategy is folded into directions instead of standing as its own stage
+  - the canvas lacks align, group, reorder, undo/redo, typography controls and safe-area guides
+  - a campaign set is per-channel copy, not a planned sequence
+- **Missing:**
+  - client review: scoped, revocable and expiring sharing, comments, pinned annotations
+  - delivery bundles per client
+  - recipes and selective re-runs over a dependency graph
+  - outcome metrics: time to first usable concept, revisions, cost per approved asset
+  - a third-client demonstration
+
+### 16.3 The plan, by dependency
+
+1. **Phase 1: the ground.** P9 typography, validation and readiness (done). The Brand Workspace, brand readiness and "What the Studio used" (this slice). Next in this phase: the strategy stage as a structured brief document shared by every later stage.
+2. **Phase 2: exploration and craft.**
+   - Three directions by default with an exploration budget, a strategy rationale and a measured diversity score (P7's plan signature).
+   - Board, Canvas, Copy and Review views.
+   - The canvas: align, group, reorder, undo and redo, typography controls and safe-area guides.
+   - Targeted refinement on a selected element, with preservation compared before and after.
+3. **Phase 3: production at scale.**
+   - Recipes over a dependency graph (brief, references, copy, imagery, composition, adaptations, review), re-running only what changed and keeping what is locked.
+   - Campaign sequences with asset roles.
+   - Agency review, then client review through scoped, revocable, expiring links with comments and pinned annotations.
+   - Delivery bundles, and metrics with baselines measured first.
+
+### 16.4 Delivered in this slice
+
+- **The Brand Workspace** (`GET /brand/workspace?ns=&campaign=`, read role) assembles a client's knowledge, for the whole client or one campaign. Each item is normalised with:
+  - **authority:** approved rule, reference observation, preference, project decision, or AI inference
+  - **scope:** the whole client, or one campaign
+  - **status:** active, proposed, retired, or outdated
+  - **source:** where it came from
+
+  It draws on the kit, the marks actually in R2, references across the client's projects, learned corrections, accepted and rejected work, catalogued artwork, and the new `brand_items` (`POST /brand/item`, `/brand/item/update`, `/brand/item/review`, full role). An AI inference is always a proposal and cannot be switched on as it stands. A proposal is kept with a chosen scope and authority, or dismissed with a reason. Every change is a revision with its reason (`/brand/item/history`).
+- **Kit history.** Every kit save writes a revision in words with the kit as saved (`brand_revisions`, `GET /brand/revisions`). Logo uploads keep a version list. Re-uploading a wordmark variant keeps the earlier version in that variant's history, and every version stays under its own immutable key.
+- **Readiness** (`brReadiness`), shown in the workspace and on the brief check, covers four things:
+  - **Blocking:** a mark the campaign policy requires is not on file.
+  - **Gaps:** only the unnamed single wordmark slot, no light-and-dark pair, no fonts, palette or voice, no identity note, no brand or approved reference, no observed placement, no approved facts, or proposals waiting.
+  - **Conflicts:** both the single slot and named variants exist; a banned term sits inside approved knowledge; two approved facts disagree; a preference speaks of the client logo on a campaign that does not carry it.
+  - **Review:** unanalysed references, facts naming an old year, pending facts.
+- **The wordmark library in the page.** Named variants with tone, version, default and history are shown on a light and a dark ground. They are uploaded through the page with a name and a tone, and "make default" chooses between them. The old single slot is shown as what it is, never as a library. HOOF's three supplied files (blue, white, black) are uploaded by the team; the build never did.
+- **Reviewed memory.** An approval or rejection whose reason runs to twelve characters or more becomes a proposed `accepted` or `rejected` item, with its project, asset and version. Nothing writes a learned rule from it until a person keeps it.
+- **What the Studio used** (`GET /studio/used?asset=&version=`, read role; a panel on every asset). It names:
+  - the version that made the words and plan, with its model and concept card
+  - the version that rendered the imagery, with its model, size, pixels received, reference images and brief
+  - hand edits since then
+  - the reference pack: attached, read, left out and why
+  - the learned rules applied, and whether they are still in force
+  - the count of approved facts and banned terms
+  - the kit revision in force
+  - the marks with variant and version
+  - the assumptions the brief proceeded on
+- **Identity separation holds by construction.**
+  - MCA work carries the MCA logo under the logo policy.
+  - HOOF carries its own wordmark variants and never the MCA logo, and a preference that says otherwise is reported as a conflict.
+  - A myth-busting format does not change which identity applies.
+  - Another client's items, facts, references, marks and history never appear, and cannot be edited by naming another namespace.
+
+### 16.5 Proof and limits
+
+- **Tests:**
+  - `tests/studio-p10-worker.mjs` (9): history, readiness, the variant library, authorities and scope, conflicts, items and reviews, proposals, isolation, used.
+  - The P10 case in `tests/studio-browser.mjs` (19 cases in all): the Brand view, keeping a proposal, uploading a named variant through the page, the used panel.
+  - `tests/studio-p9-worker.mjs` (15): adds size precedence and the cap.
+  - Every earlier Studio suite still passes.
+- **Not done in this slice:** the strategy stage, the canvas upgrade, recipes, client review, delivery and metrics (see 16.3).
+- **Not measured:** the effect on creative quality. No real model was called; the demonstration with real models waits for an approved spending cap.
+

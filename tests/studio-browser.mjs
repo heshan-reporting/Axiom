@@ -338,6 +338,31 @@ await t('the jobs view lists every job with its log; the client context lists th
   ok(/Label the answer Fact/.test(c) && /more than any other industry/.test(c) && /300,000 Australians/.test(c) && /"subsidy"/.test(c) && /logo on file/.test(c) && /claude-opus-5-5/.test(c) && /No haul trucks/.test(c) && /campaign/.test(c), c.slice(0, 500));
   await shot(page, 'studio-context');
 });
+await t('P10: the Brand workspace names what the Studio knows with its authority and scope, holds the reasons given on approvals as proposals until a person keeps one, takes a named wordmark variant through the page, and the asset says what the Studio used', async () => {
+  await page.click(R + '.st-railbtn:has-text("Brand")'); await page.waitForSelector(R + '.st-brand');
+  const t0 = (await page.textContent(R + '.st-brand')).replace(/\s+/g, ' ');
+  ok(/Brand workspace: Minerals Council of Australia/.test(t0) && /approved rule/.test(t0) && /Label the answer Fact/.test(t0) && /Readiness for Hands Off Our Fuel/.test(t0) && /whole client/.test(t0), t0.slice(0, 400));
+  ok(/Proposed memory updates \(\d+\) - none applies until a person keeps it/.test(t0) && /client asked for the plain ask/.test(t0), 'the approval reasons wait as proposals');
+  const nProp = +(t0.match(/Proposed memory updates \((\d+)\)/) || [])[1];
+  await page.click(R + 'section[aria-label="Proposed memory updates"] .st-know-acts button:has-text("Keep")');
+  await page.waitForFunction(n => { const el = document.querySelector('#studio-root .st-brand'); if (!el) return false; const m = el.textContent.match(/Proposed memory updates \((\d+)\)/); return !m ? n === 1 : +m[1] === n - 1; }, nProp);
+  ok(/preference/.test(await page.textContent(R + 'section[aria-label="Preferences and decisions"]')), 'the kept proposal is a preference now');
+  await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof'); await page.waitForSelector(R + '.st-upload');
+  ok(/Hands Off Our Fuel/.test(await page.textContent(R + 'section[aria-label="Identity"]')));
+  await page.setInputFiles(R + '.st-upload input[type=file]', { name: 'hoof-wordmark-white.png', mimeType: 'image/png', buffer: Buffer.from(PNG, 'base64') });
+  await page.fill(R + '.st-upload input[aria-label="Variant name"]', 'white'); await page.selectOption(R + '.st-upload select[aria-label="Tone"]', 'light');
+  await page.click(R + '.st-upload button:has-text("Save variant")');
+  await page.waitForSelector(R + '.st-markcard:has-text("wordmark: white")', { timeout: 15000 });
+  const kit = (await api('GET', '/brand/kit?ns=mca')).kit; const hoof = kit.campaigns.find(c => c.id === 'hoof');
+  eq(hoof.wordmarks.map(w => [w.variant, w.tone]), [['white', 'light']], 'stored as a named, toned variant');
+  ok(/light \(for dark grounds\)|light/.test(await page.textContent(R + '.st-markcard:has-text("wordmark: white")')) && await page.$(R + '.st-markcard:has-text("wordmark: white") .st-mark-grounds img'), 'shown on a light and a dark ground');
+  ok(/Kit history/.test(await page.textContent(R + '.st-brand')) && /hoof wordmark variant white \(light, version/.test(await page.textContent(R + 'section[aria-label="Kit history"]')), 'the upload is in the kit history');
+  await shot(page, 'studio-brand');
+  await page.click(R + '.st-railbtn.asset:has-text("Facebook post")'); await page.waitForSelector(R + '.st-used');
+  await page.click(R + '.st-used summary'); await page.waitForFunction(() => /Rules applied/.test(document.querySelector('#studio-root .st-used').textContent));
+  const used = (await page.textContent(R + '.st-used')).replace(/\s+/g, ' ');
+  ok(/Say more than any other industry/.test(used) && /Words and plan made as version/.test(used) && /Imagery rendered as version/.test(used) && /Nothing from another client/.test(used), used.slice(0, 600));
+});
 await t('an open brief, copy only: two distinct directions first, nothing produced until one is chosen; then copy-only assets with no render', async () => {
   await page.click(R + '.st-head .ov-link:has-text("projects")');
   await page.waitForSelector(R + '.st-lib tbody tr');
