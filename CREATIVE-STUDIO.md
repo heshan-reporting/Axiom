@@ -591,3 +591,12 @@ This closes the request "Upgrade AXIOM Creative Studio into an agency-grade crea
 3. Run the demonstration with a small approved budget.
 4. Look at the work.
 
+## 25. What the first live run taught (build studio-p18)
+
+The first live run of `tools/studio-demo.py` (HOOF and the synthetic client, 20 calls approved, no images) completed all six steps for the synthetic client. HOOF stopped at step 5, and both of its faults were real:
+
+1. **The diagram direction planned image boxes it could never fill.** With no image approved, those boxes stay empty sketches, which correctly block delivery. Production and refinement now take `imagery: 'none'`. The planner is told, and the server enforces it: image regions are dropped, a photographic medium becomes typographic, and the ground takes the kit colour.
+2. **The re-composed adaptations overflowed** at 1:1 and 16:9. The app already had the repair for this ("Fix layout (no render)"), but the demonstration composed tiles outside the app and only measured them. `tools/studio-compose.mjs --repair` now applies the same bounded repair first. The repair never changes a word and is saved as a layout version.
+
+Both are covered by tests (`studio-p18-worker.mjs`, and the repair cases in `studio-compose-test.mjs`).
+

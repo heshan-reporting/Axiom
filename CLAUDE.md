@@ -1433,6 +1433,22 @@ cent, three kinds, resolution, the limit stated before spending) and the
 preservation card on the asset with a compare link. Harnesses:
 `tests/studio-p17-worker.mjs` (5), the P17 case in the browser harness (24).
 
+**No imagery, and repair outside the tab (build `studio-p18`).** The copy
+and concepts stages take `imagery: 'none'` (the demonstration sends it when
+no render is approved): the planner is told (`ST_NO_IMAGERY_LINE`) and
+`stPlanNoImagery` holds the plan to it - every image region dropped (an
+empty image box is a sketch that never passes validation), a photographic
+medium made typographic, artwork made editable, the ground the kit colour -
+and the version records `context.imagery: 'none'`, which a later
+refinement of an imageless version honours. `tools/studio-compose.mjs
+--repair` (with `--save`) gives a failing tile the app's "Fix layout (no
+render)" first - the bounded `repair()` that never changes a word, saved as
+a layout version, then measured and filed; `tools/studio-demo.py` composes
+with it. `package.json` lists Playwright for these tools (`npm install &&
+npx playwright install chromium`; `node_modules/` is ignored). Harnesses:
+`tests/studio-p18-worker.mjs` (3), the repair cases in
+`tests/studio-compose-test.mjs` (11).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

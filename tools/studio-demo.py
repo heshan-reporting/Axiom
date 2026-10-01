@@ -151,7 +151,7 @@ def compose(base, key, args, pid, out):
     if not node:
         return {'ok': False, 'error': 'node is not installed here'}
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'studio-compose.mjs')
-    r = subprocess.run([node, tool, '--key', key, '--project', pid, '--out', out, '--save', '--worker', base], capture_output=True, text=True, timeout=600)
+    r = subprocess.run([node, tool, '--key', key, '--project', pid, '--out', out, '--save', '--repair', '--worker', base], capture_output=True, text=True, timeout=600)
     try:
         return json.loads((r.stdout or '').strip().splitlines()[-1])
     except Exception:
@@ -253,12 +253,13 @@ def run_case(base, key, args, cid, rec):
     http(base, key, 'POST', '/studio/direction/choose', {'id': pick['id']})
     # 3. production, then a refinement that keeps the imagery
     j = job(base, key, pid, 'copy', {'channels': c['channels'], 'deliverable': 'set', 'direction': pick['id'], 'size': args.size, 'render': SPEND['cap_renders'] > 0,
+                                     'imagery': 'none' if want_type else None,
                                      'instruction': ('No photograph: the words, shapes and the mark carry it (' + str(pick.get('medium') or 'typographic') + '). One tile per channel, not a carousel.') if want_type else ''}, 'writing and laying out the master')
     if not j or j['state'] != 'done':
         raise Stop('production failed: ' + ((j or {}).get('error') or 'no answer'))
     r0 = SPEND['renders']; pump(base, key, pid)
     g = get(base, key, pid); master = g['assets'][0]; v0 = current(master)
-    cj = job(base, key, pid, 'concepts', {'asset': master['id'], 'mode': 'refine', 'feedback': 'Refine this: sharper hierarchy, same message, keep what works.', 'keep': {'imagery': True, 'copy': True, 'composition': False}}, 'refining the chosen design', asset=master['id'])
+    cj = job(base, key, pid, 'concepts', {'asset': master['id'], 'mode': 'refine', 'feedback': 'Refine this: sharper hierarchy, same message, keep what works.', 'keep': {'imagery': True, 'copy': True, 'composition': False}, 'imagery': 'none' if want_type else None}, 'refining the chosen design', asset=master['id'])
     renders_before = SPEND['renders']
     applied = None
     if cj and cj['state'] == 'done':
@@ -280,7 +281,13 @@ def run_case(base, key, args, cid, rec):
     g = get(base, key, pid)
     say(4, 'Coordinated set: %s - %d asset%s in the family, each re-composed for its own format from the master\'s plan.' % (
         ', '.join('%s %s' % (a['title'], a['format']) for a in g['assets']), len(g['assets']), '' if len(g['assets']) == 1 else 's'), assets=[{'title': a['title'], 'format': a['format'], 'marks': marks_of(current(a))} for a in g['assets']])
+    rec['marks'] = {a['title']: marks_of(current(a)) for a in g['assets']}
     comp = compose(base, key, args, pid, os.path.join(out, 'tiles'))
+    fixed = [(x.get('title'), x['repaired']) for x in comp.get('composed') or [] if x.get('repaired')]
+    for t, r in fixed:
+        print('  repaired %s with no render: %s%s' % (t, '; '.join(r.get('steps') or []) or r.get('error', ''), (' (still: ' + r['conflict'] + ')') if r.get('conflict') else ''))
+    if fixed:
+        rec['repaired'] = [{'asset': t, 'steps': r.get('steps'), 'fixed': r.get('fixed')} for t, r in fixed]
     rec['composed'] = [dict(x, file=os.path.relpath(x['file'], args.out)) for x in (comp.get('composed') or []) if x.get('file')]
     failing = [(x.get('title'), list((x.get('validation') or {}).get('blocking') or [])) for x in comp.get('composed') or [] if (x.get('validation') or {}).get('ok') is False]
     if failing:
