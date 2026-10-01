@@ -1449,6 +1449,64 @@ npx playwright install chromium`; `node_modules/` is ignored). Harnesses:
 `tests/studio-p18-worker.mjs` (3), the repair cases in
 `tests/studio-compose-test.mjs` (11).
 
+**Freeform everywhere (build `studio-p19`; `CREATIVE-STUDIO.md` s.26).**
+Every path after first production keeps the composition a plan, not the
+house panel. The revise stage's kind `layers` edits named layers by stable
+id (`stLayerList` in the prompt, `stApplyLayerOps`): locked layers, the
+words of a copy role, removing a role or a mark, and moving a mark held by
+a campaign `markRule {corner, mandatory, note}` are refused and named; the
+event lists changed and unchanged layers, no render. Kind `design` answers
+with a plan that keeps the current photograph unless an image is asked for
+and carries locked layers (`stCarryLocked`). Adaptation starts from the
+master as it stands (`stLayoutToPlan`, `stPlanForFormat` rescales type and
+mark). Sequence items carry their own plans. Production asks once (REPLAN)
+before a house layout, which is then labelled "not a bespoke design" with
+the reason. `markPlace` places the mark unless a mandatory rule holds it.
+Split headlines (`part`) must reproduce the approved words or collapse to
+one block (`stPartsReconcile`). `stArtMemory` takes only the campaign's
+own and client-wide artwork. Harness: `tests/studio-p19-worker.mjs` (10).
+
+**Layouts from the same photograph and words (build `studio-p20`; s.27).**
+Concepts mode `layouts` ("Explore layouts (same image and copy)") binds the
+imagery and the approved copy, keeps only the background region
+(`stPlanLayoutsOnly` sets aside new regions, painted lettering and words
+the version does not carry, and names them), measures each option against
+the current layout too and replans a look-alike once; every option is
+layout only. Framing: `layout.imageFocus` and region `focus` `{x, y,
+zoom}` (`stFocus`) move the cover crop in the renderer, preview and export
+alike, and survive adaptation. The editor resizes a text box without its
+type (toggle "resize scales type"), takes X/Y/W/H, line height, panel
+opacity and fill, and framing; all layout versions, no render. The thread
+shows focused edits as changed / left / refused. Harnesses:
+`tests/studio-p20-worker.mjs` (5), the P20 browser case, section 9 of
+`tests/studio-layout-browser.mjs`.
+
+**Recipes, compiled instructions, capabilities (build `studio-p21`;
+s.28).** `studio_references.recipe` (`POST /studio/reference/recipe`, full;
+`ST_REF_COMPONENTS`; an exclusion beats a borrow; excluding from a brand or
+approved reference is a recorded conflict) rides on the reference's prompt
+line; concepts name `influence` (reference x component) and one outside the
+recipe is marked. Every model call of a job is filed at
+`studio/<project>/compiled/<job>.json` (`stClaude` pushes onto
+`log.compiled`; `nanoRender` returns `sent`; `stCompiledSave`): system and
+user text, images by name, model asked and answered, effort, plain retry;
+for images the prompt, reference roles, image config, history replay and
+`masks: false`. Never a key. `GET /studio/compiled?job=` (read); "What the
+Studio used" lists the jobs behind a version. `GET /studio/capabilities`
+(read) says per operation what it takes and cannot do (no pixel masks) and
+claims no verified real output. Harness: `tests/studio-p21-worker.mjs` (6).
+
+**Inspection reasons and brand requests (build `studio-p22`; s.29-30).**
+Each inspection score carries the model's reason; a missing score is null
+("not scored"), never 3; the event records `version`, `versionNumber`,
+`sig`, `round` of 2; readiness reports an inspection of an earlier version
+as `stale` (with `inspected`). `tools/studio-brand-gaps.py --ns --key
+[--out requests/] [--analyse --approve-calls N]` turns the workspace's
+readiness into a request for approved material (NEEDED BEFORE PRODUCTION,
+PLEASE CONFIRM) and analyses unanalysed references only within the
+approved call budget; `requests/` is gitignored. Harnesses:
+`tests/studio-p22-worker.mjs` (4), `tests/studio-brand-gaps-test.mjs` (10).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

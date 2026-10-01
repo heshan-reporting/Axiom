@@ -31,6 +31,11 @@ node --experimental-sqlite tests/studio-p15-worker.mjs    # outcome metrics agai
 node --experimental-sqlite tests/studio-demo-test.mjs      # tools/studio-demo.py: estimate only without approval; the six steps for HOOF, MCA national and the synthetic client with no image; separation, isolation, the kit guard
 node --experimental-sqlite tests/studio-p17-worker.mjs    # area edits by description (no pixel mask): prompt, edit record and limits, nothing spent on a bad edit, preservation judged against the source version
 node --experimental-sqlite tests/studio-p18-worker.mjs    # no imagery: the planner is told, image regions are dropped, the flag carries into refinement, nothing renders
+node --experimental-sqlite tests/studio-p19-worker.mjs    # freeform everywhere: focused layer edits by id (locks, copy roles and a mandatory mark refused), plan-based redesign, faithful adaptation, planned sequences, labelled house fallback, art memory scoped by campaign
+node --experimental-sqlite tests/studio-p20-worker.mjs    # Explore layouts: the same photograph and words, new regions and invented words set aside, look-alikes replanned against the current layout, layout-only apply; image framing
+node --experimental-sqlite tests/studio-p21-worker.mjs    # reference recipes, influence per concept, the compiled instruction filed per job (no keys), the capability registry
+node --experimental-sqlite tests/studio-p22-worker.mjs    # inspection reasons, unscored is null, bound to its version, stale after an edit, bounded rounds
+node --experimental-sqlite tests/studio-brand-gaps-test.mjs # tools/studio-brand-gaps.py: the request for approved material, and reference analysis only within an approved call budget
 node --experimental-sqlite tests/studio-review-browser.mjs # docs/review.html and the Studio Client review view in Chromium through the worker module
 node --experimental-sqlite tests/studio-layout-browser.mjs  # the renderer's measurement, validation and repair in real Chromium (HOOF reconstruction, worker layouts in four formats, fonts, marks); writes tests/shot-layout-repair.png
 node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export

@@ -600,3 +600,134 @@ The first live run of `tools/studio-demo.py` (HOOF and the synthetic client, 20 
 
 Both are covered by tests (`studio-p18-worker.mjs`, and the repair cases in `studio-compose-test.mjs`).
 
+
+## 26. Freeform everywhere (build studio-p19)
+
+Before P19, a plan could compose a tile freely only in first production and in concepts. Everything that came after (the Partner's revisions, adaptation, sequences, the fallback when no plan came back) went back to the house panel. Now every path keeps the composition a plan:
+
+- **Focused edits by layer.** The revise stage gained the kind `layers`. The model sees every layer by its stable id (`stLayerList`) and answers with operations on named layers only (`stApplyLayerOps`).
+  - Refused and named: a locked layer, the words of a copy role (words change through a text edit), a mark held by a mandatory placement rule, and removing a role or a mark.
+  - The thread records what changed, what was left alone, and that no render was spent.
+- **Redesign by plan.** The `design` kind answers with a whole plan.
+  - The current photograph is kept unless an image is asked for, and locked layers are carried in place (`stCarryLocked`).
+  - A plan that places no words is refused. The older preset spec is accepted only as a labelled fallback.
+- **Adaptation from the master as it stands.** `stLayoutToPlan` turns the current layout back into a plan, hand edits included. `stPlanForFormat` rescales type and the mark for the new stage.
+- **Sequences.** Each item carries its own plan. An item without one becomes a house layout labelled "not a bespoke design", with the reason.
+- **Production.** One bounded REPLAN call asks for a missing plan. Only then is the house layout used, labelled as such on the version and the thread.
+- **Mark placement.** `markPlace` (corner or x/y, width) is honoured unless a campaign `markRule {corner, mandatory, note}` holds the mark. The rule wins, and the plan's request is noted.
+- **Split copy.** A headline split across layers (`part`) must reproduce the approved words exactly. Otherwise it is collapsed into one block (`stPartsReconcile`), at normalisation and again after any copy edit.
+- **Artwork memory.** `stArtMemory` now offers only this campaign's work and work filed without a campaign. Other campaigns' rows are counted and left out, which closes the HOOF / national leak.
+
+Harness: `tests/studio-p19-worker.mjs` (10).
+
+## 27. Layouts from the same photograph and words; the editor's finer controls (build studio-p20)
+
+- **Explore layouts (same image and copy)** is a fourth action beside Refine, Explore variations and Create a new design (concepts mode `layouts`).
+  - The imagery and the approved words are bound whatever the request says.
+  - `stPlanLayoutsOnly` keeps only the background region (the current image). It sets aside, and names:
+    - new image regions;
+    - painted lettering (the words stay live layers);
+    - text elements whose words the version does not carry.
+  - Each option is measured against the current layout as well as against the others. A look-alike is sent back once (REPLAN); the replacement stands or is marked.
+  - Every option is "layout only, no render", and applying one appends a layout version with the same image and copy.
+  - The model writes the why under `rationale`. The card shows how far each option draws from the current layout.
+- **Framing.**
+  - `layout.imageFocus` and region `focus` (`{x, y, zoom}`, normalised by `stFocus`) set the focal point and zoom of the cover crop.
+  - The renderer draws them identically in preview and export, and they survive adaptation.
+  - This is the "crop and negative space" control the P17 report listed as missing.
+- **The editor.**
+  - The corner resizes the text box and the words rewrap at the same size. A toggle restores scaling the type with the box.
+  - Fields for X, Y, width and height on any unlocked layer; line height on text; opacity and fill on shapes.
+  - Framing sliders for the photograph or a selected image region.
+  - All of these save as one layout version, with no render.
+- **Partner thread.** A focused edit shows what changed (layer and fields), what was left as it was, what was refused and why.
+- **Fix.** Shape opacity kept one decimal and is now kept to two.
+
+Harnesses: `tests/studio-p20-worker.mjs` (5), the P20 case in `tests/studio-browser.mjs`, and section 9 of `tests/studio-layout-browser.mjs` (framing, line height, box versus type).
+
+## 28. What the models were told, and what they can do (build studio-p21)
+
+- **Reference recipes.** `studio_references.recipe` holds, per component, whether to borrow it or leave it.
+  - The components are typography, colour, composition, hierarchy, imagery, image treatment, panels, spacing, mark placement and copy tone.
+  - An exclusion beats a borrow.
+  - Excluding a component from a brand or approved reference is recorded as a conflict, because the kit's requirement still holds.
+  - Set with `POST /studio/reference/recipe` (full role) or the References view.
+  - The recipe rides on the reference's line in every prompt ("BORROW ONLY: ... DO NOT TAKE: ...").
+  - Concepts name their influences (reference × component). One outside the recipe is marked on the card and in "What the Studio used".
+- **Compiled instructions.** Every model call of a job is filed in R2 at `studio/<project>/compiled/<job>.json`, and the record never holds a key. `GET /studio/compiled?job=` (read role) returns it.
+  - Language-model calls: the system and user text exactly as sent, the images by name and size, the model asked for and the one that answered, the effort, thinking, and a plain retry.
+  - Image calls: the prompt text, the reference images by role, the image configuration (size asked, size used, capped), whether history was replayed, and `masks: false`.
+  - The job's progress, the version's `image.meta.compiled` and "What the Studio used" point at it. The latter lists only the jobs that made what the version shows.
+- **Capability registry.** `GET /studio/capabilities` (read role) states, per operation (plan, extract, inspect, render, compose), the model, what it takes, and what it cannot do. Among the things it cannot do:
+  - pixel masks (area edits are described in words and measured afterwards);
+  - guaranteed transparency;
+  - editable painted lettering;
+  - size control on the 2.5 fallback.
+
+  It also says how each operation is shown to work. No model operation is claimed as verified on real output. The table sits in the Production view.
+- **Fix.** The reference colour swatches passed `style` as a string, which crashed the References view for any analysed reference with a palette.
+
+Harnesses: `tests/studio-p21-worker.mjs` (6), the P21 case in `tests/studio-browser.mjs`.
+
+## 29. The inspection as a record a person can weigh; brand gaps as a request (build studio-p22)
+
+- **Scores with reasons.** Each of fidelity, hierarchy, readability, relevance and identity carries the model's reason.
+  - A score the model did not give is null ("not scored"). It used to become a quiet 3.
+- **Bound to its version.** The inspection records the version id, its number and the composition signature.
+  - Readiness now reports an inspection of an earlier version as `stale`, naming the version it saw. It used to report `none`.
+  - The card shows:
+    - "verdict: ship / fix / redo";
+    - "round N of 2";
+    - "of vN";
+    - "composed tile" or "imagery only";
+    - a stale chip when the asset has moved on;
+    - each reason under the scores.
+  - A ship verdict still approves nothing, and the third look on a corrected line is refused as bounded.
+- **Brand gaps as a request for approved material.** `tools/studio-brand-gaps.py --ns <ns> --key` reads `/brand/workspace` for the client and each campaign.
+  - It writes what to ask the client for: marks, colour versions, fonts, palette, voice, identity notes, approved designs, the placement rule, and approved facts with sources.
+  - Lines that stop a composition are marked NEEDED BEFORE PRODUCTION. Contradictions are marked PLEASE CONFIRM.
+  - With `--out` it writes `requests/brand-requests-<ns>.md`. That folder is gitignored.
+  - `--analyse --approve-calls N` analyses unanalysed references, at most N model calls. Without a budget it spends nothing and says how many are waiting.
+
+Harnesses: `tests/studio-p22-worker.mjs` (4), `tests/studio-brand-gaps-test.mjs` (10), and the inspection assertions in `tests/studio-browser.mjs`.
+
+## 30. Report for the professional-platform request (builds studio-p19 to studio-p22)
+
+All work is on `claude/peaceful-gates-g1t4ss`. Nothing in P19 to P22 is deployed or merged, no paid call was made, and nothing was approved on anyone's behalf.
+
+- **The live worker** was last reported at build p17. The frontend on `main` is at p18.
+- **The attached twelve-module specification** did not reach this session. The work follows the modules as the request described them.
+
+### Implemented and tested (stub models, real Chromium for the renderer and the page)
+
+| Requirement | Where |
+|---|---|
+| Recheck brand records, surface gaps, ask for approved information | P10 workspace and readiness; P22 request tool |
+| References analysed by an authorised operation, observations with source ids, observed layouts not mandatory | P6/P8 analysis (full role), P10 observations, s.12 purpose semantics; P22 budgeted analysis |
+| MCA logo vs HOOF wordmark; colour version chosen by ground; marks never redrawn | P8-P10 policy and variants; marks are exact image layers |
+| Campaign scoping of facts, references, preferences, rules; `stArtMemory` leak | P8-P10; P19 closed the art-memory leak |
+| Distinct territories with bounded replan; four separate actions | P8 explore, P12 directions; P20 adds Explore layouts as the fourth action |
+| Freeform composition throughout production, Partner, variations, sequence, adaptation; no silent house fallback | P19 |
+| Partner positioning by stable layer id; mark geometry separate from mandatory identity | P19 |
+| Editor: box vs type, position, size, font size, line height, tracking, alignment, spacing, panel opacity, framing; groups, locks, undo, parity | P13, P20 |
+| Three layouts from the same photograph and copy, each with a why | P20 |
+| Reference recipes and influence; capability registry; compiled instructions per operation; fallbacks disclosed | P21 |
+| Validation at delivery size; cheapest repair; layout edits never render | P9, P18 |
+| P17 is described-area editing, not masking: labelled, measured, masks not exposed | P17, P21 registry |
+| Locks respected; protected areas compared; repair rounds bounded | P9, P17, P19 |
+| Brief suggestions with sources; Partner suggestions with changes, keeps, render and cost | P8, P6 |
+| Inspection: scores with reasons, verdict, round, composed vs imagery, version binding, stale | P22 |
+
+### Deferred, as the request asked
+
+- The execution, spending and client-access hardening workstream.
+- Interface restyling.
+
+### Unverified
+
+- **Real-model output.** No Claude or Gemini call was made from this sandbox for P19 to P22. The quality of the plans, layouts, inspections and reasons is unjudged.
+- **The rendered demonstration (items 1 to 7).** It needs:
+  - an explicitly approved budget;
+  - the worker deployed;
+  - `tools/studio-demo.py` / `tools/studio-showcase.py` run from the Mac.
+- **Pixel masks.** Not available from the image model this worker calls, so not exposed.
