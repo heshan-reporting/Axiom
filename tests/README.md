@@ -38,6 +38,9 @@ node --experimental-sqlite tests/studio-p22-worker.mjs    # inspection reasons, 
 node --experimental-sqlite tests/studio-brand-gaps-test.mjs # tools/studio-brand-gaps.py: the request for approved material, and reference analysis only within an approved call budget
 node --experimental-sqlite tests/studio-review-browser.mjs # docs/review.html and the Studio Client review view in Chromium through the worker module
 node --experimental-sqlite tests/studio-layout-browser.mjs  # the renderer's measurement, validation and repair in real Chromium (HOOF reconstruction, worker layouts in four formats, fonts, marks); writes tests/shot-layout-repair.png
+node --experimental-sqlite tests/studio-journey-browser.mjs # the workspace end to end in Chromium (providers MOCKED): create -> brief -> direction -> produce -> refine -> review -> export with the zip unpacked and every PNG sized; reload and resume; client switch; no imagery; adaptation into a story; provider outage and retry; a second edit during a slow save; the keyboard path (SHOT=1 writes tests/shots/journey-*.png)
+node --experimental-sqlite tests/studio-p23-worker.mjs    # adaptation into a format with a wider interface margin lands inside its safe area; same-margin adaptations keep their geometry
+node --experimental-sqlite tests/studio-shots.mjs before|after # screenshots of one seeded project at 1440, 1920 and 390 px into tests/shots/ (ignored by git)
 node --experimental-sqlite tests/studio-compose-test.mjs  # tools/studio-compose.mjs against the worker served locally: the composed tile drawn at native size and saved as the export
 node --experimental-sqlite tests/studio-showcase-test.mjs # tools/studio-showcase.py end to end with stub models: nothing without --approve-budget, the render cap, compose before inspect
 node --experimental-sqlite tests/content-worker.mjs       # Content Desk routes and the creative shelf
@@ -158,6 +161,7 @@ it at the end.
   proposals that write no rule; namespace walls; what the Studio used through a
   later hand edit.
 - `studio-layout-browser.mjs`: `docs/studio-render.js` in headless Chromium.
+- `studio-fixture.mjs`: the shared fixture for the workspace journeys - the worker module in-process, stub Claude and Gemini that can be switched to `down`, `slow` or `missing`, a real gradient PNG, a held-request hook to make a save "still in flight", and a zip reader for the export.
   The layout rules are byte-identical in the renderer and the worker; the app
   fonts (served from `FONT_DIR`, OFL) are waited for and the face used is
   reported, a late or missing face is a disclosed fallback; the HOOF

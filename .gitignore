@@ -12,3 +12,4 @@ demo/
 node_modules/
 package-lock.json
 requests/
+tests/shots/

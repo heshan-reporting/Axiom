@@ -745,3 +745,116 @@ All work is on `claude/peaceful-gates-g1t4ss`. Nothing in P19 to P22 is deployed
   - the worker deployed;
   - `tools/studio-demo.py` / `tools/studio-showcase.py` run from the Mac.
 - **Pixel masks.** Not available from the image model this worker calls, so not exposed.
+
+## 31. One workspace: the Studio as a production tool (build studio-p23)
+
+### Diagnosis (before)
+
+Inspected in Chromium at 1440 x 900, 1920 x 1080 and 390 x 844 on a seeded project (screenshots in
+`tests/shots/before-*.png`, written by `tests/studio-shots.mjs before`), and traced control by control:
+
+- **No single workflow.** Twelve views sat in one rail list (Brief, Sources, References, Directions, Board,
+  Copy deck, Sequence, Production, Brand, Client review, Client context, Jobs) beside the assets. The
+  five-step strip above the work was decorative: "review" and "export" both opened the asset view, and
+  export was a modal reached from the header.
+- **The artwork did not dominate.** At 1440 x 900 the canvas began below the fold; the Partner column was
+  always on, half its height spent on an inspection card that was not about the screen in view.
+- **Edits could be lost.** The asset view cleared its draft whenever the version changed, so a keystroke
+  typed while the previous save was in flight disappeared; two saves in quick succession raced for the
+  same revision and the second came back 409. The brief reset to the server copy on every revision
+  change (an extraction job proposing fields was enough to wipe unsaved edits), and a 409 on save said
+  only "changed".
+- **Client switching could show the wrong client.** The library and kit loads had no guard: a slow
+  answer for the previous client could land after the switch.
+- **Double clicks could spend twice.** Production, directions, concepts and retries used time-stamped
+  idempotency keys, so a double click made two jobs.
+- **Errors were toasts.** A missing key, an exhausted budget, a provider 503 and a brief gap all
+  appeared as a red toast that vanished; nothing said whether work was kept or what to do next.
+- **Nothing resumed.** A reload returned to the library; the project, the stage and the asset were gone.
+- **Choosing a second direction re-ran production** without saying it would spend.
+- **Adaptation clipped stories.** A 1:1 master adapted to 9:16 kept its per-cent geometry, so the CTA
+  and the mark landed under Instagram's story interface (bottom 20%) and the adaptation failed
+  validation (found by journey 5, fixed in the worker).
+
+### Design direction
+
+One frame, six stages, the work in the middle.
+
+- **Context bar** (sticky): client, All projects, the project, its campaign, the asset and version in
+  view; the save state ("Saving...", "All changes saved", "Not saved - retry"); live jobs; whether the
+  models are configured (one chip when both are, a red chip naming the missing one otherwise).
+- **Navigator** (sticky): Brief, Directions, Produce, Refine, Review, Export. Each step shows its state
+  worked out from the project (done, in progress, to do, running, skipped, blocked) and a short note
+  ("2 of 3 validated", "1 ready"). Every stage can be opened; a blocked one opens on its reason. Alt+1
+  to Alt+6 jump; focus moves to the stage heading.
+- **Stage heading**: the stage's purpose, its main action, the blocked reason, and the views inside it as
+  tabs (Brief: Brief, Sources, References; Produce: Board, Sequence, Recipes and usage, Jobs; Refine:
+  the asset, Copy deck).
+- **Left rail**: the assets as thumbnails drawn by the renderer, with approval state, validation flag
+  and a spinner while a job runs on one; below, Brand, Client context and Jobs.
+- **Workspace**: in Refine the artwork is sized to the visible height and takes the width it needs; the
+  validation strip sits under it with the free fixes; preservation, the family strip, art direction and
+  area edits follow.
+- **Inspector** (Refine): Copy (fields, locks, layout line, checks), Quality (technical validation,
+  the art director's scores, verdict and round, human approval kept apart, and the approve buttons),
+  Partner (the thread and composer), Versions (history, what the Studio used). Arrow keys move between
+  tabs. Elsewhere the inspector is the creative partner, and can be hidden.
+- **Review** is one table of every asset's version, validation, copy and design approval with the
+  approve buttons, followed by the client review links and comments. **Export** lists what goes in and
+  why the rest is left out, prepares the bundle, and lists every file with its pixels against the
+  version's stage size.
+- **Tokens**: `.st` defines one scale for space, type, radii, surfaces and states on top of the AXIOM
+  tokens; focus is a 2px accent ring; `prefers-reduced-motion` stops the spinners.
+- **Narrow screens**: one column; the navigator scrolls to the current stage; the assets become a
+  sideways strip; the inspector follows the work.
+
+### Wiring matrix (user action -> handler -> route or job -> engine -> saved result -> next state)
+
+| Action | Handler | Route / job | Engine | Saved | Next |
+|---|---|---|---|---|---|
+| Choose client | `switchClient` | `GET /studio/list`, `/studio/status`, `/brand/kit` (sequence-guarded) | - | `ax_studio_v1.client` | library of that client only |
+| Start (empty state / New project) | `Intake` -> `createProject` (guarded) | `POST /studio/project`, `/studio/source`, job `extract` | `stExtractStage` | project, source, ledger | Brief or Directions |
+| Edit brief, Save | `BriefView.save` -> `saveBrief` | `POST /studio/project/update` (revision) | `stBriefNorm` | `brief`; draft in `ax_studio_brief_<pid>` until saved | merged on 409 unless the same field changed (clash offered) |
+| Explore directions | `direct` (guarded) | job `direct` | `stDirectStage` | `studio_directions` | Directions |
+| Choose a direction | `chooseDirection` -> `produce` | `POST /studio/direction/choose`, job `copy` | `stCopyStage` (`inp.direction` or `chosen=1`) | assets, versions, render jobs | Refine on the first new asset; renders pumped |
+| Produce now / No imagery | `produce` (guarded) | job `copy` with `size` or `imagery:'none'` | `stCopyStage`, `stPlanNoImagery` | assets; no renders when none | Refine |
+| Type in a field | `AssetView.edit` -> `editAsset` -> `flushCopy` (one queue per asset) | `POST /studio/version` (latest revision) | `stVersionChecks` | text version | draft clears per field once the server holds it |
+| Measure | `AssetView.measure` -> `fileValidation` | `POST /studio/validation` | `stValidationJudge` | `studio_validations`, export PNG | strip and Quality tab |
+| Fix layout | `repairLayout` -> `putLayout` | `POST /studio/version` (layout) | `STRender.repair` (never the words) | layout version | measured again |
+| Edit layout | `LayoutEditor` -> `saveLayout` -> `putLayout` | `POST /studio/version` | - | layout version; on 409 re-sent only if the layout did not change elsewhere | - |
+| Direct the partner | `directTeam` (guarded) | job `revise` | `stReviseStage` | versions / new assets (adapt) / proposal | adapted asset opened |
+| Explore / refine / new design | `propose` (guarded per asset) | job `concepts` | `stConceptsStage` | `concepts` event | cards |
+| Apply a card | `applyConcept` (guarded) | `POST /studio/concept/apply` | `stConceptApply`, `stPlanRenders` | layout version, render jobs | pumped |
+| Approve / reject | `approve` -> `ReasonDialog` -> `recordDecision` | `POST /studio/approve` | `stStanding` signature | approval of the exact version | Review table, navigator |
+| Share for review | `ReviewView.create` | `POST /studio/share` | token hash | `studio_shares` | link shown once |
+| Prepare bundle | `doExport` (guarded) | `POST /studio/render/save` per PNG, job `export` | `STRender.toBlob` after fonts and images load | export manifest on the project | download; files listed with pixels |
+| Retry a failed job | `retryJob` (guarded; idem `retry:<job>:<n>`) | `POST /studio/job` | the stage | new job | notice "ran on retry" |
+| Cancel | `cancelJob` | `POST /studio/job/cancel` | lease | cancelled | notice: an in-flight provider call may still finish and be billed |
+| Reload | `loadLib` -> `openProject(place)` | `/studio/get` | - | `ax_studio_v1.byClient[ns]` | same stage and asset; "Resumed" notice |
+
+### States
+
+First use (library explains a project and offers three starts); missing brief details (the check panel
+before anything is spent; mandatory gaps block Produce unless acknowledged); missing marks (incomplete
+chip, design approval and export wait); loading (busy line under the navigator naming the job, which
+continues if the tab closes); queued and running (rail spinner, job chips with attempt n of 3 and
+cancel); success (save state, navigator ticks); partial failure (the set is kept; the failed job is a
+chip with Retry and a notice with the reason and Retry); timeout and provider down (explained as
+"busy or timed out", work kept); missing credentials (context bar chip, disabled actions with the
+reason, and a notice that says nothing was spent); unsaved changes (Unsaved changes in the stage head,
+Saving... in the context bar, a beforeunload warning); save failure ("Not saved - retry"); restored
+session (resume notice; restored brief edits offered to Save or Discard); conflicts (brief: merged or
+the clash shown; copy: Keep mine / Take theirs; layout: Apply mine on top); cancelled or superseded work
+(the cancel note; inspections of an earlier version marked).
+
+### Evidence (all MOCKED providers; no live model was called)
+
+- `tests/studio-journey-browser.mjs`: 8 of 8 - the eight journeys of the request, including the zip
+  unpacked and each PNG's pixels checked against its version's stage (1080 x 1080, 1080 x 1350).
+- `tests/studio-p23-worker.mjs`: 2 of 2 - adaptation into a story stays inside its safe area.
+- Existing: `studio-browser.mjs` 26 of 26 (updated to the new navigation; one intermittent run of
+  seven failed three art-direction cases and did not reproduce), `studio-review-browser.mjs` 5,
+  `studio-layout-browser.mjs` 74, every Studio worker harness (P1-P22), compose, showcase, demo and
+  brand-gaps tests, and the overview and scope browser harnesses.
+- Not proven: live model output, live latency, real fonts on the production page (the harness has no
+  webfonts and reports fallback fonts), Safari and Firefox, a screen reader pass.

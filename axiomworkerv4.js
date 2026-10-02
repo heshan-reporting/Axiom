@@ -6709,7 +6709,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-01.studio-p22a';
+const AXIOM_BUILD = '2026-10-02.studio-p23';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8738,7 +8738,10 @@ function stLayoutToPlan(L, v) {
 }
 /** The images already made for a layout's regions, by region id, so re-composition keeps them. */
 function stRegionSrc(L) { const out = {}; ((L && L.layers) || []).forEach(l => { if (l.type === 'img' && l.region && l.src) out[l.region] = { src: l.src, key: l.key, opaque: l.opaque }; }); return out; }
-/** A plan moved to another format: per-cent geometry stays, type keeps its pixel size relative to the stage's short side. */
+/** A plan moved to another format: per-cent geometry stays, type keeps its pixel size relative to the stage's short side.
+ *  When the target keeps a wider interface margin (a 9:16 story: the top 14% and the bottom 20% are the platform's), the
+ *  master's words, panels and devices are mapped into the target's safe area in proportion, so nothing lands under the
+ *  interface; full-bleed grounds and overlays stay full-bleed, and the mark keeps its corner, placed inside the area. */
 function stPlanForFormat(plan, from, to) {
   const A = ST_FORMATS[from] || ST_FORMATS['1:1'], B = ST_FORMATS[to] || ST_FORMATS['1:1'];
   if (from === to) return plan;
@@ -8747,6 +8750,20 @@ function stPlanForFormat(plan, from, to) {
   const scale = els => (els || []).forEach(e => { if (e && e.type === 'text' && e.size) e.size = Math.round(Math.max(1.6, e.size * k) * 10) / 10; });
   scale(out.elements); (out.frames || []).forEach(f => f && scale(f.elements));
   if (out.markPlace && out.markPlace.w) out.markPlace.w = Math.round(Math.max(8, out.markPlace.w * k) * 10) / 10;
+  const sa = stSafeInset(from), sb = stSafeInset(to);
+  if (sb.top > sa.top || sb.bottom > sa.bottom || sb.side > sa.side) {
+    const r1 = n => Math.round(n * 10) / 10;
+    const ky = (100 - sb.top - sb.bottom) / 100, kx = (100 - 2 * sb.side) / 100;
+    const fit = els => (els || []).forEach(e => {
+      if (!e || typeof e !== 'object' || [e.x, e.y, e.w, e.h].some(n => typeof n !== 'number')) return;
+      if (e.w >= 90 && e.h >= 90) return;   // a ground or an overlay: it bleeds as it did
+      e.y = r1(sb.top + e.y * ky); e.h = r1(e.h * ky);
+      if (e.type === 'text' || e.w < 90) { e.x = r1(sb.side + e.x * kx); e.w = r1(e.w * kx); }
+    });
+    fit(out.elements); (out.frames || []).forEach(f => f && fit(f.elements));
+    if (out.markPlace && typeof out.markPlace.x === 'number' && typeof out.markPlace.y === 'number' && !out.markPlace.corner) out.markPlace = { corner: (out.markPlace.y > 50 ? 'b' : 't') + (out.markPlace.x > 50 ? 'r' : 'l'), w: out.markPlace.w };
+    out.fittedTo = to + ' safe area';
+  }
   return out;
 }
 /** Words split across layers (role + part) must reproduce the copy exactly; otherwise the split is undone, never rewritten. */

@@ -36,6 +36,76 @@
   const vnum = (a, v) => (a && v ? a.versions.findIndex(x => x.id === v.id) + 1 : 0);
   const chanLabel = c => (CHANNELS[c] || { label: c || '-' }).label;
   const isClear = t => /^(adapt|write|make|produce|resize|shorten|draft|three|two|one|give me|turn|create)\b/i.test(String(t || '').trim());
+  const FORMAT_RATIO = { '1:1': 1, '4:5': 0.8, '9:16': 0.5625, '16:9': 1.7778 };
+
+  /* ------------------------------------------------------------ what went wrong, in words a producer can act on */
+  /** An error from the worker or a failed job, explained: a title, what it means for the work, what to do. The raw
+      message stays available as the diagnostic detail; nothing here pretends a failure was a success. */
+  function explain(e, what) {
+    const code = String((e && e.code) || ''); const msg = String((e && (e.message || e.error)) || e || '');
+    const has = re => re.test(code) || re.test(msg); const status = e && e.status;
+    const out = (title, text, kind) => ({ title, text, kind: kind || 'error', detail: msg && msg !== title ? msg : '' });
+    if (has(/claude_not_configured/)) return out('Claude is not configured on the worker', 'Nothing that writes, plans or inspects can run until an administrator sets ANTHROPIC_API_KEY on the worker. Nothing was spent and your work is unchanged.', 'provider');
+    if (has(/gemini_not_configured|GEMINI_KEY/)) return out('Image generation is not configured on the worker', 'No image can be made until an administrator sets GEMINI_KEY. Compositions, copy and layout work without it; choose "No imagery" to produce a complete typographic set.', 'provider');
+    if (has(/budget_exhausted/)) return out('Today\'s Studio budget is used up', 'The worker allows a set number of model calls a day (STUDIO_DAILY_CALLS). It resets at midnight Sydney time, or an administrator can raise it. Nothing more was spent.', 'provider');
+    if (has(/account_limit|credit balance|spend limit|usage limit|billing/i)) return out('The provider account has hit its spend limit', 'The Anthropic or Google account behind the worker refused the call. An administrator needs to raise the limit; retrying will not help until then.', 'provider');
+    if (has(/brief_incomplete/)) return out('The brief is missing something mandatory', msg.replace(/^brief_incomplete:\s*/, '').replace(/\s*\(not retried\)\s*$/, '') + ' Resolve it in the Brief, or tick "Proceed on the stated assumptions".', 'warn');
+    if (has(/answer_truncated|unparseable/)) return out('The model\'s answer could not be read', 'Nothing was saved from it; your work is as it was. Retry: it is a new call and may be billed.');
+    if (has(/refus/i)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
+    if (has(/gemini_5\d\d|gemini_429|overloaded|\b529\b|\b503\b|rate[ _-]?limit|too many requests|\b429\b|TimeoutError|AbortError|timed out|timeout/i)) return out('The provider is busy or timed out', 'Your work is kept. Retry when ready; a retry is a new attempt and may be billed.', 'provider');
+    if (status === 409 && /conflict/.test(code)) return out('This changed elsewhere since you read it', 'Someone, or a job, saved a newer version first. Nothing was overwritten; the latest version is now shown.', 'warn');
+    if (status === 409 && /locked/.test(code)) return out('That element is locked', 'Unlock it first (the lock beside the field), then make the change.', 'warn');
+    if (status === 409 && /stale/.test(code)) return out('That suggestion was made for an earlier version', 'The asset has moved on since. Ask again on the current version.', 'warn');
+    if (status === 401) return out('The access key was not accepted', 'Set a valid key in Settings, Access key. Nothing was changed.');
+    if (status === 403) return out('This key can read but not change', 'A full-access key is needed to make changes. Nothing was changed.');
+    if (has(/Failed to fetch|NetworkError|network|Load failed/i)) return out('Cannot reach the worker', 'Check the connection. Nothing you typed was lost; try again when the connection is back.');
+    return out(what || 'That did not work', msg);
+  }
+  const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent; a provider call already in flight may still finish and be billed.';
+
+  /* ------------------------------------------------------------ where the team left off: this browser only, never shared */
+  const STORE = 'ax_studio_v1';
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { return {}; } },
+    set(patch) { try { localStorage.setItem(STORE, JSON.stringify(Object.assign(store.get(), patch))); } catch (e) {} },
+    place(ns) { return (store.get().byClient || {})[ns] || null; },
+    setPlace(ns, place) { const s = store.get(); const by = Object.assign({}, s.byClient || {}); if (place) by[ns] = place; else delete by[ns]; store.set({ byClient: by }); },
+    draft(pid) { try { return JSON.parse(localStorage.getItem('ax_studio_brief_' + pid) || 'null'); } catch (e) { return null; } },
+    setDraft(pid, d) { try { if (d) localStorage.setItem('ax_studio_brief_' + pid, JSON.stringify(d)); else localStorage.removeItem('ax_studio_brief_' + pid); } catch (e) {} },
+  };
+
+  /* ------------------------------------------------------------ the workflow: six stages, each with its views, its state worked out from the project */
+  const STAGES = [
+    { id: 'brief', label: 'Brief', views: ['brief', 'sources', 'references'], purpose: 'Say what the work must do, for whom, on which channels, and what it may claim.' },
+    { id: 'directions', label: 'Directions', views: ['directions'], purpose: 'Compare different ideas for the brief and choose the one production follows.' },
+    { id: 'produce', label: 'Produce', views: ['board', 'sequence', 'production', 'jobs'], purpose: 'Make the set from the chosen direction or the brief: copy per channel, laid out as editable compositions.' },
+    { id: 'refine', label: 'Refine', views: ['asset', 'copy'], purpose: 'Edit the words, the layout and the imagery of each asset until it passes validation.' },
+    { id: 'review', label: 'Review', views: ['review'], purpose: 'Approve copy and design for each exact version, then share it with the client.' },
+    { id: 'export', label: 'Export', views: ['export'], purpose: 'Download exactly the approved, validated versions at their native size.' },
+  ];
+  const stageOfView = v => (STAGES.find(s => s.views.indexOf(v) >= 0) || { id: '' }).id;
+  const validOf = a => { const v = current(a); return !!v && (v.mode === 'copy' || v.mode === 'generated' || (a.readiness || {}).technical === 'passed'); };
+  const approvedOf = a => !!(standing(a, 'copy') && (standing(a, 'design') || (current(a) || {}).mode === 'copy'));
+  /** Where the project stands, stage by stage: done, current, to do, running, skipped or blocked (with the reason). */
+  function flowOf(p) {
+    const A = p.assets || [], n = A.length, b = p.brief || {}, jobs = p.jobs || [];
+    const live = j => j.state === 'queued' || j.state === 'running';
+    const chosen = p.directions.find(d => d.chosen);
+    const rendersLive = jobs.filter(j => (j.stage === 'render' || j.stage === 'inspect') && live(j)).length;
+    const producing = jobs.some(j => (j.stage === 'copy' || j.stage === 'sequence') && live(j));
+    const valid = A.filter(validOf).length, approved = A.filter(approvedOf).length, ready = A.filter(a => approvedOf(a) && validOf(a)).length;
+    const channels = (b.channels || []).length;
+    const exported = p.thread.some(e => e.kind === 'export');
+    return {
+      counts: { n, valid, approved, ready, rendersLive },
+      brief: { state: n || p.directions.length || (b.objective && b.message) ? 'done' : 'current', note: channels ? channels + ' channel' + (channels === 1 ? '' : 's') : 'no channels yet' },
+      directions: { state: chosen ? 'done' : n && !p.directions.length ? 'skipped' : p.directions.length ? 'current' : 'todo', note: chosen ? chosen.title : n && !p.directions.length ? 'not needed' : p.directions.length ? p.directions.length + ' to choose from' : 'optional' },
+      produce: { state: producing ? 'running' : !n ? (channels ? 'todo' : 'blocked') : rendersLive ? 'running' : 'done', blocked: 'Choose at least one channel in the brief first.', note: producing ? 'writing' : n ? n + ' asset' + (n === 1 ? '' : 's') + (rendersLive ? ', ' + rendersLive + ' job' + (rendersLive === 1 ? '' : 's') + ' running' : '') : '' },
+      refine: { state: !n ? 'blocked' : valid === n ? 'done' : 'todo', blocked: 'Nothing has been produced yet.', note: n ? valid + ' of ' + n + ' validated' : '' },
+      review: { state: !n ? 'blocked' : approved === n ? 'done' : approved || A.some(a => standing(a, 'copy') || standing(a, 'design')) ? 'current' : 'todo', blocked: 'Nothing has been produced yet.', note: n ? approved + ' of ' + n + ' approved' : '' },
+      export: { state: exported && ready ? 'done' : ready ? 'todo' : 'blocked', blocked: n ? 'No asset has both approvals and a passing validation yet.' : 'Nothing has been produced yet.', note: ready ? ready + ' ready' : '' },
+    };
+  }
 
   /* ------------------------------------------------------------ images behind the key */
   /* images behind the key: cached by URL (mark URLs carry the file's version, so a replaced logo or wordmark is a new URL);
@@ -89,30 +159,68 @@
     const ref = useRef(null); const comp = useComposition(v, ns, layout, c); const imgs = comp.imgs;
     useEffect(() => {
       const el = ref.current; if (!el) return;
-      if (layout) { const w = size === 'thumb' ? 192 : size === 'card' ? 480 : Math.min(1080, Math.max(320, Math.round((el.parentElement ? el.parentElement.clientWidth : 520) * 2))); R.render(layout, c, imgs, w, el); }
+      if (layout) { const w = size === 'mini' ? 96 : size === 'thumb' ? 192 : size === 'card' ? 480 : Math.min(1080, Math.max(320, Math.round((el.parentElement ? el.parentElement.clientWidth : 520) * 2))); R.render(layout, c, imgs, w, el); }
       else if (imgs.bg) { el.width = imgs.bg.naturalWidth; el.height = imgs.bg.naturalHeight; el.getContext('2d').drawImage(imgs.bg, 0, 0); }
     }, [layout, JSON.stringify(c), comp.key, size]);
-    if (!layout && !(v && v.image)) return html`<div class=${'st-copycard' + (size === 'thumb' ? ' thumb' : '')}><div class="st-copycard-h">${c.headline || c.title || '(no headline)'}</div>${size !== 'thumb' ? html`<div class="st-copycard-b">${c.caption || c.body || ''}</div>` : null}<div class="st-comp-tag">copy only</div></div>`;
-    return html`<div class=${'st-comp' + (size === 'thumb' ? ' thumb' : '')} role="img" aria-label=${c.alt || c.headline || ''}>
+    if (!layout && !(v && v.image) && size === 'mini') return html`<div class="st-copycard thumb mini" aria-hidden="true"></div>`;
+    if (!layout && !(v && v.image)) return html`<div class=${'st-copycard' + (size === 'thumb' ? ' thumb' : '')}><div class="st-copycard-h">${c.headline || c.title || '(no headline)'}</div>${size !== 'thumb' && size !== 'mini' ? html`<div class="st-copycard-b">${c.caption || c.body || ''}</div>` : null}<div class="st-comp-tag">copy only</div></div>`;
+    return html`<div class=${'st-comp' + (size === 'thumb' || size === 'mini' ? ' thumb' : '') + (size === 'mini' ? ' mini' : '')} role="img" aria-label=${c.alt || c.headline || ''}>
       <canvas class="st-canvas" ref=${ref}></canvas>
-      ${size !== 'thumb' && size !== 'card' ? html`<div class="st-comp-tag">${v.mode === 'artwork' ? 'full artwork, words in the bitmap' + (layout && layout.layers.some(l => l.role === 'logo' || l.role === 'wordmark') ? ', mark live' : '') : layout ? (layout.v === 5 ? (v.image || (layout.regions || []).every(r => /keep the current/i.test(r.prompt || '')) ? 'editable composition, ' : 'sketch (imagery not generated yet), ') + (layout.mediumName || 'plan') : 'editable composition, ' + (layout.templateName || layout.template)) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') + (v.image.fallback ? ' (fallback from ' + (v.image.requested || 'the requested model') + ')' : '') + ((v.context || {}).size && v.image.size && v.context.size !== v.image.size ? ', asked ' + v.context.size : '') : layout ? ' - no imagery yet' : ''}${layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : ''}${comp.failed.length ? ' - ' + comp.failed.length + ' image' + (comp.failed.length === 1 ? '' : 's') + ' failed to load' : ''}${comp.fonts && comp.fonts.fallback.length ? ' - fallback fonts' : ''}</div>` : null}
+      ${size !== 'thumb' && size !== 'card' && size !== 'mini' ? html`<div class="st-comp-tag">${v.mode === 'artwork' ? 'full artwork, words in the bitmap' + (layout && layout.layers.some(l => l.role === 'logo' || l.role === 'wordmark') ? ', mark live' : '') : layout ? (layout.v === 5 ? (v.image || (layout.regions || []).every(r => /keep the current/i.test(r.prompt || '')) ? 'editable composition, ' : 'sketch (imagery not generated yet), ') + (layout.mediumName || 'plan') : 'editable composition, ' + (layout.templateName || layout.template)) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image'}${v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') + (v.image.fallback ? ' (fallback from ' + (v.image.requested || 'the requested model') + ')' : '') + ((v.context || {}).size && v.image.size && v.context.size !== v.image.size ? ', asked ' + v.context.size : '') : layout ? ((v.context || {}).imagery === 'none' ? ' - no imagery, by choice' : ' - no imagery yet') : ''}${layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : ''}${comp.failed.length ? ' - ' + comp.failed.length + ' image' + (comp.failed.length === 1 ? '' : 's') + ' failed to load' : ''}${comp.fonts && comp.fonts.fallback.length ? ' - fallback fonts' : ''}</div>` : null}
+    </div>`;
+  }
+
+  /* ------------------------------------------------------------ the frame: navigator, stage heading, notices */
+  const FLOW_WORD = { done: 'done', current: 'in progress', todo: 'to do', running: 'running', skipped: 'skipped', blocked: 'blocked' };
+  /** The workflow navigator: every stage reachable (a blocked one opens on its explanation), its state and a short note. */
+  function Flow({ flow, at, onGo }) {
+    const ref = useRef(null);
+    useEffect(() => { const el = ref.current && ref.current.querySelector('.st-step.on'); if (el && el.scrollIntoView && ref.current.scrollWidth > ref.current.clientWidth) { try { el.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (e) {} } }, [at]);
+    return html`<nav class="st-steps st-flow" aria-label="Workflow" ref=${ref}>${STAGES.map((s, i) => { const f = flow[s.id] || {}; const on = at === s.id;
+      return html`<button key=${s.id} class=${'st-step ' + (f.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} title=${f.state === 'blocked' ? 'Blocked: ' + f.blocked : f.state === 'skipped' ? 'Skipped: a clear instruction needs no direction step' : s.purpose} onClick=${() => onGo(s.id)}>
+        <span class="st-step-n" aria-hidden="true">${f.state === 'done' ? '✓' : f.state === 'skipped' ? '–' : i + 1}</span><span class="st-step-l">${s.label}</span><span class="st-step-note">${f.state === 'blocked' ? 'blocked' : f.note || FLOW_WORD[f.state] || ''}</span><span class="st-vh">, ${FLOW_WORD[f.state] || ''}</span></button>`; })}</nav>`;
+  }
+  /** The head of every stage: what it is for, when it is done (or why it is blocked), its main action and the views inside it. */
+  function StageHead({ id, title, purpose, flow, children, tabs, tab, onTab, focusRef, compact }) {
+    const f = (flow && flow[id]) || {};
+    if (compact) return html`<div class="st-stagehead compact"><div class="st-stagehead-row"><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef} title=${purpose}>${title}</h2>
+      ${tabs ? html`<div class="st-subnav" role="tablist" aria-label=${title + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null}
+      <span class="st-stage-purpose st-purpose-inline">${purpose}</span><div class="st-stagehead-acts">${children}</div></div></div>`;
+    return html`<div class="st-stagehead">
+      <div class="st-stagehead-row"><div class="st-stagehead-main"><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef}>${title}</h2><span class="st-stage-purpose">${purpose}</span></div>
+        <div class="st-stagehead-acts">${children}</div></div>
+      ${f.state === 'blocked' ? html`<div class="st-blocked" role="status"><${Chip} kind="warn">blocked</${Chip}> ${f.blocked}</div>` : null}
+      ${tabs ? html`<div class="st-subnav" role="tablist" aria-label=${title + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null}
+    </div>`;
+  }
+  /** One notice at a time under the navigator: an error explained, a conflict, a restored session. Its actions are real. */
+  function Notice({ n, onClose }) {
+    if (!n) return null;
+    return html`<div class=${'st-notice ' + (n.kind || 'error')} role=${n.kind === 'info' ? 'status' : 'alert'}>
+      <div class="st-notice-body"><b>${n.title}</b> <span>${n.text}</span>
+        ${n.detail ? html`<details class="st-notice-detail"><summary>Details</summary><code>${n.detail}</code></details>` : null}</div>
+      <div class="st-notice-acts">${(n.actions || []).map((x, i) => html`<button key=${i} class=${'btn sm' + (i ? ' ghost' : '')} onClick=${() => { onClose(); x.fn(); }}>${x.label}</button>`)}<button class="btn sm ghost" onClick=${onClose} aria-label="Dismiss this notice">Dismiss</button></div>
     </div>`;
   }
 
   /* ------------------------------------------------------------ library and intake */
-  function Library({ client, data, onOpen, onNew, onImport, err }) {
-    if (err) return html`<div class="st-lib"><div class="ov-empty">The Studio backend did not answer: ${err}. ${/not_found|404/.test(err) ? 'The worker does not have the Studio routes yet: redeploy it.' : ''}</div></div>`;
-    if (!data) return html`<div class="st-lib"><div class="ov-empty">Loading projects for ${client.name}...</div></div>`;
+  const NEXT_WORD = { brief: 'finish the brief', directions: 'choose a direction', production: 'refine and validate', review: 'approve and share', approved: 'export', exported: 'exported' };
+  function Library({ client, data, onOpen, onNew, onStart, onImport, err, resume }) {
+    if (err) return html`<div class="st-lib"><div class="st-empty-state"><b>The Studio backend did not answer.</b> <span>${err}</span> ${/not_found|404/.test(err) ? html`<span>The worker does not have the Studio routes yet: it needs redeploying.</span>` : html`<span>Check the connection and the worker address in Settings.</span>`}</div></div>`;
+    if (!data) return html`<div class="st-lib" aria-busy="true"><div class="ov-empty">Loading projects for ${client.name}...</div></div>`;
     const mine = data.projects || [], legacy = data.legacy || [];
+    const last = resume ? mine.find(p => p.id === resume.pid) : null;
     return html`<div class="st-lib">
-      <div class="st-lib-head"><span class="ov-title">Projects for ${client.name}</span><span class="ov-why">${mine.length} project${mine.length === 1 ? '' : 's'}, ${legacy.length} legacy item${legacy.length === 1 ? '' : 's'}</span>${canWrite() ? html`<button class="btn sm" onClick=${onNew}>New project</button>` : null}</div>
-      ${data.status ? html`<div class="ov-dim st-foot">Backend build <b>${data.status.build}</b>, ${data.status.projects} project${data.status.projects === 1 ? '' : 's'} across clients; model calls today ${data.status.budget ? data.status.budget.used + ' of ' + data.status.budget.cap : '-'}; ${data.status.keys.claude ? 'Claude' : 'no Claude key'}, ${data.status.keys.gemini ? 'Gemini' : 'no Gemini key'}.</div>` : null}
-      ${!mine.length && !legacy.length ? html`<div class="ov-empty">Nothing yet for this client. Start from a release, a brief or existing artwork.</div>` : null}
-      <table class="ov-table"><thead><tr><th>Project</th><th>Campaign</th><th>Status</th><th>Owner</th><th>Last activity</th><th></th></tr></thead><tbody>
-        ${mine.map(p => html`<tr key=${p.id}><td><b>${p.title}</b><div class="ov-dim">${p.assets} asset${p.assets === 1 ? '' : 's'}, ${p.sources} source${p.sources === 1 ? '' : 's'}${p.legacy ? ', imported from ' + p.legacy.id : ''}</div></td><td>${p.campaign || '-'}</td><td><span class=${'st-status ' + p.status}>${p.status}</span></td><td>${p.owner}</td><td class="ov-dim">${ago(p.updated)} ago</td><td class="ov-go"><button class="ov-link" onClick=${() => onOpen(p.id)}>open</button></td></tr>`)}
+      <div class="st-lib-head"><h2 class="st-stage-title">Projects for ${client.name}</h2><span class="ov-why">${mine.length} project${mine.length === 1 ? '' : 's'}${legacy.length ? ', ' + legacy.length + ' legacy item' + (legacy.length === 1 ? '' : 's') : ''}</span>${canWrite() ? html`<button class="btn sm" onClick=${onNew}>New project</button>` : null}</div>
+      ${last ? html`<div class="st-resume" aria-label="Continue where you left off"><div><span class="st-lbl">Continue where you left off</span><div><b>${last.title}</b> <span class="ov-dim">${last.campaign || 'no campaign'}, ${last.assets} asset${last.assets === 1 ? '' : 's'}, last activity ${ago(last.updated)} ago; next: ${NEXT_WORD[last.status] || last.status}</span></div></div><button class="btn sm" onClick=${() => onOpen(last.id)}>Continue</button></div>` : null}
+      ${!mine.length && !legacy.length ? html`<div class="st-empty-state st-first"><b>No projects yet for ${client.name}.</b><span>A project holds one piece of work from brief to export: its sources, directions, every version of every asset, the approvals and the exports. Start from what you have:</span>
+        ${canWrite() ? html`<div class="st-first-acts">${[['release', 'A media release', 'paste it; claims and figures are read first'], ['brief', 'A brief or one line', 'a clear instruction goes straight to production'], ['reference', 'Existing creative', 'adapt or build on artwork you already have']].map(([k, l, t]) => html`<button key=${k} class="st-first-btn" onClick=${() => onStart(k)}><b>${l}</b><span>${t}</span></button>`)}</div>` : html`<span class="ov-dim">This key can read only; a full key is needed to start a project.</span>`}</div>` : null}
+      ${mine.length || legacy.length ? html`<table class="ov-table"><thead><tr><th>Project</th><th>Campaign</th><th>Stage</th><th>Owner</th><th>Last activity</th><th></th></tr></thead><tbody>
+        ${mine.map(p => html`<tr key=${p.id}><td><button class="st-lib-open" onClick=${() => onOpen(p.id)}>${p.title}</button><div class="ov-dim">${p.assets} asset${p.assets === 1 ? '' : 's'}, ${p.sources} source${p.sources === 1 ? '' : 's'}${p.legacy ? ', imported from ' + p.legacy.id : ''}</div></td><td>${p.campaign || '-'}</td><td><span class=${'st-status ' + p.status}>${p.status}</span><div class="ov-dim">next: ${NEXT_WORD[p.status] || '-'}</div></td><td>${p.owner}</td><td class="ov-dim">${ago(p.updated)} ago</td><td class="ov-go"><button class="ov-link" onClick=${() => onOpen(p.id)} aria-label=${'Open ' + p.title}>open</button></td></tr>`)}
         ${legacy.map(l => html`<tr key=${l.id} class="st-legacy"><td><b>${l.title}</b><div class="ov-dim">legacy ${l.kind === 'legacy_release' ? 'release pack' : 'content set'}, read-only; ${l.assets} ${l.kind === 'legacy_release' ? 'flattened tiles' : 'pieces'}${l.imported ? '; imported' : ''}</div></td><td>${l.campaign || '-'}</td><td><span class="st-status legacy">${l.status}</span></td><td>${l.owner || '-'}</td><td class="ov-dim">${ago(l.updated)} ago</td><td class="ov-go">${l.imported ? html`<button class="ov-link" onClick=${() => onOpen(l.imported)}>open import</button>` : html`<button class="ov-link" onClick=${() => onOpen(l.id)}>view</button>`}${canWrite() && !l.imported ? html` <button class="ov-link" onClick=${() => onImport(l)}>import to Studio</button>` : null}</td></tr>`)}
-      </tbody></table>
-      <div class="ov-dim st-foot">Legacy items open read-only. Importing copies one into a Studio project under this client, keeps the original untouched, and is idempotent.</div>
+      </tbody></table>` : null}
+      ${legacy.length ? html`<div class="ov-dim st-foot">Legacy items open read-only. Importing copies one into a Studio project under this client, keeps the original untouched, and is idempotent.</div>` : null}
+      ${data.status ? html`<details class="st-diag"><summary>Diagnostics</summary><div class="ov-dim">Backend build <b>${data.status.build}</b>, ${data.status.projects} project${data.status.projects === 1 ? '' : 's'} across clients; model calls today ${data.status.budget ? data.status.budget.used + ' of ' + data.status.budget.cap : '-'}; ${data.status.keys.claude ? 'Claude' : 'no Claude key'}, ${data.status.keys.gemini ? 'Gemini' : 'no Gemini key'}.</div></details>` : null}
       <${MetricsPanel} client=${client} />
     </div>`;
   }
@@ -188,17 +296,26 @@
   }
 
   /* ------------------------------------------------------------ rail and centre views */
-  function Rail({ p, view, setView, sel, setSel }) {
+  /** The left rail: the assets (what Refine works on) with their state, then the project's tools. */
+  const ASSET_WORD = { approved: 'approved', partly: 'partly approved', revised: 'revised, not approved', draft: 'draft' };
+  function Rail({ p, view, setView, sel, setSel, toolsOpen, setToolsOpen }) {
     const fams = useMemo(() => { const m = {}; (p.assets || []).forEach(a => { (m[a.family] = m[a.family] || []).push(a); }); return m; }, [p.assets]);
     const stat = a => { const c = standing(a, 'copy'), d = standing(a, 'design'); const cur = current(a); return c && (d || (cur && cur.mode === 'copy')) ? 'approved' : c || d ? 'partly' : a.versions.length > 1 ? 'revised' : 'draft'; };
+    const tech = a => { const v = current(a); if (!v || v.mode === 'copy' || v.mode === 'generated') return ''; const t = (a.readiness || {}).technical; return t === 'passed' ? '' : t === 'failed' ? 'failing validation' : 'not validated'; };
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
-    return html`<nav class="st-rail" aria-label="Project">
-      <${Lbl}>Project</${Lbl}>
-      ${[['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length], ['directions', 'Directions', p.directions.length], ['board', 'Board', p.assets.length || null], ['copy', 'Copy deck'], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['production', 'Production'], ['brand', 'Brand'], ['review', 'Client review'], ['context', 'Client context'], ['jobs', 'Jobs', live || null]].map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}
-      <${Lbl}>Assets</${Lbl}>
-      ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam"><div class="st-famname">${f}</div>${fams[f].map(a => html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} onClick=${() => { setSel(a.id); setView('asset'); }}>
-        <span>${a.title}<span class="ov-dim"> ${a.format}</span></span><span class=${'st-dot ' + stat(a)} title=${stat(a)}></span><span class="ov-dim">v${a.versions.length}</span></button>`)}</div>`)}
+    const failed = (p.jobs || []).filter(j => j.state === 'failed').length;
+    const busyOn = id => (p.jobs || []).some(j => j.asset === id && (j.state === 'queued' || j.state === 'running'));
+    const tools = [['brand', 'Brand'], ['context', 'Client context'], ['jobs', 'Jobs', live || (failed ? failed + ' failed' : null)]];
+    return html`<nav class="st-rail" aria-label="Assets and project tools">
+      <div class="st-rail-sec"><${Lbl}>Assets ${p.assets.length ? '(' + p.assets.length + ')' : ''}</${Lbl}>
+      ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam" role="group" aria-label=${f}><div class="st-famname">${f}</div>${fams[f].map(a => { const t = tech(a); const s0 = stat(a); return html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} aria-current=${view === 'asset' && sel === a.id ? 'true' : undefined} onClick=${() => { setSel(a.id); setView('asset'); }} title=${a.title + ': ' + ASSET_WORD[s0] + (t ? ', ' + t : '')}>
+        <${Composition} v=${current(a)} a=${a} ns=${p.ns} size="mini" />
+        <span class="st-asset-name">${a.title}<span class="ov-dim"> ${a.format}</span>${t ? html`<span class="st-asset-flag">${t}</span>` : null}</span><span class="st-asset-meta">${busyOn(a.id) ? html`<span class="st-spin" aria-label="a job is running on this asset"></span>` : null}<span class=${'st-dot ' + s0} aria-label=${ASSET_WORD[s0]}></span><span class="ov-dim">v${a.versions.length}</span></span></button>`; })}</div>`)}
       ${!p.assets.length ? html`<div class="ov-dim st-pad">No assets yet. ${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Production starts from the brief.'}</div>` : null}
+      </div>
+      <div class="st-rail-sec st-tools"><button class="st-tools-toggle" aria-expanded=${!!toolsOpen} onClick=${() => setToolsOpen(!toolsOpen)}><span class="st-lbl">Client and jobs</span><span aria-hidden="true">${toolsOpen ? '−' : '+'}</span></button>
+        ${toolsOpen ? tools.map(([k, l, n]) => html`<button key=${k} class=${'st-railbtn' + (view === k ? ' on' : '')} aria-current=${view === k ? 'true' : undefined} onClick=${() => setView(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`) : null}
+      </div>
     </nav>`;
   }
   const SRC_WORD = { approved: 'approved', preference: 'preference', previous: 'previous brief', reference: 'reference', team: 'team', ai: 'AI suggestion' };
@@ -213,35 +330,60 @@
       ${!disabled && list.length ? html`<div class="st-combo-list" role="listbox" aria-label=${'Suggestions for ' + id}>${list.map((it, i) => html`<button key=${i} class="st-combo-opt" role="option" title=${it.from || ''} onClick=${() => { onChange(it.text, it.source, it); setOpen(false); }}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}</button>`)}${(items || []).length > list.length && !open ? html`<button class="ov-link" onClick=${() => setOpen(true)}>more (${items.length})</button>` : null}</div>` : null}
     </div>`;
   }
-  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, onStrategy, busy }) {
-    const [b, setB] = useState(p.brief || {});
-    useEffect(() => { setB(p.brief || {}); }, [p.id, p.revision]);
+  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, onStrategy, busy, head, prov, onGo }) {
+    // the working copy: the brief as the server last held it (base) and the team's edits on top; edits survive a reload in
+    // this browser and a newer version saved elsewhere, and are merged field by field when saved, never silently dropped
+    const saved0 = store.draft(p.id);
+    const restoredDraft = saved0 && saved0.b && JSON.stringify(saved0.b) !== JSON.stringify(p.brief || {}) ? saved0 : null;
+    const baseRef = useRef(restoredDraft ? (saved0.base || p.brief || {}) : (p.brief || {}));
+    const [b, setB] = useState(restoredDraft ? restoredDraft.b : (p.brief || {}));
+    const [restored, setRestored] = useState(!!restoredDraft); const [elsewhere, setElsewhere] = useState(false); const [clash, setClash] = useState(null); const [saving, setSaving] = useState(false);
+    const dirty = JSON.stringify(b) !== JSON.stringify(baseRef.current);
+    const dirtyRef = useRef(dirty); dirtyRef.current = dirty;
+    useEffect(() => { if (!dirtyRef.current) { baseRef.current = p.brief || {}; setB(p.brief || {}); setElsewhere(false); } else if (JSON.stringify(p.brief || {}) !== JSON.stringify(baseRef.current)) setElsewhere(true); }, [p.revision]);
+    useEffect(() => { store.setDraft(p.id, dirty ? { b, base: baseRef.current, rev: p.revision, at: Date.now() } : null); }, [b, dirty]);
+    const save = async (next, force) => {
+      setSaving(true);
+      try { const r = await onSave(next || b, baseRef.current, force);
+        if (r && r.ok) { baseRef.current = r.brief || next || b; setB(r.brief || next || b); setRestored(false); setElsewhere(false); setClash(null); store.setDraft(p.id, null); return true; }
+        if (r && r.clash) setClash(r); return false; }
+      finally { setSaving(false); }
+    };
+    const discard = () => { baseRef.current = p.brief || {}; setB(p.brief || {}); setRestored(false); setElsewhere(false); setClash(null); store.setDraft(p.id, null); };
     const [sugg, setSugg] = useState(null); const [chk, setChk] = useState(null); const [ack, setAck] = useState(false); const [addTo, setAddTo] = useState({ mandatory: '', preferred: '', open: '' });
     const loadSugg = useCallback(async (ai) => { try { setSugg(s => Object.assign({}, s || {}, { loading: true })); const d = await call('/studio/brief/suggest?project=' + encodeURIComponent(p.id) + (ai ? '&ai=1' : '')); setSugg(d); } catch (e) { setSugg({ error: e.message }); } }, [p.id]);
     useEffect(() => { loadSugg(false); }, [p.id, p.campaign]);
     useEffect(() => { let live = true; call('/studio/brief/check?project=' + encodeURIComponent(p.id)).then(d => { if (live) setChk(d); }).catch(e => { if (live) setChk({ error: e.message }); }); return () => { live = false; }; }, [p.id, p.revision]);
     const set = (k, v, src) => setB(Object.assign({}, b, { [k]: v }, src && ['objective', 'audience', 'message', 'action'].indexOf(k) >= 0 ? { [k + 'Source']: src } : {}));
-    const dirty = JSON.stringify(b) !== JSON.stringify(p.brief || {});
     const chans = (b.channels || []).map(chanLabel).join(', ');
     const ro = !canWrite() || p.readOnly;
     const fields = (sugg && sugg.fields) || {};
     const req = Object.assign({ mandatory: [], preferred: [], open: [] }, b.requirements || {});
     const setReq = (band, items) => setB(Object.assign({}, b, { requirements: Object.assign({}, req, { [band]: items }) }));
     const blocking = chk && !chk.error ? chk.gaps.filter(g => g.level === 'mandatory') : [];
-    const sizeNow = b.size || '2K';
-    return html`<div class="st-centre-pad">
-      <div class="ov-sechead"><span class="ov-title">Brief</span><span class="ov-why">${chans ? 'for ' + chans + ', ' + (b.deliverable || 'set') : 'channels and deliverable are set at intake'}; campaign ${p.campaign || 'none'}</span>${dirty && !ro ? html`<button class="btn sm" style=${{ marginLeft: 'auto' }} onClick=${() => onSave(b)}>Save brief</button>` : null}</div>
-      ${sugg && !sugg.error ? html`<div class="ov-dim st-brief-src">Suggestions come from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet'}. Approved items are the kit's own records; an AI suggestion is only a suggestion.${!ro ? html` <button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => loadSugg(true)}>${sugg.aiModel ? 'ask the model again' : 'ask the model for suggestions (one call)'}</button>` : null}${sugg.aiError ? ' The model did not answer: ' + sugg.aiError : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.error}</div>` : null}
-      ${['objective', 'audience', 'message', 'action', 'deliverables'].map(k => html`<div key=${k} class="st-field"><${Lbl}>${k}${(b.proposed || []).indexOf(k) >= 0 ? html` <${Chip} kind="warn">proposed by the Studio</${Chip}>` : null}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}</${Lbl}><${Combo} id=${'brief-' + k} value=${b[k] || ''} items=${fields[k] || []} disabled=${ro} onChange=${(v, src) => set(k, v, src)} placeholder=${k === 'action' ? 'What the audience should do' : ''} /></div>`)}
-      <div class="st-field st-reqs"><${Lbl}>Design requirements</${Lbl}><div class="ov-dim">Mandatory items are constraints on every concept; preferred ones are followed unless the message needs otherwise; open ones are the art director's call. Each says where it came from.</div>
-        ${['mandatory', 'preferred', 'open'].map(band => html`<div key=${band} class=${'st-req-band ' + band}><div class="st-req-head"><b>${band}</b> <span class="ov-dim">${(req[band] || []).length}</span></div>
-          ${(req[band] || []).length ? html`<ul class="st-ul">${(req[band] || []).map((it, i) => html`<li key=${i}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}${!ro ? html` <button class="ov-link" onClick=${() => setReq(band, req[band].filter((_, j) => j !== i))}>remove</button>` : null}</li>`)}</ul>` : null}
-          ${!ro ? html`<${Combo} id=${'req-' + band} rows=${1} value=${addTo[band]} items=${(fields.requirements || []).filter(it => (it.band || 'open') === band || band === 'open')} onChange=${(v, src, it) => { if (it) { setReq(band, (req[band] || []).concat([{ text: it.text, source: it.source, from: it.from || '' }])); setAddTo(Object.assign({}, addTo, { [band]: '' })); } else setAddTo(Object.assign({}, addTo, { [band]: v })); }} placeholder=${'Add a ' + band + ' requirement, or pick a suggestion'} />${addTo[band].trim() ? html`<button class="ov-link" onClick=${() => { setReq(band, (req[band] || []).concat([{ text: addTo[band].trim(), source: 'team', from: '' }])); setAddTo(Object.assign({}, addTo, { [band]: '' })); }}>add as written</button>` : null}` : null}
-        </div>`)}
-      </div>
-      ${b.assumptions && b.assumptions.length ? html`<div class="st-field"><${Lbl}>Assumptions the Studio made (edit or remove)</${Lbl}><ul class="st-ul">${b.assumptions.map((a, i) => html`<li key=${i}>${a} ${!ro ? html`<button class="ov-link" onClick=${() => onSave(Object.assign({}, b, { assumptions: b.assumptions.filter((_, j) => j !== i) }))}>remove</button>` : null}</li>`)}</ul></div>` : null}
-      ${(b.notRecorded || []).length ? html`<div class="ov-dim">Not recorded at the time: ${b.notRecorded.join(', ')}. Left blank rather than invented.</div>` : null}
-      <${StrategyPanel} p=${p} onDraft=${onStrategy} onSave=${st => onSave(Object.assign({}, p.brief || {}, { strategy: st }))} busy=${busy} />
+    const sizeNow = b.size || '2K'; const [imagery, setImagery] = useState(b.imagery === 'none' ? 'none' : sizeNow);
+    const chosen = p.directions.find(d => d.chosen);
+    const noClaude = prov && prov.claude === false;
+    const go = async (fn) => { if (dirty && !(await save())) return; fn(); };
+    const produceArgs = () => ({ acknowledge: !!(blocking.length && ack), size: imagery === 'none' ? undefined : imagery, imagery: imagery === 'none' ? 'none' : undefined });
+    return html`<div class="st-centre-pad st-brief">
+      <${StageHead} ...${head}>
+        ${!ro && dirty ? html`<span class="st-dirty" role="status">Unsaved changes</span><button class="btn sm" disabled=${saving} onClick=${() => save()}>${saving ? 'Saving...' : 'Save brief'}</button>` : !ro ? html`<span class="ov-dim" role="status">Brief saved</span>` : null}
+        ${p.assets.length && onGo ? html`<button class="btn sm ghost" onClick=${() => onGo('refine')}>Continue to Refine</button>` : null}
+      </${StageHead}>
+      ${restored ? html`<div class="st-notice info" role="status"><div class="st-notice-body"><b>Unsaved brief edits restored.</b> <span>These edits were made in this browser and never saved. Save them, or discard them to see the brief as saved.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save()}>Save them</button><button class="btn sm ghost" onClick=${discard}>Discard</button></div></div>` : null}
+      ${elsewhere && !clash ? html`<div class="st-notice warn" role="status"><div class="st-notice-body"><b>The brief changed elsewhere.</b> <span>A job or a teammate saved a newer brief while you were editing. Your edits are kept here; saving merges them field by field.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save()}>Save and merge</button><button class="btn sm ghost" onClick=${discard}>Use the saved brief</button></div></div>` : null}
+      ${clash ? html`<div class="st-notice warn" role="alert"><div class="st-notice-body"><b>Both versions changed the same field${clash.clash.length === 1 ? '' : 's'}: ${clash.clash.join(', ')}.</b> <span>Nothing was overwritten. Keep yours to save over the newer version, or take theirs for ${clash.clash.length === 1 ? 'that field' : 'those fields'} and keep the rest of your edits.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save(clash.merged, true)}>Keep mine</button><button class="btn sm ghost" onClick=${() => { const next = Object.assign({}, clash.merged); clash.clash.forEach(k => { next[k] = clash.theirs[k]; }); baseRef.current = clash.theirs; setB(next); setClash(null); }}>Take theirs</button></div></div>` : null}
+      ${!ro && !p.assets.length ? html`<div class="st-produce st-actionbar" aria-label="Produce">
+        <div class="st-actionbar-text"><b>${chosen ? 'Produce from "' + chosen.title + '"' : 'When the brief is ready'}</b><span class="ov-dim">${chosen ? 'The chosen direction decides the idea; the brief decides channels and claims.' : 'A clear, approved brief can go straight to production; an open one is better explored as directions first.'} ${chans ? 'Channels: ' + chans + '.' : 'No channels set.'}</span></div>
+        <label class="ov-dim st-size">Imagery <select class="st-sel" value=${imagery} onChange=${e => { setImagery(e.target.value); setB(Object.assign({}, b, e.target.value === 'none' ? { imagery: 'none' } : { size: e.target.value, imagery: '' })); }} aria-label="Imagery resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option><option value="none">No imagery (type and colour)</option></select></label>
+        ${blocking.length ? html`<label class="st-check"><input type="checkbox" checked=${ack} onChange=${e => setAck(e.target.checked)} /> Proceed on the stated assumptions despite ${blocking.length} mandatory gap${blocking.length === 1 ? '' : 's'}</label>` : null}
+        <div class="st-actionbar-acts">
+          <button class=${'btn sm' + (chosen ? '' : ' ghost')} disabled=${!!busy || noClaude || !(b.channels || []).length || (blocking.length && !ack)} title=${noClaude ? 'Claude is not configured on the worker' : !(b.channels || []).length ? 'Choose channels first' : blocking.length && !ack ? 'Resolve the mandatory gaps, or tick to proceed on the assumptions' : ''} onClick=${() => go(() => onProduce(produceArgs()))}>Produce now</button>
+          ${!chosen ? html`<button class="btn sm" disabled=${!!busy || noClaude} title=${noClaude ? 'Claude is not configured on the worker' : ''} onClick=${() => go(() => onDirect())}>Explore directions first</button>` : null}
+        </div>
+        <div class="ov-dim st-actionbar-foot">${imagery === 'none' ? 'No image will be generated: every asset is a complete typographic composition (type, shapes, colour and the mark).' : 'Renders are queued at ' + imagery + ' after the copy is written; each is a job you can watch, retry or cancel.'} ${noClaude ? 'Claude is not configured on the worker, so nothing can be written yet.' : ''}</div>
+      </div>` : null}
       <div class="st-field st-check-panel" aria-label="Brief check"><${Lbl}>Before anything is spent</${Lbl}>
         ${!chk ? html`<div class="ov-dim">Checking the brief...</div>` : chk.error ? html`<div class="ov-dim">${chk.error}</div>` : html`<div>
           ${!chk.gaps.length ? html`<div><${Chip} kind="ok">complete</${Chip}> <span class="ov-dim">objective, message, audience, action and deliverables are set; the campaign and its mark are on file.</span></div>` : null}
@@ -251,10 +393,17 @@
           ${chk.brand ? html`<div class="st-brand-line" aria-label="Brand readiness"><${Chip} kind=${chk.brand.state === 'ready' ? 'ok' : chk.brand.state === 'blocked' ? 'bad' : 'warn'}>brand ${chk.brand.state === 'ready' ? 'ready' : chk.brand.state}</${Chip}> <span class="ov-dim">${[chk.brand.blocking.length ? chk.brand.blocking.map(x => x.text).join(' ') : '', chk.brand.conflicts.length ? chk.brand.conflicts.length + ' conflict' + (chk.brand.conflicts.length === 1 ? '' : 's') + ' in what the Studio knows' : '', chk.brand.gaps ? chk.brand.gaps + ' gap' + (chk.brand.gaps === 1 ? '' : 's') : '', chk.brand.outdated ? chk.brand.outdated + ' to review' : ''].filter(Boolean).join('; ') || 'nothing missing or conflicting'}. Open Brand in the rail for the detail.</span></div>` : null}
         </div>`}
       </div>
-      ${!ro && !p.assets.length ? html`<div class="st-pad st-produce">
-        <label class="ov-dim">Imagery <select class="st-sel" value=${sizeNow} onChange=${e => setB(Object.assign({}, b, { size: e.target.value }))} aria-label="Imagery resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option></select></label>
-        ${blocking.length ? html`<label class="st-check"><input type="checkbox" checked=${ack} onChange=${e => setAck(e.target.checked)} /> Proceed on the stated assumptions despite ${blocking.length} mandatory gap${blocking.length === 1 ? '' : 's'}</label>` : null}
-        <button class="btn sm" disabled=${!!busy || (blocking.length && !ack)} onClick=${async () => { if (dirty) await onSave(b); onProduce({ acknowledge: !!(blocking.length && ack), size: sizeNow }); }}>Produce now</button> <button class="btn sm ghost" disabled=${!!busy} onClick=${async () => { if (dirty) await onSave(b); onDirect(); }}>Two directions first</button> <span class="ov-dim">A complete brief goes straight to production (the quick route); an open one gets directions to choose from. Renders are queued at ${sizeNow}.</span></div>` : null}
+      ${sugg && !sugg.error ? html`<div class="ov-dim st-brief-src">Suggestions come from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet'}. Approved items are the kit's own records; an AI suggestion is only a suggestion.${!ro ? html` <button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => loadSugg(true)}>${sugg.aiModel ? 'ask the model again' : 'ask the model for suggestions (one call)'}</button>` : null}${sugg.aiError ? ' The model did not answer: ' + sugg.aiError : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.error}</div>` : null}
+      ${['objective', 'audience', 'message', 'action', 'deliverables'].map(k => html`<div key=${k} class="st-field"><${Lbl}>${k}${(b.proposed || []).indexOf(k) >= 0 ? html` <${Chip} kind="warn">proposed by the Studio</${Chip}>` : null}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}</${Lbl}><${Combo} id=${'brief-' + k} value=${b[k] || ''} items=${fields[k] || []} disabled=${ro} onChange=${(v, src) => set(k, v, src)} placeholder=${k === 'action' ? 'What the audience should do' : ''} /></div>`)}
+      <div class="st-field st-reqs"><${Lbl}>Design requirements</${Lbl}><div class="ov-dim">Mandatory items are constraints on every concept; preferred ones are followed unless the message needs otherwise; open ones are the art director's call. Each says where it came from.</div>
+        ${['mandatory', 'preferred', 'open'].map(band => html`<div key=${band} class=${'st-req-band ' + band}><div class="st-req-head"><b>${band}</b> <span class="ov-dim">${(req[band] || []).length}</span></div>
+          ${(req[band] || []).length ? html`<ul class="st-ul">${(req[band] || []).map((it, i) => html`<li key=${i}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}${!ro ? html` <button class="ov-link" onClick=${() => setReq(band, req[band].filter((_, j) => j !== i))}>remove</button>` : null}</li>`)}</ul>` : null}
+          ${!ro ? html`<${Combo} id=${'req-' + band} rows=${1} value=${addTo[band]} items=${(fields.requirements || []).filter(it => (it.band || 'open') === band || band === 'open')} onChange=${(v, src, it) => { if (it) { setReq(band, (req[band] || []).concat([{ text: it.text, source: it.source, from: it.from || '' }])); setAddTo(Object.assign({}, addTo, { [band]: '' })); } else setAddTo(Object.assign({}, addTo, { [band]: v })); }} placeholder=${'Add a ' + band + ' requirement, or pick a suggestion'} />${addTo[band].trim() ? html`<button class="ov-link" onClick=${() => { setReq(band, (req[band] || []).concat([{ text: addTo[band].trim(), source: 'team', from: '' }])); setAddTo(Object.assign({}, addTo, { [band]: '' })); }}>add as written</button>` : null}` : null}
+        </div>`)}
+      </div>
+      ${b.assumptions && b.assumptions.length ? html`<div class="st-field"><${Lbl}>Assumptions the Studio made (edit or remove)</${Lbl}><ul class="st-ul">${b.assumptions.map((a, i) => html`<li key=${i}>${a} ${!ro ? html`<button class="ov-link" onClick=${() => setB(Object.assign({}, b, { assumptions: b.assumptions.filter((_, j) => j !== i) }))}>remove</button>` : null}</li>`)}</ul></div>` : null}
+      ${(b.notRecorded || []).length ? html`<div class="ov-dim">Not recorded at the time: ${b.notRecorded.join(', ')}. Left blank rather than invented.</div>` : null}
+      <${StrategyPanel} p=${p} onDraft=${onStrategy} onSave=${st => save(Object.assign({}, b, { strategy: st }))} busy=${busy} />
     </div>`;
   }
   function SourcesView({ p, onAdd, busy }) {
@@ -383,9 +532,12 @@
           <td>${flags.length ? flags.slice(0, 4).map((c, i) => html`<div key=${i}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <span class="ov-dim">${c.text}</span></div>`) : html`<${Chip} kind="ok">clean</${Chip}>`}</td></tr>`; })}
       </tbody></table></div></div>`;
   }
-  function DirectionsView({ p, onChoose, onMore, busy }) {
-    return html`<div class="st-centre-pad"><div class="ov-title">Directions</div>
-      <div class="ov-why">Genuinely different directions for an open brief - three by default - each with its campaign idea, copy approach, medium, composition, type and colour, the references it draws on, a production plan and the images it would need. Diversity is measured, not claimed. Choose one, or explore further.</div>
+  function DirectionsView({ p, onChoose, onMore, busy, head, prov }) {
+    const noClaude = prov && prov.claude === false;
+    const choose = d => { if (p.assets.length && !window.confirm('Produce a new set from "' + d.title + '"? The ' + p.assets.length + ' asset' + (p.assets.length === 1 ? '' : 's') + ' already made stay as they are; this writes new ones (model calls, and renders unless the brief says no imagery).')) return; onChoose(d.id); };
+    return html`<div class="st-centre-pad">
+      <${StageHead} ...${head}>${canWrite() && !p.readOnly && !p.directions.length ? html`<button class="btn sm" disabled=${!!busy || noClaude} onClick=${() => onMore(3)}>Propose three directions</button>` : null}</${StageHead}>
+      <div class="ov-why">Genuinely different directions for an open brief, three by default: each with its idea, copy approach, medium, composition, type and colour, the references it draws on and the images it would need. Diversity is measured, not claimed. Choosing one starts production from it.</div>
       ${(() => { const ev = p.thread.filter(e => e.kind === 'directions' && e.diversity != null).pop(); return ev ? html`<div class="ov-dim">Last set: diversity ${ev.diversity} (1 = nothing in common between the directions; under 0.5 they repeat each other).</div>` : null; })()}
       ${!p.directions.length ? html`<div class="ov-empty">No directions yet.</div>` : null}
       <div class="st-dirs">${p.directions.map((d, i) => html`<div key=${d.id} class=${'st-dir' + (d.chosen ? ' chosen' : '')}>
@@ -402,9 +554,9 @@
         ${(d.plan || []).length ? html`<div class="st-dir-line"><b>Plan</b> ${d.plan.join(' / ')} <${Chip} kind=${d.renders ? 'warn' : 'ok'}>${d.renders ? d.renders + ' render' + (d.renders === 1 ? '' : 's') + ' per asset' : 'no render'}</${Chip}></div>` : null}
         <div class="st-dir-line"><b>Claims</b> ${(d.claims || []).join(', ') || 'none'} <span class="ov-dim">${d.uncertainty}</span></div>
         <div class="ov-dim">${d.model || ''}${d.who && d.who !== 'studio' ? ', recorded by ' + d.who : ''}</div>
-        ${canWrite() && !p.readOnly && !d.chosen ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onChoose(d.id)}>Choose this direction</button>` : null}
+        ${canWrite() && !p.readOnly && !d.chosen ? html`<button class="btn sm" disabled=${!!busy || noClaude} title=${noClaude ? 'Claude is not configured on the worker' : ''} onClick=${() => choose(d)}>Choose this direction</button>` : null}
       </div>`)}</div>
-      ${canWrite() && !p.readOnly ? html`<div class="st-pad"><label class="ov-dim">Explore <select class="st-sel" id="st-dir-n" aria-label="Exploration budget" defaultValue="3">${[1, 2, 3, 4, 5].map(n => html`<option key=${n} value=${n}>${n} direction${n === 1 ? '' : 's'}</option>`)}</select></label> <button class="btn sm ghost" disabled=${!!busy} onClick=${() => onMore(+((document.getElementById('st-dir-n') || {}).value || 3))}>Explore further</button> <span class="ov-dim">One model call; nothing is produced until you choose.</span></div>` : null}
+      ${canWrite() && !p.readOnly ? html`<div class="st-pad"><label class="ov-dim">Explore <select class="st-sel" id="st-dir-n" aria-label="Exploration budget" defaultValue="3">${[1, 2, 3, 4, 5].map(n => html`<option key=${n} value=${n}>${n} direction${n === 1 ? '' : 's'}</option>`)}</select></label> <button class="btn sm ghost" disabled=${!!busy || noClaude} onClick=${() => onMore(+((document.getElementById('st-dir-n') || {}).value || 3))}>Explore further</button> <span class="ov-dim">One model call; nothing is produced until you choose.</span></div>` : null}
     </div>`;
   }
   function ContextView({ p, onVoice, onLearned, tick }) {
@@ -580,6 +732,38 @@
       </div>`}</details>`;
   }
   /* ------------------------------------------------------------ client review: private links out, comments in, resolved by version */
+  /* ------------------------------------------------------------ Review: one table of every asset's approvals, then the client's review */
+  const TECH_SHORT = { passed: 'passed', failed: 'failing', stale: 'stale', not_validated: 'not validated', not_applicable: 'n/a' };
+  function ReviewStage({ p, onApprove, onOpen, head, onGo, flow }) {
+    const rw = canWrite() && !p.readOnly;
+    const cell = (a, part) => { const v = current(a); const ap = standing(a, part); const copyOnly = v && v.mode === 'copy';
+      if (part === 'design' && copyOnly) return html`<span class="ov-dim">copy only</span>`;
+      const blocked = part === 'design' && (!a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable')) ? 'Design approval waits for a passing validation of this exact version: open it in Refine to measure it.' : part === 'design' && v && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file.' : '';
+      return ap ? html`<span><${Chip} kind="ok">approved</${Chip}> <span class="ov-dim">v${vnum(a, a.versions.find(x => x.id === ap.version) || {})} by ${ap.by}${ap.carried ? ', unchanged since' : ''}</span>${rw ? html` <button class="ov-link" onClick=${() => onApprove(a, part, 'withdraw')}>withdraw</button>` : null}</span>`
+        : rw ? html`<span class="st-apcell"><button class="btn sm ghost" disabled=${!!blocked} title=${blocked} onClick=${() => onApprove(a, part, 'approve')} aria-label=${'Approve ' + part + ' of ' + a.title}>Approve ${part}</button>${blocked ? html`<span class="ov-dim">${blocked}</span>` : null}</span>` : html`<span class="ov-dim">not approved</span>`; };
+    return html`<div class="st-centre-pad st-reviewstage">
+      <${StageHead} ...${head}>${flow.counts.ready ? html`<button class="btn sm" onClick=${() => onGo('export')}>Continue to Export (${flow.counts.ready} ready)</button>` : null}</${StageHead}>
+      <div class="ov-why">Approval is a person's decision about one exact version: it stands while that version is current, and an edit drops the approval of the part it changes. The art director's verdict is advice and never approves.</div>
+      ${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to review yet.</b><span>Produce the set first.</span><button class="btn sm" onClick=${() => onGo('produce')}>Go to Produce</button></div>` : html`<table class="ov-table st-approvals" aria-label="Approvals"><thead><tr><th>Asset</th><th>Version</th><th>Validation</th><th>Copy</th><th>Design</th></tr></thead><tbody>
+        ${p.assets.map(a => { const v = current(a); const t = v && (v.mode === 'copy' || v.mode === 'generated') ? 'not_applicable' : (a.readiness || {}).technical || 'not_validated'; return html`<tr key=${a.id}><td><button class="st-lib-open" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}</div></td><td>v${vnum(a, v)} <span class="ov-dim">of ${a.versions.length}</span></td><td><${Chip} kind=${TECH_KIND[t] || ''}>${TECH_SHORT[t] || t}</${Chip}></td><td>${cell(a, 'copy')}</td><td>${cell(a, 'design')}</td></tr>`; })}
+      </tbody></table>`}
+      ${p.assets.length ? html`<${ReviewView} p=${p} onOpen=${onOpen} />` : null}
+    </div>`;
+  }
+  /* ------------------------------------------------------------ Export: what will be in the bundle, and what is in it once made */
+  function ExportView({ p, head, flow, state, onExport, onClickup, onGo }) {
+    const rows = p.assets.map(a => { const v = current(a); const c = standing(a, 'copy'), d = standing(a, 'design'); const copyOnly = v && v.mode === 'copy'; const tech = (a.readiness || {}).technical; const valid = copyOnly || (v && v.mode === 'generated') || tech === 'passed'; return { a, v, c, d, valid, tech, ok: !!(c && (d || copyOnly) && valid), partly: !!(c || d) }; });
+    const ready = rows.filter(x => x.ok); const busy = state && state.busy;
+    return html`<div class="st-centre-pad st-exportstage" aria-label="Export">
+      <${StageHead} ...${head}>${ready.length ? html`<button class="btn sm" disabled=${busy} onClick=${() => onExport(ready)}>${busy ? 'Preparing...' : state && state.url ? 'Prepare again' : 'Prepare bundle (' + ready.length + ')'}</button>` : null}${state && state.url ? html`<a class="btn sm ghost" href=${state.url} download=${state.name}>Download ${state.name} (${Math.round(state.size / 1024)} KB)</a>` : null}</${StageHead}>
+      <div class="ov-why">Only versions with both approvals and a passing validation go in, drawn at their native size by the same renderer as the preview, with a copy sheet and a manifest naming each exact version. Export sends nothing anywhere; a hand-off is its own step.</div>
+      <table class="ov-table"><thead><tr><th>Asset</th><th>Version</th><th>Copy</th><th>Design</th><th>Validation</th><th>Export</th></tr></thead><tbody>${rows.map(x => html`<tr key=${x.a.id}><td>${x.a.title}<div class="ov-dim">${chanLabel(x.a.channel)} ${x.a.format}${x.v && x.v.layout && x.v.layout.stage ? ', ' + x.v.layout.stage.w + ' x ' + x.v.layout.stage.h + ' px' : ''}</div></td><td class="ov-dim">v${vnum(x.a, x.v)}</td><td>${x.c ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.v && x.v.mode === 'copy' ? html`<span class="ov-dim">copy only</span>` : x.d ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.valid ? html`<${Chip} kind="ok">${x.v && x.v.mode === 'copy' ? 'n/a' : 'passed'}</${Chip}>` : html`<${Chip} kind=${x.tech === 'failed' ? 'bad' : 'warn'}>${x.tech === 'failed' ? 'failing' : 'not validated'}</${Chip}>`}</td><td>${x.ok ? html`<${Chip} kind="ok">included</${Chip}>` : html`<span class="ov-dim">left out${x.c && (x.d || (x.v && x.v.mode === 'copy')) && !x.valid ? ' (approved, but ' + (x.tech === 'failed' ? 'its validation fails' : 'not validated') + ')' : x.partly ? ' (partly approved)' : ' (not approved)'}</span>`}</td></tr>`)}</tbody></table>
+      ${!ready.length && p.assets.length ? html`<div class="st-empty-state"><b>Nothing is ready to export.</b><span>An asset goes in once its copy and design are approved and its current version passes validation.</span><button class="btn sm" onClick=${() => onGo('review')}>Go to Review</button></div>` : null}
+      ${state && state.msg ? html`<div class=${'st-export-msg' + (state.error ? ' bad' : '')} role="status">${state.msg}</div>` : null}
+      ${state && state.files ? html`<table class="ov-table st-export-files" aria-label="Files in the bundle"><thead><tr><th>File</th><th class="num">Size</th><th>Pixels</th></tr></thead><tbody>${state.files.map(f => html`<tr key=${f.name}><td>${f.name}</td><td class="num">${Math.max(1, Math.round(f.bytes / 1024))} KB</td><td>${f.w ? html`${f.w} x ${f.h}${f.want ? (f.w === f.want.w && f.h === f.want.h ? html` <${Chip} kind="ok">native size</${Chip}>` : html` <${Chip} kind="bad">expected ${f.want.w} x ${f.want.h}</${Chip}>`) : null}` : html`<span class="ov-dim">-</span>`}</td></tr>`)}</tbody></table>` : null}
+      ${ready.length ? html`<div class="st-pad"><button class="btn sm ghost" disabled=${!canWrite()} onClick=${() => onClickup(ready)}>Send to ClickUp...</button> <span class="ov-dim">a separate, confirmed step: one task per asset with the approved copy</span></div>` : null}
+    </div>`;
+  }
   function reviewLink(token) {
     const page = new URL('review.html', location.href); const base = (window.csBase ? window.csBase() : '') || '';
     return page.origin + page.pathname + '#t=' + encodeURIComponent(token) + (base ? '&w=' + encodeURIComponent(base) : '');
@@ -689,8 +873,8 @@
   function JobsView({ p, onRetry, onCancel, onStep, budget }) {
     const jobs = (p.jobs || []).slice();
     const asset = id => (p.assets.find(x => x.id === id) || {}).title || (id ? id : '-');
-    return html`<div class="st-centre-pad"><div class="ov-title">Jobs</div>
-      <div class="ov-why">Every generation is a persistent job: claimed with a lease, one stage at a time, stepped by this browser while the tab is open and finished by the worker's tick otherwise. No invented percentages.${budget ? ' Model calls today: ' + budget.used + ' of ' + budget.cap + '.' : ''}</div>
+    return html`<div class="st-jobs">
+      <div class="ov-why">Every generation is a persistent job: claimed with a lease, one stage at a time, stepped by this browser while the tab is open and finished by the worker's tick otherwise. A transient provider failure is tried again up to three times; then it fails here with a Retry. No invented percentages. ${RUN_NOTE}${budget ? ' Model calls today: ' + budget.used + ' of ' + budget.cap + '.' : ''}</div>
       ${!jobs.length ? html`<div class="ov-empty">No jobs yet.</div>` : null}
       <table class="ov-table"><thead><tr><th>Job</th><th>Stage</th><th>Asset</th><th>State</th><th class="num">Attempts</th><th>When</th><th></th></tr></thead><tbody>
         ${jobs.map(j => html`<tr key=${j.id}><td class="ov-dim">${j.id}</td><td>${j.stage}</td><td>${asset(j.asset)}</td><td><span class=${'st-status ' + j.state}>${j.state}</span>${j.error ? html`<div class="ov-dim">${j.error}</div>` : null}${j.progress && j.progress.lines && j.progress.lines.length ? html`<details><summary class="ov-link">${j.progress.lines.length} log lines</summary><div class="st-joblog">${j.progress.lines.map(l => html`<div key=${l.id} class=${'st-jobline ' + l.kind}>${l.kind === 'cmd' ? '$ ' : l.kind === 'err' ? '! ' : '> '}${l.text}</div>`)}</div></details>` : null}</td><td class="num">${j.attempts}</td><td class="ov-dim">${aest(j.updated || j.created)}</td><td class="ov-go">${canWrite() ? html`${j.state === 'failed' ? html`<button class="ov-link" onClick=${() => onRetry(j)}>retry</button>` : null} ${j.state === 'queued' ? html`<button class="ov-link" onClick=${() => onStep(j)}>run now</button> <button class="ov-link" onClick=${() => onCancel(j.id)}>cancel</button>` : null} ${j.state === 'running' ? html`<button class="ov-link" onClick=${() => onCancel(j.id)}>cancel</button>` : null}` : null}</td></tr>`)}
@@ -864,29 +1048,49 @@
   const TECH_WORD = { passed: 'passed', failed: 'failed', stale: 'not validated (stale)', not_validated: 'not validated', not_applicable: 'not applicable', unknown: 'unknown', none: 'not validated' };
   const TECH_KIND = { passed: 'ok', failed: 'bad', stale: 'warn', not_validated: 'warn' };
   const INS_WORD = { none: 'not inspected', stale: 'inspected an earlier composition', imagery_only: 'imagery only (not a finished-layout review)', inconsistent: 'inconsistent: ship with unresolved problems', ship: 'ship', fix: 'fix', redo: 'redo', stop: 'bounded: a designer next' };
+  const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
+  const fixableOf = val => !!(val && val.issues.some(i => LAYOUT_CODES[i.code] || /^(mark_low_contrast|mark_unreadable|low_contrast|unreadable_contrast)$/.test(i.code)));
+  /** Under the artwork: the measured state in one line and the free fixes; the detail is in the Quality tab. */
+  function ReadyStrip({ a, v, val, measuring, ro, onRepair, onMeasure, onDraft, repairing, repairNote, onDetail }) {
+    const rd = a.readiness || {}; const t = measuring ? 'measuring' : rd.technical || 'not_validated';
+    const blocking = val ? val.issues.filter(i => i.severity === 'blocking').length : 0; const warns = val ? val.issues.filter(i => i.severity !== 'blocking').length : 0;
+    return html`<div class=${'st-ready st-readystrip ' + t} aria-label="Readiness">
+      <div class="st-ready-row"><b>Technical validation</b> <${Chip} kind=${measuring ? '' : TECH_KIND[rd.technical] || ''}>${measuring ? 'measuring at ' + (v.layout && v.layout.stage ? v.layout.stage.w + ' x ' + v.layout.stage.h : 'native size') + '...' : TECH_WORD[rd.technical] || rd.technical || 'not validated'}</${Chip}>
+        ${val && !measuring ? html`<span class="ov-dim">${val.issues.length ? (blocking ? blocking + ' blocking' : '') + (blocking && warns ? ', ' : '') + (warns ? warns + ' to look at' : '') : 'no overflow, collisions, clipping or missing files at the output size'}</span>` : null}
+        ${val && val.issues.length ? html`<button class="ov-link" onClick=${onDetail}>details</button>` : null}</div>
+      ${!ro ? html`<div class="st-ready-acts">${fixableOf(val) ? html`<button class="btn sm" disabled=${repairing} onClick=${onRepair} title="Fit boxes to their measured lines, restack, widen, move a mark, a bounded type step, a readable colour or a better approved mark variant - never the words; a layout version, no render">${repairing ? 'Fixing...' : 'Fix layout (no render)'}</button>` : null}<button class="btn sm ghost" disabled=${measuring} onClick=${onMeasure}>Measure again</button><button class="btn sm ghost" onClick=${onDraft} title="A PNG labelled as a draft: not validated production artwork">Download draft PNG</button></div>` : null}
+      ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict ? ' warn' : '')} role="status">${repairNote.text}</div>` : null}
+    </div>`;
+  }
   /** Three things kept apart: the measured technical validation, the art director's opinion, and a person's approval. */
-  function Readiness({ a, v, val, measuring, ro, onRepair, onMeasure, onDraft, repairing, repairNote }) {
+  function Readiness({ p, a, v, val }) {
     const rd = a.readiness || {}; const ins = rd.inspection || { state: 'none' }; const appr = standing(a, 'design');
-    const layoutCodes = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
-    const fixable = val && val.issues.some(i => layoutCodes[i.code] || /^(mark_low_contrast|mark_unreadable|low_contrast|unreadable_contrast)$/.test(i.code));
-    return html`<div class="st-ready" aria-label="Readiness">
-      <div class="st-ready-row"><b>Technical validation</b> <${Chip} kind=${TECH_KIND[rd.technical] || ''}>${TECH_WORD[rd.technical] || rd.technical || 'not validated'}</${Chip}>${measuring ? html` <span class="ov-dim">measuring at ${v.layout && v.layout.stage ? v.layout.stage.w + 'x' + v.layout.stage.h : 'native size'}...</span>` : rd.validation ? html` <span class="ov-dim">${aest(rd.validation.at)}, ${rd.validation.who}</span>` : null}</div>
+    const last = (p.thread || []).filter(e => e.kind === 'inspection' && e.asset === a.id).pop();
+    return html`<div class="st-readydetail" aria-label="Quality">
+      <div class="st-ready-row"><b>Technical validation</b> <${Chip} kind=${TECH_KIND[rd.technical] || ''}>${TECH_WORD[rd.technical] || rd.technical || 'not validated'}</${Chip}>${rd.validation ? html` <span class="ov-dim">${aest(rd.validation.at)}, ${rd.validation.who}</span>` : null}</div>
       ${val ? html`<ul class="st-vallist st-val">${val.issues.length ? val.issues.map((i, k) => html`<li key=${k}><${Chip} kind=${i.severity === 'blocking' ? 'bad' : i.severity === 'warning' ? 'warn' : ''}>${i.code.replace(/_/g, ' ')}</${Chip}> ${i.layers.length ? html`<b>${i.layers.join(', ')}</b> ` : null}<span class="ov-dim">${i.detail}</span></li>`) : html`<li><span class="ov-dim">No collisions, overflow, clipping or missing assets measured at the output size.</span></li>`}${val.fonts ? html`<li class="ov-dim">Fonts: ${Object.keys(val.fonts.roles || {}).map(k => k + ' ' + val.fonts.roles[k].used + (val.fonts.roles[k].fallback ? ' (asked ' + val.fonts.roles[k].requested + ')' : '')).join('; ') || 'none needed'}</li>` : null}</ul>` : null}
       ${rd.technical && rd.technical !== 'passed' && rd.reasons && rd.reasons.length ? html`<div class="ov-dim">${rd.reasons.join(' ')}</div>` : null}
-      ${!ro ? html`<div class="st-ready-acts">${fixable ? html`<button class="btn sm" disabled=${repairing} onClick=${onRepair} title="Fit boxes to their measured lines, restack, widen, move a mark, a bounded type step, a better approved mark variant - never the words; a layout version, no render">Fix layout (no render)</button>` : null}<button class="btn sm ghost" disabled=${measuring} onClick=${onMeasure}>Measure again</button><button class="btn sm ghost" onClick=${onDraft} title="A PNG labelled as a draft: not validated production artwork">Download draft PNG</button></div>` : null}
-      ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict ? ' warn' : '')}>${repairNote.text}</div>` : null}
-      <div class="st-ready-row"><b>Art direction</b> <${Chip} kind=${ins.state === 'ship' ? 'ok' : ins.state === 'inconsistent' || ins.state === 'redo' ? 'bad' : ins.state === 'none' ? '' : 'warn'}>${INS_WORD[ins.state] || ins.state}</${Chip}>${rd.baked ? html` <${Chip} kind=${rd.baked.verified ? 'ok' : 'warn'}>${rd.baked.verified ? 'painted words read back' : 'painted words not verified'}</${Chip}>` : null} <span class="ov-dim">an opinion; it never approves and never outranks the measurements</span></div>
+      <div class="st-ready-row"><b>Art direction</b> <${Chip} kind=${ins.state === 'ship' ? 'ok' : ins.state === 'inconsistent' || ins.state === 'redo' ? 'bad' : ins.state === 'none' ? '' : 'warn'}>${INS_WORD[ins.state] || ins.state}</${Chip}>${rd.baked ? html` <${Chip} kind=${rd.baked.verified ? 'ok' : 'warn'}>${rd.baked.verified ? 'painted words read back' : 'painted words not verified'}</${Chip}>` : null}</div>
+      ${last && last.scores ? html`<div class="st-insp-mini" aria-label="Latest inspection"><div class="st-insp-scores">${['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'].map(k => html`<span key=${k} class=${'st-insp-score s' + (last.scores[k] == null ? 'n' : last.scores[k])} title=${(last.reasons || {})[k] || ''}>${k} <b>${last.scores[k] == null ? 'not scored' : last.scores[k]}</b></span>`)}</div>
+        <div class="ov-dim">Verdict ${last.verdict}, round ${last.round} of ${last.of || 2}${(() => { const vn = a.versions.findIndex(x => x.id === last.version) + 1; return vn ? ', on v' + vn + (last.version !== a.current ? ' (an earlier version)' : '') : ''; })()}. The critique, its reasons and the offered correction are in the Partner tab. An opinion: it never approves.</div></div>` : html`<div class="ov-dim">No inspection of this asset yet. One runs after each render; it is advice and never approves.</div>`}
       <div class="st-ready-row"><b>Human approval</b> <${Chip} kind=${appr ? 'ok' : ''}>${appr ? 'design approved by ' + appr.by : 'design not approved'}</${Chip}>${appr && rd.technical !== 'passed' && rd.technical !== 'not_applicable' ? html` <span class="ov-dim">the approval stands, but export waits for a passing validation</span>` : null}</div>
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onPreservation }) {
+  /** The Refine workspace: the artwork, sized to the screen, with the free fixes under it and the design tools below; the
+      words, the quality record, approvals and versions are in the inspector beside it (rendered there through a portal). */
+  function AssetView({ p, a, sel, setSel, onEdit, onDraftState, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onPreservation, slot, tab, setTab, conflict, onConflict, neighbours }) {
     const v = current(a);
-    const [hist, setHist] = useState(false); const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
-    useEffect(() => { setLe(false); }, [a.id, a.current]);
-    const [draft, setDraft] = useState({}); const timer = useRef(null);
-    useEffect(() => { setDraft({}); }, [a.id, a.current]);
+    const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
+    useEffect(() => { setLe(false); }, [a.current]);
+    // the words being typed: shown at once on the canvas, saved after a pause as a text version; a key leaves the draft
+    // only once the server holds exactly that value, so a reload in between never takes a keystroke back
+    const [draft, setDraft] = useState({}); const timer = useRef(null); const draftRef = useRef({}); draftRef.current = draft;
+    useEffect(() => { setDraft(d => { const n = {}; Object.keys(d).forEach(k => { if ((((v && v.copy) || {})[k] || '') !== d[k]) n[k] = d[k]; }); return Object.keys(n).length === Object.keys(d).length ? d : n; }); }, [a.current, v && v.id]);
+    useEffect(() => { if (onDraftState) onDraftState(a.id, Object.keys(draft).length > 0); }, [Object.keys(draft).length]);
+    const flushNow = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; const d = draftRef.current; if (Object.keys(d).length) onEdit(a, d); } };
+    useEffect(() => () => { flushNow(); if (onDraftState) onDraftState(a.id, false); }, []);
     const copy = Object.assign({}, v ? v.copy : {}, draft);
-    const edit = (k, val) => { const d = Object.assign({}, draft, { [k]: val }); setDraft(d); clearTimeout(timer.current); timer.current = setTimeout(() => onEdit(a, d), 800); };
+    const edit = (k, val) => { const d = Object.assign({}, draftRef.current, { [k]: val }); draftRef.current = d; setDraft(d); clearTimeout(timer.current); timer.current = setTimeout(() => { timer.current = null; onEdit(a, draftRef.current); }, 700); };
     const ap = { copy: standing(a, 'copy'), design: standing(a, 'design') };
     const flat = v && v.mode === 'generated'; const copyOnly = v && v.mode === 'copy'; const ro = !canWrite() || p.readOnly;
     const fields = [['headline', copyOnly ? 'Hook line' : 'Headline'], ['support', 'Support line'], ['cta', 'Call to action'], ['caption', 'Caption (' + chanLabel(a.channel) + ', ' + (copy.caption || '').length + ' of ' + ((CHANNELS[a.channel] || {}).max || 900) + ')'], ['alt', 'Alt text']];
@@ -913,41 +1117,48 @@
     useEffect(() => { measure(false); }, [measure]);
     const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
     const draftPng = async () => { const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u = URL.createObjectURL(blob); const el = document.createElement('a'); el.href = u; el.download = (a.title + '-v' + vnum(a, v) + '-DRAFT-not-validated.png').replace(/[^a-z0-9.-]+/gi, '_'); document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
-    return html`<div class="st-asset">
+    const renderJob = (p.jobs || []).find(j => j.asset === a.id && (j.stage === 'render' || j.stage === 'inspect') && (j.state === 'queued' || j.state === 'running'));
+    const ratio = (v.layout && v.layout.stage && v.layout.stage.w / v.layout.stage.h) || FORMAT_RATIO[a.format] || 1;
+    const hasLayout = !copyOnly && !flat && v.layout && v.layout.layers;
+    const work = html`<div class="st-asset">
       <div class="st-asset-head">
-        <div><b>${a.title}</b> <span class="ov-dim">${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}, ${a.family}; v${vnum(a, v)} of ${a.versions.length}, ${v.note}${v.who ? ', ' + v.who : ''}</span></div>
+        <div class="st-asset-title"><b>${a.title}</b> <span class="ov-dim">${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}, ${a.family}; v${vnum(a, v)} of ${a.versions.length}, ${v.note}${v.who ? ', ' + v.who : ''}</span></div>
         <div class="st-asset-acts">
-          ${!copyOnly ? html`<button class="btn sm ghost" onClick=${() => setZoom(zoom === 'fit' ? 'actual' : 'fit')} title="Fit to screen or actual size">${zoom === 'fit' ? 'Actual size' : 'Fit'}</button>` : null}
-          ${!copyOnly && !flat && !ro && v.layout && v.layout.layers && !a.locks.layout ? html`<button class=${'btn sm ghost' + (le ? ' on' : '')} onClick=${() => setLe(!le)}>${le ? 'Close layout editor' : 'Edit layout'}</button>` : null}
-          <button class="btn sm ghost" onClick=${() => setHist(!hist)}>Versions (${a.versions.length})</button>
+          ${neighbours && neighbours.prev ? html`<button class="btn sm ghost" onClick=${() => onOpen(neighbours.prev)} aria-label="Previous asset" title="Previous asset">←</button>` : null}${neighbours && neighbours.next ? html`<button class="btn sm ghost" onClick=${() => onOpen(neighbours.next)} aria-label="Next asset" title="Next asset">→</button>` : null}
+          ${!copyOnly ? html`<button class="btn sm ghost" onClick=${() => setZoom(zoom === 'fit' ? 'actual' : 'fit')} title="Fit to the screen or actual size">${zoom === 'fit' ? 'Actual size' : 'Fit'}</button>` : null}
+          ${!copyOnly && !flat && !ro && v.layout && v.layout.layers && !a.locks.layout ? html`<button class=${'btn sm ghost' + (le ? ' on' : '')} aria-pressed=${le} onClick=${() => setLe(!le)}>${le ? 'Close layout editor' : 'Edit layout'}</button>` : null}
+          <button class="btn sm ghost" onClick=${() => setTab('versions')}>Versions (${a.versions.length})</button>
           ${a.versions.length > 1 ? html`<button class="btn sm ghost" onClick=${() => onCompare(a.versions[a.versions.length - 2].id, v.id)}>Compare</button>` : null}
         </div>
       </div>
-      <div class=${'st-stage ' + zoom}>
-        <div class="st-stage-inner">${le ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} />`}</div>
-        ${flat ? html`<div class="st-flatnote">This is a flattened legacy tile: the text on the image is not editable. Editing the caption below does not change the image; rebuilding it as a composition is a later phase.</div>` : null}
+      <div class=${'st-stage ' + zoom} style=${{ '--ar': ratio }}>
+        <div class="st-stage-inner">${le ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout, v.id); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} />`}</div>
+        ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The art director is inspecting this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
+        ${flat ? html`<div class="st-flatnote">This is a flattened legacy tile: the text on the image is not editable. Editing the caption does not change the image.</div>` : null}
         ${v.mode === 'artwork' ? html`<div class="st-flatnote">Full artwork: the ${((v.layout || {}).baked || ['headline', 'support', 'cta']).join(', ')} are painted into the generated image (${(v.image || {}).model || 'image model'}, ${(v.image || {}).size || ''}${(v.image || {}).fallback ? ', fell back from ' + (v.image || {}).requested : ''}) and are not independently editable; the ${(v.layout || {}).layers && v.layout.layers.some(l => l.role === 'wordmark') ? 'wordmark' : 'logo'} is a live layer placed from its original file. Change the words by editing the artwork with an instruction, or switch to an editable composition.</div>` : null}
         ${v.image && v.image.fallback && v.mode !== 'artwork' ? html`<div class="st-flatnote">The image model fell back: ${v.image.requested} was requested, ${v.image.model} answered at ${v.image.size}.</div>` : null}
         ${v.layout && (v.layout.incomplete || []).length ? html`<div class="st-flatnote st-incomplete"><${Chip} kind="bad">incomplete</${Chip}> ${v.layout.incomplete.map(i => i.text).join('; ')}. Design approval and export wait for the file.</div>` : null}
-        ${v.image && v.image.meta ? html`<div class="st-flatnote st-render-rec">Imagery: asked ${v.image.meta.requested || v.image.requested || '-'} at ${(v.context || {}).size || v.image.meta.size}, made by ${v.image.meta.model} at ${v.image.meta.size}${v.image.meta.capped ? ' (asked ' + v.image.meta.capped + ', capped by the worker setting IMAGE_SIZE_MAX)' : ''}${v.image.meta.pixels ? ', received ' + v.image.meta.pixels.w + 'x' + v.image.meta.pixels.h + ' px' : ''}${v.image.meta.ms ? ' in ' + (v.image.meta.ms / 1000).toFixed(1) + ' s' : ''}${(v.image.meta.references || []).length ? '; references given: ' + v.image.meta.references.join(', ') : '; no reference images'}${v.image.meta.historyReplayed === false ? '; edit history not replayed (another model answered), the current image attached instead' : ''}${v.image.meta.usage && v.image.meta.usage.total ? '; ' + v.image.meta.usage.total + ' tokens' : ''}.</div>` : null}
-        ${v.context && v.context.regions ? html`<div class="st-flatnote">${Object.keys(v.context.regions).map(k => 'region ' + k + ': ' + v.context.regions[k].model + (v.context.regions[k].size ? ' ' + v.context.regions[k].size : '') + (v.context.regions[k].alpha === false ? ' - opaque, no transparency' : v.context.regions[k].alpha ? ' - transparent' : '')).join('; ')}</div>` : null}
-        ${!copyOnly && !flat && !v.image ? html`<div class="st-flatnote">No background yet: ${(p.jobs || []).some(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) ? 'a render job is ' + ((p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running')) || {}).state + ' (see Jobs).' : 'the composition is drawn over a plain ground until one is rendered.'}</div>` : null}
+        ${hasLayout && !v.image && !renderJob && (v.context || {}).imagery !== 'none' && (v.layout.regions || []).length ? html`<div class="st-flatnote">No imagery yet: the composition is drawn over its ground until a render lands (see Jobs).</div>` : null}
+        ${(v.context || {}).imagery === 'none' ? html`<div class="st-flatnote">No imagery by choice: a complete typographic composition, nothing to render.</div>` : null}
       </div>
-      ${!copyOnly && !flat && v.layout && v.layout.layers ? html`<${Readiness} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} />` : null}
+      ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} />` : null}
       <${Preservation} p=${p} a=${a} v=${v} ro=${ro} onCompare=${onCompare} onFile=${onPreservation} />
-      ${!flat ? html`<${UsedPanel} a=${a} v=${v} />` : null}
       <${FamilyStrip} p=${p} a=${a} onOpen=${onOpen} />
-      <div class="st-copy">
+      ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
+      ${!copyOnly && !flat && !ro ? html`<${AreaEdit} a=${a} v=${v} busy=${busy} onEdit=${onAreaEdit} />` : null}
+    </div>`;
+    const panel = (id, body) => html`<div key=${id} role="tabpanel" id=${'st-tab-' + id} aria-labelledby=${'st-tabbtn-' + id} hidden=${tab !== id} class="st-tabpanel">${body}</div>`;
+    const inspector = html`<div class="st-inspector-asset">
+      ${panel('copy', html`<div class="st-copy">
+        ${conflict ? html`<div class="st-notice warn" role="alert"><div class="st-notice-body"><b>Changed elsewhere while you typed: ${conflict.fields.join(', ')}.</b> <span>Nothing was overwritten. Your text is still in the field${conflict.fields.length === 1 ? '' : 's'}.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => onConflict('mine')}>Keep mine</button><button class="btn sm ghost" onClick=${() => { const d = Object.assign({}, draftRef.current); conflict.fields.forEach(k => { delete d[k]; }); draftRef.current = d; setDraft(d); onConflict('theirs'); }}>Take theirs</button></div></div>` : null}
         ${fields.map(([k, label]) => html`<div key=${k} class=${'st-field' + (sel === k ? ' on' : '') + (a.locks[k] ? ' locked' : '')} onClick=${() => setSel(k)}>
-          <div class="st-field-head"><${Lbl}>${label}</${Lbl}>${!ro ? html`<button class=${'st-lock' + (a.locks[k] ? ' on' : '')} onClick=${e => { e.stopPropagation(); onLock(a, k, !a.locks[k]); }} title=${a.locks[k] ? 'Locked: survives revisions until unlocked' : 'Lock this element'} aria-pressed=${!!a.locks[k]}>${a.locks[k] ? 'locked' : 'lock'}</button>` : null}</div>
-          ${k === 'caption' || k === 'support' ? html`<textarea class="st-ta" rows=${k === 'caption' ? 4 : 2} value=${copy[k] || ''} disabled=${ro || a.locks[k] || baked.has(k) || (flat && k !== 'caption' && k !== 'alt')} title=${baked.has(k) ? 'part of the generated artwork; not independently editable' : ''} onInput=${e => edit(k, e.target.value)}></textarea>` : html`<input class="st-in" value=${copy[k] || ''} disabled=${ro || a.locks[k] || baked.has(k) || (flat && k !== 'alt')} title=${baked.has(k) ? 'part of the generated artwork; not independently editable' : ''} onInput=${e => edit(k, e.target.value)} />`}${baked.has(k) ? html` <${Chip} kind="warn" title="painted into the bitmap by the image model">in the artwork</${Chip}>` : null}
+          <div class="st-field-head"><label class="st-lbl" for=${'st-f-' + k}>${label}</label>${!ro ? html`<button class=${'st-lock' + (a.locks[k] ? ' on' : '')} onClick=${e => { e.stopPropagation(); onLock(a, k, !a.locks[k]); }} title=${a.locks[k] ? 'Locked: survives revisions until unlocked' : 'Lock this element'} aria-pressed=${!!a.locks[k]} aria-label=${(a.locks[k] ? 'Unlock ' : 'Lock ') + label}>${a.locks[k] ? 'locked' : 'lock'}</button>` : null}</div>
+          ${k === 'caption' || k === 'support' ? html`<textarea class="st-ta" id=${'st-f-' + k} rows=${k === 'caption' ? 4 : 2} value=${copy[k] || ''} disabled=${ro || a.locks[k] || baked.has(k) || (flat && k !== 'caption' && k !== 'alt')} title=${baked.has(k) ? 'part of the generated artwork; not independently editable' : ''} onInput=${e => edit(k, e.target.value)} onBlur=${flushNow}></textarea>` : html`<input class="st-in" id=${'st-f-' + k} value=${copy[k] || ''} disabled=${ro || a.locks[k] || baked.has(k) || (flat && k !== 'alt')} title=${baked.has(k) ? 'part of the generated artwork; not independently editable' : ''} onInput=${e => edit(k, e.target.value)} onBlur=${flushNow} />`}${baked.has(k) ? html` <${Chip} kind="warn" title="painted into the bitmap by the image model">in the artwork</${Chip}>` : null}
         </div>`)}
-        ${Object.keys(draft).length ? html`<div class="ov-dim">Saving as a new version (text change, no render)...</div>` : null}
-        <div class="st-field"><div class="st-field-head"><${Lbl}>Layout</${Lbl}>${!ro && !copyOnly && !flat ? html`<button class=${'st-lock' + (a.locks.layout ? ' on' : '')} onClick=${() => onLock(a, 'layout', !a.locks.layout)} aria-pressed=${!!a.locks.layout}>${a.locks.layout ? 'locked' : 'lock'}</button>` : null}</div>
-          <div class="ov-dim">${copyOnly ? 'copy only: no tile' : flat ? 'not editable (flattened)' : v.layout && v.layout.layers ? 'editable composition: ' + v.layout.templateName + ', headline ' + (hl ? hl.size : '-') + '% of the width, ' + v.layout.layers.length + ' layers' + (v.layout.layers.some(l => l.role === 'logo') ? ', kit logo placed exactly' : ', no logo on file') + '.' : 'no layout'}
+        <div class="ov-dim st-savenote" role="status">${Object.keys(draft).length ? 'Saving as a new version (text change, no render)...' : 'Edits save as a new version after a pause; no render.'}</div>
+        <div class="st-field"><div class="st-field-head"><${Lbl}>Layout</${Lbl}>${!ro && !copyOnly && !flat ? html`<button class=${'st-lock' + (a.locks.layout ? ' on' : '')} onClick=${() => onLock(a, 'layout', !a.locks.layout)} aria-pressed=${!!a.locks.layout} aria-label=${a.locks.layout ? 'Unlock the layout' : 'Lock the layout'}>${a.locks.layout ? 'locked' : 'lock'}</button>` : null}</div>
+          <div class="ov-dim">${copyOnly ? 'copy only: no tile' : flat ? 'not editable (flattened)' : v.layout && v.layout.layers ? 'editable composition: ' + (v.layout.mediumName || v.layout.templateName) + ', headline ' + (hl ? hl.size : '-') + '% of the width, ' + v.layout.layers.length + ' layers' + (v.layout.layers.some(l => l.role === 'logo') ? ', kit logo placed exactly' : v.layout.layers.some(l => l.role === 'wordmark') ? ', campaign wordmark placed exactly' : ', no mark on file') + '.' : 'no layout'}
             ${!ro && hl && !a.locks.layout ? html` <button class="ov-link" onClick=${() => onLayout(a, -0.6)}>headline smaller</button> <button class="ov-link" onClick=${() => onLayout(a, 0.6)}>larger</button> <span class="ov-dim">(a layout version, no render)</span>` : null}</div></div>
-        ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
-        ${!copyOnly && !flat && !ro ? html`<${AreaEdit} a=${a} v=${v} busy=${busy} onEdit=${onAreaEdit} />` : null}
         <div class="st-field"><${Lbl}>Checks on this version</${Lbl}>
           <ul class="st-checks">
             ${(v.checks || []).map((c, i) => html`<li key=${i} class=${c.state}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <b>${c.text}</b> <span class="ov-dim">${c.note}</span></li>`)}
@@ -955,16 +1166,20 @@
             <li class="ov-dim">Deterministic checks on figures, units, quotations, banned terms, limits and fit. Matching a source is not independent verification.</li>
           </ul>
         </div>
-        <div class="st-approve">
+      </div>`)}
+      ${panel('quality', html`${hasLayout ? html`<${Readiness} p=${p} a=${a} v=${v} val=${val} />` : html`<div class="ov-dim">${copyOnly ? 'Copy only: nothing to measure; the checks on the words are in the Copy tab.' : 'A flattened tile cannot be measured.'}</div>`}
+        <div class="st-approve" aria-label="Approvals">
           ${['copy', 'design'].filter(part => part === 'copy' || !copyOnly).map(part => html`<div key=${part} class="st-appr"><span><b>${part}</b> ${ap[part] ? html`<${Chip} kind="ok">approved</${Chip}> <span class="ov-dim">on v${a.versions.findIndex(x => x.id === ap[part].version) + 1} by ${ap[part].by}, ${ap[part].reason}${ap[part].carried ? ' (unchanged since, so it stands)' : ''}</span>` : html`<span class="ov-dim">draft</span>`}</span>
             ${!ro ? html`<span>${ap[part] ? html`<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'withdraw')}>Withdraw</button>` : html`<button class="btn sm ghost" disabled=${part === 'design' && ((v.layout && (v.layout.incomplete || []).length > 0) || !a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable'))} title=${part === 'design' && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file: the design cannot be approved until it is' : part === 'design' && a.readiness && a.readiness.technical !== 'passed' ? 'Design approval waits for a passing technical validation of this composition' : ''} onClick=${() => onApprove(a, part, 'approve')}>Approve ${part}</button>`}<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'reject')}>Reject</button></span>` : null}
           </div>`)}
-        </div>
-      </div>
-      ${hist ? html`<div class="st-hist"><div class="ov-sechead"><span class="ov-title">Versions</span><span class="ov-why">immutable; restore creates a new current version that references the earlier content</span></div>
+          <div class="ov-dim">An approval names this exact version. The inspection's verdict is advice and never approves.</div>
+        </div>`)}
+      ${panel('versions', html`<div class="st-hist"><div class="ov-dim">Versions are immutable; restoring creates a new current version that references the earlier content.</div>
         ${a.versions.slice().reverse().map(x => html`<div key=${x.id} class=${'st-hist-row' + (x.id === a.current ? ' cur' : '')}><${Composition} v=${x} a=${a} ns=${p.ns} size="thumb" /><div><b>v${vnum(a, x)}</b> <${Chip} kind=${x.kind === 'render' ? 'warn' : ''}>${x.kind === 'render' ? 'render' : x.kind === 'layout' ? 'layout edit' : x.kind === 'restore' ? 'restore' : 'text change'}</${Chip}><div class="ov-dim">${x.note}, ${aest(x.created)}, ${x.who}${x.parent && x.parent !== (a.versions[vnum(a, x) - 2] || {}).id ? ' (branch)' : ''}</div></div><div>${x.id === a.current ? html`<${Chip} kind="ok">current</${Chip}>` : !ro ? html`<button class="ov-link" onClick=${() => onRestore(a, x.id)}>restore</button>` : null} <button class="ov-link" onClick=${() => onCompare(x.id, a.current)}>compare</button></div></div>`)}
-      </div>` : null}
+        </div>
+        ${!flat ? html`<${UsedPanel} a=${a} v=${v} />` : null}`)}
     </div>`;
+    return html`${work}${slot ? ReactDOM.createPortal(inspector, slot) : null}`;
   }
 
   /* ------------------------------------------------------------ the right panel: the direction thread */
@@ -977,8 +1192,8 @@
     const answered = useMemo(() => { const m = {}; p.thread.forEach(e => { if ((e.kind === 'decided' || e.kind === 'remembered' || e.kind === 'offer_declined') && e.eid) m[e.eid + ':' + (e.kind === 'decided' ? 'proposal' : 'offer')] = e; }); return m; }, [p.thread]);
     const send = () => { if (!text.trim()) return; onDirect(text.trim(), target); setText(''); };
     const ro = !canWrite() || p.readOnly;
-    return html`<aside class="st-partner" aria-label="Creative partner">
-      <div class="st-partner-head"><span class="ov-title">Creative partner</span><span class="ov-why">creative director, copywriter, designer; knows ${p.ns.toUpperCase()} and nothing of any other client</span></div>
+    return html`<section class="st-partner" aria-label="Creative partner">
+      <div class="st-partner-head"><span class="ov-why">Creative director, copywriter and designer for ${p.ns.toUpperCase()}; knows nothing of any other client. Direct the team below; every change lands as a version.</span></div>
       <div class="st-thread" ref=${box}>
         ${p.thread.map(m => { const dec = m.kind === 'proposal' ? answered[m.eid + ':proposal'] : null; const off = m.offer ? answered[m.eid + ':offer'] : null; return html`<div key=${m.id} class=${'st-msg ' + (m.who === 'studio' ? 'studio' : 'you')}>
           <div class="st-msg-meta">${m.who === 'studio' ? 'Studio' : m.who || 'team'}${m.target && m.kind === 'note' ? html` <span class="ov-dim">to ${m.target}</span>` : null} <span class="ov-dim">${aest(m.at)}${m.kind && m.kind !== 'note' ? ' - ' + m.kind : ''}</span></div>
@@ -1014,7 +1229,7 @@
         <textarea class="st-ta" rows="2" value=${text} placeholder=${'Direct the team. e.g. "Keep the layout, sharpen the headline", "three alternative opening lines", "adapt this for Instagram", "more restrained visual"'} onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} aria-label="Direction"></textarea>
         <div class="st-composer-acts"><button class="btn sm" disabled=${!text.trim() || !!busy || (target !== 'set' && !a)} onClick=${send}>Send</button><button class="ov-link" disabled=${!text.trim() || !!busy} onClick=${() => { onNote(text.trim(), target === 'set' ? 'the whole set' : (a || {}).title || ''); setText(''); }}>record as a note instead</button></div>
       </div>` : html`<div class="ov-dim st-pad">A read-only key can review, compare and export; directing the team needs a full key.</div>`}
-    </aside>`;
+    </section>`;
   }
 
   /* ------------------------------------------------------------ the Client panel: voice profile (the Content Desk's editor, reused) and learned rules */
@@ -1144,16 +1359,6 @@
   }
 
   /* ------------------------------------------------------------ dialogs */
-  function ExportDialog({ p, client, onClose, onClickup, onExport, state }) {
-    const rows = p.assets.map(a => { const v = current(a); const c = standing(a, 'copy'), d = standing(a, 'design'); const copyOnly = v && v.mode === 'copy'; const tech = (a.readiness || {}).technical; const valid = copyOnly || tech === 'passed'; return { a, v, c, d, valid, tech, ok: !!(c && (d || copyOnly) && valid), partly: !!(c || d) }; });
-    const ready = rows.filter(x => x.ok);
-    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Export"><div class="st-dialog-box">
-      <div class="ov-sechead"><span class="ov-title">Export</span><span class="ov-why">approved versions only; the export records the exact version it took</span><button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${onClose}>Close</button></div>
-      <table class="ov-table"><thead><tr><th>Asset</th><th>Version</th><th>Copy</th><th>Design</th><th>Export</th></tr></thead><tbody>${rows.map(x => html`<tr key=${x.a.id}><td>${x.a.title}</td><td class="ov-dim">v${vnum(x.a, x.v)}</td><td>${x.c ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.v && x.v.mode === 'copy' ? html`<span class="ov-dim">copy only</span>` : x.d ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.ok ? html`<${Chip} kind="ok">included</${Chip}>` : html`<span class="ov-dim">left out${x.c && (x.d || (x.v && x.v.mode === 'copy')) && !x.valid ? ' (approved, but ' + (x.tech === 'failed' ? 'its technical validation fails' : 'not validated') + ')' : x.partly ? ' (partly approved)' : ''}</span>`}</td></tr>`)}</tbody></table>
-      <div class="st-pad"><b>${ready.length}</b> asset${ready.length === 1 ? '' : 's'} ready: each composition drawn at its native size by the same renderer as the preview, one copy sheet (headline, support, CTA, caption, alt text, checks, approvals), the manifest with the context snapshot. ${state && state.msg ? html`<div class="ov-dim">${state.msg}</div>` : null}</div>
-      <div class="st-dialog-acts"><button class="btn sm" disabled=${!ready.length || (state && state.busy)} onClick=${() => onExport(ready)}>${state && state.busy ? 'Preparing...' : state && state.url ? 'Prepare again' : 'Prepare bundle'}</button>${state && state.url ? html`<a class="btn sm" href=${state.url} download=${state.name}>Download ${state.name} (${Math.round(state.size / 1024)} KB)</a>` : null}<button class="btn sm ghost" disabled=${!ready.length || !canWrite()} onClick=${() => onClickup(ready)}>Send to ClickUp...</button><span class="ov-dim">Export never creates a task or sends anything by itself; the hand-off is its own step.</span></div>
-    </div></div>`;
-  }
   function ClickupDialog({ ready, client, p, onClose }) {
     const [state, setState] = useState({ busy: false, msg: '' });
     const send = async () => {
@@ -1184,12 +1389,14 @@
   /* ------------------------------------------------------------ the app */
   function StudioApp() {
     const CLIENTS = clientList();
-    const [clientId, setClientId] = useState(CLIENTS[0] ? CLIENTS[0].id : 'mca');
+    const saved0 = useMemo(() => store.get(), []);
+    const [clientId, setClientId] = useState(saved0.client && CLIENTS.some(c => c.id === saved0.client) ? saved0.client : (CLIENTS[0] ? CLIENTS[0].id : 'mca'));
     const [lib, setLib] = useState(null); const [libErr, setLibErr] = useState('');
+    const [status, setStatus] = useState(null);
     const [kit, setKit] = useState(null);
     const [pid, setPid] = useState(null); const [p, setP] = useState(null);
     const [intake, setIntake] = useState(false);
-    const [view, setView] = useState('brief');
+    const [view, setView0] = useState('brief');
     const [selAsset, setSelAsset] = useState(null); const [selField, setSelField] = useState(null);
     const [target, setTarget] = useState('asset');
     const [busy, setBusy] = useState('');
@@ -1197,12 +1404,31 @@
     const [dialog, setDialog] = useState(null);
     const [exportState, setExportState] = useState(null);
     const [preset, setPreset] = useState(null); const [panel, setPanel] = useState(null); const [ctxTick, setCtxTick] = useState(0);
+    const [notice, setNotice] = useState(null);
+    const [tab, setTab] = useState('copy');
+    const [slot, setSlot] = useState(null);
+    const [toolsOpen, setToolsOpen0] = useState(saved0.tools !== false);
+    const [partnerOpen, setPartnerOpen0] = useState(saved0.partner !== false);
+    const [saveSt, setSaveSt] = useState({ pending: 0, err: null, at: 0 });
+    const [typing, setTyping] = useState(0);
+    const [conflict, setConflict] = useState(null);
     const stepping = useRef(new Set()); const pidRef = useRef(null); pidRef.current = pid;
+    const pRef = useRef(null); const pSeen = useRef(null); if (pSeen.current !== p) { pSeen.current = p; pRef.current = p; }
+    const clientRef = useRef(clientId); clientRef.current = clientId;
+    const once = useRef(new Set()); const libSeq = useRef(0); const resumed = useRef(false); const intakeRef = useRef(false); intakeRef.current = intake;
+    const titleRef = useRef(null); const focusNext = useRef(false); const typingSet = useRef(new Set());
     const client = CLIENTS.find(c => c.id === clientId) || CLIENTS[0] || FALLBACK_CLIENTS[0];
     const a = p ? p.assets.find(x => x.id === selAsset) || null : null;
+    const prov = status && status.keys ? { claude: !!status.keys.claude, gemini: !!status.keys.gemini } : null;
+    const setToolsOpen = v => { setToolsOpen0(v); store.set({ tools: v }); };
+    const setPartnerOpen = v => { setPartnerOpen0(v); store.set({ partner: v }); };
+    /* a view change from a deliberate navigation moves focus to the stage's heading, so a keyboard or screen-reader user lands on it */
+    const setView = useCallback((v, focus) => { setView0(v); setCmp(null); if (focus) focusNext.current = true; }, []);
+    // the heading is brought to just under the sticky context bar and navigator (its scroll-margin), so a new stage starts at its top
+    useEffect(() => { if (focusNext.current && titleRef.current) { focusNext.current = false; try { titleRef.current.focus({ preventScroll: true }); titleRef.current.scrollIntoView({ block: 'start' }); } catch (e) {} } }, [view, p && p.id]);
     /* suggested next directions for the selected composition: one small, cached model call per version; refreshed when the asset, its version or the references change */
     const [sugg, setSugg] = useState(null); const suggSig = useRef('');
-    const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() ? a.id + '|' + av.id + '|' + p.references.length : '';
+    const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() && prov && prov.claude ? a.id + '|' + av.id + '|' + p.references.length : '';
     const fetchSugg = useCallback(async (refresh) => {
       if (!suggKey) { setSugg(null); return; }
       suggSig.current = suggKey; setSugg(s => ({ loading: true, data: refresh ? null : (s && s.data) || null, err: '' }));
@@ -1211,19 +1437,32 @@
     }, [suggKey]);
     useEffect(() => { fetchSugg(false); }, [fetchSugg]);
 
+    const refreshStatus = useCallback(() => call('/studio/status').then(s => { setStatus(s); return s; }).catch(() => null), []);
+    /* the library of one client; a slower answer for a client no longer chosen is dropped, never shown */
     const loadLib = useCallback(async () => {
-      setLib(null); setLibErr('');
-      try { const [l, s, k] = await Promise.all([call('/studio/list?ns=' + encodeURIComponent(clientId)), call('/studio/status').catch(() => null), call('/brand/kit?ns=' + encodeURIComponent(clientId)).catch(() => null)]); setLib(Object.assign({}, l, { status: s })); setKit(k && k.kit ? k.kit : {}); }
-      catch (e) { setLibErr(e.code || e.message); }
+      const seq = ++libSeq.current; const ns = clientId; setLib(null); setLibErr(''); setKit(null);
+      try {
+        const [l, s, k] = await Promise.all([call('/studio/list?ns=' + encodeURIComponent(ns)), call('/studio/status').catch(() => null), call('/brand/kit?ns=' + encodeURIComponent(ns)).catch(() => null)]);
+        if (seq !== libSeq.current || clientRef.current !== ns) return;
+        setLib(Object.assign({}, l, { status: s })); if (s) setStatus(s); setKit(k && k.kit ? k.kit : {});
+        // reopen the project this browser had open for this client, where it was left (unless another desk sent work in)
+        if (!resumed.current) { resumed.current = true; const pl = store.place(ns); if (pl && pl.open && !intakeRef.current && (l.projects || []).some(x => x.id === pl.pid)) { const d = await openProject(pl.pid, pl); if (d) setNotice({ kind: 'info', title: 'Resumed where you left off.', text: d.title + ': ' + ((STAGES.find(x => x.views.indexOf(pl.view) >= 0) || {}).label || 'Brief') + (pl.asset && d.assets.some(x => x.id === pl.asset) ? ', ' + d.assets.find(x => x.id === pl.asset).title : '') + '.', actions: [{ label: 'All projects', fn: () => closeProject() }] }); } }
+      } catch (e) { if (seq === libSeq.current) setLibErr(e.code || e.message); }
     }, [clientId]);
     useEffect(() => { loadLib(); }, [loadLib]);
+    useEffect(() => { store.set({ client: clientId }); }, [clientId]);
+    useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
-    useGoto('studio', q => { q = q || {}; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
+    useGoto('studio', q => { q = q || {}; resumed.current = true; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
     const reload = useCallback(async (id) => {
       const want = id || pidRef.current; if (!want) return null;
-      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) setP(d); return d; } catch (e) { toastMsg(e.message, true); return null; }
+      // the ref moves with the answer, not with the next render: a write that follows a reload in the same handler sends the fresh revision
+      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
     }, []);
-    const fail = e => { toastMsg(e.message, true); setBusy(''); };
+    /* an error explained where the work is, with a real retry when one makes sense; a provider problem refreshes the status chips */
+    const fail = (e, what, retry) => { const x = explain(e, what); setNotice(Object.assign(x, { actions: retry ? [{ label: 'Retry', fn: retry }] : [] })); setBusy(''); if (x.kind === 'provider') refreshStatus(); };
+    /* the same action twice while it is still running is refused here, before any request: a double click never makes two jobs or two charges */
+    const guard = async (key, fn) => { if (once.current.has(key)) { setNotice({ kind: 'info', title: 'Already in progress.', text: 'That was not started a second time.' }); return null; } once.current.add(key); try { return await fn(); } finally { once.current.delete(key); } };
 
     /* a job: step it until it ends; a lease held elsewhere is waited out; the project is reloaded as it moves */
     const runJob = useCallback(async (id, label) => {
@@ -1231,11 +1470,14 @@
       try {
         let waits = 0;
         for (let i = 0; i < 60; i++) {
-          if (label) setBusy(label + ' (job ' + id + '; you can close the tab, the tick finishes it)');
+          if (label) setBusy(label);
           let j;
-          try { j = (await call('/studio/job/step', { id })).job; } catch (e) { toastMsg(e.message, true); break; }
-          await reload();
-          if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') { if (j.state === 'failed') toastMsg('Job ' + j.stage + ' failed: ' + j.error, true); return j; }
+          try { j = (await call('/studio/job/step', { id })).job; } catch (e) { fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
+          const d = await reload();
+          if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') {
+            if (j.state === 'failed' && pidRef.current === j.project) { const x = explain({ message: j.error, code: (String(j.error).match(/^[a-z_0-9]+/) || [''])[0] }, 'The ' + j.stage + ' step failed'); setNotice(Object.assign(x, { title: x.title + (x.title.indexOf(j.stage) < 0 ? ' (' + j.stage + ')' : ''), actions: canWrite() && !/not retried|not_configured|budget_exhausted|account_limit/.test(j.error) ? [{ label: 'Retry ' + j.stage, fn: () => retryJob(j) }, { label: 'Jobs', fn: () => setView('jobs', true) }] : [{ label: 'Jobs', fn: () => setView('jobs', true) }] })); if (x.kind === 'provider') refreshStatus(); }
+            return j;
+          }
           // a recipe step waits for the one before it: that one is stepped in its turn (or by the tick), so this one is left, not spun
           if (j.note && /waiting for the step before/.test(j.note)) { if (++waits >= 4) return j; await sleep(2500); continue; }
           await sleep(j.note && /another runner/.test(j.note) ? 3000 : 600);
@@ -1248,7 +1490,6 @@
       try {
         const as = (d.assets || []).find(x => x.id === assetId); if (!as) return false; const v = versionId ? as.versions.find(x => x.id === versionId) : current(as);
         if (!v || !v.layout || !Array.isArray(v.layout.layers) || !canWrite() || d.readOnly) return false;
-        // the art director sees exactly what the export will be: fonts loaded, every image in, measured and filed as this version's evidence
         const imgs = await loadImages(v, d.ns); const fonts = await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
         const val = R.validate(v.layout, v.copy, imgs, { fonts, channel: as.channel, format: as.format });
         const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
@@ -1258,57 +1499,135 @@
     }, []);
     /* anything queued (renders the copy stage enqueued) is run in turn while the tab is open */
     const pump = useCallback(async (d) => {
-      // a finished render queues an inspection, an applied concept queues renders: keep going while new work appears (bounded)
-      let cur = d || p; const seen = new Set();
-      // a recipe is a chain: up to eight steps, each of which may queue renders and inspections of its own
+      let cur = d || pRef.current; const seen = new Set();
       for (let round = 0; round < 10 && cur; round++) {
-        // a step whose upstream has not finished is left for the next round, when that one has run
         const st = {}; (cur.jobs || []).forEach(j => { st[j.id] = j.state; });
         const jobs = (cur.jobs || []).filter(j => j.state === 'queued' && !stepping.current.has(j.id) && !seen.has(j.id) && !(j.after && (st[j.after] === 'queued' || st[j.after] === 'running'))).sort((x, y) => x.created - y.created);
         if (!jobs.length) break;
         for (const j of jobs) { seen.add(j.id); if (pidRef.current !== j.project) return; if (j.stage === 'inspect') await composeExport(cur, j.asset, (j.input || {}).version); await runJob(j.id, (j.stage === 'render' ? 'Rendering ' + (((j.input || {}).approach === 'artwork') ? 'the full artwork' : (j.input || {}).region && (j.input || {}).region !== 'bg' ? 'the ' + (j.input || {}).regionRole + ' image' : 'the background') + ' at ' + ((j.input || {}).size || '2K') : j.stage === 'inspect' ? 'The art director inspects the result' : 'Running ' + j.stage) + (cur.assets || []).filter(x => x.id === j.asset).map(x => ' for ' + x.title).join('')); }
         cur = await reload();
       }
-    }, [p, runJob, reload, composeExport]);
-    const openProject = async (id) => {
-      setPid(id); pidRef.current = id; setCmp(null); setIntake(false); setP(null);
-      const d = await reload(id); if (!d) { setPid(null); return; }
-      setSelAsset(d.assets[0] ? d.assets[0].id : null); setView(d.assets.length ? 'asset' : d.directions.length ? 'directions' : 'brief');
+    }, [runJob, reload, composeExport]);
+    const openProject = async (id, place) => {
+      setPid(id); pidRef.current = id; setCmp(null); setIntake(false); setP(null); setNotice(null); setConflict(null); setExportState(null); setTab('copy');
+      const d = await reload(id); if (!d) { setPid(null); pidRef.current = null; return null; }
+      const asset = place && place.asset && d.assets.some(x => x.id === place.asset) ? place.asset : d.assets[0] ? d.assets[0].id : null;
+      setSelAsset(asset); setSelField(null);
+      const want = place && place.view && stageOfView(place.view) && (place.view !== 'asset' || asset) ? place.view : d.assets.length ? 'asset' : d.directions.length ? 'directions' : 'brief';
+      setView(want, true);
+      refreshStatus();
       if (!d.readOnly) pump(d);
+      return d;
     };
-    const closeProject = () => { setPid(null); pidRef.current = null; setP(null); setCmp(null); loadLib(); };
-    const switchClient = id => { setClientId(id); closeProject(); setIntake(false); setSelAsset(null); setSelField(null); };
+    const closeProject = () => { const pl = store.place(clientRef.current); if (pl) store.setPlace(clientRef.current, Object.assign({}, pl, { open: false })); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setSugg(null); loadLib(); };
+    /* switching client leaves nothing of the other client on screen: project, kit, suggestions, notices, export, dialogs */
+    const switchClient = id => { if (id === clientId) return; resumed.current = true; setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setDialog(null); setPanel(null); setPreset(null); setIntake(false); setSelAsset(null); setSelField(null); setSugg(null); setKit(null); setLib(null); setTab('copy'); setClientId(id); };
 
     const job = async (stage, input, asset, idem, label) => { const r = await call('/studio/job', { project: pidRef.current, asset: asset || undefined, stage, input, idem }); return runJob(r.job.id, label); };
-    const produce = async (extra) => { const d = p || await reload(); const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]); if (!channels.length) { toastMsg('Choose channels in the brief first', true); return; } const j = await job('copy', { channels, deliverable: b.deliverable || 'set', formats: b.formats || {}, template: b.template || '', instruction: (extra && extra.instruction) || '', acknowledge: !!(extra && extra.acknowledge) || undefined, size: (extra && extra.size) || b.size || undefined, quick: !!(extra && extra.instruction) || undefined }, null, 'copy:' + pidRef.current + ':' + Date.now(), 'Writing ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' in the ' + (d.ns || '').toUpperCase() + ' voice' + ((b.deliverable || 'set') === 'copy' ? ', copy only' : ', then laying out compositions')); const d2 = await reload(); if (d2 && d2.assets.length) { setSelAsset(d2.assets[d2.assets.length - 1].id); setView('asset'); } if (j && j.state === 'done') pump(d2); };
-    const direct = async (n) => { n = Math.max(1, Math.min(5, +n || 3)); await job('direct', { n, channels: ((p && p.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing ' + n + ' direction' + (n === 1 ? '' : 's') + ' from the brief, the strategy and the ledger'); setView('directions'); };
-    const draftStrategy = async (instruction) => { await job('strategy', { instruction: instruction || undefined }, null, 'strategy:' + pidRef.current + ':' + Date.now(), 'Drafting the creative strategy'); setView('brief'); };
-    const planSequence = async (input) => { await job('sequence', input, null, 'sequence:' + pidRef.current + ':' + Date.now(), 'Planning the campaign sequence'); setView('sequence'); };
-    const createProject = async (o) => {
+    const produce = (extra) => guard('produce:' + pidRef.current, async () => {
+      try {
+        const d = pRef.current || await reload(); const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]);
+        if (!channels.length) { setNotice({ kind: 'warn', title: 'No channels in the brief.', text: 'Choose at least one channel, then produce.', actions: [{ label: 'Open the brief', fn: () => setView('brief', true) }] }); return; }
+        const imagery = (extra && extra.imagery) || (b.imagery === 'none' ? 'none' : undefined);
+        const before = new Set(d.assets.map(x => x.id));
+        const j = await job('copy', { channels, deliverable: b.deliverable || 'set', formats: b.formats || {}, template: b.template || '', instruction: (extra && extra.instruction) || '', acknowledge: !!(extra && extra.acknowledge) || undefined, size: imagery === 'none' ? undefined : (extra && extra.size) || b.size || undefined, imagery: imagery === 'none' ? 'none' : undefined, quick: !!(extra && extra.instruction) || undefined }, null, 'copy:' + pidRef.current + ':' + Date.now(), 'Writing ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' in the ' + (d.ns || '').toUpperCase() + ' voice' + ((b.deliverable || 'set') === 'copy' ? ', copy only' : ', then laying out compositions'));
+        const d2 = await reload(); const fresh = d2 ? d2.assets.filter(x => !before.has(x.id)) : [];
+        if (fresh.length) { setSelAsset(fresh[0].id); setTab('copy'); setView('asset', true); }
+        if (j && j.state === 'done') pump(d2);
+      } catch (e) { fail(e, 'Production did not start', () => produce(extra)); }
+    });
+    const direct = (n) => guard('direct:' + pidRef.current, async () => { n = Math.max(1, Math.min(5, +n || 3)); try { const j = await job('direct', { n, channels: ((pRef.current && pRef.current.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing ' + n + ' direction' + (n === 1 ? '' : 's') + ' from the brief, the strategy and the ledger'); if (j && j.state === 'done') setView('directions', true); } catch (e) { fail(e, 'Directions did not start', () => direct(n)); } });
+    const draftStrategy = (instruction) => guard('strategy:' + pidRef.current, async () => { try { await job('strategy', { instruction: instruction || undefined }, null, 'strategy:' + pidRef.current + ':' + Date.now(), 'Drafting the creative strategy'); setView('brief'); } catch (e) { fail(e, 'The strategy did not start', () => draftStrategy(instruction)); } });
+    const planSequence = (input) => guard('sequence:' + pidRef.current, async () => { try { await job('sequence', input, null, 'sequence:' + pidRef.current + ':' + Date.now(), 'Planning the campaign sequence'); setView('sequence'); } catch (e) { fail(e, 'The sequence did not start', () => planSequence(input)); } });
+    const createProject = (o) => guard('create:' + clientId, async () => {
       try {
         setBusy('Creating the project'); setIntake(false);
         const formats = {}; o.channels.forEach(c => { formats[c] = (CHANNELS[c] || {}).format || '1:1'; }); if (o.deliverable === 'visual') formats.instagram = '4:5';
         const brief = { objective: o.start === 'brief' ? o.text : o.start === 'reference' ? 'Adapt the reference: ' + o.text : '', audience: '', message: '', deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'Visual creative for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), channels: o.channels, deliverable: o.deliverable, formats, campaignConfirmed: !!o.campaignConfirmed, assumptions: ['Organic, not paid (assumed; edit if wrong)'].concat(o.campaign ? [] : ['No campaign chosen: campaign identity and campaign facts will not apply']) };
         const pr = await call('/studio/project', { ns: client.id, campaign: o.campaign, title: (o.start === 'release' ? (o.text.split('\n').map(s => s.trim()).filter(s => s && !/^media release/i.test(s))[0] || 'Release') : o.text).slice(0, 80), brief, idem: 'p:' + client.id + ':' + Date.now() });
-        setPid(pr.id); pidRef.current = pr.id; setView('brief');
+        setPid(pr.id); pidRef.current = pr.id; setSelAsset(null); setView('brief', true);
         if (o.start === 'release') { const s = await call('/studio/source', { project: pr.id, kind: 'release', name: 'Pasted release', text: o.text }); await reload(pr.id); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading the source: claims, figures and quotations with their passages'); }
         if (o.start === 'reference' && o.file) { await call('/studio/reference', { project: pr.id, kind: 'image', name: o.file.name, purpose: 'composition', imageB64: o.file.b64, mime: o.file.mime, note: 'from intake' }); }
         await reload(pr.id);
         if (o.route === 'guided') { await job('strategy', {}, null, 'strategy:' + pr.id, 'Drafting the creative strategy'); await direct(3); }
         else if (o.clear) await produce({ instruction: o.start === 'release' ? o.instruction : o.text }); else await direct();
-      } catch (e) { fail(e); } finally { setBusy(''); }
+      } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); }
+    });
+    const setCampaign = async (cid) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { campaign: cid || '', brief: { campaignConfirmed: true } } }); await reload(); } catch (e) { if (e.status === 409) { await reload(); fail(e); } else fail(e, 'The campaign was not set'); } };
+    /* the brief is saved on the latest revision; if a newer one arrived first, the team's changed fields are laid over it and
+       saved again when nobody else changed the same field, and handed back as a clash when someone did - never overwritten */
+    const saveBrief = async (b, base, force) => {
+      const changedKeys = (from, to) => Array.from(new Set(Object.keys(from || {}).concat(Object.keys(to || {})))).filter(k => JSON.stringify((from || {})[k]) !== JSON.stringify((to || {})[k]));
+      const put = async (brief) => { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { brief } }); const d = await reload(); return { ok: true, brief: d ? d.brief : brief }; };
+      try { return await put(b); }
+      catch (e) {
+        if (e.status !== 409) { fail(e, 'The brief was not saved', () => saveBrief(b, base, force)); return { ok: false }; }
+        const d = await reload(); if (!d) return { ok: false };
+        const mine = changedKeys(base, b); const theirs = changedKeys(base, d.brief);
+        const merged = Object.assign({}, d.brief); mine.forEach(k => { merged[k] = b[k]; });
+        const clash = mine.filter(k => theirs.indexOf(k) >= 0 && JSON.stringify(d.brief[k]) !== JSON.stringify(b[k]));
+        if (clash.length && !force) return { ok: false, clash, merged, theirs: d.brief };
+        try { const r = await put(merged); setNotice({ kind: 'info', title: 'Brief saved and merged.', text: 'A newer brief had been saved meanwhile; your changes were laid over it' + (theirs.length ? ' (' + theirs.filter(k => mine.indexOf(k) < 0).join(', ') + ' kept from the newer version).' : '.') }); return r; }
+        catch (e2) { fail(e2, 'The brief was not saved', () => saveBrief(b, base, force)); return { ok: false }; }
+      }
     };
-    const setCampaign = async (cid, none) => { try { await call('/studio/project/update', { id: p.id, revision: p.revision, patch: { campaign: cid || '', brief: none ? { campaignConfirmed: true } : { campaignConfirmed: true } } }); await reload(); } catch (e) { fail(e); if (e.status === 409) reload(); } };
-    const saveBrief = async (b) => { try { await call('/studio/project/update', { id: p.id, revision: p.revision, patch: { brief: b } }); await reload(); } catch (e) { fail(e); if (e.status === 409) reload(); } };
-    const addSource = async (name, text) => { try { const s = await call('/studio/source', { project: p.id, kind: 'text', name, text }); await reload(); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading ' + name); } catch (e) { fail(e); } };
-    const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e); } finally { setBusy(''); } };
-    const saveRecipe = async (id, recipe) => { try { setBusy('Saving the recipe'); const d = await call('/studio/reference/recipe', Object.assign({ id, project: p.id }, recipe)); await reload(); toastMsg(d.recipe && d.recipe.conflict ? 'Saved, with a note: ' + d.recipe.conflict : 'Recipe saved', !!(d.recipe && d.recipe.conflict)); } catch (e) { fail(e); } finally { setBusy(''); } };
-    const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e); } finally { setBusy(''); } };
-    const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e); } };
-    const editAsset = async (as, patch) => { try { const cur = p.assets.find(x => x.id === as.id) || as; const changed = {}; Object.keys(patch).forEach(k => { if ((current(cur).copy || {})[k] !== patch[k]) changed[k] = patch[k]; }); if (!Object.keys(changed).length) return; await call('/studio/version', { asset: as.id, revision: cur.revision, copy: changed, note: 'hand edit: ' + Object.keys(changed).join(', ') }); await reload(); } catch (e) { fail(e); if (e.status === 409 || e.code === 'locked') reload(); } };
-    const propose = async (as, feedback, refine, opts) => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The art director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The art director refines ' : 'The art director explores variations of ') + as.title); await reload(); } catch (e) { fail(e); } };
-    const applyInspection = async (eid, instruction, force) => { try { const r = await call('/studio/inspection/apply', { project: p.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the art director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e); } };
-    const applyConcept = async (eid, index, render, imageFrom, size) => { try { const r = await call('/studio/concept/apply', { project: p.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e); } };
+    const addSource = async (name, text) => { try { const s = await call('/studio/source', { project: p.id, kind: 'text', name, text }); await reload(); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading ' + name); } catch (e) { fail(e, 'The source was not added'); } };
+    const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e, 'The reference was not added'); } finally { setBusy(''); } };
+    const saveRecipe = async (id, recipe) => { try { setBusy('Saving the recipe'); const d = await call('/studio/reference/recipe', Object.assign({ id, project: p.id }, recipe)); await reload(); toastMsg(d.recipe && d.recipe.conflict ? 'Saved, with a note: ' + d.recipe.conflict : 'Recipe saved', !!(d.recipe && d.recipe.conflict)); } catch (e) { fail(e, 'The recipe was not saved'); } finally { setBusy(''); } };
+    const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e, 'The reference was not read'); } finally { setBusy(''); } };
+    const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e, 'The direction was not chosen'); } };
+
+    /* text edits: one queue per asset, sent one at a time on the latest revision, so a fast second edit waits for the first
+       instead of racing it; a revision taken by someone else is retried only when they did not touch the same words */
+    const saveQ = useRef(new Map());
+    const bump = (dn, extra) => setSaveSt(s => Object.assign({}, s, { pending: Math.max(0, s.pending + dn) }, extra || {}));
+    const flushCopy = async (id) => {
+      const q = saveQ.current.get(id); if (!q || q.running) return; q.running = true; q.failed = false; bump(1);
+      try {
+        while (Object.keys(q.patch).length) {
+          const patch = q.patch; q.patch = {};
+          let as = ((pRef.current || {}).assets || []).find(x => x.id === id); if (!as) break;
+          const curCopy = (current(as) || {}).copy || {}; const changed = {};
+          Object.keys(patch).forEach(k => { if ((curCopy[k] || '') !== patch[k]) changed[k] = patch[k]; });
+          if (!Object.keys(changed).length) continue;
+          const note = 'hand edit: ' + Object.keys(changed).join(', ');
+          try { await call('/studio/version', { asset: id, revision: as.revision, copy: changed, note }); Object.keys(changed).forEach(k => { q.known[k] = changed[k]; }); }
+          catch (e) {
+            if (e.status === 409 && e.code === 'conflict') {
+              const d = await reload(); as = d && d.assets.find(x => x.id === id); if (!as) throw e;
+              const server = (current(as) || {}).copy || {};
+              const clash = Object.keys(changed).filter(k => (server[k] || '') !== (q.known[k] != null ? q.known[k] : curCopy[k] || '') && (server[k] || '') !== changed[k]);
+              if (clash.length) { setConflict({ asset: id, fields: clash, mine: changed }); q.patch = {}; break; }
+              await call('/studio/version', { asset: id, revision: as.revision, copy: changed, note }); Object.keys(changed).forEach(k => { q.known[k] = changed[k]; });
+            } else { q.patch = Object.assign({}, changed, q.patch); throw e; }
+          }
+          await reload();
+        }
+        setSaveSt(s => Object.assign({}, s, { err: null, at: Date.now() }));
+      } catch (e) {
+        q.failed = true; setSaveSt(s => Object.assign({}, s, { err: { asset: id, message: explain(e).title } }));
+        fail(e, 'Your edit was not saved', () => flushCopy(id));
+      } finally { q.running = false; bump(-1); if (Object.keys(q.patch).length && !q.failed) setTimeout(() => flushCopy(id), 0); }
+    };
+    const editAsset = (as, patch) => {
+      const q = saveQ.current.get(as.id) || { patch: {}, known: {}, running: false };
+      const cur = (((pRef.current || {}).assets || []).find(x => x.id === as.id) || as); const copy0 = (current(cur) || {}).copy || {};
+      Object.keys(patch).forEach(k => { if (q.known[k] == null) q.known[k] = copy0[k] || ''; q.patch[k] = patch[k]; });
+      saveQ.current.set(as.id, q); flushCopy(as.id);
+    };
+    const resolveConflict = async (which) => {
+      const c = conflict; setConflict(null); if (!c) return;
+      const q = saveQ.current.get(c.asset); if (q) c.fields.forEach(k => { delete q.known[k]; });
+      if (which !== 'mine') { await reload(); return; }
+      try { const as = (await reload()).assets.find(x => x.id === c.asset); const mine = {}; c.fields.forEach(k => { mine[k] = c.mine[k]; }); await call('/studio/version', { asset: c.asset, revision: as.revision, copy: mine, note: 'hand edit kept over a newer change: ' + c.fields.join(', ') }); await reload(); }
+      catch (e) { fail(e, 'Your text was not saved'); }
+    };
+    const onDraftState = useCallback((id, on) => { if (on) typingSet.current.add(id); else typingSet.current.delete(id); setTyping(typingSet.current.size); }, []);
+    useEffect(() => { const h = e => { if (typingSet.current.size || saveSt.pending) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
+
+    const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The art director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The art director refines ' : 'The art director explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The art director did not start', () => propose(as, feedback, refine, opts)); } });
+    const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the art director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
+    const applyConcept = (eid, index, render, imageFrom, size) => guard('apply:' + eid + ':' + index, async () => { try { const r = await call('/studio/concept/apply', { project: pRef.current.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e, 'The concept was not applied'); } });
     /* a measurement of one version at its output size, with the composed PNG: the worker re-judges it with the shared rules */
     const fileValidation = async (as, v, val, comp) => {
       try {
@@ -1316,7 +1635,20 @@
         let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
         await call('/studio/validation', { asset: as.id, version: v.id, report: R.report(v, val), imageB64: btoa(bin), mime: 'image/png' });
         await reload();
-      } catch (e) { toastMsg('Validation not filed: ' + e.message, true); }
+      } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message, true); }
+    };
+    /* layout versions go on the latest revision; if the asset moved on, the layout is re-sent only when the newer version did not change the layout too */
+    const putLayout = async (as, layout, baseVid, note) => {
+      const fresh = (((pRef.current || {}).assets || []).find(x => x.id === as.id)) || as;
+      try { await call('/studio/version', { asset: as.id, revision: fresh.revision, layout, kind: 'layout', note }); await reload(); return true; }
+      catch (e) {
+        if (e.status !== 409 || e.code !== 'conflict') throw e;
+        const d = await reload(); const as2 = d && d.assets.find(x => x.id === as.id); if (!as2) throw e;
+        const base = as2.versions.find(x => x.id === baseVid); const cur = current(as2);
+        if (base && JSON.stringify(base.layout) === JSON.stringify(cur.layout)) { await call('/studio/version', { asset: as.id, revision: as2.revision, layout, kind: 'layout', note }); await reload(); return true; }
+        setNotice({ kind: 'warn', title: 'The layout changed elsewhere while you edited.', text: 'v' + as2.versions.length + ' changed the layout too, so yours was not saved over it. Apply yours on top of v' + as2.versions.length + ', or leave the newer layout.', actions: [{ label: 'Apply mine on top', fn: async () => { try { const as3 = (await reload()).assets.find(x => x.id === as.id); await call('/studio/version', { asset: as.id, revision: as3.revision, layout, kind: 'layout', note: note + ' (applied over a newer layout)' }); await reload(); } catch (e3) { fail(e3, 'The layout was not saved'); } } }] });
+        return false;
+      }
     };
     /* the smallest geometric fix, measured with the real renderer, saved as a layout version: no image call is made */
     const repairLayout = async (as, v, comp) => {
@@ -1324,113 +1656,160 @@
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
         const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
         if (!r.changed) return { text: r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix geometrically.', conflict: !!r.conflict };
-        await call('/studio/version', { asset: as.id, revision: as.revision, layout: r.layout, kind: 'layout', note: 'layout repaired: ' + r.steps.join('; ').slice(0, 170) });
-        await reload();
+        const saved = await putLayout(as, r.layout, v.id, 'layout repaired: ' + r.steps.join('; ').slice(0, 170));
+        if (!saved) return { text: 'Not saved: the layout changed elsewhere first.', conflict: true };
         return { text: (r.ok ? 'Fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.', conflict: !r.ok };
-      } catch (e) { toastMsg(e.message, true); return { text: 'The fix failed: ' + e.message, conflict: true }; }
+      } catch (e) { fail(e, 'The layout fix was not saved'); return { text: 'The fix failed: ' + e.message, conflict: true }; }
     };
     const markVariant = async (as, v, comp) => {
       try {
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
         const r = R.markVariants(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, variants });
         if (!r.changed) return false;
-        await call('/studio/version', { asset: as.id, revision: as.revision, layout: r.layout, kind: 'layout', note: 'mark variant chosen for contrast: ' + r.steps.join('; ').slice(0, 160) });
-        await reload(); toastMsg(r.steps.join('; ') + ' - no render'); return true;
+        const ok2 = await putLayout(as, r.layout, v.id, 'mark variant chosen for contrast: ' + r.steps.join('; ').slice(0, 160));
+        if (ok2) toastMsg(r.steps.join('; ') + ' - no render'); return ok2;
       } catch (e) { toastMsg('Mark variant not changed: ' + e.message, true); return false; }
     };
-    const saveLayout = async (as, layout) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'layout edited by hand' }); await reload(); } catch (e) { fail(e); } };
-    const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await call('/studio/version', { asset: as.id, revision: as.revision, layout, kind: 'layout', note: 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)' }); await reload(); } catch (e) { fail(e); } };
-    const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e); } };
-    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(fail); return; } setDialog({ kind: 'reason', part, what, asset: as.id }); };
+    const saveLayout = async (as, layout, baseVid) => { try { await putLayout(as, layout, baseVid || as.current, 'layout edited by hand'); } catch (e) { fail(e, 'The layout was not saved', () => saveLayout(as, layout, baseVid)); } };
+    const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
+    const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
+    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)) }); };
     const recordDecision = async (why) => {
       const d = dialog; setDialog(null); if (!why) return;
       try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why }); await reload(); }
       catch (e) {
         // painted words nobody could verify, or an inconsistent inspection: a person may still approve, having looked
-        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && window.confirm((e.detail || e.message) + '\n\nApprove anyway, having checked the tile yourself?')) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2); } }
-        else fail(e);
+        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && window.confirm((e.detail || e.message) + '\n\nApprove anyway, having checked the tile yourself?')) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
+        else fail(e, 'The decision was not recorded');
       }
     };
-    const restore = async (as, vid) => { try { await call('/studio/version', { asset: as.id, revision: as.revision, restoreFrom: vid }); await reload(); setCmp(null); } catch (e) { fail(e); } };
-    const render = async (as, prompt, edit, size) => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: ['1K', '2K', '4K'].indexOf(size) >= 0 ? size : (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e); } };
-    const areaEdit = async (as, o) => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (o.kind === 'area' ? 'area edit: ' : o.kind === 'background' ? 'background swap: ' : 'restyle: ') + o.instruction.slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (o.kind === 'area' ? 'Editing the marked area of ' : o.kind === 'background' ? 'Changing the background of ' : 'Restyling ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e); } };
+    const restore = async (as, vid) => { try { const fresh = pRef.current.assets.find(x => x.id === as.id) || as; await call('/studio/version', { asset: as.id, revision: fresh.revision, restoreFrom: vid }); await reload(); setCmp(null); } catch (e) { if (e.status === 409) { await reload(); } fail(e, 'The version was not restored'); } };
+    const render = (as, prompt, edit, size) => guard('render:' + as.id, async () => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: ['1K', '2K', '4K'].indexOf(size) >= 0 ? size : (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e, 'The render did not start'); } });
+    const areaEdit = (as, o) => guard('render:' + as.id, async () => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (o.kind === 'area' ? 'area edit: ' : o.kind === 'background' ? 'background swap: ' : 'restyle: ') + o.instruction.slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (o.kind === 'area' ? 'Editing the marked area of ' : o.kind === 'background' ? 'Changing the background of ' : 'Restyling ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e, 'The edit did not start'); } });
     const filePreservation = async (m) => { try { await call('/studio/preservation', m); await reload(); } catch (e) { toastMsg('Preservation not filed: ' + e.message, true); } };
-    const note = async (text, tgt) => { try { await call('/studio/note', { project: p.id, text, target: tgt }); await reload(); } catch (e) { fail(e); } };
-    const directTeam = async (text, tgt) => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + p.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { setSelAsset(j.result.changed[0]); setView('asset'); } } catch (e) { fail(e); } };
+    const note = async (text, tgt) => { try { await call('/studio/note', { project: pRef.current.id, text, target: tgt }); await reload(); } catch (e) { fail(e, 'The note was not recorded'); } };
+    const directTeam = (text, tgt) => guard('revise:' + pidRef.current, async () => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + pRef.current.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { setSelAsset(j.result.changed[0]); setTab('copy'); setView('asset'); } } catch (e) { fail(e, 'The direction was not sent'); } });
     /* the paid remedies of the impact list: one revise call on that asset, locked fields kept by the stage itself */
     const reviseFromImpact = async (x, r) => { const ins = r.remedy === 'readapt' ? 'The master this was adapted from has changed. Bring this asset\'s words in line with the master\'s current version, fitted to this channel and format. Keep the locked fields.' : 'The creative strategy was confirmed after this asset was made. Bring the words in line with the confirmed strategy (proposition, audience, tone). Keep the locked fields.'; await job('revise', { target: 'asset', asset: x.asset, instruction: ins }, null, 'revise:' + x.asset + ':' + r.code + ':' + x.version, (r.remedy === 'readapt' ? 'Re-adapting ' : 'Revising ') + x.title); await reload(); };
-    const pickAlternative = async (assetId, field, option) => { try { const as = p.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); setView('asset'); } catch (e) { fail(e); } };
-    const decideProposal = async (eid, decision) => { try { const r = await call('/studio/proposal', { project: p.id, eid, decision }); const d = await reload(); if (decision === 'do' && r.jobs && r.jobs.length) pump(d); } catch (e) { fail(e); } };
-    const remember = async (eid, scope, offer) => { try { const ta = document.getElementById('offer-' + eid); const rule = ta ? ta.value.trim() : offer.rule; const r = await call('/studio/remember', { project: p.id, eid, scope, rule, task: offer.task, campaign: offer.campaign, instruction: offer.instruction }); toastMsg(r.saved ? 'Saved as ' + (r.scope === 'campaign' ? 'a campaign preference for ' + r.campaign : 'a lasting ' + p.ns.toUpperCase() + ' rule') : 'Not saved; applied to this work only'); await reload(); } catch (e) { fail(e); } };
-    const retryJob = async (j) => { try { await job(j.stage, j.input, j.asset || null, (j.idem || j.id) + ':retry:' + Date.now(), 'Retrying ' + j.stage); } catch (e) { fail(e); } };
-    const cancelJob = async (id) => { try { await call('/studio/job/cancel', { id }); await reload(); } catch (e) { fail(e); } };
-    const importLegacy = async (l) => { try { setBusy('Importing ' + l.title); const r = await call('/studio/import', { legacy: l.id }); toastMsg(r.existing ? 'Already imported: opening that project' : 'Imported; the original is untouched'); await openProject(r.id); } catch (e) { fail(e); } finally { setBusy(''); } };
+    const pickAlternative = async (assetId, field, option) => { try { const as = pRef.current.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); setView('asset'); } catch (e) { if (e.status === 409) await reload(); fail(e, 'The alternative was not applied'); } };
+    const decideProposal = async (eid, decision) => { try { const r = await call('/studio/proposal', { project: pRef.current.id, eid, decision }); const d = await reload(); if (decision === 'do' && r.jobs && r.jobs.length) pump(d); } catch (e) { fail(e, 'The decision was not recorded'); } };
+    const remember = async (eid, scope, offer) => { try { const ta = document.getElementById('offer-' + eid); const rule = ta ? ta.value.trim() : offer.rule; const r = await call('/studio/remember', { project: pRef.current.id, eid, scope, rule, task: offer.task, campaign: offer.campaign, instruction: offer.instruction }); toastMsg(r.saved ? 'Saved as ' + (r.scope === 'campaign' ? 'a campaign preference for ' + r.campaign : 'a lasting ' + pRef.current.ns.toUpperCase() + ' rule') : 'Not saved; applied to this work only'); await reload(); } catch (e) { fail(e, 'The preference was not recorded'); } };
+    /* a retry is a new job named after the one that failed and how many retries it has had: pressing Retry twice runs it once */
+    const retryJob = (j) => guard('retry:' + j.id, async () => { try { const n = ((pRef.current || {}).jobs || []).filter(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && (x.state === 'failed' || x.state === 'cancelled')).length; const r = await call('/studio/job', { project: j.project || pidRef.current, asset: j.asset || undefined, stage: j.stage, input: j.input, idem: 'retry:' + j.id + ':' + n }); const done = await runJob(r.job.id, 'Retrying ' + j.stage); const d = await reload(); if (done && done.state === 'done') { setNotice({ kind: 'info', title: 'The ' + j.stage + ' step ran on retry.', text: 'Nothing was lost; the result is in place.' }); if (j.stage === 'copy' && d) { const fresh = d.assets[d.assets.length - 1]; if (fresh) { setSelAsset(fresh.id); setView('asset'); } } pump(d); } } catch (e) { fail(e, 'The retry did not start'); } });
+    const cancelJob = async (id) => { try { const r = await call('/studio/job/cancel', { id }); await reload(); setNotice({ kind: 'info', title: 'Cancelled.', text: (r && r.note) || RUN_NOTE }); } catch (e) { fail(e, 'The job was not cancelled'); } };
+    const importLegacy = async (l) => { try { setBusy('Importing ' + l.title); const r = await call('/studio/import', { legacy: l.id }); toastMsg(r.existing ? 'Already imported: opening that project' : 'Imported; the original is untouched'); await openProject(r.id); } catch (e) { fail(e, 'The import did not run'); } finally { setBusy(''); } };
 
-    /* export: the renderer draws each approved composition at native size; a full key saves the PNGs and runs the export stage; the bundle downloads */
-    const doExport = async (ready) => {
+    /* export: the renderer draws each approved composition at native size (fonts and imagery loaded first, as for the
+       validation); a full key saves the PNGs and runs the export stage; the bundle downloads; the files are listed with their pixels */
+    const doExport = (ready) => guard('export:' + pidRef.current, async () => {
+      const p0 = pRef.current;
       setExportState({ busy: true, msg: 'Drawing ' + ready.length + ' composition' + (ready.length === 1 ? '' : 's') + ' at native size...' });
       try {
-        const files = []; const sheet = [];
+        const files = []; const sheet = []; const list = [];
+        const dims = u8 => (u8 && u8.length > 24 && u8[1] === 80 && u8[2] === 78 && u8[3] === 71) ? { w: ((u8[16] << 24) | (u8[17] << 16) | (u8[18] << 8) | u8[19]) >>> 0, h: ((u8[20] << 24) | (u8[21] << 16) | (u8[22] << 8) | u8[23]) >>> 0 } : null;
         for (const x of ready) {
           const v = x.v; const safe = (x.a.title + '-v' + vnum(x.a, v)).replace(/[^a-z0-9-]+/gi, '_');
           if (v.layout && v.layout.layers) {
-            const blob = await R.toBlob(v.layout, v.copy, await loadImages(v, p.ns)); const u8 = new Uint8Array(await blob.arrayBuffer());
-            files.push({ name: safe + '.png', data: u8 });
-            if (canWrite() && !p.readOnly) { const b64 = btoa(Array.from(u8).map(c => String.fromCharCode(c)).join('')); await call('/studio/render/save', { asset: x.a.id, version: v.id, imageB64: b64, mime: 'image/png' }); }
-          } else if (v.image && v.image.url) { try { const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); files.push({ name: safe + '.png', data: new Uint8Array(await r.arrayBuffer()) }); } catch (e) {} }
+            const imgs = await loadImages(v, p0.ns); await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+            const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
+            files.push({ name: safe + '.png', data: u8 }); const d0 = dims(u8); list.push(Object.assign({ name: safe + '.png', bytes: u8.length, want: v.layout.stage ? { w: v.layout.stage.w, h: v.layout.stage.h } : null }, d0 || {}));
+            if (canWrite() && !p0.readOnly) { let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); await call('/studio/render/save', { asset: x.a.id, version: v.id, imageB64: btoa(bin), mime: 'image/png' }); }
+          } else if (v.image && v.image.url) { try { const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); const u8 = new Uint8Array(await r.arrayBuffer()); files.push({ name: safe + '.png', data: u8 }); list.push(Object.assign({ name: safe + '.png', bytes: u8.length }, dims(u8) || {})); } catch (e) {} }
           sheet.push('== ' + x.a.title + ' (' + x.a.channel + ' ' + x.a.format + ') - version ' + v.id + ' ==', ...['headline', 'support', 'cta', 'caption', 'alt'].filter(k => v.copy[k]).map(k => k.toUpperCase() + ': ' + v.copy[k]), 'CHECKS: ' + ((v.checks || []).map(c => c.state + ' ' + c.text).join('; ') || 'none'), 'APPROVALS: ' + Object.keys(x.a.approvals || {}).map(k => k + ' by ' + x.a.approvals[k].by + ' - ' + x.a.approvals[k].reason).join('; '), '');
         }
         let manifest = null;
-        if (canWrite() && !p.readOnly) { setExportState({ busy: true, msg: 'Recording the export on the project...' }); const j = await job('export', { assets: ready.map(x => x.a.id) }, null, 'export:' + p.id + ':' + Date.now(), 'Recording the export'); manifest = j && j.result ? j.result : null; if (manifest && manifest.sheet) sheet.unshift(manifest.sheet.split('\n')[0], ''); }
-        files.push({ name: 'copy-sheet.txt', data: (manifest && manifest.sheet && manifest.sheet.length < 4000 ? manifest.sheet : 'COPY SHEET - ' + p.title + '\n\n' + sheet.join('\n')) });
-        files.push({ name: 'manifest.json', data: JSON.stringify({ project: p.id, ns: p.ns, title: p.title, campaign: p.campaign, at: new Date().toISOString(), assets: ready.map(x => ({ asset: x.a.id, title: x.a.title, channel: x.a.channel, format: x.a.format, version: x.v.id, copy: x.v.copy, layout: x.v.layout, image: x.v.image, checks: x.v.checks, approvals: x.a.approvals, context: x.v.context })), export: manifest ? { id: manifest.export, files: manifest.files, excluded: manifest.excluded } : { note: 'downloaded by a read-only key; not recorded on the project' }, note: 'Approved versions only. This export created no task and sent nothing anywhere.' }, null, 2) });
-        const blob = R.zip(files); const url = URL.createObjectURL(blob); const name = 'studio-' + p.ns + '-' + p.id + '.zip';
-        // the browser may refuse a download that code starts after a long wait (Safari always does), so the dialog also shows the link for a real click
+        if (canWrite() && !p0.readOnly) { setExportState({ busy: true, msg: 'Recording the export on the project...' }); const j = await job('export', { assets: ready.map(x => x.a.id) }, null, 'export:' + p0.id + ':' + Date.now(), 'Recording the export'); if (!j || j.state !== 'done') throw new Error((j && j.error) || 'the export was not recorded'); manifest = j.result || null; }
+        const sheetText = manifest && manifest.sheet && manifest.sheet.length < 4000 ? manifest.sheet : 'COPY SHEET - ' + p0.title + '\n\n' + sheet.join('\n');
+        files.push({ name: 'copy-sheet.txt', data: sheetText });
+        const man = JSON.stringify({ project: p0.id, ns: p0.ns, title: p0.title, campaign: p0.campaign, at: new Date().toISOString(), assets: ready.map(x => ({ asset: x.a.id, title: x.a.title, channel: x.a.channel, format: x.a.format, version: x.v.id, versionNumber: vnum(x.a, x.v), copy: x.v.copy, layout: x.v.layout, image: x.v.image, checks: x.v.checks, approvals: x.a.approvals, context: x.v.context })), export: manifest ? { id: manifest.export, files: manifest.files, excluded: manifest.excluded } : { note: 'downloaded by a read-only key; not recorded on the project' }, note: 'Approved versions only. This export created no task and sent nothing anywhere.' }, null, 2);
+        files.push({ name: 'manifest.json', data: man });
+        list.push({ name: 'copy-sheet.txt', bytes: sheetText.length }, { name: 'manifest.json', bytes: man.length });
+        const blob = R.zip(files); const url = URL.createObjectURL(blob); const name = 'studio-' + p0.ns + '-' + p0.id + '.zip';
+        // the browser may refuse a download that code starts after a long wait (Safari always does), so the view also shows the link for a real click
         try { const el = document.createElement('a'); el.href = url; el.download = name; document.body.appendChild(el); el.click(); el.remove(); } catch (e) {}
-        setExportState({ busy: false, url, name, size: blob.size, msg: 'Bundle ready: ' + files.length + ' files' + (manifest ? '; recorded as export ' + manifest.export + ' on the project.' : '.') + ' If the download did not start, use the link.' }); window.__studioLastExport = { files: files.map(f => f.name), manifest };
-      } catch (e) { setExportState({ busy: false, msg: 'Export stopped: ' + e.message }); }
-    };
+        const bad = list.filter(f => f.want && f.w && (f.w !== f.want.w || f.h !== f.want.h));
+        setExportState({ busy: false, url, name, size: blob.size, files: list, error: !!bad.length, msg: 'Bundle ready: ' + files.length + ' files' + (manifest ? '; recorded as export ' + manifest.export + ' on the project.' : '.') + (bad.length ? ' ' + bad.length + ' image' + (bad.length === 1 ? ' is' : 's are') + ' not at the native size: do not send them.' : ' Every image is at its native size.') + ' If the download did not start, use the link.' });
+        window.__studioLastExport = { files: files.map(f => f.name), list, manifest };
+        await reload();
+      } catch (e) { const x = explain(e, 'The export stopped'); setExportState({ busy: false, error: true, msg: x.title + '. ' + x.text }); }
+    });
 
-    const stage = !p ? '' : !p.assets.length && p.directions.length && !p.directions.some(d => d.chosen) ? 'directions' : !p.assets.length ? 'brief' : p.assets.every(x => standing(x, 'copy') && (standing(x, 'design') || (current(x) || {}).mode === 'copy')) ? 'export' : p.assets.some(x => standing(x, 'copy') || standing(x, 'design')) ? 'review' : 'production';
+    const flow = p ? flowOf(p) : null;
+    const stage = stageOfView(view) || (view === 'brand' || view === 'context' ? '' : 'brief');
+    const goStage = (id) => {
+      if (id === 'brief') setView('brief', true); else if (id === 'directions') setView('directions', true); else if (id === 'produce') setView('board', true);
+      else if (id === 'refine') { if (!a && p && p.assets[0]) setSelAsset(p.assets[0].id); setView('asset', true); }
+      else if (id === 'review') setView('review', true); else if (id === 'export') setView('export', true);
+    };
+    const openAsset = id => { setSelAsset(id); setSelField(null); setView('asset'); };
+    /* Alt+1..6 jumps to a stage from anywhere in the Studio, except while typing */
+    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const n = +e.key; if (n >= 1 && n <= 6 && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(STAGES[n - 1].id); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
+
+    const liveJobs = p ? (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running') : [];
+    const campName = p && p.campaign ? ((kit && kit.campaigns || []).find(c => c.id === p.campaign) || {}).name || p.campaign : '';
+    const saveWord = saveSt.err ? 'Not saved' : saveSt.pending || typing ? 'Saving...' : saveSt.at ? 'All changes saved' : 'Saved';
     const header = html`<div class="st-head">
-      <div class="st-head-l"><span class="ov-title">Creative Studio</span>
-        <select class="st-sel" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select>
-        ${p ? html`<button class="ov-link" onClick=${closeProject}>projects</button><span class="st-sep">/</span><b>${p.title}</b><span class="ov-dim">${p.campaign || 'no campaign'}</span>${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}` : html`<span class="ov-dim">project library</span>`}
+      <div class="st-head-l"><span class="st-appname">Creative Studio</span>
+        <select class="st-sel st-client" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select>
+        ${p ? html`<span class="st-sep" aria-hidden="true">/</span><button class="ov-link" onClick=${closeProject}>All projects</button><span class="st-sep" aria-hidden="true">/</span><b class="st-ptitle" title=${p.title}>${p.title}</b>${campName ? html`<${Chip} title="campaign">${campName}</${Chip}>` : html`<span class="ov-dim">no campaign</span>`}${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}${a && view === 'asset' ? html`<span class="st-sep" aria-hidden="true">/</span><span class="st-curasset">${a.title} <span class="ov-dim">v${vnum(a, current(a))} of ${a.versions.length}</span></span>` : null}` : html`<span class="ov-dim">project library</span>`}
       </div>
-      <div class="st-head-r">${p ? html`<span class="ov-dim">saved ${ago(p.updated)} ago${p.legacy ? ', imported from ' + p.legacy.id : ''}</span><span class=${'st-status ' + stage}>${stage}</span><button class="ov-link" onClick=${() => { setCmp(null); setView('context'); }} title="What the Studio knows about this client">client</button>${p.assets.length ? html`<button class="btn sm ghost" onClick=${() => { setExportState(null); setDialog({ kind: 'export' }); }}>Export</button>` : null}` : null}${lib && lib.status ? html`<${Chip} title="Worker build">${lib.status.build}</${Chip}>` : null}</div>
+      <div class="st-head-r">
+        ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save' + (saveSt.err ? ' bad' : saveSt.pending || typing ? ' busy' : ' ok')} role="status" aria-live="polite">${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}
+        ${p ? html`<button class=${'st-activity' + (liveJobs.length ? ' on' : '')} onClick=${() => setView('jobs', true)} aria-label=${liveJobs.length ? liveJobs.length + ' jobs running or queued; open Jobs' : 'No jobs running; open Jobs'}>${liveJobs.length ? html`<span class="st-spin" aria-hidden="true"></span>${liveJobs.length} running` : 'Jobs'}</button>` : null}
+        ${prov ? (prov.claude && prov.gemini ? html`<span class="st-prov ok" title=${'Claude and image generation are configured on the worker (reachability is checked when a call is made). Model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-') + '. Build ' + status.build + '.'}>Models ready</span>` : html`<span class=${'st-prov ' + (prov.claude ? 'ok' : 'bad')} title=${prov.claude ? 'Claude is configured on the worker' : 'Claude is not configured on the worker: writing, planning and inspection cannot run'}>Claude ${prov.claude ? 'ready' : 'not configured'}</span><span class=${'st-prov ' + (prov.gemini ? 'ok' : 'bad')} title=${prov.gemini ? 'Image generation is configured on the worker' : 'Image generation is not configured: compositions work, imagery cannot be made'}>Images ${prov.gemini ? 'ready' : 'not configured'}</span>`) : null}
+        ${status && !p ? html`<${Chip} title=${'Worker build; model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-')}>${status.build}</${Chip}>` : null}
+      </div>
     </div>`;
-    const stepper = p ? html`<div class="st-steps" aria-label="Stages">${['brief', 'directions', 'production', 'review', 'export'].map((s, i, arr) => { const idx = arr.indexOf(stage); const skipped = s === 'directions' && !p.directions.length && p.assets.length; return html`<button key=${s} class=${'st-step' + (s === stage ? ' on' : i < idx ? ' done' : '') + (skipped ? ' skipped' : '')} onClick=${() => { setCmp(null); setView(s === 'directions' ? 'directions' : s === 'brief' ? 'brief' : 'asset'); }} title=${skipped ? 'Skipped: a clear instruction needs no direction step' : ''}>${s}</button>`; })}</div>` : null;
+
+    const headOf = (id, extra) => { const s0 = STAGES.find(x => x.id === id); return Object.assign({ id, title: s0.label, purpose: s0.purpose, flow, focusRef: titleRef }, extra || {}); };
+    const tabsFor = id => id === 'brief' ? { tabs: [['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length]], tab: view, onTab: k => setView(k) }
+      : id === 'produce' ? { tabs: [['board', 'Board', p.assets.length || null], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['production', 'Recipes and usage'], ['jobs', 'Jobs', liveJobs.length || null]], tab: view, onTab: k => setView(k) }
+      : id === 'refine' ? { tabs: [['asset', a ? a.title : 'Asset'], ['copy', 'Copy deck']], tab: view, onTab: k => { if (k === 'asset' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } } : {};
+    const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
+    const jobsLine = p && (liveJobs.length || (p.jobs || []).some(j => j.state === 'failed')) ? html`<div class="st-jobline-strip" aria-label="Jobs in progress">${liveJobs.slice(0, 4).map(j => html`<span key=${j.id} class="st-jobchip"><span class="st-spin" aria-hidden="true"></span>${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${j.state}${j.attempts ? ', attempt ' + (j.attempts + 1) + ' of 3' : ''}</span>${canWrite() ? html` <button class="ov-link" title=${RUN_NOTE} onClick=${() => cancelJob(j.id)}>cancel</button>` : null}</span>`)}${(p.jobs || []).filter(j => j.state === 'failed' && !(p.jobs || []).some(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && x.state !== 'failed')).slice(-3).map(j => html`<span key=${j.id} class="st-jobchip bad"><${Chip} kind="bad">failed</${Chip}> ${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${explain({ message: j.error }).title}</span>${canWrite() ? html` <button class="ov-link" onClick=${() => retryJob(j)}>retry</button>` : null}</span>`)}</div>` : null;
 
     let centre;
-    if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} onOpen=${openProject} onNew=${() => setIntake(true)} onImport=${importLegacy} />`;
-    else if (!p) centre = html`<div class="st-centre-pad"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
+    if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
+    else if (!p) centre = html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
-    else if (view === 'brief') centre = html`<${BriefView} p=${p} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} busy=${busy} />`;
-    else if (view === 'board') centre = html`<${BoardView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
-    else if (view === 'copy') centre = html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
-    else if (view === 'sequence') centre = html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${id => { setSelAsset(id); setView('asset'); }} busy=${busy} />`;
-    else if (view === 'sources') centre = html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`;
-    else if (view === 'references') centre = html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} busy=${busy} />`;
-    else if (view === 'directions') centre = html`<${DirectionsView} p=${p} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
-    else if (view === 'production') centre = html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${id => { setSelAsset(id); setView('asset'); }} onReview=${() => setView('review')} onRevise=${reviseFromImpact} />`;
-    else if (view === 'review') centre = html`<${ReviewView} p=${p} onOpen=${id => { setSelAsset(id); setView('asset'); }} />`;
-    else if (view === 'brand') centre = html`<${BrandView} p=${p} tick=${ctxTick} />`;
+    else if (view === 'brief') centre = html`<${BriefView} key=${p.id} p=${p} head=${headOf('brief', tabsFor('brief'))} prov=${prov} onGo=${goStage} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} busy=${busy} />`;
+    else if (view === 'sources') centre = Staged('brief', null, html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`);
+    else if (view === 'references') centre = Staged('brief', null, html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} busy=${busy} />`);
+    else if (view === 'directions') centre = html`<${DirectionsView} p=${p} head=${headOf('directions')} prov=${prov} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
+    else if (view === 'board') centre = Staged('produce', p.assets.length ? html`<button class="btn sm" onClick=${() => goStage('refine')}>Continue to Refine</button>` : canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.claude) || !((p.brief || {}).channels || []).length} title=${prov && !prov.claude ? 'Claude is not configured on the worker' : ''} onClick=${() => produce({})}>Produce the set</button><button class="btn sm ghost" onClick=${() => setView('brief', true)}>Check the brief</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing produced yet.</b><span>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, or produce straight from the brief.' : 'Production writes one piece per channel in the brief and lays each out as an editable composition.'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`);
+    else if (view === 'sequence') centre = Staged('produce', null, html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${openAsset} busy=${busy} />`);
+    else if (view === 'production') centre = Staged('produce', null, html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${openAsset} onReview=${() => setView('review', true)} onRevise=${reviseFromImpact} />`);
+    else if (view === 'jobs') centre = Staged('produce', null, html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${status ? status.budget : null} />`);
+    else if (view === 'copy') centre = Staged('refine', null, html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${openAsset} />`);
+    else if (view === 'review') centre = html`<${ReviewStage} p=${p} head=${headOf('review')} flow=${flow} onGo=${goStage} onApprove=${approve} onOpen=${openAsset} />`;
+    else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('export')} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
+    else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
-    else if (view === 'jobs') centre = html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${lib && lib.status ? lib.status.budget : null} />`;
-    else if (a) centre = html`<${AssetView} p=${p} a=${a} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${id => { setSelAsset(id); setSelField(null); }} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} />`;
-    else centre = html`<div class="st-centre-pad"><div class="ov-empty">${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Confirm the brief on the left; production starts from it.'}</div></div>`;
+    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('refine', Object.assign({ compact: true }, tabsFor('refine')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} slot=${slot} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} /></div>`; }
+    else centre = Staged('refine', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to refine yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Produce the set from the brief first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length ? 'directions' : 'brief')}>${p.directions.length ? 'Go to Directions' : 'Go to the Brief'}</button>` : null}</div>`);
 
-    return html`<div class="st">
-      ${header}${stepper}
-      <div class=${'st-body' + (p ? '' : ' lib')}>
-        ${p ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => { setCmp(null); setView(v); }} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} />` : null}
-        <main class="st-centre">${centre}</main>
-        ${p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} busy=${busy} sugg=${view === 'asset' || a ? sugg : null} onSuggRefresh=${() => fetchSugg(true)} />` : null}
+    const inRefine = !!(p && view === 'asset' && a && !cmp);
+    const insTabs = [['copy', 'Copy'], ['quality', 'Quality'], ['partner', 'Partner'], ['versions', 'Versions']];
+    const tabKey = e => { const i = insTabs.findIndex(t => t[0] === tab); if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const n = insTabs[(i + (e.key === 'ArrowRight' ? 1 : insTabs.length - 1)) % insTabs.length][0]; setTab(n); setTimeout(() => { const el = document.getElementById('st-tabbtn-' + n); if (el) el.focus(); }, 0); } };
+    const showAside = !!p && (inRefine || partnerOpen);
+    const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${() => fetchSugg(true)} />` : null;
+    return html`<div class=${'st' + (p ? ' has-project' : '')} data-stage=${stage}>
+      ${header}
+      ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
+      ${busy && p ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
+      <${Notice} n=${notice} onClose=${() => setNotice(null)} />
+      <div class=${'st-body' + (p ? '' : ' lib') + (p && !showAside ? ' noaside' : '')}>
+        ${p ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} />` : null}
+        <main class="st-centre" aria-label="Workspace">${centre}</main>
+        ${p ? (showAside ? html`<aside class="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative partner'}>
+          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '')} onClick=${() => setTab(k)}>${l}${k === 'quality' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}</div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative partner</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the creative partner">hide</button></div>`}
+          <div class="st-slot" ref=${setSlot}></div>
+          <div class="st-partner-wrap" id="st-tab-partner" role=${inRefine ? 'tabpanel' : undefined} hidden=${inRefine && tab !== 'partner'}>${partnerEl}</div>
+        </aside>` : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the creative partner">Partner</button>`) : null}
       </div>
-      ${dialog && dialog.kind === 'export' && p ? html`<${ExportDialog} p=${p} client=${client} onClose=${() => setDialog(null)} onClickup=${ready => setDialog({ kind: 'clickup', ready })} onExport=${doExport} state=${exportState} />` : null}
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
       ${panel && p ? html`<${ClientPanel} p=${p} kind=${panel} onClose=${() => setPanel(null)} onChanged=${() => { setCtxTick(t => t + 1); loadLib(); }} />` : null}
-      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + (a || {}).title + ', the current version. Approval is recorded as client acceptance of this exact version, never as performance.'} onDone=${recordDecision} />` : null}
+      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.'} onDone=${recordDecision} />` : null}
     </div>`;
   }
 

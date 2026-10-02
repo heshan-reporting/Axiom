@@ -1519,6 +1519,33 @@ brand colour is not changed on its own; the Fix button now shows for every
 contrast finding; `tools/studio-compose.mjs --repair` passes the variants.
 Section 10 of `tests/studio-layout-browser.mjs`.
 
+**One workspace (build `studio-p23`; `CREATIVE-STUDIO.md` s.31).** The island is
+one frame: a sticky context bar (client, All projects, project, campaign, asset and
+version, save state, live jobs, whether the models are configured), a sticky
+navigator of six stages - Brief, Directions, Produce, Refine, Review, Export - whose
+states come from the project (`flowOf`: done, in progress, to do, running, skipped,
+blocked with the reason), a stage heading with the purpose, the main action and the
+views inside the stage as tabs, the assets rail (renderer thumbnails, approval and
+validation state) with Brand, Client context and Jobs, the workspace, and an
+inspector: in Refine the tabs Copy, Quality (validation, the art director's scores,
+human approval kept apart), Partner and Versions, rendered through a portal from
+`AssetView`; elsewhere the creative partner, which can be hidden. Review is one
+approvals table plus the client review; Export lists every file with its pixels
+against the version's stage. Wiring: copy edits go through one queue per asset on the
+latest revision (`flushCopy`; a clash with someone else's change to the same field
+is shown with Keep mine / Take theirs), the brief keeps its working copy in
+localStorage (`ax_studio_brief_<pid>`) and merges field by field on a 409, layout
+saves re-send only when the layout did not change elsewhere (`putLayout`), library
+loads are sequence-guarded per client, every paid action is guarded against a second
+start (`guard`) and retries use `retry:<job>:<n>`, errors are explained in a notice
+with a real Retry (`explain`: missing keys, budget, account limit, brief gaps,
+unreadable answers, provider busy, conflicts, locks, roles, network), and the place
+(`ax_studio_v1`: client, project, stage, asset) reopens on reload. Alt+1..6 jump to a
+stage. The worker's `stPlanForFormat` now maps an adaptation into the target's safe
+area when it is wider (a 9:16 story). Harnesses: `tests/studio-journey-browser.mjs`
+(8 journeys on `tests/studio-fixture.mjs`, providers mocked), `tests/studio-p23-worker.mjs`
+(2), `tests/studio-shots.mjs` (before/after screenshots into the ignored `tests/shots/`).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
