@@ -236,7 +236,7 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
 await t('directing the team: a text direction lands as a version with no render; alternatives arrive as chips and one becomes the caption; a visual direction is proposed, confirmed, and runs a render; the standing preference is offered and saved for the campaign', async () => {
   await page.click(R + '.st-railbtn.asset:has-text("LinkedIn post")'); await page.waitForSelector(R + '.st-asset');
   const head0 = await page.textContent(R + '.st-asset-head'); const v0 = +(head0.match(/v(\d+) of/) || [])[1];
-  await itab(page, 'Partner');
+  await itab(page, 'Art Director');
   const g0 = calls.gemini;
   await page.fill(R + '.st-composer textarea', 'Keep this layout but make the headline sharper'); await page.press(R + '.st-composer textarea', 'Enter');
   await page.waitForFunction(() => /Text change only: 1 asset at a new version, image kept, no render spent/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
@@ -298,7 +298,9 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   await page.selectOption(R + '.st-size select', '2K');
 });
 await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
-  await itab(page, 'Partner'); await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
+  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
+  ok(!(await page.$(R + '.st-partner .st-sugg.design .st-sugg-item')), 'nothing is suggested, and nothing spent, until the team asks');
+  await page.click(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")'); await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
   const items = await texts(page, R + '.st-partner .st-sugg.design .st-sugg-item'); eq(items.length, 3); ok(/compact translucent panel in the upper left/.test(items[0]), items[0]); ok(/the artwork seen/.test(await page.textContent(R + '.st-partner .st-sugg-head')), 'the head says the model saw the artwork');
   const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link'); await useBtns[1].click();
   eq(await page.inputValue(R + '.st-composer textarea'), SUGGEST.design[1].text, 'the suggestion is in the composer, editable, not sent');
@@ -333,7 +335,7 @@ await t('three visible actions: Create a new design opens a form that names what
   ok(/New designs/.test(await page.textContent(R + '.st-rail')), 'the new asset sits in its own family');
   ok(/Created ".+" as a new design/.test(await page.textContent(R + '.st-thread')));
   // the inspection a render queued earlier reached the thread with its scores and one correction
-  await itab(page, 'Partner'); await page.waitForSelector(R + '.st-insp', { timeout: 20000 });
+  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-insp', { timeout: 20000 });
   const insp = await page.textContent(R + '.st-insp'); ok(/fidelity/.test(insp) && /readability/.test(insp) && /round 1 of 2/.test(insp), insp.slice(0, 200));
   ok(/verdict: fix/.test(insp) && /identity not scored/.test(insp) && /hierarchy 3 Support sits too close and competes with the headline/.test(insp) && /of v\d+/.test(insp) && /(composed tile|imagery only)/.test(insp), 'each score with its reason, the unscored one said, the verdict, the version and what was seen: ' + insp.slice(0, 500));
   ok(/support line sits too close/.test(await page.textContent(R + '.st-insp')), 'the issue is named');
@@ -635,7 +637,7 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   eq([rows[0].kind, rows[0].copy, JSON.parse(rows[0].image).key], ['layout', rows[1].copy, JSON.parse(rows[1].image).key], 'same words and photograph');
   // a focused Partner edit: only the CTA moves, and the thread says what moved, what was left and that nothing rendered
   const v2 = await head();
-  await itab(page, 'Partner'); await page.fill(R + '.st-composer textarea', 'Move only the CTA to the right'); await page.click(R + '.st-composer .btn:has-text("Send")');
+  await itab(page, 'Art Director'); await page.fill(R + '.st-composer textarea', 'Move only the CTA to the right'); await page.click(R + '.st-composer .btn:has-text("Send")');
   await page.waitForSelector(R + '.st-focused', { timeout: 20000 });
   const fx = await page.textContent(R + '.st-focused'); ok(/Changed/.test(fx) && /x/.test(fx) && /Left as they were: .*headline|Left as they were/.test(fx) && /no render/.test(fx), fx);
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v2, { timeout: 15000 });

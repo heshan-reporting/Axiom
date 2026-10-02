@@ -126,7 +126,7 @@
   }
   /* everything a composition needs before it is drawn for real: every image layer (keyed by layer id) and the fonts its words use.
      The canvas is drawn at once (a draft) and again when the fonts or any image arrive; `ready` says measurement may begin. */
-  function useComposition(v, ns, layoutOverride, copy) {
+  function useComposition(v, ns, layoutOverride, copy, nonce) {
     const layout = layoutOverride || (v && v.layout) || {};
     const bgUrl = v && v.image && v.image.url;
     const srcs = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src).map(l => l.id + '=' + l.src).join('|');
@@ -143,7 +143,7 @@
       const onFonts = () => { if (live && layout.layers) R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 1500 }).then(fonts => { if (live) setSt(s => Object.assign({}, s, { fonts, key: s.key + '+f' })); }); };
       if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', onFonts);
       return () => { live = false; if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', onFonts); };
-    }, [bgUrl, srcs, words, ns]);
+    }, [bgUrl, srcs, words, ns, nonce || 0]);
     return st;
   }
   function useImages(v, ns, layoutOverride) { return useComposition(v, ns, layoutOverride).imgs; }
@@ -894,7 +894,8 @@
     const d = sugg && sugg.data; const items = d && Array.isArray(d[kind]) ? d[kind] : [];
     const title = kind === 'image' ? 'Suggested photographs' : kind === 'typography' ? 'Suggested type changes' : kind === 'copy' ? 'Suggested copy changes' : kind === 'concept' ? 'Concepts worth exploring' : 'Suggested next directions';
     return html`<div class=${'st-sugg ' + kind + (compact ? ' compact' : '')} aria-label=${title}>
-      <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? ', the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh ? html`<button class="ov-link" disabled=${!!busy || (sugg && sugg.loading)} onClick=${onRefresh}>refresh</button>` : null}</div>
+      <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? ', the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh && sugg && !sugg.idle ? html`<button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => onRefresh(true)} title="Ask again for this version: one model call">refresh</button>` : null}</div>
+      ${sugg && sugg.idle && onRefresh ? html`<div><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onRefresh(false)} title="One small model call for this version (none when an answer for it is already cached); nothing is applied until you choose">Suggest for this version (1 model call)</button></div>` : null}
       ${sugg && sugg.err ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.err}</div>` : null}
       ${d && !items.length && !sugg.loading ? html`<div class="ov-dim">Nothing suggested for this version.</div>` : null}
       ${items.map((s, i) => html`<div key=${i} class="st-sugg-item"><div class="st-sugg-text">${s.text}</div>${s.basis || s.changes || s.preserves || s.paid != null ? html`<div class="st-sugg-meta">${s.basis ? html`<${Chip} kind=${s.basis === 'rule' ? 'ok' : s.basis === 'inferred' ? 'warn' : ''}>${s.basis}</${Chip}>` : null}${s.changes ? html` <span class="ov-dim">changes ${s.changes}</span>` : null}${s.preserves ? html` <span class="ov-dim">keeps ${s.preserves}</span>` : null} <${Chip} kind=${s.paid ? 'warn' : 'ok'}>${s.paid ? 'needs a render' : 'no render'}</${Chip}></div>` : null}<div class="st-sugg-foot"><span class="ov-dim">${s.why}${(s.refs || []).length ? ' - from ' + s.refs.map(r => r.name).join(', ') : ''}</span><button class="ov-link" disabled=${!!busy} onClick=${() => onUse(s.text)}>${kind === 'image' ? 'use as the description' : 'use'}</button></div></div>`)}
@@ -1062,6 +1063,42 @@
       ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict ? ' warn' : '')} role="status">${repairNote.text}</div>` : null}
     </div>`;
   }
+  /** What no layout move can fix, said with its remedy: imagery the composition expects but nobody has made yet, and a mark file
+      that did not load. Generating the imagery is one render (paid, announced); a solid ground is a layout version, no render. */
+  function Remedies({ a, v, val, ro, renderJob, lastRender, typeOnly, onGenerate, onSolid, onRetry, onRefresh }) {
+    if (!val) return null;
+    const missing = val.issues.some(i => i.code === 'imagery_missing'); const unloaded = val.issues.filter(i => i.code === 'mark_unloaded');
+    if (!missing && !unloaded.length) return null;
+    const failed = lastRender && lastRender.state === 'failed' ? lastRender : null;
+    return html`<div class="st-remedy" role="region" aria-label="What a layout cannot fix">
+      ${missing ? html`<div class="st-remedy-row"><div><b>No imagery yet.</b> <span class="ov-dim">This composition expects a photograph or illustration that has not been made, so it cannot pass validation. Moving the words does not change that.</span>
+          ${renderJob ? html`<div class="ov-dim">${renderJob.state === 'running' ? 'The imagery is being generated now.' : 'A render is queued for this asset.'}</div>` : failed ? html`<div class="st-remedy-fail"><${Chip} kind="bad">last render failed</${Chip}> <span class="ov-dim">${explain({ message: failed.error, code: (String(failed.error).match(/^[a-z_0-9]+/) || [''])[0] }).title}</span></div>` : null}</div>
+        ${!ro && !renderJob ? html`<div class="st-remedy-acts">
+          ${failed ? html`<button class="btn sm" onClick=${() => onRetry(failed)} title="Runs the same render again: one image generation">Retry the render (1 render)</button>` : html`<button class="btn sm" onClick=${onGenerate} title="One image generation from the composition's own art direction; the words and marks stay live layers">Generate the imagery (1 render)</button>`}
+          ${typeOnly ? html`<button class="btn sm ghost" onClick=${onSolid} title=${'Drop the photograph and set the words on the campaign colour: ' + (typeOnly.ok ? 'measured and passing' : 'measured; still ' + typeOnly.blocking.join(', ')) + '. A layout version, no render.'}>Use a solid ground instead (no render)</button>` : null}
+        </div>` : null}</div>` : null}
+      ${unloaded.length ? html`<div class="st-remedy-row"><div><b>A mark file did not load</b> <span class="ov-dim">(${unloaded.map(i => i.layers.join(', ')).join('; ')}). The logo or wordmark is placed from its file and is never redrawn; reload it, or check the Brand view for the file.</span></div>${!ro ? html`<div class="st-remedy-acts"><button class="btn sm ghost" onClick=${onRefresh}>Load the marks again</button></div>` : null}</div>` : null}
+    </div>`;
+  }
+  /** Other arrangements of the same words, marks and imagery, laid out by the renderer and measured at the output size before
+      they are offered: free, no model call, no render. Choosing one saves it as a layout version named after it. */
+  function LayoutVariations({ a, v, ns, comp, ro, list, onUse, using }) {
+    const [open, setOpen] = useState(true);
+    if (!list) return html`<section class="st-vars" aria-label="Layout variations"><div class="st-vars-head"><b>Layout variations</b> <span class="ov-dim">${comp.ready ? 'measuring each arrangement at the output size...' : 'waiting for the fonts and images...'}</span></div></section>`;
+    if ((a.locks || {}).layout) return html`<section class="st-vars" aria-label="Layout variations"><div class="st-vars-head"><b>Layout variations</b> <span class="ov-dim">The layout is locked on this asset; unlock it (Copy tab) to try other arrangements.</span></div></section>`;
+    const ok = list.filter(x => x.ok).length; const needs = list.filter(x => x.ok && x.pending.indexOf('imagery_missing') >= 0).length;
+    return html`<section class="st-vars" aria-label="Layout variations">
+      <div class="st-vars-head"><b>Layout variations</b> <span class="ov-dim">${list.length} arrangements of the same words${v.image ? ', photograph' : ''} and marks, each measured at ${v.layout.stage ? v.layout.stage.w + ' x ' + v.layout.stage.h : 'the output size'}: ${ok} pass${ok === 1 ? 'es' : ''} the layout checks${needs ? ', ' + needs + ' of them still need the imagery made' : ''}. Free: no model call, no render. The words are never changed.</span>
+        <button class="ov-link" onClick=${() => setOpen(!open)} aria-expanded=${open}>${open ? 'hide' : 'show'}</button></div>
+      ${open ? html`<div class="st-vars-grid">${list.map(x => html`<div key=${x.id} class=${'st-var' + (x.ok ? '' : ' bad')} data-variant=${x.id}>
+        <${Composition} v=${Object.assign({}, v, { layout: x.layout })} a=${a} ns=${ns} size="card" />
+        <div class="st-var-name">${x.name}</div>
+        <div class="st-var-state">${x.ok ? html`<${Chip} kind="ok" title=${x.steps.length ? 'after: ' + x.steps.join('; ') : 'laid out by measurement'}>passes</${Chip}>` : html`<${Chip} kind="bad" title=${x.blocking.join('; ')}>${x.blocking.length} blocking</${Chip}>`}${x.typeOnly ? html`<${Chip} title="no photograph: the words on the campaign colour">no photograph</${Chip}>` : x.pending.indexOf('imagery_missing') >= 0 ? html`<${Chip} kind="warn" title="the arrangement is sound; the imagery still has to be made">needs imagery</${Chip}>` : null}${x.warnings.length ? html`<${Chip} title=${x.warnings.join(', ')}>${x.warnings.length} to look at</${Chip}>` : null}</div>
+        ${!x.ok ? html`<div class="ov-dim st-var-why">${x.blocking.join('; ')}</div>` : null}
+        ${!ro ? html`<button class="btn sm ghost" disabled=${!!using} onClick=${() => onUse(x)}>${using === x.id ? 'Saving...' : 'Use this layout'}</button>` : null}
+      </div>`)}</div>` : null}
+    </section>`;
+  }
   /** Three things kept apart: the measured technical validation, the art director's opinion, and a person's approval. */
   function Readiness({ p, a, v, val }) {
     const rd = a.readiness || {}; const ins = rd.inspection || { state: 'none' }; const appr = standing(a, 'design');
@@ -1072,13 +1109,13 @@
       ${rd.technical && rd.technical !== 'passed' && rd.reasons && rd.reasons.length ? html`<div class="ov-dim">${rd.reasons.join(' ')}</div>` : null}
       <div class="st-ready-row"><b>Art direction</b> <${Chip} kind=${ins.state === 'ship' ? 'ok' : ins.state === 'inconsistent' || ins.state === 'redo' ? 'bad' : ins.state === 'none' ? '' : 'warn'}>${INS_WORD[ins.state] || ins.state}</${Chip}>${rd.baked ? html` <${Chip} kind=${rd.baked.verified ? 'ok' : 'warn'}>${rd.baked.verified ? 'painted words read back' : 'painted words not verified'}</${Chip}>` : null}</div>
       ${last && last.scores ? html`<div class="st-insp-mini" aria-label="Latest inspection"><div class="st-insp-scores">${['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'].map(k => html`<span key=${k} class=${'st-insp-score s' + (last.scores[k] == null ? 'n' : last.scores[k])} title=${(last.reasons || {})[k] || ''}>${k} <b>${last.scores[k] == null ? 'not scored' : last.scores[k]}</b></span>`)}</div>
-        <div class="ov-dim">Verdict ${last.verdict}, round ${last.round} of ${last.of || 2}${(() => { const vn = a.versions.findIndex(x => x.id === last.version) + 1; return vn ? ', on v' + vn + (last.version !== a.current ? ' (an earlier version)' : '') : ''; })()}. The critique, its reasons and the offered correction are in the Partner tab. An opinion: it never approves.</div></div>` : html`<div class="ov-dim">No inspection of this asset yet. One runs after each render; it is advice and never approves.</div>`}
+        <div class="ov-dim">Verdict ${last.verdict}, round ${last.round} of ${last.of || 2}${(() => { const vn = a.versions.findIndex(x => x.id === last.version) + 1; return vn ? ', on v' + vn + (last.version !== a.current ? ' (an earlier version)' : '') : ''; })()}. The critique, its reasons and the offered correction are in the Art Director tab. An opinion: it never approves.</div></div>` : html`<div class="ov-dim">No inspection of this asset yet. One runs after each render; it is advice and never approves.</div>`}
       <div class="st-ready-row"><b>Human approval</b> <${Chip} kind=${appr ? 'ok' : ''}>${appr ? 'design approved by ' + appr.by : 'design not approved'}</${Chip}>${appr && rd.technical !== 'passed' && rd.technical !== 'not_applicable' ? html` <span class="ov-dim">the approval stands, but export waits for a passing validation</span>` : null}</div>
     </div>`;
   }
   /** The Refine workspace: the artwork, sized to the screen, with the free fixes under it and the design tools below; the
       words, the quality record, approvals and versions are in the inspector beside it (rendered there through a portal). */
-  function AssetView({ p, a, sel, setSel, onEdit, onDraftState, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onPreservation, slot, tab, setTab, conflict, onConflict, neighbours }) {
+  function AssetView({ p, a, sel, setSel, onEdit, onDraftState, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onPreservation, onVariant, onRetryJob, slot, tab, setTab, conflict, onConflict, neighbours }) {
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.current]);
@@ -1098,7 +1135,17 @@
     // on a full artwork the words are in the bitmap: the fields show them but cannot change them
     const baked = v.mode === 'artwork' ? new Set((v.layout || {}).baked || ['headline', 'support', 'cta']) : new Set();
     const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
-    const comp = useComposition(v, p.ns, v.layout, v.copy);
+    const [nonce, setNonce] = useState(0);
+    const comp = useComposition(v, p.ns, v.layout, v.copy, nonce);
+    // the variations are worked out once the fonts and images are in, so every one is measured as it would export
+    const canVary = !copyOnly && !flat && v.mode !== 'artwork' && v.layout && Array.isArray(v.layout.layers);
+    const [vars, setVars] = useState(null); const [using, setUsing] = useState('');
+    useEffect(() => {
+      setVars(null); if (!canVary || !comp.ready) return; let live = true;
+      const t = setTimeout(() => { try { const r = R.variants(v.layout, v.copy, comp.imgs, { fonts: comp.fonts, format: a.format, channel: a.channel, locks: a.locks }); if (live) setVars(r); } catch (e) { if (live) setVars([]); } }, 40);
+      return () => { live = false; clearTimeout(t); };
+    }, [v && v.id, comp.key, comp.ready, !!(a.locks || {}).layout]);
+    const useVariant = async x => { setUsing(x.id); try { await onVariant(a, x.layout, v.id, x.name); } finally { setUsing(''); } };
     const [val, setVal] = useState(null); const [measuring, setMeasuring] = useState(false); const [repairing, setRepairing] = useState(false); const [repairNote, setRepairNote] = useState(null);
     const filed = useRef(''); const autoMark = useRef('');
     const measure = useCallback(async (force) => {
@@ -1118,6 +1165,10 @@
     const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
     const draftPng = async () => { const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u = URL.createObjectURL(blob); const el = document.createElement('a'); el.href = u; el.download = (a.title + '-v' + vnum(a, v) + '-DRAFT-not-validated.png').replace(/[^a-z0-9.-]+/gi, '_'); document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
     const renderJob = (p.jobs || []).find(j => j.asset === a.id && (j.stage === 'render' || j.stage === 'inspect') && (j.state === 'queued' || j.state === 'running'));
+    const imageJob = (p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running'));
+    const lastRender = (p.jobs || []).filter(j => j.asset === a.id && j.stage === 'render').sort((x, y) => (x.created || 0) - (y.created || 0)).pop();
+    // the art direction the composition already carries: the background region's own brief, else the version's visual note
+    const bgPrompt = () => { const L = v.layout || {}; const r = (L.regions || []).find(x => x.role === 'background'); return (r && r.prompt) || (v.context || {}).visual || ''; };
     const ratio = (v.layout && v.layout.stage && v.layout.stage.w / v.layout.stage.h) || FORMAT_RATIO[a.format] || 1;
     const hasLayout = !copyOnly && !flat && v.layout && v.layout.layers;
     const work = html`<div class="st-asset">
@@ -1142,6 +1193,8 @@
         ${(v.context || {}).imagery === 'none' ? html`<div class="st-flatnote">No imagery by choice: a complete typographic composition, nothing to render.</div>` : null}
       </div>
       ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} />` : null}
+      ${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} onGenerate=${() => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
+      ${canVary ? html`<${LayoutVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} list=${vars} using=${using} onUse=${useVariant} />` : null}
       <${Preservation} p=${p} a=${a} v=${v} ro=${ro} onCompare=${onCompare} onFile=${onPreservation} />
       <${FamilyStrip} p=${p} a=${a} onOpen=${onOpen} />
       ${!copyOnly && !flat ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
@@ -1183,7 +1236,30 @@
   }
 
   /* ------------------------------------------------------------ the right panel: the direction thread */
-  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, busy, sugg, onSuggRefresh, prefill }) {
+  /** The Art Director's latest word on this asset, pinned above the thread: the verdict, the scores with their reasons, the
+      most serious issue and the correction on offer, which version it judged, and a review on request (one model call). */
+  function ArtDirectorReview({ p, a, ro, busy, onReview, onApplyInspection }) {
+    if (!a) return null; const v = current(a); if (!v || v.mode === 'copy') return null;
+    const last = (p.thread || []).filter(e => e.kind === 'inspection' && e.asset === a.id).pop();
+    const reviewing = (p.jobs || []).some(j => j.asset === a.id && j.stage === 'inspect' && (j.state === 'queued' || j.state === 'running'));
+    const vn = last ? a.versions.findIndex(x => x.id === last.version) + 1 : 0; const old = last && last.version && last.version !== a.current;
+    const done = last ? (p.thread || []).find(e => e.kind === 'inspection_applied' && e.eid === last.eid) : null;
+    const issues = last ? (last.issues || []).map(x => typeof x === 'string' ? { text: x, severity: '' } : x) : [];
+    const top = issues.find(x => x.severity === 'blocking') || issues.find(x => x.severity === 'material') || issues[0];
+    const KEYS = ['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'];
+    return html`<div class="st-adreview" aria-label="Art Director review">
+      <div class="st-adreview-head"><b>Review of ${a.title}</b>
+        ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Art Director reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : last && !old ? 'Review again (1 model call)' : 'Review v' + a.versions.length + ' (1 model call)'}</button>` : null}</div>
+      ${last && last.scores ? html`<div class="st-adreview-body">
+        <div class="st-insp-scores">${KEYS.map(k => html`<span key=${k} class=${'st-insp-score s' + (last.scores[k] == null ? 'n' : last.scores[k])} title=${(last.reasons || {})[k] || ''}>${k} <b>${last.scores[k] == null ? 'not scored' : last.scores[k]}</b></span>`)}</div>
+        <div><${Chip} kind=${last.verdict === 'ship' ? 'ok' : last.verdict === 'redo' ? 'bad' : 'warn'}>verdict: ${last.verdict}</${Chip}> <span class="ov-dim">on v${vn || '?'}${old ? ' - an earlier version; review again for this one' : ', the current version'}, round ${last.round} of ${last.of || 2}, ${last.composed ? 'the composed tile' : 'the imagery only'}, ${aest(last.at)}</span></div>
+        ${top ? html`<div class="st-adreview-top">${top.severity ? html`<${Chip} kind=${top.severity === 'blocking' ? 'bad' : top.severity === 'material' ? 'warn' : ''}>${top.severity}</${Chip}> ` : null}${top.text}${issues.length > 1 ? html` <span class="ov-dim">(+${issues.length - 1} more in the thread)</span>` : null}</div>` : null}
+        ${last.fix ? done ? html`<div><${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}></div>` : !ro ? html`<div class="st-adreview-fix"><span class="ov-dim">Offered (${last.fix.kind}${last.fix.kind === 'design' || last.fix.kind === 'copy' ? ', no render' : ', one render'}):</span> ${last.fix.instruction} <button class="btn sm ghost" disabled=${!!busy} onClick=${() => { if (old && !window.confirm('This review judged an earlier version. Apply its correction to the current version anyway?')) return; onApplyInspection(last.eid, last.fix.instruction, old); }}>Apply</button></div>` : null : null}
+        <div class="ov-dim">Advice, not approval: a person approves the copy and design in the Quality tab.</div>
+      </div>` : last && last.verdict === 'stop' ? html`<div class="ov-dim">${last.text}</div>` : html`<div class="ov-dim">Not reviewed yet. A review runs after each render, or now on request; it reads the tile as it exports.</div>`}
+    </div>`;
+  }
+  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, onReview, busy, sugg, onSuggRefresh, prefill }) {
     const [text, setText] = useState(''); const [offerOpen, setOfferOpen] = useState(null); const box = useRef(null); const [sk, setSk] = useState('design');
     useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [p.thread.length, busy]);
     // a chosen suggestion lands in the composer as an editable instruction, never sent on its own
@@ -1192,11 +1268,12 @@
     const answered = useMemo(() => { const m = {}; p.thread.forEach(e => { if ((e.kind === 'decided' || e.kind === 'remembered' || e.kind === 'offer_declined') && e.eid) m[e.eid + ':' + (e.kind === 'decided' ? 'proposal' : 'offer')] = e; }); return m; }, [p.thread]);
     const send = () => { if (!text.trim()) return; onDirect(text.trim(), target); setText(''); };
     const ro = !canWrite() || p.readOnly;
-    return html`<section class="st-partner" aria-label="Creative partner">
-      <div class="st-partner-head"><span class="ov-why">Creative director, copywriter and designer for ${p.ns.toUpperCase()}; knows nothing of any other client. Direct the team below; every change lands as a version.</span></div>
+    return html`<section class="st-partner" aria-label="Art Director">
+      <div class="st-partner-head"><span class="ov-why">Your Art Director for ${p.ns.toUpperCase()}: reviews the tile as it exports, proposes directions and takes instructions on words, layout and imagery; knows nothing of any other client. Every change lands as a version; nothing is approved for you.</span></div>
+      ${onReview ? html`<${ArtDirectorReview} p=${p} a=${a} ro=${ro} busy=${busy} onReview=${onReview} onApplyInspection=${onApplyInspection} />` : null}
       <div class="st-thread" ref=${box}>
         ${p.thread.map(m => { const dec = m.kind === 'proposal' ? answered[m.eid + ':proposal'] : null; const off = m.offer ? answered[m.eid + ':offer'] : null; return html`<div key=${m.id} class=${'st-msg ' + (m.who === 'studio' ? 'studio' : 'you')}>
-          <div class="st-msg-meta">${m.who === 'studio' ? 'Studio' : m.who || 'team'}${m.target && m.kind === 'note' ? html` <span class="ov-dim">to ${m.target}</span>` : null} <span class="ov-dim">${aest(m.at)}${m.kind && m.kind !== 'note' ? ' - ' + m.kind : ''}</span></div>
+          <div class="st-msg-meta">${m.who === 'studio' ? (/^(inspection|concepts)$/.test(m.kind || '') ? 'Art Director' : 'Studio') : m.who || 'team'}${m.target && m.kind === 'note' ? html` <span class="ov-dim">to ${m.target}</span>` : null} <span class="ov-dim">${aest(m.at)}${m.kind && m.kind !== 'note' ? ' - ' + m.kind : ''}</span></div>
           ${m.instruction && /^(revise|adapted|alternatives|proposal|question)$/.test(m.kind) ? html`<div class="st-msg-you">Direction: ${m.instruction}</div>` : null}
           <div class="st-msg-text">${m.text}</div>
           ${m.changed || m.render != null ? html`<div class="st-msg-foot">${m.changed && m.changed.length ? m.changed.length + ' asset' + (m.changed.length === 1 ? '' : 's') + ' changed ' : ''}${m.kind === 'proposal' ? html`<${Chip} kind="warn">render proposed, nothing spent</${Chip}>` : m.kind === 'decided' ? html`<${Chip} kind="warn">${(m.jobs || []).length} render${(m.jobs || []).length === 1 ? '' : 's'} queued</${Chip}>` : m.render ? html`<${Chip} kind="warn">render spent</${Chip}>` : m.render === false ? html`<${Chip} kind="ok">no render</${Chip}>` : null}${m.locked ? html` <span class="ov-dim">kept locked: ${m.locked.join(', ')}</span>` : null}</div>` : null}
@@ -1226,7 +1303,7 @@
       ${!ro && a && sugg ? html`<div class="st-sugg-tabs" role="tablist">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy} onUse=${t => { setText(t); setTarget('asset'); }} onRefresh=${onSuggRefresh} />` : null}
       ${!ro ? html`<div class="st-composer">
         <select class="st-sel" value=${target} onChange=${e => setTarget(e.target.value)} aria-label="Target of the direction">${targets.map(([k, l]) => html`<option key=${k} value=${k} disabled=${k !== 'set' && !a}>${l}</option>`)}</select>
-        <textarea class="st-ta" rows="2" value=${text} placeholder=${'Direct the team. e.g. "Keep the layout, sharpen the headline", "three alternative opening lines", "adapt this for Instagram", "more restrained visual"'} onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} aria-label="Direction"></textarea>
+        <textarea class="st-ta" rows="2" value=${text} placeholder=${'Tell the Art Director. e.g. "Keep the layout, sharpen the headline", "three alternative opening lines", "adapt this for Instagram", "more restrained visual"'} onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} aria-label="Direction"></textarea>
         <div class="st-composer-acts"><button class="btn sm" disabled=${!text.trim() || !!busy || (target !== 'set' && !a)} onClick=${send}>Send</button><button class="ov-link" disabled=${!text.trim() || !!busy} onClick=${() => { onNote(text.trim(), target === 'set' ? 'the whole set' : (a || {}).title || ''); setText(''); }}>record as a note instead</button></div>
       </div>` : html`<div class="ov-dim st-pad">A read-only key can review, compare and export; directing the team needs a full key.</div>`}
     </section>`;
@@ -1426,7 +1503,7 @@
     const setView = useCallback((v, focus) => { setView0(v); setCmp(null); if (focus) focusNext.current = true; }, []);
     // the heading is brought to just under the sticky context bar and navigator (its scroll-margin), so a new stage starts at its top
     useEffect(() => { if (focusNext.current && titleRef.current) { focusNext.current = false; try { titleRef.current.focus({ preventScroll: true }); titleRef.current.scrollIntoView({ block: 'start' }); } catch (e) {} } }, [view, p && p.id]);
-    /* suggested next directions for the selected composition: one small, cached model call per version; refreshed when the asset, its version or the references change */
+    /* suggested next directions for the selected composition: one small, cached model call per version, made only when the team asks for it */
     const [sugg, setSugg] = useState(null); const suggSig = useRef('');
     const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() && prov && prov.claude ? a.id + '|' + av.id + '|' + p.references.length : '';
     const fetchSugg = useCallback(async (refresh) => {
@@ -1435,7 +1512,8 @@
       try { const d = await call('/studio/suggest', { project: pidRef.current, asset: suggKey.split('|')[0], refresh: !!refresh }); if (suggSig.current !== suggKey) return; if (d.ok) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: d.detail || d.error || 'no answer' }); }
       catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
     }, [suggKey]);
-    useEffect(() => { fetchSugg(false); }, [fetchSugg]);
+    // asked for, never fetched on its own: a new version (every pause in typing makes one) must not spend a call by itself
+    useEffect(() => { suggSig.current = suggKey; setSugg(suggKey ? { idle: true, data: null, err: '' } : null); }, [suggKey]);
 
     const refreshStatus = useCallback(() => call('/studio/status').then(s => { setStatus(s); return s; }).catch(() => null), []);
     /* the library of one client; a slower answer for a client no longer chosen is dropped, never shown */
@@ -1655,10 +1733,13 @@
       try {
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
         const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
-        if (!r.changed) return { text: r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix geometrically.', conflict: !!r.conflict };
+        // what no layout move can clear is named with its remedy, so "fixed" never hides a tile that still cannot pass
+        const rest = (r.after ? r.after.issues : []).filter(i => i.severity === 'blocking' && !LAYOUT_CODES[i.code] && !/contrast/.test(i.code));
+        const restText = rest.length ? ' Still blocking, and not a layout matter: ' + Array.from(new Set(rest.map(i => i.code === 'imagery_missing' ? 'no imagery yet (generate it, or use a solid ground - see below the artwork)' : i.code === 'mark_unloaded' ? 'a mark file did not load (load the marks again)' : i.code === 'imagery_sketch' ? 'an image region is still a sketch (generate it)' : i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')))).join('; ') + '.' : '';
+        if (!r.changed) return { text: (r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix in the layout: no overflow, collision or unreadable words.') + restText + ' Or choose one of the layout variations below.', conflict: !!r.conflict || !!rest.length };
         const saved = await putLayout(as, r.layout, v.id, 'layout repaired: ' + r.steps.join('; ').slice(0, 170));
         if (!saved) return { text: 'Not saved: the layout changed elsewhere first.', conflict: true };
-        return { text: (r.ok ? 'Fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.', conflict: !r.ok };
+        return { text: (r.ok ? 'Layout fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.' + restText + (r.ok ? '' : ' The layout variations below are each measured and may fit where this one cannot.'), conflict: !r.ok || !!rest.length };
       } catch (e) { fail(e, 'The layout fix was not saved'); return { text: 'The fix failed: ' + e.message, conflict: true }; }
     };
     const markVariant = async (as, v, comp) => {
@@ -1670,6 +1751,18 @@
         if (ok2) toastMsg(r.steps.join('; ') + ' - no render'); return ok2;
       } catch (e) { toastMsg('Mark variant not changed: ' + e.message, true); return false; }
     };
+    /* a measured arrangement from the variations: a layout version named after it, no render */
+    const layoutVariant = (as, layout, baseVid, name) => guard('variant:' + as.id, async () => { try { const ok = await putLayout(as, layout, baseVid, 'layout variation: ' + name + ' (no render)'); if (ok) toastMsg('Layout changed to "' + name + '" - a new version, no render; the words are unchanged'); } catch (e) { fail(e, 'The layout was not saved', () => layoutVariant(as, layout, baseVid, name)); } });
+    /* the Art Director reviews the version on request: the tile is composed exactly as it exports, then one model call reads it */
+    const reviewNow = (as) => guard('inspect:' + as.id, async () => {
+      try {
+        const v = current(as); setBusy('Composing ' + as.title + ' exactly as it exports');
+        const composed = await composeExport(pRef.current, as.id, v.id);
+        const j = await job('inspect', { version: v.id }, as.id, 'review:' + v.id + ':' + Date.now(), 'The Art Director reviews ' + as.title + (composed ? ' (the composed tile)' : ' (the imagery only; the composed tile was not saved)'));
+        await reload(); setTab('partner');
+        if (j && j.state === 'done') toastMsg('Review in: an opinion, it approves nothing');
+      } catch (e) { fail(e, 'The review did not start', () => reviewNow(as)); }
+    });
     const saveLayout = async (as, layout, baseVid) => { try { await putLayout(as, layout, baseVid || as.current, 'layout edited by hand'); } catch (e) { fail(e, 'The layout was not saved', () => saveLayout(as, layout, baseVid)); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
@@ -1785,14 +1878,14 @@
     else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('export')} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
     else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
-    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('refine', Object.assign({ compact: true }, tabsFor('refine')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} slot=${slot} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} sugg=${sugg} onSuggRefresh=${() => fetchSugg(true)} busy=${busy} /></div>`; }
+    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('refine', Object.assign({ compact: true }, tabsFor('refine')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} slot=${slot} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} busy=${busy} /></div>`; }
     else centre = Staged('refine', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to refine yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Produce the set from the brief first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length ? 'directions' : 'brief')}>${p.directions.length ? 'Go to Directions' : 'Go to the Brief'}</button>` : null}</div>`);
 
     const inRefine = !!(p && view === 'asset' && a && !cmp);
-    const insTabs = [['copy', 'Copy'], ['quality', 'Quality'], ['partner', 'Partner'], ['versions', 'Versions']];
+    const insTabs = [['copy', 'Copy'], ['quality', 'Quality'], ['partner', 'Art Director'], ['versions', 'Versions']];
     const tabKey = e => { const i = insTabs.findIndex(t => t[0] === tab); if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const n = insTabs[(i + (e.key === 'ArrowRight' ? 1 : insTabs.length - 1)) % insTabs.length][0]; setTab(n); setTimeout(() => { const el = document.getElementById('st-tabbtn-' + n); if (el) el.focus(); }, 0); } };
     const showAside = !!p && (inRefine || partnerOpen);
-    const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${() => fetchSugg(true)} />` : null;
+    const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${inRefine ? reviewNow : null} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} />` : null;
     return html`<div class=${'st' + (p ? ' has-project' : '')} data-stage=${stage}>
       ${header}
       ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
@@ -1801,11 +1894,11 @@
       <div class=${'st-body' + (p ? '' : ' lib') + (p && !showAside ? ' noaside' : '')}>
         ${p ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} />` : null}
         <main class="st-centre" aria-label="Workspace">${centre}</main>
-        ${p ? (showAside ? html`<aside class="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative partner'}>
-          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '')} onClick=${() => setTab(k)}>${l}${k === 'quality' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}</div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative partner</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the creative partner">hide</button></div>`}
+        ${p ? (showAside ? html`<aside class="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Art Director'}>
+          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '')} onClick=${() => setTab(k)}>${l}${k === 'quality' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}</div>` : html`<div class="st-insp-head"><span class="st-lbl">Art Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Art Director">hide</button></div>`}
           <div class="st-slot" ref=${setSlot}></div>
           <div class="st-partner-wrap" id="st-tab-partner" role=${inRefine ? 'tabpanel' : undefined} hidden=${inRefine && tab !== 'partner'}>${partnerEl}</div>
-        </aside>` : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the creative partner">Partner</button>`) : null}
+        </aside>` : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the Art Director">Art Director</button>`) : null}
       </div>
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
       ${panel && p ? html`<${ClientPanel} p=${p} kind=${panel} onClose=${() => setPanel(null)} onChanged=${() => { setCtxTick(t => t + 1); loadLib(); }} />` : null}

@@ -9,6 +9,7 @@
  *   6. provider failure and retry without losing work or duplicating a job; a missing key stated honestly
  *   7. a rapid edit while an earlier save is still running
  *   8. the essential workflow by keyboard
+ *   9. imagery remedies, measured layout variations, and an Art Director review on request
  * Run: node --experimental-sqlite tests/studio-journey-browser.mjs     (SHOT=1 writes tests/shots/journey-*.png) */
 import fs from 'node:fs';
 import { makeStudio, runner, eq, ok, pngSize, unzipStored } from './studio-fixture.mjs';
@@ -208,7 +209,7 @@ await T.t('5. adapting a master to another format keeps its words and image, and
   await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const d0 = await api('GET', '/studio/get?id=' + J1); const master = d0.assets.find(a => a.channel === 'facebook');
   await page.click(R + '.st-railbtn.asset:has-text("' + master.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
-  await itab(page, 'Partner');
+  await itab(page, 'Art Director');
   await page.fill(R + '.st-composer textarea', 'Adapt this for an Instagram story 9:16'); await page.click(R + '.st-composer .btn:has-text("Send")');
   await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-railbtn.asset').length === n + 1, d0.assets.length, { timeout: 30000 });
   const d = await api('GET', '/studio/get?id=' + J1); const story = d.assets.find(a => a.format === '9:16'); ok(story, 'a 9:16 asset');
@@ -348,6 +349,76 @@ await T.t('8. the essential workflow by keyboard: start a project, move between 
   const d = await api('GET', '/studio/get?id=' + pr.id); ok(d.assets[0].approvals.copy && /Read out and agreed/.test(d.assets[0].approvals.copy.reason), 'approved by keyboard');
   await shot(page, 'keyboard');
   await page.ctxB.close();
+});
+
+/* ---------------------------------------------------------------------------------------------------- 9 */
+await T.t('9. a tile with no imagery says why no layout can pass it and offers the two real remedies; a solid ground is a free layout version that then validates; the layout variations are each measured, and one becomes a version with the same words and photograph; the Art Director reviews the composed tile on request with one model call and approves nothing', async () => {
+  // a production whose render failed: the composition exists, the photograph does not
+  fx.setProvider('gemini', 'down');
+  const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'No photograph yet', brief: { channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, objective: 'x', message: 'y' }, idem: 'j9' });
+  const stepTo = async id => { for (let i = 0; i < 20; i++) { const j = (await api('POST', '/studio/job/step', { id })).job; if (!j || /done|failed|cancelled/.test(j.state)) return j; } };
+  await stepTo((await api('POST', '/studio/job', { project: pr.id, stage: 'copy', input: { channels: ['instagram'], deliverable: 'set', acknowledge: true, instruction: 'write it' }, idem: 'j9copy' })).job.id);
+  let d = await api('GET', '/studio/get?id=' + pr.id); for (const j of d.jobs.filter(j => j.stage === 'render')) await stepTo(j.id);
+  fx.setProvider('gemini', 'ok');
+  d = await api('GET', '/studio/get?id=' + pr.id); const a = d.assets[0]; ok(!a.versions.find(v => v.id === a.current).image, 'no photograph on the asset');
+  ok(d.jobs.some(j => j.stage === 'render' && j.state === 'failed'), 'the render failed');
+  const page = await fx.open({ viewport: { width: 1440, height: 900 } });
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("No photograph yet") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-remedy', { timeout: 30000 });
+  const rem = await page.textContent(R + '.st-remedy');
+  ok(/No imagery yet/.test(rem) && /Moving the words does not change that/.test(rem) && /last render failed/.test(rem), 'the gap is named, with the failed render: ' + rem);
+  ok(await page.$(R + '.st-remedy button:has-text("Retry the render (1 render)")') && await page.$(R + '.st-remedy button:has-text("Use a solid ground instead (no render)")'), 'the two remedies, each with its cost');
+  await page.waitForSelector(R + '.st-vars .st-var', { timeout: 30000 });
+  ok(await page.$(R + '.st-var[data-variant="col-left"] .st-chip:has-text("needs imagery")') && /8 of them still need the imagery made/.test(await page.textContent(R + '.st-vars-head')), 'variations that still need the photograph say so, card by card and in the count');
+  await page.$eval(R + '.st-remedy', e => e.scrollIntoView({ block: 'center' })); await shot(page, 'remedy');
+  const g0 = calls.gemini, a0 = calls.anthropic, n0 = a.versions.length;
+  await page.click(R + '.st-remedy button:has-text("Use a solid ground instead")');
+  await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
+  d = await api('GET', '/studio/get?id=' + pr.id); const a1 = d.assets[0]; const v1 = a1.versions.find(v => v.id === a1.current); const v0 = a.versions.find(v => v.id === a.current);
+  eq(a1.versions.length, n0 + 1, 'one new version'); eq(v1.kind, 'layout');
+  ok(/layout variation: Type only, no photograph \(no render\)/.test(v1.note), v1.note);
+  ok(v1.layout.noImagery && !(v1.layout.regions || []).length && !v1.layout.layers.some(l => l.type === 'img' && !/logo|wordmark/.test(l.role)), 'no image region left to fill');
+  eq(v1.copy, v0.copy, 'the words unchanged'); eq([calls.gemini, calls.anthropic], [g0, a0], 'no model or image call');
+  eq(a1.readiness.technical, 'passed', 'the worker holds a passing validation of exactly this composition');
+  ok(!(await page.$(R + '.st-remedy')), 'nothing left to remedy');
+  await page.ctxB.close();
+
+  // the variations of a tile with its photograph: each measured, one taken as a layout version
+  const p2 = await fx.open({ viewport: { width: 1440, height: 900 } });
+  await p2.waitForSelector(R + '.st-lib tbody tr'); await p2.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await p2.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  const dj = await api('GET', '/studio/get?id=' + J1); const as = dj.assets.find(x => x.channel === 'instagram') || dj.assets[0]; const before = as.versions.find(v => v.id === as.current);
+  await p2.click(R + '.st-railbtn.asset:has-text("' + as.title + '")'); await p2.waitForSelector(R + '.st-stage canvas');
+  await p2.waitForFunction(() => document.querySelectorAll('#studio-root .st-vars .st-var').length >= 8, null, { timeout: 30000 });
+  const cards = await p2.$$eval(R + '.st-vars .st-var', els => els.map(e => ({ id: e.dataset.variant, bad: e.classList.contains('bad'), text: e.textContent })));
+  ok(cards.length >= 8 && cards.every(c => !c.bad && /passes/.test(c.text)), 'every arrangement offered passes the measurement: ' + cards.map(c => c.id + (c.bad ? ' BAD' : '')).join(', '));
+  ok(cards.some(c => c.id === 'type-only' && /no photograph/.test(c.text)), 'the type-only arrangement is labelled');
+  ok(/Free: no model call, no render/.test(await p2.textContent(R + '.st-vars-head')) && !/still need the imagery/.test(await p2.textContent(R + '.st-vars-head')), 'the cost is stated');
+  await p2.$eval(R + '.st-vars', e => e.scrollIntoView({ block: 'start' })); await shot(p2, 'variations');
+  const pick = cards.find(c => c.id !== 'type-only'); const g1 = calls.gemini, a1c = calls.anthropic;
+  await p2.click(R + '.st-var[data-variant="' + pick.id + '"] button:has-text("Use this layout")');
+  await p2.waitForFunction(n => /v(\d+) of (\d+)/.test(document.querySelector('#studio-root .st-asset-title').textContent) && +document.querySelector('#studio-root .st-asset-title').textContent.match(/of (\d+)/)[1] === n, as.versions.length + 1, { timeout: 15000 });
+  await p2.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
+  const dj2 = await api('GET', '/studio/get?id=' + J1); const as2 = dj2.assets.find(x => x.id === as.id); const after = as2.versions.find(v => v.id === as2.current);
+  ok(/^layout variation: .+ \(no render\)$/.test(after.note) && after.kind === 'layout', after.note);
+  eq([after.copy, (after.image || {}).key], [before.copy, (before.image || {}).key], 'the same words and photograph');
+  ok(JSON.stringify(after.layout) !== JSON.stringify(before.layout), 'the arrangement changed');
+  eq([calls.gemini, calls.anthropic], [g1, a1c], 'no model or image call'); eq(as2.readiness.technical, 'passed');
+
+  // the Art Director: a review on request reads the composed tile of this version with one call, and approves nothing
+  await itab(p2, 'Art Director'); await p2.waitForSelector(R + '.st-adreview');
+  const appr0 = JSON.stringify(as2.approvals || {}); const a2 = calls.anthropic, g2 = calls.gemini;
+  await p2.click(R + '.st-adreview button:has-text("1 model call")');
+  await p2.waitForFunction(v => { const t = (document.querySelector('#studio-root .st-adreview') || {}).textContent || ''; return /verdict: fix/.test(t) && new RegExp('on v' + v + ', the current version').test(t); }, as2.versions.length, { timeout: 30000 });
+  const rv = await p2.textContent(R + '.st-adreview');
+  ok(/hierarchy\s*3/.test(rv) && /the composed tile/.test(rv) && /spacing|support line/i.test(rv) && /Advice, not approval/.test(rv), rv);
+  eq([calls.anthropic - a2, calls.gemini - g2], [1, 0], 'one model call, no image call');
+  const dj3 = await api('GET', '/studio/get?id=' + J1); const ins = dj3.thread.filter(e => e.kind === 'inspection' && e.asset === as.id).pop();
+  eq([ins.version, ins.composed], [as2.current, true], 'the review judged this version as it exports');
+  eq(JSON.stringify(dj3.assets.find(x => x.id === as.id).approvals || {}), appr0, 'no approval changed');
+  ok(await p2.$(R + '.st-instab.on:has-text("Art Director")'), 'the tab is named for the role');
+  await shot(p2, 'art-director');
+  ok(!p2.errors.length, p2.errors.join(' | '));
+  await p2.ctxB.close();
 });
 
 const res = T.done();

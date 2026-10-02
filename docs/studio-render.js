@@ -125,8 +125,8 @@
     const bgFill = layout.bg && typeof layout.bg === 'object' ? (() => { const d = layout.bg.dir || 'down'; const g = d === 'right' ? ctx.createLinearGradient(0, 0, W, 0) : d === 'left' ? ctx.createLinearGradient(W, 0, 0, 0) : d === 'up' ? ctx.createLinearGradient(0, H, 0, 0) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, layout.bg.from || '#0f171d'); g.addColorStop(1, layout.bg.to || layout.bg.from || '#0f171d'); return g; })() : layout.bg || null;
     const planNoBg = layout.v === 5 && !(layout.regions || []).some(r => r.role === 'background');
     if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
-    if (images.bg) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
-    else if (!planNoBg) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
+    if (images.bg && !layout.noImagery) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
+    else if (!planNoBg && !layout.noImagery) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
     const overflow = [];
     const sketch = s => { ctx.setLineDash([W * 0.01, W * 0.008]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, W * 0.003); ctx.strokeRect(s.x + 1, s.y + 1, s.w - 2, s.h - 2); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '500 ' + Math.max(10, W * 0.018) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2); };
     layers.forEach(l => {
@@ -318,6 +318,7 @@
   }
   /** Does the composition expect imagery that is not there? */
   function imageryMissing(layout, images) {
+    if (layout.noImagery) return false;
     if (images && images.bg) return false;
     if (layout.v === 5) return (layout.regions || []).some(r => r.role === 'background');
     return !(layout.style === 'typographic' && !layout.image) && !!(layout.layers || []).length;
@@ -470,6 +471,115 @@
     }
     return result('');
   }
+  /* ---------------------------------------------------------------- variations: the same words, marks and imagery arranged other ways, measured before they are offered */
+  const ROLE_ORDER = ['kicker', 'label', 'myth', 'fact', 'headline', 'support', 'free', 'caption', 'cta'];
+  const r1 = n => Math.round(n * 10) / 10;
+  /** Up to nine arrangements of a composition: bands, columns, cards, a centred statement, a fade, and (when allowed) type only.
+   *  The words are never changed; only where they sit, their size within the readable minimum, their colour against the new
+   *  ground, and the panel behind them. Each is laid out by measurement, repaired if it needs it, and validated; the result says
+   *  whether it passes, what still blocks it, and what is pending that no layout can fix (imagery not made yet, a mark not loaded). */
+  function variants(layout0, copy, images, opts) {
+    opts = opts || {}; copy = copy || {}; images = images || {};
+    const L0 = layout0 || {}; if (opts.locks && opts.locks.layout) return [];
+    const fmt = opts.format || L0.format || '1:1'; const { w: W, h: H } = stageSize(L0, opts.width);
+    const story = fmt === '9:16'; const wide = fmt === '16:9';
+    const sp = story ? { top: 14, bottom: 20, side: 6 } : { top: 5, bottom: 5, side: 5.5 };
+    const layers0 = L0.layers || [];
+    const texts0 = layers0.filter(l => l.type === 'text' && !l.hidden && displayedText(L0, l, copy));
+    if (!texts0.length) return [];
+    const order = l => { const i = ROLE_ORDER.indexOf(l.role); return (i < 0 ? 4.5 : i) * 1000 + (l.y || 0); };
+    const panel0 = layers0.find(l => l.type === 'shape' && (l.role === 'panel') && typeof l.fill === 'string' && /^#[0-9a-f]{6}$/i.test(l.fill));
+    const accent = (panel0 && panel0.fill) || (L0.palette && L0.palette.primary) || '#0E6A6E';
+    const observed = L0.markPlacement && L0.markPlacement.basis === 'observed' ? L0.markPlacement.corner : '';
+    const sigOf = L => (L.layers || []).filter(l => l.type === 'text').map(l => [l.id, Math.round(l.x), Math.round(l.y), Math.round(l.w)].join(':')).sort().join('|');
+    const current = sigOf(L0);
+    const recipes = [
+      { id: 'band-foot', name: 'Band across the foot', panel: 'band', zone: { x: sp.side, y: 50, w: 100 - 2 * sp.side, h: 50 - sp.bottom }, anchor: 'bottom' },
+      { id: 'band-head', name: 'Band across the top', panel: 'band', zone: { x: sp.side, y: sp.top, w: 100 - 2 * sp.side, h: 50 - sp.top }, anchor: 'top' },
+      { id: 'col-left', name: 'Words in a column on the left', panel: 'column', zone: { x: sp.side, y: sp.top, w: (wide ? 44 : 52) - sp.side - 2, h: 100 - sp.top - sp.bottom }, anchor: 'middle', colW: wide ? 44 : 52 },
+      { id: 'col-right', name: 'Words in a column on the right', panel: 'column', right: true, zone: { x: (wide ? 56 : 48) + 2, y: sp.top, w: (wide ? 44 : 52) - sp.side - 2, h: 100 - sp.top - sp.bottom }, anchor: 'middle', colW: wide ? 44 : 52 },
+      { id: 'card-low', name: 'Card, lower left', panel: 'card', zone: { x: sp.side, y: 40, w: wide ? 52 : 72, h: 60 - sp.bottom }, anchor: 'bottom' },
+      { id: 'card-high', name: 'Card, upper left', panel: 'card', zone: { x: sp.side, y: sp.top, w: wide ? 52 : 72, h: 56 - sp.top }, anchor: 'top' },
+      { id: 'centre', name: 'Centred statement over a shade', panel: 'scrim', align: 'center', zone: { x: 10, y: sp.top + 4, w: 80, h: 100 - sp.top - sp.bottom - 8 }, anchor: 'middle' },
+      { id: 'fade', name: 'Words over a fade from the foot', panel: 'fade', zone: { x: sp.side, y: 45, w: wide ? 60 : 100 - 2 * sp.side, h: 55 - sp.bottom }, anchor: 'bottom' },
+    ];
+    if (opts.allowNoImagery !== false) recipes.push({ id: 'type-only', name: 'Type only, no photograph', panel: 'none', typeOnly: true, zone: { x: sp.side + 2, y: sp.top + 4, w: 100 - 2 * sp.side - 4, h: 100 - sp.top - sp.bottom - 8 }, anchor: 'middle', grow: 1.25 });
+    const out = [];
+    recipes.forEach(r => {
+      const L = JSON.parse(JSON.stringify(L0)); const byId = {}; (L.layers || []).forEach(l => { byId[String(l.id)] = l; });
+      const keepImgs = r.typeOnly ? [] : L.layers.filter(l => l.type === 'img' && !isMark(l));
+      const lockedShapes = L.layers.filter(l => l.type === 'shape' && l.locked);
+      const marks = L.layers.filter(l => isMark(l) && !l.hidden);
+      const T = texts0.slice().sort((a, b) => order(a) - order(b)).map(t => byId[String(t.id)]).filter(Boolean);
+      const lockedText = T.filter(l => l.locked); const moving = T.filter(l => !l.locked);
+      if (!moving.length) return;
+      if (r.typeOnly) { L.noImagery = true; L.regions = []; L.bg = accent; L.image = null; if (L.v !== 5) { L.style = 'typographic'; L.template = L.template || 'plain'; } }
+      const zone = r.zone; const pad = r.panel === 'band' || r.panel === 'column' || r.panel === 'card' ? 3 : 0;
+      const kz = Math.max(0.7, Math.min(1.15, zone.w / (100 - 2 * sp.side))) * (r.grow || 1) * (story ? 1.12 : 1);
+      moving.forEach(l => {
+        const o = texts0.find(t => t.id === l.id) || l;
+        l.rotate = 0; l.opacity = 1; l.align = r.align || 'left'; delete l.group;
+        if (!l.bg) l.color = '#FFFFFF';
+        l.size = Math.max(MIN_SIZE[l.role] || 2.2, Math.round(o.size * (l.role === 'headline' || l.role === 'myth' || l.role === 'fact' ? kz : Math.min(1, kz)) * 100) / 100);
+      });
+      // lay the column out by measurement, stepping the type down (never under the readable minimum) until it fits the zone
+      let total = 0;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        moving.forEach(l => { l.x = r1(zone.x + pad); l.w = r1(zone.w - pad * 2); l.y = 0; l.h = 60; });
+        const g = {}; measure(L, copy, images, W, H).forEach(b => { g[b.id] = b; });
+        let cur = 0; let tooWide = false;
+        moving.forEach((l, i) => {
+          const b = g[String(l.id)]; const hh = b && b.contentH ? b.contentH / H * 100 + 0.3 : l.size * 1.3 * W / H;
+          if (b && b.overflowW) tooWide = true;
+          l.y = cur; l.h = r1(hh); cur += hh;
+          const nx = moving[i + 1]; if (nx) cur += Math.max(1.2, (l.size / 100 * W) * (nx.role === 'cta' ? 0.9 : 0.5) / H * 100);
+        });
+        total = cur;
+        const fits = total <= zone.h - pad * 2 && !tooWide;
+        if (fits) break;
+        if (moving.every(l => l.size * 0.92 < (MIN_SIZE[l.role] || 2.2))) break;
+        moving.forEach(l => { const m = MIN_SIZE[l.role] || 2.2; if (l.size * 0.92 >= m) l.size = Math.round(l.size * 0.92 * 100) / 100; });
+      }
+      const top = r.anchor === 'top' ? zone.y + pad : r.anchor === 'bottom' ? zone.y + zone.h - pad - total : zone.y + Math.max(0, (zone.h - total) / 2);
+      moving.forEach(l => { l.y = r1(l.y + top); });
+      // a one-line chip (a label or a CTA on its own plate) keeps its natural width when the column is centred, instead of
+      // the plate running the width of the column
+      if (r.align === 'center') {
+        const chips = moving.filter(l => l.bg); chips.forEach(l => { l.align = 'left'; });
+        const g = {}; measure(L, copy, images, W, H).forEach(b => { g[b.id] = b; });
+        chips.forEach(l => { const b = g[String(l.id)]; l.align = 'center'; if (!b || b.lines !== 1 || !b.w) return; const nw = Math.min(l.w, b.w / W * 100 + 0.6); l.x = r1(zone.x + (zone.w - nw) / 2); l.w = r1(nw); });
+      }
+      const sTop = top - pad, sBot = top + total + pad;
+      // the ground the words sit on
+      const shapes = [];
+      if (r.panel === 'band') shapes.push({ id: 'v-panel', type: 'shape', role: 'panel', shape: 'rect', x: 0, w: 100, y: r.anchor === 'bottom' ? r1(Math.max(0, sTop - 1)) : 0, h: r.anchor === 'bottom' ? r1(100 - Math.max(0, sTop - 1)) : r1(Math.min(100, sBot + 1)), fill: accent, opacity: 0.94, radius: 0 });
+      if (r.panel === 'column') shapes.push({ id: 'v-panel', type: 'shape', role: 'panel', shape: 'rect', x: r.right ? 100 - r.colW : 0, y: 0, w: r.colW, h: 100, fill: accent, opacity: 0.94, radius: 0 });
+      if (r.panel === 'card') shapes.push({ id: 'v-panel', type: 'shape', role: 'panel', shape: 'rect', x: r1(zone.x), y: r1(sTop), w: r1(zone.w), h: r1(sBot - sTop), fill: accent, opacity: 0.94 });
+      if (r.panel === 'scrim') shapes.push({ id: 'v-panel', type: 'shape', role: 'overlay', shape: 'rect', x: 0, y: 0, w: 100, h: 100, fill: 'rgba(8,12,18,0.55)', radius: 0 });
+      if (r.panel === 'fade') shapes.push({ id: 'v-panel', type: 'shape', role: 'overlay', shape: 'rect', gradient: true, dir: 'up', x: 0, y: r1(Math.max(0, sTop - 18)), w: 100, h: r1(100 - Math.max(0, sTop - 18)), fill: 'rgba(8,12,18,0.82)', radius: 0 });
+      // the marks go to a corner clear of the words (the observed corner first), unless locked
+      const occupied = { x: zone.x, y: sTop, w: zone.w, h: sBot - sTop };
+      marks.filter(mk => !mk.locked).forEach(mk => {
+        const lh = mk.h || 6; const lw = mk.w || 17;
+        const C = { tl: [sp.side, sp.top], tr: [100 - sp.side - lw, sp.top], bl: [sp.side, 100 - sp.bottom - lh], br: [100 - sp.side - lw, 100 - sp.bottom - lh] };
+        const pref = [observed, 'br', 'bl', 'tr', 'tl'].filter((c, i, a) => c && a.indexOf(c) === i);
+        const clear = c => { const [x, y] = C[c]; return Math.min(x + lw, occupied.x + occupied.w) - Math.max(x, occupied.x) <= 0.5 || Math.min(y + lh, occupied.y + occupied.h) - Math.max(y, occupied.y) <= 0.5; };
+        const pick = pref.find(clear) || pref[0]; mk.x = r1(C[pick][0]); mk.y = r1(C[pick][1]);
+      });
+      const textIds = new Set(T.map(l => String(l.id)));
+      L.layers = keepImgs.concat(lockedShapes, shapes, L.layers.filter(l => l.type === 'text' && textIds.has(String(l.id))), L.layers.filter(l => l.type === 'text' && !textIds.has(String(l.id))), marks.concat(L.layers.filter(l => isMark(l) && l.hidden)));
+      void lockedText;
+      // measure; repair what geometry or colour can fix; never the words
+      const vopts = Object.assign({}, opts, { production: true });
+      let v = validate(L, copy, images, vopts); let final = L; let steps = [];
+      const pendingCodes = { imagery_missing: 1, mark_unloaded: 1, imagery_sketch: 1 };
+      const blockers = x => x.issues.filter(i => i.severity === 'blocking' && !pendingCodes[i.code]);
+      if (blockers(v).length || v.issues.some(i => i.code === 'low_contrast')) { const rp = repair(L, copy, images, Object.assign({}, opts, { fixContrast: true })); if (rp.changed) { final = rp.layout; steps = rp.steps; v = validate(final, copy, images, vopts); } }
+      if (sigOf(final) === current && !r.typeOnly) return;
+      out.push({ id: r.id, name: r.name, layout: final, ok: !blockers(v).length, typeOnly: !!r.typeOnly, blocking: blockers(v).map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')), pending: v.issues.filter(i => pendingCodes[i.code]).map(i => i.code), warnings: v.issues.filter(i => i.severity !== 'blocking').map(i => i.code), steps });
+    });
+    return out.sort((a, b) => (b.ok - a.ok));
+  }
   /* a store-only zip: enough for images and text, no compression, readable everywhere */
   const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
   function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -491,5 +601,5 @@
   function report(v, val) {
     return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'rotate'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 100) / 100 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, report, zip };
+  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, variants, report, zip };
 })();

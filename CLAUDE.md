@@ -1546,6 +1546,24 @@ area when it is wider (a 9:16 story). Harnesses: `tests/studio-journey-browser.m
 (8 journeys on `tests/studio-fixture.mjs`, providers mocked), `tests/studio-p23-worker.mjs`
 (2), `tests/studio-shots.mjs` (before/after screenshots into the ignored `tests/shots/`).
 
+**Layout variations, imagery remedies, the Art Director (page p24; `CREATIVE-STUDIO.md` s.32).**
+`STRender.variants(layout, copy, images, opts)` lays the same words, marks and imagery out nine ways
+(bands foot / top, columns left / right, cards low / high, a centred statement over a shade, a fade
+from the foot, type only with `layout.noImagery`), each by measurement inside the format's safe area,
+then validates (and repairs) it at the output size; the result names what blocks and what is pending
+(`imagery_missing`, `mark_unloaded`). Free, no model call; the words never change. The Refine workspace
+shows them as cards; **Use this layout** is a layout version "layout variation: <name> (no render)".
+Under the artwork, **Remedies** names what no layout can fix: no imagery yet (Generate the imagery, 1
+render, confirmed; or Retry the failed render; or Use a solid ground, the type-only arrangement, no
+render) and a mark that did not load. Fix layout's note now names the remaining non-layout blockers. The
+creative partner is the **Art Director**: the latest review pinned above the thread (scores with
+reasons, verdict, version judged, top issue, correction with Apply) and **Review vN (1 model call)**,
+which composes the tile as it exports and runs `inspect` on that version; advice, never approval.
+Suggestions are fetched only on **Suggest for this version (1 model call)**, no longer on every new
+version. Studio scripts load as `?v=p24` so a browser cannot keep a stale renderer: bump it on each
+page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
+`tests/studio-journey-browser.mjs`.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

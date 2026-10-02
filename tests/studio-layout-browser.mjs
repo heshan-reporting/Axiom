@@ -7,6 +7,8 @@
  * (Bricolage Grotesque, Instrument Sans, OFL) served from FONT_DIR when it holds them; without them the font cases are
  * skipped and say so, and the rest runs on the browser's fallback and reports it.
  *
+ * Section 11 (P24) offers the layout variations of every case and checks each against the same validation.
+ *
  * Writes tests/shot-layout-repair.png: the HOOF reconstruction before and after repair (issue boxes outlined) and the
  * four formats with long copy after repair, labelled as synthetic.
  *
@@ -371,6 +373,46 @@ ok(p22b.lockedChanged === false, 'a locked mark is left as it is');
 ok(p22b.textBefore.some(c => /contrast/.test(c)), 'the pale label over the sky is caught: ' + p22b.textBefore.join(', '));
 ok(p22b.untouchedByDefault, 'a merely low contrast is left alone unless the person asks (a deliberate brand colour may sit there): the Fix button asks');
 ok(!p22b.text.after.some(c => /contrast/.test(c)) && p22b.text.sameWords && p22b.text.samePlace && p22b.text.steps.length === 1, 'the repair makes it read with ' + (p22b.text.bg ? 'a backing plate' : 'a colour change') + ' (' + p22b.text.color + (p22b.text.bg ? ' on ' + p22b.text.bg : '') + '), same words, same place and size');
+
+/* ------------------------------------------------------------------ P24: layout variations */
+section('11. layout variations: nine arrangements of the same words, each laid out by measurement and validated at the output size; the words never change');
+const p24 = await page.evaluate(async ({ house, HOOF, HC }) => {
+  const R = window.STRender; const im = await window.__load(); const out = [];
+  const cases = Object.keys(house).map(k => ({ name: k, L: house[k].layout, C: house[k].copy, ch: house[k].channel, fmt: house[k].format })).concat([{ name: 'HOOF reported tile', L: HOOF, C: HC, ch: 'instagram', fmt: '4:5' }]);
+  for (const c of cases) for (const photo of [true, false]) {
+    const imgs = photo ? { bg: im.photo } : {}; (c.L.layers || []).forEach(l => { if (l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) imgs[l.id] = im.white; });
+    const fonts = await R.ensureFonts(c.L, c.C, { timeout: 6000 }); const o = { fonts, channel: c.ch, format: c.fmt };
+    const words0 = JSON.stringify(window.__displayed(c.L, c.C).filter(([id]) => (c.L.layers.find(l => String(l.id) === id) || {}).type === 'text').sort());
+    const vs = R.variants(c.L, c.C, imgs, o);
+    const res = vs.map(x => {
+      const v = R.validate(x.layout, c.C, imgs, Object.assign({ production: true }, o)); const blocking = v.issues.filter(i => i.severity === 'blocking' && !/imagery_missing|mark_unloaded|imagery_sketch/.test(i.code)).map(i => i.code + ':' + i.layers.join(','));
+      const words = JSON.stringify(window.__displayed(x.layout, c.C).filter(([id]) => (x.layout.layers.find(l => String(l.id) === id) || {}).type === 'text').sort());
+      const texts = v.boxes.filter(b => b.type === 'text' && !b.hidden && !b.empty); const marks = v.boxes.filter(b => b.mark && !b.hidden);
+      const clash = marks.some(m => texts.some(t => Math.min(m.x + m.w, t.x + t.w) - Math.max(m.x, t.x) > 1 && Math.min(m.y + m.h, t.y + t.h) - Math.max(m.y, t.y) > 1));
+      const chipsW = x.id === 'centre' ? v.boxes.filter(b => b.type === 'text' && b.bg && b.lines === 1).every(b => { const l = x.layout.layers.find(q => String(q.id) === b.id); return l && Math.abs(l.x + l.w / 2 - 50) < 0.6 && l.w < 79.9; }) : true;
+      return { id: x.id, ok: x.ok, reportedOk: x.ok === !blocking.length, blocking, sameWords: words === words0, clash, chipsW, typeOnly: x.typeOnly, noImg: !!x.layout.noImagery, imgMissing: v.imageryMissing, pending: x.pending };
+    });
+    out.push({ name: c.name + (photo ? ' with photo' : ' no photo'), n: vs.length, res, distinct: new Set(vs.map(x => JSON.stringify(x.layout.layers.filter(l => l.type === 'text').map(l => [l.x, l.y, l.w, l.size])))).size });
+  }
+  const locked = R.variants(Object.assign({}, HOOF), HC, { bg: im.photo }, { channel: 'instagram', format: '4:5', locks: { layout: true } }).length;
+  const LL = JSON.parse(JSON.stringify(HOOF)); const lt = LL.layers.find(l => l.type === 'text'); lt.locked = true;
+  const lv = R.variants(LL, HC, { bg: im.photo, wordmark: im.white }, { channel: 'instagram', format: '4:5' });
+  const kept = lv.every(x => { const y = x.layout.layers.find(l => l.id === lt.id); return y && y.x === lt.x && y.y === lt.y && y.w === lt.w && y.size === lt.size; });
+  return { out, locked, kept, lockedId: lt.id };
+}, { house, HOOF: HOOF_REPRO, HC: HOOF_COPY });
+for (const c of p24.out) {
+  const bad = c.res.filter(r => !r.ok);
+  ok(c.n >= 8 && c.distinct === c.n, c.name + ': ' + c.n + ' distinct arrangements offered');
+  ok(c.res.every(r => r.sameWords), c.name + ': every arrangement shows exactly the words of the original');
+  ok(c.res.every(r => r.reportedOk), c.name + ': each one\'s pass or fail is what the validation measures');
+  ok(/long/.test(c.name) && !HAVE_FONTS ? c.res.filter(r => r.ok).length >= 5 : !bad.length, c.name + ': ' + c.res.filter(r => r.ok).length + ' of ' + c.n + ' pass' + (bad.length ? ' (' + bad.map(r => r.id + ' ' + r.blocking.join(' ')).join('; ') + ')' : ''));
+  ok(c.res.every(r => !r.ok || !r.clash), c.name + ': no mark sits on the words in a passing arrangement');
+  ok(c.res.every(r => r.chipsW), c.name + ': a one-line label or CTA keeps its natural width when the words are centred');
+  const to = c.res.find(r => r.typeOnly); ok(to && to.noImg && !to.imgMissing, c.name + ': the type-only arrangement needs no imagery');
+  if (/no photo/.test(c.name)) ok(c.res.filter(r => !r.typeOnly).every(r => r.pending.indexOf('imagery_missing') >= 0), c.name + ': without a photograph, the others say the imagery is still to be made (not a layout failure)');
+}
+ok(p24.locked === 0, 'a locked layout offers no variations');
+ok(p24.kept, 'a locked text layer (' + p24.lockedId + ') keeps its place and size in every variation');
 
 /* ------------------------------------------------------------------ the evidence sheet */
 section('evidence: tests/shot-layout-repair.png (synthetic fixture, real renderer)');

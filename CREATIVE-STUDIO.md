@@ -858,3 +858,78 @@ the clash shown; copy: Keep mine / Take theirs; layout: Apply mine on top); canc
   brand-gaps tests, and the overview and scope browser harnesses.
 - Not proven: live model output, live latency, real fonts on the production page (the harness has no
   webfonts and reports fallback fonts), Safari and Firefox, a screen reader pass.
+
+## 32. Layout variations, imagery remedies and the Art Director (page build p24; worker unchanged at studio-p23)
+
+### What was reported
+
+A HOOF tile, live: the headline and support unreadable (contrast 1.05 and 1.30), a label overflowing by
+one pixel (55 against 54), `imagery_missing`, and **Fix layout** answering "Partly fixed" with nothing
+visibly better. Two causes:
+
+- **Stale scripts.** GitHub Pages served `studio-render.js` and `studio.js` without a version in the URL,
+  so a browser that had cached the pre-p22 renderer kept a `repair()` that could not change a colour. The
+  Studio scripts (and `ax-ui.js`, `content.js`) now load as `?v=p24`; bump it with each page release.
+- **A blocker no layout can clear.** `imagery_missing` is blocking in production: the composition expects
+  a photograph nobody has made. Moving boxes cannot fix that, and the note never said so.
+
+### What changed
+
+- **Fix layout says what is left.** After the repair, every blocking issue that is not a layout matter is
+  named with its remedy ("no imagery yet (generate it, or use a solid ground)", "a mark file did not load
+  (load the marks again)", "an image region is still a sketch"). "Fixed" never hides a tile that still
+  cannot pass, and an unfixable layout points at the variations.
+- **Imagery remedies** (`Remedies` under the artwork, when the measurement finds `imagery_missing` or
+  `mark_unloaded`): **Generate the imagery (1 render)** from the composition's own art direction (the
+  background region's prompt, else the version's visual note), confirmed first with its size; when the
+  last render failed, its explained error and **Retry the render (1 render)** instead; **Use a solid
+  ground instead (no render)**, which applies the measured type-only arrangement as a layout version; and
+  **Load the marks again** for a mark that did not load. Nothing paid runs without a click and a confirm.
+- **Layout variations** (`STRender.variants(layout, copy, images, opts)`, free, no model call). Nine
+  arrangements of the same words, marks and imagery: band across the foot, band across the top, words in
+  a column on the left or the right (44% wide on 16:9, 52% otherwise), a card lower left or upper left, a
+  centred statement over a shade, words over a fade from the foot, and type only (no photograph; the
+  ground is the campaign colour; `layout.noImagery`). Each is laid out by measurement: the text layers in
+  reading order (kicker, label, myth, fact, headline, support, free, caption, CTA) are stacked in the
+  recipe's zone inside the format's safe area (the Instagram story interface for 9:16), sized from the
+  original within the readable minimum and stepped down by 8% until the stack fits; a one-line label or
+  CTA on its own plate keeps its natural width when centred; the marks go to a corner clear of the words
+  (the observed corner first); locked layers stay where they are. Every arrangement is then validated at
+  the output size and, if anything blocks, repaired with the contrast fix on; the result says whether it
+  passes, what still blocks it, and what is pending that no layout can fix (`imagery_missing`,
+  `mark_unloaded`, `imagery_sketch`). The words are never changed: the harness compares every displayed
+  word. An arrangement identical to the current one is not offered; a locked layout offers none. The
+  Refine workspace shows them as cards drawn by the renderer with their state; **Use this layout** saves
+  a layout version noted "layout variation: <name> (no render)". The renderer honours `noImagery` in
+  `draw` (no placeholder ground) and in `imageryMissing`; the worker's own rule already agrees (no
+  background region on a v5 plan, `style: typographic` with no image on a v4 layout), so no worker change
+  was needed.
+- **The Art Director** (the creative partner, renamed). The inspector tab, the panel, its head and the
+  composer name the role. Above the thread, the **latest review** of the asset is pinned: the five scores
+  with their reasons, the verdict, which version it judged (and whether that is the current one), the
+  round, whether it saw the composed tile, the most serious issue and the correction on offer with
+  **Apply**. **Review vN (1 model call)** composes the tile exactly as it exports, files it with its
+  measurement, and runs the existing `inspect` stage on that version; a review is advice and approves
+  nothing (the panel says so, and the harness checks no approval moved).
+- **No silent spending.** The suggestions beside the Art Director used to be fetched automatically for
+  every new version of an open asset - and a pause in typing makes a version - so each hand edit could
+  spend a model call. They now wait for **Suggest for this version (1 model call)**; the server's cache
+  still answers for free when it holds one.
+
+### Evidence
+
+- `tests/studio-layout-browser.mjs` section 11: the worker's house layouts in 1:1, 4:5, 9:16 and 16:9
+  with short and long copy, plus the reconstruction of the reported HOOF tile, each with and without a
+  photograph: nine distinct arrangements every time, all nine passing (with the app's fonts), the same
+  words in every one, no mark on the words, centred chips at their natural width, the type-only
+  arrangement needing no imagery, the others saying the imagery is pending when there is none; a locked
+  layout offers none and a locked text layer keeps its place (211 checks in the file).
+- `tests/studio-journey-browser.mjs` journey 9: a production whose render failed shows the gap, the
+  failed render and both remedies; the solid ground becomes a layout version with no model or image call
+  and the worker then holds a passing validation; on a photographed tile every offered arrangement
+  passes and one becomes a version with the same words and photograph and no call; the Art Director's
+  review is one model call on the composed tile of the current version and changes no approval.
+- `tests/studio-browser.mjs` (26) updated for the tab name and the on-demand suggestions; every other
+  Studio harness passes unchanged.
+- Providers are mocked in these harnesses: they prove the page, the renderer and the worker agree, not
+  what a live model answers.
