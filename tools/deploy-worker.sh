@@ -173,6 +173,12 @@ SUMMARY="$(node -e '
   console.log("binding types kept: " + types.join(" "));
 ' "$SETTINGS" "$META")" || die "the worker '$NAME' could not be read on account $ACC (wrong account, wrong name, or the token lacks Workers Scripts: Edit)"
 echo "$SUMMARY"
+# Since build r1 the worker is closed when it has no access keys (deny by default). Refuse to deploy onto a worker
+# that has neither AXIOM_KEYS nor AXIOM_ACCESS_KEY: it would answer 503 to everyone until one is set.
+node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const n = ((j.result || {}).bindings || []).map(x => x.name);
+  if (n.indexOf("AXIOM_KEYS") < 0 && n.indexOf("AXIOM_ACCESS_KEY") < 0) { console.error("no AXIOM_KEYS or AXIOM_ACCESS_KEY secret on the worker: the new code closes every protected route without one. Set it first: npx wrangler secret put AXIOM_KEYS --name newsaus"); process.exit(3); }
+' "$SETTINGS" || die "set an access key secret before deploying this build"
 FOUND=" $(echo "$SUMMARY" | sed -nE 's/^bindings \([0-9]+\): (.*)$/\1/p') "
 MISSING=""
 for b in $REQUIRED_BINDINGS; do

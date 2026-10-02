@@ -1827,7 +1827,7 @@ async function metaCron(env) {
   try { r.library = await metaAdLibrary(env); } catch (e) { r.library = { error: String(e).slice(0, 100) }; }
   try { r.comments = await metaComments(env); } catch (e) { r.comments = { error: String(e).slice(0, 100) }; }
   try { r.reactions = await metaReactions(env); } catch (e) { r.reactions = { error: String(e).slice(0, 100) }; }
-  await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'meta_last_result', jsonFit(r, 4000), 7 * 86400);
 }
 
 // ==============================================================================
@@ -2096,7 +2096,7 @@ async function redditCron(env) {
   const queries = all.slice(cur, cur + slice).concat(cur + slice > all.length ? all.slice(0, cur + slice - all.length) : []);
   await kvPut(env.AXIOM_KV, 'reddit_q_cursor', String((cur + slice) % Math.max(1, all.length)), 7 * 86400);
   let r; try { r = await redditSweep(env, { threads: 15, commentsPer: 30, queries: queries }); } catch (e) { r = { error: String(e).slice(0, 120) }; }
-  await kvPut(env.AXIOM_KV, 'reddit_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'reddit_last_result', jsonFit(r, 4000), 7 * 86400);
 }
 /** File a document in the Mind from server-side code: the same chunking,
  *  embedding and bookkeeping /mind/ingest performs for an upload. */
@@ -2217,14 +2217,14 @@ async function jobCreate(env, source, params, who) {
   const where = String((params && params.where) || 'auto');
   const local = (await jobRoute(env, source, where)) === 'worker';
   await env.MIND_DB.prepare('INSERT INTO bridge_jobs(id,source,params,status,agent,who,created,claimed,finished,ok,result) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-    .bind(id, source, JSON.stringify(params || {}).slice(0, 4000), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
+    .bind(id, source, jsonFit(params || {}, 4000), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
   await jobLog(env, id, [{ k: 'info', t: 'job ' + id + ' created: ' + source + (local ? ' (running in the worker)' : ' (waiting for a desktop collector to claim it)') }]);
   return { id, local };
 }
 async function jobFinish(env, id, ok, result) {
   await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, finished=?, ok=?, result=? WHERE id=?')
-    .bind(ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, JSON.stringify(result || {}).slice(0, 4000), id).run();
-  await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + (result && typeof result.summary === 'string' && result.summary ? result.summary : JSON.stringify(result || {}).slice(0, 600)) }]);
+    .bind(ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, jsonFit(result || {}, 4000), id).run();
+  await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + (result && typeof result.summary === 'string' && result.summary ? result.summary : jsonFit(result || {}, 600)) }]);
   // keep the log readable: trim to the most recent lines
   try {
     await env.MIND_DB.prepare('DELETE FROM bridge_log WHERE job=? AND id NOT IN (SELECT id FROM bridge_log WHERE job=? ORDER BY id DESC LIMIT ?)').bind(id, id, BRIDGE_LOG_KEEP).run();
@@ -2495,7 +2495,7 @@ function topicNormalize(raw) {
     if (!kw) return;
     const key = topicSlug(kw); if (!key || seen.has(key)) return; seen.add(key);
     out.push({ id: String(id || key).replace(/[^\w.-]/g, '').slice(0, 60) || key, keyword: kw, topic: String(topic || '').slice(0, 80),
-      ns: String(ns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24), priority: pri, extra: extra ? JSON.stringify(extra).slice(0, 1500) : '' });
+      ns: String(ns || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24), priority: pri, extra: extra ? jsonFit(extra, 1500) : '' });
   });
   return out;
 }
@@ -2782,7 +2782,7 @@ async function signalsCron(env) {
   const out = {};
   if (env.LINKEDIN_TOKEN && liOrgs(env).length) { try { out.linkedin = await linkedinSweep(env, {}); } catch (e) { out.linkedin = { error: String(e).slice(0, 120) }; } }
   if (env.META_TOKEN && metaPages(env).length) { try { out.meta = await metaOrganicSweep(env, {}); } catch (e) { out.meta = { error: String(e).slice(0, 120) }; } }
-  await kvPut(env.AXIOM_KV, 'signals_last_result', JSON.stringify(out).slice(0, 4000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'signals_last_result', jsonFit(out, 4000), 7 * 86400);
 }
 /** Run a job here, in the worker, narrating every step into its log. */
 /** Comment rows for one Reddit thread, in the sweep's exact shape: a comment
@@ -3088,7 +3088,7 @@ async function releaseCompose(env, pack, opts, log) {
     + ' A "quote" tile uses a verbatim sentence from the release with attribution. Captions: LinkedIn up to 600 chars (professional, one line break allowed), X up to 270, Facebook up to 400; captions may add one relevant hashtag at most.'
     + ' Return strict JSON only: {"tiles":[{"kind":"lead|stat|people|proof|warning|quote|cta","headline":"","support":"","cta":"","caption":{"linkedin":"","x":"","facebook":""},"alt":"<=140 chars image description for accessibility","visual":"<=200 chars art direction: subject, mood, composition; no text instructions"}]}.'
     + ' Produce exactly ' + n + ' tiles, ordered lead first, quote last if present, no duplicate kinds unless there are more tiles than kinds.';
-  const user = 'RELEASE EXTRACT:\n' + JSON.stringify(ex).slice(0, 12000) + '\n\nFULL RELEASE TEXT:\n' + pack.source.slice(0, 16000);
+  const user = 'RELEASE EXTRACT:\n' + jsonFit(ex, 12000) + '\n\nFULL RELEASE TEXT:\n' + pack.source.slice(0, 16000);
   // what the team has taught the Engine, for this client and for everyone
   let learned = { text: '', count: 0 };
   try { learned = await engineRules(env, ns, 'tiles'); } catch (e) {}
@@ -3126,7 +3126,7 @@ async function releaseBuild(env, packId, opts) {
     const tiles = await releaseCompose(env, pack, opts, log);
     const title = String(pack.extract.headline || pack.title || 'Release').slice(0, 200);
     await env.MIND_DB.prepare('UPDATE release_packs SET title=?, extract=?, tiles=?, status=?, updated=? WHERE id=?')
-      .bind(title, JSON.stringify(pack.extract).slice(0, 60000), JSON.stringify(tiles), 'composed', Date.now(), packId).run();
+      .bind(title, jsonFit(pack.extract, 60000), JSON.stringify(tiles), 'composed', Date.now(), packId).run();
     // provenance: the release itself is archived with the pack it produced
     try {
       await archiveItems(env, 'release', [{ src: 'release', title, body: pack.source.slice(0, 20000), url: 'x:release:' + packId, author: '',
@@ -3330,7 +3330,7 @@ async function engineArtwork(env, body, who) {
   const meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
   // the Mind document may go to the client's creative shelf (<ns>_creative) so only the creative surfaces retrieve it
   const mindNs = engineMindNs(ns, body.mindNs); if (mindNs !== ns) meta.mindNs = mindNs;
-  const d = await engineDescribe(env, body.imageB64, mime, title + ' ' + JSON.stringify(meta).slice(0, 300));
+  const d = await engineDescribe(env, body.imageB64, mime, title + ' ' + jsonFit(meta, 300));
   const key = 'art/' + ns + '/' + id;
   await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
   // the image is kept whether or not the describer answered: an undescribed artwork is still findable by
@@ -3339,7 +3339,7 @@ async function engineArtwork(env, body, who) {
   let docId = '';
   if (d.ok) docId = await engineArtworkDoc(env, mindNs, id, title, key, description, meta);
   await env.MIND_DB.prepare('INSERT INTO engine_art(id,ns,title,key,mime,description,meta,docId,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .bind(id, ns, title, key, mime, description, JSON.stringify(meta).slice(0, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
+    .bind(id, ns, title, key, mime, description, jsonFit(meta, 2000), docId, String(who || '').slice(0, 40), Date.now()).run();
   const out = { id, ns, title, key, description, model: d.model || '', docId, described: !!d.ok, url: '/engine/art?id=' + id };
   if (!d.ok) out.warning = 'stored, but not described: ' + (d.detail || d.error) + (d.error === 'gemini_not_configured' ? ' (set GEMINI_KEY on the worker)' : '') + '. POST /engine/artwork/describe {id} retries.';
   return out;
@@ -3367,7 +3367,7 @@ async function engineArtworkDescribe(env, id) {
   const bytes = new Uint8Array(await obj.arrayBuffer());
   let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   const meta = pjs(row.meta, {});
-  const d = await engineDescribe(env, btoa(bin), row.mime, row.title + ' ' + JSON.stringify(meta).slice(0, 300));
+  const d = await engineDescribe(env, btoa(bin), row.mime, row.title + ' ' + jsonFit(meta, 300));
   if (!d.ok) throw new Error(d.error + (d.detail ? ': ' + d.detail : ''));
   const docId = await engineArtworkDoc(env, engineMindNs(row.ns, meta.mindNs), id, row.title, row.key, d.description, meta);
   await env.MIND_DB.prepare('UPDATE engine_art SET description=?, docId=? WHERE id=?').bind(d.description, docId || row.docId || '', id).run();
@@ -3577,7 +3577,7 @@ async function contentBuild(env, setId, opts) {
   const set = Object.assign({}, row, { platforms: JSON.parse(row.platforms || '[]') });
   try {
     const r = await contentCompose(env, set, opts, log);
-    await env.MIND_DB.prepare('UPDATE content_sets SET items=?, status=?, updated=? WHERE id=?').bind(JSON.stringify(r.items).slice(0, 200000), 'written', Date.now(), setId).run();
+    await env.MIND_DB.prepare('UPDATE content_sets SET items=?, status=?, updated=? WHERE id=?').bind(contentItemsJson(r.items), 'written', Date.now(), setId).run();
     await log('info', 'set ' + setId + ' written: ' + r.items.length + ' pieces in the ' + set.ns + ' voice (' + r.facts + ' facts, ' + r.examples + ' examples, ' + r.learned + ' corrections in play)');
     await log.flush();
     await jobFinish(env, opts.job, true, { ok: true, setId, pieces: r.items.length, flagged: r.items.filter(it => !it.check.ok).length, campaign: r.campaign });
@@ -3600,7 +3600,7 @@ function contentView(set) {
   return { id: set.id, ns: set.ns, campaign: set.campaign, segment: set.segment, brief: set.brief, source: set.source, platforms: set.platforms, items: set.items, status: set.status, job: set.job, who: set.who, history: set.history, created: set.created, updated: set.updated };
 }
 async function contentSave(env, set) {
-  await env.MIND_DB.prepare('UPDATE content_sets SET items=?, history=?, updated=? WHERE id=?').bind(JSON.stringify(set.items).slice(0, 200000), JSON.stringify((set.history || []).slice(-60)).slice(0, 60000), Date.now(), set.id).run();
+  await env.MIND_DB.prepare('UPDATE content_sets SET items=?, history=?, updated=? WHERE id=?').bind(contentItemsJson(set.items), jsonFit((set.history || []).slice(-60), 60000), Date.now(), set.id).run();
 }
 /** Revise by instruction. Claude edits the chosen piece (or all of them) and
  *  says whether the instruction is a standing preference; if it is, the Engine
@@ -3802,7 +3802,7 @@ async function archiveItems(env, kind, rows, strict) {
       String(r.url || ('x:' + kind + ':' + arcHash((r.src || '') + '|' + (r.title || '') + '|' + (r.body || '')))).slice(0, 700),
       String(r.author || '').slice(0, 140),
       typeof r.tone === 'number' ? r.tone : null,
-      r.meta ? JSON.stringify(r.meta).slice(0, 1500) : null,
+      r.meta ? jsonFit(r.meta, 1500) : null,
       r.ts || now,
       now));
     const res = await env.MIND_DB.batch(batch);
@@ -4199,6 +4199,55 @@ async function sourcesSeed(env, force) {
   return { ok: true, seeded: seed.length, had: n };
 }
 function pjs(v, d) { try { const x = JSON.parse(v || ''); return x == null ? d : x; } catch (e) { return d; } }
+/* ---- persisted JSON: valid or refused, never cut mid-string ------------------------------------------------
+ * jsonOk(s)        - does a stored string parse?
+ * jsonFit(v, max)  - for diagnostics and advisory blobs: the value serialised within max characters, shrinking long
+ *                    strings and arrays field by field until it fits, always valid JSON; a shrunk object carries
+ *                    _truncated: true. Never used for a person's instruction, brief, recipe or layout.
+ * jsonLimitProblem(v, max, fieldMax, label) - for what people supply: '' when it fits, else a sentence naming the
+ *                    field and its size, so the request can be refused (413) with nothing written. */
+function contentItemsJson(items) { const s = JSON.stringify(items || []); if (s.length > 400000) throw new Error('content_too_large: the set would be ' + s.length + ' characters; nothing was saved'); return s; }
+function jsonOk(s) { if (s == null || s === '') return true; try { JSON.parse(s); return true; } catch (e) { return false; } }
+function jsonShrink(v, lim, acap, depth) {
+  if (depth > 12) return null;
+  if (typeof v === 'string') return v.length > lim ? v.slice(0, lim) + '...' : v;
+  if (Array.isArray(v)) return v.slice(0, acap).map(x => jsonShrink(x, lim, acap, depth + 1));
+  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) { const x = jsonShrink(v[k], lim, acap, depth + 1); if (x !== undefined) o[k] = x; } return o; }
+  return v;
+}
+function jsonFit(v, max) {
+  if (v === undefined) v = null;
+  let s = JSON.stringify(v); if (s.length <= max) return s;
+  for (const [lim, acap] of [[4000, 200], [1500, 80], [600, 30], [200, 12], [60, 5], [20, 2]]) {
+    const c = jsonShrink(v, lim, acap, 0);
+    if (c && typeof c === 'object' && !Array.isArray(c)) c._truncated = true;
+    s = JSON.stringify(c); if (s.length <= max) return s;
+  }
+  if (typeof v === 'string') { let n = Math.max(0, max - 8); for (;;) { s = JSON.stringify(v.slice(0, n) + (n < v.length ? '...' : '')); if (s.length <= max || n === 0) return s.length <= max ? s : '""'; n = Math.floor(n * 0.8); } }
+  if (Array.isArray(v)) return '[]';
+  return JSON.stringify({ _truncated: true, chars: JSON.stringify(v).length });
+}
+function jsonLimitProblem(v, max, fieldMax, label) {
+  let worst = null;
+  const walk = (x, path, depth) => {
+    if (depth > 12) return;
+    if (typeof x === 'string') { if (fieldMax && x.length > fieldMax && (!worst || x.length > worst.n)) worst = { path, n: x.length }; return; }
+    if (Array.isArray(x)) { x.forEach((y, i) => walk(y, path + '[' + i + ']', depth + 1)); return; }
+    if (x && typeof x === 'object') Object.keys(x).forEach(k => walk(x[k], path ? path + '.' + k : k, depth + 1));
+  };
+  walk(v, '', 0);
+  if (worst) return (worst.path || label || 'the value') + ' is ' + worst.n + ' characters; the limit for one field is ' + fieldMax;
+  const total = JSON.stringify(v == null ? {} : v).length;
+  if (total > max) {
+    let big = ''; let bn = 0; if (v && typeof v === 'object') Object.keys(v).forEach(k => { const n = JSON.stringify(v[k] == null ? null : v[k]).length; if (n > bn) { bn = n; big = k; } });
+    return (label || 'the input') + ' is ' + total + ' characters as stored' + (big ? ' (largest field ' + big + ', ' + bn + ')' : '') + '; the limit is ' + max;
+  }
+  return '';
+}
+const ST_INPUT_MAX = 60000, ST_FIELD_MAX = 20000, ST_BRIEF_MAX = 60000, ST_LAYOUT_MAX = 250000;
+/* a layout or a brief written by a stage is stored whole or the stage fails with the reason, never cut mid-string */
+function stLayoutJson(layout) { const s = JSON.stringify(layout == null ? null : layout); if (s && s.length > ST_LAYOUT_MAX) throw new Error('layout_too_large: the layout is ' + s.length + ' characters; the limit is ' + ST_LAYOUT_MAX + ' (not retried)'); return s; }
+function stBriefJson(brief) { const s = JSON.stringify(brief || {}); if (s.length > ST_BRIEF_MAX * 1.5) throw new Error('brief_too_large: the brief would be ' + s.length + ' characters; the limit is ' + ST_BRIEF_MAX * 1.5 + ' (not retried)'); return s; }
 function sourceRow(r) {
   return { id: r.id, name: r.name || r.id, tier: r.tier || 'core', juris: r.juris || 'au', issues: pjs(r.issues, []), methods: pjs(r.methods, []), urls: pjs(r.urls, {}),
     schedule: Number(r.schedule) || 60, enabled: !!r.enabled, core: !!r.core, edited: !!r.edited, created: r.created || 0, updated: r.updated || 0,
@@ -5573,7 +5622,7 @@ async function socialCron(env) {
   await run('youtube', () => youtubeEnrich(env, { max: 6 }));
   const pl = Number(await kvGet(env.AXIOM_KV, 'petitions_last') || 0);
   if (now - pl > 20 * 3600000) { await kvPut(env.AXIOM_KV, 'petitions_last', String(now), 7 * 86400); await run('petitions', () => petitionsSweep(env, { detail: 10 })); }
-  await kvPut(env.AXIOM_KV, 'social_last', JSON.stringify(res).slice(0, 8000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'social_last', jsonFit(res, 8000), 7 * 86400);
   return res;
 }
 
@@ -5899,7 +5948,7 @@ async function sentimentRun(env, opts) {
   const take = cands.slice(0, limit);
   const callsNeeded = Math.ceil(take.length / SENT_BATCH);
   await log('info', out.scanned + ' rows of the last ' + hours + 'h without a verdict; ' + out.matched + ' mention an entity; classifying ' + take.length + ' in ' + callsNeeded + ' call' + (callsNeeded === 1 ? '' : 's') + ' (' + budget.used + ' of ' + budget.cap + ' calls used today, ' + budget.model + ')');
-  if (!take.length) { await kvPut(env.AXIOM_KV, 'sent_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400); return out; }
+  if (!take.length) { await kvPut(env.AXIOM_KV, 'sent_last', jsonFit(Object.assign({ at: now }, out), 4000), 7 * 86400); return out; }
   for (let i = 0; i < take.length; i += SENT_BATCH) {
     if (out.calls >= budget.left) { out.errors.push('daily budget of ' + budget.cap + ' Claude calls reached; ' + (take.length - i) + ' rows wait for tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
     const batch = take.slice(i, i + SENT_BATCH);
@@ -5927,7 +5976,7 @@ async function sentimentRun(env, opts) {
   await log('info', out.classified + ' rows classified, ' + out.mentions + ' entity stances recorded, ' + out.skipped + ' rows marked as mentioning nothing');
   out.summary = out.classified + ' rows judged in ' + out.calls + ' call' + (out.calls === 1 ? '' : 's') + ': ' + out.byStance.neg + ' critical, ' + out.byStance.neu + ' neutral, ' + out.byStance.pos + ' supportive mentions; ' + out.skipped + ' rows mention no one' + (out.errors.length ? '; ' + out.errors.length + ' error' + (out.errors.length === 1 ? '' : 's') : '');
   if (!out.classified && out.errors.length) { out.ok = false; out.detail = out.errors[0]; }
-  await kvPut(env.AXIOM_KV, 'sent_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'sent_last', jsonFit(Object.assign({ at: now }, out), 4000), 7 * 86400);
   return out;
 }
 async function sentimentCron(env) {
@@ -6379,7 +6428,7 @@ async function narrativesRun(env, opts) {
   await log('info', out.named + ' named, ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') + ' raised (' + out.ms + 'ms)');
   out.summary = out.placed + ' rows placed (' + out.joined + ' joined a live narrative, ' + out.started + ' started one)' + (out.unanchored ? ', ' + out.unanchored + ' set aside' : '') + '; ' + recounted + ' recounted' + (out.deferred ? ' (' + out.deferred + ' deferred to the tick)' : '') + '; ' + (out.namingDeferred ? 'naming deferred to the tick' : out.named + ' named') + (out.alerts ? '; ' + out.alerts + ' alert' + (out.alerts === 1 ? '' : 's') : '') + (out.pruned ? '; ' + out.pruned + ' empty singletons pruned' : '') + ' - ' + (out.ms / 1000).toFixed(1) + 's';
   if (out.errors.length && !out.placed && !out.named) { out.ok = false; out.detail = out.errors[0]; }
-  await kvPut(env.AXIOM_KV, 'narr_last', JSON.stringify(Object.assign({ at: now }, out)).slice(0, 4000), 7 * 86400);
+  await kvPut(env.AXIOM_KV, 'narr_last', jsonFit(Object.assign({ at: now }, out), 4000), 7 * 86400);
   return out;
 }
 async function narrativesCron(env) {
@@ -6776,7 +6825,7 @@ function stProjectRow(r) {
    larger than a thread note; a truncated JSON document reads back as nothing, so those kinds get more room. */
 const ST_EVENT_BIG = { concepts: 120000, alternatives: 40000, proposal: 20000, applied: 20000 };
 async function stEvent(env, project, kind, data, who) {
-  try { await env.MIND_DB.prepare('INSERT INTO studio_events(project,kind,data,who,created) VALUES(?,?,?,?,?)').bind(project, kind, JSON.stringify(data || {}).slice(0, ST_EVENT_BIG[kind] || 4000), stStr(who, 40), Date.now()).run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('INSERT INTO studio_events(project,kind,data,who,created) VALUES(?,?,?,?,?)').bind(project, kind, jsonFit(data || {}, ST_EVENT_BIG[kind] || 4000), stStr(who, 40), Date.now()).run(); } catch (e) {}
 }
 async function stProject(env, id) {
   id = stClean(id, 24); if (!id) return null;
@@ -6804,24 +6853,58 @@ async function stStanding(env, asset) {
   });
   return out;
 }
+/* A read-modify-write of a project's brief with optimistic concurrency: the change is applied to a fresh read and
+ * written only if the revision is still the one read (UPDATE ... WHERE revision=?, affected rows checked); if someone
+ * else wrote in between, it is re-applied to their version. A stage never writes back a brief it read minutes ago. */
+async function stBriefPatch(env, pid, mutate, opts) {
+  opts = opts || {};
+  for (let i = 0; i < 6; i++) {
+    const cur = await stProject(env, pid); if (!cur) throw new Error('unknown_project (not retried)');
+    const brief = JSON.parse(JSON.stringify(cur.brief || {}));
+    if (mutate(brief, cur) === false) return { ok: true, unchanged: true, brief: cur.brief, revision: cur.revision };
+    const res = await env.MIND_DB.prepare('UPDATE studio_projects SET brief=?' + (opts.statusSql ? ', status=' + opts.statusSql : '') + ', revision=revision+1, updated=? WHERE id=? AND revision=?').bind(stBriefJson(brief), Date.now(), pid, cur.revision).run();
+    if (res && res.meta && res.meta.changes) return { ok: true, brief, revision: cur.revision + 1 };
+  }
+  throw new Error('conflict: the brief kept changing while this step saved it; run the step again (nothing of it was written)');
+}
 async function stBump(env, project) { await env.MIND_DB.prepare('UPDATE studio_projects SET revision=revision+1, updated=? WHERE id=?').bind(Date.now(), project).run(); }
-/** Append a version and move the asset's current to it (unless opts.branch). Never edits an existing version. */
+/** Append a version and move the asset's current to it (unless opts.branch). Never edits an existing version.
+ *  The insert and the move are one transaction, both conditional on the asset still pointing at the version this
+ *  write was built from (and on its revision): two writes from the same base cannot both land. A write that loses
+ *  is rebuilt on top of the winner (so two edits of different fields both survive), unless the caller named the
+ *  revision it expects (opts.expectRevision), in which case it fails with code 'conflict' and nothing is written. */
 async function stAppendVersion(env, asset, patch, who, opts) {
   opts = opts || {};
-  const cur = await stCurrent(env, asset);
-  const base = opts.baseVersion || cur;
-  const v = {
-    id: stId('v'), asset: asset.id, project: asset.project, parent: base ? base.id : null, kind: stStr(patch.kind || 'text', 12), note: stStr(patch.note, 200),
-    copy: Object.assign({}, base ? base.copy : {}, stCopy(patch.copy || {})), layout: patch.layout && typeof patch.layout === 'object' ? patch.layout : (base ? base.layout : {}), image: patch.image === undefined ? (base ? base.image : null) : stImage(patch.image),
-    mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : (base ? base.checks || [] : []), context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
-  };
-  // approved words split across layers must still read as the copy: a copy edit that breaks the split undoes it, never rewrites words
-  if (v.layout && Array.isArray(v.layout.layers) && v.layout.layers.some(l => l.part != null)) { const pr = stPartsReconcile(v.layout, v.copy); if (pr.collapsed.length) { v.layout = pr.layout; v.note = stStr(v.note + ' (the ' + pr.collapsed.join(' and ') + ' split across layers no longer matched the words; kept as one block)', 200); } }
-  await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .bind(v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), JSON.stringify(v.layout).slice(0, 20000), v.image ? JSON.stringify(v.image) : null, v.mode, JSON.stringify(v.checks).slice(0, 8000), JSON.stringify(v.context).slice(0, 8000), v.restored_from, v.who, v.created).run();
-  if (!opts.branch) await env.MIND_DB.prepare('UPDATE studio_assets SET current=?, revision=revision+1, updated=? WHERE id=?').bind(v.id, Date.now(), asset.id).run();
-  await stBump(env, asset.project);
-  return stVersionRow(Object.assign({}, v, { copy: JSON.stringify(v.copy), layout: JSON.stringify(v.layout), image: v.image ? JSON.stringify(v.image) : null, checks: JSON.stringify(v.checks), context: JSON.stringify(v.context) }));
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (attempt) {
+      const fresh = await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(asset.id).first(); if (!fresh) throw new Error('asset gone (not retried)');
+      asset = stAssetRow(fresh);
+      if (opts.expectRevision != null) { const e = new Error('conflict: the asset changed while this version was being written; nothing was written'); e.code = 'conflict'; e.asset = asset; throw e; }
+    }
+    const cur = await stCurrent(env, asset);
+    const base = opts.baseVersion || cur;
+    const v = {
+      id: stId('v'), asset: asset.id, project: asset.project, parent: base ? base.id : null, kind: stStr(patch.kind || 'text', 12), note: stStr(patch.note, 200),
+      copy: Object.assign({}, base ? base.copy : {}, stCopy(patch.copy || {})), layout: patch.layout && typeof patch.layout === 'object' ? patch.layout : (base ? base.layout : {}), image: patch.image === undefined ? (base ? base.image : null) : stImage(patch.image),
+      mode: stStr(patch.mode || (base ? base.mode : 'composition'), 16), checks: Array.isArray(patch.checks) ? patch.checks.slice(0, 40) : (base ? base.checks || [] : []), context: patch.context && typeof patch.context === 'object' ? patch.context : {}, restored_from: patch.restoredFrom ? stClean(patch.restoredFrom, 24) : null, who: stStr(who, 40), created: Date.now(),
+    };
+    // approved words split across layers must still read as the copy: a copy edit that breaks the split undoes it, never rewrites words
+    if (v.layout && Array.isArray(v.layout.layers) && v.layout.layers.some(l => l.part != null)) { const pr = stPartsReconcile(v.layout, v.copy); if (pr.collapsed.length) { v.layout = pr.layout; v.note = stStr(v.note + ' (the ' + pr.collapsed.join(' and ') + ' split across layers no longer matched the words; kept as one block)', 200); } }
+    const vals = [v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), stLayoutJson(v.layout), v.image ? JSON.stringify(v.image) : null, v.mode, jsonFit(v.checks, 20000), jsonFit(v.context, 60000), v.restored_from, v.who, v.created];
+    if (opts.branch) { await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(...vals).run(); }
+    else {
+      const expectCur = asset.current || ''; const expectRev = opts.expectRevision != null ? Number(opts.expectRevision) : asset.revision;
+      const guard = 'id=? AND COALESCE(current,\'\')=? AND revision=?';
+      const rs = await env.MIND_DB.batch([
+        env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM studio_assets WHERE ' + guard + ')').bind(...vals, asset.id, expectCur, expectRev),
+        env.MIND_DB.prepare('UPDATE studio_assets SET current=?, revision=revision+1, updated=? WHERE ' + guard).bind(v.id, Date.now(), asset.id, expectCur, expectRev),
+      ]);
+      if (!(rs[1] && rs[1].meta && rs[1].meta.changes)) continue;   // someone else's version landed first: rebuild on it
+    }
+    await stBump(env, asset.project);
+    return stVersionRow(Object.assign({}, v, { copy: JSON.stringify(v.copy), layout: JSON.stringify(v.layout), image: v.image ? JSON.stringify(v.image) : null, checks: JSON.stringify(v.checks), context: JSON.stringify(v.context) }));
+  }
+  const e = new Error('conflict: the asset kept changing while this version was being written; nothing was written'); e.code = 'conflict'; e.asset = asset; throw e;
 }
 async function stAssetView(env, a, opts) {
   opts = opts || {};
@@ -6980,7 +7063,7 @@ async function stImport(env, legacyId, who) {
   return { id, existing: false };
 }
 // -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
-function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '' }; }
+function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '' }; }
 async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
 async function stJobCreate(env, body, who) {
   const p = await stProject(env, body.project);
@@ -6992,6 +7075,7 @@ async function stJobCreate(env, body, who) {
   if (body.asset) { const pair = await stAsset(env, body.asset); if (!pair) return { error: 'unknown_asset', status: 404 }; if (pair.project.id !== p.id) return { error: 'cross_project', status: 403, detail: 'The asset belongs to another project.' }; asset = pair.asset; }
   if (stage === 'render' && !asset) return { error: 'asset_required', status: 400 };
   const input0 = body.input && typeof body.input === 'object' ? body.input : {};
+  { const lim = jsonLimitProblem(input0, ST_INPUT_MAX, ST_FIELD_MAX, 'input'); if (lim) return { error: 'input_too_large', status: 413, detail: 'Nothing was queued: ' + lim + '. Shorten it, or put long material in a source.' }; }
   if (stage === 'extract') { const src = input0.source ? await env.MIND_DB.prepare('SELECT id FROM studio_sources WHERE id=? AND project=?').bind(stClean(input0.source, 24), p.id).first() : null; if (!src) return { error: 'source_required', status: 400, detail: 'extract needs input.source, a source of this project.' }; }
   if ((stage === 'concepts' || stage === 'inspect') && !asset) return { error: 'asset_required', status: 400, detail: stage + ' needs the asset it is about.' };
   if (stage === 'copy' && !(Array.isArray(input0.channels) && input0.channels.some(c => ST_CHANNELS[String(c).toLowerCase()]))) return { error: 'channels_required', status: 400, detail: 'copy needs input.channels from ' + Object.keys(ST_CHANNELS).join(', ') + '.' };
@@ -7003,7 +7087,7 @@ async function stJobCreate(env, body, who) {
     await ensureRecipes(env);
     let after = ''; if (body.after) { const dep = await env.MIND_DB.prepare('SELECT id FROM studio_jobs WHERE id=? AND project=?').bind(stClean(body.after, 30), p.id).first(); if (!dep) return { error: 'unknown_after', status: 400, detail: 'after must name a job of the same project.' }; after = dep.id; }
     await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated,after,recipe) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input).slice(0, 12000), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null).run();
+      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null).run();
   } catch (e) {
     if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
     throw e;
@@ -7024,7 +7108,7 @@ function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortEr
 async function stJobRun(env, job) {
   const done = async (state, patch) => {
     await env.MIND_DB.prepare('UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=?')
-      .bind(state, patch.result ? JSON.stringify(patch.result).slice(0, 8000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id).run();
+      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id).run();
     return stJob(env, job.id);
   };
   const fail = async (msg, progress) => {
@@ -7037,6 +7121,8 @@ async function stJobRun(env, job) {
   try {
     const live = await stJob(env, job.id);
     if (!live || live.state !== 'running') return live;   // cancelled between claim and run
+    // a stored input that does not parse is never run as {}: the person's instruction would be silently replaced
+    if (live.inputCorrupt) return done('failed', { error: 'input_corrupt: the stored input of this job does not parse, so it was not run with an empty one (not retried). Start the step again from the app; GET /integrity lists such records.' });
     if (job.stage === 'echo') {
       return done('done', { result: { echo: job.input, at: Date.now() } });
     }
@@ -7102,7 +7188,7 @@ async function ensureRecipes(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_jobs ADD COLUMN recipe TEXT').run(); } catch (e) {}
   RECIPES_READY = true; return true;
 }
-function stRecipeSteps(v) { return (Array.isArray(v) ? v : []).slice(0, 8).map(s => s && ST_RECIPE_STAGES.indexOf(s.stage) >= 0 ? { stage: s.stage, input: s.input && typeof s.input === 'object' ? JSON.parse(JSON.stringify(s.input).slice(0, 4000)) : {}, label: stStr(s.label, 80) } : null).filter(Boolean); }
+function stRecipeSteps(v) { return (Array.isArray(v) ? v : []).slice(0, 8).map(s => s && ST_RECIPE_STAGES.indexOf(s.stage) >= 0 ? { stage: s.stage, input: s.input && typeof s.input === 'object' ? JSON.parse(JSON.stringify(s.input)) : {}, label: stStr(s.label, 80) } : null).filter(Boolean); }
 /** What one step would spend: model calls and images, at a size. An estimate, from the brief and the inputs, never a promise. */
 function stStepEstimate(step, p) {
   const b = p.brief || {}; const chans = Array.isArray(step.input.channels) ? step.input.channels : (b.channels || []); const deliverable = step.input.deliverable || b.deliverable || 'set';
@@ -7524,12 +7610,16 @@ async function stExtractStage(env, job, p, log) {
     await log('out', claims.length + ' claims in the ledger (' + claims.filter(c => c.value != null).length + ' figures, ' + claims.filter(c => c.quote).length + ' quotations)' + (un ? '; ' + un + ' the source does not carry as written, marked unverified' : '; every one tied to a passage'));
   } else await log('info', 'ANTHROPIC_API_KEY is not set: the ledger is the rule pass only, no subjects or brief proposed');
   const extract = { model, headline, spokesperson, at: Date.now(), figures: claims.filter(c => c.value != null).length, quotes: claims.filter(c => c.quote).length, unverified: claims.filter(c => c.verified === false).length };
-  await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(JSON.stringify(claims).slice(0, 120000), JSON.stringify(extract), src.id).run();
+  await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(jsonFit(claims, 120000), JSON.stringify(extract), src.id).run();
   let proposed = [];
   if (brief) {
-    const b = Object.assign({}, p.brief); const asm = Array.isArray(b.assumptions) ? b.assumptions.slice() : [];
-    ['objective', 'audience', 'message', 'deliverables'].forEach(k => { if (!String(b[k] || '').trim() && brief[k]) { b[k] = stStr(brief[k], 400); proposed.push(k); } });
-    if (proposed.length) { asm.push('The ' + proposed.join(', ') + ' ' + (proposed.length === 1 ? 'was' : 'were') + ' proposed from the source by the Studio; edit before production.'); b.assumptions = asm; b.proposed = proposed; await env.MIND_DB.prepare('UPDATE studio_projects SET brief=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(b).slice(0, 12000), Date.now(), p.id).run(); }
+    // only fields still empty in the brief as it is NOW are proposed: an edit made while the source was being read wins
+    await stBriefPatch(env, p.id, b => {
+      proposed = []; const asm = Array.isArray(b.assumptions) ? b.assumptions.slice() : [];
+      ['objective', 'audience', 'message', 'deliverables'].forEach(k => { if (!String(b[k] || '').trim() && brief[k]) { b[k] = stStr(brief[k], 400); proposed.push(k); } });
+      if (!proposed.length) return false;
+      asm.push('The ' + proposed.join(', ') + ' ' + (proposed.length === 1 ? 'was' : 'were') + ' proposed from the source by the Studio; edit before production.'); b.assumptions = asm; b.proposed = proposed;
+    });
   }
   await stBump(env, p.id);
   await stEvent(env, p.id, 'extract', { text: 'Read ' + (src.name || 'the source') + ': ' + extract.figures + ' figures, ' + extract.quotes + ' quotations, ' + claims.length + ' claims tied to their passages' + (extract.unverified ? ', ' + extract.unverified + ' marked unverified' : '') + (proposed.length ? '. A brief was proposed from it (' + proposed.join(', ') + '); its assumptions are marked for you to confirm.' : '.'), source: src.id, job: job.id }, 'studio');
@@ -7664,7 +7754,7 @@ async function stVersionChecks(env, project, asset, v) {
   const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
   const inScope = f => f.status !== 'pending' && (!f.campaign || f.campaign === project.campaign);
   const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(inScope), otherFacts: (kit.facts || []).filter(f => !inScope(f)), channel: asset.channel, format: asset.format, layout: v.layout });
-  try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(JSON.stringify(checks).slice(0, 8000), v.id).run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(jsonFit(checks, 8000), v.id).run(); } catch (e) {}
   return checks;
 }
 // -- layouts: the Ad Lab layer model (percentages of the stage), one document drawn by one renderer ---------
@@ -7895,8 +7985,7 @@ async function stStrategyStage(env, job, p, log) {
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 8000, timeoutMs: 170000, effort: 'high', log });
   const j = relJson(r.text); if (!j || !j.idea) throw new Error('strategy_unparseable: the model did not return a strategy as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '" (not retried)');
   const st = Object.assign(stStrategyNorm(j, known), { status: 'proposed', model: r.model, at: Date.now(), job: job.id, source: 'ai' });
-  const cur = await stProject(env, p.id); const brief = Object.assign({}, cur.brief || {}, { strategy: st });
-  await env.MIND_DB.prepare('UPDATE studio_projects SET brief=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(brief).slice(0, 60000), Date.now(), p.id).run();
+  await stBriefPatch(env, p.id, b => { b.strategy = st; });
   await stEvent(env, p.id, 'strategy', { text: 'Strategy proposed: ' + st.idea + ' - ' + st.proposition + ' (for ' + (st.audience.who || 'the audience') + '). Edit and confirm it on the brief; directions and production read it from there.' + (st.questions.length ? ' Open questions: ' + st.questions.join('; ') + '.' : ''), job: job.id, model: r.model }, 'studio');
   await log('out', 'strategy proposed: ' + st.idea);
   return { idea: st.idea, proposition: st.proposition, questions: st.questions, model: r.model };
@@ -7944,9 +8033,7 @@ async function stSequenceStage(env, job, p, log) {
     items.push({ order: i + 1, role, channel, format, day: Number(it.day) || 0, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), asset: aid, version: v.id, headline: copy.headline || '', how, medium: how === 'plan' ? layout.medium : undefined });
   }
   const seq = { id: seqId, name, arc: stStr(j.arc, 400), cadence: stStr(j.cadence, 200), direction: direction ? direction.id : '', items, at: now, model: r.model, job: job.id };
-  const cur = await stProject(env, p.id); const seqs = Array.isArray((cur.brief || {}).sequences) ? cur.brief.sequences : [];
-  const brief = Object.assign({}, cur.brief || {}, { sequences: seqs.concat([seq]).slice(-8) });
-  await env.MIND_DB.prepare("UPDATE studio_projects SET brief=?, status=CASE WHEN status IN ('brief','directions') THEN 'production' ELSE status END, revision=revision+1, updated=? WHERE id=?").bind(JSON.stringify(brief).slice(0, 60000), Date.now(), p.id).run();
+  await stBriefPatch(env, p.id, b => { const seqs = Array.isArray(b.sequences) ? b.sequences : []; b.sequences = seqs.concat([seq]).slice(-8); }, { statusSql: "CASE WHEN status IN ('brief','directions') THEN 'production' ELSE status END" });
   await stEvent(env, p.id, 'sequence', { text: 'Sequence "' + name + '": ' + items.map(x => x.order + '. ' + x.role + ' (' + ST_CHANNELS[x.channel].label + ' ' + x.format + ', day ' + x.day + ')').join('; ') + '. ' + (seq.arc ? seq.arc.replace(/[.\s]+$/, '') + '. ' : '') + 'Made as editable compositions with no image spent' + (items.some(x => x.how === 'plan') ? ', each planned for its role (' + items.filter(x => x.how === 'plan').map(x => x.order + ' ' + ST_MEDIA_WORDS[x.medium]).join(', ') + ')' : '') + (items.some(x => x.how === 'house') ? '; house composition for ' + items.filter(x => x.how === 'house').map(x => x.order).join(', ') + ', which came back without a usable plan and are not bespoke designs' : '') + ': ask for imagery per asset, or ' + items.length + ' render' + (items.length === 1 ? '' : 's') + ' for the whole sequence.', job: job.id, sequence: seqId, assets: items.map(x => x.asset), model: r.model }, 'studio');
   await log('out', 'sequence "' + name + '": ' + items.length + ' assets, no renders spent');
   return { sequence: seqId, assets: items.map(x => x.asset), model: r.model };
@@ -7969,7 +8056,7 @@ async function stDirectStage(env, job, p, log) {
   const dirs = j.directions.slice(0, n).map(d => ({ idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
   dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6 || (d.medium && d.medium === dirs[k].medium && stSimilar(d.idea + ' ' + d.message, dirs[k].idea + ' ' + dirs[k].message) > 0.45)) { d.similar = dirs[k].title; similar++; break; } });
   const diversity = stDiversity(dirs);
-  for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(d).slice(0, 8000), 0, 'studio', Date.now())); }
+  for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 8000), 0, 'studio', Date.now())); }
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
   await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title).join(' / ') + (similar ? ' - ' + similar + ' read as close to another; ask for another' : ' - distinct arguments'));
@@ -8937,7 +9024,7 @@ async function stRefAnalyse(env, p, ref, log) {
       else analysis = { summary: stStr(j.summary, 300), typography: stStr(j.typography, 240), colour: { palette: (Array.isArray(j.colour && j.colour.palette) ? j.colour.palette : []).map(x => stStr(x, 9)).filter(x => /^#[0-9a-fA-F]{3,8}$/.test(x)).slice(0, 6), relationships: stStr(j.colour && j.colour.relationships, 200) }, hierarchy: stStr(j.hierarchy, 200), composition: stStr(j.composition, 240), imageTreatment: stStr(j.imageTreatment, 200), panels: stStr(j.panels, 200), spacing: stStr(j.spacing, 160), logo: stStr(j.logo, 160), text: (Array.isArray(j.text) ? j.text : []).map(x => stStr(x, 120)).slice(0, 12), takeaways: (Array.isArray(j.takeaways) ? j.takeaways : []).map(x => stStr(x, 120)).slice(0, 5), model: r.model, at: Date.now() };
     } catch (e) { analysis = { error: String((e && e.message) || e).slice(0, 160), at: Date.now() }; }
   }
-  try { await env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(JSON.stringify(analysis).slice(0, 6000), ref.id).run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(jsonFit(analysis, 6000), ref.id).run(); } catch (e) {}
   await log(analysis.error ? 'info' : 'out', 'reference "' + (ref.name || ref.id) + '" ' + (analysis.error ? 'not analysed: ' + analysis.error : 'analysed: ' + analysis.summary.slice(0, 90)));
   return analysis;
 }
@@ -9076,7 +9163,7 @@ function brKitDiff(a, b) {
 async function brKitRevision(env, ns, before, after, who) {
   if (!(await ensureBrand(env))) return null;
   const summary = brKitDiff(before, after); if (!summary.length && before && before.updated) return null;
-  const id = stId('kr'); const snap = JSON.stringify(after || {}).slice(0, 60000);
+  const id = stId('kr'); const snap = jsonFit(after || {}, 60000);
   await env.MIND_DB.prepare('INSERT INTO brand_revisions(id,ns,at,who,summary,kit) VALUES(?,?,?,?,?,?)').bind(id, ns, (after && after.updated) || Date.now(), stStr(who, 40), JSON.stringify(summary.length ? summary : ['first record of the kit']), snap).run();
   try { await env.MIND_DB.prepare('DELETE FROM brand_revisions WHERE ns=? AND id NOT IN (SELECT id FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 200)').bind(ns, ns).run(); } catch (e) {}
   return id;
@@ -9095,16 +9182,17 @@ function brClean(body, cur) {
 }
 async function brItemGet(env, id) { await ensureBrand(env); return brItemRow(await env.MIND_DB.prepare('SELECT * FROM brand_items WHERE id=?').bind(stClean(id, 30)).first()); }
 async function brItemRevise(env, item, why, who) {
-  await env.MIND_DB.prepare('INSERT INTO brand_item_revisions(id,item,ns,rev,data,why,who,at) VALUES(?,?,?,?,?,?,?,?)').bind(stId('br'), item.id, item.ns, item.rev, JSON.stringify({ kind: item.kind, authority: item.authority, status: item.status, title: item.title, body: item.body, campaign: item.campaign, data: item.data, source: item.source }).slice(0, 8000), stStr(why, 300), stStr(who, 40), Date.now()).run();
+  await env.MIND_DB.prepare('INSERT INTO brand_item_revisions(id,item,ns,rev,data,why,who,at) VALUES(?,?,?,?,?,?,?,?)').bind(stId('br'), item.id, item.ns, item.rev, jsonFit({ kind: item.kind, authority: item.authority, status: item.status, title: item.title, body: item.body, campaign: item.campaign, data: item.data, source: item.source }, 8000), stStr(why, 300), stStr(who, 40), Date.now()).run();
 }
 /** A new knowledge item. An AI inference can only be created as a proposal; a person's item can carry any other authority. */
 async function brItemCreate(env, ns, body, who) {
   await ensureBrand(env); const c = brClean(body);
+  { const lim = jsonLimitProblem(body.data || {}, 8000, 4000, 'data'); if (lim) return { error: 'data_too_large', status: 413, detail: 'Nothing was saved: ' + lim + '.' }; }
   if (!c.title && !c.body) return { error: 'empty', status: 400, detail: 'Say what the item is (a title or a body).' };
   if (c.campaign) { const kit = (await brandKit(env, ns)) || {}; if (!(kit.campaigns || []).some(x => x.id === c.campaign)) return { error: 'unknown_campaign', status: 400, detail: 'The ' + ns + ' kit has no campaign "' + c.campaign + '".' }; }
   if (c.authority === 'inference' && c.status === 'active') c.status = 'proposed';
   const now = Date.now(); const id = stId('bi');
-  await env.MIND_DB.prepare('INSERT INTO brand_items(id,ns,campaign,kind,authority,status,title,body,data,source,who,created,updated,rev) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)').bind(id, ns, c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data).slice(0, 8000), JSON.stringify(c.source), stStr(who, 40), now, now).run();
+  await env.MIND_DB.prepare('INSERT INTO brand_items(id,ns,campaign,kind,authority,status,title,body,data,source,who,created,updated,rev) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)').bind(id, ns, c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data), JSON.stringify(c.source), stStr(who, 40), now, now).run();
   const item = await brItemGet(env, id); await brItemRevise(env, item, body.why || (c.status === 'proposed' ? 'proposed' : 'created'), who);
   return { ok: true, item };
 }
@@ -9112,9 +9200,10 @@ async function brItemCreate(env, ns, body, who) {
 async function brItemUpdate(env, ns, body, who) {
   const cur = await brItemGet(env, body.id); if (!cur || cur.ns !== ns) return { error: 'unknown_item', status: 404 };
   const c = brClean(body, cur);
+  { const lim = jsonLimitProblem(body.data || {}, 8000, 4000, 'data'); if (lim) return { error: 'data_too_large', status: 413, detail: 'Nothing was saved: ' + lim + '.' }; }
   if (c.authority === 'inference' && c.status === 'active') return { error: 'inference_not_rule', status: 400, detail: 'An AI inference cannot be made active as it stands: review it and give it the authority a person stands behind (a preference, a decision or an approved rule).' };
   const now = Date.now();
-  await env.MIND_DB.prepare('UPDATE brand_items SET campaign=?, kind=?, authority=?, status=?, title=?, body=?, data=?, source=?, updated=?, rev=rev+1 WHERE id=?').bind(c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data).slice(0, 8000), JSON.stringify(c.source), now, cur.id).run();
+  await env.MIND_DB.prepare('UPDATE brand_items SET campaign=?, kind=?, authority=?, status=?, title=?, body=?, data=?, source=?, updated=?, rev=rev+1 WHERE id=?').bind(c.campaign, c.kind, c.authority, c.status, c.title, c.body, JSON.stringify(c.data), JSON.stringify(c.source), now, cur.id).run();
   const item = await brItemGet(env, cur.id); await brItemRevise(env, item, body.why || 'edited', who);
   return { ok: true, item };
 }
@@ -9752,7 +9841,7 @@ async function stValidationSubmit(env, pair, body, who) {
   const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
   const id = stId('val'); const now = Date.now();
   const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, asset: b.asset })) };
-  await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, JSON.stringify(j.issues).slice(0, 12000), JSON.stringify(slim).slice(0, 20000), exportKey, stStr(who, 40), now).run();
+  await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now).run();
   try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
   const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
   if (!prev || prev.sig !== sig || !!prev.ok !== j.ok || JSON.stringify(pjs(prev.issues, []).map(i => i.code + ':' + (i.layers || []).join(','))) !== codes) await stEvent(env, p.id, 'validation', { asset: a.id, version: v.id, ok: j.ok, blocking: blocking.length, warnings: warnings.length, text: 'Technical validation of ' + a.title + ' (version ' + v.id + ', ' + j.W + 'x' + j.H + '): ' + (j.ok ? 'passed' + (warnings.length ? ' with ' + warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') + ' (' + warnings.map(i => i.code).join(', ') + ')' : '') : 'failed - ' + blocking.map(i => i.code + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')) + (j.fonts && j.fonts.fallback.length ? '. Fonts: ' + j.fonts.fallback.join('; ') : '') + '.' }, who);
@@ -9957,23 +10046,99 @@ function ctEq(a, b) {
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
+/* The roster is validated as a whole: every entry must be an object whose role is exactly "read" or "full". A typo
+ * ("admin", "Full", a missing r) used to mean full access; now it closes the worker until the roster is fixed, and
+ * the answer says which entry is wrong (by position and name, never by key). */
+function axRoster(env) {
+  if (!env.AXIOM_KEYS) return { roster: null, problem: '' };
+  let roster; try { roster = JSON.parse(env.AXIOM_KEYS); } catch (e) { return { roster: null, problem: 'AXIOM_KEYS is not valid JSON' }; }
+  if (!roster || typeof roster !== 'object' || Array.isArray(roster)) return { roster: null, problem: 'AXIOM_KEYS is not a JSON object of keys' };
+  const keys = Object.keys(roster); let i = 0;
+  for (const k of keys) {
+    i++; const who = roster[k];
+    if (!k || k.length < 8) return { roster: null, problem: 'entry ' + i + ' has a key shorter than 8 characters' };
+    if (!who || typeof who !== 'object') return { roster: null, problem: 'entry ' + i + ' is not an object like {"n":"Name","r":"read"}' };
+    if (who.r !== 'read' && who.r !== 'full') return { roster: null, problem: 'entry ' + i + ' (' + String(who.n || 'unnamed').slice(0, 30) + ') has role ' + JSON.stringify(who.r === undefined ? null : who.r) + '; the role must be "read" or "full"' };
+  }
+  return { roster: keys.length ? roster : null, problem: '' };
+}
+/* Development without keys is possible only on purpose and only locally: AXIOM_DEV_OPEN=1 AND a localhost origin.
+ * A deployed worker (any workers.dev or custom hostname) with no keys is closed, whatever the variable says. */
+function axDevOpen(req, env) {
+  if (String(env.AXIOM_DEV_OPEN || '') !== '1') return false;
+  let host = ''; try { host = new URL(req.url).hostname; } catch (e) { return false; }
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1' || /\.localhost$/.test(host);
+}
 function axAuth(req, env) {
   const supplied = req.headers.get('X-Axiom-Key') || '';
-  let roster = null, broken = false;
-  if (env.AXIOM_KEYS) { try { roster = JSON.parse(env.AXIOM_KEYS); if (!roster || typeof roster !== 'object' || Array.isArray(roster)) { roster = null; broken = true; } } catch (e) { roster = null; broken = true; } }
-  // a key roster that is set but unreadable must not open the worker: fail closed until it is fixed
-  if (broken && !env.AXIOM_ACCESS_KEY) return { enforced: true, ok: false, role: null, name: '', misconfigured: true };
-  const enforced = !!(env.AXIOM_ACCESS_KEY || (roster && Object.keys(roster).length));
-  if (!enforced) return { enforced: false, ok: true, role: 'full', name: 'open' };
-  if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) {
-    return { enforced: true, ok: true, role: 'full', name: 'admin' };
+  const { roster, problem } = axRoster(env);
+  // a key roster that is set but unreadable or carries an unknown role opens nothing; only the separate single admin
+  // key (AXIOM_ACCESS_KEY, its own secret) still works beside it, so the roster can be repaired
+  if (problem) {
+    if (env.AXIOM_ACCESS_KEY && supplied && ctEq(supplied, env.AXIOM_ACCESS_KEY)) return { configured: true, ok: true, role: 'full', name: 'admin', rosterProblem: problem };
+    return { configured: true, ok: false, role: null, name: '', misconfigured: true, problem };
   }
-  let who = null;
-  if (roster) for (const k of Object.keys(roster)) { if (ctEq(supplied, k)) { who = roster[k]; break; } }
-  if (who) {
-    return { enforced: true, ok: true, role: (who.r === 'read' ? 'read' : 'full'), name: String(who.n || 'user').slice(0, 40) };
+  const configured = !!(env.AXIOM_ACCESS_KEY || roster);
+  if (!configured) return axDevOpen(req, env) ? { configured: false, dev: true, ok: true, role: 'full', name: 'dev-open' } : { configured: false, ok: false, role: null, name: '' };
+  if (!supplied) return { configured: true, ok: false, role: null, name: '' };
+  if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) return { configured: true, ok: true, role: 'full', name: 'admin' };
+  if (roster) for (const k of Object.keys(roster)) { if (ctEq(supplied, k)) return { configured: true, ok: true, role: roster[k].r, name: String(roster[k].n || 'user').slice(0, 40) }; }
+  return { configured: true, ok: false, role: null, name: '' };
+}
+/* THE ROUTE POLICY - deny by default. Every request is one of:
+ *   public  - answers without a key (aggregate counts, the health answer)
+ *   token   - authenticated by the route's own token (a client review link, SIFA's bearer), never the AXIOM key
+ *   read    - any valid key (read or full)
+ *   full    - a full key
+ * Every method other than GET/HEAD is full. A GET is full when it acts: spends a model call, sends, collects,
+ * probes a live service, files a snapshot or reads a provider live. Anything not listed is read, never open. */
+const AX_PUBLIC_GET = new Set(['/', '/archive/stats']);
+const AX_GET_FULL = new Set(['/integrity', '/collect', '/fetchurl', '/sources/probe', '/topics/probe', '/sentinel/scan', '/mps/sync', '/topics/sync']);
+function axRoutePolicy(path, method, sp) {
+  const m = method === 'HEAD' ? 'GET' : method;
+  if (path.startsWith('/review/')) return 'token';
+  if (path.startsWith('/sifa/')) return 'token';
+  if (m !== 'GET') return 'full';
+  if (AX_PUBLIC_GET.has(path)) return 'public';
+  if (AX_GET_FULL.has(path)) return 'full';
+  // under these prefixes only the named reads are read-role (as before r1); every other GET there acts (claims a job,
+  // logs, ingests, scans, syncs, writes a session, runs the self-test) and needs a full key
+  const under = (pre, reads) => path.startsWith(pre) && reads.indexOf(path) < 0;
+  if (under('/bridge/', ['/bridge/job', '/bridge/status']) || under('/mind/', ['/mind/query', '/mind/docs']) || path.startsWith('/log/')
+    || under('/session/', ['/session/load', '/session/img']) || under('/meta/', ['/meta/status']) || under('/sentinel/', ['/sentinel/alerts', '/sentinel/metrics'])
+    || path === '/archive/add' || path === '/archive/selftest' || path === '/research' || path === '/chat' || path === '/nano' || path === '/clickup' || path === '/clickup-attach' || path === '/whatsapp') return 'full';
+  if (sp.get('probe') && sp.get('probe') !== '0') return 'full';               // live probes of Meta, Reddit, the social platforms
+  if (sp.get('live') && sp.get('live') !== '0') return 'full';                 // live provider reads (/reddit/comments?live=1)
+  if (path === '/fulltext' && sp.get('save') && sp.get('save') !== '0') return 'full';   // asks the Wayback Machine to take a snapshot
+  if (path === '/studio/brief/suggest' && sp.get('ai') === '1') return 'full';      // one extraction-model call
+  return 'read';
+}
+/* A URL a person supplies is fetched only when it names a public web address: http(s), no credentials, a default
+ * port, and a host that is not local, private, link-local, metadata or an internal name. */
+function axUrlProblem(u) {
+  let x; try { x = new URL(String(u || '')); } catch (e) { return 'not a URL'; }
+  if (x.protocol !== 'https:' && x.protocol !== 'http:') return 'only http(s) addresses can be read';
+  if (x.username || x.password) return 'addresses with credentials are not read';
+  if (x.port && x.port !== '80' && x.port !== '443') return 'only the default web ports are read';
+  const h = x.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h || h === 'localhost' || /\.(localhost|local|internal|intranet|lan|home|corp)$/.test(h) || h.indexOf('.') < 0 && h.indexOf(':') < 0) return 'local and internal hosts are not read';
+  if (/^[0-9.]+$/.test(h)) {
+    const o = h.split('.').map(Number); if (o.length !== 4 || o.some(n => !(n >= 0 && n <= 255))) return 'not a valid address';
+    if (o[0] === 10 || o[0] === 127 || o[0] === 0 || (o[0] === 169 && o[1] === 254) || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168) || (o[0] === 100 && o[1] >= 64 && o[1] <= 127) || o[0] >= 224) return 'private and reserved addresses are not read';
   }
-  return { enforced: true, ok: false, role: null, name: '' };
+  if (h.indexOf(':') >= 0) { if (h === '::1' || h === '::' || /^(fc|fd|fe8|fe9|fea|feb)/.test(h) || /^::ffff:/.test(h)) return 'private and reserved addresses are not read'; }
+  return '';
+}
+/* fetch a person-supplied address, following at most three redirects by hand so every hop is checked again */
+async function axFetchPublic(url, init, hops) {
+  let u = String(url); hops = hops == null ? 3 : hops;
+  for (let i = 0; i <= hops; i++) {
+    const bad = axUrlProblem(u); if (bad) { const e = new Error('blocked_url: ' + bad); e.blocked = true; throw e; }
+    const r = await fetch(u, Object.assign({}, init || {}, { redirect: 'manual' }));
+    if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { u = new URL(r.headers.get('location'), u).href; continue; }
+    return r;
+  }
+  const e = new Error('blocked_url: too many redirects'); e.blocked = true; throw e;
 }
 
 // ==============================================================================
@@ -10446,6 +10611,44 @@ async function sentinelScan(env, opts = {}) {
   return { ok: true, scanned: CLIENT_ISSUES.length, wire: items.length, fired: fired.length, alerts: fired };
 }
 
+/* A read-only integrity report: every stored JSON column that does not parse, by table, with ids and what to do.
+ * It never rewrites a record; recovery is a person's decision (re-run the job, re-enter the brief, restore a version). */
+const AX_JSON_COLUMNS = [
+  ['studio_jobs', 'input', 'id', 'The job input was cut before r1. Re-run the step from the app (Retry makes a new job); the old row stays as history and is not repaired automatically.'],
+  ['studio_jobs', 'result', 'id', 'Advisory only: the job ran; its result summary did not survive. Re-run the step if its result is needed.'],
+  ['studio_jobs', 'progress', 'id', 'Advisory only: the progress log of a finished job.'],
+  ['studio_projects', 'brief', 'id', 'Re-enter the brief from the Brief stage (the browser may still hold a working copy) and save it; not repaired automatically.'],
+  ['studio_versions', 'layout', 'id', 'Restore an earlier version of the asset (a version is immutable; restoring appends a new one). Not repaired automatically.'],
+  ['studio_versions', 'copy', 'id', 'Restore an earlier version of the asset; not repaired automatically.'],
+  ['studio_versions', 'checks', 'id', 'Advisory: POST /studio/recheck {asset} recomputes the checks with no model call.'],
+  ['studio_versions', 'context', 'id', 'Advisory: what the Studio used for that version; the version itself is intact.'],
+  ['studio_events', 'data', 'id', 'Advisory: one thread entry cannot be shown; the work it describes is in the versions.'],
+  ['studio_recipes', 'steps', 'id', 'Save the recipe again from the Production view; not repaired automatically.'],
+  ['studio_directions', 'data', 'id', 'Propose directions again or re-enter the direction; not repaired automatically.'],
+  ['studio_sources', 'claims', 'id', 'Run extract on the source again (no change to the source text).'],
+  ['studio_references', 'analysis', 'id', 'Analyse the reference again (POST /studio/reference/analyse).'],
+  ['brand_items', 'data', 'id', 'Edit the item in the Brand view and save it again with a reason.'],
+  ['bridge_jobs', 'params', 'id', 'Start the sweep again; the old job is history.'],
+  ['bridge_jobs', 'result', 'id', 'Advisory: the sweep ran; its summary did not survive.'],
+  ['content_sets', 'items', 'id', 'The copy set cannot be read; regenerate or re-enter it. Not repaired automatically.'],
+  ['arc_items', 'meta', 'id', 'Advisory: the archive row reads without its meta (issues, tone) until it is filed again.'],
+];
+async function integrityReport(env, limit) {
+  const out = { ok: true, readOnly: true, at: Date.now(), checked: [], findings: [], errors: [] };
+  for (const [table, col, idc, recovery] of AX_JSON_COLUMNS) {
+    try {
+      const n = await env.MIND_DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != '' AND json_valid(${col}) = 0`).first();
+      out.checked.push(table + '.' + col);
+      if (n && n.n) {
+        const ids = await env.MIND_DB.prepare(`SELECT ${idc} AS id FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != '' AND json_valid(${col}) = 0 LIMIT ?`).bind(Math.min(200, limit || 50)).all();
+        out.findings.push({ table, column: col, count: n.n, ids: (ids.results || []).map(r => r.id), recovery });
+      }
+    } catch (e) { const m = String(e && e.message || e); if (!/no such table|no such column/i.test(m)) out.errors.push(table + '.' + col + ': ' + m.slice(0, 160)); }
+  }
+  out.ok = !out.findings.length && !out.errors.length;
+  return out;
+}
+export const __test = { jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -10471,48 +10674,32 @@ export default {
     const sr      = reqUrl.searchParams.get('sr') || 'australia';
 
     // ---- access control ----------------------------------------------------
-    // Two secrets, both optional:
-    //   AXIOM_ACCESS_KEY  - a single full-access key (legacy, still honoured)
-    //   AXIOM_KEYS        - JSON of per-person keys with roles, e.g.
-    //                       {"k1":{"n":"Heshan","r":"full"},"k2":{"n":"Steve","r":"read"}}
-    // Roles: "full" may write (ingest, log, save, ack); "read" may only read
-    // (query, search, alerts, metrics). Everything stays open until at least
-    // one secret exists, so nothing breaks before they are configured.
-    // /archive/stats stays public by design: aggregate counts only, so the map
-    // shows presence of knowledge without revealing any of it.
-    const READ_ROUTES = ['/mind/query', '/mind/docs', '/archive/search', '/sentinel/alerts', '/sentinel/metrics', '/session/load', '/meta/status'];
-    const isRead = READ_ROUTES.includes(path) || (path === '/session/img' && req.method === 'GET')
-      || (path.startsWith('/perf/') && req.method === 'GET')
-      || (path.startsWith('/reddit/') && req.method === 'GET' && !reqUrl.searchParams.get('live'))
-      || (path.startsWith('/signals/') && req.method === 'GET')
-      || ((path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/') || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path === '/fulltext' || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/') || path.startsWith('/studio')) && req.method === 'GET')
-      // the console must be readable by anyone who can see the view; claiming
-      // and reporting jobs is a write and stays full-role
-      || (path === '/bridge/job' || path === '/bridge/status');
-    const gated = path.startsWith('/mind/') || path.startsWith('/session/') || path.startsWith('/log/')
-      || path === '/archive/search' || path === '/archive/add' || path === '/archive/selftest' || path.startsWith('/sentinel/')
-      || path === '/research' || path.startsWith('/meta/') || path.startsWith('/perf/') || path.startsWith('/reddit/')
-      || path.startsWith('/signals/') || path.startsWith('/bridge/') || path.startsWith('/release/') || path.startsWith('/brand/') || path.startsWith('/engine/')
-      || path.startsWith('/content/') || path.startsWith('/topics') || path.startsWith('/mps') || path.startsWith('/sources') || path.startsWith('/fulltext') || path.startsWith('/social/') || path.startsWith('/entities') || path.startsWith('/sentiment/') || path.startsWith('/narratives') || path === '/overview' || path.startsWith('/brief/')
-      // the creative endpoints spend Claude and Gemini tokens and were open until Studio Phase 1: writes, full role
-      || path.startsWith('/studio') || path === '/chat' || path === '/nano' || path === '/clickup';
+    // Two secrets: AXIOM_ACCESS_KEY (a single full key) and AXIOM_KEYS (JSON of per-person keys with role "read"
+    // or "full"). The policy is deny by default (axRoutePolicy): public, the route's own token, read, or full. A
+    // worker with no keys is closed (503 auth_not_configured) unless AXIOM_DEV_OPEN=1 on a localhost origin.
+    // /archive/stats stays public by design: aggregate counts only.
+    const policy = axRoutePolicy(path, req.method, reqUrl.searchParams);
     const auth = axAuth(req, env);
-    // A key is only as good as the number of guesses allowed against it: lock an
-    // address out for ten minutes after a dozen failures.
-    if (gated && auth.enforced && env.AXIOM_KV) {
-      const fk = 'af_' + (req.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 60);
-      const fails = Number(await kvGet(env.AXIOM_KV, fk) || 0);
-      if (fails >= 12) return jsonResp({ error: 'too_many_attempts', detail: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 429);
-      if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
-      else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
-    }
-    if (gated && auth.enforced) {
-      if (!auth.ok) return jsonResp(auth.misconfigured ? { error: 'auth_misconfigured', detail: 'AXIOM_KEYS on the worker is not a JSON object of keys; access is closed until it is fixed (npx wrangler secret put AXIOM_KEYS --name newsaus).' } : { error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
-      if (auth.role === 'read' && !isRead) {
-        return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
+    if (policy !== 'public' && policy !== 'token') {
+      if (auth.misconfigured) return jsonResp({ error: 'auth_misconfigured', detail: 'Access is closed until the key roster is fixed: ' + auth.problem + '. (npx wrangler secret put AXIOM_KEYS --name newsaus)' }, 401);
+      if (!auth.configured && !auth.ok) return jsonResp({ error: 'auth_not_configured', detail: 'No access keys are set on this worker, so it answers nothing but its public routes. Set AXIOM_KEYS or AXIOM_ACCESS_KEY (npx wrangler secret put AXIOM_KEYS --name newsaus).' }, 503);
+      // A key is only as good as the number of guesses allowed against it: lock an address out for ten minutes
+      // after a dozen failures.
+      if (auth.configured && env.AXIOM_KV) {
+        const fk = 'af_' + (req.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 60);
+        const fails = Number(await kvGet(env.AXIOM_KV, fk) || 0);
+        if (fails >= 12) return jsonResp({ error: 'too_many_attempts', detail: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 429);
+        if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
+        else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
       }
+      if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
+      if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
     }
 
+    if (path === '/integrity' && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
+      return jsonResp(await integrityReport(env, parseInt(reqUrl.searchParams.get('limit') || '50', 10) || 50));
+    }
     // ==========================================================================
     // V5 ROUTES - POLITICAL INTELLIGENCE
     // ==========================================================================
@@ -10927,11 +11114,12 @@ export default {
     if (path === '/fetchurl') {
       const target = reqUrl.searchParams.get('url') || '';
       if (!/^https?:\/\//i.test(target)) return jsonResp({ error: 'bad_url', detail: 'Provide a full http(s) URL.' }, 400);
+      { const bad = axUrlProblem(target); if (bad) return jsonResp({ error: 'bad_url', detail: 'That address is not read: ' + bad + '.' }, 400); }
       const ck = 'fetchurl2_' + target.slice(0, 300);
       const cached = await kvGet(env.AXIOM_KV, ck);
       if (cached) return new Response(cached, { headers: CORS });
       try {
-        const r = await fetch(target, {
+        const r = await axFetchPublic(target, {
           headers: { 'User-Agent': BROWSER_UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
           signal: AbortSignal.timeout ? AbortSignal.timeout(9000) : undefined,
           cf: { cacheTtl: 300 },
@@ -10985,6 +11173,7 @@ export default {
         }]).catch(() => {}));
         return new Response(out, { headers: CORS });
       } catch (e) {
+        if (e && e.blocked) return jsonResp({ error: 'bad_url', detail: 'That address (or one it redirected to) is not read: ' + String(e.message).replace(/^blocked_url: /, '') + '.' }, 400);
         const name = String(e && e.name || e);
         const detail = /Timeout|Abort/i.test(name) ? 'Timed out fetching the page.' : name.slice(0, 60);
         return jsonResp({ error: 'fetchurl_failed', detail }, 502);
@@ -11272,7 +11461,7 @@ export default {
           const tid = String(reqUrl.searchParams.get('thread') || '').replace(/[^a-z0-9_]/gi, '').slice(0, 20);
           if (!tid) return jsonResp({ error: 'missing_thread' }, 400);
           if (reqUrl.searchParams.get('live')) {
-            if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'A live fetch writes to the archive and needs a full-access key.' }, 403);
+            if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'A live fetch writes to the archive and needs a full-access key.' }, 403);
             const t = (await threadRows([tid]))[0];
             if (!t) return jsonResp({ error: 'unknown_thread', detail: 'Sweep first so the thread is on file.' }, 404);
             const cs = await redditThreadComments(env, t.sub, tid, 120, 4);
@@ -11297,7 +11486,7 @@ export default {
         if (path === '/reddit/sweep' && req.method === 'POST') {
           const r = await redditSweep(env, rbody || {});
           await kvPut(env.AXIOM_KV, 'reddit_last_sweep', String(Date.now()), 86400);
-          await kvPut(env.AXIOM_KV, 'reddit_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+          await kvPut(env.AXIOM_KV, 'reddit_last_result', jsonFit(r, 4000), 7 * 86400);
           return jsonResp(r);
         }
         if (path === '/reddit/analyse' && req.method === 'POST') {
@@ -11394,7 +11583,7 @@ export default {
             sources: BRIDGE_SOURCES.map(sc => ({ source: sc, desktopOnly: BRIDGE_DESKTOP_ONLY.indexOf(sc) >= 0,
               ready: sc === 'reddit' ? true : sc === 'meta' ? !!(env.META_TOKEN && metaPages(env).length) : sc === 'linkedin' ? !!(env.LINKEDIN_TOKEN && liOrgs(env).length) : sc === 'render' ? renderConfigured(env) : true })) });
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Collector routes need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Collector routes need a full-access key.' }, 403);
         if (path === '/bridge/next') {
           const agent = String(reqUrl.searchParams.get('agent') || 'agent').slice(0, 40);
           const sources = String(reqUrl.searchParams.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);
@@ -11491,7 +11680,7 @@ export default {
             return { id: r.id, title: r.title, status: r.status, who: r.who, format: r.format, created: r.created, updated: r.updated, tiles: t.length, rendered: t.filter(x => x.image).length,
               cover: (t.find(x => x.image) ? '/release/tile?id=' + r.id + '&n=' + t.find(x => x.image).n + '&v=' + (t.find(x => x.image).image.ver || 1) : '') }; }) });
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Building packs, rendering tiles and editing the brand kit need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Building packs, rendering tiles and editing the brand kit need a full-access key.' }, 403);
         if (path === '/brand/item' && req.method === 'POST') { const r = await brItemCreate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/update' && req.method === 'POST') { const r = await brItemUpdate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/review' && req.method === 'POST') { const r = await brItemReview(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
@@ -11584,7 +11773,7 @@ export default {
           try { docs = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) n FROM mind_docs WHERE ns=? GROUP BY kind ORDER BY n DESC').bind(ens).all()).results || []; } catch (e) {}
           return jsonResp({ ok: true, build: AXIOM_BUILD, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Teaching the Engine, approving and filing artwork need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Teaching the Engine, approving and filing artwork need a full-access key.' }, 403);
         if (path === '/engine/fix' && req.method === 'POST') {
           const fix = await engineAddFix(env, ebody, auth.name);
           return jsonResp({ ok: true, fix: Object.assign({}, fix, { active: true, hits: 0 }) });
@@ -11657,7 +11846,7 @@ export default {
           return jsonResp(Object.assign({}, rec, { today: auDayKey(), isToday: rec.day === auDayKey() }));
         }
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing the brief needs a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing the brief needs a full-access key.' }, 403);
         const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
         const rec = await briefWrite(env, { days: bb.days, mind: bb.mind !== false, by: auth.name || 'operator', log });
         return jsonResp(Object.assign({}, rec, { lines, today: auDayKey(), isToday: true }), rec.ok ? 200 : rec.error === 'not_configured' ? 501 : 500);
@@ -11744,7 +11933,7 @@ export default {
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
           if (path === '/studio/brief/check') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const ns0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_sources WHERE project=?').bind(p.id).first(); const nd0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_directions WHERE project=?').bind(p.id).first(); const chk = await stBriefCheck(env, p, null, { hasSource: Number((ns0 || {}).n) > 0, hasDirection: Number((nd0 || {}).n) > 0, instruction: qf('instruction') }); let brand = null; try { const ws = await brandWorkspace(env, p.ns, p.campaign || ''); if (ws && ws.readiness) brand = { state: ws.readiness.state, blocking: ws.readiness.blocking, gaps: ws.readiness.gaps.length, conflicts: ws.readiness.conflicts, outdated: ws.readiness.outdated.length }; } catch (e) {} return jsonResp(Object.assign({ ok: true, brand }, chk)); }
-          if (path === '/studio/brief/suggest') { const p = qf('project') ? await stProject(env, qf('project')) : null; if (qf('project') && !p) return jsonResp({ error: 'unknown_project' }, 404); if (!p && !qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); if (qf('ai') === '1' && auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Model suggestions spend a call; a full key is needed. The sourced suggestions are read-role.' }, 403); return jsonResp(await stBriefSuggest(env, p, { ns: qf('ns'), campaign: qf('campaign'), ai: qf('ai') === '1' })); }
+          if (path === '/studio/brief/suggest') { const p = qf('project') ? await stProject(env, qf('project')) : null; if (qf('project') && !p) return jsonResp({ error: 'unknown_project' }, 404); if (!p && !qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); if (qf('ai') === '1' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Model suggestions spend a call; a full key is needed. The sourced suggestions are read-role.' }, 403); return jsonResp(await stBriefSuggest(env, p, { ns: qf('ns'), campaign: qf('campaign'), ai: qf('ai') === '1' })); }
           if (path === '/studio/identity') { const ns = relNs(qf('ns')); if (!qf('ns')) return jsonResp({ error: 'missing_ns' }, 400); return jsonResp(await stIdentityAudit(env, ns)); }
           if (path === '/studio/models') return jsonResp(await stModels(env));
           if (path === '/studio/capabilities') return jsonResp(stCapabilities(env));
@@ -11768,15 +11957,16 @@ export default {
           }
           return jsonResp({ error: 'not_found' }, 404);
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Creating, changing and approving Studio work needs a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Creating, changing and approving Studio work needs a full-access key.' }, 403);
         const who = auth.name || 'operator'; const now = Date.now();
         if (path === '/studio/project') {
           const ns = relNs(sb.ns); if (!sb.ns) return jsonResp({ error: 'missing_ns', detail: 'A project belongs to one client: give ns.' }, 400);
           const idem = sb.idem ? stStr(sb.idem, 80) : null;
           if (idem) { const had = await env.MIND_DB.prepare('SELECT id FROM studio_projects WHERE idem=?').bind(idem).first(); if (had) return jsonResp(Object.assign({ ok: true, existing: true }, await stGet(env, had.id, { light: true }))); }
           const id = stId('p');
+          { const lim = jsonLimitProblem(sb.brief || {}, ST_BRIEF_MAX, ST_BRIEF_MAX, 'the brief'); if (lim) return jsonResp({ error: 'brief_too_large', detail: 'The project was not created: ' + lim + '. Put long material in a source instead.' }, 413); }
           await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)).slice(0, 12000), 'brief', who, 1, null, null, idem, 0, now, now).run();
+            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now).run();
           await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' }, who);
           return jsonResp(Object.assign({ ok: true, existing: false }, await stGet(env, id, { light: true })));
         }
@@ -11785,9 +11975,18 @@ export default {
           if (path === '/studio/project/archive') { await env.MIND_DB.prepare('UPDATE studio_projects SET archived=?, revision=revision+1, updated=? WHERE id=?').bind(sb.archived === false ? 0 : 1, now, p.id).run(); await stEvent(env, p.id, sb.archived === false ? 'unarchived' : 'archived', { text: sb.archived === false ? 'Project restored from the archive.' : 'Project archived. Nothing is deleted.' }, who); return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true }))); }
           if (sb.revision != null && Number(sb.revision) !== p.revision) return conflict(p, sb.revision);
           const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {};
-          const brief = patch.brief && typeof patch.brief === 'object' ? stBriefNorm(Object.assign({}, p.brief, patch.brief)) : p.brief;
-          await env.MIND_DB.prepare('UPDATE studio_projects SET title=?, campaign=?, brief=?, status=?, revision=revision+1, updated=? WHERE id=?')
-            .bind(patch.title != null ? stStr(patch.title, 140) : p.title, patch.campaign != null ? stStr(patch.campaign, 40) : p.campaign, JSON.stringify(brief).slice(0, 60000), patch.status != null ? stStr(patch.status, 20) : p.status, now, p.id).run();
+          { const lim = jsonLimitProblem(Object.assign({}, p.brief, patch.brief && typeof patch.brief === 'object' ? patch.brief : {}), ST_BRIEF_MAX, ST_BRIEF_MAX, 'the brief'); if (lim) return jsonResp({ error: 'brief_too_large', detail: 'Nothing was saved: ' + lim + '. Your text is still in the form; put long material in a source instead.' }, 413); }
+          // compare-and-swap on the revision: with a revision sent, a write that lost the race is a 409 with nothing
+          // written; without one, the patch is re-applied to the newer brief so both changes survive
+          let at = p, wrote = false;
+          for (let k = 0; k < 6 && !wrote; k++) {
+            if (k) { at = await stProject(env, p.id); if (sb.revision != null) return conflict(at, sb.revision); }
+            const brief = patch.brief && typeof patch.brief === 'object' ? stBriefNorm(Object.assign({}, at.brief, patch.brief)) : at.brief;
+            const res = await env.MIND_DB.prepare('UPDATE studio_projects SET title=?, campaign=?, brief=?, status=?, revision=revision+1, updated=? WHERE id=? AND revision=?')
+              .bind(patch.title != null ? stStr(patch.title, 140) : at.title, patch.campaign != null ? stStr(patch.campaign, 40) : at.campaign, JSON.stringify(brief), patch.status != null ? stStr(patch.status, 20) : at.status, now, at.id, at.revision).run();
+            wrote = !!(res && res.meta && res.meta.changes);
+          }
+          if (!wrote) return conflict(await stProject(env, p.id), sb.revision != null ? sb.revision : at.revision);
           await stEvent(env, p.id, 'edited', { text: 'Project ' + Object.keys(patch).join(', ') + ' edited.' }, who);
           return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true })));
         }
@@ -11798,7 +11997,7 @@ export default {
             if (text.trim().length < 20) return jsonResp({ error: 'empty_source', detail: 'A source needs text (extraction of documents and links arrives in Phase 2).' }, 400);
             // Phase 1 stores the text and its passages; the claim ledger is extracted in Phase 2
             const paras = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean); const passages = {}; paras.forEach((t, i) => { passages['p' + (i + 1)] = t.slice(0, 2000); });
-            await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'text', 20), stStr(sb.name || 'Pasted text', 120), text, JSON.stringify(passages).slice(0, 60000), '[]', stStr(sb.provenance || 'pasted', 200), who, now).run();
+            await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'text', 20), stStr(sb.name || 'Pasted text', 120), text, jsonFit(passages, 60000), '[]', stStr(sb.provenance || 'pasted', 200), who, now).run();
             await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. Claim extraction runs as a job (stage extract).', source: id }, who);
             return jsonResp({ ok: true, id, passages: paras.length });
           }
@@ -11815,9 +12014,10 @@ export default {
             await stBump(env, p.id); await stEvent(env, p.id, 'reference', { text: 'Reference added: ' + stStr(sb.name || 'Reference', 120) + ' (' + purpose + ').' + (analysis ? (analysis.error ? ' Not analysed: ' + analysis.error + '; the models know its name and purpose only.' : ' Read: ' + analysis.summary) : ''), reference: id, analysed: !!(analysis && !analysis.error) }, who);
             return jsonResp({ ok: true, id, key, url: key ? '/studio/file?key=' + encodeURIComponent(key) : '', prepKey, prepared: !!prepKey, bytes: originalBytes, overLimit: originalBytes >= 4500000, note: originalBytes >= 4500000 && !prepKey ? 'The original is over 4.5 MB and cannot be shown to the models; upload a prepared copy (prepB64) and the original stays on file.' : undefined, analysis });
           }
+          { const lim = jsonLimitProblem(sb.data || {}, 30000, ST_FIELD_MAX, 'the direction'); if (lim) return jsonResp({ error: 'input_too_large', detail: 'The direction was not saved: ' + lim + '.' }, 413); }
           const id = stId('d');
           if (sb.chosen) await env.MIND_DB.prepare('UPDATE studio_directions SET chosen=0 WHERE project=?').bind(p.id).run();
-          await env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(sb.data && typeof sb.data === 'object' ? sb.data : {}).slice(0, 8000), sb.chosen ? 1 : 0, who, now).run();
+          await env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, JSON.stringify(sb.data && typeof sb.data === 'object' ? sb.data : {}), sb.chosen ? 1 : 0, who, now).run();
           await stBump(env, p.id); await stEvent(env, p.id, 'direction', { text: (sb.chosen ? 'Direction chosen: ' : 'Direction recorded: ') + stStr((sb.data || {}).title || '', 80), direction: id }, who);
           return jsonResp({ ok: true, id });
         }
@@ -11842,9 +12042,17 @@ export default {
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The asset belongs to another project; nothing was written.' }, 403);
           if (sb.revision != null && Number(sb.revision) !== pair.asset.revision) return conflict(pair.asset, sb.revision);
           if (path === '/studio/lock') {
-            const locks = Object.assign({}, pair.asset.locks); const k = stStr(sb.element, 20); if (!k) return jsonResp({ error: 'missing_element' }, 400);
-            if (sb.locked === false) delete locks[k]; else locks[k] = true;
-            await env.MIND_DB.prepare('UPDATE studio_assets SET locks=?, revision=revision+1, updated=? WHERE id=?').bind(JSON.stringify(locks), now, pair.asset.id).run(); await stBump(env, pair.project.id);
+            const k = stStr(sb.element, 20); if (!k) return jsonResp({ error: 'missing_element' }, 400);
+            // compare-and-swap: a lock set at the same moment on another element is kept, not overwritten
+            let at = pair.asset, wrote = false;
+            for (let n = 0; n < 6 && !wrote; n++) {
+              if (n) { at = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first()); if (sb.revision != null) return conflict(at, sb.revision); }
+              const locks = Object.assign({}, at.locks); if (sb.locked === false) delete locks[k]; else locks[k] = true;
+              const res = await env.MIND_DB.prepare('UPDATE studio_assets SET locks=?, revision=revision+1, updated=? WHERE id=? AND revision=?').bind(JSON.stringify(locks), now, at.id, at.revision).run();
+              wrote = !!(res && res.meta && res.meta.changes);
+            }
+            if (!wrote) return conflict(at, at.revision);
+            await stBump(env, pair.project.id);
             return jsonResp({ ok: true, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
           }
           const cur = await stCurrent(env, pair.asset);
@@ -11857,13 +12065,17 @@ export default {
           let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context || carry };
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
-          const v = await stAppendVersion(env, pair.asset, patch, who, { baseVersion: base });
+          let v;
+          try { v = await stAppendVersion(env, pair.asset, patch, who, { baseVersion: base, expectRevision: sb.revision != null ? Number(sb.revision) : undefined }); }
+          catch (e) { if (e && e.code === 'conflict') return conflict(e.asset || pair.asset, sb.revision != null ? sb.revision : (e.asset || pair.asset).revision); throw e; }
           if (sb.checks === undefined) v.checks = await stVersionChecks(env, pair.project, pair.asset, v);
           await stEvent(env, pair.project.id, 'version', { text: (patch.kind === 'restore' ? 'Restored ' : patch.kind === 'render' ? 'New image on ' : patch.kind === 'layout' ? 'Layout change on ' : 'Text change on ') + pair.asset.title + ': ' + (patch.note || '') + (patch.kind === 'render' ? '' : ' (no render)'), asset: pair.asset.id, version: v.id, render: patch.kind === 'render' }, who);
           return jsonResp({ ok: true, version: v, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) });
         }
         if (path === '/studio/recipe') {
-          await ensureRecipes(env); const ns = relNs(sb.ns); const steps = stRecipeSteps(sb.steps); if (!steps.length) return jsonResp({ error: 'steps_required', detail: 'A recipe needs at least one step: ' + ST_RECIPE_STAGES.join(', ') + '.' }, 400);
+          await ensureRecipes(env); const ns = relNs(sb.ns);
+          { let lim = ''; (Array.isArray(sb.steps) ? sb.steps : []).slice(0, 8).forEach((st, i) => { if (!lim && st && st.input) lim = jsonLimitProblem(st.input, ST_INPUT_MAX / 4, ST_FIELD_MAX, 'step ' + (i + 1) + ' input'); }); if (lim) return jsonResp({ error: 'input_too_large', detail: 'The recipe was not saved: ' + lim + '.' }, 413); }
+          const steps = stRecipeSteps(sb.steps); if (!steps.length) return jsonResp({ error: 'steps_required', detail: 'A recipe needs at least one step: ' + ST_RECIPE_STAGES.join(', ') + '.' }, 400);
           const id = sb.id ? stClean(sb.id, 30) : stId('rc'); const now = Date.now(); const had = sb.id ? await env.MIND_DB.prepare('SELECT id FROM studio_recipes WHERE id=? AND ns=?').bind(id, ns).first() : null;
           if (sb.id && !had) return jsonResp({ error: 'unknown_recipe' }, 404);
           if (had) await env.MIND_DB.prepare('UPDATE studio_recipes SET name=?, campaign=?, steps=?, note=?, who=?, updated=? WHERE id=?').bind(stStr(sb.name || 'Recipe', 80), kitSlug(sb.campaign || ''), JSON.stringify(steps), stStr(sb.note, 300), stStr(who, 40), now, id).run();
@@ -11898,7 +12110,9 @@ export default {
             if (rd.inspection.state === 'inconsistent' && !sb.acknowledgeInspection) return jsonResp({ error: 'inspection_inconsistent', detail: 'The art director answered ship while naming unresolved problems. Review the inspection, then approve with acknowledgeInspection if you accept it.', readiness: rd }, 409);
             if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote = ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
           }
-          await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(stStr(sb.reason, 360) + ackNote, 400), who, now).run();
+          // the approval names exactly the version that was looked at: it is filed only while that version is still current
+          const apr = await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM studio_assets WHERE id=? AND current=?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(stStr(sb.reason, 360) + ackNote, 400), who, now, pair.asset.id, cur.id).run();
+          if (!(apr && apr.meta && apr.meta.changes)) return jsonResp({ ok: false, error: 'version_moved', detail: 'A newer version of ' + pair.asset.title + ' landed while you decided; nothing was recorded. Look at the current version and decide again.' }, 409);
           await stBump(env, pair.project.id);
           let outcome = '';
           if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
@@ -12023,7 +12237,7 @@ export default {
         }
         if (path === '/narratives/status' && req.method === 'GET') return jsonResp(await narrativesStatus(env));
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Running, editing and merging narratives need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Running, editing and merging narratives need a full-access key.' }, 403);
         if (path === '/narratives/run') {
           const params = { hours: parseInt(nrb.hours, 10) || NARR_WINDOW_H, scan: parseInt(nrb.scan, 10) || NARR_SCAN, where: 'worker' };
           const job = await jobCreate(env, 'narratives', params, auth.name);
@@ -12149,7 +12363,7 @@ export default {
         if (path === '/sentiment/topics' && req.method === 'GET') return jsonResp(await sentimentTopics(env, { days: qf('days'), platform: qf('platform'), region: qf('region') }));
         if (path === '/sentiment/items' && req.method === 'GET') return jsonResp(await sentimentItems(env, { entity: qf('entity'), stance: qf('stance'), issue: qf('issue'), platform: qf('platform'), region: qf('region'), days: qf('days'), limit: qf('limit') }));
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Editing the register and running the classifier need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Editing the register and running the classifier need a full-access key.' }, 403);
         if (path === '/entities/add') {
           const s = entitySanitize(nb, null);
           if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the entity a name.' }, 400);
@@ -12225,7 +12439,7 @@ export default {
           return jsonResp({ ok: true, handles: await xWatchList(env), mps });
         }
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Starting sweeps and editing the watch list need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Starting sweeps and editing the watch list need a full-access key.' }, 403);
         if (path === '/social/x/watch') {
           const list = (Array.isArray(ob.handles) ? ob.handles : []).slice(0, 200).map(w => (typeof w === 'string' ? { handle: w } : (w || {})));
           await kvPut(env.AXIOM_KV, 'x_watch', JSON.stringify(list), 365 * 86400);
@@ -12251,7 +12465,7 @@ export default {
       if (path === '/fulltext/save') {
         if (req.method !== 'POST') return jsonResp({ error: 'post_required' }, 405);
         if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Filing text needs a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Filing text needs a full-access key.' }, 403);
         let fb = {}; try { fb = await req.json(); } catch (e) { fb = {}; }
         const sv = await fulltextSave(env, fb);
         return jsonResp(sv, sv.ok ? 200 : (sv.error === 'unknown_row' ? 404 : 400));
@@ -12269,7 +12483,7 @@ export default {
       }
       if (!/^https?:\/\//.test(url)) return jsonResp({ error: 'missing_url', detail: 'Give url=https://... or id=<archive row>.' }, 400);
       const ft = await fullText(env, url, { save: reqUrl.searchParams.get('save') === '1', light: reqUrl.searchParams.get('light') === '1', render: reqUrl.searchParams.get('light') !== '1' });
-      if (row && ft.ok && (!auth.enforced || auth.role === 'full')) { const sv = await fulltextSave(env, { id: row.id, text: ft.text, title: ft.title, method: ft.method, link: ft.decoded, published: ft.published }); ft.filed = !!sv.ok; }
+      if (row && ft.ok && (auth.role === 'full')) { const sv = await fulltextSave(env, { id: row.id, text: ft.text, title: ft.title, method: ft.method, link: ft.decoded, published: ft.published }); ft.filed = !!sv.ok; }
       ft.renderConfigured = renderConfigured(env);
       return jsonResp(ft);
     }
@@ -12314,7 +12528,7 @@ export default {
             sources: rows.map(s => ({ id: s.id, name: s.name, tier: s.tier, juris: s.juris, issues: s.issues, urls: s.urls, methods: s.methods, schedule: s.schedule, enabled: s.enabled, core: s.core, note: s.note, method_ok: s.method_ok })) });
         }
         if (req.method !== 'POST') return jsonResp({ error: 'not_found' }, 404);
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Changing the registry needs a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Changing the registry needs a full-access key.' }, 403);
         if (path === '/sources/add') {
           const s = sourceSanitize(sb, null);
           if (!s.id || !s.name) return jsonResp({ error: 'missing_name', detail: 'Give the source a name.' }, 400);
@@ -12410,7 +12624,7 @@ export default {
           return jsonResp({ ok: true, ns: cns, sets: rows.map(r => { let it = [], pl = []; try { it = JSON.parse(r.items || '[]'); } catch (e) {} try { pl = JSON.parse(r.platforms || '[]'); } catch (e) {}
             return { id: r.id, campaign: r.campaign, segment: r.segment, brief: String(r.brief || '').slice(0, 140), platforms: pl, pieces: it.length, flagged: it.filter(x => x.check && !x.check.ok).length, approved: it.filter(x => x.verdict === 'approved').length, status: r.status, who: r.who, created: r.created, updated: r.updated }; }) });
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing, revising and approving copy need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Writing, revising and approving copy need a full-access key.' }, 403);
         if (path === '/content/generate' && req.method === 'POST') {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
           const platforms = []; (Array.isArray(cbody.platforms) ? cbody.platforms : [cbody.platforms]).forEach(p => { const v = contentPlatform(p); if (v && platforms.indexOf(v) < 0) platforms.push(v); });
@@ -12419,7 +12633,7 @@ export default {
           const brief = String(cbody.brief || '').replace(/\r/g, '').trim().slice(0, 4000);
           let source = ''; const sk = cbody.source && typeof cbody.source === 'object' ? cbody.source : {};
           if (sk.kind === 'release' && sk.id) { const rp = await env.MIND_DB.prepare('SELECT source FROM release_packs WHERE id=?').bind(String(sk.id).replace(/[^a-z0-9]/gi, '').slice(0, 24)).first(); source = rp ? String(rp.source || '') : ''; if (!source) return jsonResp({ error: 'unknown_pack', detail: 'That release pack was not found.' }, 404); }
-          else if (sk.kind === 'topic' && sk.id) { let tb = null; try { tb = JSON.parse(await kvGet(env.AXIOM_KV, 'topic_brief_' + String(sk.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 40)) || 'null'); } catch (e) { tb = null; } if (!tb) return jsonResp({ error: 'unknown_topic', detail: 'No brief has been written for that topic yet.' }, 404); source = JSON.stringify(tb).slice(0, 16000); }
+          else if (sk.kind === 'topic' && sk.id) { let tb = null; try { tb = JSON.parse(await kvGet(env.AXIOM_KV, 'topic_brief_' + String(sk.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 40)) || 'null'); } catch (e) { tb = null; } if (!tb) return jsonResp({ error: 'unknown_topic', detail: 'No brief has been written for that topic yet.' }, 404); source = jsonFit(tb, 16000); }
           else source = String(sk.text || cbody.source || '').replace(/\r/g, '').trim();
           source = source.slice(0, 16000);
           if (brief.length < 8 && source.length < 40) return jsonResp({ error: 'missing_brief', detail: 'Write a one-line brief or paste source material.' }, 400);
@@ -12530,7 +12744,7 @@ export default {
         const list = await mpsList(env, { q: reqUrl.searchParams.get('q') || '', house: reqUrl.searchParams.get('house') || '', withX: reqUrl.searchParams.get('x') === '1', limit: reqUrl.searchParams.get('limit') || 400 });
         return jsonResp({ ok: true, mps: list, total: list.length, synced: Number((await kvGet(env.AXIOM_KV, 'mps_synced')) || 0) });
       }
-      if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Syncing, adding and running topics need a full-access key.' }, 403);
+      if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Syncing, adding and running topics need a full-access key.' }, 403);
       if (path === '/topics/probe') { const r = await sifaPull(env); return jsonResp(r, r.ok ? 200 : (r.error === 'sifa_not_configured' ? 501 : 502)); }
       if (path === '/topics/sync' && req.method === 'POST') {
         const r = await sifaPull(env);
@@ -12670,7 +12884,7 @@ export default {
           const rows = await commentRows(tid, 200);
           return jsonResp({ ok: true, thread: tid, platform: plat, comments: rows.map(r => ({ body: r.body, tone: r.tone, ts: r.ts, score: r.score, issues: pj(r.issues) })) });
         }
-        if (auth.enforced && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Analysis and filing need a full-access key.' }, 403);
+        if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Analysis and filing need a full-access key.' }, 403);
         // POST /signals/prune {platform:'reddit'} - delete the off-topic threads
         // the keyword pass filed before the Australian gate, and their comments.
         // Reddit only: the other platforms are the clients' own pages.
@@ -13251,7 +13465,7 @@ export default {
         try { r.reactions = await metaReactions(env, per); } catch (e) { r.reactions = { error: String(e).slice(0, 120) }; }
       }
       await kvPut(env.AXIOM_KV, 'meta_last_sync', String(Date.now()), 86400);
-      await kvPut(env.AXIOM_KV, 'meta_last_result', JSON.stringify(r).slice(0, 4000), 7 * 86400);
+      await kvPut(env.AXIOM_KV, 'meta_last_result', jsonFit(r, 4000), 7 * 86400);
       return jsonResp({ ok: true, ...r });
     }
 
@@ -13456,6 +13670,7 @@ export default {
     if (path === '/forum-detect') {
       const targetUrl = reqUrl.searchParams.get('url') || '';
       if (!targetUrl) return jsonResp({ error: 'url_required' }, 400);
+      { const bad = axUrlProblem(targetUrl); if (bad) return jsonResp({ error: 'bad_url', detail: 'That address is not read: ' + bad + '.' }, 400); }
 
       const { ok, html, status } = await safeFetch(targetUrl, { headers: FORUM_HEADERS(targetUrl) });
       if (!ok) return jsonResp({ error: 'fetch_failed', status }, 502);
@@ -13519,6 +13734,7 @@ export default {
         targetUrl     = registryEntry.url;
       }
       if (!targetUrl) return jsonResp({ error: 'url_or_name_required' }, 400);
+      { const bad = axUrlProblem(targetUrl); if (bad) return jsonResp({ error: 'bad_url', detail: 'That address is not read: ' + bad + '.' }, 400); }
 
       // Build search URL if query provided
       let fetchUrl = targetUrl;
@@ -13602,6 +13818,7 @@ export default {
       const page      = parseInt(reqUrl.searchParams.get('page') || '1', 10) || 1;
 
       if (!targetUrl) return jsonResp({ error: 'url_required' }, 400);
+      { const bad = axUrlProblem(targetUrl); if (bad) return jsonResp({ error: 'bad_url', detail: 'That address is not read: ' + bad + '.' }, 400); }
 
       const cacheKey = `thread_${btoa(targetUrl.slice(0, 80)).replace(/[^a-z0-9]/gi,'').slice(0,32)}_p${page}`;
       const cached   = await kvGet(env.AXIOM_KV, cacheKey);

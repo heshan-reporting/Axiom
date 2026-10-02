@@ -112,7 +112,8 @@ await t('filters narrow by tier, jurisdiction and issue', async () => {
   const d = await req('GET', '/sources?q=courier', null, 'read-key'); ok(d.d.sources.some(s => s.id === 'couriermail'));
 });
 await t('GET /sources/probe runs every method and says which deliver', async () => {
-  const r = await req('GET', '/sources/probe?id=nationals', null, 'read-key');
+  eq((await req('GET', '/sources/probe?id=nationals', null, 'read-key')).status, 403, 'a live probe that writes health rows needs a full key');
+  const r = await req('GET', '/sources/probe?id=nationals');
   eq(r.status, 200); eq(r.d.best, 'wp'); eq(r.d.delivering, ['wp', 'sitemap', 'gnews']);
   const by = {}; r.d.results.forEach(x => { by[x.method] = x; });
   eq(by.rss.ok, false); eq(by.rss.status, 404); ok(/HTTP 404/.test(by.rss.detail));
@@ -176,14 +177,14 @@ await t('POST /sources/update switches a source off, and a core feed off drops i
   const a = await req('POST', '/sources/update', { id: 'riverine_herald', enabled: false, note: 'paused' });
   eq(a.d.source.enabled, false); eq(a.d.source.note, 'paused');
   const l = await req('GET', '/sources?status=off', null, 'read-key'); ok(l.d.sources.some(s => s.id === 'riverine_herald'));
-  const before = await req('GET', '/allnews?debug=1', null, null); eq(before.d.feeds, list.summary.core, 'every core feed is fetched');
+  const before = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(before.d.feeds, list.summary.core, 'every core feed is fetched');
   const b = await req('POST', '/sources/update', { id: 'abc', enabled: false }); eq(b.d.source.enabled, false); eq(b.d.source.core, true);
   eq(JSON.parse(kv.get('sources_core_off')), ['abc']);
-  const after = await req('GET', '/allnews?debug=1', null, null); eq(after.d.feeds, list.summary.core - 1, 'the switched-off core feed is not fetched');
+  const after = await req('GET', '/allnews?debug=1', null, 'read-key'); eq(after.d.feeds, list.summary.core - 1, 'the switched-off core feed is not fetched');
   await req('POST', '/sources/update', { id: 'abc', enabled: true });
 });
 await t('/allnews merges the registry rows from the archive and marks them', async () => {
-  const r = await req('GET', '/allnews?debug=1&hours=72', null, null);
+  const r = await req('GET', '/allnews?debug=1&hours=72', null, 'read-key');
   ok(r.d.registry >= 10, 'registry rows merged: ' + r.d.registry);
   const it = r.d.items.find(i => i.src === 'nationals');
   ok(it && it.reg === 1 && it.tier === 'party' && it.method === 'wp', JSON.stringify(it));

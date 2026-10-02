@@ -116,7 +116,8 @@ await t('GET /social/coverage lists every platform with method, keys and what it
   ok(r.d.platforms.every(p => p.counts && typeof p.counts.threads24 === 'number'));
 });
 await t('GET /social/coverage?probe=1 asks each keyless platform one small question', async () => {
-  const r = await req('GET', '/social/coverage?probe=1', null, 'read-key');
+  eq((await req('GET', '/social/coverage?probe=1', null, 'read-key')).status, 403, 'a live probe of every platform needs a full key');
+  const r = await req('GET', '/social/coverage?probe=1');
   const by = {}; r.d.platforms.forEach(p => { by[p.id] = p; });
   eq(by.bluesky.probe.ok, true); ok(/1 posts for auspol/.test(by.bluesky.probe.detail));
   eq(by.mastodon.probe.ok, true); eq(by.x.probe.ok, true); ok(/3 posts in the embed timeline/.test(by.x.probe.detail));
