@@ -32,8 +32,12 @@
   const FALLBACK_CLIENTS = [{ id: 'mca', name: 'Minerals Council of Australia', accent: '#c9a227' }, { id: 'aep', name: 'Australian Energy Producers', accent: '#2f7fd6' }, { id: 'pca', name: 'Property Council of Australia', accent: '#3c9a6e' }];
   const clientList = () => (Array.isArray(window.CC_CLIENTS) && window.CC_CLIENTS.length ? window.CC_CLIENTS : FALLBACK_CLIENTS).map(c => ({ id: c.id, name: c.name, accent: c.accent || '#c9a227' }));
   const standing = (a, part) => (a && a.approvals && a.approvals[part]) || null;
-  const current = a => (a && a.versions ? a.versions.find(v => v.id === a.current) || a.versions[a.versions.length - 1] : null);
-  const vnum = (a, v) => (a && v ? a.versions.findIndex(x => x.id === v.id) + 1 : 0);
+  /* the current version is the one the worker names, always sent with the asset however old it is; if it is not there
+     the asset has no current version to show (null), never an older version presented as current */
+  const current = a => (a && a.versions ? a.versions.find(v => v.id === a.current) || null : null);
+  /* a version's number on its asset comes from the worker (insertion order), so a paged history numbers it right */
+  const vnum = (a, v) => (a && v ? (v.n || (a.versions.findIndex(x => x.id === v.id) + 1)) : 0);
+  const vtotal = a => (a ? a.versionsTotal || (a.versions || []).length : 0);
   const chanLabel = c => (CHANNELS[c] || { label: c || '-' }).label;
   const isClear = t => /^(adapt|write|make|produce|resize|shorten|draft|three|two|one|give me|turn|create)\b/i.test(String(t || '').trim());
   const FORMAT_RATIO = { '1:1': 1, '4:5': 0.8, '9:16': 0.5625, '16:9': 1.7778 };
@@ -53,6 +57,12 @@
     if (has(/answer_truncated|unparseable/)) return out('The model\'s answer could not be read', 'Nothing was saved from it; your work is as it was. Retry: it is a new call and may be billed.');
     if (has(/refus/i)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
     if (has(/gemini_5\d\d|gemini_429|overloaded|\b529\b|\b503\b|rate[ _-]?limit|too many requests|\b429\b|TimeoutError|AbortError|timed out|timeout/i)) return out('The provider is busy or timed out', 'Your work is kept. Retry when ready; a retry is a new attempt and may be billed.', 'provider');
+    if (has(/brief_too_large|input_too_large|data_too_large|layout_too_large|content_too_large/)) return out('That is too long to save', msg.replace(/^[a-z_]+:\s*/, '') + ' Nothing was saved and your text is still where you typed it; put long material in a Source instead.');
+    if (has(/input_corrupt/)) return out('This job\'s stored instruction is damaged', 'It was not run with an empty instruction. Start the step again from here; the damaged job stays in Jobs as history.');
+    if (status === 409 && /version_moved/.test(code)) return out('A newer version arrived while you decided', 'Nothing was recorded. Look at the current version and decide again.', 'warn');
+    if (status === 409 && /job_ended/.test(code)) return out('That job had already ended', 'It finished or was cancelled first; nothing more was filed.', 'warn');
+    if (has(/auth_not_configured/)) return out('The worker has no access keys set', 'An administrator must set AXIOM_KEYS (or AXIOM_ACCESS_KEY) on the worker before anything can be read or changed.');
+    if (has(/auth_misconfigured/)) return out('The worker\'s key list is invalid', 'An administrator must fix AXIOM_KEYS on the worker (every key needs the role "read" or "full"). Nothing was changed.');
     if (status === 409 && /conflict/.test(code)) return out('This changed elsewhere since you read it', 'Someone, or a job, saved a newer version first. Nothing was overwritten; the latest version is now shown.', 'warn');
     if (status === 409 && /locked/.test(code)) return out('That element is locked', 'Unlock it first (the lock beside the field), then make the change.', 'warn');
     if (status === 409 && /stale/.test(code)) return out('That suggestion was made for an earlier version', 'The asset has moved on since. Ask again on the current version.', 'warn');
@@ -300,7 +310,7 @@
   const ASSET_WORD = { approved: 'approved', partly: 'partly approved', revised: 'revised, not approved', draft: 'draft' };
   function Rail({ p, view, setView, sel, setSel, toolsOpen, setToolsOpen }) {
     const fams = useMemo(() => { const m = {}; (p.assets || []).forEach(a => { (m[a.family] = m[a.family] || []).push(a); }); return m; }, [p.assets]);
-    const stat = a => { const c = standing(a, 'copy'), d = standing(a, 'design'); const cur = current(a); return c && (d || (cur && cur.mode === 'copy')) ? 'approved' : c || d ? 'partly' : a.versions.length > 1 ? 'revised' : 'draft'; };
+    const stat = a => { const c = standing(a, 'copy'), d = standing(a, 'design'); const cur = current(a); return c && (d || (cur && cur.mode === 'copy')) ? 'approved' : c || d ? 'partly' : vtotal(a) > 1 ? 'revised' : 'draft'; };
     const tech = a => { const v = current(a); if (!v || v.mode === 'copy' || v.mode === 'generated') return ''; const t = (a.readiness || {}).technical; return t === 'passed' ? '' : t === 'failed' ? 'failing validation' : 'not validated'; };
     const live = (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running').length;
     const failed = (p.jobs || []).filter(j => j.state === 'failed').length;
@@ -310,7 +320,7 @@
       <div class="st-rail-sec"><${Lbl}>Assets ${p.assets.length ? '(' + p.assets.length + ')' : ''}</${Lbl}>
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-fam" role="group" aria-label=${f}><div class="st-famname">${f}</div>${fams[f].map(a => { const t = tech(a); const s0 = stat(a); return html`<button key=${a.id} class=${'st-railbtn asset' + (view === 'asset' && sel === a.id ? ' on' : '')} aria-current=${view === 'asset' && sel === a.id ? 'true' : undefined} onClick=${() => { setSel(a.id); setView('asset'); }} title=${a.title + ': ' + ASSET_WORD[s0] + (t ? ', ' + t : '')}>
         <${Composition} v=${current(a)} a=${a} ns=${p.ns} size="mini" />
-        <span class="st-asset-name">${a.title}<span class="ov-dim"> ${a.format}</span>${t ? html`<span class="st-asset-flag">${t}</span>` : null}</span><span class="st-asset-meta">${busyOn(a.id) ? html`<span class="st-spin" aria-label="a job is running on this asset"></span>` : null}<span class=${'st-dot ' + s0} aria-label=${ASSET_WORD[s0]}></span><span class="ov-dim">v${a.versions.length}</span></span></button>`; })}</div>`)}
+        <span class="st-asset-name">${a.title}<span class="ov-dim"> ${a.format}</span>${t ? html`<span class="st-asset-flag">${t}</span>` : null}</span><span class="st-asset-meta">${busyOn(a.id) ? html`<span class="st-spin" aria-label="a job is running on this asset"></span>` : null}<span class=${'st-dot ' + s0} aria-label=${ASSET_WORD[s0]}></span><span class="ov-dim">v${vtotal(a)}</span></span></button>`; })}</div>`)}
       ${!p.assets.length ? html`<div class="ov-dim st-pad">No assets yet. ${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Production starts from the brief.'}</div>` : null}
       </div>
       <div class="st-rail-sec st-tools"><button class="st-tools-toggle" aria-expanded=${!!toolsOpen} onClick=${() => setToolsOpen(!toolsOpen)}><span class="st-lbl">Client and jobs</span><span aria-hidden="true">${toolsOpen ? '−' : '+'}</span></button>
@@ -514,7 +524,7 @@
       ${!p.assets.length ? html`<div class="ov-empty">No assets yet.</div>` : null}
       ${Object.keys(fams).map(f => html`<div key=${f} class="st-board-fam"><${Lbl}>${f} (${fams[f].length})</${Lbl}><div class="st-board-grid">${fams[f].map(a => { const [tw, tk] = tech(a); return html`<button key=${a.id} class="st-board-card" onClick=${() => onOpen(a.id)} aria-label=${'Open ' + a.title}>
         <${Composition} v=${current(a)} a=${a} ns=${p.ns} size="card" />
-        <span class="st-board-t">${a.title}</span><span class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${a.versions.length}</span>
+        <span class="st-board-t">${a.title}</span><span class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${vtotal(a)}</span>
         <span class="st-know-h"><${Chip} kind=${tk}>${tw}</${Chip}>${standing(a, 'copy') ? html`<${Chip} kind="ok">copy approved</${Chip}>` : null}${standing(a, 'design') ? html`<${Chip} kind="ok">design approved</${Chip}>` : null}</span></button>`; })}</div></div>`)}
     </div>`;
   }
@@ -527,7 +537,7 @@
     return html`<div class="st-centre-pad st-copydeck" aria-label="Copy deck"><div class="ov-title">Copy</div><div class="ov-why">Every word in the project in one place. An edit here is a text version of that asset (no render), checked again against the ledger, the facts and the banned terms; a change to words on a tile asks for its validation again.</div>
       <div class="st-copydeck-scroll"><table class="ov-table"><thead><tr><th>Asset</th>${F.map(([k, l]) => html`<th key=${k}>${l}</th>`)}<th>Checks</th></tr></thead><tbody>
       ${p.assets.map(a => { const v = current(a) || {}; const flags = (v.checks || []).filter(c => c.state !== 'matches' && c.state !== 'fact'); const max = (CHANNELS[a.channel] || {}).max || 900;
-        return html`<tr key=${a.id}><td><button class="ov-link" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${a.versions.length}</div></td>
+        return html`<tr key=${a.id}><td><button class="ov-link" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}, v${vtotal(a)}</div></td>
           ${F.map(([k]) => html`<td key=${k}>${k !== 'cta' ? html`<textarea class="st-ta" rows=${k === 'caption' ? 3 : 2} disabled=${ro || (a.locks || {})[k]} value=${val(a, k)} onInput=${e => setDraft(Object.assign({}, draft, { [key(a, k)]: e.target.value }))} onBlur=${() => save(a, k)} aria-label=${k + ' of ' + a.title}></textarea>` : html`<input class="st-in" disabled=${ro || (a.locks || {})[k]} value=${val(a, k)} onInput=${e => setDraft(Object.assign({}, draft, { [key(a, k)]: e.target.value }))} onBlur=${() => save(a, k)} aria-label=${k + ' of ' + a.title} />`}${k === 'caption' ? html`<div class=${'ov-dim' + (val(a, k).length > max ? ' st-over' : '')}>${val(a, k).length} of ${max}</div>` : null}</td>`)}
           <td>${flags.length ? flags.slice(0, 4).map((c, i) => html`<div key=${i}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <span class="ov-dim">${c.text}</span></div>`) : html`<${Chip} kind="ok">clean</${Chip}>`}</td></tr>`; })}
       </tbody></table></div></div>`;
@@ -745,7 +755,7 @@
       <${StageHead} ...${head}>${flow.counts.ready ? html`<button class="btn sm" onClick=${() => onGo('export')}>Continue to Export (${flow.counts.ready} ready)</button>` : null}</${StageHead}>
       <div class="ov-why">Approval is a person's decision about one exact version: it stands while that version is current, and an edit drops the approval of the part it changes. The art director's verdict is advice and never approves.</div>
       ${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to review yet.</b><span>Produce the set first.</span><button class="btn sm" onClick=${() => onGo('produce')}>Go to Produce</button></div>` : html`<table class="ov-table st-approvals" aria-label="Approvals"><thead><tr><th>Asset</th><th>Version</th><th>Validation</th><th>Copy</th><th>Design</th></tr></thead><tbody>
-        ${p.assets.map(a => { const v = current(a); const t = v && (v.mode === 'copy' || v.mode === 'generated') ? 'not_applicable' : (a.readiness || {}).technical || 'not_validated'; return html`<tr key=${a.id}><td><button class="st-lib-open" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}</div></td><td>v${vnum(a, v)} <span class="ov-dim">of ${a.versions.length}</span></td><td><${Chip} kind=${TECH_KIND[t] || ''}>${TECH_SHORT[t] || t}</${Chip}></td><td>${cell(a, 'copy')}</td><td>${cell(a, 'design')}</td></tr>`; })}
+        ${p.assets.map(a => { const v = current(a); const t = v && (v.mode === 'copy' || v.mode === 'generated') ? 'not_applicable' : (a.readiness || {}).technical || 'not_validated'; return html`<tr key=${a.id}><td><button class="st-lib-open" onClick=${() => onOpen(a.id)}>${a.title}</button><div class="ov-dim">${chanLabel(a.channel)} ${a.format}</div></td><td>v${vnum(a, v)} <span class="ov-dim">of ${vtotal(a)}</span></td><td><${Chip} kind=${TECH_KIND[t] || ''}>${TECH_SHORT[t] || t}</${Chip}></td><td>${cell(a, 'copy')}</td><td>${cell(a, 'design')}</td></tr>`; })}
       </tbody></table>`}
       ${p.assets.length ? html`<${ReviewView} p=${p} onOpen=${onOpen} />` : null}
     </div>`;
@@ -786,7 +796,7 @@
       ${made ? html`<div class="st-offer-box" aria-label="New review link"><b>Link for "${made.share.label}"</b> <span class="ov-dim">shown once - copy it now</span><input class="st-in" readonly value=${made.link} onFocus=${e => e.target.select()} aria-label="Review link" /><div><button class="btn sm" onClick=${() => { try { navigator.clipboard.writeText(made.link); toastMsg('Link copied'); } catch (e) {} }}>Copy link</button> <button class="btn sm ghost" onClick=${() => setMade(null)}>Done</button></div></div>` : null}
       ${form ? html`<div class="st-offer-box" aria-label="Share for review">
         <div class="st-lbl">Assets the client will see</div>
-        ${p.assets.map(a => html`<label key=${a.id} class="st-check"><input type="checkbox" disabled=${!ready(a)} checked=${!!form.assets[a.id]} onChange=${e => setForm(Object.assign({}, form, { assets: Object.assign({}, form.assets, { [a.id]: e.target.checked }) }))} /> ${a.title} <span class="ov-dim">${a.format}, v${a.versions.length}${ready(a) ? '' : ' - ' + why(a)}</span></label>`)}
+        ${p.assets.map(a => html`<label key=${a.id} class="st-check"><input type="checkbox" disabled=${!ready(a)} checked=${!!form.assets[a.id]} onChange=${e => setForm(Object.assign({}, form, { assets: Object.assign({}, form.assets, { [a.id]: e.target.checked }) }))} /> ${a.title} <span class="ov-dim">${a.format}, v${vtotal(a)}${ready(a) ? '' : ' - ' + why(a)}</span></label>`)}
         <input class="st-in" value=${form.label} onInput=${e => setForm(Object.assign({}, form, { label: e.target.value }))} aria-label="Review label" />
         <div class="st-nd-row"><label class="ov-dim">Expires <select class="st-sel" value=${form.days} onChange=${e => setForm(Object.assign({}, form, { days: e.target.value }))} aria-label="Expiry"><option value="7">in 7 days</option><option value="14">in 14 days</option><option value="30">in 30 days</option><option value="0">never (withdraw by hand)</option></select></label>
           <label class="st-check"><input type="checkbox" checked=${form.approve} onChange=${e => setForm(Object.assign({}, form, { approve: e.target.checked }))} /> the client may approve (after the agency has)</label></div>
@@ -1131,11 +1141,14 @@
     const ap = { copy: standing(a, 'copy'), design: standing(a, 'design') };
     const flat = v && v.mode === 'generated'; const copyOnly = v && v.mode === 'copy'; const ro = !canWrite() || p.readOnly;
     const fields = [['headline', copyOnly ? 'Hook line' : 'Headline'], ['support', 'Support line'], ['cta', 'Call to action'], ['caption', 'Caption (' + chanLabel(a.channel) + ', ' + (copy.caption || '').length + ' of ' + ((CHANNELS[a.channel] || {}).max || 900) + ')'], ['alt', 'Alt text']];
-    if (!v) return html`<div class="st-centre-pad"><div class="ov-empty">This asset has no version.</div></div>`;
+    if (!v) return html`<div class="st-centre-pad"><div class="ov-empty" role="alert">${a.currentMissing ? 'The current version of this asset could not be found. Nothing older is shown in its place; open Versions to restore one.' : 'This asset has no version.'}</div></div>`;
     // on a full artwork the words are in the bitmap: the fields show them but cannot change them
     const baked = v.mode === 'artwork' ? new Set((v.layout || {}).baked || ['headline', 'support', 'cta']) : new Set();
     const hl = v.layout && v.layout.layers ? v.layout.layers.find(l => l.role === 'headline') : null;
     const [nonce, setNonce] = useState(0);
+    // history older than the window the project view carries, paged on request in the worker's order
+    const [older, setOlder] = useState([]); useEffect(() => { setOlder([]); }, [a.id]);
+    const loadOlder = async () => { try { const before = older.length ? older[older.length - 1].n : (a.versionsFrom || 1); const d = await call('/studio/versions?asset=' + encodeURIComponent(a.id) + '&before=' + before + '&limit=40'); setOlder(o => o.concat((d.versions || []).slice().reverse())); } catch (e) { toastMsg('Older versions did not load: ' + e.message, true); } };
     const comp = useComposition(v, p.ns, v.layout, v.copy, nonce);
     // the variations are worked out once the fonts and images are in, so every one is measured as it would export
     const canVary = !copyOnly && !flat && v.mode !== 'artwork' && v.layout && Array.isArray(v.layout.layers);
@@ -1173,13 +1186,13 @@
     const hasLayout = !copyOnly && !flat && v.layout && v.layout.layers;
     const work = html`<div class="st-asset">
       <div class="st-asset-head">
-        <div class="st-asset-title"><b>${a.title}</b> <span class="ov-dim">${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}, ${a.family}; v${vnum(a, v)} of ${a.versions.length}, ${v.note}${v.who ? ', ' + v.who : ''}</span></div>
+        <div class="st-asset-title"><b>${a.title}</b> <span class="ov-dim">${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}, ${a.family}; v${vnum(a, v)} of ${vtotal(a)}, ${v.note}${v.who ? ', ' + v.who : ''}</span></div>
         <div class="st-asset-acts">
           ${neighbours && neighbours.prev ? html`<button class="btn sm ghost" onClick=${() => onOpen(neighbours.prev)} aria-label="Previous asset" title="Previous asset">←</button>` : null}${neighbours && neighbours.next ? html`<button class="btn sm ghost" onClick=${() => onOpen(neighbours.next)} aria-label="Next asset" title="Next asset">→</button>` : null}
           ${!copyOnly ? html`<button class="btn sm ghost" onClick=${() => setZoom(zoom === 'fit' ? 'actual' : 'fit')} title="Fit to the screen or actual size">${zoom === 'fit' ? 'Actual size' : 'Fit'}</button>` : null}
           ${!copyOnly && !flat && !ro && v.layout && v.layout.layers && !a.locks.layout ? html`<button class=${'btn sm ghost' + (le ? ' on' : '')} aria-pressed=${le} onClick=${() => setLe(!le)}>${le ? 'Close layout editor' : 'Edit layout'}</button>` : null}
-          <button class="btn sm ghost" onClick=${() => setTab('versions')}>Versions (${a.versions.length})</button>
-          ${a.versions.length > 1 ? html`<button class="btn sm ghost" onClick=${() => onCompare(a.versions[a.versions.length - 2].id, v.id)}>Compare</button>` : null}
+          <button class="btn sm ghost" onClick=${() => setTab('versions')}>Versions (${vtotal(a)})</button>
+          ${(() => { const vi = a.versions.findIndex(x => x.id === v.id); return vi > 0 ? html`<button class="btn sm ghost" onClick=${() => onCompare(a.versions[vi - 1].id, v.id)}>Compare</button>` : null; })()}
         </div>
       </div>
       <div class=${'st-stage ' + zoom} style=${{ '--ar': ratio }}>
@@ -1229,6 +1242,8 @@
         </div>`)}
       ${panel('versions', html`<div class="st-hist"><div class="ov-dim">Versions are immutable; restoring creates a new current version that references the earlier content.</div>
         ${a.versions.slice().reverse().map(x => html`<div key=${x.id} class=${'st-hist-row' + (x.id === a.current ? ' cur' : '')}><${Composition} v=${x} a=${a} ns=${p.ns} size="thumb" /><div><b>v${vnum(a, x)}</b> <${Chip} kind=${x.kind === 'render' ? 'warn' : ''}>${x.kind === 'render' ? 'render' : x.kind === 'layout' ? 'layout edit' : x.kind === 'restore' ? 'restore' : 'text change'}</${Chip}><div class="ov-dim">${x.note}, ${aest(x.created)}, ${x.who}${x.parent && x.parent !== (a.versions[vnum(a, x) - 2] || {}).id ? ' (branch)' : ''}</div></div><div>${x.id === a.current ? html`<${Chip} kind="ok">current</${Chip}>` : !ro ? html`<button class="ov-link" onClick=${() => onRestore(a, x.id)}>restore</button>` : null} <button class="ov-link" onClick=${() => onCompare(x.id, a.current)}>compare</button></div></div>`)}
+        ${older.map(x => html`<div key=${x.id} class="st-hist-row st-hist-older"><div></div><div><b>v${x.n}</b> <${Chip}>${x.kind === 'render' ? 'render' : x.kind === 'layout' ? 'layout edit' : x.kind === 'restore' ? 'restore' : 'text change'}</${Chip}><div class="ov-dim">${x.note}, ${aest(x.created)}, ${x.who}</div></div><div>${!ro ? html`<button class="ov-link" onClick=${() => onRestore(a, x.id)}>restore</button>` : null} <button class="ov-link" onClick=${() => onCompare(x.id, a.current)}>compare</button></div></div>`)}
+        ${(older.length ? older[older.length - 1].n : (a.versionsFrom || 1)) > 1 ? html`<button class="ov-link st-hist-more" onClick=${loadOlder}>Load older versions (${(older.length ? older[older.length - 1].n : a.versionsFrom) - 1} earlier)</button>` : null}
         </div>
         ${!flat ? html`<${UsedPanel} a=${a} v=${v} />` : null}`)}
     </div>`;
@@ -1249,7 +1264,7 @@
     const KEYS = ['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'];
     return html`<div class="st-adreview" aria-label="Art Director review">
       <div class="st-adreview-head"><b>Review of ${a.title}</b>
-        ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Art Director reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : last && !old ? 'Review again (1 model call)' : 'Review v' + a.versions.length + ' (1 model call)'}</button>` : null}</div>
+        ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Art Director reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : last && !old ? 'Review again (1 model call)' : 'Review v' + vtotal(a) + ' (1 model call)'}</button>` : null}</div>
       ${last && last.scores ? html`<div class="st-adreview-body">
         <div class="st-insp-scores">${KEYS.map(k => html`<span key=${k} class=${'st-insp-score s' + (last.scores[k] == null ? 'n' : last.scores[k])} title=${(last.reasons || {})[k] || ''}>${k} <b>${last.scores[k] == null ? 'not scored' : last.scores[k]}</b></span>`)}</div>
         <div><${Chip} kind=${last.verdict === 'ship' ? 'ok' : last.verdict === 'redo' ? 'bad' : 'warn'}>verdict: ${last.verdict}</${Chip}> <span class="ov-dim">on v${vn || '?'}${old ? ' - an earlier version; review again for this one' : ', the current version'}, round ${last.round} of ${last.of || 2}, ${last.composed ? 'the composed tile' : 'the imagery only'}, ${aest(last.at)}</span></div>
@@ -1724,7 +1739,7 @@
         const d = await reload(); const as2 = d && d.assets.find(x => x.id === as.id); if (!as2) throw e;
         const base = as2.versions.find(x => x.id === baseVid); const cur = current(as2);
         if (base && JSON.stringify(base.layout) === JSON.stringify(cur.layout)) { await call('/studio/version', { asset: as.id, revision: as2.revision, layout, kind: 'layout', note }); await reload(); return true; }
-        setNotice({ kind: 'warn', title: 'The layout changed elsewhere while you edited.', text: 'v' + as2.versions.length + ' changed the layout too, so yours was not saved over it. Apply yours on top of v' + as2.versions.length + ', or leave the newer layout.', actions: [{ label: 'Apply mine on top', fn: async () => { try { const as3 = (await reload()).assets.find(x => x.id === as.id); await call('/studio/version', { asset: as.id, revision: as3.revision, layout, kind: 'layout', note: note + ' (applied over a newer layout)' }); await reload(); } catch (e3) { fail(e3, 'The layout was not saved'); } } }] });
+        setNotice({ kind: 'warn', title: 'The layout changed elsewhere while you edited.', text: 'v' + vtotal(as2) + ' changed the layout too, so yours was not saved over it. Apply yours on top of v' + vtotal(as2) + ', or leave the newer layout.', actions: [{ label: 'Apply mine on top', fn: async () => { try { const as3 = (await reload()).assets.find(x => x.id === as.id); await call('/studio/version', { asset: as.id, revision: as3.revision, layout, kind: 'layout', note: note + ' (applied over a newer layout)' }); await reload(); } catch (e3) { fail(e3, 'The layout was not saved'); } } }] });
         return false;
       }
     };
@@ -1844,7 +1859,7 @@
     const header = html`<div class="st-head">
       <div class="st-head-l"><span class="st-appname">Creative Studio</span>
         <select class="st-sel st-client" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select>
-        ${p ? html`<span class="st-sep" aria-hidden="true">/</span><button class="ov-link" onClick=${closeProject}>All projects</button><span class="st-sep" aria-hidden="true">/</span><b class="st-ptitle" title=${p.title}>${p.title}</b>${campName ? html`<${Chip} title="campaign">${campName}</${Chip}>` : html`<span class="ov-dim">no campaign</span>`}${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}${a && view === 'asset' ? html`<span class="st-sep" aria-hidden="true">/</span><span class="st-curasset">${a.title} <span class="ov-dim">v${vnum(a, current(a))} of ${a.versions.length}</span></span>` : null}` : html`<span class="ov-dim">project library</span>`}
+        ${p ? html`<span class="st-sep" aria-hidden="true">/</span><button class="ov-link" onClick=${closeProject}>All projects</button><span class="st-sep" aria-hidden="true">/</span><b class="st-ptitle" title=${p.title}>${p.title}</b>${campName ? html`<${Chip} title="campaign">${campName}</${Chip}>` : html`<span class="ov-dim">no campaign</span>`}${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}${a && view === 'asset' ? html`<span class="st-sep" aria-hidden="true">/</span><span class="st-curasset">${a.title} <span class="ov-dim">v${vnum(a, current(a))} of ${vtotal(a)}</span></span>` : null}` : html`<span class="ov-dim">project library</span>`}
       </div>
       <div class="st-head-r">
         ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save' + (saveSt.err ? ' bad' : saveSt.pending || typing ? ' busy' : ' ok')} role="status" aria-live="polite">${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}

@@ -2221,14 +2221,18 @@ async function jobCreate(env, source, params, who) {
   await jobLog(env, id, [{ k: 'info', t: 'job ' + id + ' created: ' + source + (local ? ' (running in the worker)' : ' (waiting for a desktop collector to claim it)') }]);
   return { id, local };
 }
-async function jobFinish(env, id, ok, result) {
-  await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, finished=?, ok=?, result=? WHERE id=?')
-    .bind(ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, jsonFit(result || {}, 4000), id).run();
+/* finishing is conditional too: a job that was cancelled (or already finished) keeps that state, and when the report
+ * names its collector, only the collector holding the job may finish it. Returns false when the report was ignored. */
+async function jobFinish(env, id, ok, result, agent) {
+  const u = await env.MIND_DB.prepare("UPDATE bridge_jobs SET status=?, finished=?, ok=?, result=? WHERE id=? AND status IN ('queued','running')" + (agent ? ' AND (agent IS NULL OR agent=? OR agent=\'\')' : ''))
+    .bind(...[ok ? 'done' : 'failed', Date.now(), ok ? 1 : 0, jsonFit(result || {}, 4000), id].concat(agent ? [String(agent).slice(0, 40)] : [])).run();
+  if (!(u && u.meta && u.meta.changes)) { await jobLog(env, id, [{ k: 'info', t: 'a late report (' + (ok ? 'done' : 'failed') + ') was ignored: the job had already ended or was cancelled' }]); return false; }
   await jobLog(env, id, [{ k: 'done', t: (ok ? 'finished: ' : 'failed: ') + (result && typeof result.summary === 'string' && result.summary ? result.summary : jsonFit(result || {}, 600)) }]);
   // keep the log readable: trim to the most recent lines
   try {
     await env.MIND_DB.prepare('DELETE FROM bridge_log WHERE job=? AND id NOT IN (SELECT id FROM bridge_log WHERE job=? ORDER BY id DESC LIMIT ?)').bind(id, id, BRIDGE_LOG_KEEP).run();
   } catch (e) {}
+  return true;
 }
 /** The desktop agent claims the oldest queued job it can handle. */
 async function jobClaim(env, agent, sources) {
@@ -2236,10 +2240,16 @@ async function jobClaim(env, agent, sources) {
   const want = (sources || []).map(sigSource).filter(Boolean);
   const list = want.length ? want : BRIDGE_SOURCES;
   const marks = list.map(() => '?').join(',');
-  const row = await env.MIND_DB.prepare('SELECT id,source,params FROM bridge_jobs WHERE status=? AND source IN (' + marks + ') ORDER BY created LIMIT 1')
-    .bind('queued', ...list).first();
+  // the claim is the conditional UPDATE (status still queued, affected rows checked): two collectors asking at the same
+  // moment can both see the job, but only one moves it; the other takes the next one or nothing
+  const rows = ((await env.MIND_DB.prepare('SELECT id,source,params FROM bridge_jobs WHERE status=? AND source IN (' + marks + ') ORDER BY created LIMIT 5')
+    .bind('queued', ...list).all()).results || []);
+  let row = null;
+  for (const r of rows) {
+    const u = await env.MIND_DB.prepare("UPDATE bridge_jobs SET status='running', agent=?, claimed=? WHERE id=? AND status='queued'").bind(String(agent || 'agent').slice(0, 40), Date.now(), r.id).run();
+    if (u && u.meta && u.meta.changes) { row = r; break; }
+  }
   if (!row) return null;
-  await env.MIND_DB.prepare('UPDATE bridge_jobs SET status=?, agent=?, claimed=? WHERE id=?').bind('running', String(agent || 'agent').slice(0, 40), Date.now(), row.id).run();
   await jobLog(env, row.id, [{ k: 'info', t: 'claimed by ' + String(agent || 'agent').slice(0, 40) }]);
   let params = {}; try { params = JSON.parse(row.params || '{}'); } catch (e) {}
   return { id: row.id, source: row.source, params };
@@ -6906,14 +6916,37 @@ async function stAppendVersion(env, asset, patch, who, opts) {
   }
   const e = new Error('conflict: the asset kept changing while this version was being written; nothing was written'); e.code = 'conflict'; e.asset = asset; throw e;
 }
+/* Versions are numbered by insertion order (created, then rowid): stable when timestamps are equal, the same on every
+ * read. n is the version's number on its asset (1-based). */
+async function stVersionNumber(env, assetId, vid) {
+  const r = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_versions v, (SELECT created, rowid AS rid FROM studio_versions WHERE id=?) c WHERE v.asset=? AND (v.created < c.created OR (v.created = c.created AND v.rowid <= c.rid))').bind(vid, assetId).first();
+  return Number((r || {}).n || 0);
+}
+/** A page of an asset's history, oldest first, numbered: the newest `limit` versions, or those before number `before`. */
+async function stVersionPage(env, assetId, opts) {
+  opts = opts || {}; const limit = Math.max(1, Math.min(200, opts.limit || 60));
+  const total = Number(((await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_versions WHERE asset=?').bind(assetId).first()) || {}).n || 0);
+  const end = opts.before ? Math.max(0, Math.min(total, Number(opts.before) - 1)) : total;     // the last number on this page
+  const start = Math.max(0, end - limit);                                                         // numbers start+1 .. end
+  const rows = end > start ? ((await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE asset=? ORDER BY created ASC, rowid ASC LIMIT ? OFFSET ?').bind(assetId, end - start, start).all()).results || []) : [];
+  return { total, versions: rows.map((r, i) => Object.assign(stVersionRow(r), { n: start + i + 1 })) };
+}
 async function stAssetView(env, a, opts) {
   opts = opts || {};
-  const versions = ((await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE asset=? ORDER BY created ASC, id ASC LIMIT ?').bind(a.id, opts.versions || 60).all()).results || []).map(stVersionRow);
+  // the newest window of the history, and always the current version itself, whatever its age (a restore of an old
+  // version, or a history longer than the window, never leaves the view showing an older version as current)
+  const page = await stVersionPage(env, a.id, { limit: opts.versions || 60 });
+  const versions = page.versions;
+  let curId = a.current || (versions.length ? versions[versions.length - 1].id : '');
+  if (curId && !versions.some(v => v.id === curId)) {
+    const row = await env.MIND_DB.prepare('SELECT * FROM studio_versions WHERE id=? AND asset=?').bind(curId, a.id).first();
+    if (row) { const cv = Object.assign(stVersionRow(row), { n: await stVersionNumber(env, a.id, curId), outsideWindow: true }); versions.push(cv); versions.sort((x, y) => x.n - y.n); }
+    else curId = '';   // a current pointer to nothing is reported as no current version, never replaced by another one
+  }
   const approvals = await stStanding(env, a);
-  const curId = a.current || (versions.length ? versions[versions.length - 1].id : '');
   const project = opts.project || await stProject(env, a.project);
   let readiness = null; try { readiness = project ? await stReadiness(env, project, a, versions.find(x => x.id === curId) || null, opts.kit) : null; } catch (e) { readiness = { technical: 'unknown', error: String(e.message || e).slice(0, 120) }; }
-  return Object.assign({}, a, { versions, approvals, readiness, current: curId });
+  return Object.assign({}, a, { versions, versionsTotal: page.total, versionsFrom: versions.length ? versions[0].n : 0, approvals, readiness, current: curId, currentMissing: !!(a.current && !curId) });
 }
 /** The whole project as the workspace reads it. */
 async function stGet(env, id, opts) {
@@ -7106,15 +7139,26 @@ async function stJobClaim(env, id) {
 function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
 /** Run one claimed job to its end state. Never writes over a version the asset has moved past. */
 async function stJobRun(env, job) {
+  // ownership: this attempt owns the job only while it is running under this attempt's number. A cancel, or another
+  // runner taking over after the lease ran out, ends that; from then on this attempt writes nothing (fencing).
+  const attempt = Number(job.attempts) || 0;
+  const owned = async () => { const r = await env.MIND_DB.prepare('SELECT state, attempts FROM studio_jobs WHERE id=?').bind(job.id).first(); return !!r && r.state === 'running' && Number(r.attempts) === attempt; };
+  job.fence = async () => { if (!(await owned())) { const e = new Error('fenced: attempt ' + attempt + ' of job ' + job.id + ' no longer owns it (cancelled, or another runner took over); nothing more is filed'); e.fenced = true; throw e; } };
+  // checkpoint before a long provider call: the lease must outlast the call, so no second runner starts beside this one
+  job.lease = async (ms) => { await env.MIND_DB.prepare("UPDATE studio_jobs SET lease_until=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(Date.now() + Math.max(ST_LEASE_MS, ms || 0), Date.now(), job.id, attempt).run(); };
   const done = async (state, patch) => {
-    await env.MIND_DB.prepare('UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=?')
-      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id).run();
-    return stJob(env, job.id);
+    const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=? AND state='running' AND attempts=?")
+      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id, attempt).run();
+    const now = await stJob(env, job.id);
+    // a cancelled or taken-over attempt cannot finish, fail or requeue the job: its state stays what the owner made it
+    return (u && u.meta && u.meta.changes) ? now : Object.assign(now || {}, { fenced: true });
   };
   const fail = async (msg, progress) => {
     const transient = stTransient(msg) && !/not retried/.test(msg);
     const again = transient && job.attempts < ST_MAX_ATTEMPTS;
-    const out = await done(again ? 'queued' : 'failed', { error: msg + (again ? ' (will retry)' : transient ? ' (attempts exhausted)' : /not retried/.test(msg) ? '' : ' (not retried: not a transient failure)'), progress: progress || {} });
+    const out0 = await done(again ? 'queued' : 'failed', { error: msg + (again ? ' (will retry)' : transient ? ' (attempts exhausted)' : /not retried/.test(msg) ? '' : ' (not retried: not a transient failure)'), progress: progress || {} });
+    if (out0.fenced) return out0;
+    const out = out0;
     await stEvent(env, job.project, 'job', { text: 'Job ' + job.id + ' ' + (again ? 'failed, queued to retry' : 'failed') + ': ' + msg, job: job.id }, 'studio');
     return out;
   };
@@ -7133,7 +7177,7 @@ async function stJobRun(env, job) {
     }
     if (ST_STAGES.indexOf(job.stage) >= 0) return stStageRun(env, job, done, fail);
     return done('failed', { error: 'unknown stage ' + job.stage });
-  } catch (e) { const full = String((e && e.message) || e); return fail(/\(not retried\)/.test(full) && full.length > 200 ? full.slice(0, 180) + '... (not retried)' : full.slice(0, 200)); }
+  } catch (e) { if (e && e.fenced) return Object.assign(await stJob(env, job.id) || {}, { fenced: true }); const full = String((e && e.message) || e); return fail(/\(not retried\)/.test(full) && full.length > 200 ? full.slice(0, 180) + '... (not retried)' : full.slice(0, 200)); }
 }
 /** One synchronous step: claim if free, run. Returns the job either way. */
 async function stJobStep(env, id) {
@@ -7148,7 +7192,8 @@ async function stJobCancel(env, id, who) {
   if (!job) return null;
   if (job.state === 'done' || job.state === 'failed' || job.state === 'cancelled') return job;
   const note = job.state === 'running' ? 'cancelled while running: the provider call in flight may still complete and cost; its result will not be filed' : 'cancelled before it ran';
-  await env.MIND_DB.prepare("UPDATE studio_jobs SET state='cancelled', lease_until=0, error=?, updated=? WHERE id=?").bind(note, Date.now(), id).run();
+  const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='cancelled', lease_until=0, error=?, updated=? WHERE id=? AND state IN ('queued','running')").bind(note, Date.now(), id).run();
+  if (!(u && u.meta && u.meta.changes)) return stJob(env, id);   // it ended first: its end state stands
   await stEvent(env, job.project, 'job', { text: 'Job ' + id + ' ' + note, job: id }, who);
   return stJob(env, id);
 }
@@ -7475,9 +7520,12 @@ async function stClaude(env, o) {
   const floor = { low: 4000, medium: 8000, high: 16000, max: 32000 }[effort];
   const rich = stIsV5(model) ? Object.assign({}, base, { max_tokens: Math.max(base.max_tokens, floor), thinking: { type: 'adaptive' }, output_config: { effort } }) : base;
   const once = async (body) => {
+    if (o.log && o.log.lease) await o.log.lease((o.timeoutMs || 150000) + 60000);
     await stSpend(env);
     const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined });
     const d = await r.json().catch(() => ({}));
+    // a job cancelled or taken over while this call was in flight files nothing from its answer
+    if (o.log && o.log.fence) await o.log.fence();
     return { status: r.status, d };
   };
   // the compiled instruction: exactly what this call sent (system, user text, the images by name and size, the settings), kept per job
@@ -8403,7 +8451,7 @@ async function stReviewGet(env, share, p, opts) {
   for (const id of ids) {
     const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) continue;
     const a = pair.asset; const rv = await stReviewable(env, p, a);
-    const vs = (await env.MIND_DB.prepare('SELECT id FROM studio_versions WHERE asset=? ORDER BY created, id').bind(a.id).all()).results || [];
+    const vs = (await env.MIND_DB.prepare('SELECT id FROM studio_versions WHERE asset=? ORDER BY created, rowid').bind(a.id).all()).results || [];
     const n = id2 => vs.findIndex(x => x.id === id2) + 1;
     const rows = ((await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE share=? AND asset=? ORDER BY created').bind(share.id, a.id).all()).results || []).map(stReviewRow);
     const comments = rows.map(c => ({ id: c.id, kind: c.kind, text: c.text, pin: c.pin, author: c.author, version: n(c.version), status: c.status, addressedIn: c.resolvedVersion ? n(c.resolvedVersion) : null, note: c.status === 'resolved' ? c.resolvedNote : '', created: c.created }));
@@ -9702,7 +9750,9 @@ async function stRenderJob(env, job, pair, done, fail) {
   const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
   if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
+  if (job.lease) await job.lease(300000);
   const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
+  if (job.fence) await job.fence();
   const compiledKey = out.sent ? await stCompiledSave(env, job, [Object.assign({ at: Date.now(), op: areaEdit ? 'area edit (' + areaEdit.kind + ')' : inp.approach === 'artwork' ? 'artwork render' : 'render ' + (inp.region || 'bg'), answered: out.ok ? out.model : '', fallback: !!out.fallback, error: out.ok ? undefined : out.error + (out.detail ? ': ' + out.detail : ''), masks: false, areaNote: areaEdit ? 'the area is described in words; no pixel mask is sent' : undefined }, out.sent)]) : '';
   if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''), compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : undefined);
   const again = await stJob(env, job.id);
@@ -9742,6 +9792,7 @@ async function stRenderJob(env, job, pair, done, fail) {
       patch.layout = Object.assign({}, L, { layers: marks, baked: Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'], approach: 'artwork' }); patch.mode = 'artwork';
     }
   }
+  if (job.fence) await job.fence();
   const v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined });
   await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : inp.approach === 'artwork' ? ', full artwork - the words are part of the bitmap' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
@@ -9933,7 +9984,7 @@ async function stInspectStage(env, job, p, log) {
   const assessment = verdict === 'ship' && (serious.length || unapproved.length || words.missing.length || techBlocking.length) ? 'inconsistent' : 'consistent';
   const bakedCheck = baked.length ? { words: baked.map(b => b.role), missing: words.missing, verified: !!(composed && !unapproved.length && !words.missing.length && words.present.length) } : undefined;
   const issueLine = issues.map(x => x.text + (x.severity !== 'material' ? ' (' + x.severity + ')' : ''));
-  const vNum = Number((await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_versions WHERE asset=? AND created<=?').bind(a.id, v.created).first() || {}).n || 0);
+  const vNum = await stVersionNumber(env, a.id, v.id);
   await stEvent(env, p.id, 'inspection', { eid: stId('e'), asset: a.id, version: v.id, versionNumber: vNum || undefined, sig: rdy.sig, round: round + 1, of: 2, scores, reasons, unscored: unscored.length ? unscored : undefined, words, issues, verdict, assessment, technical: rdy.technical, baked: bakedCheck, fix, composed, imageryOnly: !composed, inventory, siblings: siblings.length || undefined, note: stStr(j.note, 300), model: r.model, job: job.id, text: 'Inspection of ' + a.title + ' (version ' + v.id + ', ' + (composed ? 'the composed export' : 'imagery only - no composed export saved yet') + '): ' + verdict + (assessment === 'inconsistent' ? ' (INCONSISTENT: the verdict is ship but ' + (techBlocking.length ? 'the technical validation is failing' : 'it names unresolved problems') + ' - review it)' : '') + ' - ' + SC.map(k => k + ' ' + (scores[k] == null ? 'not scored' : scores[k])).join(', ') + ' of 5.' + (issueLine.length ? ' ' + issueLine.join(' ') : '') + (unapproved.length ? ' Wording in the image that is not approved copy: ' + unapproved.join(', ') + '.' : '') + (fix ? ' Correction offered (' + fix.kind + '): ' + fix.instruction : '') + (verdict === 'ship' ? ' A ship verdict is the art director\'s opinion, not an approval: approval stays a person\'s decision.' : '') }, 'studio');
   await log('out', 'inspection: ' + verdict + ' (' + SC.map(k => k + ' ' + (scores[k] == null ? 'not scored' : scores[k])).join(', ') + ')' + (fix ? '; a ' + fix.kind + ' correction is offered, not applied' : ''));
   return { verdict, assessment, technical: rdy.technical, scores, reasons, issues, fix, words, composed, round: round + 1, version: v.id, model: r.model };
@@ -10006,7 +10057,7 @@ function stCapabilities(env) {
 }
 async function stStageRun(env, job, done, fail) {
   const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
-  log.compiled = [];
+  log.compiled = []; log.fence = job.fence; log.lease = job.lease;
   const p = await stProject(env, job.project);
   if (!p) return done('failed', { error: 'project gone (not retried)' });
   const filed = async () => { const c = await stCompiledSave(env, job, log.compiled); return c ? { key: c, calls: log.compiled.length } : undefined; };
@@ -10696,6 +10747,12 @@ export default {
       if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
     }
 
+    if (path === '/studio/versions' && req.method === 'GET') {
+      if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
+      const pair = await stAsset(env, reqUrl.searchParams.get('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+      const pg = await stVersionPage(env, pair.asset.id, { before: parseInt(reqUrl.searchParams.get('before') || '0', 10) || 0, limit: parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60 });
+      return jsonResp({ ok: true, asset: pair.asset.id, current: pair.asset.current, total: pg.total, versions: pg.versions });
+    }
     if (path === '/integrity' && (req.method === 'GET' || req.method === 'HEAD')) {
       if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
       return jsonResp(await integrityReport(env, parseInt(reqUrl.searchParams.get('limit') || '50', 10) || 50));
@@ -11601,8 +11658,8 @@ export default {
         if (path === '/bridge/done' && req.method === 'POST') {
           const id = String(bbody.job || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
           if (!id) return jsonResp({ error: 'missing_job' }, 400);
-          await jobFinish(env, id, bbody.ok !== false, bbody.result || {});
-          return jsonResp({ ok: true });
+          const took = await jobFinish(env, id, bbody.ok !== false, bbody.result || {}, bbody.agent || '');
+          return took ? jsonResp({ ok: true }) : jsonResp({ ok: false, ignored: true, error: 'job_ended', detail: 'The job had already ended or was cancelled; this report was not filed.' }, 409);
         }
         if (path === '/bridge/cancel' && req.method === 'POST') {
           const id = String(bbody.job || bbody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
