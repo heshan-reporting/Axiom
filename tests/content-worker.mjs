@@ -20,6 +20,7 @@ class Stmt {
   exec() {
     const db = this.db; let sql = this.sql; db.log.push(sql.slice(0, 60));
     if (/^CREATE/i.test(sql)) return [];
+    if (/^(PRAGMA|ALTER)\b/i.test(sql)) return [];   // schema migrations: columns appear as rows are written
     let i = 0; sql = sql.replace(/\?/g, () => '$' + (i++));
     let m;
     if ((m = sql.match(/^INSERT INTO (\w+)\s*\(([^)]*)\)\s*VALUES\s*\((.*)\)\s*$/is))) {

@@ -85,14 +85,21 @@ def main() -> int:
                 method="POST")
             with urllib.request.urlopen(req, timeout=60) as r:
                 d = json.loads(r.read().decode())
+            for _ in range(60):  # a long note is indexed over several calls: resume until complete
+                if d.get("status") != "partial" or d.get("error"):
+                    break
+                rq = urllib.request.Request(args.worker.rstrip("/") + "/mind/ingest/resume", data=json.dumps({"docId": d.get("docId")}).encode(),
+                                            headers={"Content-Type": "application/json", "X-Axiom-Key": args.key, "User-Agent": "axiom-mind-push/1.0"}, method="POST")
+                with urllib.request.urlopen(rq, timeout=120) as r2:
+                    d = json.loads(r2.read().decode())
             if not d.get("ok"):
-                raise RuntimeError(d.get("detail") or d.get("error") or "ingest refused")
+                raise RuntimeError(d.get("detail") or d.get("error") or ("indexed %s of %s chunks" % (d.get("indexed"), d.get("chunks"))))
             print(f"  ok      [{payload['namespace']}] {f.name} -> {d.get('docId')} ({d.get('chunks')} chunks)")
         except Exception as exc:
             fails += 1
             print(f"  FAILED  {f.name} - {exc}")
     if fails:
-        print(f"{fails} note(s) failed - re-run to retry (server dedupes nothing; avoid double-pushing successes).")
+        print(f"{fails} note(s) failed - re-run to retry (the worker recognises identical text by its hash and resumes it instead of indexing it twice).")
         return 1
     return 0
 

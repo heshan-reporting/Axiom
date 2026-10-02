@@ -2100,27 +2100,102 @@ async function redditCron(env) {
 }
 /** File a document in the Mind from server-side code: the same chunking,
  *  embedding and bookkeeping /mind/ingest performs for an upload. */
-async function mindIngestDoc(env, doc) {
+/* ---- knowledge ingestion: the whole document, or an honest partial with its coverage -----------------------
+ * The text is stored in R2 first (the source of truth), the document row records its character count, content hash,
+ * the chunks it has and how many are indexed, and a status: indexing, complete, or partial (with the error). Chunks
+ * are embedded in batches with a checkpoint after each, up to MIND_INGEST_CHUNKS_PER_CALL a call (default 400); what
+ * is left is resumed by POST /mind/ingest/resume {docId}. Vector ids are docId_<seq> and every vector carries seq,
+ * start and end in the stored text, so a citation can be traced to the exact passage. */
+const MIND_CHUNK = 1200, MIND_STEP = 1050, MIND_MAX_CHARS = 2000000;
+function mindChunks(text) { const out = []; for (let i = 0; i < text.length; i += MIND_STEP) { out.push({ seq: out.length, start: i, end: Math.min(text.length, i + MIND_CHUNK) }); if (i + MIND_CHUNK >= text.length) break; } return out; }
+async function sha256hex(text) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text))); return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join(''); }
+let MIND_SCHEMA_OK = false;
+async function mindSchema(env) {
+  if (MIND_SCHEMA_OK) return;
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_docs(id TEXT PRIMARY KEY, ns TEXT, title TEXT, kind TEXT, source TEXT, dt TEXT, chunks INTEGER, created INTEGER)').run();
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
+  // the coverage columns arrive by migration; a column that cannot be added is an error, not something to swallow
+  const have = new Set(((await env.MIND_DB.prepare('PRAGMA table_info(mind_docs)').all()).results || []).map(c => c.name));
+  for (const [c, t] of [['chars', 'INTEGER'], ['hash', 'TEXT'], ['indexed', 'INTEGER'], ['status', 'TEXT'], ['error', 'TEXT'], ['updated', 'INTEGER']]) if (!have.has(c)) await env.MIND_DB.prepare('ALTER TABLE mind_docs ADD COLUMN ' + c + ' ' + t).run();
+  try { await env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS mind_docs_ns_hash ON mind_docs(ns, hash)').run(); } catch (e) { /* an index is an optimisation; the lookup still works without it */ }
+  MIND_SCHEMA_OK = true;
+}
+async function mindEmbed(env, texts) { const r = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: texts }); if (!r || !Array.isArray(r.data) || r.data.length !== texts.length) throw new Error('embedding_failed: Workers AI returned ' + (r && r.data ? r.data.length : 0) + ' vectors for ' + texts.length + ' texts'); return r.data; }
+async function mindIngestDoc(env, doc, opts) {
+  opts = opts || {};
   const missing = [];
   if (!env.MIND_VECTORS) missing.push('MIND_VECTORS'); if (!env.AI) missing.push('AI'); if (!env.MIND_DB) missing.push('MIND_DB'); if (!env.MIND_DOCS) missing.push('MIND_DOCS');
   if (missing.length) throw new Error('mind_not_configured: bind ' + missing.join(', '));
   const ns = String(doc.ns || 'cmm').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32) || 'cmm';
-  const text = String(doc.text || '').slice(0, 200000);
+  const text = String(doc.text || '');
   if (!text.trim()) throw new Error('empty_document');
+  if (text.length > MIND_MAX_CHARS) { const e = new Error('document_too_large: ' + text.length + ' characters; the limit is ' + MIND_MAX_CHARS + '. Split it into parts; nothing was stored.'); e.status = 413; throw e; }
+  await mindSchema(env);
+  const hash = await sha256hex(text);
+  if (!doc.force) {
+    const had = await env.MIND_DB.prepare('SELECT id, status FROM mind_docs WHERE ns=? AND hash=? ORDER BY created DESC LIMIT 1').bind(ns, hash).first();
+    if (had) { const r = had.status === 'complete' ? await mindDocSummary(env, had.id) : await mindIndexResume(env, had.id, { text }); return Object.assign(r, { existing: true }); }
+  }
   const docId = ns + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const title = String(doc.title || 'Untitled').slice(0, 200), kind = String(doc.kind || 'doc').slice(0, 40);
-  const chunks = []; for (let i = 0; i < text.length && chunks.length < 120; i += 1050) chunks.push(text.slice(i, i + 1200));
-  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_docs(id TEXT PRIMARY KEY, ns TEXT, title TEXT, kind TEXT, source TEXT, dt TEXT, chunks INTEGER, created INTEGER)').run();
-  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
-  for (let i = 0; i < chunks.length; i += 20) {
-    const batch = chunks.slice(i, i + 20);
-    const vecs = (await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: batch })).data;
-    await env.MIND_VECTORS.insert(batch.map((c, j) => ({ id: docId + '_' + (i + j), values: vecs[j], namespace: ns,
-      metadata: { docId, title, kind, source: String(doc.source || '').slice(0, 300), dt: String(doc.date || '').slice(0, 20), snippet: c.slice(0, 900) } })));
-  }
+  const chunks = mindChunks(text);
   await env.MIND_DOCS.put('mind/' + ns + '/' + docId + '.txt', text);
-  await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created) VALUES(?,?,?,?,?,?,?,?)').bind(docId, ns, title, kind, String(doc.source || ''), String(doc.date || ''), chunks.length, Date.now()).run();
-  return { docId, chunks: chunks.length, ns };
+  await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created,chars,hash,indexed,status,error,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(docId, ns, title, kind, String(doc.source || '').slice(0, 300), String(doc.date || '').slice(0, 20), chunks.length, Date.now(), text.length, hash, 0, 'indexing', '', Date.now()).run();
+  return mindIndexResume(env, docId, { text });
+}
+async function mindDocSummary(env, docId) {
+  const row = await env.MIND_DB.prepare('SELECT * FROM mind_docs WHERE id=?').bind(docId).first(); if (!row) return { ok: false, error: 'unknown_document', docId };
+  const total = Number(row.chunks) || 0, done = row.status == null ? Number(row.chunks) || 0 : Number(row.indexed) || 0;
+  return { ok: row.status === 'complete', docId, ns: row.ns, status: row.status || 'legacy', chunks: total, indexed: done, coverage: total ? Math.round(done / total * 10000) / 10000 : 0, chars: Number(row.chars) || null, hash: row.hash || '', error: row.error || '' };
+}
+/** Index what is left of a document, from its checkpoint, within this call's chunk budget. */
+async function mindIndexResume(env, docId, o) {
+  o = o || {}; await mindSchema(env);
+  const row = await env.MIND_DB.prepare('SELECT * FROM mind_docs WHERE id=?').bind(String(docId || '').slice(0, 80)).first();
+  if (!row) return { ok: false, error: 'unknown_document', docId };
+  let text = o.text;
+  if (text == null) { const obj = await env.MIND_DOCS.get('mind/' + row.ns + '/' + row.id + '.txt'); text = obj ? await obj.text() : null; }
+  if (text == null) { await env.MIND_DB.prepare("UPDATE mind_docs SET status='partial', error=?, updated=? WHERE id=?").bind('the stored text is missing from R2; re-ingest the original', Date.now(), row.id).run(); return mindDocSummary(env, row.id); }
+  const chunks = mindChunks(text); const hash = row.hash || await sha256hex(text);
+  // a document filed before r6 indexed its first `chunks` chunks with the same chunking: continue after them
+  let i = row.status == null ? Math.min(Number(row.chunks) || 0, chunks.length) : Math.min(Number(row.indexed) || 0, chunks.length);
+  const budget = Math.max(20, parseInt(env.MIND_INGEST_CHUNKS_PER_CALL || '400', 10) || 400);
+  await env.MIND_DB.prepare("UPDATE mind_docs SET chunks=?, chars=?, hash=?, indexed=?, status='indexing', error='', updated=? WHERE id=?").bind(chunks.length, text.length, hash, i, Date.now(), row.id).run();
+  let n = 0, error = '';
+  const put = env.MIND_VECTORS.upsert ? env.MIND_VECTORS.upsert.bind(env.MIND_VECTORS) : env.MIND_VECTORS.insert.bind(env.MIND_VECTORS);
+  while (i < chunks.length && n < budget) {
+    const batch = chunks.slice(i, Math.min(chunks.length, i + 20, i + (budget - n)));
+    try {
+      const vecs = await mindEmbed(env, batch.map(c => text.slice(c.start, c.end)));
+      await put(batch.map((c, j) => ({ id: row.id + '_' + c.seq, values: vecs[j], namespace: row.ns,
+        metadata: { docId: row.id, title: row.title || '', kind: row.kind || 'doc', source: String(row.source || '').slice(0, 300), dt: String(row.dt || '').slice(0, 20), snippet: text.slice(c.start, c.end), seq: c.seq, start: c.start, end: c.end, hash: hash.slice(0, 16) } })));
+    } catch (e) { error = String((e && e.message) || e).slice(0, 300); break; }
+    i += batch.length; n += batch.length;
+    await env.MIND_DB.prepare('UPDATE mind_docs SET indexed=?, updated=? WHERE id=?').bind(i, Date.now(), row.id).run();   // checkpoint
+  }
+  const status = i >= chunks.length ? 'complete' : 'partial';
+  await env.MIND_DB.prepare('UPDATE mind_docs SET indexed=?, status=?, error=?, updated=? WHERE id=?').bind(i, status, error, Date.now(), row.id).run();
+  const sum = await mindDocSummary(env, row.id);
+  return Object.assign(sum, { indexedChars: i ? chunks[i - 1].end : 0, remaining: chunks.length - i, next: status === 'partial' ? 'POST /mind/ingest/resume {"docId":"' + row.id + '"}' : '' });
+}
+/** Read-only: how much of each document in a namespace is indexed, with documents from before r6 measured against
+ *  their stored text. Nothing is reindexed; the answer says how to backfill the ones chosen. */
+async function mindCoverage(env, ns, limit) {
+  await mindSchema(env);
+  const rows = ((await env.MIND_DB.prepare('SELECT * FROM mind_docs WHERE ns=? ORDER BY created DESC LIMIT ?').bind(ns, Math.min(500, limit || 200)).all()).results || []);
+  const docs = [];
+  for (const r of rows) {
+    if (r.status != null) { docs.push({ id: r.id, title: r.title, status: r.status, chunks: r.chunks, indexed: r.indexed, coverage: r.chunks ? r.indexed / r.chunks : 0, chars: r.chars, indexedChars: null, error: r.error || '' }); continue; }
+    // before r6: at most 120 chunks were indexed; a document that reached the cap may be partly unindexed
+    const legacy = { id: r.id, title: r.title, legacy: true, chunks: r.chunks };
+    if ((Number(r.chunks) || 0) < 120) { docs.push(Object.assign(legacy, { status: 'complete', coverage: 1, note: 'under the old cap: every stored character was indexed' })); continue; }
+    const obj = await env.MIND_DOCS.get('mind/' + r.ns + '/' + r.id + '.txt'); const len = obj ? (await obj.text()).length : null;
+    const covered = (Number(r.chunks) - 1) * MIND_STEP + MIND_CHUNK;
+    docs.push(Object.assign(legacy, { status: len == null ? 'unknown' : covered >= len ? 'complete' : 'partial', chars: len, indexedChars: len == null ? null : Math.min(len, covered), coverage: len ? Math.min(1, covered / len) : null, note: 'indexed under the 120-chunk cap; text beyond 200,000 characters was never stored and needs the original re-ingested' + (len == null ? '; the stored text is missing' : '') }));
+  }
+  const partial = docs.filter(d => d.status === 'partial');
+  return { ok: true, readOnly: true, ns, docs, partial: partial.length, backfill: partial.length ? 'For each document you choose, POST /mind/ingest/resume {"docId": ...} indexes the rest from its checkpoint (' + (parseInt(env.MIND_INGEST_CHUNKS_PER_CALL || '400', 10) || 400) + ' chunks a call; repeat until complete). Nothing is reindexed automatically.' : 'Nothing to backfill.' };
 }
 
 async function socialBsky(tag) {
@@ -3299,7 +3374,7 @@ async function engineOutcome(env, body, who) {
       + (o.headline ? '\nHeadline: ' + o.headline : '') + (o.support ? '\nSupport: ' + o.support : '') + (o.cta ? '\nCTA: ' + o.cta : '') + (o.why ? '\nWhy: ' + o.why : '');
     const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: new Date().toISOString().slice(0, 10) });
     docId = r.docId;
-  } catch (e) {}
+  } catch (e) { o.exemplarError = String((e && e.message) || e).slice(0, 200); console.log('outcome exemplar not filed: ' + o.exemplarError); }   // the verdict stands; the answer says the exemplar is missing
   return Object.assign(o, { docId });
 }
 /** Describe a piece of artwork with a vision model so it can be remembered and
@@ -5893,11 +5968,9 @@ function sentText(r) {
 }
 function sentDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
 async function sentBudget(env) {
-  const cap = Math.max(0, parseInt(env.SENTIMENT_DAILY_CALLS, 10) || SENT_DAILY_CALLS);
-  const used = Number(await kvGet(env.AXIOM_KV, 'sent_calls_' + sentDay()) || 0);
-  return { used, cap, left: Math.max(0, cap - used), model: env.SENTIMENT_MODEL || SENT_MODEL };
+  const u = await aiUsage(env, 'sentiment');
+  return { used: u.reserved, cap: u.cap, left: u.left, confirmed: u.confirmed, failed: u.failed, retries: u.retries, model: env.SENTIMENT_MODEL || SENT_MODEL };
 }
-async function sentSpend(env, n) { const k = 'sent_calls_' + sentDay(); const used = Number(await kvGet(env.AXIOM_KV, k) || 0) + n; await kvPut(env.AXIOM_KV, k, String(used), 2 * 86400); return used; }
 const SENT_SYS = 'You read Australian political text and judge how its author regards the entities named under it. For each text and each entity listed, give stance: -1 when the text is critical, hostile, mocking, or blames the entity; 1 when it praises, supports, defends or credits it; 0 when it merely mentions or reports it without a view. Judge the author\'s view, not the events: a report of an attack on X is 0 unless the reporter\'s own framing takes a side. For a topic entity the stance is for or against the thing itself. Sarcasm inverts the literal words; mark it. intensity: 1 mild, 2 clear, 3 strong or abusive. Also give the text\'s overall tone from -1 (hostile, angry, despairing) to 1 (warm, approving) as a number with one decimal, and its type: news (reporting), opinion (a view, a comment) or question. Reply with strict JSON only, no prose: {"items":[{"n":1,"tone":-0.6,"type":"opinion","entities":[{"id":"alp","stance":-1,"intensity":2,"sarcasm":false,"why":"calls the policy a rort"}]}]}. why: at most twelve words, the phrase that decided it. Every text and every listed entity must appear.';
 async function sentClassify(env, batch, matcher, log) {
   const ids = Array.from(new Set(batch.flatMap(b => b.entities)));
@@ -5906,7 +5979,7 @@ async function sentClassify(env, batch, matcher, log) {
   const user = 'ENTITIES\n' + gloss + '\n\nTEXTS\n' + texts;
   let txt = '', parsed = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    txt = await claudeMsg(env, SENT_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 400 + batch.length * 140, 45000, env.SENTIMENT_MODEL || SENT_MODEL);
+    txt = await claudeMsg(env, SENT_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 400 + batch.length * 140, 45000, env.SENTIMENT_MODEL || SENT_MODEL, { scope: 'sentiment', retry: attempt > 0 });
     parsed = relJson(txt);
     if (!parsed || !Array.isArray(parsed.items)) parsed = null;
   }
@@ -5964,8 +6037,8 @@ async function sentimentRun(env, opts) {
     const batch = take.slice(i, i + SENT_BATCH);
     await log('cmd', 'claude ' + budget.model + ' batch ' + (i / SENT_BATCH + 1) + ': ' + batch.length + ' texts, ' + batch.reduce((a, x) => a + x.entities.length, 0) + ' entity mentions');
     let verdicts;
-    try { verdicts = await sentClassify(env, batch, matcher, log); out.calls++; await sentSpend(env, 1); }
-    catch (e) { out.calls++; await sentSpend(env, 1); const m = String((e && e.message) || e).slice(0, 160); out.errors.push(m); await log('err', m); continue; }
+    try { verdicts = await sentClassify(env, batch, matcher, log); out.calls++; }   // each provider call is reserved and settled inside claudeMsg
+    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
     const stmts = [];
     let neg = 0, neu = 0, pos = 0;
     verdicts.forEach(v => {
@@ -6175,9 +6248,8 @@ function narrRow(r) {
 }
 function narrDay() { return new Date().toISOString().slice(0, 10).replace(/-/g, ''); }
 async function narrBudget(env) {
-  const cap = Math.max(0, parseInt(env.NARRATIVE_DAILY_CALLS, 10) || NARR_DAILY_CALLS);
-  const used = Number(await kvGet(env.AXIOM_KV, 'narr_calls_' + narrDay()) || 0);
-  return { used, cap, left: Math.max(0, cap - used), model: env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || SENT_MODEL };
+  const u = await aiUsage(env, 'narratives');
+  return { used: u.reserved, cap: u.cap, left: u.left, confirmed: u.confirmed, failed: u.failed, retries: u.retries, model: env.NARRATIVE_MODEL || env.SENTIMENT_MODEL || SENT_MODEL };
 }
 /** Recount one narrative from its rows: size, pace, where it is, the order
  *  the channels took it up, who carries it, the sentiment split, and where it
@@ -6219,7 +6291,7 @@ async function narrLabelBatch(env, clusters, log) {
   const model = (await narrBudget(env)).model;
   let parsed = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    const txt = await claudeMsg(env, NARR_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 300 + clusters.length * 260, 45000, model);
+    const txt = await claudeMsg(env, NARR_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 300 + clusters.length * 260, 45000, model, { scope: 'narratives', retry: attempt > 0 });
     parsed = relJson(txt); if (!parsed || !Array.isArray(parsed.clusters)) parsed = null;
   }
   if (!parsed) throw new Error('the naming model answered without valid JSON');
@@ -6267,8 +6339,8 @@ async function narrLabel(env, ids, log, left) {
     const batch = clusters.slice(i, i + 5);
     await log('cmd', 'claude ' + budget.model + ' name ' + batch.length + ' narrative' + (batch.length === 1 ? '' : 's') + ' (' + batch.map(c => c.n + ' rows').join(', ') + ')');
     let named;
-    try { named = await narrLabelBatch(env, batch, log); out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); }
-    catch (e) { out.calls++; await kvPut(env.AXIOM_KV, 'narr_calls_' + narrDay(), String(budget.used + out.calls), 2 * 86400); const m = String((e && e.message) || e).slice(0, 160); out.errors.push(m); await log('err', m); continue; }
+    try { named = await narrLabelBatch(env, batch, log); out.calls++; }   // reserved and settled per provider call inside claudeMsg
+    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
     const stmts = named.map(x => { const ns = (CLIENT_ISSUES.find(ci => ci.id === x.issues[0]) || {}).ns || ''; return db.prepare('UPDATE narratives SET label=?, summary=?, claim=?, counter_claim=?, proponents=?, issues=CASE WHEN ?<>\'[]\' THEN ? ELSE issues END, ns=CASE WHEN ?<>\'\' THEN ? ELSE ns END, scope=?, relevance=?, scope_why=?, labelled_n=n, model=?, updated=? WHERE id=?').bind(x.label, x.summary, x.claim, x.counter, x.proponents, JSON.stringify(x.issues), JSON.stringify(x.issues), ns, ns, x.scope, x.relevance, x.why, x.model, now, x.id); });
     if (stmts.length) await db.batch(stmts);
     out.named += named.length;
@@ -7497,11 +7569,9 @@ const ST_HEADLINE_FIT = { '1:1': 64, '4:5': 56, '9:16': 44, '16:9': 60 };
 const ST_TEMPLATES = { teal: { name: 'teal fact panel', fill: '#0E6A6E' }, gold: { name: 'gold panel', fill: '#B8901E' }, plain: { name: 'plain photographic', fill: 'rgba(10,14,22,0.58)' }, kit: { name: 'client palette', fill: '' } };
 function stModel(env, role) { return role === 'extract' ? (env.EXTRACT_MODEL || ST_MODEL_EXTRACT) : (env.CREATIVE_MODEL || ST_MODEL_CREATIVE); }
 async function stBudget(env) {
-  const cap = Math.max(0, parseInt(env.STUDIO_DAILY_CALLS, 10) || ST_DAILY_CALLS);
-  const used = Number(await kvGet(env.AXIOM_KV, 'studio_calls_' + auDayKey()) || 0);
-  return { used, cap, left: Math.max(0, cap - used), day: auDayKey(), models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') } };
+  const u = await aiUsage(env, 'studio');
+  return { used: u.reserved, cap: u.cap, left: u.left, day: u.day, confirmed: u.confirmed, failed: u.failed, retries: u.retries, inFlight: u.inFlight, tokens: { in: u.in_tok, out: u.out_tok }, accounting: 'reserved before each provider call (attempts sent, retries included); confirmed and failed as settled', models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') } };
 }
-async function stSpend(env) { const k = 'studio_calls_' + auDayKey(); const used = Number(await kvGet(env.AXIOM_KV, k) || 0) + 1; await kvPut(env.AXIOM_KV, k, String(used), 2 * 86400); return used; }
 function stIsV5(model) { return /(opus|sonnet|fable|haiku)-5(-|$)/i.test(String(model || '')); }
 /** One Claude call for a Studio stage. The 5.x models think adaptively and take an effort level; when a
  *  deployment answers 400 to those fields the call is repeated plain, so a schema change cannot stall
@@ -7519,11 +7589,15 @@ async function stClaude(env, o) {
   // a floor by effort (only tokens actually produced are billed; a higher cap costs nothing unless it is used)
   const floor = { low: 4000, medium: 8000, high: 16000, max: 32000 }[effort];
   const rich = stIsV5(model) ? Object.assign({}, base, { max_tokens: Math.max(base.max_tokens, floor), thinking: { type: 'adaptive' }, output_config: { effort } }) : base;
+  let attempts = 0;
   const once = async (body) => {
     if (o.log && o.log.lease) await o.log.lease((o.timeoutMs || 150000) + 60000);
-    await stSpend(env);
-    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined });
+    const rv = await aiReserve(env, 'studio', { retry: attempts++ > 0 });
+    if (!rv.ok) throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)');
+    let r;
+    try { r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined }); } catch (e) { await aiSettle(env, 'studio', false); throw e; }
     const d = await r.json().catch(() => ({}));
+    await aiSettle(env, 'studio', r.ok && !d.error, d.usage);
     // a job cancelled or taken over while this call was in flight files nothing from its answer
     if (o.log && o.log.fence) await o.log.fence();
     return { status: r.status, d };
@@ -10415,7 +10489,56 @@ async function nanoRender(env, opts) {
   // the error names the provider's last status so a caller can tell a transient refusal (503, 429) from bad input (400) or a key problem (403)
   return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel, sent: lastSent };
 }
-async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
+/* ---- AI usage: one D1 ledger, reserved before each provider call ---------------------------------------------
+ * KV has no atomic increment, so a read-then-write counter lost calls when two ran at once and let racing calls past
+ * the daily cap. Each attempt now reserves a call with one conditional UPDATE (reserved < cap, affected rows
+ * checked) before anything is sent, and settles afterwards as confirmed (with the tokens the provider reported) or
+ * failed; a retry is its own reserved call, also counted as a retry. reserved = attempts sent (what the cap
+ * limits); confirmed + failed = attempts settled; the difference is calls still in flight or never settled. */
+const AI_SCOPES = {
+  studio: { cap: env => Math.max(0, parseInt(env.STUDIO_DAILY_CALLS, 10) || ST_DAILY_CALLS), day: () => auDayKey(), legacy: d => 'studio_calls_' + d },
+  sentiment: { cap: env => Math.max(0, parseInt(env.SENTIMENT_DAILY_CALLS, 10) || SENT_DAILY_CALLS), day: () => new Date().toISOString().slice(0, 10).replace(/-/g, ''), legacy: d => 'sent_calls_' + d },
+  narratives: { cap: env => Math.max(0, parseInt(env.NARRATIVE_DAILY_CALLS, 10) || NARR_DAILY_CALLS), day: () => new Date().toISOString().slice(0, 10).replace(/-/g, ''), legacy: d => 'narr_calls_' + d },
+};
+let AI_LEDGER_OK = false;
+async function aiLedger(env) {
+  if (AI_LEDGER_OK || !env.MIND_DB) return !!env.MIND_DB;
+  await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS ai_usage(day TEXT, scope TEXT, reserved INTEGER DEFAULT 0, confirmed INTEGER DEFAULT 0, failed INTEGER DEFAULT 0, retries INTEGER DEFAULT 0, in_tok INTEGER DEFAULT 0, out_tok INTEGER DEFAULT 0, legacy INTEGER DEFAULT 0, updated INTEGER, PRIMARY KEY(day, scope))').run();
+  AI_LEDGER_OK = true; return true;
+}
+async function aiRow(env, scope) {
+  const sc = AI_SCOPES[scope]; const day = sc.day();
+  // the first use of a day carries over what the old KV counter already held for it (the day of the deploy)
+  const had = await env.MIND_DB.prepare('SELECT 1 FROM ai_usage WHERE day=? AND scope=?').bind(day, scope).first();
+  if (!had) { const legacy = Number(await kvGet(env.AXIOM_KV, sc.legacy(day)) || 0); await env.MIND_DB.prepare('INSERT OR IGNORE INTO ai_usage(day,scope,reserved,legacy,updated) VALUES(?,?,?,?,?)').bind(day, scope, legacy, legacy, Date.now()).run(); }
+  return day;
+}
+async function aiReserve(env, scope, opts) {
+  opts = opts || {}; const sc = AI_SCOPES[scope]; const cap = sc.cap(env);
+  if (!(await aiLedger(env))) return { ok: true, untracked: true };
+  const day = await aiRow(env, scope);
+  const u = await env.MIND_DB.prepare('UPDATE ai_usage SET reserved=reserved+1, retries=retries+?, updated=? WHERE day=? AND scope=? AND reserved < ?').bind(opts.retry ? 1 : 0, Date.now(), day, scope, cap).run();
+  if (u && u.meta && u.meta.changes) return { ok: true, day };
+  const r = await aiUsage(env, scope); return { ok: false, used: r.reserved, cap };
+}
+async function aiSettle(env, scope, okd, usage) {
+  if (!env.MIND_DB) return; const day = AI_SCOPES[scope].day(); usage = usage || {};
+  try { await env.MIND_DB.prepare('UPDATE ai_usage SET confirmed=confirmed+?, failed=failed+?, in_tok=in_tok+?, out_tok=out_tok+?, updated=? WHERE day=? AND scope=?').bind(okd ? 1 : 0, okd ? 0 : 1, Number(usage.input_tokens) || 0, Number(usage.output_tokens) || 0, Date.now(), day, scope).run(); }
+  catch (e) { console.log('ai usage settle failed: ' + String(e && e.message || e).slice(0, 120)); }   // the reservation stands; the call is still counted
+}
+async function aiUsage(env, scope) {
+  const sc = AI_SCOPES[scope]; const cap = sc.cap(env); const day = sc.day();
+  if (!(await aiLedger(env))) { const used = Number(await kvGet(env.AXIOM_KV, sc.legacy(day)) || 0); return { day, cap, reserved: used, confirmed: null, failed: null, retries: null, in_tok: null, out_tok: null, left: Math.max(0, cap - used) }; }
+  const r = (await env.MIND_DB.prepare('SELECT * FROM ai_usage WHERE day=? AND scope=?').bind(day, scope).first()) || {};
+  const legacy = r.reserved != null ? 0 : Number(await kvGet(env.AXIOM_KV, sc.legacy(day)) || 0);
+  const reserved = (Number(r.reserved) || 0) + legacy;
+  return { day, cap, reserved, confirmed: Number(r.confirmed) || 0, failed: Number(r.failed) || 0, retries: Number(r.retries) || 0, in_tok: Number(r.in_tok) || 0, out_tok: Number(r.out_tok) || 0, legacy: Number(r.legacy) || legacy, inFlight: Math.max(0, reserved - (Number(r.legacy) || legacy) - (Number(r.confirmed) || 0) - (Number(r.failed) || 0)), left: Math.max(0, cap - reserved) };
+}
+async function claudeMsg(env, system, user, maxTok, timeoutMs, model, acct) {
+  // acct {scope, retry}: the call is reserved against that scope's daily cap before it is sent, and settled after
+  if (acct && acct.scope) { const rv = await aiReserve(env, acct.scope, { retry: acct.retry }); if (!rv.ok) throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' ' + acct.scope + ' calls used today (not retried)'); }
+  let settled = false; const settle = async (okd, usage) => { if (acct && acct.scope && !settled) { settled = true; await aiSettle(env, acct.scope, okd, usage); } };
+  try {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
@@ -10423,11 +10546,13 @@ async function claudeMsg(env, system, user, maxTok, timeoutMs, model) {
     signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const d = await r.json().catch(() => ({}));
+  await settle(r.ok && !d.error, d.usage);
   if (d.error) throw new Error(String(d.error.message || 'anthropic_error').slice(0, 160));
   const text = (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
   if (d.stop_reason === 'refusal') throw new Error('refusal: the model declined this request' + (text ? ' - "' + llmExcerpt(text).slice(0, 160) + '"' : ''));
   if (!text && d.stop_reason === 'max_tokens') throw new Error('empty_answer: the model reached max_tokens (' + maxTok + ') before writing any text');
   return text;
+  } catch (e) { await settle(false); throw e; }
 }
 async function gnewsSweep(qq, hours, max) {
   try {
@@ -10699,7 +10824,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch };
+export const __test = { jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -13269,33 +13394,20 @@ export default {
       if (path === '/mind/ingest' && req.method === 'POST') {
         let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
         const ns = nsClean(b.namespace);
-        const text = String(b.text || '').slice(0, 200000);
-        if (!ns || !text.trim()) return jsonResp({ error: 'missing_fields', detail: 'namespace and text are required' }, 400);
-        const docId = ns + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const title = String(b.title || 'Untitled').slice(0, 200);
-        const kind = String(b.kind || 'doc').slice(0, 40);
-        // Chunk ~1200 chars with 150 overlap, embed in batches, insert.
-        const chunks = [];
-        for (let i = 0; i < text.length && chunks.length < 120; i += 1050) chunks.push(text.slice(i, i + 1200));
+        if (!ns || !String(b.text || '').trim()) return jsonResp({ error: 'missing_fields', detail: 'namespace and text are required' }, 400);
         try {
-          await ensureSchema();
-          for (let i = 0; i < chunks.length; i += 20) {
-            const batch = chunks.slice(i, i + 20);
-            const vecs = await embed(batch);
-            await env.MIND_VECTORS.insert(batch.map((c, j) => ({
-              id: docId + '_' + (i + j),
-              values: vecs[j],
-              namespace: ns,
-              metadata: { docId, title, kind, source: String(b.source || '').slice(0, 300), dt: String(b.date || '').slice(0, 20), snippet: c.slice(0, 900) },
-            })));
-          }
-          await env.MIND_DOCS.put('mind/' + ns + '/' + docId + '.txt', text);
-          await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created) VALUES(?,?,?,?,?,?,?,?)')
-            .bind(docId, ns, title, kind, String(b.source || ''), String(b.date || ''), chunks.length, Date.now()).run();
-          return jsonResp({ ok: true, docId, chunks: chunks.length });
-        } catch (e) {
-          return jsonResp({ error: 'ingest_failed', detail: String(e && e.message || e).slice(0, 200) }, 502);
-        }
+          const r = await mindIngestDoc(env, { ns, text: String(b.text), title: b.title, kind: b.kind, source: b.source, date: b.date, force: !!b.force });
+          return jsonResp(Object.assign({ ok: r.status === 'complete' }, r), r.error ? 207 : 200);
+        } catch (e) { const m = String(e && e.message || e); return jsonResp({ error: /^document_too_large/.test(m) ? 'document_too_large' : 'ingest_failed', detail: m.slice(0, 300) }, e && e.status ? e.status : 502); }
+      }
+      if (path === '/mind/ingest/resume' && req.method === 'POST') {
+        let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+        try { const r = await mindIndexResume(env, b.docId); return jsonResp(Object.assign({ ok: r.status === 'complete' }, r), r.error === 'unknown_document' ? 404 : r.error ? 207 : 200); }
+        catch (e) { return jsonResp({ error: 'resume_failed', detail: String(e && e.message || e).slice(0, 300) }, 502); }
+      }
+      if (path === '/mind/coverage' && req.method === 'GET') {
+        const ns = nsClean(reqUrl.searchParams.get('namespace')); if (!ns) return jsonResp({ error: 'no_namespace' }, 400);
+        return jsonResp(await mindCoverage(env, ns, parseInt(reqUrl.searchParams.get('limit') || '200', 10) || 200));
       }
 
       // GET /mind/docs?namespace=  - what the KB holds (for the UI)
@@ -13304,7 +13416,8 @@ export default {
         if (!ns) return jsonResp({ error: 'no_namespace' }, 400);
         try {
           await ensureSchema();
-          const rows = await env.MIND_DB.prepare('SELECT id,title,kind,source,dt,chunks,created FROM mind_docs WHERE ns=? ORDER BY created DESC LIMIT 50').bind(ns).all();
+          await mindSchema(env);
+          const rows = await env.MIND_DB.prepare('SELECT id,title,kind,source,dt,chunks,created,chars,indexed,status,error FROM mind_docs WHERE ns=? ORDER BY created DESC LIMIT 50').bind(ns).all();
           return jsonResp({ ok: true, docs: rows.results || [] });
         } catch (e) { return jsonResp({ error: 'docs_failed', detail: String(e && e.message || e).slice(0, 120) }, 502); }
       }

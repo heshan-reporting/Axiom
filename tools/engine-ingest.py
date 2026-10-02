@@ -37,7 +37,7 @@ WORKER = rr.WORKER
 STATE = '.axiom-ingest-state.json'
 TEXT_EXT = {'.txt', '.md', '.markdown', '.html', '.htm', '.csv', '.json', '.docx', '.pdf'}
 IMAGE_EXT = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
-MAX_TEXT = 180000
+MAX_TEXT = 2000000   # the worker's limit (MIND_MAX_CHARS); a longer file is refused, not cut
 MAX_IMAGE = 6 * 1024 * 1024
 KIT_RX = re.compile(r'(^|[-_])brand[-_]?kit\.json$', re.I)
 FIXES_RX = re.compile(r'(^|[-_])fixes\.json$', re.I)
@@ -170,9 +170,16 @@ def file_doc(worker, key, ns, path, rel):
     title = (meta.get('title') or os.path.splitext(os.path.basename(rel))[0].replace('_', ' ').replace('-', ' ').strip())[:200]
     kind = re.sub(r'[^a-z_]', '', (meta.get('kind') or '').lower())[:40] or guess_kind(rel)
     tags = ':'.join(x for x in [ns, re.sub(r'[^a-z0-9_-]', '', (meta.get('campaign') or '').lower())[:24], re.sub(r'[^a-z0-9_, -]', '', (meta.get('platform') or '').lower())[:60]] if x)
-    body = {'namespace': ns, 'title': title, 'text': text[:MAX_TEXT], 'kind': kind, 'source': ('pack:' + tags + ':' if meta else 'ingest:') + rel[:240], 'date': date_from(rel, path)}
+    if len(text) > MAX_TEXT: raise RuntimeError('%d characters; the limit is %d - split the file (nothing was cut or sent)' % (len(text), MAX_TEXT))
+    body = {'namespace': ns, 'title': title, 'text': text, 'kind': kind, 'source': ('pack:' + tags + ':' if meta else 'ingest:') + rel[:240], 'date': date_from(rel, path)}
     d = http(worker.rstrip('/') + '/mind/ingest', key, body, timeout=120)
+    # a long document is indexed over several calls: resume until it is complete, or say how much is indexed
+    for _ in range(60):
+        if d.get('status') != 'partial' or d.get('error'): break
+        d = http(worker.rstrip('/') + '/mind/ingest/resume', key, {'docId': d.get('docId')}, timeout=120)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
+    if d.get('status') and d.get('status') != 'complete':
+        raise RuntimeError('indexed %s of %s chunks (%s); re-run to resume' % (d.get('indexed'), d.get('chunks'), d.get('status')))
     return {'docId': d.get('docId', ''), 'chunks': d.get('chunks', 0), 'kind': body['kind'], 'chars': len(text)}
 
 

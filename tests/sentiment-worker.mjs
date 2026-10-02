@@ -129,7 +129,8 @@ await t('POST /sentiment/run judges the rows that mention an entity, marks the r
   const news = row("SELECT s.texttype, s.region FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE a.url='https://smh.test/1'"); eq(news.texttype, 'news'); eq(news.region, 'nsw', 'region from the source registry juris');
   const melb = row("SELECT s.region FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE a.url='x:rcmt:c2'"); eq(melb.region, 'vic', 'region from the subreddit');
   const sk = row("SELECT model, entities FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE a.url='x:sigc:youtube:z'"); eq(sk.model, 'none'); eq(sk.entities, '[]');
-  eq(Number(kv.get('sent_calls_' + new Date().toISOString().slice(0, 10).replace(/-/g, ''))), 1);
+  // one provider call, reserved and settled in the D1 usage ledger (it replaced the KV counter in r6)
+  const u = env.MIND_DB.db.prepare("SELECT reserved, confirmed FROM ai_usage WHERE scope='sentiment'").get(); eq([u.reserved, u.confirmed], [1, 1]);
 });
 await t('a classifier that answers without JSON is retried once, then the failure is recorded and the run goes on', async () => {
   // the GARBAGE row was in the single batch above and was judged with the rest; run it alone to see the retry path

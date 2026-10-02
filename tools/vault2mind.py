@@ -127,8 +127,12 @@ def main() -> int:
                 "namespace": n["ns"], "title": n["title"], "kind": n["kind"],
                 "text": n["text"], "source": "vault:" + n["path"], "date": n["date"],
             })
+            for _ in range(60):  # a long note is indexed over several calls: resume until complete
+                if res.get("status") != "partial" or res.get("error"):
+                    break
+                res = post_json(args.worker.rstrip("/") + "/mind/ingest/resume", {"docId": res.get("docId")})
             if not res.get("ok"):
-                raise RuntimeError(res.get("detail") or res.get("error") or "ingest failed")
+                raise RuntimeError(res.get("detail") or res.get("error") or ("indexed %s of %s chunks" % (res.get("indexed"), res.get("chunks"))))
             prev = synced.get(n["path"], {})
             if prev.get("docId"):
                 state.setdefault("superseded", []).append(prev["docId"])
