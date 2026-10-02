@@ -129,13 +129,16 @@ await t('drill-down: a narrative row opens the Narratives view on that narrative
 await t('drill-down: an issue sets the Narratives filter; an entity opens the Sentiment drawer', async () => {
   await page.click(R + '.ov-issues tr:first-child .ov-link:has-text("narratives")');
   await page.waitForSelector('#v-narratives.on');
-  await page.waitForFunction(() => document.querySelector('#narratives-root .sn-filters select[aria-label="Client issue"]').value === 'ftc');
-  ok(calls.some(c => c.p === '/narratives' && c.q.issue === 'ftc'), 'the filter reached the worker');
-  await page.evaluate(() => go('command'));
-  await page.click(R + '.ov-sec:nth-of-type(3) .ov-table:nth-of-type(1) tbody tr:first-child .ov-link');
-  await page.waitForSelector('#v-sentiment.on');
-  await page.waitForSelector('#sentiment-root .sn-drawertitle:has-text("Anthony Albanese")', { timeout: 15000 });
-  await page.evaluate(() => go('command'));
+  try {
+    await page.waitForFunction(() => document.querySelector('#narratives-root .sn-filters select[aria-label="Client issue"]').value === 'ftc');
+    // the select takes the value first and the view asks the worker on its next render: wait for the request, do not race it
+    for (let i = 0; i < 50 && !calls.some(c => c.p === '/narratives' && c.q.issue === 'ftc'); i++) await new Promise(r => setTimeout(r, 100));
+    ok(calls.some(c => c.p === '/narratives' && c.q.issue === 'ftc'), 'the filter reached the worker');
+    await page.evaluate(() => go('command'));
+    await page.click(R + '.ov-sec:nth-of-type(3) .ov-table:nth-of-type(1) tbody tr:first-child .ov-link');
+    await page.waitForSelector('#v-sentiment.on');
+    await page.waitForSelector('#sentiment-root .sn-drawertitle:has-text("Anthony Albanese")', { timeout: 15000 });
+  } finally { await page.evaluate(() => go('command')); }   // a failure here must not leave the next case on another view
 });
 await t('the daily brief sits at the top: headline, summary, what changed with evidence links, by client, narratives and stances; Rewrite posts and shows the new one', async () => {
   await page.waitForSelector(R + '.ov-brief-h');

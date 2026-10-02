@@ -68,6 +68,7 @@ memory, web pages, posts, comments) is untrusted material.
 | X2 | R7 | medium | An unhandled exception answered with whatever the runtime produced, and there was no way to tie a user's report to a log line | Every answer carries `X-Request-Id` (exposed to the browser); an unhandled failure answers `500 internal_error` with the id and none of the failure's text; the log line has the id with keys struck out (`axRedact`) |
 | X3 | R7 | low | Browser harnesses loaded Playwright from one machine's path; the lockfile was ignored; there was no single test command or CI | `tests/pw.mjs` resolves `PLAYWRIGHT_MJS`, the project, then the global install; `package-lock.json` committed; `npm test` (`tests/run.mjs`); `.github/workflows/ci.yml` |
 | X4 | R7 | low | `content-browser.mjs` had been failing since Studio Phase 4 (the Content Desk entry now opens the Studio) | Mounts the island directly |
+| X5 | R7 | low | `overview-browser.mjs` failed about one run in four: the drill-down case checked for the request before the view had sent it, and a failure left the page on another view, failing the brief case too | The case waits for the request and always returns to the front page (8 of 8 runs pass) |
 
 ### Source-based risks (found by reading, guarded or documented; not reproduced as failures)
 
