@@ -62,7 +62,9 @@ async function openDesk(role) {
   await page.route(W + '/**', async route => { const r = route.request(); let body = null; try { body = r.postDataJSON(); } catch (e) {} await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(stub(r.url(), r.method(), body)) }); });
   await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof go === 'function' && typeof contentInit === 'function', null, { timeout: 15000 });
-  await page.evaluate(() => go('content'));
+  // since Studio Phase 4 go('content') opens the Studio intake; the Content Desk island and its routes remain in the
+  // page without a navigation entry, so the harness shows its view and mounts it directly
+  await page.evaluate(() => { document.querySelectorAll('.view').forEach(x => x.classList.remove('on')); const v = document.getElementById('v-content'); if (v) v.classList.add('on'); contentInit(); });
   await page.waitForSelector('#content-root .cd-head', { timeout: 15000 });
   return page;
 }
@@ -192,7 +194,7 @@ await t('recent sets list the set and reopen it with its thread', async () => {
   eq(await page.$$eval('.cd-msg.user', els => els.length), 3, 'history restored from the set');
 });
 await t('switching client shows the empty profile warning', async () => {
-  await page.selectOption('select[aria-label="Client"]', 'aep');
+  await page.selectOption('#content-root select[aria-label="Client"]', 'aep');
   await page.waitForSelector('.cd-warn', { timeout: 10000 });
   ok(/No voice profile for AEP yet/.test(await page.textContent('.cd-warn')));
   ok(/0 campaigns/.test(await page.textContent('.cd-head')));

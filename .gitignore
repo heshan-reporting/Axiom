@@ -8,8 +8,8 @@ tests/shot-*.png
 # Studio showcase and demonstration output (client creative; kept out of the repo)
 showcase/
 demo/
-# local tooling installs (package.json lists Playwright for the compose tool and harnesses)
+# local tooling installs (package.json lists Playwright for the compose tool and harnesses; package-lock.json is
+# committed so CI and every machine install the same version)
 node_modules/
-package-lock.json
 requests/
 tests/shots/

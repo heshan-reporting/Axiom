@@ -13,7 +13,37 @@ and drive it with Playwright, with every worker route stubbed.
 Node 22 or later (the SQLite shim uses `node:sqlite`), Python 3, Chromium
 through Playwright for the browser harnesses.
 
+One command runs everything and names what failed (CI runs the same on every
+push: `.github/workflows/ci.yml`):
+
 ```
+npm ci                              # Playwright at the version package-lock.json pins
+npx playwright install chromium     # once per machine (the cloud sandbox has it already)
+npm run check                       # worker syntax, worker pure ASCII, RULES blocks identical, page scripts parse, nothing private in docs/
+npm run test:backend                # every worker and tool harness without a browser, plus the Python tool tests
+npm run test:browser                # the Chromium harnesses
+npm test                            # all three: node tests/run.mjs all
+```
+
+Every provider is MOCKED (Claude, Gemini, Workers AI, Vectorize, Slack, Reddit,
+the Supermetrics and Meta APIs): a pass proves the worker, the page and the
+tools agree with each other, not what a live model answers or what production
+data looks like. Real-model quality evaluations are separate, bounded and run
+only with explicit approval (`tools/studio-showcase.py --approve-budget`,
+`tools/studio-demo.py --approve-calls`).
+
+Each harness on its own:
+
+```
+node --experimental-sqlite tests/auth-policy-worker.mjs   # R1 access: the route policy, roster validation, fail closed, read keys refused on writes and probes, no provider reached on a refusal, private URLs refused
+node --experimental-sqlite tests/integrity-worker.mjs     # R2 persisted JSON: always valid when shrunk, oversize refused with the field named, corrupt job input fails visibly, GET /integrity read-only
+node --experimental-sqlite tests/concurrency-worker.mjs   # R3 overlapping writes: brief edits against stages, project updates, locks, version appends, approvals of a moved version
+node --experimental-sqlite tests/jobs-lifecycle-worker.mjs # R4 jobs: one claim per job, fenced attempts, terminal cancel, late reports ignored, lease checkpoints
+node --experimental-sqlite tests/versions-worker.mjs      # R5 versions: the current version past 60 and with equal timestamps, paged history, restore
+node --experimental-sqlite tests/ingest-worker.mjs        # R6 knowledge: whole-document indexing, partial with coverage, resume without duplicates, hash dedupe, the coverage report
+node --experimental-sqlite tests/usage-worker.mjs         # R6 AI accounting: no lost increments, the cap under racing calls, retries and failures counted as such
+node --experimental-sqlite tests/ai-boundaries-worker.mjs # R7 AI boundaries: an injected source and a subverted answer - mark policy, figure checks, namespace walls, malformed answers, "ship" is not approval
+node --experimental-sqlite tests/diagnostics-worker.mjs   # R7 request ids on every answer, a safe 500 with the id, secrets struck from log lines
 node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1 (projects, versions, approvals, jobs, legacy)
 node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phase 2 (ledger, directions, copy, checks, layouts, export, budget)
 node --experimental-sqlite tests/studio-p3-worker.mjs     # Creative Studio Phases 3-4 (direction by instruction, Remember, outcomes, KV session import)
@@ -56,11 +86,17 @@ python3 tests/engine-ingest-test.py
 python3 tests/reach-render-test.py
 ```
 
-Playwright: the harnesses import it through `pw.mjs`, which uses the sandbox's
-global install by default; set `PLAYWRIGHT_MJS` to your own
-(`PLAYWRIGHT_MJS=./node_modules/playwright/index.mjs`). Each browser harness
-starts its own static server on a fixed port in the 8766-8776 range and kills
-it at the end.
+Playwright: the harnesses import it through `pw.mjs`, which looks in order at
+`PLAYWRIGHT_MJS` (a path to `playwright/index.mjs`), the project's own
+`node_modules` (`npm ci`), then the global install (`npm root -g`); no path is
+tied to one machine. `studio-fixture.mjs` seeds the journey harness and
+`studio-answers.mjs` holds the mocked model answers it and the boundary
+evaluations share. `worker-env.mjs` is the backend fixture for the reliability
+harnesses: the worker in-process over SQLite with a recording `fetch` (every
+outbound call is listed, so a test can prove a refused request reached no
+provider) and `slowReads(ms)`, which makes overlapping requests interleave
+between their read and their write. Each browser harness starts its own static
+server on a fixed port in the 8766-8776 range and kills it at the end.
 
 ## What is covered
 

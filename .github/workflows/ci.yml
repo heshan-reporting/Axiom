@@ -1,0 +1,40 @@
+# Checks and harnesses on every push and pull request. Everything runs against MOCKED providers: no secret is used,
+# nothing is deployed, no model or image provider is called. A pass proves the worker, the page and the tools agree
+# with each other; it does not prove what a live model answers (that is a separate, authorised evaluation).
+name: ci
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks-and-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts
+      - run: node tests/run.mjs check
+      - run: node tests/run.mjs backend
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: checks-and-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/run.mjs browser

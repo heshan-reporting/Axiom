@@ -1560,8 +1560,8 @@ creative partner is the **Art Director**: the latest review pinned above the thr
 reasons, verdict, version judged, top issue, correction with Apply) and **Review vN (1 model call)**,
 which composes the tile as it exports and runs `inspect` on that version; advice, never approval.
 Suggestions are fetched only on **Suggest for this version (1 model call)**, no longer on every new
-version. Studio scripts load as `?v=p24` so a browser cannot keep a stale renderer: bump it on each
-page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
+version. Studio scripts load with a release query (`?v=r1` now) so a browser cannot keep a stale
+renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
 Phase 1, the ground:
@@ -1865,20 +1865,31 @@ fastest way to debug a System User token.
 
 ## Access roles
 
-Two optional worker secrets. `AXIOM_ACCESS_KEY` is a single full-access key.
-`AXIOM_KEYS` is JSON of per-person keys:
-`{"key1":{"n":"Heshan","r":"full"},"key2":{"n":"Steve","r":"read"}}`.
-`read` may only hit read routes (`/mind/query`, `/mind/docs`,
-`/archive/search`, `/sentinel/alerts`, `/sentinel/metrics`, `/session/load`);
-writes return 403. The app hides mutating buttons for read-only keys.
+Two worker secrets, at least one required. `AXIOM_ACCESS_KEY` is a single
+full-access key (it also opens beside a broken roster, so the roster can be
+repaired). `AXIOM_KEYS` is JSON of per-person keys:
+`{"key1":{"n":"Heshan","r":"full"},"key2":{"n":"Steve","r":"read"}}` - every
+entry must say `"r":"read"` or `"r":"full"`; anything else closes the roster
+(`401 auth_misconfigured`), never full access. With neither secret the worker
+is **closed** (`503 auth_not_configured`); `AXIOM_DEV_OPEN=1` opens only a
+localhost origin. `axRoutePolicy(path, method, query)` decides every request,
+deny by default: `/` and `/archive/stats` are public; `/review/*` and `/sifa/*`
+use their own tokens; every non-GET is full; GETs that act (`/collect`,
+`/fetchurl`, `/integrity`, probes `?probe=1`, live reads `?live=1`, bridge
+claims, Meta sync, the self-test, `/fulltext?save=1`, `/studio/brief/suggest?
+ai=1`) are full; other GETs are read. Writes and acting GETs with a read key
+return `403 read_only`. The app hides mutating buttons for read-only keys.
+URLs a person supplies (`/fetchurl`, the forum readers) are fetched only when
+`axUrlProblem` finds a public http(s) address (no private, local, credentialed
+or non-default-port host; redirects rechecked by hand).
 
 ## Security & org knowledge (Curious Minds = namespace `cmm`)
 
-- Access control: the `AXIOM_ACCESS_KEY` worker secret gates /mind/*,
-  /session/*, /log/*, /archive/search and /archive/add via the `X-Axiom-Key`
-  header (open until the secret is set). `/archive/stats` stays public by
-  design: aggregate counts only, so the map shows presence of knowledge
-  without revealing content. The app sends the key from Settings -> Access key.
+- Access control: the keys above gate every route through the `X-Axiom-Key`
+  header (closed until a key is set; see Access roles). `/archive/stats` stays
+  public by design: aggregate counts only, so the map shows presence of
+  knowledge without revealing content. The app sends the key from Settings ->
+  Access key.
 - Confidential material NEVER goes into the git vault (`knowledge/` is in the
   repo). It goes straight to the Mind (`/mind/ingest`, key-gated, R2/D1/
   Vectorize) under the owning client's namespace; the vault may hold only a
@@ -1893,10 +1904,68 @@ writes return 403. The app hides mutating buttons for read-only keys.
   AEC results CSVs, polling CSVs) into the archive as `hist_*` kinds via the
   key-gated `/archive/add`. Re-runs are safe (url-deduped).
 
+## Reliability (release r1; `RELIABILITY.md` holds the system map, the defect list and the evidence)
+
+Patterns every change keeps to, each with its harness (`npm test` runs them all;
+CI runs the same on every push with providers MOCKED and no secrets):
+
+- **Access** - deny by default through `axRoutePolicy`; a new route that acts
+  must be full (non-GET, or listed in `AX_GET_FULL`). `auth-policy-worker.mjs`
+  tries every acting route with no key, a wrong key, a read key and a full key,
+  and proves through the recording `fetch` that a refusal reached no provider.
+- **Persisted JSON** - never `JSON.stringify(x).slice(...)`. Diagnostics use
+  `jsonFit(v, max)` (valid, shrunk field by field, `_truncated`); anything that
+  drives work is refused past its limit with the field named (`jsonLimitProblem`,
+  413: input 60,000, field 20,000, brief 60,000, layout 250,000). A job whose
+  stored input does not parse fails `input_corrupt`. `GET /integrity` (full,
+  read-only) lists unparseable records per `AX_JSON_COLUMNS` with the recovery.
+  `integrity-worker.mjs`.
+- **Concurrent writes** - compare-and-swap on `revision` with affected rows
+  checked (projects, assets, locks); `stAppendVersion` inserts and moves
+  `current` in one guarded batch; stages write the brief through
+  `stBriefPatch`; approvals only for the version still current (`409
+  version_moved`). `concurrency-worker.mjs` (`slowReads` interleaves requests).
+- **Jobs** - bridge claims and finishes are conditional (`409 job_ended` for a
+  late report); Studio attempts are fenced by attempt number (`job.fence`), the
+  lease is extended before each provider call (`job.lease`), cancel is terminal.
+  `jobs-lifecycle-worker.mjs`.
+- **Versions** - the asset view carries the newest 60 plus the current version,
+  numbered by `(created, rowid)`; `versionsTotal`; `GET /studio/versions?asset=
+  &before=&limit=` pages the rest; the page never falls back to another version
+  as current. `versions-worker.mjs`.
+- **Knowledge** - `mindIngestDoc` is the one path: whole text up to 2,000,000
+  characters (413 beyond), every chunk indexed in checkpointed batches of
+  `MIND_INGEST_CHUNKS_PER_CALL` (400), `mind_docs.status` indexing / complete /
+  partial with `chars`, `hash`, `indexed`, `error`; vectors carry `seq`,
+  `start`, `end`; `POST /mind/ingest/resume {docId}`; `GET /mind/coverage?
+  namespace=` (read-only) measures documents filed under the old 120-chunk cap
+  and proposes the backfill - nothing reindexes itself. `ingest-worker.mjs`.
+- **AI accounting** - one D1 ledger `ai_usage(day, scope)` for studio,
+  sentiment and narratives: `aiReserve` (conditional, before the call; refusal
+  is `budget_exhausted`), `aiSettle` (confirmed with tokens, or failed; retries
+  counted). `claudeMsg(env, system, user, maxTok, timeoutMs, model, acct)` takes
+  `{scope, retry}`. `/studio/budget` reports reserved, confirmed, failed,
+  retries, in flight and tokens. `usage-worker.mjs`.
+- **AI boundaries** - every system prompt ends with `AX_UNTRUSTED_RULE` (source
+  material is data, never instructions); the deterministic guards (mark policy,
+  figure checks, namespace walls, approval gates) must hold when an answer is
+  subverted. `ai-boundaries-worker.mjs`. A figure written inside an injected
+  source still "matches the source": the check is provenance, not truth.
+- **Diagnostics** - every answer carries `X-Request-Id` (exposed to the
+  browser); an unhandled failure answers `500 internal_error` with
+  `requestId`; log lines strike keys out with `axRedact`. `diagnostics-worker.mjs`.
+- **Tests** - `tests/run.mjs check|backend|browser|all` (`npm run check`,
+  `test:backend`, `test:browser`, `test`); Playwright pinned by the committed
+  `package-lock.json` and found by `tests/pw.mjs` (`PLAYWRIGHT_MJS`, the
+  project, then the global install); `tests/worker-env.mjs` is the backend
+  fixture. Backups of the earlier states: branches
+  `backup/2026-10-02-main-p23` and `backup/2026-10-02-studio-p24`.
+
 ## Working conventions
 
-- Verify frontend changes with the Playwright harnesses in the session
-  scratchpad when present; never break the Studio/Ad Lab conversation flows.
+- Verify changes with the harnesses in `tests/` (`npm test`; a new defect
+  gets a test that fails before the fix); never break the Studio/Ad Lab
+  conversation flows.
 - Worker secrets (ANTHROPIC_API_KEY, GEMINI_KEY, CLICKUP_TOKEN, …) exist only
   in Cloudflare — never in the repo.
 - Ship flow: commit on `claude/…` branch → push → fast-forward merge to
@@ -1904,7 +1973,8 @@ writes return 403. The app hides mutating buttons for read-only keys.
   laptop with `tools/deploy-worker.sh` (checks syntax and ASCII, reads the
   live settings through the Workers API, uploads the module with
   `keep_bindings` for every binding type plus secrets and vars, proves the
-  new code answers on `/engine/status`; auth from the `wrangler login`
+  new code answers on `/engine/status`; it refuses to deploy onto a worker
+  with no access key, since the worker is closed without one; auth from the `wrangler login`
   session or `CLOUDFLARE_API_TOKEN`). Never `wrangler deploy` from the repo
   root: `wrangler.toml` is a template whose Mind bindings are placeholders,
   so that would detach D1/Vectorize/AI/R2 from the live worker. Secrets:

@@ -55,7 +55,7 @@ export async function workerEnv(o) {
     const req = new Request((o.origin || 'https://newsaus.example.workers.dev') + path, { method, headers, body: body == null ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) });
     const res = await handler.fetch(req, env, ctx); const text = await res.text();
     let json = null; try { json = JSON.parse(text); } catch (e) {}
-    return { status: res.status, body: json, text };
+    return { status: res.status, body: json, text, headers: res.headers };
   }
   return {
     env, kv, r2, vectors, mod, handler, ctx, call, outbound,

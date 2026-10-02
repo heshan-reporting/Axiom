@@ -48,7 +48,10 @@
   function explain(e, what) {
     const code = String((e && e.code) || ''); const msg = String((e && (e.message || e.error)) || e || '');
     const has = re => re.test(code) || re.test(msg); const status = e && e.status;
-    const out = (title, text, kind) => ({ title, text, kind: kind || 'error', detail: msg && msg !== title ? msg : '' });
+    const rid = String((e && e.requestId) || '');
+    const out = (title, text, kind) => ({ title, text, kind: kind || 'error', detail: (msg && msg !== title ? msg : '') + (rid ? (msg && msg !== title ? ' ' : '') + '(request ' + rid + ')' : '') });
+    const failedHere = () => out('Something failed on the worker', 'Nothing more was done and your work is as it was. Try again; if it fails again, quote ' + (rid ? 'request ' + rid : 'the time it happened') + ' when reporting it.');
+    if (has(/internal_error/)) return failedHere();
     if (has(/claude_not_configured/)) return out('Claude is not configured on the worker', 'Nothing that writes, plans or inspects can run until an administrator sets ANTHROPIC_API_KEY on the worker. Nothing was spent and your work is unchanged.', 'provider');
     if (has(/gemini_not_configured|GEMINI_KEY/)) return out('Image generation is not configured on the worker', 'No image can be made until an administrator sets GEMINI_KEY. Compositions, copy and layout work without it; choose "No imagery" to produce a complete typographic set.', 'provider');
     if (has(/budget_exhausted/)) return out('Today\'s Studio budget is used up', 'The worker allows a set number of model calls a day (STUDIO_DAILY_CALLS). It resets at midnight Sydney time, or an administrator can raise it. Nothing more was spent.', 'provider');
@@ -69,6 +72,7 @@
     if (status === 401) return out('The access key was not accepted', 'Set a valid key in Settings, Access key. Nothing was changed.');
     if (status === 403) return out('This key can read but not change', 'A full-access key is needed to make changes. Nothing was changed.');
     if (has(/Failed to fetch|NetworkError|network|Load failed/i)) return out('Cannot reach the worker', 'Check the connection. Nothing you typed was lost; try again when the connection is back.');
+    if (status >= 500 && status < 600 && !msg) return failedHere();
     return out(what || 'That did not work', msg);
   }
   const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent; a provider call already in flight may still finish and be billed.';
