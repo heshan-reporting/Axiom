@@ -225,7 +225,7 @@ means for compatibility, and what is still uncertain.
   (Playwright 1.56.1 from the public registry), `tests/run.mjs`
   (`npm run check|test:backend|test:browser|test`) and
   `.github/workflows/ci.yml`. CI uses no secrets and calls no provider.
-- **Release:** build `2026-10-02.r1`; page scripts load as `?v=r1`.
+- **Release:** build `2026-10-02.studio-p24-r1`; page scripts load as `?v=r1`.
 
 ## 4. Before deploying (needs the operator's approval)
 
@@ -235,7 +235,7 @@ means for compatibility, and what is still uncertain.
    access, and it now closes the worker.
 2. Deploy with `tools/deploy-worker.sh` (never `wrangler deploy` from the
    root). It keeps every binding and proves `/engine/status` answers
-   `2026-10-02.r1`.
+   `2026-10-02.studio-p24-r1`.
 3. Fast-forward `main` to the branch so Pages serves `?v=r1` pages that
    understand the new error codes and version paging.
 4. Smoke checks with a read key, all of which spend nothing:
