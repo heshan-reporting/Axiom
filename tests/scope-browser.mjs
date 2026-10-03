@@ -2,11 +2,8 @@
  * Narratives, Sentiment, Signals and Sources together; a party or person
  * opens their stance drawer; the scope survives a reload; Clear resets.
  * Run: node scope-browser.mjs */
-import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-const require = createRequire(import.meta.url);
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
-const DOCS = new URL('../docs', import.meta.url).pathname;
+import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 const PORT = 8774, W = 'https://newsaus.heshan-998.workers.dev';
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
 for (let i = 0; i < 40; i++) { try { const r = await fetch('http://127.0.0.1:' + PORT + '/index.html'); if (r.ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 150)); }

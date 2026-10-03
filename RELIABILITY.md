@@ -69,6 +69,7 @@ memory, web pages, posts, comments) is untrusted material.
 | X3 | R7 | low | Browser harnesses loaded Playwright from one machine's path; the lockfile was ignored; there was no single test command or CI | `tests/pw.mjs` resolves `PLAYWRIGHT_MJS`, the project, then the global install; `package-lock.json` committed; `npm test` (`tests/run.mjs`); `.github/workflows/ci.yml` |
 | X4 | R7 | low | `content-browser.mjs` had been failing since Studio Phase 4 (the Content Desk entry now opens the Studio) | Mounts the island directly |
 | X5 | R7 | low | `overview-browser.mjs` failed about one run in four: the drill-down case checked for the request before the view had sent it, and a failure left the page on another view, failing the brief case too | The case waits for the request and always returns to the front page (8 of 8 runs pass) |
+| X6 | R7 | medium | The first CI run on GitHub's runners showed seven browser harnesses loading Playwright from the sandbox's own path, and a font case assuming the order of two fallbacks; both passed here and failed anywhere else | The harnesses load through `tests/pw.mjs`, `tools/studio-compose.mjs` looks up the global install instead of a fixed path, the font case is order-independent, and `npm run check` refuses a machine-specific Playwright path |
 
 ### Source-based risks (found by reading, guarded or documented; not reproduced as failures)
 

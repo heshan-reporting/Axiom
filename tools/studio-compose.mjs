@@ -43,7 +43,9 @@ async function dataUrl(u) {
   try { const r = await fetch(BASE + u, { headers: H }); if (!r.ok) return null; const buf = Buffer.from(await r.arrayBuffer()); return 'data:' + (r.headers.get('content-type') || 'image/png') + ';base64,' + buf.toString('base64'); } catch (e) { return null; }
 }
 async function loadChromium() {
-  const tries = [process.env.PLAYWRIGHT_MJS, 'playwright', 'playwright-core', '/opt/node22/lib/node_modules/playwright/index.mjs'].filter(Boolean);
+  // PLAYWRIGHT_MJS, then the project install, then the global one (npm root -g): no path tied to one machine
+  let globalPw = ''; try { const { execSync } = await import('node:child_process'); globalPw = path.join(execSync('npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(), 'playwright', 'index.mjs'); } catch (e) {}
+  const tries = [process.env.PLAYWRIGHT_MJS, 'playwright', 'playwright-core', globalPw && fs.existsSync(globalPw) ? globalPw : ''].filter(Boolean);
   for (const t of tries) { try { const m = await import(t); if (m.chromium) return m.chromium; } catch (e) {} }
   return null;
 }

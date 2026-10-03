@@ -3,11 +3,8 @@
  * platform chips, Write, the pieces and their checks, the chat revise with a
  * remembered rule, Ask the Desk, Approve, the Voice profile and Learned panels,
  * and the read-only key. Run: node content-browser.mjs */
-import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-const require = createRequire(import.meta.url);
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
-const DOCS = new URL('../docs', import.meta.url).pathname;
+import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 
 const PORT = 8765, W = 'https://newsaus.heshan-998.workers.dev';
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });

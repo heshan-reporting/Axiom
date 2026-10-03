@@ -3,11 +3,8 @@
  * table and its order, the filters, the drawer with probe and sweep, switching
  * a source off, editing, adding, the sweep job console, and the read-only key.
  * Run: node sources-browser.mjs   (SHOT=1 also saves screenshots) */
-import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-const require = createRequire(import.meta.url);
-const { chromium } = require('/opt/node22/lib/node_modules/playwright');
-const DOCS = new URL('../docs', import.meta.url).pathname;
+import { chromium, DOCS } from './pw.mjs';   // Playwright found portably (PLAYWRIGHT_MJS, the project, the global install)
 
 const PORT = 8766, W = 'https://newsaus.heshan-998.workers.dev';
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });

@@ -95,7 +95,7 @@ section('2. fonts: wait for them, say which were used');
   if (HAVE_FONTS) ok(f.ok && f.roles.display.used === 'Bricolage Grotesque' && f.roles.body.used === 'Instrument Sans', 'the app fonts load and are reported as used: ' + JSON.stringify(f.roles));
   else ok(!f.ok && f.fallback.length, 'no app fonts on this machine: the fallback is reported, not hidden: ' + f.fallback.join('; '));
   const g = await page.evaluate(async ({ L, C }) => window.STRender.ensureFonts(Object.assign({}, L, { fonts: { display: 'Kit Face Not Installed', body: 'Instrument Sans' } }), C, { timeout: 1500 }), { L: HOOF_REPRO, C: HOOF_COPY });
-  ok(g.roles.display.fallback && g.roles.display.requested === 'Kit Face Not Installed' && g.fallback[0].includes('Kit Face Not Installed'), 'a kit font that is not available is disclosed with what drew instead: ' + g.fallback.join('; '));
+  ok(g.roles.display.fallback && g.roles.display.requested === 'Kit Face Not Installed' && g.fallback.some(x => x.indexOf('display: asked "Kit Face Not Installed"') === 0), 'a kit font that is not available is disclosed with what drew instead: ' + g.fallback.join('; '));
   const v = await page.evaluate(async ({ L, C, g }) => { const im = await window.__load(); return window.STRender.validate(L, C, { bg: im.photo, wordmark: im.white }, { fonts: g, channel: 'instagram' }).issues.map(i => i.code + '/' + i.severity); }, { L: HOOF_REPRO, C: HOOF_COPY, g });
   ok(v.includes('font_fallback/warning'), 'the fallback rides on the validation as a warning');
 }

@@ -35,6 +35,7 @@ if (mode === 'check' || mode === 'all') {
     check('docs/' + f + ' parses', () => { new Function(fs.readFileSync(p, 'utf8')); return true; });
   }
   check('nothing private in docs/ (GitHub Pages serves it)', () => { const bad = []; const walk = d => fs.readdirSync(d, { withFileTypes: true }).forEach(e => { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.(py|sh|env|pem|key|sqlite|db)$/i.test(e.name) || /axiomworker|wrangler|^\.dev\.vars/i.test(e.name) || /knowledge|voice-pack|briefs?\//i.test(path.relative(ROOT, p))) bad.push(path.relative(ROOT, p)); }); walk(path.join(ROOT, 'docs')); return !bad.length || bad.join(', '); });
+  check('no harness or tool tied to one machine\'s Playwright path (tests/pw.mjs finds it)', () => { const bad = []; for (const d of ['tests', 'tools']) for (const f of fs.readdirSync(path.join(ROOT, d))) { if (!/\.(mjs|js|py)$/.test(f)) continue; const t = fs.readFileSync(path.join(ROOT, d, f), 'utf8'); if (/\/opt\/node\d+\/lib\/node_modules\/playwright/.test(t)) bad.push(d + '/' + f); } return !bad.length || bad.join(', '); });
   check('package.json and package-lock.json are valid JSON', () => { JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')); JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8')); return true; });
 }
 if (mode === 'backend' || mode === 'all') {
