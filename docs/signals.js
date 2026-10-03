@@ -219,7 +219,8 @@
   /* Petitions: what people are signing, fastest-growing first. */
   function Petitions({ f, setF, canWrite, onSweep, busy }) {
     const [d, setD] = useState(null); const [err, setErr] = useState('');
-    const load = useCallback(async () => { try { setD(await call('/social/petitions?issue=' + encodeURIComponent(f.issue) + '&days=' + f.days)); setErr(''); } catch (e) { setErr(e.message); } }, [f.issue, f.days]);
+    const petSeq = useRef(0);   // a quick filter change: only the newest answer is shown
+    const load = useCallback(async () => { const my = ++petSeq.current; try { const d = await call('/social/petitions?issue=' + encodeURIComponent(f.issue) + '&days=' + f.days); if (my === petSeq.current) { setD(d); setErr(''); } } catch (e) { if (my === petSeq.current) setErr(e.message); } }, [f.issue, f.days]);
     useEffect(() => { load(); }, [load]);
     const list = (d && d.petitions) || [];
     const growth = g => (g == null ? '-' : (g > 0 ? '+' : '') + fmtN(g));
@@ -241,7 +242,8 @@
   /* Coverage: every platform, how it is read, what it needs, what it cannot reach, how it fared. */
   function Coverage() {
     const [d, setD] = useState(null); const [err, setErr] = useState(''); const [probing, setProbing] = useState(false);
-    const load = useCallback(async (probe) => { if (probe) setProbing(true); try { setD(await call('/social/coverage' + (probe ? '?probe=1' : ''))); setErr(''); } catch (e) { setErr(e.message); } setProbing(false); }, []);
+    const covSeq = useRef(0);   // a probe answer is never overwritten by an earlier plain read that lands after it
+    const load = useCallback(async (probe) => { const my = ++covSeq.current; if (probe) setProbing(true); try { const d = await call('/social/coverage' + (probe ? '?probe=1' : '')); if (my === covSeq.current) { setD(d); setErr(''); } } catch (e) { if (my === covSeq.current) setErr(e.message); } if (my === covSeq.current) setProbing(false); }, []);
     useEffect(() => { load(false); }, [load]);
     const list = (d && d.platforms) || [];
     const chip = (on, txt) => html`<span class=${'src-chip' + (on ? ' on' : '')}>${txt}</span>`;
@@ -292,13 +294,19 @@
     const pollRef = useRef(null);
     const plat = P(tab);
 
+    // every load is numbered: an answer that arrives after a newer request (a quick tab or filter change) is dropped,
+    // and another platform's rows are cleared at once rather than shown under this tab while it loads
+    const loadSeq = useRef(0);
     const load = useCallback(async () => {
-      if (P(tab).special) { setData(null); setErr(null); return; }   // petitions and coverage load their own
+      const my = ++loadSeq.current;
+      if (P(tab).special) { setData(null); setErr(null); setBusy(b => Object.assign({}, b, { load: false })); return; }   // petitions and coverage load their own
+      setData(d => (d && d._tab === tab ? d : null));
       setBusy(b => Object.assign({}, b, { load: true }));
       try {
         const d = await call('/signals/threads?platform=' + tab + '&days=' + f.days + '&issue=' + encodeURIComponent(f.issue) + '&channel=' + encodeURIComponent(f.channel) + '&q=' + encodeURIComponent(f.q) + '&sort=' + f.sort + (f.all ? '&all=1' : '') + '&limit=80');
-        setData(d); setErr(null);
-      } catch (e) { setData(null); setErr(e); }
+        if (my !== loadSeq.current) return;
+        setData(Object.assign({}, d, { _tab: tab })); setErr(null);
+      } catch (e) { if (my !== loadSeq.current) return; setData(null); setErr(e); }
       setBusy(b => Object.assign({}, b, { load: false }));
     }, [tab, f.days, f.issue, f.channel, f.q, f.sort, f.all]);
     useEffect(() => { setOpen(null); setSel(new Set()); setAnalysis(null); load(); }, [load]);

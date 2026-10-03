@@ -219,6 +219,8 @@ await t('Place and name now runs a job the console follows, then refreshes the s
   const before = calls.filter(c => c.p === '/narratives/status').length;
   await page.click(R + 'button:has-text("Place and name now")');
   await page.waitForSelector(R + '.sig-con .sig-line.cmd');
+  // the console streams: wait until the lines this case reads have arrived, rather than racing them
+  await page.waitForFunction(r => { const t = (document.querySelector(r + '.sig-con') || {}).textContent || ''; return /name 2 narratives/.test(t) && /billionaire miners" \[ftc, mining\]/.test(t) && /287 rows placed: 251 joined/.test(t); }, R, { timeout: 15000 });
   eq(calls.find(c => c.p === '/narratives/run').body, {});
   ok(/claude claude-sonnet-4-6 name 2 narratives \(14 rows, 7 rows\)/.test(await page.textContent(R + '.sig-line.cmd')));
   ok(/billionaire miners" \[ftc, mining\]/.test(await page.textContent(R + '.sig-line.out')));

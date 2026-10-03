@@ -148,6 +148,7 @@ await t('Classify all waiting keeps stepping until the backlog is empty', async 
 await t('the register lists entities with aliases, adds one, edits aliases, switches off, tests a sentence and syncs MPs', async () => {
   await page.click('#sentiment-root button:has-text("Entity register")');
   await page.waitForSelector('.sn-reg');
+  await page.waitForFunction(() => document.querySelectorAll('.sn-reg tbody tr').length === 4, null, { timeout: 15000 });   // the register is its own request
   ok((await texts(page, '.sn-reg tbody tr')).length === 4);
   ok(/Albanese \/ Albo \/ the PM/.test(await page.textContent('.sn-reg tbody tr:has-text("Anthony Albanese")')));
   ok(/from the MP register/.test(await page.textContent('.sn-reg tbody tr:has-text("Barnaby Joyce")')));
@@ -162,6 +163,7 @@ await t('the register lists entities with aliases, adds one, edits aliases, swit
   await page.fill('.sn-form textarea', 'Chalmers\nthe Treasurer\nJim');
   await page.click('.sn-form button:has-text("Save")');
   await page.waitForSelector('.sn-reg tbody tr:has-text("Jim Chalmers"):has-text("Jim")');
+  for (let i = 0; i < 50 && !calls.some(c => c.p === '/entities/update'); i++) await new Promise(r => setTimeout(r, 100));   // the row already says "Jim": wait for the save itself
   const upd = calls.filter(c => c.p === '/entities/update').pop(); eq(upd.body.id, 'chalmers'); eq(upd.body.aliases, ['Chalmers', 'the Treasurer', 'Jim']);
   await page.click('.sn-reg tbody tr:has-text("Anthony Albanese") button:has-text("Off")');
   await page.waitForFunction(() => { const tr = Array.from(document.querySelectorAll('.sn-reg tbody tr')).find(x => /Anthony Albanese/.test(x.textContent)); return tr && tr.textContent.indexOf('On') >= 0 && !/Off/.test(tr.querySelectorAll('button')[1].textContent); });

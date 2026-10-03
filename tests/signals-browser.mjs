@@ -107,8 +107,8 @@ await t('the Petitions tab ranks by growth, filters by issue, and reads the page
   await page.selectOption('.rd-ctl select[aria-label="Issue"]', '');
   await page.waitForSelector('.pet-table');
   await page.click('button:has-text("Read the petition pages now")');
-  await page.waitForSelector('.sig-con .sig-line.out');
-  ok(/2 petitions listed/.test(await page.textContent('.sig-line.out')));
+  await page.waitForFunction(() => /2 petitions listed/.test((document.querySelector('.sig-con') || {}).textContent || ''), null, { timeout: 15000 });
+  ok(/2 petitions listed/.test(await page.textContent('.sig-con')), 'the console reports what was read');
   const c = calls.filter(x => x.p === '/bridge/run').pop(); eq(c.body.source, 'petitions');
 });
 await t('the Coverage tab shows every platform with method, needs, state, counts and last run, and probes on demand', async () => {
@@ -120,7 +120,7 @@ await t('the Coverage tab shows every platform with method, needs, state, counts
   ok(/Facebook public/.test(rowsT[2]) && /not set up/.test(rowsT[2]) && /Cannot: the Graph API refuses/.test(rowsT[2]), rowsT[2]);
   ok(/on, no key/.test(rowsT[3]), 'YouTube says it runs without a key');
   ok(/Nothing was read\. gone_account/.test(rowsT[1]), 'the last failure is quoted');
-  ok(/No Mac collector connected/.test(await page.textContent('.rd-ctl')));
+  await page.waitForFunction(() => /No Mac collector connected/.test((document.querySelector('.rd-ctl') || {}).textContent || ''), null, { timeout: 15000 });   // the collector status is its own request
   await page.click('button:has-text("Probe every platform")');
   await page.waitForSelector('.cov-table td:has-text("reachable")');
   const after = await texts(page, '.cov-table tbody tr');

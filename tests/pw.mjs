@@ -14,5 +14,16 @@ async function load() {
   if (g && fs.existsSync(g)) return import(g);
   throw new Error('Playwright is not installed. Run: npm ci && npx playwright install chromium   (or set PLAYWRIGHT_MJS to playwright/index.mjs)');
 }
-export const { chromium } = await load();
+const pw = await load();
+/* PW_CPU_THROTTLE=4 runs every page four times slower (Chrome's CPU throttling): the way to find a harness that races
+ * the page here before a slower machine (CI) finds it. Unset, Playwright is untouched. */
+const RATE = Number(process.env.PW_CPU_THROTTLE || 0);
+async function throttle(page) { try { const s = await page.context().newCDPSession(page); await s.send('Emulation.setCPUThrottlingRate', { rate: RATE }); } catch (e) {} return page; }
+function slowContext(ctx) { const np = ctx.newPage.bind(ctx); ctx.newPage = async (...a) => throttle(await np(...a)); return ctx; }
+export const chromium = RATE > 1 ? Object.assign(Object.create(pw.chromium), {
+  async launch(...a) {
+    const b = await pw.chromium.launch(...a); const nc = b.newContext.bind(b), np = b.newPage.bind(b);
+    b.newContext = async (...x) => slowContext(await nc(...x)); b.newPage = async (...x) => throttle(await np(...x)); return b;
+  },
+}) : pw.chromium;
 export const DOCS = new URL('../docs', import.meta.url).pathname;

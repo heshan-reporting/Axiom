@@ -17,7 +17,7 @@ const run = (name, cmd, args, timeoutMs) => {
   const ok = r.status === 0 && !/[1-9]\d* failed/.test(last);
   results.push({ name, ok, summary: last || (r.error ? String(r.error.message) : 'exit ' + r.status), ms: Date.now() - t0 });
   console.log((ok ? '  ok   ' : '  FAIL ') + name + '  ' + (last || 'exit ' + r.status) + '  (' + Math.round((Date.now() - t0) / 1000) + 's)');
-  if (!ok) console.log(out.split('\n').filter(l => /FAIL|Error|error/.test(l)).slice(0, 12).map(l => '       ' + l.slice(0, 220)).join('\n'));
+  if (!ok) { const L = out.split('\n'); const keep = []; L.forEach((l, i) => { if (/FAIL|Error/.test(l)) for (let j = i; j < Math.min(L.length, i + 4); j++) if (keep.indexOf(j) < 0) keep.push(j); }); console.log(keep.slice(0, 40).map(j => '       ' + L[j].slice(0, 260)).join('\n')); }
 };
 const check = (name, fn) => { try { const r = fn(); const ok = r === true || r === undefined; results.push({ name, ok, summary: ok ? 'ok' : String(r) }); console.log((ok ? '  ok   ' : '  FAIL ') + name + (ok ? '' : '  ' + r)); } catch (e) { results.push({ name, ok: false, summary: e.message }); console.log('  FAIL ' + name + '  ' + e.message); } };
 

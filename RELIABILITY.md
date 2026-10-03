@@ -70,6 +70,7 @@ memory, web pages, posts, comments) is untrusted material.
 | X4 | R7 | low | `content-browser.mjs` had been failing since Studio Phase 4 (the Content Desk entry now opens the Studio) | Mounts the island directly |
 | X5 | R7 | low | `overview-browser.mjs` failed about one run in four: the drill-down case checked for the request before the view had sent it, and a failure left the page on another view, failing the brief case too | The case waits for the request and always returns to the front page (8 of 8 runs pass) |
 | X6 | R7 | medium | The first CI run on GitHub's runners showed seven browser harnesses loading Playwright from the sandbox's own path, and a font case assuming the order of two fallbacks; both passed here and failed anywhere else | The harnesses load through `tests/pw.mjs`, `tools/studio-compose.mjs` looks up the global install instead of a fixed path, the font case is order-independent, and `npm run check` refuses a machine-specific Playwright path |
+| X7 | R7 | medium | Signals: switching tabs or filters quickly could show the previous platform's rows under the new tab (a slower earlier answer landed last), and an earlier coverage read could overwrite a probe's answer; found when the CI runner's locale changed the timing | Thread, petition and coverage loads are numbered and only the newest answer is shown; another platform's rows are cleared at once; the cases that read streaming text wait for it (`PW_CPU_THROTTLE=4 LANG=C.UTF-8` reproduces CI conditions locally) |
 
 ### Source-based risks (found by reading, guarded or documented; not reproduced as failures)
 
@@ -94,7 +95,7 @@ memory, web pages, posts, comments) is untrusted material.
    `gemini-2.5-flash`. Whether these are reachable by the live keys is a live
    question (`GET /studio/models` answers it without spending).
 5. **Legacy inline views** (Newsroom, Pulse, Radar, Analyst, Briefing,
-   Audience) have no stale-response guard when filters change quickly. They
+   Audience) have no stale-response guard (the Signals island now has one, X7) when filters change quickly. They
    are read-only displays, but a slow earlier answer can paint over a newer one.
 6. **The worker is one 14,000-line module.** It deploys as one script by
    design (`tools/deploy-worker.sh`). Boundaries are enforced by tests (the

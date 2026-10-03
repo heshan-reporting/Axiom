@@ -95,7 +95,8 @@ evaluations share. `worker-env.mjs` is the backend fixture for the reliability
 harnesses: the worker in-process over SQLite with a recording `fetch` (every
 outbound call is listed, so a test can prove a refused request reached no
 provider) and `slowReads(ms)`, which makes overlapping requests interleave
-between their read and their write. Each browser harness starts its own static
+between their read and their write. `PW_CPU_THROTTLE=4` (Chrome's CPU throttling on every page) with `LANG=C.UTF-8` runs the browser harnesses the way a
+slower CI runner does: a case that reads the page before it has rendered fails here first. Each browser harness starts its own static
 server on a fixed port in the 8766-8776 range and kills it at the end.
 
 ## What is covered
