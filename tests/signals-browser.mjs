@@ -80,10 +80,10 @@ await t('the Bluesky tab lists posts through the same routes, with issues and th
   ok(calls.some(c => c.p === '/signals/threads' && c.q.platform === 'bluesky'));
 });
 await t('YouTube posts show their channel; Substack shows its publication', async () => {
-  await page.click('.sig-tab:has-text("YouTube")'); await page.waitForSelector('.rd-th');
+  await page.click('.sig-tab:has-text("YouTube")'); await page.waitForSelector('.rd-th .rd-sub:has-text("ABC News (Australia)")');
   eq(await texts(page, '.rd-th .rd-sub'), ['ABC News (Australia)']);
   ok(/Sweep YouTube/.test(await page.textContent('.rd-ctl')));
-  await page.click('.sig-tab:has-text("Substack")'); await page.waitForSelector('.rd-th');
+  await page.click('.sig-tab:has-text("Substack")'); await page.waitForSelector('.rd-th .rd-sub:has-text("example.substack.com")');
   eq(await texts(page, '.rd-th .rd-sub'), ['example.substack.com']);
 });
 await t('the X tab offers Read account timelines, which runs in the worker and is followed in the console', async () => {
@@ -122,10 +122,10 @@ await t('the Coverage tab shows every platform with method, needs, state, counts
   ok(/Nothing was read\. gone_account/.test(rowsT[1]), 'the last failure is quoted');
   await page.waitForFunction(() => /No Mac collector connected/.test((document.querySelector('.rd-ctl') || {}).textContent || ''), null, { timeout: 15000 });   // the collector status is its own request
   await page.click('button:has-text("Probe every platform")');
-  await page.waitForSelector('.cov-table td:has-text("reachable")');
+  await page.waitForFunction(() => { const r = Array.from(document.querySelectorAll('.cov-table tbody tr')).map(x => x.textContent); return r.length > 1 && /3 posts for auspol/.test(r[0]) && /no timeline/.test(r[1]); }, null, { timeout: 15000 });
   const after = await texts(page, '.cov-table tbody tr');
-  ok(/reachable/.test(after[0]) && /3 posts for auspol/.test(after[0]));
-  ok(/failed/.test(after[1]) && /no timeline/.test(after[1]));
+  ok(/reachable/.test(after[0]) && /3 posts for auspol/.test(after[0]), after[0]);
+  ok(/failed/.test(after[1]) && /no timeline/.test(after[1]), after[1]);
   ok(calls.some(c => c.p === '/social/coverage' && c.q.probe === '1'));
 });
 if (process.env.SHOT) await page.screenshot({ path: 'shot-coverage.png' });
