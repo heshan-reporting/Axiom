@@ -2293,8 +2293,12 @@ async function jobCreate(env, source, params, who) {
   const id = jobId();
   const where = String((params && params.where) || 'auto');
   const local = (await jobRoute(env, source, where)) === 'worker';
+  // params drive the job (queries, threads, ids): they are stored whole or refused with the field named, never shrunk -
+  // the old JSON.stringify(...).slice(0, 4000) cut long term lists into JSON the collector then read as {}
+  const tooBig = jsonLimitProblem(params || {}, ST_INPUT_MAX, ST_FIELD_MAX, 'params');
+  if (tooBig) throw Object.assign(new Error('params_too_large: ' + tooBig), { code: 'params_too_large' });
   await env.MIND_DB.prepare('INSERT INTO bridge_jobs(id,source,params,status,agent,who,created,claimed,finished,ok,result) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-    .bind(id, source, jsonFit(params || {}, 4000), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
+    .bind(id, source, JSON.stringify(params || {}), local ? 'running' : 'queued', '', String(who || '').slice(0, 40), Date.now(), local ? Date.now() : 0, 0, 0, '').run();
   await jobLog(env, id, [{ k: 'info', t: 'job ' + id + ' created: ' + source + (local ? ' (running in the worker)' : ' (waiting for a desktop collector to claim it)') }]);
   return { id, local };
 }
@@ -2328,7 +2332,14 @@ async function jobClaim(env, agent, sources) {
   }
   if (!row) return null;
   await jobLog(env, row.id, [{ k: 'info', t: 'claimed by ' + String(agent || 'agent').slice(0, 40) }]);
-  let params = {}; try { params = JSON.parse(row.params || '{}'); } catch (e) {}
+  let params = null; try { params = JSON.parse(row.params || '{}'); } catch (e) {}
+  if (!params || typeof params !== 'object') {
+    // a job whose stored params do not parse (written by the old code, which cut them at 4000 characters) is failed
+    // where everyone can see it, never handed to a collector as {} - that would sweep the defaults and look like success
+    await jobLog(env, row.id, [{ k: 'err', t: 'params_corrupt: this job\'s stored settings cannot be read, so it was not run. Start the sweep again.' }]);
+    await jobFinish(env, row.id, false, { ok: false, error: 'params_corrupt' }, agent);
+    return jobClaim(env, agent, sources);
+  }
   return { id: row.id, source: row.source, params };
 }
 async function jobTail(env, id, after) {
@@ -6842,7 +6853,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-02.studio-p24-r1';
+const AXIOM_BUILD = '2026-10-03.studio-p24-r2';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -11782,7 +11793,9 @@ const AXIOM_WORKER = {
           const source = sigSource(bbody.source);
           if (!source) return jsonResp({ error: 'unknown_source', detail: 'source must be one of ' + BRIDGE_SOURCES.join(', ') + '.' }, 400);
           const params = (bbody.params && typeof bbody.params === 'object') ? bbody.params : {};
-          const job = await jobCreate(env, source, Object.assign({}, params, { where: bbody.where || 'auto' }), auth.name);
+          let job;
+          try { job = await jobCreate(env, source, Object.assign({}, params, { where: bbody.where || 'auto' }), auth.name); }
+          catch (e) { if (e.code === 'params_too_large') return jsonResp({ error: 'params_too_large', detail: String(e.message).replace(/^params_too_large:\s*/, '') + '. Nothing was queued.' }, 413); throw e; }
           if (job.local) {
             // run it after the response so the console can start tailing at once
             ctx.waitUntil(jobRunLocal(env, { id: job.id, source, params }));

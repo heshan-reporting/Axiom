@@ -86,4 +86,27 @@ await T.t('a provider call longer than the default lease does not let a second a
   const other = await call('POST', '/studio/job/step', { id }); ok(/another runner/.test(other.body.job.note || ''), 'a second runner waits: ' + JSON.stringify(other.body.job.note));
   g.open(); await run; eq(job(id).state, 'done');
 });
+await T.t('a sweep with long settings (a topic X job carrying the MP register) reaches the collector whole, not cut into {}', async () => {
+  const mps = Array.from({ length: 230 }, (_, i) => ({ x: 'MP_handle_' + i, name: 'Member Number ' + i, party: 'Australian Labor Party', house: 'House of Representatives' }));
+  const params = { queries: ['fuel tax credit australia'], fromQueries: ['fuel tax credit'], from: mps.map(m => m.x), mps, topic: 't1', ns: 'mca', perQuery: 30 };
+  ok(JSON.stringify(params).length > 4000, 'longer than the old 4000-character cut: ' + JSON.stringify(params).length);
+  const r = await call('POST', '/bridge/run', { source: 'x', params }); eq(r.status, 200, r.text.slice(0, 160));
+  const n = await call('GET', '/bridge/next?agent=mac-a&sources=x'); eq(n.body.job.id, r.body.id);
+  eq([n.body.job.params.mps.length, n.body.job.params.from[229], n.body.job.params.topic], [230, 'MP_handle_229', 't1']);
+  await call('POST', '/bridge/done', { job: r.body.id, ok: true, result: { ok: true }, agent: 'mac-a' });
+});
+await T.t('settings past the limit are refused with the field named, and nothing is queued', async () => {
+  const before = db.prepare('SELECT COUNT(*) AS n FROM bridge_jobs').get().n;
+  const r = await call('POST', '/bridge/run', { source: 'x', params: { queries: Array.from({ length: 4000 }, (_, i) => 'a fairly long search term number ' + i) } });
+  eq([r.status, r.body.error], [413, 'params_too_large']); ok(/params|queries/.test(r.body.detail), r.body.detail);
+  eq(db.prepare('SELECT COUNT(*) AS n FROM bridge_jobs').get().n, before, 'nothing queued');
+});
+await T.t('a queued job whose stored settings do not parse (written by the old code) is failed visibly, never handed out as {}', async () => {
+  db.prepare("INSERT INTO bridge_jobs(id,source,params,status,agent,who,created,claimed,finished,ok,result) VALUES('jbroken','x',?,'queued','','old',1,0,0,0,'')").run('{"queries":["fuel tax cre');
+  const good = (await call('POST', '/bridge/run', { source: 'x', params: { queries: ['ok'] } })).body.id;
+  const n = await call('GET', '/bridge/next?agent=mac-a&sources=x');
+  eq(n.body.job.id, good, 'the collector gets the next readable job');
+  const b = db.prepare("SELECT status, result FROM bridge_jobs WHERE id='jbroken'").get(); eq(b.status, 'failed'); ok(/params_corrupt/.test(b.result), b.result);
+  await call('POST', '/bridge/done', { job: good, ok: true, result: { ok: true }, agent: 'mac-a' });
+});
 const res = T.done(); w.restore(); process.exit(res.fail ? 1 : 0);
