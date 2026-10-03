@@ -158,7 +158,9 @@ await t('GET /sentiment/entities is the leaderboard: mentions, net stance, share
   ok(by.albanese.change === null, 'no previous window yet');
 });
 await t('GET /sentiment/series gives points over time, for an entity and for the whole conversation', async () => {
-  const a = await req('GET', '/sentiment/series?entity=mca&days=30', null, 'read-key'); eq(a.d.points.length, 1); eq(a.d.points[0].n, 3); eq(a.d.bucket, 'day');
+  const a = await req('GET', '/sentiment/series?entity=mca&days=30', null, 'read-key'); eq(a.d.bucket, 'day');
+  // the rows are hours old, so they fall on one Sydney day or, run near midnight there, on two: the total is what is fixed
+  ok(a.d.points.length >= 1 && a.d.points.length <= 2, JSON.stringify(a.d.points)); eq(a.d.points.reduce((x, p) => x + p.n, 0), 3);
   const b = await req('GET', '/sentiment/series?days=30&bucket=hour', null, 'read-key'); ok(b.d.points.length >= 3 && b.d.points.every(p => typeof p.score === 'number'), JSON.stringify(b.d.points));
   const c = await req('GET', '/sentiment/series?days=30&issue=ftc', null, 'read-key'); eq(c.d.points.reduce((x, p) => x + p.n, 0), 3);
 });
