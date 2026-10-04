@@ -1734,6 +1734,38 @@ brand** (Inspect, a form per kind, Preview, Confirm with a reason; hidden
 from read-only keys). Harnesses: `tests/studio-s6-worker.mjs` (7),
 `tests/studio-brand-browser.mjs` (4).
 
+**One context compiler (S7).** Every stage that asks a model for words, a
+plan or a judgement - strategy, directions, production, sequence, revise,
+concepts, suggestions - gets its context from `stCompileContext(env, p,
+{channels, stage, refs: {images, mode, chosen, attachChosen} | null, art})`:
+the client context (`stContext`: kit block, exemplars, learned corrections),
+the references and their pack (`stRefBundle` + `stReferencePack`, the chosen
+references attached as images when asked), the artwork memory, the placement
+evidence (`stPlacementEvidence` on the pack) and one `identityText`
+(CAMPAIGN IDENTITY, PALETTE, the placement rule or observation) that now
+reaches every path alike - the directions and the revise stage used to see
+no identity line at all. It returns a **manifest** of what informed the
+call: the facts by id with source, the banned terms, voice and standing
+rules, identity and mark policy, the corrections by id with their rule, the
+examples count, the references attached / read / excluded / unavailable, the
+artwork memory counts, the placement (basis, corner, confidence, mandatory),
+the marks on file, the prompt sections with their sizes, the models, and
+`omitted[]` - what was held but left out, each with its reason (a pending
+fact, another campaign's fact, an excluded or unanalysed reference, another
+campaign's artwork). Stages store it as `informed` on the versions and
+events they write (production and sequence versions, the revise versions and
+event, the strategy / directions / concepts events, the suggestions answer),
+and `GET /studio/used` answers `informed` from the generating version
+through later hand edits (or from the concept event that made the words).
+The Studio's kit block is now campaign-scoped (`contentKitBlock(...,
+{campaignOnly: true})`: the campaign's own facts and the client-wide ones;
+other campaigns' facts counted in `excludedFacts`), because the figure
+checks already judge against the campaign's facts only; the Content Desk
+keeps every approved fact, the campaign's first. In-app: **What informed this
+creative?** inside "What the Studio used" on every asset, and the client
+context view names the other campaigns' facts it leaves out. Harness:
+`tests/studio-s7-worker.mjs` (5).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

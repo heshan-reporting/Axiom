@@ -3581,12 +3581,15 @@ function contentItemCheck(item, allowed, banned) {
 }
 /** The client block of a compose or revise prompt: voice, rules, the chosen
  *  campaign, the audience, the facts that may be quoted, the words never used. */
-function contentKitBlock(kit, campaignId, segmentId, platforms) {
-  kit = kit || {};
+function contentKitBlock(kit, campaignId, segmentId, platforms, opts) {
+  kit = kit || {}; opts = opts || {};
   const camp = (kit.campaigns || []).find(c => c.id === campaignId) || null;
   const seg = (kit.segments || []).find(s => s.id === segmentId) || null;
-  let facts = (kit.facts || []).filter(f => f.status !== 'pending');
-  if (camp) { const own = facts.filter(f => f.campaign === camp.id); const rest = facts.filter(f => f.campaign !== camp.id); facts = own.concat(rest); }
+  let facts = (kit.facts || []).filter(f => f.status !== 'pending'); let excludedFacts = 0;
+  // the Content Desk offers every approved fact, the campaign's own first (a HOOF post may cite the national tax figure). The
+  // Studio (opts.campaignOnly, S7) carries the campaign's own facts and the client-wide ones only: its figure checks judge
+  // against the campaign's facts, so offering another campaign's invited figures the checks would then flag.
+  if (camp) { const own = facts.filter(f => f.campaign === camp.id); const shared = facts.filter(f => !f.campaign); const rest = facts.filter(f => f.campaign && f.campaign !== camp.id); if (opts.campaignOnly) { excludedFacts = rest.length; facts = own.concat(shared); } else facts = own.concat(shared, rest); }
   facts = facts.slice(0, 40);
   let s = '';
   if (kit.voice) s += '\n\nCLIENT VOICE:\n' + kit.voice;
@@ -3602,7 +3605,7 @@ function contentKitBlock(kit, campaignId, segmentId, platforms) {
   const pn = kit.platforms || {};
   (platforms || []).forEach(p => { if (pn[p] && pn[p].notes) s += '\n\nHOW THIS CLIENT USES ' + (CONTENT_PLATFORMS[p] || {}).label.toUpperCase() + ': ' + pn[p].notes; });
   if ((kit.people || []).length) s += '\n\nSPOKESPEOPLE: ' + kit.people.map(p => p.name + (p.title ? ' (' + p.title + ')' : '') + (p.role ? ' - ' + p.role : '')).join('; ');
-  return { text: s, campaign: camp, segment: seg, facts, banned: kit.banned || [] };
+  return { text: s, campaign: camp, segment: seg, facts, banned: kit.banned || [], excludedFacts };
 }
 /** Approved examples for this client from the Mind: copy filed by the voice
  *  pack, WIN outcomes the team approved, the content guide. */
@@ -7645,7 +7648,7 @@ async function stContext(env, p, opts) {
   opts = opts || {}; const log = opts.log || (async () => {});
   const kit = (await brandKit(env, p.ns)) || {};
   const channels = (opts.channels || []).filter(c => CONTENT_PLATFORMS[c]);
-  const block = contentKitBlock(kit, p.campaign, (p.brief || {}).segment || '', channels);
+  const block = contentKitBlock(kit, p.campaign, (p.brief || {}).segment || '', channels, { campaignOnly: true });
   let rulesCopy = { text: '', count: 0, ids: [] }, rulesTiles = { text: '', count: 0, ids: [] };
   try { rulesCopy = await engineRules(env, p.ns, 'copy', 0, { campaign: p.campaign }); rulesTiles = await engineRules(env, p.ns, 'tiles', 0, { campaign: p.campaign }); } catch (e) {}
   const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
@@ -7660,15 +7663,64 @@ async function stContext(env, p, opts) {
 /** The Client context view: what the Studio would put in front of the model, itemised, no other client's. */
 async function stContextView(env, p) {
   const kit = (await brandKit(env, p.ns)) || {};
-  const block = contentKitBlock(kit, p.campaign, '', []);
+  const block = contentKitBlock(kit, p.campaign, '', [], { campaignOnly: true });
   let fixes = []; try { fixes = await engineFixes(env, p.ns, null, false); } catch (e) {}
   fixes = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any').filter(f => { const c = stCampaignOf(f); return !c || c === String(p.campaign || ''); });
   let shelf = { docs: 0, error: '' }; try { const hits = await mindRetrieve(env, p.ns, [(p.brief || {}).objective, p.campaign, 'approved creative example'].filter(Boolean).join(' '), 10, { creative: true }); shelf.docs = hits.filter(h => h.ns === p.ns + '_creative').length; shelf.examples = hits.filter(h => /^(copy|outcome|brief|artwork)$/.test(String(h.meta.kind || ''))).length; } catch (e) { shelf.error = 'retrieval unavailable: ' + String(e.message || e).slice(0, 80); }
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
   return { ok: true, ns: p.ns, client, kit: { name: kit.name || '', updated: kit.updated || 0, hasLogo: !!kit.hasLogo, palette: kit.palette || {}, fonts: kit.fonts || {}, voice: String(kit.voice || '').slice(0, 1200), rules: String(kit.rules || '').split(/\n+/).map(s => s.trim()).filter(Boolean).slice(0, 40) },
-    campaign: block.campaign, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name, active: c.active !== false })), facts: block.facts.map(f => ({ id: f.id, text: f.text, source: f.source, status: f.status, campaign: f.campaign })), banned: block.banned,
+    campaign: block.campaign, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name, active: c.active !== false })), facts: block.facts.map(f => ({ id: f.id, text: f.text, source: f.source, status: f.status, campaign: f.campaign })), excludedFacts: block.excludedFacts || 0, banned: block.banned,
     learned: fixes.map(f => ({ id: f.id, task: f.task, scope: stCampaignOf(f) ? 'campaign' : f.scope, campaign: stCampaignOf(f), rule: f.rule, source: f.source, who: f.who, created: f.created })), shelf, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract'), image: 'gemini-3-pro-image at ' + (env.IMAGE_SIZE || '2K') },
     note: 'Recorded with every generation as a context snapshot. Source accuracy and mandatory requirements outrank preferences. Nothing here comes from another client.' };
+}
+// -- S7: one context compiler for every generation path --------------------------------------------------------------
+// Every stage that asks a model for words, a plan or a judgement (strategy, directions, production, sequence, revise,
+// concepts, suggestions) used to assemble its own context from the same parts in its own order. stCompileContext builds
+// those parts once - the client context (kit block, exemplars, learned corrections), the references and their pack, the
+// artwork memory, the mark placement evidence and the campaign identity line - and returns them together with a
+// MANIFEST: what informed the call, as data (facts by id, banned terms, corrections by id, references attached / read /
+// excluded, artwork memory, placement, marks, models) and what was held but deliberately left out (pending facts,
+// another campaign's facts, references and artwork, unanalysed references). Stages store the manifest on the versions
+// and events they write (`informed`), so "What informed this creative?" is answered from the record, never recomputed.
+async function stCompileContext(env, p, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const ctx = await stContext(env, p, { channels: opts.channels || [], log });
+  const wantRefs = opts.refs && typeof opts.refs === 'object';
+  let refs = { text: '', rows: [], images: [], used: [], unanalysed: [] }, pack = null, placement = null, mem = { text: '', count: 0 };
+  if (wantRefs) {
+    refs = await stRefBundle(env, p, { log, images: opts.refs.images == null ? 2 : opts.refs.images });
+    const mode = opts.refs.mode === 'none' || opts.refs.mode === 'chosen' ? opts.refs.mode : (Array.isArray(opts.refs.chosen) && opts.refs.chosen.length && opts.refs.chosenMeansMode ? 'chosen' : 'recommended');
+    // a chosen reference not yet attached is attached (up to three images) so the team's choice reaches the model as pixels
+    if (mode === 'chosen' && opts.refs.attachChosen) { const want = new Set((opts.refs.chosen || []).map(x => stClean(x, 24))); for (const r of refs.rows) { if (want.has(r.id) && !refs.images.some(im => im.ref === r.id) && refs.images.length < 3) { const im = await stRefImage(env, r); if (im) { refs.images.push(Object.assign(im, { ref: r.id, purpose: r.purpose, name: r.name })); r.attached = true; r.prepared = !!im.prepared; r.unavailable = false; } else if (r.key) r.unavailable = true; } } }
+    pack = stReferencePack(refs, { mode, chosen: opts.refs.chosen, campaign: p.campaign });
+    placement = stPlacementEvidence(pack.rows, ctx.kit, p.campaign || '');
+  }
+  if (opts.art) mem = await stArtMemory(env, p.ns, opts.art, p.campaign);
+  const kit = ctx.kit; const camp = ctx.block.campaign || (kit.campaigns || []).find(c => c.id === p.campaign) || null;
+  const identityText = '\n\nCAMPAIGN IDENTITY: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') + '; mark policy: ' + (camp.logoPolicy || 'logo') + (camp.hasWordmark ? ' (wordmark on file)' : '') + (kit.hasLogo ? ' (client logo on file)' : '') : 'no campaign; client logo ' + (kit.hasLogo ? 'on file' : 'not on file'))
+    + '\nPALETTE: ' + JSON.stringify(kit.palette || {}) + '; fonts ' + JSON.stringify(kit.fonts || {})
+    + (placement && placement.basis === 'rule' ? '\nMARK PLACEMENT RULE (approved for the campaign): ' + placement.text : placement && placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : '');
+  // the manifest: what reached the model, by id, and what was held back, by reason
+  let fixes = []; try { fixes = await engineFixes(env, p.ns, null, false); } catch (e) {}
+  const ruleIds = Array.from(new Set([].concat(ctx.rules.copy.ids, ctx.rules.tiles.ids)));
+  const corrections = ruleIds.map(id => { const f = fixes.find(x => x.id === id); return { id, task: f ? f.task : '', rule: stStr(f ? f.rule : '', 160), campaign: f ? stCampaignOf(f) : '' }; });
+  const cid = camp ? camp.id : (p.campaign || '');
+  const omitted = [];
+  (kit.facts || []).forEach(f => { if (f.status === 'pending') omitted.push({ what: 'fact', id: f.id, text: stStr(f.text, 100), why: 'pending review: an unreviewed fact is never quoted' }); else if (cid && f.campaign && f.campaign !== cid) omitted.push({ what: 'fact', id: f.id, text: stStr(f.text, 100), why: 'belongs to the campaign ' + f.campaign + ', not ' + cid }); });
+  if (pack) pack.record.excluded.forEach(x => omitted.push({ what: 'reference', id: x.id, text: x.name, why: x.why }));
+  if (pack) pack.record.unavailable.forEach(x => omitted.push({ what: 'reference image', id: x.id, text: x.name, why: x.why + ' (read by its analysis only)' }));
+  refs.unanalysed.forEach(n => omitted.push({ what: 'reference analysis', text: stStr(n, 120), why: 'not analysed: the model knows its name and purpose only' }));
+  if (mem.otherCampaigns) omitted.push({ what: 'artwork', text: mem.otherCampaigns + ' catalogued artwork' + (mem.otherCampaigns === 1 ? '' : 's'), why: 'from other campaigns: another campaign\'s look is not this one\'s identity' });
+  const sections = [{ id: 'kit', chars: ctx.block.text.length, what: 'voice, standing rules, campaign wording, approved facts, banned terms' }, { id: 'examples', chars: Math.max(0, ctx.text.length - ctx.block.text.length - ctx.rules.copy.text.length), what: 'approved examples from the creative shelf' }, { id: 'corrections', chars: ctx.rules.copy.text.length + (ctx.rules.tiles.ids.some(id => ctx.rules.copy.ids.indexOf(id) < 0) ? ctx.rules.tiles.text.length : 0), what: 'learned corrections' }, { id: 'identity', chars: identityText.length, what: 'campaign identity, palette, fonts, mark placement' }, { id: 'references', chars: pack ? pack.text.length : refs.text.length, what: 'the reference pack' }, { id: 'artMemory', chars: mem.text.length, what: 'catalogued past artwork' }].filter(s => s.chars > 0);
+  const manifest = { v: 1, build: AXIOM_BUILD, stage: opts.stage || '', at: Date.now(), ns: p.ns, client: ctx.client, campaign: cid,
+    kit: { name: kit.name || '', updated: kit.updated || 0, voice: !!kit.voice, standingRules: String(kit.rules || '').split(/\n+/).filter(s => s.trim()).length, identity: camp ? stStr(camp.identity, 200) : '', policy: camp ? (camp.logoPolicy || 'logo') : (kit.hasLogo ? 'logo' : 'none'), facts: ctx.block.facts.map(f => ({ id: f.id, text: stStr(f.text, 100), source: stStr(f.source, 60) })).slice(0, 40), banned: ctx.block.banned.map(b => b.term).slice(0, 60) },
+    corrections, examples: ctx.snapshot.examples || 0,
+    references: pack ? { mode: pack.mode, attached: pack.record.attached.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), read: pack.record.read.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), excluded: pack.record.excluded.length, unavailable: pack.record.unavailable.length } : (wantRefs ? { mode: 'all', attached: [], read: refs.used.filter(r => r.analysed).map(r => ({ id: r.id, name: r.name, purpose: r.purpose })), excluded: 0, unavailable: 0 } : null),
+    artMemory: opts.art ? { count: mem.count || 0, sameCampaign: mem.sameCampaign || 0, otherCampaigns: mem.otherCampaigns || 0 } : null,
+    placement: placement ? { basis: placement.basis, corner: placement.corner, confidence: placement.confidence, mandatory: !!placement.mandatory, evidence: placement.evidence.length, exceptions: placement.exceptions.length } : null,
+    marks: { policy: camp ? (camp.logoPolicy || 'logo') : 'logo', logoOnFile: !!kit.hasLogo, wordmarkOnFile: !!(camp && camp.hasWordmark) },
+    omitted: omitted.slice(0, 40), sections, models: ctx.snapshot.models };
+  return { ctx, refs, pack, mem, placement, identityText, manifest };
 }
 // -- the claim ledger: every figure and quotation in a source, tied to its passage ---------------------
 const ST_UNIT = { dollars: 'dollars', dollar: 'dollars', 'dollars a litre': 'dollars', 'dollars per litre': 'dollars', cents: 'cents', cent: 'cents', c: 'cents', 'c/l': 'cents', 'cents a litre': 'cents', 'cents per litre': 'cents', bn: 'billion', b: 'billion', billion: 'billion', m: 'million', mn: 'million', million: 'million', k: 'thousand', thousand: 'thousand', '%': 'per cent', percent: 'per cent', 'per cent': 'per cent', pc: 'per cent', jobs: 'jobs', job: 'jobs', australians: 'people', people: 'people', workers: 'people', employees: 'people', businesses: 'businesses', business: 'businesses', companies: 'businesses', years: 'years', year: 'years', tonnes: 'tonnes', hectares: 'hectares', homes: 'homes', households: 'households', members: 'members', mines: 'mines' };
@@ -8134,7 +8186,7 @@ function stStrategyText(p) {
   return '\nCREATIVE STRATEGY (' + (s.status === 'confirmed' ? 'confirmed by the team - work within it' : 'proposed, not yet confirmed - follow it unless the brief contradicts it') + '):\nproblem: ' + s.problem + '\naudience: ' + s.audience.who + '; now: ' + s.audience.now + '; wanted: ' + s.audience.wanted + '\ninsight: ' + s.audience.insight + '\ncampaign idea: ' + s.idea + '\nproposition: ' + s.proposition + (s.proof.length ? '\nproof (claim ids): ' + s.proof.join(', ') : '') + '\ntone: ' + s.tone + (s.avoid.length ? '\navoid: ' + s.avoid.join('; ') : '');
 }
 async function stStrategyStage(env, job, p, log) {
-  const ctx = await stContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log });
+  const cc = await stCompileContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'strategy' }); const ctx = cc.ctx;
   const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
   const sys = 'You are the creative strategist of an Australian political communications agency working for ' + ctx.client + '. From the brief, the source ledger and the client context you write the creative strategy the art director and copywriter will work from: specific to this audience and this argument, never generic. Return strict JSON only: {"problem":"<=40 words: the communication problem, not the business goal","audience":{"who":"<=25 words","now":"<=25 words: what they believe or do now","wanted":"<=25 words: what we want them to believe or do","insight":"<=35 words: the human truth that makes the idea land"},"idea":"<=20 words: the campaign idea in one line","proposition":"<=25 words: the single thing to say","proof":["ledger claim ids or fact:<id> that support it"],"tone":"<=20 words","avoid":["what not to say or show"],"risks":["how an opponent attacks it"],"measures":["qualitative signals the team will look for; no forecasts, no numbers you do not have"],"questions":["what the team must decide that the brief does not settle"]}. Figures only from the ledger or approved facts. No exclamation marks.' + ctx.text;
   const user = 'BRIEF:\n' + stBriefText(p) + (job.input.instruction ? '\n\nINSTRUCTION FROM THE TEAM: ' + stStr(job.input.instruction, 1200) : '') + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source in the project)') + '\n\nWrite the strategy.';
@@ -8143,7 +8195,7 @@ async function stStrategyStage(env, job, p, log) {
   const j = relJson(r.text); if (!j || !j.idea) throw new Error('strategy_unparseable: the model did not return a strategy as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '" (not retried)');
   const st = Object.assign(stStrategyNorm(j, known), { status: 'proposed', model: r.model, at: Date.now(), job: job.id, source: 'ai' });
   await stBriefPatch(env, p.id, b => { b.strategy = st; });
-  await stEvent(env, p.id, 'strategy', { text: 'Strategy proposed: ' + st.idea + ' - ' + st.proposition + ' (for ' + (st.audience.who || 'the audience') + '). Edit and confirm it on the brief; directions and production read it from there.' + (st.questions.length ? ' Open questions: ' + st.questions.join('; ') + '.' : ''), job: job.id, model: r.model }, 'studio');
+  await stEvent(env, p.id, 'strategy', { text: 'Strategy proposed: ' + st.idea + ' - ' + st.proposition + ' (for ' + (st.audience.who || 'the audience') + '). Edit and confirm it on the brief; directions and production read it from there.' + (st.questions.length ? ' Open questions: ' + st.questions.join('; ') + '.' : ''), job: job.id, model: r.model, informed: cc.manifest }, 'studio');
   await log('out', 'strategy proposed: ' + st.idea);
   return { idea: st.idea, proposition: st.proposition, questions: st.questions, model: r.model };
 }
@@ -8158,7 +8210,7 @@ async function stSequenceStage(env, job, p, log) {
   const channels = (Array.isArray(inp.channels) && inp.channels.length ? inp.channels : ((p.brief || {}).channels || ['instagram', 'facebook', 'linkedin'])).filter(c => ST_CHANNELS[c]);
   if (!channels.length) throw new Error('channels_required: name the channels the sequence runs on (not retried)');
   const count = Math.max(2, Math.min(8, parseInt(inp.count, 10) || 4));
-  const ctx = await stContext(env, p, { channels, log }); const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
+  const cc = await stCompileContext(env, p, { channels, log, stage: 'sequence' }); const ctx = cc.ctx; const led = await stLedger(env, p.id); const known = new Set(led.claims.map(c => c.id));
   let direction = null; if (inp.direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=? AND project=?').bind(stClean(inp.direction, 24), p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
   if (!direction) { const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE project=? AND chosen=1 ORDER BY created DESC LIMIT 1').bind(p.id).first(); direction = d ? Object.assign({ id: d.id }, pjs(d.data, {})) : null; }
   const sys = 'You are the creative director of an Australian political communications agency planning a campaign sequence for ' + ctx.client + ': a set of assets that tell one argument in order across channels, each with a job in the sequence - not several unrelated posts. Return strict JSON only: {"name":"<=6 words","arc":"<=40 words: how the sequence moves the audience from the first asset to the last","cadence":"<=20 words: timing across days","items":[{"order":1,"role":"' + ST_SEQ_ROLES.join('|') + '","channel":"' + channels.join('|') + '","format":"1:1|4:5|9:16|16:9","day":0,"purpose":"<=20 words: this asset\'s job","relation":"<=20 words: how it carries the master idea","headline":"in the client voice","support":"<=25 words","cta":"<=6 words","caption":"for the channel","alt":"<=20 words","claims":["ledger ids"]' + (inp.deliverable === 'copy' ? '' : ',"plan":' + ST_PLAN_SCHEMA) + '}]}. Exactly ' + count + ' items, ordered.' + (inp.deliverable === 'copy' ? '' : ' Each item has its own composition for its job in the sequence - an opener, a proof, a response or a call to action are designed differently, with their own hierarchy, medium and placement of every element - not one template repeated; the set still reads as one campaign. ' + ST_PLAN_RULES + (inp.imagery === 'none' ? ST_NO_IMAGERY_LINE : '')) + ' Figures only from the ledger or approved facts, quoted exactly. Headlines within the fit for each format: ' + Object.keys(ST_HEADLINE_FIT).map(f => f + ' ' + ST_HEADLINE_FIT[f] + ' chars').join(', ') + '. No exclamation marks.' + ctx.text;
@@ -8186,7 +8238,7 @@ async function stSequenceStage(env, job, p, log) {
     const aid = stId('a'); const title = (i + 1) + '. ' + role + ' - ' + ST_CHANNELS[channel].label + ' ' + format;
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, 'Sequence: ' + name, channel, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
-    const v = await stAppendVersion(env, a, { kind: 'text', note: 'sequence ' + name + ', ' + (i + 1) + ' of ' + sorted.length + ' (' + role + '), ' + (how === 'plan' ? layout.mediumName + ' planned for its role' : how === 'house' ? 'house composition (' + why + '; not a bespoke design)' : 'copy') + ', no imagery yet', copy, layout, image: null, mode: inp.deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, sequence: seqId, order: i + 1, of: sorted.length, role, how, planIn: planIn || undefined, bespoke: how === 'plan' ? true : how === 'house' ? false : undefined, fallbackReason: why || undefined, medium: how === 'plan' ? layout.medium : undefined, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), day: Number(it.day) || 0, direction: direction ? direction.id : '', claims: (Array.isArray(it.claims) ? it.claims : []).map(String).filter(x => known.has(x)), template: how === 'plan' ? 'plan' : template }) }, 'studio');
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'sequence ' + name + ', ' + (i + 1) + ' of ' + sorted.length + ' (' + role + '), ' + (how === 'plan' ? layout.mediumName + ' planned for its role' : how === 'house' ? 'house composition (' + why + '; not a bespoke design)' : 'copy') + ', no imagery yet', copy, layout, image: null, mode: inp.deliverable === 'copy' ? 'copy' : 'composition', checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, sequence: seqId, order: i + 1, of: sorted.length, role, how, planIn: planIn || undefined, bespoke: how === 'plan' ? true : how === 'house' ? false : undefined, fallbackReason: why || undefined, medium: how === 'plan' ? layout.medium : undefined, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), day: Number(it.day) || 0, direction: direction ? direction.id : '', claims: (Array.isArray(it.claims) ? it.claims : []).map(String).filter(x => known.has(x)), template: how === 'plan' ? 'plan' : template }) }, 'studio');
     items.push({ order: i + 1, role, channel, format, day: Number(it.day) || 0, purpose: stStr(it.purpose, 200), relation: stStr(it.relation, 200), asset: aid, version: v.id, headline: copy.headline || '', how, medium: how === 'plan' ? layout.medium : undefined });
   }
   const seq = { id: seqId, name, arc: stStr(j.arc, 400), cadence: stStr(j.cadence, 200), direction: direction ? direction.id : '', items, at: now, model: r.model, job: job.id };
@@ -8197,12 +8249,12 @@ async function stSequenceStage(env, job, p, log) {
 }
 async function stDirectStage(env, job, p, log) {
   const n = Math.min(Math.max(parseInt(job.input.n, 10) || 3, 1), 5);   // the exploration budget: three by default, one to five
-  const ctx = await stContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log });
+  const cc = await stCompileContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'direct', refs: { images: 0 }, art: 4 }); const ctx = cc.ctx;
   const led = await stLedger(env, p.id);
   const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","idea":"<=15 words: the campaign idea","copyApproach":"<=20 words: how the words work (hierarchy, register, device)","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","references":["reference names it draws on"],"plan":["<=12 words each: the production steps"],"renders":0}]}. The directions must differ in what is drawn as well as in what is argued: change the medium and composition when the argument allows, never only the photograph behind the same panel. "renders" is the number of images the first asset would need (0 for typography-led or diagram work). Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
   const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
-    + (await stRefBundle(env, p, { log, images: 0 })).text + (await stArtMemory(env, p.ns, 4, p.campaign)).text
+    + cc.refs.text + cc.mem.text + cc.identityText
     + '\n\nGive ' + n + ' directions.';
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + n + ' directions for an open brief, grounded in ' + led.claims.length + ' ledger claims, the references and the client context');
   const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log });
@@ -8217,7 +8269,7 @@ async function stDirectStage(env, job, p, log) {
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
   await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title).join(' / ') + (similar ? ' - ' + similar + ' read as close to another; ask for another' : ' - distinct arguments'));
-  await stEvent(env, p.id, 'directions', { diversity: diversity.score, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids }, 'studio');
+  await stEvent(env, p.id, 'directions', { diversity: diversity.score, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
   return { directions: ids, titles: dirs.map(d => d.title), similar, diversity: diversity.score, model: r.model };
 }
 // -- the brief: what is settled, what is assumed, what blocks spending ------------------------------------------
@@ -8411,7 +8463,8 @@ async function stCopyStage(env, job, p, log) {
   const deliverable = ['copy', 'visual', 'set'].indexOf(inp.deliverable) >= 0 ? inp.deliverable : 'set';
   const formats = {}; channels.forEach(c => { const f = inp.formats && inp.formats[c]; formats[c] = ST_FORMATS[f] ? f : ST_CHANNELS[c].format; });
   const size = ['1K', '2K', '4K'].indexOf(inp.size) >= 0 ? inp.size : (env.IMAGE_SIZE || '2K');
-  const ctx = await stContext(env, p, { channels, log });
+  // one compiler for the whole context (S7): the kit block, corrections, exemplars, references and their pack, artwork memory, placement
+  const cc = await stCompileContext(env, p, { channels, log, stage: 'copy', refs: deliverable === 'copy' ? null : { images: 2, mode: inp.refMode, chosen: inp.refs }, art: deliverable === 'copy' ? 0 : 4 }); const ctx = cc.ctx;
   // the creation mode was chosen on the brief; finished mode paints the mark from its file, so the file must exist before anything is spent
   const finished = deliverable !== 'copy' && ((p.brief || {}).creationMode === 'finished' || inp.creationMode === 'finished') && inp.imagery !== 'none';
   let markFiles = null;
@@ -8432,10 +8485,7 @@ async function stCopyStage(env, job, p, log) {
   const drow = inp.direction ? await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=? AND project=?').bind(stClean(inp.direction, 24), p.id).first() : await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE project=? AND chosen=1 ORDER BY created DESC LIMIT 1').bind(p.id).first();
   if (drow) direction = Object.assign({ id: drow.id }, pjs(drow.data, {}));
   const template = stTemplateFor(ctx.kit, p.campaign || (ctx.block.campaign || {}).id, inp.template);
-  const refs = deliverable === 'copy' ? { text: '', rows: [], images: [], used: [], unanalysed: [] } : await stRefBundle(env, p, { log, images: 2 });
-  const pack = deliverable === 'copy' ? null : stReferencePack(refs, { mode: inp.refMode, chosen: inp.refs, campaign: p.campaign });
-  const mem = deliverable === 'copy' ? { text: '', count: 0 } : await stArtMemory(env, p.ns, 4, p.campaign);
-  const placement = deliverable === 'copy' ? null : stMarkPlacement(refs.rows);
+  const refs = cc.refs, pack = cc.pack, mem = cc.mem, placement = cc.placement;
   const camp = ctx.block.campaign || (ctx.kit.campaigns || []).find(c => c.id === p.campaign) || null;
   const specLines = channels.map(c => { const s = CONTENT_PLATFORMS[c]; const own = (ctx.kit.platforms || {})[c] || {}; return '- ' + c + ' (' + s.label + ', tile ' + formats[c] + ', ' + ST_FORMATS[formats[c]].w + 'x' + ST_FORMATS[formats[c]].h + '): ' + s.register + ' Caption up to ' + (own.max || s.max) + ' characters; ' + ((own.hashtags != null ? own.hashtags : s.hashtags) ? 'at most ' + (own.hashtags != null ? own.hashtags : s.hashtags) + ' hashtag(s)' : 'no hashtags') + '. Headline at most ' + ST_HEADLINE_FIT[formats[c]] + ' characters for ' + formats[c] + '.'; }).join('\n');
   const sys = 'You are the creative team (creative director, art director and senior copywriter) of an Australian political communications agency, producing a coordinated set for ' + ctx.client + '. One argument, adapted to each channel: LinkedIn leads with the figure and its source, Instagram with the human consequence, Facebook with the plain ask, X with one fact and its source. Write exactly as the client has approved before. Return strict JSON only, no prose: {"pieces":[{"channel":"linkedin","headline":"the words on the tile","support":"<=140 characters, the second line on the tile or empty","cta":"<=30 characters or empty","caption":"the post text for the channel","alt":"<=140 characters describing the finished tile for accessibility","visual":"<=160 characters: the imagery in one line (subject, mood, what to avoid), no text",'
@@ -8451,7 +8501,7 @@ async function stCopyStage(env, job, p, log) {
     + (inp.imagery === 'none' && deliverable !== 'copy' ? ST_NO_IMAGERY_LINE : '')
     + (finished ? ST_FINISHED_LINE : '')
     + (inp.instruction ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1500) : '')
-    + (deliverable === 'copy' ? '' : '\n\nCAMPAIGN IDENTITY: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') + '; mark policy: ' + (camp.logoPolicy || 'logo') + (camp.hasWordmark ? ' (wordmark on file)' : '') + (ctx.kit.hasLogo ? ' (client logo on file)' : '') : 'no campaign; client logo ' + (ctx.kit.hasLogo ? 'on file' : 'not on file')) + '\nPALETTE: ' + JSON.stringify(ctx.kit.palette || {}) + '; fonts ' + JSON.stringify(ctx.kit.fonts || {}) + (placement && placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : ''))
+    + (deliverable === 'copy' ? '' : cc.identityText)
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED - do not use]' : '')).join('\n') || '(no source in this project: use only the APPROVED FACTS, or no figures)')
     + (led.text ? '\n\nSOURCE TEXT (excerpt):\n' + led.text.slice(0, 6000) : '')
     + (pack ? pack.text : refs.text) + (refs.images.length ? '\n(Reference images are attached in the order listed.)' : '') + mem.text
@@ -8511,7 +8561,7 @@ async function stCopyStage(env, job, p, log) {
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
     const bgRegion = how === 'plan' ? (layout.regions || []).find(x => x.role === 'background') : null;
-    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
     assets.push(aid); versions.push(v.id);
     if (deliverable !== 'copy' && inp.render !== false) {
       if (how === 'plan' || finished) renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true, marks: markFiles ? markFiles.marks : undefined }));
@@ -8736,10 +8786,8 @@ async function stReviseStage(env, job, p, log) {
     return { kind: 'question', eid, changed: [] };
   }
   const channels = Array.from(new Set(targets.map(t => t.asset.channel).filter(c => CONTENT_PLATFORMS[c])));
-  const ctx = await stContext(env, p, { channels, log });
+  const cc = await stCompileContext(env, p, { channels, log, stage: 'revise', refs: { images: 1 }, art: 4 }); const ctx = cc.ctx, refs = cc.refs, mem = cc.mem;
   const led = await stLedger(env, p.id);
-  const refs = await stRefBundle(env, p, { log, images: 1 });
-  const mem = await stArtMemory(env, p.ns, 4, p.campaign);
   const art = targets[0].version && targets[0].version.mode !== 'copy' ? await stVersionImage(env, targets[0].version, log) : null;
   const sys = 'You are the creative team (creative director, copywriter, designer) of an Australian political communications agency, working for ' + ctx.client + '. The team lead gives you a direction about one or more assets. First decide what the instruction asks for, then answer with strict JSON only, no prose:\n'
     + '{"kind":"text|alternatives|render|adapt|layout|design|question",'
@@ -8758,7 +8806,7 @@ async function stReviseStage(env, job, p, log) {
     + ctx.text;
   const user = 'INSTRUCTION FROM THE TEAM LEAD (target: ' + (target === 'set' ? 'the whole set' : target === 'family' ? 'the family ' + targets[0].asset.family : 'one asset') + '):\n' + instruction
     + '\n\nASSETS IN SCOPE (' + targets.length + '):\n' + targets.map(stAssetBrief).join('\n\n')
-    + (p.campaign ? '\n\nCAMPAIGN: ' + p.campaign : '') + '\n\nBRIEF: ' + [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' - ')
+    + (p.campaign ? '\n\nCAMPAIGN: ' + p.campaign : '') + cc.identityText + '\n\nBRIEF: ' + [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' - ')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.verified === false ? ' [UNVERIFIED - do not use]' : '')).join('\n') || '(no source: only the APPROVED FACTS may carry figures)')
     + (targets[0].version && targets[0].version.layout && targets[0].version.layout.design ? '\n\nCOMPOSITION OF ' + targets[0].asset.title + ' NOW: ' + stDescribeSpec(targets[0].version.layout.design) + (art ? ' (its artwork is attached as the first image)' : '') : '')
     + refs.text + (refs.images.length ? '\n(The reference image is attached' + (art ? ' after the artwork' : '') + '.)' : '') + mem.text;
@@ -8771,7 +8819,8 @@ async function stReviseStage(env, job, p, log) {
   const inScope = id => targets.find(t => t.asset.id === stClean(id, 24));
   let offer = null;
   if (j.memory && typeof j.memory === 'object' && j.memory.standing && Number(j.memory.confidence) >= 0.6 && String(j.memory.rule || '').trim()) offer = { rule: stStr(j.memory.rule, 300), scope: j.memory.scope === 'campaign' && p.campaign ? 'campaign' : 'client', campaign: p.campaign || '', task: kind === 'render' || kind === 'layout' || kind === 'layers' || kind === 'design' ? 'tiles' : 'copy', instruction };
-  const base = { eid, instruction, target, model: r.model, job: job.id, offer: offer || undefined };
+  const base = { eid, instruction, target, model: r.model, job: job.id, offer: offer || undefined, informed: cc.manifest };
+  const vctx = (t, extra) => Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model, informed: cc.manifest }, extra || {});
   const changed = [], kept = [];
   if (kind === 'text' || kind === 'layout') {
     const changes = Array.isArray(j.changes) ? j.changes : [];
@@ -8784,12 +8833,12 @@ async function stReviseStage(env, job, p, log) {
         const dir = String(j.layout.headlineSize || 'same'); if (dir !== 'same') { layout = JSON.parse(JSON.stringify(t.version.layout)); const hl = layout.layers.find(l => l.role === 'headline'); if (hl) { const d = dir === 'larger' ? 0.6 : -0.6; hl.h = Math.round(hl.h * ((hl.size + d) / hl.size) * 10) / 10; hl.size = Math.max(2.4, Math.round((hl.size + d) * 10) / 10); } }
       } else if (kind === 'layout' && t.asset.locks.layout) kept.push(t.asset.title + '/layout');
       if (!Object.keys(patch).length && !layout) continue;
-      const v = await stAppendVersion(env, t.asset, { kind: layout && !Object.keys(patch).length ? 'layout' : 'text', note: 'directed: ' + stStr(c.note || instruction, 80), copy: patch, layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model }) }, 'studio');
+      const v = await stAppendVersion(env, t.asset, { kind: layout && !Object.keys(patch).length ? 'layout' : 'text', note: 'directed: ' + stStr(c.note || instruction, 80), copy: patch, layout, context: vctx(t) }, 'studio');
       await stVersionChecks(env, p, t.asset, v);
       changed.push(t.asset.id);
     }
     if (kind === 'layout' && j.layout && Array.isArray(j.layout.assets) && !changes.length) {
-      for (const id of j.layout.assets) { const t = inScope(id); if (!t || !t.version || !t.version.layout || !t.version.layout.layers) continue; if (t.asset.locks.layout) { kept.push(t.asset.title + '/layout'); continue; } const dir = String(j.layout.headlineSize || 'same'); if (dir === 'same') continue; const layout = JSON.parse(JSON.stringify(t.version.layout)); const hl = layout.layers.find(l => l.role === 'headline'); if (!hl) continue; const d = dir === 'larger' ? 0.6 : -0.6; hl.h = Math.round(hl.h * ((hl.size + d) / hl.size) * 10) / 10; hl.size = Math.max(2.4, Math.round((hl.size + d) * 10) / 10); const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: headline ' + dir, layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300) }) }, 'studio'); await stVersionChecks(env, p, t.asset, v); changed.push(t.asset.id); }
+      for (const id of j.layout.assets) { const t = inScope(id); if (!t || !t.version || !t.version.layout || !t.version.layout.layers) continue; if (t.asset.locks.layout) { kept.push(t.asset.title + '/layout'); continue; } const dir = String(j.layout.headlineSize || 'same'); if (dir === 'same') continue; const layout = JSON.parse(JSON.stringify(t.version.layout)); const hl = layout.layers.find(l => l.role === 'headline'); if (!hl) continue; const d = dir === 'larger' ? 0.6 : -0.6; hl.h = Math.round(hl.h * ((hl.size + d) / hl.size) * 10) / 10; hl.size = Math.max(2.4, Math.round((hl.size + d) * 10) / 10); const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: headline ' + dir, layout, context: vctx(t) }, 'studio'); await stVersionChecks(env, p, t.asset, v); changed.push(t.asset.id); }
     }
     const text = reply + (changed.length ? ' ' + (kind === 'layout' ? 'Layout change' : 'Text change') + ' only: ' + changed.length + ' asset' + (changed.length === 1 ? '' : 's') + ' at a new version, image kept, no render spent.' : ' Nothing changed' + (kept.length ? ': the fields named are locked.' : '.')) + (kept.length ? ' Kept locked: ' + kept.join(', ') + '.' : '');
     await stEvent(env, p.id, 'revise', Object.assign({}, base, { text, changed, render: false, locked: kept.length ? kept : undefined }), 'studio');
@@ -8805,7 +8854,7 @@ async function stReviseStage(env, job, p, log) {
     const keeps = (Array.isArray(lz.keeps) ? lz.keeps : []).map(x => stStr(x, 80)).filter(Boolean).slice(0, 6);
     const unchanged = t.version.layout.layers.filter(l => !res.changed.some(c => c.id === l.id)).map(l => l.id);
     if (res.changed.length) {
-      const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + res.changed.map(c => c.id + ' (' + c.fields.join(', ') + ')').join('; ').slice(0, 150), layout: res.layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model }) }, 'studio');
+      const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + res.changed.map(c => c.id + ' (' + c.fields.join(', ') + ')').join('; ').slice(0, 150), layout: res.layout, context: vctx(t) }, 'studio');
       await stVersionChecks(env, p, t.asset, v); changed.push(t.asset.id);
     }
     const text = reply + (res.changed.length ? ' Changed only ' + res.changed.map(c => c.id + ' (' + c.fields.join(', ') + ')').join('; ') + ' on ' + t.asset.title + '; ' + unchanged.length + ' other layer' + (unchanged.length === 1 ? '' : 's') + ' and the photograph unchanged, no render spent.' : ' Nothing changed.') + (res.refused.length ? ' Not done: ' + res.refused.map(x => x.id + ' - ' + x.why).join('; ') + '.' : '');
@@ -8833,7 +8882,7 @@ async function stReviseStage(env, job, p, log) {
         if (!L0.layers.some(l => l.type === 'text') && L0.approach !== 'artwork') { planNotes.push(t.asset.title + ': the plan placed no words, so it was not applied'); continue; }
         const cl = stCarryLocked(L0, t.version.layout); const layout = cl.layout;
         if (cl.carried.length) kept.push(t.asset.title + '/' + cl.carried.join(','));
-        const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(dz.why || pl.story || instruction, 80), layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model, planIn: pl, how: 'plan', medium: layout.medium }) }, 'studio');
+        const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(dz.why || pl.story || instruction, 80), layout, context: vctx(t, { planIn: pl, how: 'plan', medium: layout.medium }) }, 'studio');
         await stVersionChecks(env, p, t.asset, v);
         changed.push(t.asset.id); design = design || { summary: layout.mediumName + (layout.story ? ': ' + layout.story.slice(0, 120) : '') + (layout.unsupported && layout.unsupported.length ? ' (noted: ' + layout.unsupported.slice(0, 2).join('; ') + ')' : '') };
         continue;
@@ -8841,7 +8890,7 @@ async function stReviseStage(env, job, p, log) {
       const spec = stSpecNormalise(Object.assign({}, dz.spec && typeof dz.spec === 'object' ? dz.spec : {}, { image: Object.assign({}, (dz.spec && dz.spec.image) || {}, imageSpec || { keep: true }) }), t.version.layout, ctx.kit);
       spec.image.keep = !imageSpec; design = design || spec; planNotes.push(t.asset.title + ': answered with a preset spec, not a plan');
       const layout = stLayoutFromSpec(ctx.kit, p.ns, t.asset.format, spec, t.version.copy, t.version.layout, p.campaign);
-      const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(spec.concept || instruction, 80), layout, context: Object.assign({}, t.version.context || {}, { job: job.id, instruction: instruction.slice(0, 300), model: r.model, design: stDescribeSpec(spec) }) }, 'studio');
+      const v = await stAppendVersion(env, t.asset, { kind: 'layout', note: 'directed: ' + stStr(spec.concept || instruction, 80), layout, context: vctx(t, { design: stDescribeSpec(spec) }) }, 'studio');
       await stVersionChecks(env, p, t.asset, v);
       changed.push(t.asset.id);
     }
@@ -9787,8 +9836,10 @@ async function stUsed(env, p, a, v) {
   const edits = (firstGen < 0 ? chain : chain.slice(0, firstGen)).map(x => ({ version: x.id, note: x.note, kind: x.kind })).reverse();
   const ctx = (textGen && textGen.context) || {};
   // the concept card that made it, when the words or plan came from one
-  let refPack = ctx.refPack || null, concept = null;
-  for (const x of chain.slice(0, 12)) { if (refPack && concept) break; try { const ap = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='applied' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + x.id + '"%').first(); const apd = ap ? pjs(ap.data, null) : null; if (apd && apd.eid) { const ce = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + apd.eid + '"%').first(); const ced = ce ? pjs(ce.data, null) : null; if (ced) { if (!refPack && ced.refPack) refPack = ced.refPack; concept = concept || { eid: ced.eid, mode: ced.mode, model: ced.model, job: ced.job || '', option: (ced.options || [])[apd.index] ? ced.options[apd.index].name : '', influence: (ced.options || [])[apd.index] ? ced.options[apd.index].influence || [] : [], version: x.id }; } } } catch (e) {} }
+  let refPack = ctx.refPack || null, concept = null, informed = null;
+  // the manifest of what informed the words and plan: on the generating version, else on the concept event that made it
+  for (const x of chain) { if (x.context && x.context.informed) { informed = x.context.informed; break; } }
+  for (const x of chain.slice(0, 12)) { if (refPack && concept) break; try { const ap = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='applied' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"version":"' + x.id + '"%').first(); const apd = ap ? pjs(ap.data, null) : null; if (apd && apd.eid) { const ce = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + apd.eid + '"%').first(); const ced = ce ? pjs(ce.data, null) : null; if (ced) { if (!refPack && ced.refPack) refPack = ced.refPack; if (!informed && ced.informed) informed = ced.informed; concept = concept || { eid: ced.eid, mode: ced.mode, model: ced.model, job: ced.job || '', option: (ced.options || [])[apd.index] ? ced.options[apd.index].name : '', influence: (ced.options || [])[apd.index] ? ced.options[apd.index].influence || [] : [], version: x.id }; } } } catch (e) {} }
   const refRows = (await env.MIND_DB.prepare('SELECT id, name, purpose, campaign FROM studio_references WHERE project=?').bind(p.id).all()).results || [];
   const refName = id => { const r = refRows.find(x => x.id === id); return r ? { id, name: r.name, purpose: r.purpose, campaign: r.campaign || '' } : { id, name: id, purpose: '', campaign: '' }; };
   const ruleIds = Array.from(new Set([].concat((ctx.rules && ctx.rules.copy) || [], (ctx.rules && ctx.rules.tiles) || [])));
@@ -9814,7 +9865,7 @@ async function stUsed(env, p, a, v) {
     references: refPack ? { mode: refPack.mode, attached: (refPack.attached || []).map(refName), read: (refPack.read || []).map(refName), excluded: refPack.excluded || [], unavailable: refPack.unavailable || [] } : null,
     rules, facts: ctx.facts != null ? ctx.facts : null, banned: ctx.banned != null ? ctx.banned : null, examples: ctx.examples != null ? ctx.examples : null,
     marks, models: { text: ctx.model || (concept && concept.model) || '', image: imagery ? imagery.model : '', imageSize: imagery ? imagery.size : '', pixels: imagery ? imagery.pixels : undefined, fallback: imagery ? imagery.fallback : false },
-    concept, compiled: cj, assumptions: (ctx.brief && ctx.brief.assumptions) || [], gaps: (ctx.brief && ctx.brief.gaps) || [], acknowledged: !!(ctx.brief && ctx.brief.acknowledged), how: ctx.how || '', medium: ctx.medium || '', size: ctx.size || '',
+    concept, compiled: cj, informed, assumptions: (ctx.brief && ctx.brief.assumptions) || [], gaps: (ctx.brief && ctx.brief.gaps) || [], acknowledged: !!(ctx.brief && ctx.brief.acknowledged), how: ctx.how || '', medium: ctx.medium || '', size: ctx.size || '',
     note: parts.length ? 'Recorded when ' + parts.join(' and ') + (edits.length ? '; ' + edits.length + ' later hand edit' + (edits.length === 1 ? '' : 's') + ' used no model and no new knowledge' : '') + '. Nothing from another client is ever in the context.' : 'This version was not generated by the Studio (an import or a hand-made layout): no model context was used.' };
 }
 /** The reference pack a concept sees: the project's references grouped by what they are for, in one of three modes -
@@ -9929,16 +9980,12 @@ async function stConceptsStage(env, job, p, log) {
   const keepExplicit = !!(inp.keep && typeof inp.keep === 'object');
   // a layouts exploration binds the imagery and the approved words whatever the request says: only the arrangement may change
   const keep = mode === 'layouts' ? { imagery: true, copy: true, composition: false, explicit: true } : keepExplicit ? { imagery: !!inp.keep.imagery, copy: inp.keep.copy !== false, composition: !!inp.keep.composition, explicit: true } : { imagery: mode !== 'new', copy: true, composition: mode === 'refine', explicit: false };
-  const ctx = await stContext(env, p, { channels: [a.channel], log });
-  const led = await stLedger(env, p.id);
-  const refs = await stRefBundle(env, p, { log, images: 2 });
   // the pack: none / chosen / recommended; a chosen reference not yet attached is attached (up to three images), another campaign's is left out
   const refMode = inp.refMode === 'none' || inp.refMode === 'chosen' ? inp.refMode : (Array.isArray(inp.refs) && inp.refs.length ? 'chosen' : 'recommended');
-  if (refMode === 'chosen') { const want = new Set((inp.refs || []).map(x => stClean(x, 24))); for (const r of refs.rows) { if (want.has(r.id) && !refs.images.some(im => im.ref === r.id) && refs.images.length < 3) { const im = await stRefImage(env, r); if (im) { refs.images.push(Object.assign(im, { ref: r.id, purpose: r.purpose, name: r.name })); r.attached = true; r.prepared = !!im.prepared; r.unavailable = false; } else if (r.key) r.unavailable = true; } } }
-  const pack = stReferencePack(refs, { mode: refMode, chosen: inp.refs, campaign: p.campaign });
+  const cc = await stCompileContext(env, p, { channels: [a.channel], log, stage: 'concepts', refs: { images: 2, mode: refMode, chosen: inp.refs, attachChosen: true }, art: 6 });
+  const ctx = cc.ctx, refs = cc.refs, pack = cc.pack, placement = cc.placement, mem = cc.mem;
+  const led = await stLedger(env, p.id);
   refs.text = pack.text + (refMode === 'chosen' ? '\nTHE TEAM CHOSE THESE REFERENCES FOR THE NEW DESIGN: ' + pack.rows.map(r => '[' + r.id + '] ' + r.name).join(', ') : '');
-  const placement = stMarkPlacement(pack.rows);
-  const mem = await stArtMemory(env, p.ns, 6, p.campaign);
   let refine = null;
   if (inp.refine && inp.refine.eid) { const row = await env.MIND_DB.prepare("SELECT data FROM studio_events WHERE project=? AND kind='concepts' AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%"eid":"' + stClean(inp.refine.eid, 24) + '"%').first(); const d = row ? pjs(row.data, {}) : null; const o = d && Array.isArray(d.options) ? d.options[parseInt(inp.refine.index, 10) || 0] : null; if (o) refine = { name: o.name, concept: o.concept, imagery: o.imagery, plan: o.planIn || null, design: o.design }; }
   const art = keep.imagery || mode !== 'new' ? await stVersionImage(env, v, log) : null; const imageSeen = !!art;
@@ -9949,9 +9996,8 @@ async function stConceptsStage(env, job, p, log) {
     : mode === 'refine' ? 'REFINE THIS DESIGN. FEEDBACK FROM THE TEAM: ' + feedback + (refine ? '\nThe direction being refined: ' + JSON.stringify(refine) : '') : 'EXPLORE VARIATIONS. FEEDBACK FROM THE TEAM: ' + feedback + (refine ? '\n\nREFINE THIS DIRECTION rather than starting over: ' + JSON.stringify(refine) : ''))
     + '\n\n' + stTileBrief(a, v, imageSeen) + (v.layout && v.layout.v === 5 ? '\nIt was made from a plan: ' + v.layout.mediumName + ', ' + v.layout.approach + (v.layout.story ? ' - ' + v.layout.story : '') : '')
     + '\n\nBRIEF: ' + ['objective', 'audience', 'message'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('; ')
-    + '\nCAMPAIGN IDENTITY: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') + '; mark policy: ' + (camp.logoPolicy || 'logo') + (camp.hasWordmark ? ' (wordmark on file)' : '') + (ctx.kit.hasLogo ? ' (client logo on file)' : '') : 'no campaign; client logo ' + (ctx.kit.hasLogo ? 'on file' : 'not on file'))
-    + '\nPALETTE: ' + JSON.stringify(ctx.kit.palette || {}) + '; fonts ' + JSON.stringify(ctx.kit.fonts || {})
-    + '\nFORMAT: ' + a.format + ' (' + a.channel + ')' + (placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : '')
+    + cc.identityText
+    + '\nFORMAT: ' + a.format + ' (' + a.channel + ')'
     + refs.text + (refs.images.length ? '\n(Reference images are attached' + (art ? ' after the artwork' : '') + ', in the order listed.)' : '') + mem.text
     + '\nLEDGER: ' + (led.claims.slice(0, 12).map(c => '[' + c.id + '] ' + c.text.slice(0, 120)).join(' | ') || 'no source')
     + '\n\n' + (mode === 'explore' ? 'Give three distinct concepts.' : mode === 'layouts' ? 'Give three distinct layouts, each a full plan.' : mode === 'refine' ? 'Give one or two refined concepts.' : 'Give one to three new concepts.');
@@ -10024,7 +10070,7 @@ async function stConceptsStage(env, job, p, log) {
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
   }
   const distinct = options.filter(o => !o.similar).length;
-  await stEvent(env, p.id, 'concepts', { eid, mode, asset: a.id, version: v.id, feedback, keep, size, critique: stStr(j.critique, 600), options, imageSeen, refsUsed: refs.used, unanalysed: refs.unanalysed, refPack: pack.record, placement, memory: mem.count, model: r.model, replanned: replanned || undefined, job: job.id, refine: refine ? refine.name : '', text: (mode === 'new' ? 'New design for ' : mode === 'refine' ? 'Refinement of ' : mode === 'layouts' ? 'Layouts for ' : 'Variations for ') + a.title + ': ' + options.length + ' concept' + (options.length === 1 ? '' : 's') + ' - ' + options.map(o => o.name + ' (' + o.summary + ')').join('; ') + '. Proposed as sketches, not applied; nothing spent beyond ' + (replanned ? 'two calls (one replanning round)' : 'this call') + '.' + (replanned ? ' ' + replanned + ' look-alike concept' + (replanned === 1 ? ' was' : 's were') + ' replanned once.' : '') + (distinct < options.length ? ' ' + (options.length - distinct) + ' would still look alike and ' + (options.length - distinct === 1 ? 'is' : 'are') + ' marked.' : '') + (refs.used.length ? ' Read ' + refs.used.length + ' reference' + (refs.used.length === 1 ? '' : 's') + (refs.unanalysed.length ? ' (' + refs.unanalysed.length + ' by name only)' : '') + '.' : '') + ' ' + pack.summary.charAt(0).toUpperCase() + pack.summary.slice(1) + '.' + (mode === 'layouts' ? ' Same photograph and approved words in each; ' + (options.some(o => o.renders) ? 'a render is still called for by ' + options.filter(o => o.renders).map(o => o.name).join(', ') : 'no render needed') + '.' + (options.some(o => o.setAside) ? ' Set aside from the answers: ' + Array.from(new Set(options.flatMap(o => o.setAside || []))).join('; ') + '.' : '') : '') + (options.some(o => o.kept) ? ' Retained as asked: ' + Array.from(new Set(options.flatMap(o => o.kept || []))).join(', ') + '.' : '') + (options.some(o => o.incomplete) ? ' The campaign mark is not on file: these compositions are incomplete until it is uploaded.' : '') }, 'studio');
+  await stEvent(env, p.id, 'concepts', { eid, mode, asset: a.id, version: v.id, feedback, keep, size, critique: stStr(j.critique, 600), options, imageSeen, refsUsed: refs.used, unanalysed: refs.unanalysed, refPack: pack.record, placement: { basis: placement.basis, corner: placement.corner, text: placement.text, confidence: placement.confidence, mandatory: placement.mandatory }, informed: cc.manifest, memory: mem.count, model: r.model, replanned: replanned || undefined, job: job.id, refine: refine ? refine.name : '', text: (mode === 'new' ? 'New design for ' : mode === 'refine' ? 'Refinement of ' : mode === 'layouts' ? 'Layouts for ' : 'Variations for ') + a.title + ': ' + options.length + ' concept' + (options.length === 1 ? '' : 's') + ' - ' + options.map(o => o.name + ' (' + o.summary + ')').join('; ') + '. Proposed as sketches, not applied; nothing spent beyond ' + (replanned ? 'two calls (one replanning round)' : 'this call') + '.' + (replanned ? ' ' + replanned + ' look-alike concept' + (replanned === 1 ? ' was' : 's were') + ' replanned once.' : '') + (distinct < options.length ? ' ' + (options.length - distinct) + ' would still look alike and ' + (options.length - distinct === 1 ? 'is' : 'are') + ' marked.' : '') + (refs.used.length ? ' Read ' + refs.used.length + ' reference' + (refs.used.length === 1 ? '' : 's') + (refs.unanalysed.length ? ' (' + refs.unanalysed.length + ' by name only)' : '') + '.' : '') + ' ' + pack.summary.charAt(0).toUpperCase() + pack.summary.slice(1) + '.' + (mode === 'layouts' ? ' Same photograph and approved words in each; ' + (options.some(o => o.renders) ? 'a render is still called for by ' + options.filter(o => o.renders).map(o => o.name).join(', ') : 'no render needed') + '.' + (options.some(o => o.setAside) ? ' Set aside from the answers: ' + Array.from(new Set(options.flatMap(o => o.setAside || []))).join('; ') + '.' : '') : '') + (options.some(o => o.kept) ? ' Retained as asked: ' + Array.from(new Set(options.flatMap(o => o.kept || []))).join(', ') + '.' : '') + (options.some(o => o.incomplete) ? ' The campaign mark is not on file: these compositions are incomplete until it is uploaded.' : '') }, 'studio');
   await log('out', options.length + ' concept' + (options.length === 1 ? '' : 's') + ' (' + distinct + ' visibly distinct' + (replanned ? ', ' + replanned + ' replanned' : '') + '): ' + options.map(o => o.name + ' = ' + o.summary + (o.unsupported.length ? ' [cannot draw: ' + o.unsupported.join('; ') + ']' : '')).join(' | ') + (imageSeen ? '; the model saw the current artwork' : ''));
   return { eid, mode, asset: a.id, critique: stStr(j.critique, 600), options: options.map(o => ({ i: o.i, name: o.name, kind: o.kind, medium: o.medium, approach: o.approach, needsImage: o.needsImage, renders: o.renders, cost: o.cost, summary: o.summary, similar: o.similar, fromCurrent: o.fromCurrent, kept: o.kept, setAside: o.setAside, incomplete: !!o.incomplete })), distinct, replanned, imageSeen, refs: refs.used.length, pack: pack.record, model: r.model, model2: model2 || undefined };
 }
@@ -10504,9 +10550,7 @@ async function stSuggest(env, p, asset, opts) {
   const sig = v.id + '|' + refRows.map(r => r.id).join(',') + '|' + (lastEv ? lastEv.id : 0);
   const key = 'studio_sugg_' + asset.id;
   if (!opts.refresh) { try { const c = JSON.parse((await kvGet(env.AXIOM_KV, key)) || 'null'); if (c && c.sig === sig) return Object.assign({ ok: true, cached: true }, c); } catch (e) {} }
-  const ctx = await stContext(env, p, { channels: [asset.channel], log });
-  const refs = await stRefBundle(env, p, { log, images: 1 });
-  const mem = await stArtMemory(env, p.ns, 4, p.campaign);
+  const cc = await stCompileContext(env, p, { channels: [asset.channel], log, stage: 'suggest', refs: { images: 1 }, art: 4 }); const ctx = cc.ctx, refs = cc.refs, mem = cc.mem;
   const art = await stVersionImage(env, v, log);
   const recent = ((await env.MIND_DB.prepare("SELECT kind, data FROM studio_events WHERE project=? AND kind IN ('revise','proposal','concepts','applied','question','note','alternatives') AND data LIKE ? ORDER BY id DESC LIMIT 5").bind(p.id, '%' + asset.id + '%').all()).results || []).map(r => { const d = pjs(r.data, {}); return r.kind + ': ' + (d.instruction || d.feedback || d.text || '').slice(0, 160); });
   const user = stTileBrief(asset, v, !!art) + '\n\nBRIEF: ' + ['objective', 'audience', 'message'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('; ') + (p.campaign ? '\nCAMPAIGN: ' + p.campaign : '') + '\nPALETTE: ' + JSON.stringify(ctx.kit.palette || {}) + refs.text + mem.text + (recent.length ? '\n\nRECENT FEEDBACK ON THIS ASSET:\n' + recent.join('\n') : '') + '\n\nGive two or three suggestions in each group: design, image, typography, copy, concept.';
@@ -10521,7 +10565,7 @@ async function stSuggest(env, p, asset, opts) {
   const led = await stLedger(env, p.id); const facts = (ctx.kit.facts || []).filter(f => f.status !== 'pending' && (!f.campaign || f.campaign === p.campaign));
   const figureCheck = list => list.map(sg => { const bad = stChecks({ body: sg.text }, led.claims, { facts }).filter(c => c.state === 'unsupported' || c.state === 'differs').map(c => c.text); return bad.length ? Object.assign(sg, { unverifiedFigures: bad, basis: sg.basis === 'rule' ? 'inferred' : sg.basis }) : sg; });
   const _clean = clean; const cleanF = (arr, withRefs, paid) => figureCheck(_clean(arr, withRefs, paid));
-  const out = { sig, at: Date.now(), asset: asset.id, version: v.id, design: cleanF(j.design, true, false), image: cleanF(j.image, false, true), typography: cleanF(j.typography, true, false), copy: cleanF(j.copy, false, false), concept: cleanF(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed };
+  const out = { sig, at: Date.now(), asset: asset.id, version: v.id, design: cleanF(j.design, true, false), image: cleanF(j.image, false, true), typography: cleanF(j.typography, true, false), copy: cleanF(j.copy, false, false), concept: cleanF(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed, informed: cc.manifest };
   try { await kvPut(env.AXIOM_KV, key, JSON.stringify(out), 6 * 3600); } catch (e) {}
   return Object.assign({ ok: true, cached: false }, out);
 }

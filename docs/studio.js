@@ -599,7 +599,7 @@
         ${c.kit.voice ? html`<${Lbl}>Voice</${Lbl}><div>${c.kit.voice}</div>` : null}
         <${Lbl}>Mandatory rules (kit)</${Lbl}>${c.kit.rules.length ? html`<ul class="st-ul">${c.kit.rules.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>` : html`<div class="ov-dim">none recorded</div>`}
         <${Lbl}>Learned corrections in force (${c.learned.length})</${Lbl}>${c.learned.length ? html`<ul class="st-ul">${c.learned.map(f => html`<li key=${f.id}>${f.rule} <span class="ov-dim">${f.task}, ${f.scope === 'campaign' ? 'campaign ' + f.campaign : f.scope}${f.who ? ', taught by ' + f.who : ''}</span></li>`)}</ul>` : html`<div class="ov-dim">none</div>`}
-        <${Lbl}>Approved facts (${c.facts.length}) - the only figures besides the sources</${Lbl}>${c.facts.length ? html`<ul class="st-ul">${c.facts.map(f => html`<li key=${f.id}>${f.text}${f.source ? html` <span class="ov-dim">(${f.source})</span>` : null}${f.campaign ? html` <${Chip}>${f.campaign}</${Chip}>` : null}</li>`)}</ul>` : html`<div class="ov-dim">none</div>`}
+        <${Lbl}>Approved facts (${c.facts.length}) - the only figures besides the sources</${Lbl}>${c.facts.length ? html`<ul class="st-ul">${c.facts.map(f => html`<li key=${f.id}>${f.text}${f.source ? html` <span class="ov-dim">(${f.source})</span>` : null}${f.campaign ? html` <${Chip}>${f.campaign}</${Chip}>` : null}</li>`)}</ul>` : html`<div class="ov-dim">none</div>`}${c.excludedFacts ? html`<div class="ov-dim">${c.excludedFacts} approved fact${c.excludedFacts === 1 ? '' : 's'} of other campaigns ${c.excludedFacts === 1 ? 'is' : 'are'} not offered to this campaign's models.</div>` : null}
         <${Lbl}>Never use (${c.banned.length})</${Lbl}>${c.banned.length ? html`<ul class="st-ul">${c.banned.map((b, i) => html`<li key=${i}>"${b.term}"${b.use ? ' - say "' + b.use + '"' : ''}${b.allowNegated ? ' (allowed inside a denial)' : ''}${b.why ? html` <span class="ov-dim">${b.why}</span>` : null}</li>`)}</ul>` : html`<div class="ov-dim">none</div>`}
         <${Lbl}>Campaign</${Lbl}><div>${c.campaign ? c.campaign.name + (c.campaign.signoff ? ' - sign-off "' + c.campaign.signoff + '"' : '') + (c.campaign.tone ? '; tone: ' + c.campaign.tone : '') : 'no campaign on this project'}${c.campaigns.length ? html` <span class="ov-dim">(${c.campaigns.length} in the kit)</span>` : null}</div>
         <${Lbl}>Creative shelf and examples</${Lbl}><div>${c.shelf.error ? c.shelf.error : c.shelf.docs + ' document' + (c.shelf.docs === 1 ? '' : 's') + ' on the ' + c.ns + '_creative shelf near this brief, ' + (c.shelf.examples || 0) + ' approved examples retrieved. Nothing from any other client.'}</div>
@@ -815,7 +815,28 @@
         ${(u.concept && (u.concept.influence || []).length) ? html`<div><b>Reference influence</b> ${u.concept.influence.map(x => x.component + ' from ' + x.name + (x.outsideRecipe ? ' (outside the recipe)' : '')).join('; ')}</div>` : null}
         <${CompiledList} list=${u.compiled || []} />
         ${u.assumptions.length ? html`<div><b>Assumptions</b> ${u.assumptions.join('; ')}${u.acknowledged ? ' (gaps acknowledged before producing)' : ''}</div>` : null}
+        <${InformedPanel} m=${u.informed} />
       </div>`}</details>`;
+  }
+  /** What informed this creative: the compiler's manifest as recorded with the generation - what reached the model, by id, and what was held back, by reason. */
+  function InformedPanel({ m }) {
+    if (!m) return html`<div class="st-informed"><b>What informed this creative?</b> <span class="ov-dim">no manifest recorded: this version was made before the context compiler, or not by a model call.</span></div>`;
+    const refs = m.references; const list = (arr, f) => arr.map(f).join(', ');
+    return html`<div class="st-informed" aria-label="What informed this creative">
+      <div><b>What informed this creative?</b> <span class="ov-dim">compiled for the ${m.stage} stage, ${aest(m.at)}; ${m.client}${m.campaign ? ', campaign ' + m.campaign : ', no campaign'}.</span></div>
+      <ul class="st-ul">
+        <li><b>Approved facts (${m.kit.facts.length})</b> ${m.kit.facts.length ? list(m.kit.facts, f => f.text + (f.source ? ' [' + f.source + ']' : '')) : html`<span class="ov-dim">none: figures only from the sources</span>`}</li>
+        <li><b>Never use (${m.kit.banned.length})</b> ${m.kit.banned.length ? list(m.kit.banned, b => '"' + b + '"') : html`<span class="ov-dim">none</span>`}</li>
+        <li><b>Voice and rules</b> ${m.kit.voice ? 'the client voice' : 'no voice recorded'}, ${m.kit.standingRules} standing rule${m.kit.standingRules === 1 ? '' : 's'}${m.kit.identity ? ', identity "' + m.kit.identity + '"' : ''}, mark policy ${m.kit.policy}${m.marks ? ' (' + (m.marks.logoOnFile ? 'logo on file' : 'no logo') + ', ' + (m.marks.wordmarkOnFile ? 'wordmark on file' : 'no wordmark') + ')' : ''}</li>
+        <li><b>Learned corrections (${m.corrections.length})</b> ${m.corrections.length ? list(m.corrections, c => c.rule + (c.campaign ? ' (campaign ' + c.campaign + ')' : '')) : html`<span class="ov-dim">none in force</span>`}</li>
+        <li><b>Approved examples</b> ${m.examples} from the creative shelf</li>
+        <li><b>References</b> ${refs ? html`${refs.attached.length ? 'shown as images: ' + list(refs.attached, r => r.name + ' (' + r.purpose + ')') + '. ' : ''}${refs.read.length ? 'read by analysis: ' + list(refs.read, r => r.name + ' (' + r.purpose + ')') + '. ' : ''}${!refs.attached.length && !refs.read.length ? 'none reached the model. ' : ''}${refs.excluded ? html`<span class="ov-dim">${refs.excluded} left out.</span>` : null}` : html`<span class="ov-dim">no references for this stage (copy only)</span>`}</li>
+        ${m.artMemory ? html`<li><b>Artwork memory</b> ${m.artMemory.count} catalogued artwork${m.artMemory.count === 1 ? '' : 's'}${m.artMemory.sameCampaign ? ' (' + m.artMemory.sameCampaign + ' of this campaign)' : ''}${m.artMemory.otherCampaigns ? ', ' + m.artMemory.otherCampaigns + ' of other campaigns left out' : ''}</li>` : null}
+        ${m.placement ? html`<li><b>Mark placement</b> ${m.placement.basis === 'rule' ? 'the approved rule' : m.placement.basis === 'observed' ? 'observed in ' + m.placement.evidence + ' reference' + (m.placement.evidence === 1 ? '' : 's') + ' (' + Math.round(m.placement.confidence * 100) + '% agreement' + (m.placement.exceptions ? ', ' + m.placement.exceptions + ' differing' : '') + ')' : 'the house default'}: ${({ tl: 'top left', tr: 'top right', bl: 'bottom left', br: 'bottom right' })[m.placement.corner] || m.placement.corner}${m.placement.mandatory ? ', held' : ''}</li>` : null}
+        ${m.omitted.length ? html`<li><b>Held back (${m.omitted.length})</b> <ul class="st-ul ov-dim">${m.omitted.map((o, k) => html`<li key=${k}>${o.what}${o.text ? ' "' + o.text + '"' : ''}: ${o.why}</li>`)}</ul></li>` : null}
+        <li class="ov-dim">Prompt sections: ${list(m.sections, s => s.id + ' ' + s.chars + ' chars')}. Models: ${m.models ? m.models.creative + ' / ' + m.models.extract : 'not recorded'}. Nothing from another client.</li>
+      </ul>
+    </div>`;
   }
   /* ------------------------------------------------------------ client review: private links out, comments in, resolved by version */
   /* ------------------------------------------------------------ Review: one table of every asset's approvals, then the client's review */
