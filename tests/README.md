@@ -44,6 +44,9 @@ node --experimental-sqlite tests/ingest-worker.mjs        # R6 knowledge: whole-
 node --experimental-sqlite tests/usage-worker.mjs         # R6 AI accounting: no lost increments, the cap under racing calls, retries and failures counted as such
 node --experimental-sqlite tests/ai-boundaries-worker.mjs # R7 AI boundaries: an injected source and a subverted answer - mark policy, figure checks, namespace walls, malformed answers, "ship" is not approval
 node --experimental-sqlite tests/diagnostics-worker.mjs   # R7 request ids on every answer, a safe 500 with the id, secrets struck from log lines
+node --experimental-sqlite tests/studio-s1-worker.mjs      # S1 worker: placement inference reads negations, reference lines carry the words and addresses, the re-judging carries visibility and occlusion
+node --experimental-sqlite tests/studio-quality-browser.mjs # S1 renderer (Chromium): zero-opacity words fail, transparent plates are no ground (composited contrast), later shapes and images that cover words fail, a rule-held mark is never moved by the repair or the variations, failed loads are unresolved
+node --experimental-sqlite tests/studio-editor-browser.mjs  # S1 page (Chromium): a failed validation filing is retried by Measure again and never shown as passed; canvas shortcuts leave the editor's fields alone
 node --experimental-sqlite tests/studio-worker.mjs        # Creative Studio Phase 1 (projects, versions, approvals, jobs, legacy)
 node --experimental-sqlite tests/studio-p2-worker.mjs     # Creative Studio Phase 2 (ledger, directions, copy, checks, layouts, export, budget)
 node --experimental-sqlite tests/studio-p3-worker.mjs     # Creative Studio Phases 3-4 (direction by instruction, Remember, outcomes, KV session import)

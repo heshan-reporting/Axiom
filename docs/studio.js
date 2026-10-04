@@ -1176,7 +1176,9 @@
       const rd = a.readiness || {}; const sigKey = v.id + '|' + r.issues.map(i => i.code + ':' + i.layers.join(',')).join(';') + '|' + (comp.fonts ? comp.fonts.fallback.join(',') : '');
       // file the evidence when the worker has none for this composition, or when what was measured disagrees with what it holds
       const disagrees = (rd.technical === 'passed' && !r.ok) || (rd.technical === 'failed' && r.ok);
-      if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && filed.current !== sigKey) { filed.current = sigKey; setMeasuring(true); try { await onValidate(a, v, r, comp); } finally { setMeasuring(false); } }
+      // the signature is recorded only once the worker accepted the evidence: a filing that failed (network, 500, a stale
+      // version) leaves nothing recorded, so Measure again sends it again instead of doing nothing
+      if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && (force || filed.current !== sigKey)) { setMeasuring(true); try { const sent = await onValidate(a, v, r, comp); if (sent) filed.current = sigKey; } finally { setMeasuring(false); } }
     }, [v && v.id, comp.key, comp.ready, a.readiness && a.readiness.technical]);
     useEffect(() => { measure(false); }, [measure]);
     const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
@@ -1351,6 +1353,7 @@
     const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
     const layout = hist.now;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
+    const clickFocus = useRef(null);   // the layer being focused by a click (the click already chose the selection; keyboard focus selects)
     const commit = next => setHist(h => ({ past: h.past.concat([h.now]).slice(-80), now: next, future: [] }));
     const live = next => setHist(h => Object.assign({}, h, { now: next }));            // during a drag; the step is committed on release
     const undo = () => setHist(h => h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now].concat(h.future) } : h);
@@ -1363,7 +1366,10 @@
     const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => (patches[l.id] ? Object.assign({}, l, patches[l.id]) : l)) });
     const r1 = x => Math.round(x * 10) / 10;
     const pick = (e, l) => { setFocus(l.id); setSelIds(s => e.shiftKey ? (s.indexOf(l.id) >= 0 ? s.filter(x => x !== l.id) : s.concat([l.id])) : (s.indexOf(l.id) >= 0 && s.length > 1 ? s : [l.id])); };
-    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); pick(e, l); if (l.locked) return; const r = box.current.getBoundingClientRect();
+    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); pick(e, l);
+      // preventDefault keeps the browser from focusing the layer, so focus it by hand: the arrow keys then nudge what was clicked
+      try { const el = mode === 'move' ? e.currentTarget : e.currentTarget.parentElement; if (el && el.focus) { clickFocus.current = l.id; el.focus({ preventScroll: true }); clickFocus.current = null; } } catch (x) {}
+      if (l.locked) return; const r = box.current.getBoundingClientRect();
       const ids = mode === 'move' ? Array.from(new Set((sel.indexOf(l.id) >= 0 ? sel : [l.id]).reduce((acc, id) => acc.concat(groupOf(id)), []))) : [l.id];
       act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const move = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
@@ -1391,6 +1397,8 @@
     const ungroup = () => { const patches = {}; selected().forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
     const setOne = (id, patch) => commit(patchMany(layout, { [id]: patch }));
     const keyAll = e => { const mod = e.metaKey || e.ctrlKey;
+      // a key typed into a field edits the field: the canvas shortcuts (nudge, undo, redo, escape) never take it
+      const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '') || t.isContentEditable)) return;
       if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
       if (e.key === 'Escape') { setSelIds([]); return; }
@@ -1419,7 +1427,7 @@
       <div class="st-le" ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${e => { if (e.target === box.current) setSelIds([]); }}>
         <${Composition} v=${Object.assign({}, v, { layout })} a=${a} ns=${ns} />
         ${guides ? html`<div class="st-le-guide" style=${{ left: '3%', top: '3%', right: '3%', bottom: '3%' }} title="3% margin"></div>${story ? html`<div class="st-le-zone" style=${{ left: 0, right: 0, top: 0, height: '14%' }} title="Instagram story interface (top 14%)"></div><div class="st-le-zone" style=${{ left: 0, right: 0, bottom: 0, height: '20%' }} title="Instagram story interface (bottom 20%)"></div>` : null}` : null}
-        ${layers.filter(l => !l.hidden).map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (bad.has(l.id) ? ' bad' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
+        ${layers.filter(l => !l.hidden).map(l => html`<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (bad.has(l.id) ? ' bad' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: (l.h || 4) + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (clickFocus.current !== l.id && sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
           <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}${l.group ? ' (grouped)' : ''}</span>${!l.locked ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
         </div>`)}
       </div>
@@ -1731,8 +1739,8 @@
         const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
         let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
         await call('/studio/validation', { asset: as.id, version: v.id, report: R.report(v, val), imageB64: btoa(bin), mime: 'image/png' });
-        await reload();
-      } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message, true); }
+        await reload(); return true;
+      } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message + (e.requestId ? ' (request ' + e.requestId + ')' : '') + '. Measure again to retry.', true); return false; }
     };
     /* layout versions go on the latest revision; if the asset moved on, the layout is re-sent only when the newer version did not change the layout too */
     const putLayout = async (as, layout, baseVid, note) => {

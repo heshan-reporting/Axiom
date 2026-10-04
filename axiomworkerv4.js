@@ -7776,53 +7776,58 @@ function stWrapLines(text, charsPerLine) {
    (tests/studio-layout-browser.mjs compares them), so the worker derives the verdict from measured boxes exactly as the
    browser does, and a client's own verdict is never taken on trust. */
 /* RULES:BEGIN */
-function layoutRules(boxes, o) {
-  o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
-  var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
-  var tol = Math.max(1, W * 0.0015);
-  var safe = o.format === '9:16' && o.channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
-  var live = [], i, j;
-  for (i = 0; i < boxes.length; i++) {
-    var b = boxes[i];
-    if (b.dup) add('duplicate_id', 'blocking', [b.id], 'two layers share the id ' + b.id + '; edits, locks and checks cannot tell them apart');
-    if (b.valid === false) { add('invalid_geometry', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' layer has missing or impossible geometry'); continue; }
-    if (b.hidden || b.empty) continue;
-    if (b.type === 'text' || b.mark) live.push(b);
-    if (b.type === 'text') {
-      if (b.overflowH) add('text_overflow', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' needs ' + Math.round(b.contentH) + ' px over ' + b.lines + ' lines; its box is ' + Math.round(b.ah) + ' px, so it runs into whatever sits below');
-      if (b.overflowW) add('text_too_wide', 'blocking', [b.id], 'a line of the ' + (b.role || 'text') + ' is wider than its box even when broken');
-      if (b.broken) add('word_broken', 'warning', [b.id], 'a word or address in the ' + (b.role || 'text') + ' is too long for the box and is broken across lines');
-      var pct = b.px / W * 100;
-      if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
-      else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
-      if (typeof b.contrast === 'number') { var large = pct >= 4; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (large ? 3 : 4.5)) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (large ? 3 : 4.5) + ':1 wanted)'); }
+  function layoutRules(boxes, o) {
+    o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
+    var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
+    var tol = Math.max(1, W * 0.0015);
+    var safe = o.format === '9:16' && o.channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+    var live = [], i, j;
+    for (i = 0; i < boxes.length; i++) {
+      var b = boxes[i];
+      if (b.dup) add('duplicate_id', 'blocking', [b.id], 'two layers share the id ' + b.id + '; edits, locks and checks cannot tell them apart');
+      if (b.valid === false) { add('invalid_geometry', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' layer has missing or impossible geometry'); continue; }
+      if (b.hidden || b.empty) continue;
+      if (b.type === 'text' || b.mark) live.push(b);
+      if (b.type === 'text') {
+        if (b.overflowH) add('text_overflow', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' needs ' + Math.round(b.contentH) + ' px over ' + b.lines + ' lines; its box is ' + Math.round(b.ah) + ' px, so it runs into whatever sits below');
+        if (b.overflowW) add('text_too_wide', 'blocking', [b.id], 'a line of the ' + (b.role || 'text') + ' is wider than its box even when broken');
+        if (b.broken) add('word_broken', 'warning', [b.id], 'a word or address in the ' + (b.role || 'text') + ' is too long for the box and is broken across lines');
+        var pct = b.px / W * 100;
+        if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
+        else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
+        if (typeof b.contrast === 'number') { var large = pct >= 4; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (large ? 3 : 4.5)) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (large ? 3 : 4.5) + ':1 wanted)'); }
+      }
+      if (b.mark) {
+        if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
+        if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
+      }
+      if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
+      if (b.type === 'text' || b.mark) {
+        if (typeof b.opacity === 'number') { if (b.opacity < 0.05) add('invisible', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity: it is not visible'); else if (b.opacity < 0.5) add('faint', 'warning', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity'); }
+        if (typeof b.occluded === 'number') {
+          var cov = (b.occludedBy || []).filter(function (id) { return b.overlaps.indexOf(String(id)) < 0; });
+          if (cov.length || !(b.occludedBy && b.occludedBy.length)) { var cl = [b.id].concat(cov); if (b.occluded >= 0.2) add('occluded', 'blocking', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? 'a later layer (' + cov.join(', ') + ')' : 'later layers')); else if (b.occluded >= 0.05) add('occluded', 'warning', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? cov.join(', ') : 'later layers')); }
+        }
+        if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
+        else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top 14%, bottom 20%)' : 'inside the 3% margin'));
+      }
     }
-    if (b.mark) {
-      if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
-      if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
+    for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
+      var a = live[i], c = live[j];
+      if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
+      var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
+      if (iw > tol && ih > tol) {
+        var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
+        add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
+      }
     }
-    if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
-    if (b.type === 'text' || b.mark) {
-      if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
-      else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top 14%, bottom 20%)' : 'inside the 3% margin'));
-    }
+    if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
+    if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
+    var rank = { blocking: 0, warning: 1, info: 2 };
+    out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
+    return out;
   }
-  for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
-    var a = live[i], c = live[j];
-    if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
-    var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
-    if (iw > tol && ih > tol) {
-      var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
-      add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
-    }
-  }
-  if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
-  if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
-  var rank = { blocking: 0, warning: 1, info: 2 };
-  out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
-  return out;
-}
-/* RULES:END */
+  /* RULES:END */
 /** Does the text fit its layer? Sizes are per cent of the stage width, heights per cent of the stage height. */
 function stFit(layout, copy, format) {
   const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const out = [];
@@ -8868,10 +8873,29 @@ function stNum(v, lo, hi, dflt) { const n = Number(v); return isFinite(n) ? Math
 function stColour(v, dflt) { v = String(v == null ? '' : v).trim(); return /^#[0-9a-fA-F]{3,8}$/.test(v) || /^rgba?\((\s*[\d.]+\s*,){2,3}\s*[\d.]+\s*\)$/.test(v) ? v : dflt; }
 /** Where approved and brand references put the mark: observed corners only, never an invented measurement; the house default otherwise. */
 const ST_CORNER_RX = { bl: /\b(bottom|lower)[\s-]*left\b/i, br: /\b(bottom|lower)[\s-]*right\b/i, tl: /\b(top|upper)[\s-]*left\b/i, tr: /\b(top|upper)[\s-]*right\b/i };
+/** The corners a sentence asserts a mark IS in. A negation ("no", "not", "never", "without", "rather than", "instead
+ *  of") negates the corner phrases that follow it up to a contrast ("but", "while", "whereas") or the end of the clause,
+ *  so "No logo at bottom left. Wordmark sits top right." asserts top right only. Each clause is read on its own. */
+function stCornerMentions(text) {
+  const out = []; const seen = {};
+  String(text || '').split(/[.;:\n]+/).forEach(clause => {
+    const toks = clause.toLowerCase().replace(/[\s-]+/g, ' ').split(' ').filter(Boolean); let neg = false;
+    for (let i = 0; i < toks.length; i++) {
+      const t = toks[i], t2 = t + ' ' + (toks[i + 1] || ''), t3 = t2 + ' ' + (toks[i + 2] || '');
+      if (/^(no|not|never|without|nor|absent|isn't|aren't|wasn't|except)$/.test(t) || /^(rather than|instead of|is not|are not|not in|not at)$/.test(t2)) { neg = true; continue; }
+      if (/^(but|while|whereas|however|although|yet)$/.test(t) || t2 === 'and the') { neg = false; continue; }
+      const m = t3.match(/^(bottom|lower|top|upper) (left|right)\b/); if (!m) continue;
+      const k = (m[1] === 'bottom' || m[1] === 'lower' ? 'b' : 't') + (m[2] === 'left' ? 'l' : 'r');
+      if (!neg && !seen[k]) { seen[k] = true; out.push(k); }
+      i += 1;
+    }
+  });
+  return out;
+}
 function stMarkPlacement(rows) {
   const votes = {}; const by = {};
   (rows || []).filter(r => r && (r.purpose === 'approved' || r.purpose === 'brand') && r.analysis && !r.analysis.error && r.analysis.logo).forEach(r => {
-    Object.keys(ST_CORNER_RX).forEach(k => { if (ST_CORNER_RX[k].test(r.analysis.logo)) { votes[k] = (votes[k] || 0) + 1; (by[k] = by[k] || []).push(r.name || r.id); } });
+    stCornerMentions(r.analysis.logo).forEach(k => { votes[k] = (votes[k] || 0) + 1; (by[k] = by[k] || []).push(r.name || r.id); });
   });
   const best = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
   if (!best) return { corner: 'br', basis: 'default', text: 'bottom right, the house default; no approved or brand reference describes a mark position', refs: [] };
@@ -9183,7 +9207,7 @@ function stRefLine(r, an) {
   const head = '[' + r.id + '] ' + r.name + ' (' + r.purpose + (r.note ? '; ' + r.note : '') + ')';
   const rc = stRecipeText(r.recipe);
   if (!an || an.error) return head + rc + ' - not analysed' + (an && an.error ? ': ' + an.error : '') + '; only its name and purpose are known.';
-  return head + rc + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
+  return head + rc + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (Array.isArray(an.text) && an.text.length ? ' Words on it: ' + an.text.map(t => '"' + String(t).replace(/"/g, "'") + '"').join(', ') + '.' : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
 }
 /** The project's references as the models receive them: ranked by purpose, analysed (lazily, up to two a call), the strongest attached as images. */
 async function stRefBundle(env, p, opts) {
@@ -9928,7 +9952,7 @@ function stValidationJudge(a, v, rep) {
   (Array.isArray(L.layers) ? L.layers : []).forEach((l, i) => {
     const id = String(l.id || ('layer' + i)); const dup = !!seen[id]; seen[id] = true; ids.add(id);
     const valid = num(l.x) && num(l.y) && num(l.w) && l.w > 0 && (l.h == null || (num(l.h) && l.h >= 0)) && (l.type !== 'text' || (num(l.size) && l.size > 0));
-    const b = { id, role: l.role || '', type: l.type, hidden: !!l.hidden, dup, valid, overlaps: Array.isArray(l.overlaps) ? l.overlaps.map(String) : [], rotate: l.rotate || 0 };
+    const b = { id, role: l.role || '', type: l.type, hidden: !!l.hidden, dup, valid, overlaps: Array.isArray(l.overlaps) ? l.overlaps.map(String) : [], rotate: l.rotate || 0, opacity: l.opacity == null ? 1 : Math.max(0, Math.min(1, +l.opacity || 0)) };
     if (valid) { b.ax = l.x / 100 * W; b.ay = l.y / 100 * H; b.aw = l.w / 100 * W; b.ah = (l.h || 0) / 100 * H; b.x = b.ax; b.y = b.ay; b.w = b.aw; b.h = b.ah; }
     if (!valid || l.hidden) { boxes.push(b); return; }
     const rb = rep.boxes.find(x => x && String(x.id) === id) || null;
@@ -9949,11 +9973,13 @@ function stValidationJudge(a, v, rep) {
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
       Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken });
       if (num(rb.contrast)) b.contrast = rb.contrast;
+      if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }
     } else if (l.type === 'img') {
       b.mark = isMark; const sameSrc = String(rb.src || '') === String(l.src || '');
       if (isMark && !sameSrc) problems.push('the ' + l.role + ' was measured from ' + (rb.src || 'nothing') + '; this version places ' + (l.src || 'nothing'));
       b.asset = rb.asset === 'loaded' && (sameSrc || !isMark) ? 'loaded' : (rb.asset === 'sketch' ? 'sketch' : 'missing');
       if (num(rb.contrast)) b.contrast = rb.contrast;
+      if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }
     }
     boxes.push(b);
   });
@@ -9978,7 +10004,7 @@ async function stValidationSubmit(env, pair, body, who) {
   const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
   const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
   const id = stId('val'); const now = Date.now();
-  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, asset: b.asset })) };
+  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, asset: b.asset, opacity: b.opacity, occluded: b.occluded })) };
   await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now).run();
   try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
   const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
@@ -10841,7 +10867,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 

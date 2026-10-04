@@ -118,20 +118,28 @@
   function draw(ctx, W, H, layout, copy, images, opts) {
     layout = layout || {}; copy = copy || {}; images = images || {}; opts = opts || {};
     const ground = opts.only === 'ground';
-    const layers = Array.isArray(layout.layers) ? layout.layers : [];
+    // layersOnly: draw just these layers on a clear stage (no base, no imagery) - the occlusion pass asks what a set of
+    // later layers paints over the words and marks beneath them
+    const subset = Array.isArray(opts.layersOnly) ? opts.layersOnly : null;
+    const layers = subset || (Array.isArray(layout.layers) ? layout.layers : []);
     const pal = layout.palette || {};
     ctx.save(); ctx.clearRect(0, 0, W, H);
     const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : null;
     const bgFill = layout.bg && typeof layout.bg === 'object' ? (() => { const d = layout.bg.dir || 'down'; const g = d === 'right' ? ctx.createLinearGradient(0, 0, W, 0) : d === 'left' ? ctx.createLinearGradient(W, 0, 0, 0) : d === 'up' ? ctx.createLinearGradient(0, H, 0, 0) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, layout.bg.from || '#0f171d'); g.addColorStop(1, layout.bg.to || layout.bg.from || '#0f171d'); return g; })() : layout.bg || null;
     const planNoBg = layout.v === 5 && !(layout.regions || []).some(r => r.role === 'background');
-    if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
-    if (images.bg && !layout.noImagery) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
-    else if (!planNoBg && !layout.noImagery) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
+    if (!subset) {
+      if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
+      if (images.bg && !layout.noImagery) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
+      else if (!planNoBg && !layout.noImagery) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
+    }
     const overflow = [];
     const sketch = s => { ctx.setLineDash([W * 0.01, W * 0.008]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, W * 0.003); ctx.strokeRect(s.x + 1, s.y + 1, s.w - 2, s.h - 2); ctx.setLineDash([]); ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '500 ' + Math.max(10, W * 0.018) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2); };
     layers.forEach(l => {
       if (l.hidden) return;
-      if (ground && (l.type === 'text' || isMark(l))) return;
+      // the ground pass leaves out the marks and the glyphs, but keeps a text layer's plate and highlight band: they are
+      // what the glyphs sit on, drawn with their real alpha, so the contrast is measured against what is really there
+      if (ground && isMark(l)) return;
+      const glyphs = !(ground && l.type === 'text');
       const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
       ctx.save(); ctx.globalAlpha = l.opacity == null ? 1 : l.opacity;
       if (l.rotate) { ctx.translate(x + w / 2, y + h / 2); ctx.rotate(l.rotate * Math.PI / 180); ctx.translate(-(x + w / 2), -(y + h / 2)); }
@@ -155,14 +163,17 @@
         ctx.textBaseline = 'top'; ctx.textAlign = t.align;
         if (t.overflowH) overflow.push(l.role || l.id);
         if (l.bg) { ctx.fillStyle = l.bg; roundRect(ctx, t.bx, y, t.bw, t.contentH, t.px * 0.35); ctx.fill(); }
-        if (l.emphasis === 'highlight' || l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || (l.emphasis === 'highlight' ? 'rgba(255,214,0,.85)' : l.color || '#fff'); t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; if (l.emphasis === 'highlight') ctx.fillRect(lx - t.px * 0.15, y + t.padY + i * t.lh - t.px * 0.05, lw + t.px * 0.3, t.lh); else ctx.fillRect(lx, y + t.padY + i * t.lh + t.px * 1.02, lw, Math.max(1.5, t.px * 0.08)); }); }
-        if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, t.px * 0.08); ctx.strokeRect(x, y, w, t.contentH); }
-        ctx.fillStyle = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
-        t.lines.forEach((s, i) => ctx.fillText(s, t.tx, y + t.padY + i * t.lh));
+        if (l.emphasis === 'highlight') { ctx.fillStyle = l.emphasisColor || 'rgba(255,214,0,.85)'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx - t.px * 0.15, y + t.padY + i * t.lh - t.px * 0.05, lw + t.px * 0.3, t.lh); }); }
+        if (glyphs) {
+          if (l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || l.color || '#fff'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx, y + t.padY + i * t.lh + t.px * 1.02, lw, Math.max(1.5, t.px * 0.08)); }); }
+          if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, t.px * 0.08); ctx.strokeRect(x, y, w, t.contentH); }
+          ctx.fillStyle = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
+          t.lines.forEach((s, i) => ctx.fillText(s, t.tx, y + t.padY + i * t.lh));
+        }
       }
       ctx.restore();
     });
-    if (!ground && layout.frame && layout.frame.of > 1) { ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '500 ' + Math.max(10, W * 0.02) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'top'; ctx.textAlign = 'right'; ctx.fillText(layout.frame.index + 1 + ' / ' + layout.frame.of, W - W * 0.025, H * 0.015); ctx.restore(); }
+    if (!ground && !subset && layout.frame && layout.frame.of > 1) { ctx.save(); ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '500 ' + Math.max(10, W * 0.02) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'top'; ctx.textAlign = 'right'; ctx.fillText(layout.frame.index + 1 + ' / ' + layout.frame.of, W - W * 0.025, H * 0.015); ctx.restore(); }
     ctx.restore();
     return { overflow };
   }
@@ -223,7 +234,7 @@
       const id = String(l.id || ('layer' + i)); const dup = !!seen[id]; seen[id] = true;
       const num = v => typeof v === 'number' && isFinite(v);
       const valid = num(l.x) && num(l.y) && num(l.w) && l.w > 0 && (l.h == null || (num(l.h) && l.h >= 0)) && (l.type !== 'text' || (num(l.size) && l.size > 0));
-      const b = { id, role: l.role || '', type: l.type, shape: l.shape || '', hidden: !!l.hidden, locked: !!l.locked, dup, valid, overlaps: Array.isArray(l.overlaps) ? l.overlaps.map(String) : [], rotate: l.rotate || 0, ax: (l.x || 0) / 100 * W, ay: (l.y || 0) / 100 * H, aw: (l.w || 0) / 100 * W, ah: (l.h || 0) / 100 * H };
+      const b = { id, role: l.role || '', type: l.type, shape: l.shape || '', hidden: !!l.hidden, locked: !!l.locked, dup, valid, overlaps: Array.isArray(l.overlaps) ? l.overlaps.map(String) : [], rotate: l.rotate || 0, opacity: l.opacity == null ? 1 : Math.max(0, Math.min(1, +l.opacity || 0)), ax: (l.x || 0) / 100 * W, ay: (l.y || 0) / 100 * H, aw: (l.w || 0) / 100 * W, ah: (l.h || 0) / 100 * H };
       b.x = b.ax; b.y = b.ay; b.w = b.aw; b.h = b.ah;
       if (!valid || l.hidden) { boxes.push(b); return; }
       if (l.type === 'text') {
@@ -268,6 +279,11 @@
       }
       if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
       if (b.type === 'text' || b.mark) {
+        if (typeof b.opacity === 'number') { if (b.opacity < 0.05) add('invisible', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity: it is not visible'); else if (b.opacity < 0.5) add('faint', 'warning', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity'); }
+        if (typeof b.occluded === 'number') {
+          var cov = (b.occludedBy || []).filter(function (id) { return b.overlaps.indexOf(String(id)) < 0; });
+          if (cov.length || !(b.occludedBy && b.occludedBy.length)) { var cl = [b.id].concat(cov); if (b.occluded >= 0.2) add('occluded', 'blocking', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? 'a later layer (' + cov.join(', ') + ')' : 'later layers')); else if (b.occluded >= 0.05) add('occluded', 'warning', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? cov.join(', ') : 'later layers')); }
+        }
         if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
         else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top 14%, bottom 20%)' : 'inside the 3% margin'));
       }
@@ -292,28 +308,77 @@
   /* ---------------------------------------------------------------- contrast against what is actually behind each word and mark */
   const lum = (r, g, b) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-  function colourLum(css) { const c = pctx(); c.fillStyle = '#000'; c.fillStyle = css || '#fff'; const v = c.fillStyle; if (/^#/.test(v)) { const n = parseInt(v.slice(1), 16); return lum((n >> 16) & 255, (n >> 8) & 255, n & 255); } const m = String(v).match(/[\d.]+/g) || [255, 255, 255]; return lum(+m[0], +m[1], +m[2]); }
-  function regionLum(data, W, H, r) {
-    const x0 = Math.max(0, Math.floor(r.x)), y0 = Math.max(0, Math.floor(r.y)), x1 = Math.min(W, Math.ceil(r.x + r.w)), y1 = Math.min(H, Math.ceil(r.y + r.h));
-    const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 4000))); let n = 0, s = 0;
-    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) { const k = (y * W + x) * 4; s += lum(data[k], data[k + 1], data[k + 2]); n++; }
-    return n ? s / n : 0;
+  /** A CSS colour as [r, g, b, a] (0-255, alpha 0-1), through the canvas parser; alpha is kept, never dropped. */
+  function colourRGBA(css) {
+    const c = pctx(); c.fillStyle = '#000'; c.fillStyle = css || '#fff'; const v = String(c.fillStyle);
+    if (/^#/.test(v)) { const n = parseInt(v.slice(1, 7), 16); const a = v.length === 9 ? parseInt(v.slice(7, 9), 16) / 255 : 1; return [(n >> 16) & 255, (n >> 8) & 255, n & 255, a]; }
+    const m = v.match(/[\d.]+/g) || [255, 255, 255]; return [+m[0], +m[1], +m[2], m.length > 3 ? Math.max(0, Math.min(1, +m[3])) : 1];
   }
-  function markLum(img) {
+  function colourLum(css) { const c = colourRGBA(css); return lum(c[0], c[1], c[2]); }
+  /** The composited pixels under a box: mean colour and luminance, and the brightest and darkest sampled patch (local
+   *  readability, which an average can hide). */
+  function regionStats(data, W, H, r) {
+    const x0 = Math.max(0, Math.floor(r.x)), y0 = Math.max(0, Math.floor(r.y)), x1 = Math.min(W, Math.ceil(r.x + r.w)), y1 = Math.min(H, Math.ceil(r.y + r.h));
+    const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 4000))); let n = 0, s = 0, sr = 0, sg = 0, sb = 0, lo = 1, hi = 0;
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) { const k = (y * W + x) * 4; const L = lum(data[k], data[k + 1], data[k + 2]); s += L; sr += data[k]; sg += data[k + 1]; sb += data[k + 2]; if (L < lo) lo = L; if (L > hi) hi = L; n++; }
+    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], lo, hi, n } : { lum: 0, rgb: [0, 0, 0], lo: 0, hi: 0, n: 0 };
+  }
+  function regionLum(data, W, H, r) { return regionStats(data, W, H, r).lum; }
+  /** The visible pixels of a mark: mean colour and luminance over the pixels that are not transparent, and how much of the
+   *  box they fill (a mark with wide transparent padding is smaller than its box). */
+  function markStats(img) {
     if (!img) return null; const c = document.createElement('canvas'); const w = Math.min(160, img.naturalWidth || 160), h = Math.max(1, Math.round(w * (img.naturalHeight || 1) / (img.naturalWidth || 1))); c.width = w; c.height = h;
     const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h); let d; try { d = x.getImageData(0, 0, w, h).data; } catch (e) { return null; }
-    let n = 0, s = 0; for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 128) { s += lum(d[k], d[k + 1], d[k + 2]); n++; }
-    return n ? s / n : null;
+    let n = 0, s = 0, sr = 0, sg = 0, sb = 0; let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 128) { s += lum(d[k], d[k + 1], d[k + 2]); sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; n++; const px = (k / 4) % w, py = Math.floor(k / 4 / w); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; }
+    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], fill: n / (w * h), bounds: { x: minX / w, y: minY / h, w: (maxX - minX + 1) / w, h: (maxY - minY + 1) / h } } : null;
   }
+  function markLum(img) { const m = markStats(img); return m ? m.lum : null; }
+  const blend = (fg, a, bg) => [0, 1, 2].map(i => a * fg[i] + (1 - a) * bg[i]);
+  /** Contrast against what is actually behind each word and mark: the ground pass draws everything but the glyphs and
+   *  the marks (plates, panels, scrims, imagery, with their real alpha and order); the foreground is composited with its
+   *  colour's alpha and the layer's opacity before it is compared, so a transparent plate is not a ground and a faint word
+   *  is a faint word. */
   function contrastOf(layout, copy, images, boxes, W, H) {
     const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
     draw(x, W, H, layout, copy, images, { only: 'ground' }); let data; try { data = x.getImageData(0, 0, W, H).data; } catch (e) { return false; }
     const byId = {}; (layout.layers || []).forEach(l => { byId[String(l.id)] = l; });
     boxes.forEach(b => {
       const l = byId[b.id]; if (!l || b.hidden || b.empty || b.valid === false) return;
-      if (b.type === 'text') { const fg = l.emphasis === 'highlight' ? colourLum(l.emphasisColor ? l.color || '#fff' : '#111') : colourLum(l.color || '#fff'); const bgL = l.bg ? colourLum(l.bg) : l.emphasis === 'highlight' ? colourLum(l.emphasisColor || 'rgb(255,214,0)') : regionLum(data, W, H, b); b.contrast = Math.round(ratio(fg, bgL) * 100) / 100; }
-      else if (b.mark && b.asset === 'loaded') { const ml = markLum(markImage(images, l)); if (ml != null) b.contrast = Math.round(ratio(ml, regionLum(data, W, H, b)) * 100) / 100; }
+      const op = b.opacity == null ? 1 : b.opacity;
+      if (b.type === 'text') {
+        const g = regionStats(data, W, H, b); const fgc = colourRGBA(l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff'));
+        const a = fgc[3] * op; const eff = blend(fgc, a, g.rgb);
+        b.contrast = Math.round(ratio(lum(eff[0], eff[1], eff[2]), g.lum) * 100) / 100; b.alpha = Math.round(a * 100) / 100;
+        b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.lo * 1000) / 1000, Math.round(g.hi * 1000) / 1000];
+      } else if (b.mark && b.asset === 'loaded') {
+        const m = markStats(markImage(images, l)); if (!m) return; const g = regionStats(data, W, H, b);
+        const eff = blend(m.rgb, op, g.rgb); b.contrast = Math.round(ratio(lum(eff[0], eff[1], eff[2]), g.lum) * 100) / 100; b.alpha = Math.round(op * 100) / 100;
+        b.markFill = Math.round(m.fill * 100) / 100; b.groundLum = Math.round(g.lum * 1000) / 1000;
+      }
     });
+    return true;
+  }
+  /** What later layers paint over each word and mark: the layers after it (its named overlaps excepted) are drawn alone on
+   *  a clear stage and the alpha under its occupied box is sampled; the covered share and the covering layers are recorded. */
+  function occlusionOf(layout, copy, images, boxes, W, H) {
+    const layers = Array.isArray(layout.layers) ? layout.layers : []; if (layers.length < 2) return true;
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    const idx = {}; layers.forEach((l, i) => { idx[String(l.id || ('layer' + i))] = i; });
+    for (const b of boxes) {
+      if (!(b.type === 'text' || b.mark) || b.hidden || b.empty || b.valid === false) continue;
+      const i = idx[b.id]; if (i == null) continue;
+      const later = layers.slice(i + 1).filter(l => !l.hidden && b.overlaps.indexOf(String(l.id)) < 0);
+      if (!later.length) continue;
+      // only layers whose own box meets this one can cover it (a cheap geometric filter before the pixels are read)
+      const near = later.filter(l => { const lx = l.x / 100 * W, ly = l.y / 100 * H, lw = l.w / 100 * W, lh = (l.h || 0) / 100 * H; const pad = l.rotate ? Math.max(lw, lh) : 0; return Math.min(lx + lw + pad, b.x + b.w) - Math.max(lx - pad, b.x) > 0 && Math.min(ly + lh + pad, b.y + b.h) - Math.max(ly - pad, b.y) > 0; });
+      if (!near.length) continue;
+      draw(x, W, H, layout, copy, images, { layersOnly: near }); let data; try { data = x.getImageData(0, 0, W, H).data; } catch (e) { return false; }
+      const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y)), x1 = Math.min(W, Math.ceil(b.x + b.w)), y1 = Math.min(H, Math.ceil(b.y + b.h));
+      const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 6000))); let n = 0, cov = 0;
+      for (let yy = y0; yy < y1; yy += step) for (let xx = x0; xx < x1; xx += step) { n++; if (data[(yy * W + xx) * 4 + 3] >= 128) cov++; }
+      if (n) { b.occluded = Math.round(cov / n * 1000) / 1000; b.occludedBy = near.map(l => String(l.id)); }
+    }
     return true;
   }
   /** Does the composition expect imagery that is not there? */
@@ -329,6 +394,7 @@
     const { w: W, h: H } = stageSize(layout, opts.width);
     const boxes = measure(layout, copy, images, W, H);
     const contrasted = opts.contrast === false ? false : contrastOf(layout, copy, images, boxes, W, H);
+    if (opts.occlusion !== false) occlusionOf(layout, copy, images, boxes, W, H);
     const missing = imageryMissing(layout, images);
     const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing });
     return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
@@ -421,12 +487,13 @@
       layers.forEach(l => { if (l.type !== 'text' || !movable(l) || !bad.has(String(l.id)) || (l.align && l.align !== 'left')) return; let right = 100 - sp.side; others([l]).forEach(o => { if (o.x >= l.x + l.w - 0.01 && Math.min(o.y + (o.h || 0), l.y + (l.h || 0)) - Math.max(o.y, l.y) > 0.3) right = Math.min(right, o.x - 1.5); }); const nw = Math.min(right - l.x, l.w * 1.3); if (nw > l.w + 1) { l.w = Math.round(nw * 10) / 10; widened++; } });
       if (widened) { settle(); steps.push('widened ' + widened + ' text block' + (widened === 1 ? '' : 's') + ' into the free space beside ' + (widened === 1 ? 'it' : 'them')); now = validate(L, copy, images, vopts); }
     }
-    // 4. move a mark (or the CTA) off the words, only where the campaign has no observed placement rule
+    // 4. move a mark (or the CTA) off the words, only where nothing holds the mark: a mandatory campaign rule and an
+    //    observed placement both hold it (the words move instead, in 2 and 5), and the step says so
+    const markHeld = mk => (mk && mk.rule && mk.rule.mandatory) ? 'the approved placement rule' + (mk.rule.note ? ' (' + mk.rule.note + ')' : '') : (L.markPlacement && L.markPlacement.basis === 'rule') ? 'the approved placement rule' + (L.markPlacement.text ? ' (' + L.markPlacement.text + ')' : '') : (L.markPlacement && L.markPlacement.basis === 'observed') ? 'the approved references (' + (L.markPlacement.text || 'observed') + ')' : '';
     if (layoutIssues(now).some(i => i.code === 'collision' && i.layers.some(id => isMark(byId[id])))) {
-      const observed = L.markPlacement && L.markPlacement.basis === 'observed';
       layoutIssues(now).filter(i => i.code === 'collision').forEach(i => {
         const mk = i.layers.map(id => byId[id]).find(isMark); if (!mk || !movable(mk)) return;
-        if (observed) { steps.push('left the ' + mk.role + ' where the approved references put it (' + (L.markPlacement.text || 'observed') + ')'); return; }
+        const held = markHeld(mk); if (held) { steps.push('left the ' + mk.role + ' where ' + held + ' puts it; the words must move instead'); return; }
         const g = geo(); const texts = Object.keys(g).map(k => g[k]).filter(b => b.type === 'text' && !b.hidden && !b.empty);
         const corners = [[100 - sp.side - mk.w, 100 - sp.bottom - mk.h], [sp.side, 100 - sp.bottom - mk.h], [100 - sp.side - mk.w, sp.top], [sp.side, sp.top]];
         const free = corners.find(([cx, cy]) => texts.every(b => { const bx = pX(b.x), by = pY(b.y), bw = pX(b.w), bh = pY(b.h); return Math.min(bx + bw, cx + mk.w) - Math.max(bx, cx) <= 0.3 || Math.min(by + bh, cy + mk.h) - Math.max(by, cy) <= 0.3; }));
@@ -462,10 +529,12 @@
     now = validate(L, copy, images, vopts);
     if (layoutIssues(now).length) {
       const locked = layoutIssues(now).reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
+      const heldMark = layoutIssues(now).filter(i => i.code === 'collision').map(i => i.layers.map(id => byId[id]).find(mk => isMark(mk) && markHeld(mk))).find(Boolean);
       const g = geo(); const longest = Object.keys(g).map(k => g[k]).filter(b => b.type === 'text' && b.chars).sort((a, b) => b.contentH - a.contentH)[0];
       const left = layoutIssues(now); const textLeft = left.some(i => i.layers.some(id => byId[id] && byId[id].type === 'text' && (i.code === 'text_overflow' || i.code === 'text_too_wide' || i.code === 'collision')));
       const what = left.map(i => i.code.replace(/_/g, ' ') + ' (' + i.layers.join(', ') + ')').join('; ');
       return result(locked.length ? 'Locked layers stop the fix: ' + Array.from(new Set(locked)).join(', ') + '. Unlock them, or decide what may move.'
+        : heldMark ? 'The ' + heldMark.role + ' is held by ' + markHeld(heldMark) + ' and the words still run into it (' + what + '); move or shorten the words, the mark stays.'
         : textLeft ? 'Geometry alone cannot fit the words without going under the readable minimum (' + what + ').' + (longest ? ' Shorter copy for the ' + (longest.role || 'text') + ' (about ' + Math.max(10, Math.round(longest.chars * 0.75)) + ' characters instead of ' + longest.chars + ') would fit; the Studio does not cut words on its own.' : '')
         : 'The layout still has ' + what + ' and no move within the rules clears it; decide what may move.');
     }
@@ -490,7 +559,8 @@
     const order = l => { const i = ROLE_ORDER.indexOf(l.role); return (i < 0 ? 4.5 : i) * 1000 + (l.y || 0); };
     const panel0 = layers0.find(l => l.type === 'shape' && (l.role === 'panel') && typeof l.fill === 'string' && /^#[0-9a-f]{6}$/i.test(l.fill));
     const accent = (panel0 && panel0.fill) || (L0.palette && L0.palette.primary) || '#0E6A6E';
-    const observed = L0.markPlacement && L0.markPlacement.basis === 'observed' ? L0.markPlacement.corner : '';
+    const observed = L0.markPlacement && (L0.markPlacement.basis === 'observed' || L0.markPlacement.basis === 'rule') ? L0.markPlacement.corner : '';
+    const heldMark = l => isMark(l) && ((l.rule && l.rule.mandatory) || (L0.markPlacement && L0.markPlacement.basis === 'rule'));
     const sigOf = L => (L.layers || []).filter(l => l.type === 'text').map(l => [l.id, Math.round(l.x), Math.round(l.y), Math.round(l.w)].join(':')).sort().join('|');
     const current = sigOf(L0);
     const recipes = [
@@ -559,7 +629,7 @@
       if (r.panel === 'fade') shapes.push({ id: 'v-panel', type: 'shape', role: 'overlay', shape: 'rect', gradient: true, dir: 'up', x: 0, y: r1(Math.max(0, sTop - 18)), w: 100, h: r1(100 - Math.max(0, sTop - 18)), fill: 'rgba(8,12,18,0.82)', radius: 0 });
       // the marks go to a corner clear of the words (the observed corner first), unless locked
       const occupied = { x: zone.x, y: sTop, w: zone.w, h: sBot - sTop };
-      marks.filter(mk => !mk.locked).forEach(mk => {
+      marks.filter(mk => !mk.locked && !heldMark(mk)).forEach(mk => {
         const lh = mk.h || 6; const lw = mk.w || 17;
         const C = { tl: [sp.side, sp.top], tr: [100 - sp.side - lw, sp.top], bl: [sp.side, 100 - sp.bottom - lh], br: [100 - sp.side - lw, 100 - sp.bottom - lh] };
         const pref = [observed, 'br', 'bl', 'tr', 'tl'].filter((c, i, a) => c && a.indexOf(c) === i);
@@ -599,7 +669,7 @@
   }
   /** The report a browser hands the worker: the measured boxes and the attested measurements, not a verdict (the worker derives that). */
   function report(v, val) {
-    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'rotate'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 100) / 100 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
+    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, variants, report, zip };
+  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf };
 })();

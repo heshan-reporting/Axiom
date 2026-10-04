@@ -101,7 +101,7 @@ export async function makeStudio(opts) {
   await new Promise(r => setTimeout(r, 900));
   const browser = await chromium.launch();
   /* hold: a path pattern whose requests wait until released, to make a request "still running" on purpose */
-  const holds = []; const seen = [];
+  const holds = []; const seen = []; const fails = [];
   async function open(o) {
     o = o || {};
     const ctxB = await browser.newContext({ viewport: o.viewport || { width: 1440, height: 900 }, acceptDownloads: true, reducedMotion: o.reducedMotion || 'no-preference' });
@@ -114,6 +114,8 @@ export async function makeStudio(opts) {
       if (!u.startsWith(W)) return route.abort();
       const path = u.slice(W.length); seen.push({ method: rq.method(), path, body: rq.postData() });
       for (const h of holds) if (h.re.test(path)) await h.wait;
+      // a request made to fail on purpose (once): the page must cope and retry, never pretend it succeeded
+      const fi = fails.findIndex(f => f.re.test(path)); if (fi >= 0) { const f = fails.splice(fi, 1)[0]; f.hit++; return route.fulfill({ status: f.status || 500, headers: { 'content-type': 'application/json' }, body: JSON.stringify(f.body || { error: 'internal_error', detail: 'made to fail by the harness' }) }); }
       const headers = rq.headers(); const body = rq.postDataBuffer();
       const res = await handler.fetch(new Request(u, { method: rq.method(), headers, body: body && rq.method() !== 'GET' ? body : undefined }), env, ctx);
       const hh = {}; res.headers.forEach((v, k) => { hh[k] = v; });
@@ -124,9 +126,10 @@ export async function makeStudio(opts) {
     if (o.go !== false) { await page.evaluate(() => go('studio')); await page.waitForSelector('#studio-root .st-head'); }
     page.ctxB = ctxB; return page;
   }
+  function failNext(re, status, body) { const f = { re, status, body, hit: 0 }; fails.push(f); return f; }
   function hold(re) { let release; const wait = new Promise(r => { release = r; }); const h = { re, wait }; holds.push(h); return () => { release(); holds.splice(holds.indexOf(h), 1); }; }
   async function close() { await browser.close(); server.kill(); globalThis.fetch = realFetch; }
-  return { env, handler, api, calls, providers, setProvider, open, close, hold, seen, r2, kv, PORT };
+  return { env, handler, api, calls, providers, setProvider, open, close, hold, failNext, seen, r2, kv, PORT };
 }
 
 /* ------------------------------------------------------------ a tiny test runner */
