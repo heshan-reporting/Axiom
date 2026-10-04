@@ -8053,8 +8053,11 @@ function stLayoutFromSpec(kit, ns, format, spec, copy, base, campaign) {
   let markNotes = [], markState = null;
   { const lw = 17, lh = 8 * aspect; const corner = spec.logo.corner;
     const si = stSafeInset(format);
-    const pos = corner === 'bl' ? { x: si.side, y: 100 - si.bottom - lh } : corner === 'tr' ? { x: 100 - si.side - lw, y: si.top } : corner === 'tl' ? { x: si.side, y: si.top } : corner === 'panel' ? { x: geo.x + geo.w - pad - lw, y: geo.y + geo.h - pad * aspect - lh } : null;
-    const marks = stMarkLayers(kit, ns, campaign || (base && base.marks && base.marks.campaign) || '', format, null, pos ? { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 } : null, { placement: spec.logo.corner === 'br' && base && base.markPlacement && base.markPlacement.basis === 'observed' ? base.markPlacement : null });
+    let pos = corner === 'bl' ? { x: si.side, y: 100 - si.bottom - lh } : corner === 'tr' ? { x: 100 - si.side - lw, y: si.top } : corner === 'tl' ? { x: si.side, y: si.top } : corner === 'panel' ? { x: geo.x + geo.w - pad - lw, y: geo.y + geo.h - pad * aspect - lh } : null;
+    // the campaign's approved placement rule outranks the spec's corner on the house layout too (S6); the layers carry the rule
+    const campId = campaign || (base && base.marks && base.marks.campaign) || ''; const mpRule = stMarkPlace(null, format, kit, campId);
+    if (mpRule.pos) pos = mpRule.pos;
+    const marks = stMarkLayers(kit, ns, campId, format, null, pos ? { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10 } : null, { placement: spec.logo.corner === 'br' && base && base.markPlacement && base.markPlacement.basis === 'observed' ? base.markPlacement : null, rule: mpRule.rule });
     marks.layers.forEach(l => layers.push(l)); markNotes = marks.notes; spec.marksPolicy = marks.policy; markState = marks; }
   const image = stImageBox(format, spec, geo);
   const L = { v: 4, format, template: fillKey === 'dark' ? 'plain' : fillKey, templateName: fillKey === 'dark' ? 'dark panel' : ST_TEMPLATES[fillKey].name, style: stStyleWord(spec), placement: c.zone, design: spec, image, marks: { policy: spec.marksPolicy, campaign: campaign || (base && base.marks && base.marks.campaign) || '' }, markPlacement: markState ? markState.placement : undefined, incomplete: markState ? markState.incomplete : [], unsupported: markNotes, bg: image && style === 'typographic' ? fill : undefined, stage: { w: f.w, h: f.h }, palette: Object.assign({ primary: fill }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans', fallback: 'the app families when the kit fonts are not installed on the machine rendering' }, layers };
@@ -8986,16 +8989,50 @@ function stCornerMentions(text) {
   });
   return out;
 }
-function stMarkPlacement(rows) {
-  const votes = {}; const by = {};
-  (rows || []).filter(r => r && (r.purpose === 'approved' || r.purpose === 'brand') && r.analysis && !r.analysis.error && r.analysis.logo).forEach(r => {
-    stCornerMentions(r.analysis.logo).forEach(k => { votes[k] = (votes[k] || 0) + 1; (by[k] = by[k] || []).push(r.name || r.id); });
+const ST_CORNER_WORDS = { bl: 'bottom left', br: 'bottom right', tl: 'top left', tr: 'top right' };
+/** Mark placement as evidence (S6). Every approved or brand reference that shows a mark contributes one row: the corner, how
+ *  it was read (`structured` - the vision pass answered a mark object; `text` - a corner phrase in its prose, negations
+ *  honoured), a confidence (0.85 structured, 0.55 one prose corner, 0.3 several), the kind of mark, its size and clear space
+ *  in the analyst's words, the approval the reference carries (approved beats brand), and the link. Rows are weighed, not
+ *  counted; the result names the corner with the most weight, the agreement (that corner's share of the weight), and every
+ *  reference that disagrees as an exception. Above the evidence sits the rule layer: a campaign's `markRule` (taught through
+ *  POST /brand/teach or set on the kit) makes the basis `rule`, and mandatory rules hold the mark in production. No evidence
+ *  and no rule is the house default. Mood, imagery, typography and inspiration references never count: they are not approvals. */
+function stPlacementEvidence(rows, kit, campaign) {
+  const camp = kit && campaign ? ((kit.campaigns || []).find(c => c.id === campaign) || null) : null;
+  const rule = camp && camp.markRule && ST_CORNER_WORDS[camp.markRule.corner] ? { corner: camp.markRule.corner, mandatory: !!camp.markRule.mandatory, note: camp.markRule.note || '' } : null;
+  const evidence = [];
+  (rows || []).filter(r => r && (r.purpose === 'approved' || r.purpose === 'brand') && r.analysis && !r.analysis.error).forEach(r => {
+    const an = r.analysis; const mk = an.mark && typeof an.mark === 'object' ? an.mark : null;
+    let corner = null, basis = '', confidence = 0;
+    if (mk && ST_CORNER_WORDS[mk.corner]) { corner = mk.corner; basis = 'structured'; confidence = 0.85; }
+    else if (mk && mk.present === false) return;                       // the analyst saw no mark: nothing to learn about placement
+    else if (an.logo) { const ks = stCornerMentions(an.logo); if (ks.length === 1) { corner = ks[0]; basis = 'text'; confidence = 0.55; } else if (ks.length > 1) { corner = ks[0]; basis = 'text'; confidence = 0.3; } }
+    if (!corner) return;
+    evidence.push({ ref: r.id, name: r.name || r.id, purpose: r.purpose, approval: r.purpose === 'approved' ? 'approved' : 'brand', campaign: r.campaign || '', corner, basis, confidence, kind: mk && mk.kind ? mk.kind : 'unsure', size: (mk && mk.size) || '', clearSpace: (mk && mk.clearSpace) || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : (r.url || ''), text: stStr(an.logo, 160) });
   });
-  const best = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
-  if (!best) return { corner: 'br', basis: 'default', text: 'bottom right, the house default; no approved or brand reference describes a mark position', refs: [] };
-  const words = { bl: 'bottom left', br: 'bottom right', tl: 'top left', tr: 'top right' };
-  return { corner: best, basis: 'observed', text: words[best] + ' as in ' + votes[best] + ' ' + (votes[best] === 1 ? 'reference' : 'references') + ' (' + by[best].slice(0, 3).join(', ') + ')' + (Object.keys(votes).length > 1 ? '; others differ: ' + Object.keys(votes).filter(k => k !== best).map(k => words[k] + ' in ' + by[k].join(', ')).join('; ') : ''), refs: by[best] };
+  const weight = {}; let total = 0;
+  evidence.forEach(e => { const w = e.confidence * (e.approval === 'approved' ? 1.2 : 1); weight[e.corner] = (weight[e.corner] || 0) + w; total += w; });
+  const best = Object.keys(weight).sort((a, b) => weight[b] - weight[a])[0] || null;
+  const agreement = best ? Math.round((weight[best] / total) * 100) / 100 : 0;
+  const names = k => evidence.filter(e => e.corner === k).map(e => e.name).slice(0, 3).join(', ');
+  const others = best ? Object.keys(weight).filter(k => k !== best) : [];
+  const out = { corner: 'br', basis: 'default', text: '', refs: [], evidence, exceptions: [], confidence: 0, mandatory: false, rule, scope: { client: true, campaign: campaign || '' } };
+  if (rule) {
+    out.corner = rule.corner; out.basis = 'rule'; out.mandatory = rule.mandatory; out.confidence = 1;
+    out.exceptions = evidence.filter(e => e.corner !== rule.corner);
+    out.refs = evidence.filter(e => e.corner === rule.corner).map(e => e.name);
+    out.text = ST_CORNER_WORDS[rule.corner] + ' by the approved placement rule' + (rule.mandatory ? ' (mandatory: the mark is held there)' : ' (a preference the plan may move away from)') + (rule.note ? ': ' + rule.note : '') + (out.refs.length ? '; ' + out.refs.length + ' reference' + (out.refs.length === 1 ? ' agrees' : 's agree') + ' (' + out.refs.slice(0, 3).join(', ') + ')' : '') + (out.exceptions.length ? '; ' + out.exceptions.length + ' reference' + (out.exceptions.length === 1 ? ' differs' : 's differ') + ' (' + out.exceptions.map(e => e.name + ': ' + ST_CORNER_WORDS[e.corner]).slice(0, 3).join(', ') + ')' : '');
+    return out;
+  }
+  if (!best) { out.text = 'bottom right, the house default; no approved or brand reference describes a mark position'; return out; }
+  out.corner = best; out.basis = 'observed'; out.confidence = agreement; out.exceptions = evidence.filter(e => e.corner !== best); out.refs = evidence.filter(e => e.corner === best).map(e => e.name);
+  const n = out.refs.length;
+  out.text = ST_CORNER_WORDS[best] + ' as in ' + n + ' ' + (n === 1 ? 'reference' : 'references') + ' (' + names(best) + ')' + (others.length ? '; others differ: ' + others.map(k => ST_CORNER_WORDS[k] + ' in ' + names(k)).join('; ') : '') + (agreement < 1 ? '; agreement ' + Math.round(agreement * 100) + '%' : '');
+  return out;
 }
+/** The placement callers have used since P8: corner, basis, text and the supporting names - now computed from the evidence above, with the evidence attached. */
+function stMarkPlacement(rows, kit, campaign) { return stPlacementEvidence(rows, kit, campaign); }
 /** The mark layers for a campaign: the client logo, the campaign wordmark, both, or none - each an exact image layer from its original asset.
  *  A campaign's logo policy is mandatory: a plan that asks for another mark is overruled and the note says so. A mark the policy wants
  *  but that is not on file is never drawn, substituted or replaced by another campaign's: the layout is marked incomplete instead. */
@@ -9042,6 +9079,8 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
     const pick = vars.length ? (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
     layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - (opts.w || 24)), y: at.y, w: opts.w || 24, h: Math.round(8 * aspect * ((opts.w || 24) / 24) * 10) / 10, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
   } else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
+  // a mandatory campaign rule rides on the mark layers themselves, so the editor, the layer ops and /studio/version hold the mark wherever the layout travels
+  if (opts.rule && opts.rule.mandatory && ST_CORNER_WORDS[opts.rule.corner]) layers.forEach(l => { l.rule = { corner: opts.rule.corner, mandatory: true, note: opts.rule.note || '' }; });
   return { layers, policy, notes, campaign: camp, incomplete, overridden, placement: pos ? (opts.rule && opts.rule.mandatory ? { corner: opts.rule.corner, basis: 'rule', text: 'the approved placement rule' + (opts.rule.note ? ': ' + opts.rule.note : '') } : { corner: 'given', basis: 'plan', x: pos.x, y: pos.y, w: lw }) : placement ? { corner: placement.corner, basis: placement.basis, text: placement.text } : { corner: 'br', basis: 'default' } };
 }
 // -- P19: freeform everywhere ---------------------------------------------------------------------------------
@@ -9252,7 +9291,17 @@ function stRegionPrompt(plan, region, piece, ctx, format) {
 const ST_SPEC_SCHEMA = '{"concept":"<=30 words","objective":"<=20 words: what the composition must say first","image":{"keep":true,"subject":"","setting":"","framing":"","lighting":"","mood":"","focal":"left|centre|right"},"composition":{"style":"panel|translucent|none|gradient|split|typographic","zone":"top|middle|bottom|left|right","coverage":"compact|standard|large"},"type":{"align":"left|centre","scale":"same|larger|smaller"},"panel":{"fill":"teal|gold|plain|kit|dark","opacity":0.94},"logo":{"corner":"br|bl|tr|tl|panel"},"cta":{"style":"button|text"}}';
 const ST_SPEC_RULES = 'DESIGN SPEC. image.keep true reuses the current photograph (leave the other image fields empty); false means a new photograph, described by subject, setting, framing, lighting, mood and focal (where the subject sits so the words have room). composition.style: panel = a solid text panel; translucent = the panel lets the photograph through; none = the words straight over a darkened photograph; gradient = the words over a gradient that darkens from the zone edge; split = the words on a solid field with the photograph in its own region beside or above; typographic = the brand colour fills the stage, the type leads, a small photograph sits in the opposite corner. zone places the words; coverage is how much of the stage they take. type.align centre only for a symmetrical composition. panel.fill kit = the client palette primary, dark = near black. logo.corner panel puts the logo inside the text panel. cta.style text drops the button. Variation comes from the composition, the hierarchy and the treatment, not from a different photograph alone or a synonym.';
 const ST_REF_RANK = { approved: 0, brand: 1, composition: 2, typography: 3, mood: 4, imagery: 5, inspiration: 6 };
-const ST_REF_SYS = 'You are a senior designer describing one reference image for colleagues who will design in a related style. Answer as strict JSON only, no prose: {"summary":"<=40 words: what it is and what makes it work","typography":"<=30 words: families as they look, weights, case, size relationships","colour":{"palette":["#hex"],"relationships":"<=25 words: ground, accent and type colours, contrast"},"hierarchy":"<=25 words: what reads first, second, third","composition":"<=30 words: grid, zones, where the image and the words sit, negative space","imageTreatment":"<=25 words: photograph or illustration, crop, light, grade, overlays","panels":"<=25 words: boxes, bands, shapes, their opacity and corners, or none","spacing":"<=20 words: margins, padding, density","logo":"<=20 words: where and how large, or none","text":["every word that appears, verbatim"],"takeaways":["<=12 words each, three to five: what to take from it"]}. Describe only what is visible; do not guess the client or the intent.';
+const ST_REF_SYS = 'You are a senior designer describing one reference image for colleagues who will design in a related style. Answer as strict JSON only, no prose: {"summary":"<=40 words: what it is and what makes it work","typography":"<=30 words: families as they look, weights, case, size relationships","colour":{"palette":["#hex"],"relationships":"<=25 words: ground, accent and type colours, contrast"},"hierarchy":"<=25 words: what reads first, second, third","composition":"<=30 words: grid, zones, where the image and the words sit, negative space","imageTreatment":"<=25 words: photograph or illustration, crop, light, grade, overlays","panels":"<=25 words: boxes, bands, shapes, their opacity and corners, or none","spacing":"<=20 words: margins, padding, density","logo":"<=20 words: where and how large, or none","mark":{"present":true,"kind":"logo|wordmark|both|none|unsure","corner":"tl|tr|bl|br|centre|none","size":"<=12 words: its width against the stage","clearSpace":"<=12 words: the margin kept around it"},"text":["every word that appears, verbatim"],"takeaways":["<=12 words each, three to five: what to take from it"]}. Describe only what is visible; do not guess the client or the intent. In "mark", corner is where the mark sits (none when there is no mark); say unsure rather than guess.';
+/** The mark a reference shows, as data: kind, corner, size and clear space, each held to its vocabulary; an unreadable answer is unsure / none. */
+function stRefMark(m) {
+  if (!m || typeof m !== 'object') return undefined;
+  const kind = ['logo', 'wordmark', 'both', 'none', 'unsure'].indexOf(m.kind) >= 0 ? m.kind : 'unsure';
+  const corner = ['tl', 'tr', 'bl', 'br', 'centre', 'none'].indexOf(m.corner) >= 0 ? m.corner : 'none';
+  const out = { present: m.present === false || kind === 'none' ? false : true, kind, corner };
+  if (stStr(m.size, 120)) out.size = stStr(m.size, 120);
+  if (stStr(m.clearSpace, 120)) out.clearSpace = stStr(m.clearSpace, 120);
+  return out;
+}
 async function stRefImage(env, ref) {
   if (!ref || !ref.key || !env.MIND_DOCS) return null;
   try {
@@ -9274,7 +9323,7 @@ async function stRefAnalyse(env, p, ref, log) {
       const r = await stClaude(env, { role: 'extract', system: ST_REF_SYS, user: 'REFERENCE "' + (ref.name || 'reference') + '" (purpose: ' + (ref.purpose || 'inspiration') + (ref.note ? '; note: ' + ref.note : '') + '). Describe it.', images: [im], maxTok: 1800, timeoutMs: 60000, log });
       const j = relJson(r.text);
       if (!j || !j.summary) analysis = { error: 'the model did not describe it as JSON', at: Date.now() };
-      else analysis = { summary: stStr(j.summary, 300), typography: stStr(j.typography, 240), colour: { palette: (Array.isArray(j.colour && j.colour.palette) ? j.colour.palette : []).map(x => stStr(x, 9)).filter(x => /^#[0-9a-fA-F]{3,8}$/.test(x)).slice(0, 6), relationships: stStr(j.colour && j.colour.relationships, 200) }, hierarchy: stStr(j.hierarchy, 200), composition: stStr(j.composition, 240), imageTreatment: stStr(j.imageTreatment, 200), panels: stStr(j.panels, 200), spacing: stStr(j.spacing, 160), logo: stStr(j.logo, 160), text: (Array.isArray(j.text) ? j.text : []).map(x => stStr(x, 120)).slice(0, 12), takeaways: (Array.isArray(j.takeaways) ? j.takeaways : []).map(x => stStr(x, 120)).slice(0, 5), model: r.model, at: Date.now() };
+      else analysis = { summary: stStr(j.summary, 300), typography: stStr(j.typography, 240), colour: { palette: (Array.isArray(j.colour && j.colour.palette) ? j.colour.palette : []).map(x => stStr(x, 9)).filter(x => /^#[0-9a-fA-F]{3,8}$/.test(x)).slice(0, 6), relationships: stStr(j.colour && j.colour.relationships, 200) }, hierarchy: stStr(j.hierarchy, 200), composition: stStr(j.composition, 240), imageTreatment: stStr(j.imageTreatment, 200), panels: stStr(j.panels, 200), spacing: stStr(j.spacing, 160), logo: stStr(j.logo, 160), mark: stRefMark(j.mark), text: (Array.isArray(j.text) ? j.text : []).map(x => stStr(x, 120)).slice(0, 12), takeaways: (Array.isArray(j.takeaways) ? j.takeaways : []).map(x => stStr(x, 120)).slice(0, 5), model: r.model, at: Date.now() };
     } catch (e) { analysis = { error: String((e && e.message) || e).slice(0, 160), at: Date.now() }; }
   }
   try { await env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(jsonFit(analysis, 6000), ref.id).run(); } catch (e) {}
@@ -9341,7 +9390,7 @@ async function stIdentityAudit(env, ns) {
     const marks = await brMarks(env, ns, kit, c); const wmVar = marks.wordmark.variants.find(v => v.onFile && v.default) || marks.wordmark.variants.find(v => v.onFile);
     const wm = wmVar ? { bytes: wmVar.bytes, mime: wmVar.mime, variant: wmVar.variant, variants: marks.wordmark.variants.map(v => ({ variant: v.variant, tone: v.tone, v: v.v, onFile: v.onFile, default: v.default })) } : (c.hasWordmark ? await head('brand/' + ns + '/wordmark/' + c.id) : null);
     const refs = refsFor(c.id); const byPurpose = {}; refs.forEach(r => { byPurpose[r.purpose] = (byPurpose[r.purpose] || 0) + 1; });
-    const placement = stMarkPlacement(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, analysis: pjs(r.analysis, null) })));
+    const placement = stPlacementEvidence(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign, key: r.key, analysis: pjs(r.analysis, null) })), kit, c.id);
     const prefs = fixes.filter(f => !stCampaignOf(f) || stCampaignOf(f) === c.id);
     const artworks = art.filter(a => String((pjs(a.meta, {}) || {}).campaign || '') === c.id);
     const gaps = [];
@@ -9349,7 +9398,7 @@ async function stIdentityAudit(env, ns) {
     if ((policy === 'wordmark' || policy === 'both') && !wm) gaps.push('the ' + (c.name || c.id) + ' wordmark the policy requires is not on file' + (c.hasWordmark ? ' (the kit says it is, but R2 has no object)' : ''));
     if (!c.identity) gaps.push('no identity note (colours, devices, type) recorded on the campaign');
     if (!byPurpose.brand && !byPurpose.approved) gaps.push('no brand or approved reference for this campaign on any project');
-    if (placement.basis !== 'observed') gaps.push('mark placement is not observed in any approved reference; the house default (bottom right) applies');
+    if (placement.basis === 'default') gaps.push('mark placement is not observed in any approved reference and no rule is taught; the house default (bottom right) applies');
     campaigns.push({ id: c.id, name: c.name || c.id, active: c.active !== false, policy, identity: c.identity || '', logo: logo ? { onFile: true, bytes: logo.bytes, mime: logo.mime } : { onFile: false }, wordmark: wm ? { onFile: true, bytes: wm.bytes, mime: wm.mime } : { onFile: false, kitSays: !!c.hasWordmark }, references: { total: refs.length, byPurpose, analysed: refs.filter(r => { const a = pjs(r.analysis, null); return a && !a.error; }).length }, placement, preferences: prefs.map(f => ({ id: f.id, rule: f.rule, scope: stCampaignOf(f) ? 'campaign' : f.scope, who: f.who })), artworks: artworks.length, gaps });
   }
   const unassigned = refRows.filter(r => !(r.campaign || r.project_campaign));
@@ -9403,6 +9452,7 @@ function brKitDiff(a, b) {
     if (wv(x.wordmarks) !== wv(y.wordmarks)) { const before = new Set((x.wordmarks || []).map(v => v.variant + '@' + v.v)); (y.wordmarks || []).filter(v => !before.has(v.variant + '@' + v.v)).forEach(v => out.push(id + ' wordmark variant ' + v.variant + ' (' + v.tone + ', version ' + v.v + ')')); const after = new Set((y.wordmarks || []).map(v => v.variant)); (x.wordmarks || []).filter(v => !after.has(v.variant)).forEach(v => out.push(id + ' wordmark variant ' + v.variant + ' removed')); }
     if (x.wordmarkV !== y.wordmarkV) out.push(id + ' single wordmark ' + (y.wordmarkV ? 'version ' + y.wordmarkV : 'removed'));
     if (x.wordmarkDefault !== y.wordmarkDefault) out.push(id + ' default wordmark variant ' + (y.wordmarkDefault || 'none'));
+    if (!same(x.markRule, y.markRule)) out.push(id + ' mark placement rule ' + (y.markRule ? (ST_CORNER_WORDS[y.markRule.corner] || y.markRule.corner) + (y.markRule.mandatory ? ', mandatory' : ', preferred') : 'removed'));
     ['identity', 'tone', 'cta', 'signoff', 'structure', 'notes', 'active'].forEach(k => { if (!same(x[k], y[k])) out.push(id + ' ' + k); });
   });
   Object.keys(ca).forEach(id => { if (!cb[id]) out.push('campaign ' + id + ' removed'); });
@@ -9525,7 +9575,8 @@ function brReadiness(ws) {
   const designRefs = ws.references.filter(r => r.purpose === 'brand' || r.purpose === 'approved');
   if (!designRefs.length) gaps.push({ code: 'no_approved_reference', text: 'No brand or approved design reference ' + (camp ? 'for ' + (camp.name || camp.id) : 'for the client') + ' on any project.' });
   const unanalysed = ws.references.filter(r => !r.analysed); if (unanalysed.length) outdated.push({ code: 'references_unanalysed', text: unanalysed.length + ' reference' + (unanalysed.length === 1 ? ' is' : 's are') + ' not analysed: the models read them by name only (' + unanalysed.slice(0, 4).map(r => r.name).join(', ') + ').' });
-  if (camp && ws.placement.basis !== 'observed') gaps.push({ code: 'placement_unobserved', text: 'Mark placement is not observed in any approved reference; the house default (bottom right) applies.' });
+  if (camp && ws.placement.basis === 'default') gaps.push({ code: 'placement_unobserved', text: 'Mark placement is not observed in any approved reference and no rule is taught; the house default (bottom right) applies.', fix: 'Upload an approved tile as a reference (purpose approved) and analyse it, or teach the placement in the Brand workspace.' });
+  if (camp && ws.placement.basis === 'observed' && (ws.placement.exceptions.length || ws.placement.confidence < 0.7)) gaps.push({ code: 'placement_contested', text: 'The approved references disagree on where the mark sits (' + ws.placement.text + '); the Studio follows the heavier evidence but nothing holds the mark there.', fix: 'Teach the placement (Brand workspace, Teach this brand) so one corner becomes the rule and the exceptions are recorded.' });
   const claims = ws.words.items.filter(i => i.kind === 'claim');
   if (camp && !claims.some(c => c.status === 'active')) gaps.push({ code: 'no_approved_facts', text: 'No approved facts for ' + (camp.name || camp.id) + ': every figure will need a source in the project.' });
   // a banned term inside an approved fact, a campaign's own words, the standing rules or an active preference
@@ -9559,7 +9610,8 @@ async function brandWorkspace(env, ns, campaignId) {
   // references: every project of this client; a campaign view shows that campaign's and the unassigned ones
   const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
   const refs = refRows.filter(r => { const c = r.campaign || r.pc || ''; return cid ? (c === cid || c === '') : true; }).map(r => { const an = pjs(r.analysis, null); return item({ id: r.id, kind: 'reference', authority: 'observation', campaign: r.campaign || r.pc || '', name: r.name, title: r.name, purpose: r.purpose, body: an && !an.error ? stStr(an.summary, 300) : (r.note || ''), analysed: !!(an && !an.error), project: r.project, projectTitle: r.ptitle, url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', source: { type: 'reference', id: r.id, label: 'reference on project ' + (r.ptitle || r.project), project: r.project }, created: r.created }); });
-  const placement = stMarkPlacement(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, analysis: pjs((refRows.find(x => x.id === r.id) || {}).analysis, null) })));
+  const placement = stPlacementEvidence(refs.map(r => { const row = refRows.find(x => x.id === r.id) || {}; return { id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign, key: row.key || '', analysis: pjs(row.analysis, null) }; }), kit, cid);
+  const excludedReferences = refRows.length - refs.length;
   const voice = [];
   if (kit.voice) voice.push(item({ id: 'kit:voice', kind: 'voice', authority: 'rule', title: 'Voice', body: stStr(kit.voice, 1500), source: kitSrc('brand kit voice') }));
   String(kit.rules || '').split(/\n+/).map(s => s.trim()).filter(Boolean).forEach((r, i) => voice.push(item({ id: 'kit:rule:' + i, kind: 'rule', authority: 'rule', title: 'Standing rule', body: r, source: kitSrc('brand kit standing rules') })));
@@ -9577,7 +9629,7 @@ async function brandWorkspace(env, ns, campaignId) {
   const artworks = art.filter(a => { const c = String((pjs(a.meta, {}) || {}).campaign || ''); return !cid || c === cid || c === ''; }).slice(0, 60).map(a => ({ id: a.id, title: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || ''), url: '/engine/art?id=' + a.id, created: a.created }));
   const native = await brItems(env, ns, cid);
   const ws = { ok: true, ns, client: kit.name || ns, campaign: camp ? { id: camp.id, name: camp.name || camp.id, identity: camp.identity || '', policy: identity.policy, active: camp.active !== false } : null, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name || c.id, policy: c.logoPolicy || 'logo', active: c.active !== false })),
-    identity, type: { fonts: kit.fonts || {}, note: camp ? camp.identity || '' : '' }, colour: { palette: kit.palette || {} }, references: refs, artworks, placement: { basis: placement.basis, corner: placement.corner, text: placement.text || '', supporting: refs.filter(r => r.analysed && (r.purpose === 'approved' || r.purpose === 'brand')).map(r => ({ id: r.id, name: r.name })) },
+    identity, type: { fonts: kit.fonts || {}, note: camp ? camp.identity || '' : '' }, colour: { palette: kit.palette || {} }, references: refs, excludedReferences, artworks, placement: { basis: placement.basis, corner: placement.corner, text: placement.text || '', mandatory: placement.mandatory, confidence: placement.confidence, rule: placement.rule, evidence: placement.evidence, exceptions: placement.exceptions, supporting: placement.evidence.filter(e => e.corner === placement.corner).map(e => ({ id: e.ref, name: e.name })) },
     voice: { items: voice }, words: { items: words, excludedFacts }, preferences, accepted, items: native,
     authorities: BR_AUTH.map(k => ({ id: k, word: BR_AUTH_WORD[k] })), kitUpdated: at };
   ws.readiness = brReadiness(ws);
@@ -9586,6 +9638,141 @@ async function brandWorkspace(env, ns, campaignId) {
   const counts = {}; [].concat(voice, words, preferences, accepted, native, refs).forEach(i => { if (i.status === 'retired') return; counts[i.authority] = (counts[i.authority] || 0) + 1; }); ws.counts = counts;
   ws.note = 'Only ' + (kit.name || ns) + (camp ? ', ' + (camp.name || camp.id) + ' and the client-wide knowledge' : '') + ' is shown; no other client\'s knowledge reaches this view or the models. Approved rules and the campaign policy outrank preferences; observations and inferences inform and never bind.';
   return ws;
+}
+// -- S6: the client knowledge inventory, placement evidence and "Teach this brand" ------------------------------------
+// The workspace says what is known; the inventory says what of it the models can actually use, what is missing, what is
+// stored but never retrieved (a pending fact, another campaign's fact or reference, a switched-off correction, an
+// artwork the describer never catalogued), and what to do about each. Teach this brand turns evidence and gaps into
+// proposals a person confirms with a reason; every confirmation is a kit revision, an engine_fixes row or a brand item,
+// never a silent change, and a confirmed placement rule is then held in production (the mark layer carries the rule).
+const BR_TEACH_KINDS = ['placement', 'fact', 'banned', 'rule', 'item'];
+const BR_EXAMPLE_PURPOSES = { approved: 'an approved tile for this campaign: the strongest constraint on identity, placement and the words', brand: 'a brand or campaign sheet: the marks, colours and type as the client supplied them', typography: 'a reference for type: families as they look, weights, case, size relationships', imagery: 'a reference for the imagery the client accepts: subjects, light, crop, grade', composition: 'a reference for layout: where the words, image and mark sit' };
+async function brInventory(env, ns, campaignId) {
+  const ws = await brandWorkspace(env, ns, campaignId); if (ws.error) return ws;
+  const kit = (await brandKit(env, ns)) || {}; const camp = ws.campaign; const cid = camp ? camp.id : ''; const id = ws.identity;
+  const usable = [], notRetrieved = [], recommendations = [];
+  const push = (kind, items, reaches, text) => usable.push({ kind, n: items.length, text: text || (items.length ? items.slice(0, 6).join(', ') + (items.length > 6 ? ' and ' + (items.length - 6) + ' more' : '') : 'none'), reaches });
+  const marks = [];
+  if (id.logo.onFile && (!camp || id.logo.required)) marks.push('client logo' + (id.logo.v ? ' (version ' + id.logo.v + ')' : ''));
+  if (camp && id.wordmark.required) { id.wordmark.variants.filter(v => v.onFile).forEach(v => marks.push(camp.name + ' wordmark ' + v.variant + ' (' + v.tone + ')')); if (!id.wordmark.variants.some(v => v.onFile) && id.wordmark.legacy) marks.push(camp.name + ' wordmark (single slot)'); }
+  push('marks', marks, 'every composition ' + (camp ? 'on ' + camp.name : 'for the client') + ', as exact image layers from their files');
+  const facts = ws.words.items.filter(i => i.kind === 'claim' && i.status === 'active'); push('facts', facts.map(f => f.body), 'the copy and revise stages (the only figures besides the sources) and the figure checks');
+  push('banned', ws.words.items.filter(i => i.kind === 'banned').map(i => i.title), 'every copy stage and the banned-term check');
+  push('voice', ws.voice.items.map(i => i.title), 'every stage that writes words, through the client context');
+  const refs = ws.references; push('references', refs.filter(r => r.analysed).map(r => r.name + ' (' + r.purpose + ')'), 'concepts, directions, copy and revise: brand and approved as constraints, the rest in their one respect');
+  usable[usable.length - 1].analysed = refs.filter(r => r.analysed).length; usable[usable.length - 1].n = refs.length;
+  push('corrections', ws.preferences.filter(p => p.status === 'active').map(p => p.body), 'the copy and tiles prompts as learned corrections' + (camp ? ' (client-wide and ' + camp.name + ')' : ''));
+  push('items', ws.items.filter(i => i.status === 'active').map(i => i.title || i.kind), 'the Brand workspace; rules and preferences among them are read into the context');
+  let art = []; try { art = (await env.MIND_DB.prepare('SELECT id, title, meta, description FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) {}
+  art = art.filter(a => { const c = String((pjs(a.meta, {}) || {}).campaign || ''); return !cid || c === cid || c === ''; });
+  const artDescribed = art.filter(a => !/^\[not yet described\]/.test(String(a.description || ''))), artUndescribed = art.filter(a => /^\[not yet described\]/.test(String(a.description || '')));
+  push('artwork', artDescribed.map(a => a.title), 'the artwork memory the concepts and copy stages retrieve' + (camp ? ' (this campaign\'s and client-wide)' : ''));
+  // stored, but never reaches a model
+  const nr = (code, items, why, remedy) => { if (items.length) notRetrieved.push({ code, n: items.length, items: items.slice(0, 20), why, remedy }); };
+  nr('fact_pending', ws.words.items.filter(i => i.kind === 'claim' && i.status === 'proposed').map(f => ({ id: f.id.replace(/^kit:fact:/, ''), text: f.body, source: (f.data || {}).source || '' })), 'a pending fact is an unreviewed inference: the copy stage never quotes it', 'review it: Teach this brand, approve the fact with its source');
+  if (cid) nr('facts_other_campaign', (kit.facts || []).filter(f => f.campaign && f.campaign !== cid).map(f => ({ id: f.id, text: f.text, campaign: f.campaign })), 'facts of another campaign are kept out of this campaign\'s context by design', 'none needed unless the fact belongs here too: re-file it on this campaign');
+  let refRows = []; try { refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.campaign, r.project, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) {}
+  if (cid) nr('references_other_campaign', refRows.filter(r => { const c = r.campaign || r.pc || ''; return c && c !== cid; }).map(r => ({ id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign || r.pc, project: r.project })), 'references filed on another campaign are excluded from this campaign\'s reference pack in recommended mode', 'none needed unless the reference belongs here too: change its campaign on the project');
+  nr('corrections_off', ws.preferences.filter(p => p.status === 'retired').map(p => ({ id: p.id.replace(/^fix:/, ''), text: p.body, campaign: p.campaign })), 'a switched-off correction is kept but not applied', 'switch it back on in the Learned table if it still holds');
+  nr('artwork_undescribed', artUndescribed.map(a => ({ id: a.id, title: a.title, text: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || '') })), 'the image is stored but the describer never catalogued it, so nothing retrieves it', 'POST /engine/artwork/describe (one model call each)');
+  nr('items_proposed', ws.items.filter(i => i.status === 'proposed').map(i => ({ id: i.id, title: i.title, text: i.body })), 'a proposal applies to nothing until a person keeps it', 'review it in the Brand workspace');
+  const unanalysed = refs.filter(r => !r.analysed).map(r => ({ id: r.id, name: r.name, purpose: r.purpose, project: r.project, projectTitle: r.projectTitle }));
+  const rd = ws.readiness;
+  const missing = [].concat(rd.blocking.map(b => Object.assign({ level: 'blocking' }, b)), rd.gaps.map(g => Object.assign({ level: 'gap' }, g)));
+  const conflicting = [].concat(rd.conflicts.map(c => Object.assign({ level: 'conflict' }, c)), rd.outdated.map(o => Object.assign({ level: 'review' }, o)));
+  // what to do, in order of what it unblocks
+  const rec = (code, text, action, priority) => recommendations.push({ code, text, action: action || null, priority: priority || 'normal' });
+  rd.blocking.forEach(b => rec('upload_mark', b.text + ' ' + (b.fix || ''), { kind: 'upload', what: b.code === 'logo_missing' ? 'logo' : 'wordmark' }, 'blocking'));
+  if (unanalysed.length) rec('analyse_references', unanalysed.length + ' reference' + (unanalysed.length === 1 ? ' is' : 's are') + ' not analysed: the models read ' + (unanalysed.length === 1 ? 'it' : 'them') + ' by name only (one extraction call each).', { route: '/studio/reference/analyse', ids: unanalysed.map(r => r.id), paid: true }, 'high');
+  if (camp && ws.placement.basis === 'observed') rec('teach_placement', 'The approved references put the mark ' + (ST_CORNER_WORDS[ws.placement.corner] || ws.placement.corner) + (ws.placement.exceptions.length ? ', with ' + ws.placement.exceptions.length + ' differing' : '') + '; nothing holds it there. Teach the placement so it becomes the campaign rule.', { route: '/brand/teach', body: { ns, campaign: cid, kind: 'placement', proposal: { corner: ws.placement.corner, mandatory: true, note: '' } } }, 'high');
+  if (camp && ws.placement.basis === 'default') rec('collect_approved_reference', 'No approved reference shows where the ' + camp.name + ' mark sits; the house default applies. Add an approved tile as a reference, or teach the placement.', { route: '/brand/teach', body: { ns, campaign: cid, kind: 'placement', proposal: { corner: 'br', mandatory: false, note: '' } } }, 'normal');
+  const pend = notRetrieved.find(x => x.code === 'fact_pending'); if (pend) rec('review_fact', pend.n + ' fact' + (pend.n === 1 ? ' is' : 's are') + ' pending and cannot be quoted. Approve or remove ' + (pend.n === 1 ? 'it' : 'them') + '.', { route: '/brand/teach', body: { ns, campaign: cid, kind: 'fact', proposal: { id: pend.items[0].id } }, items: pend.items }, 'normal');
+  const und = notRetrieved.find(x => x.code === 'artwork_undescribed'); if (und) rec('describe_artwork', und.n + ' artwork' + (und.n === 1 ? '' : 's') + ' in the memory ' + (und.n === 1 ? 'is' : 'are') + ' not described, so nothing retrieves ' + (und.n === 1 ? 'it' : 'them') + ' (one vision call each).', { route: '/engine/artwork/describe', body: { ns, limit: und.n }, paid: true }, 'normal');
+  const prop = notRetrieved.find(x => x.code === 'items_proposed'); if (prop) rec('review_proposals', prop.n + ' proposed memory update' + (prop.n === 1 ? '' : 's') + ' wait for review.', { route: '/brand/item/review' }, 'normal');
+  if (rd.gaps.some(g => g.code === 'wordmark_tones')) rec('upload_variant', rd.gaps.find(g => g.code === 'wordmark_tones').text, { kind: 'upload', what: 'wordmark variant' }, 'normal');
+  if (rd.gaps.some(g => g.code === 'no_approved_facts')) rec('add_facts', 'No approved facts for ' + (camp ? camp.name : 'the client') + ': every figure will need a source in the project. Teach the facts the client has approved, with their sources.', { route: '/brand/teach', body: { ns, campaign: cid, kind: 'fact', proposal: { text: '', source: '' } } }, 'normal');
+  if (rd.gaps.some(g => g.code === 'voice_missing')) rec('add_voice', 'No voice recorded: the copy stages write in the house register.', { route: '/brand/kit', body: { ns, voice: '' } }, 'normal');
+  rd.conflicts.forEach(c => rec('resolve_conflict', c.text, { code: c.code }, 'high'));
+  // the curated examples still wanted: one per purpose the scope has none of
+  const have = {}; refs.forEach(r => { have[r.purpose] = (have[r.purpose] || 0) + 1; });
+  const examples = Object.keys(BR_EXAMPLE_PURPOSES).filter(pu => !have[pu]).map(pu => ({ purpose: pu, why: BR_EXAMPLE_PURPOSES[pu], where: 'upload it as a reference with purpose ' + pu + (cid ? ' and campaign ' + cid : '') + ' on a ' + (camp ? camp.name : ns) + ' project, then analyse it' }));
+  const sum = list => list.reduce((a, x) => a + (x.n || 0), 0);
+  return { ok: true, ns, client: ws.client, campaign: camp, usable, missing, unanalysed, conflicting, notRetrieved, recommendations, examples, placement: ws.placement, readiness: rd.state,
+    counts: { usable: sum(usable), missing: missing.length, unanalysed: unanalysed.length, conflicting: conflicting.length, notRetrieved: sum(notRetrieved), recommendations: recommendations.length },
+    note: 'Usable is what reaches a model call for ' + (camp ? camp.name : ws.client) + ' now; stored-but-not-retrieved is held but never sent; every count is over the kit, R2, the references, the corrections and the artwork memory as they stand. Nothing from another client is counted or shown.' };
+}
+/** Teach this brand, the look: proposals from the evidence (a placement rule), the pending facts and the waiting items. Looking writes nothing. */
+async function brTeachInspect(env, ns, campaignId) {
+  const ws = await brandWorkspace(env, ns, campaignId); if (ws.error) return ws;
+  const proposals = []; const pl = ws.placement; const camp = ws.campaign;
+  if (camp && pl.basis === 'observed') {
+    const agree = pl.evidence.filter(e => e.corner === pl.corner), differ = pl.exceptions;
+    proposals.push({ kind: 'placement', campaign: camp.id, proposal: { corner: pl.corner, mandatory: true, note: 'the ' + (camp.name || camp.id) + ' mark sits ' + ST_CORNER_WORDS[pl.corner] + ', as the approved references show' }, confidence: pl.confidence, evidence: pl.evidence, exceptions: differ,
+      why: ST_CORNER_WORDS[pl.corner] + ' in ' + agree.map(e => e.name).join(', ') + (differ.length ? '; ' + differ.map(e => e.name + ' shows ' + ST_CORNER_WORDS[e.corner]).join(', ') + ' - confirming records ' + (differ.length === 1 ? 'it' : 'them') + ' as exceptions' : '') });
+  }
+  ws.words.items.filter(i => i.kind === 'claim' && i.status === 'proposed').forEach(f => proposals.push({ kind: 'fact', campaign: f.campaign || '', proposal: { id: f.id.replace(/^kit:fact:/, ''), text: f.body, source: (f.data || {}).source || '', campaign: f.campaign || '' }, why: 'pending review: the copy stage never quotes it until a person approves it with its source' }));
+  ws.items.filter(i => i.status === 'proposed').forEach(i => proposals.push({ kind: 'item', campaign: i.campaign || '', proposal: { id: i.id, title: i.title, body: i.body, kind: i.kind, authority: i.authority }, why: 'proposed from ' + ((i.source && i.source.label) || 'the Studio') + '; kept or dismissed in the Brand workspace' }));
+  return { ok: true, ns, campaign: camp, proposals, placement: pl, note: 'Proposals only: nothing here is written until POST /brand/teach confirms one with a reason.' };
+}
+/** Teach this brand, the write: previews without confirm; with confirm and a reason writes the kit (a revision), a learned rule or a brand item. */
+async function brTeach(env, ns, body, who) {
+  const kind = String(body.kind || ''); const kit = (await brandKit(env, ns)) || {}; const cid = kitSlug(body.campaign || '');
+  if (BR_TEACH_KINDS.indexOf(kind) < 0) return { error: 'unknown_kind', status: 400, detail: 'kind is one of ' + BR_TEACH_KINDS.join(', ') };
+  const camp = cid ? (kit.campaigns || []).find(c => c.id === cid) : null;
+  if (cid && !camp) return { error: 'unknown_campaign', status: 404, detail: 'The ' + ns + ' kit has no campaign "' + cid + '".' };
+  const proposal = body.proposal && typeof body.proposal === 'object' ? body.proposal : {};
+  const confirm = body.confirm === true; const reason = stStr(body.reason, 300).trim();
+  if (confirm && !reason) return { error: 'reason_required', status: 400, detail: 'Say why this is taught (who confirmed it, from what), so the rule carries its provenance.' };
+  const src = { type: 'teach', label: 'taught by ' + (who || 'the team') + (reason ? ': ' + reason : '') };
+  if (kind === 'placement') {
+    if (!cid) return { error: 'campaign_required', status: 400, detail: 'A placement rule belongs to a campaign: name it.' };
+    const corner = proposal.corner; if (!ST_CORNER_WORDS[corner]) return { error: 'corner_required', status: 400, detail: 'corner is tl, tr, bl or br' };
+    const rule = { corner, mandatory: proposal.mandatory !== false, note: stStr(proposal.note, 200) };
+    const ws = await brandWorkspace(env, ns, cid); const ev = ws.placement.evidence || [];
+    let n = 0; try { n = (await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_assets a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND p.campaign=?').bind(ns, cid).first() || {}).n || 0; } catch (e) {}
+    const text = ST_CORNER_WORDS[corner] + (rule.mandatory ? ', mandatory: the mark is held there on every ' + (camp.name || cid) + ' composition and /studio/version refuses to move it' : ', preferred: the plan may move it and says so') + (rule.note ? ' (' + rule.note + ')' : '');
+    const slim = ev.map(e => ({ ref: e.ref, name: e.name, corner: e.corner, basis: e.basis, confidence: e.confidence, approval: e.approval }));
+    const preview = { rule, text, evidence: slim, exceptions: slim.filter(e => e.corner !== corner), affects: { assets: n, note: 'existing compositions are not moved; the rule holds the mark on every new layout and refuses moves on the existing ones' }, writes: ['the ' + (camp.name || cid) + ' campaign rule in the kit (a kit revision)', 'a brand item: approved rule, campaign scope, with the evidence'] };
+    if (!confirm) return { ok: true, written: false, preview };
+    const campaigns = (kit.campaigns || []).map(c => c.id === cid ? Object.assign({}, c, { markRule: rule }) : c);
+    await brandSave(env, ns, { campaigns }, who);
+    const item = await brItemCreate(env, ns, { kind: 'placement', authority: 'rule', status: 'active', campaign: cid, title: 'Mark placement: ' + ST_CORNER_WORDS[corner] + (rule.mandatory ? ' (held)' : ' (preferred)'), body: text, data: { corner, mandatory: rule.mandatory, note: rule.note, evidence: slim, exceptions: slim.filter(e => e.corner !== corner) }, source: src, why: 'taught: ' + reason }, who);
+    return { ok: true, written: true, rule, item: item.item || null, text };
+  }
+  if (kind === 'fact') {
+    const facts = (kit.facts || []).slice(); let fact = null;
+    if (proposal.id) { fact = facts.find(f => f.id === kitSlug(proposal.id)); if (!fact) return { error: 'unknown_fact', status: 404 }; fact.status = 'approved'; if (stStr(proposal.source, 220)) fact.source = stStr(proposal.source, 220); if (proposal.text && stStr(proposal.text, 280)) fact.text = stStr(proposal.text, 280); if (cid) fact.campaign = cid; }
+    else if (stStr(proposal.text, 280).trim()) { fact = { text: stStr(proposal.text, 280).trim(), source: stStr(proposal.source, 220), status: 'approved', campaign: cid || kitSlug(proposal.campaign || '') }; facts.push(fact); }
+    else return { error: 'fact_required', status: 400, detail: 'Name the pending fact (id) or give the fact (text) with its source.' };
+    if (!stStr(fact.source, 220).trim()) return { error: 'source_required', status: 400, detail: 'An approved fact carries its source.' };
+    const preview = { fact, writes: ['the kit facts (a kit revision): "' + fact.text + '" approved, cited to ' + fact.source] };
+    if (!confirm) return { ok: true, written: false, preview };
+    await brandSave(env, ns, { facts }, who);
+    return { ok: true, written: true, fact };
+  }
+  if (kind === 'banned') {
+    const term = stStr(proposal.term, 80).trim(); if (!term) return { error: 'term_required', status: 400 };
+    const entry = { term, use: stStr(proposal.use, 160), why: stStr(proposal.why, 240) || reason, allowNegated: !!proposal.allowNegated };
+    const banned = (kit.banned || []).filter(b => String(b.term).toLowerCase() !== term.toLowerCase()).concat([entry]);
+    if (!confirm) return { ok: true, written: false, preview: { banned: entry, writes: ['the kit banned terms (a kit revision): never "' + term + '"' + (entry.use ? ', say "' + entry.use + '"' : '')] } };
+    await brandSave(env, ns, { banned }, who);
+    return { ok: true, written: true, banned: entry };
+  }
+  if (kind === 'rule') {
+    const rule = stStr(proposal.rule, 400).trim(); if (!rule) return { error: 'rule_required', status: 400, detail: 'Give the rule in the words the models should follow.' };
+    const task = engTask(proposal.task || 'tiles');
+    const preview = { fix: { task, rule, scope: cid ? 'campaign ' + cid : 'client' }, writes: ['a learned correction (engine_fixes) for task ' + task + ', ' + (cid ? 'the ' + (camp.name || cid) + ' campaign only' : 'the whole client')] };
+    if (!confirm) return { ok: true, written: false, preview };
+    const fix = await engineAddFix(env, { ns, task, scope: 'client', right: rule, rule, exemplar: stStr(proposal.exemplar, 300), why: reason, source: 'teach:brand' + (cid ? ':campaign:' + cid : '') }, who);
+    return { ok: true, written: true, fix: { id: fix.id, task: fix.task, rule: fix.rule, campaign: cid } };
+  }
+  // kind === 'item'
+  const authority = ['rule', 'preference', 'decision', 'observation'].indexOf(proposal.authority) >= 0 ? proposal.authority : 'preference';
+  const title = stStr(proposal.title, 200), text = stStr(proposal.body, 2000);
+  if (!title && !text) return { error: 'empty', status: 400, detail: 'Say what the item is.' };
+  if (!confirm) return { ok: true, written: false, preview: { item: { kind: BR_KINDS.indexOf(proposal.kind) >= 0 ? proposal.kind : 'note', authority, title, body: text, campaign: cid }, writes: ['a brand item (' + BR_AUTH_WORD[authority] + ', ' + (cid ? 'campaign ' + cid : 'whole client') + ')'] } };
+  const r = await brItemCreate(env, ns, { kind: proposal.kind, authority, status: 'active', campaign: cid, title, body: text, data: proposal.data && typeof proposal.data === 'object' ? proposal.data : {}, source: src, why: 'taught: ' + reason }, who);
+  return r.error ? r : { ok: true, written: true, item: r.item };
 }
 /** What the Studio used to make a version: walk back through hand edits to the version that was generated, then name its inputs. */
 async function stUsed(env, p, a, v) {
@@ -12099,6 +12286,9 @@ const AXIOM_WORKER = {
         // the Brand Workspace (read): the campaign-scoped knowledge with provenance, the readiness, the item and kit histories
         if (path === '/brand/workspace') { const ws = await brandWorkspace(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || '')); return jsonResp(ws, ws.status || 200); }
         if (path === '/brand/items' && req.method === 'GET') return jsonResp({ ok: true, ns: ns2, items: await brItems(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || ''), { all: reqUrl.searchParams.get('all') === '1' }) });
+        // S6: the inventory (usable / missing / unanalysed / conflicting / stored but not retrieved, with recommendations) and the Teach proposals
+        if (path === '/brand/inventory') { const r = await brInventory(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || '')); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/teach/inspect') { const r = await brTeachInspect(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || '')); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/history') { const h = await brItemHistory(env, ns2, reqUrl.searchParams.get('id')); return h ? jsonResp(Object.assign({ ok: true }, h)) : jsonResp({ error: 'unknown_item' }, 404); }
         if (path === '/brand/revisions') { await ensureBrand(env); const rid = stClean(reqUrl.searchParams.get('id') || '', 30); const st = rid ? env.MIND_DB.prepare('SELECT id, at, who, summary, kit FROM brand_revisions WHERE ns=? AND id=?').bind(ns2, rid) : env.MIND_DB.prepare('SELECT id, at, who, summary FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 100').bind(ns2); const rows = (await st.all()).results || []; return jsonResp({ ok: true, ns: ns2, revisions: rows.map(r => ({ id: r.id, at: r.at, who: r.who, summary: pjs(r.summary, []), kit: r.kit ? pjs(r.kit, null) : undefined })) }); }
         if (path === '/brand/kit' && req.method === 'GET') {
@@ -12151,6 +12341,7 @@ const AXIOM_WORKER = {
         if (path === '/brand/item' && req.method === 'POST') { const r = await brItemCreate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/update' && req.method === 'POST') { const r = await brItemUpdate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/review' && req.method === 'POST') { const r = await brItemReview(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/teach' && req.method === 'POST') { const r = await brTeach(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
           const kit = await brandSave(env, ns2, rbody2, auth.name);
           return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });

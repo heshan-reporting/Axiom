@@ -1687,6 +1687,53 @@ the current version; the signature is recorded only when the worker accepted
 it (S1). Harnesses: `tests/studio-s5-worker.mjs` (2), the two S5 cases in
 `tests/studio-editor-browser.mjs` (6).
 
+**Client knowledge (S6).** `GET /brand/inventory?ns=&campaign=` (read;
+`brInventory`) says, for a client or one campaign, what the models can
+actually use (`usable[]`: marks on file under the campaign's policy, approved
+facts, banned terms, voice and wording, analysed references, corrections in
+force, active items, described artwork - each with what it reaches), what is
+stored but never reaches a model (`notRetrieved[]`: a pending fact, another
+campaign's facts and references, switched-off corrections, undescribed
+artwork, proposals waiting), what is not analysed, what is missing or
+conflicting (the readiness lists), `recommendations[]` each with an action
+(`/brand/teach` bodies, `/studio/reference/analyse` ids, `/engine/artwork/
+describe`, marked `paid` where a model call is spent) and the curated
+`examples[]` still wanted (one per reference purpose the scope has none of).
+**Placement is evidence, not a vote**: `stPlacementEvidence(rows, kit,
+campaign)` gives one row per approved or brand reference that shows a mark
+(`corner`, `basis` structured | text, `confidence` 0.85 / 0.55 / 0.3, kind,
+size, clear space, approval, link), weighs them (approved x1.2), names the
+agreement and every disagreeing reference as an `exception`, and puts the
+rule layer above: a campaign `markRule` makes the basis `rule`; nothing is
+the house default. `stMarkPlacement` keeps its shape (`corner`, `basis`,
+`text`, `refs`) and carries the evidence. The vision pass (`ST_REF_SYS`) now
+answers a `mark` object (present, kind, corner, size, clearSpace), sanitised
+by `stRefMark`; `brReadiness` reports `placement_contested` when the
+references disagree and no rule stands. **Teach this brand**: `GET
+/brand/teach/inspect?ns=&campaign=` proposes from the evidence and the gaps
+(a placement rule with its confidence, evidence and exceptions; pending
+facts; waiting items) and writes nothing; `POST /brand/teach {ns, campaign,
+kind placement|fact|banned|rule|item, proposal, confirm, reason}` (full)
+answers a `preview` (what would be written, the evidence, the exceptions,
+how many compositions the rule will hold) without `confirm`, and with
+`confirm:true` and a `reason` writes the campaign `markRule` through
+`brandSave` (a `brand_revisions` entry names it) plus a brand item of
+authority rule with the evidence, or approves a pending fact in place /
+adds a fact with its source, adds a banned term, adds a learned correction
+(`engine_fixes`, source `teach:brand[:campaign:<id>]`), or a knowledge item.
+**The rule holds in production**: `stMarkLayers` stamps `layer.rule` on the
+mark layers when the campaign rule is mandatory, and the house layout
+(`stLayoutFromSpec`) honours it like the plan path does, so the S5 gates
+(`mark_held`, the editor's held state) now fire from real compositions. In
+the Brand workspace: the **inventory** section (strip, usable table, stored
+but never sent with show / hide, recommendations with Teach / Analyse /
+Describe buttons that name the paid calls, examples wanted), the **mark
+placement evidence** table (reference, approval, corner, read as,
+confidence, exceptions; "make it the rule" / "teach it"), and **Teach this
+brand** (Inspect, a form per kind, Preview, Confirm with a reason; hidden
+from read-only keys). Harnesses: `tests/studio-s6-worker.mjs` (7),
+`tests/studio-brand-browser.mjs` (4).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
