@@ -7833,6 +7833,8 @@ function layoutRules(boxes, o) {
     }
   }
   if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
+  // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
+  (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
   if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
   var rank = { blocking: 0, warning: 1, info: 2 };
   out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
@@ -10168,7 +10170,9 @@ function stValidationJudge(a, v, rep) {
   // what the browser could not analyse: what it says it could not, plus any live words it reported with no contrast at all
   const unresolved = (Array.isArray(rep.unresolved) ? rep.unresolved : []).map(s => stStr(s, 20)).filter(s => /^(contrast|occlusion)$/.test(s));
   if (unmeasured.length && unresolved.indexOf('contrast') < 0) unresolved.push('contrast');
-  const issues = layoutRules(boxes, { W, H, format: a.format, channel: a.channel, production: true, fonts, imageryMissing, unresolved });
+  // the photograph's likely subjects as the browser estimated them (a warning at most; the confidence travels with it)
+  const subjects = (Array.isArray(rep.subjects) ? rep.subjects : []).slice(0, 3).map(s => s && typeof s === 'object' ? { id: stStr(s.id, 8), covered: Math.max(0, Math.min(1, Number(s.covered) || 0)), cropped: Math.max(0, Math.min(1, Number(s.cropped) || 0)), by: (Array.isArray(s.by) ? s.by : []).map(String).filter(id => ids.has(id)).slice(0, 6), confidence: Math.max(0, Math.min(1, Number(s.confidence) || 0)) } : null).filter(Boolean);
+  const issues = layoutRules(boxes, { W, H, format: a.format, channel: a.channel, production: true, fonts, imageryMissing, unresolved, subjects });
   (Array.isArray(L.incomplete) ? L.incomplete : []).forEach(i => issues.unshift({ code: 'mark_missing', severity: 'blocking', layers: [], detail: i.text }));
   if (!fonts) issues.push({ code: 'fonts_unreported', severity: 'warning', layers: [], detail: 'the report does not say which fonts were used; fidelity to the kit fonts is unknown' });
   if (v.mode === 'artwork') issues.push({ code: 'baked_text', severity: 'info', layers: [], detail: 'the words ' + ((L.baked || []).join(', ') || 'on the tile') + ' are painted into the image; geometry cannot check them, the inspection reads them' });

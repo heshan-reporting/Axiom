@@ -86,4 +86,38 @@ await T.t('the editor\'s handles sit on what the renderer measured (the words\' 
   ok(!page.errors.length, page.errors.join(' | '));
   await page.ctxB.close();
 });
+await T.t('framing by dragging: the photograph is panned through the renderer\'s transform, one drag is one undo step, the wheel zooms, centre and reset return to the plain crop', async () => {
+  const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Frame', brief: { channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, objective: 'x', message: 'y' }, idem: 'fr1' });
+  // an asset with imagery on file (the fixture's gradient photograph)
+  const { PHOTO } = await import('./studio-fixture.mjs');
+  const key = 'studio/x/frame/photo.png'; fx.r2.set(key, { v: Buffer.from(PHOTO, 'base64'), o: { httpMetadata: { contentType: 'image/png' } } });
+  const a0 = await api('POST', '/studio/asset', { project: pr.id, family: 'Set', channel: 'instagram', format: '1:1', title: 'Framed tile', copy: { headline: 'Hands off our fuel', support: 'Not a subsidy.', cta: 'Sign' }, image: { key, url: '/studio/file?key=' + encodeURIComponent(key), model: 'test', size: '1K' }, mode: 'composition' });
+  ok(a0.asset, 'asset made');
+  const page = await fx.open({ viewport: { width: 1440, height: 900 } });
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Frame") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-framing', { timeout: 15000 });
+  await page.click(R + '.st-le-framing button:has-text("Frame by dragging")'); await page.waitForSelector(R + '.st-le-frame[data-ready="1"]', { timeout: 15000 });
+  const across = () => page.inputValue(R + 'input[aria-label="Focal point across, per cent"]');
+  eq(await across(), '50', 'the plain crop starts at focus 50');
+  // the fixture photograph is square in a square box: no horizontal overflow at zoom 1, so zoom first, then drag
+  const fr = await page.$(R + '.st-le-frame'); const fb = await fr.boundingBox();
+  // a wheel event on the overlay (dispatched to the element: headless Chromium's synthetic wheel does not reliably reach a page listener)
+  await page.dispatchEvent(R + '.st-le-frame', 'wheel', { deltaY: -100, bubbles: true, cancelable: true }); await page.waitForTimeout(700);
+  const zoom = await page.inputValue(R + 'input[aria-label="Image zoom"]');
+  ok(+zoom > 1, 'the wheel zooms the photograph (zoom ' + zoom + ')');
+  const undos0 = await page.$eval(R + '.st-le-tools button:has-text("Undo")', el => !el.disabled); ok(undos0, 'the zoom gesture is one undo step');
+  // the drag: the overlay's position is read again right before it (the page may have scrolled since), and the pointer stays on the overlay
+  await page.locator(R + '.st-le-frame').scrollIntoViewIfNeeded(); const fb2 = await (await page.$(R + '.st-le-frame')).boundingBox();
+  const cx = fb2.x + fb2.width / 2, cy = fb2.y + fb2.height / 2;
+  eq(await page.evaluate(([x, y]) => (document.elementFromPoint(x, y) || {}).className, [cx, cy]), 'st-le-frame', 'the pointer starts on the framing overlay');
+  await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.move(cx - fb2.width * 0.2, cy, { steps: 5 }); await page.mouse.up(); await page.waitForTimeout(200);
+  const x1 = +(await across()); ok(x1 > 50, 'dragging the photograph left moves the focus right (' + x1 + ')');
+  await page.keyboard.press('Escape'); await page.click(R + '.st-le-tools button:has-text("Undo")'); await page.waitForTimeout(150);
+  eq(await across(), '50', 'one undo takes back the whole drag');
+  await page.click(R + '.st-le-tools button:has-text("Redo")'); await page.waitForTimeout(150); ok(+(await across()) === x1, 'redo restores it');
+  await page.click(R + '.st-le-framing button:has-text("centre and reset")'); await page.waitForTimeout(150);
+  eq([await across(), await page.inputValue(R + 'input[aria-label="Image zoom"]')], ['50', '1'], 'centre and reset returns to the plain crop at zoom 1');
+  ok(!page.errors.length, page.errors.join(' | '));
+  await page.ctxB.close();
+});
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

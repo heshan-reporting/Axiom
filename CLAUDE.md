@@ -1634,6 +1634,35 @@ behind when it differs) and its guides come from `STRender.safeArea`.
 Harnesses: `tests/studio-scene-browser.mjs` (20), `tests/studio-s3-worker.mjs`
 (3), the ink-handle case in `tests/studio-editor-browser.mjs` (3).
 
+**Background positioning (S4).** One documented transform in the renderer,
+`coverTransform(iw, ih, box, focus)`: scale `max(boxW/iw, boxH/ih) * zoom`,
+origin `boxX - (w - boxW) * fx/100` (and y alike), so the image point at
+(fx%, fy%) sits at (fx%, fy%) of the box - focus 50/50 is the plain centred
+crop, 0 and 100 pin the edges, zoom is 1-3, and because fx/fy are clamped the
+box is always covered (no pan shows an empty edge). The same focus therefore
+keeps the subject at the same relative place in 1:1, 4:5, 9:16 and 16:9.
+`imageToCanvas` / `canvasToImage` map points, `panFocus(iw, ih, box, focus,
+dx, dy)` inverts a drag, and `cover()` draws through the same function, so
+preview, export, hit-testing and the subject check agree. **Subject
+awareness is evidence, not detection:** `subjects(img)` is colour-and-edge
+saliency on a 48x48 grid (regions with a score, `confidence` capped at 0.6,
+`method` naming what it is not; a flat image returns none);
+`subjectCoverage()` maps the regions through the transform and measures what
+words, panels (opacity >= 0.5) and marks cover and what the crop cuts off;
+the RULES block gained `subject_covered` and `subject_cropped` (warnings
+that carry the confidence; the worker's judge reads `rep.subjects`);
+`frameSuggest()` searches a 5x5 grid of focus points at zoom 1 and 1.25 and
+offers the framing that keeps the subjects clearest without cropping more
+than half of one away - offered, never applied. `validate()` returns
+`subjects`, `report()` carries them. In the layout editor the Framing panel
+has **Frame by dragging** (a stage overlay: drag pans the photograph or the
+selected region's image through `panFocus`, the wheel zooms; one drag or one
+zoom gesture is one undo step), zoom - / +, **centre and reset**, the likely
+subjects marked on the stage with their confidence, and **Keep the subject
+clear (measured)** applying the suggestion as a layout change (no render).
+Harnesses: `tests/studio-framing-browser.mjs` (17), the framing case in
+`tests/studio-editor-browser.mjs` (4).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

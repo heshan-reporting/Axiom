@@ -100,12 +100,35 @@
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
   /** Cover the box with the image. focus {x, y} (per cent of the image) is the point kept in view as the crop moves toward it,
    *  zoom (1-3) enlarges the image inside the box; the centre at 1 is the plain cover crop. */
-  function cover(ctx, img, W, H, box, focus) {
-    const bx = box ? box.x : 0, by = box ? box.y : 0, bw = box ? box.w : W, bh = box ? box.h : H;
+  /* The image-to-canvas transform, in one place and documented, because the preview, the export, the hit-testing, the
+   * framing controls and the subject check all have to agree on where a pixel of the photograph lands:
+   *   scale   s  = max(boxW / imgW, boxH / imgH) * zoom          (cover: the image always fills the box; zoom 1-3 enlarges it)
+   *   drawn   w, h = imgW * s, imgH * s
+   *   origin  x0 = boxX - (w - boxW) * fx / 100,  y0 = boxY - (h - boxH) * fy / 100
+   * so the image point at (fx%, fy%) of the image sits at (fx%, fy%) of the box: a focus of (50, 50) is the plain centred
+   * crop, (0, 0) pins the top-left corner, (100, 100) the bottom-right. Because fx and fy are clamped to 0..100 and zoom
+   * to 1 or more, the box is always fully covered: there is no pan that shows an empty edge. The same focus therefore keeps
+   * the subject at the same relative place in a 1:1, a 4:5 and a 9:16 crop of the same photograph. */
+  function coverTransform(iw, ih, box, focus) {
+    const bx = box.x || 0, by = box.y || 0, bw = box.w, bh = box.h;
     const f = focus || {}; const zoom = Math.max(1, Math.min(3, +f.zoom || 1)); const fx = f.x == null ? 50 : Math.max(0, Math.min(100, +f.x)), fy = f.y == null ? 50 : Math.max(0, Math.min(100, +f.y));
-    const s = Math.max(bw / img.naturalWidth, bh / img.naturalHeight) * zoom; const w = img.naturalWidth * s, h = img.naturalHeight * s;
-    ctx.save(); ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.clip();
-    ctx.drawImage(img, bx - (w - bw) * fx / 100, by - (h - bh) * fy / 100, w, h); ctx.restore();
+    const s = Math.max(bw / (iw || 1), bh / (ih || 1)) * zoom; const w = (iw || 1) * s, h = (ih || 1) * s;
+    return { s, w, h, x: bx - (w - bw) * fx / 100, y: by - (h - bh) * fy / 100, box: { x: bx, y: by, w: bw, h: bh }, focus: { x: fx, y: fy, zoom } };
+  }
+  /** A point of the image (per cent) to the canvas, and back, under the transform. */
+  function imageToCanvas(t, px, py) { return { x: t.x + px / 100 * t.w, y: t.y + py / 100 * t.h }; }
+  function canvasToImage(t, cx, cy) { return { x: (cx - t.x) / t.w * 100, y: (cy - t.y) / t.h * 100 }; }
+  /** The focus after the image is dragged by (dx, dy) canvas pixels inside its box: the origin moves with the drag, the
+   *  focus follows from the origin, clamped so the box stays covered. A drag along an axis with no overflow changes nothing. */
+  function panFocus(iw, ih, box, focus, dx, dy) {
+    const t = coverTransform(iw, ih, box, focus); const ox = t.w - t.box.w, oy = t.h - t.box.h;
+    const fx = ox > 0.5 ? Math.max(0, Math.min(100, t.focus.x - dx * 100 / ox)) : t.focus.x; const fy = oy > 0.5 ? Math.max(0, Math.min(100, t.focus.y - dy * 100 / oy)) : t.focus.y;
+    return { x: Math.round(fx * 10) / 10, y: Math.round(fy * 10) / 10, zoom: t.focus.zoom };
+  }
+  function cover(ctx, img, W, H, box, focus) {
+    const t = coverTransform(img.naturalWidth, img.naturalHeight, box ? box : { x: 0, y: 0, w: W, h: H }, focus);
+    ctx.save(); ctx.beginPath(); ctx.rect(t.box.x, t.box.y, t.box.w, t.box.h); ctx.clip();
+    ctx.drawImage(img, t.x, t.y, t.w, t.h); ctx.restore();
   }
   function contain(ctx, img, x, y, w, h) {
     const s = Math.min(w / img.naturalWidth, h / img.naturalHeight); const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
@@ -324,6 +347,8 @@
       }
     }
     if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
+    // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
+    (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
     if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
     var rank = { blocking: 0, warning: 1, info: 2 };
     out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
@@ -411,6 +436,72 @@
     }
     return true;
   }
+  /* ---------------------------------------------------------------- subjects: where the photograph's attention probably is
+   * No face or object model runs here (none is available offline, and none is claimed). The estimate is colour-and-edge
+   * saliency over a coarse grid: cells that differ most from the image's mean colour and carry the most edge energy are
+   * grouped into regions. It is evidence with a confidence, never a fact: the rules treat a covered subject as a warning
+   * that names the confidence, and the framing suggestion offers, never applies. */
+  function subjects(img) {
+    if (!img || !(img.naturalWidth > 0)) return { regions: [], method: 'none', confidence: 0 };
+    const N = 48; const c = document.createElement('canvas'); c.width = N; c.height = N; const x = c.getContext('2d');
+    let d; try { x.drawImage(img, 0, 0, N, N); d = x.getImageData(0, 0, N, N).data; } catch (e) { return { regions: [], method: 'unavailable', confidence: 0, unresolved: true }; }
+    const L = new Float32Array(N * N); const R = new Float32Array(N * N), G = new Float32Array(N * N), B = new Float32Array(N * N); let mr = 0, mg = 0, mb = 0;
+    for (let i = 0; i < N * N; i++) { R[i] = d[i * 4]; G[i] = d[i * 4 + 1]; B[i] = d[i * 4 + 2]; L[i] = 0.2126 * R[i] + 0.7152 * G[i] + 0.0722 * B[i]; mr += R[i]; mg += G[i]; mb += B[i]; }
+    mr /= N * N; mg /= N * N; mb /= N * N;
+    const score = new Float32Array(N * N); let max = 0;
+    for (let yy = 0; yy < N; yy++) for (let xx = 0; xx < N; xx++) {
+      const i = yy * N + xx; const col = Math.sqrt((R[i] - mr) ** 2 + (G[i] - mg) ** 2 + (B[i] - mb) ** 2) / 441;
+      const gx = xx > 0 && xx < N - 1 ? Math.abs(L[i + 1] - L[i - 1]) : 0, gy = yy > 0 && yy < N - 1 ? Math.abs(L[i + N] - L[i - N]) : 0; const edge = Math.min(1, (gx + gy) / 160);
+      score[i] = col * 0.6 + edge * 0.4; if (score[i] > max) max = score[i];
+    }
+    if (max < 0.08) return { regions: [], method: 'colour-and-edge saliency (no face or object model)', confidence: 0.2, note: 'no part of the image stands out from the rest' };
+    // cells above the bar, grouped into connected regions (4-neighbour), the three strongest kept
+    const bar = max * 0.55; const seen = new Uint8Array(N * N); const regs = [];
+    for (let i = 0; i < N * N; i++) {
+      if (seen[i] || score[i] < bar) continue; const stack = [i]; seen[i] = 1; let minX = N, minY = N, maxX = -1, maxY = -1, sum = 0, n = 0;
+      while (stack.length) { const k = stack.pop(); const kx = k % N, ky = Math.floor(k / N); sum += score[k]; n++; if (kx < minX) minX = kx; if (kx > maxX) maxX = kx; if (ky < minY) minY = ky; if (ky > maxY) maxY = ky; [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([ox, oy]) => { const nx = kx + ox, ny = ky + oy; if (nx < 0 || ny < 0 || nx >= N || ny >= N) return; const j = ny * N + nx; if (!seen[j] && score[j] >= bar) { seen[j] = 1; stack.push(j); } }); }
+      if (n < 4) continue;
+      regs.push({ x: minX / N * 100, y: minY / N * 100, w: (maxX - minX + 1) / N * 100, h: (maxY - minY + 1) / N * 100, score: sum / n, cells: n });
+    }
+    regs.sort((a, b) => b.score * b.cells - a.score * a.cells);
+    const top = regs.slice(0, 3).map((r, i) => ({ id: 's' + (i + 1), x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.w * 10) / 10, h: Math.round(r.h * 10) / 10, score: Math.round(r.score * 100) / 100, kind: 'salient' }));
+    // confidence: how much the strongest region stands out from the rest, capped well under certainty - this is not detection
+    const conf = top.length ? Math.max(0.25, Math.min(0.6, 0.25 + (top[0].score - bar) * 1.5)) : 0.2;
+    return { regions: top, method: 'colour-and-edge saliency (no face or object model)', confidence: Math.round(conf * 100) / 100 };
+  }
+  /** Where the photograph's subjects land on the stage under the current framing, and how much of each the words, panels and
+   *  marks cover. Returns [{id, x, y, w, h, covered, by, confidence}] in stage pixels, or [] when there is no photograph. */
+  function subjectCoverage(layout, images, boxes, W, H, subj) {
+    if (!images || !images.bg || layout.noImagery) return [];
+    const sj = subj || subjects(images.bg); if (!sj.regions.length) return [];
+    const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : { x: 0, y: 0, w: W, h: H };
+    const t = coverTransform(images.bg.naturalWidth, images.bg.naturalHeight, ib, layout.imageFocus);
+    const covers = (boxes || []).filter(b => !b.hidden && !b.empty && b.valid !== false && (b.type === 'text' || b.mark || (b.type === 'shape' && b.opacity >= 0.5 && b.role !== 'overlay')));
+    return sj.regions.map(r => {
+      const p0 = imageToCanvas(t, r.x, r.y), p1 = imageToCanvas(t, r.x + r.w, r.y + r.h);
+      // the part of the subject that is inside the image box at all (the crop may cut it)
+      const sx = Math.max(ib.x, p0.x), sy = Math.max(ib.y, p0.y), ex = Math.min(ib.x + ib.w, p1.x), ey = Math.min(ib.y + ib.h, p1.y);
+      const vis = Math.max(0, ex - sx) * Math.max(0, ey - sy); const whole = (p1.x - p0.x) * (p1.y - p0.y);
+      let cov = 0; const by = [];
+      covers.forEach(b => { const iw = Math.min(ex, b.x + b.w) - Math.max(sx, b.x), ih = Math.min(ey, b.y + b.h) - Math.max(sy, b.y); if (iw > 0 && ih > 0) { cov += iw * ih; by.push(b.id); } });
+      return { id: r.id, x: Math.round(sx), y: Math.round(sy), w: Math.round(Math.max(0, ex - sx)), h: Math.round(Math.max(0, ey - sy)), cropped: whole > 0 ? Math.round((1 - vis / whole) * 100) / 100 : 0, covered: vis > 0 ? Math.round(Math.min(1, cov / vis) * 100) / 100 : 0, by, confidence: sj.confidence, score: r.score };
+    });
+  }
+  /** A framing (focus and zoom of the photograph) that keeps the likely subjects clear of the words and marks, without moving
+   *  a layer: a small grid of focus points and two zooms is measured with the same transform; the best is offered, never applied.
+   *  Returns null when there is no photograph or no subject to protect, or when nothing beats the current framing. */
+  function frameSuggest(layout, copy, images, opts) {
+    opts = opts || {}; if (!images || !images.bg || layout.noImagery) return null;
+    const sj = subjects(images.bg); if (!sj.regions.length) return null;
+    const { w: W, h: H } = stageSize(layout, opts.width); const boxes = measure(layout, copy, images, W, H);
+    // what covers the subject and what the crop cuts off both count; a crop that loses more than half of a subject is no way to keep it clear
+    const cost = focus => { const L2 = Object.assign({}, layout, { imageFocus: focus }); const cov = subjectCoverage(L2, images, boxes, W, H, sj); return cov.reduce((s, c) => s + (c.covered + c.cropped + (c.cropped > 0.5 ? 1 : 0)) * (c.score || 1), 0); };
+    const cur = layout.imageFocus || { x: 50, y: 50, zoom: 1 }; const now = cost(cur);
+    let best = null;
+    [1, 1.25].forEach(zoom => [20, 35, 50, 65, 80].forEach(fy => [20, 35, 50, 65, 80].forEach(fx => { const f = { x: fx, y: fy, zoom }; const c = cost(f); const dist = Math.abs(fx - (cur.x == null ? 50 : cur.x)) + Math.abs(fy - (cur.y == null ? 50 : cur.y)) + Math.abs(zoom - (cur.zoom || 1)) * 40; if (!best || c < best.cost - 1e-6 || (Math.abs(c - best.cost) < 1e-6 && dist < best.dist)) best = { focus: f, cost: c, dist }; })));
+    if (!best || best.cost >= now - 0.02) return { focus: null, before: now, after: now, subjects: sj, note: 'no framing on the grid keeps the subjects clearer than the current one; move the words instead' };
+    return { focus: best.focus, before: Math.round(now * 100) / 100, after: Math.round(best.cost * 100) / 100, subjects: sj, note: 'focus ' + best.focus.x + ', ' + best.focus.y + ' at zoom ' + best.focus.zoom + ' keeps the likely subject' + (sj.regions.length === 1 ? '' : 's') + ' clearer of the words (confidence ' + Math.round(sj.confidence * 100) + '%: a saliency estimate, not detection)' };
+  }
   /** Does the composition expect imagery that is not there? */
   function imageryMissing(layout, images) {
     if (layout.noImagery) return false;
@@ -430,8 +521,10 @@
     if (opts.contrast !== false && contrasted === false) unresolved.push('contrast');
     if (opts.occlusion !== false && occlusionOf(layout, copy, images, boxes, W, H) === false) unresolved.push('occlusion');
     const missing = imageryMissing(layout, images);
-    const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing, unresolved });
-    return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
+    // the photograph's likely subjects under this framing, and what covers them: an estimate with a confidence, a warning at most
+    let subj = []; if (opts.subjects !== false) { try { subj = subjectCoverage(layout, images, boxes, W, H); } catch (e) { subj = []; } }
+    const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing, unresolved, subjects: subj });
+    return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, subjects: subj.length ? subj : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
   }
 
   /* ---------------------------------------------------------------- repair: the smallest geometric correction, never the words */
@@ -708,7 +801,7 @@
   }
   /** The report a browser hands the worker: the measured boxes and the attested measurements, not a verdict (the worker derives that). */
   function report(v, val) {
-    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
+    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, safeArea: safeAreaOf, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf };
+  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, safeArea: safeAreaOf, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();
