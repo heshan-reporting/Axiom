@@ -1079,7 +1079,8 @@
   const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
   const fixableOf = val => !!(val && val.issues.some(i => LAYOUT_CODES[i.code] || /^(mark_low_contrast|mark_unreadable|low_contrast|unreadable_contrast)$/.test(i.code)));
   /** Under the artwork: the measured state in one line and the free fixes; the detail is in the Quality tab. */
-  function ReadyStrip({ a, v, val, measuring, ro, onRepair, onMeasure, onDraft, repairing, repairNote, onDetail }) {
+  const REPAIR_WORD = { complete: 'Fixed', partial: 'Partly fixed', blocked: 'Blocked', nothing: 'Nothing to fix' };
+  function ReadyStrip({ a, v, val, measuring, ro, onRepair, onUndoRepair, onMeasure, onDraft, repairing, repairNote, onDetail }) {
     const rd = a.readiness || {}; const t = measuring ? 'measuring' : rd.technical || 'not_validated';
     const blocking = val ? val.issues.filter(i => i.severity === 'blocking').length : 0; const warns = val ? val.issues.filter(i => i.severity !== 'blocking').length : 0;
     return html`<div class=${'st-ready st-readystrip ' + t} aria-label="Readiness">
@@ -1087,7 +1088,7 @@
         ${val && !measuring ? html`<span class="ov-dim">${val.issues.length ? (blocking ? blocking + ' blocking' : '') + (blocking && warns ? ', ' : '') + (warns ? warns + ' to look at' : '') : 'no overflow, collisions, clipping or missing files at the output size'}</span>` : null}
         ${val && val.issues.length ? html`<button class="ov-link" onClick=${onDetail}>details</button>` : null}</div>
       ${!ro ? html`<div class="st-ready-acts">${fixableOf(val) ? html`<button class="btn sm" disabled=${repairing} onClick=${onRepair} title="Fit boxes to their measured lines, restack, widen, move a mark, a bounded type step, a readable colour or a better approved mark variant - never the words; a layout version, no render">${repairing ? 'Fixing...' : 'Fix layout (no render)'}</button>` : null}<button class="btn sm ghost" disabled=${measuring} onClick=${onMeasure}>Measure again</button><button class="btn sm ghost" onClick=${onDraft} title="A PNG labelled as a draft: not validated production artwork">Download draft PNG</button></div>` : null}
-      ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict ? ' warn' : '')} role="status">${repairNote.text}</div>` : null}
+      ${repairNote ? html`<div class=${'ov-dim st-repair-note' + (repairNote.conflict || repairNote.state === 'blocked' || repairNote.state === 'partial' ? ' warn' : '')} role="status"><b>${REPAIR_WORD[repairNote.state] || 'Fix layout'}${repairNote.counts ? ' (' + repairNote.counts.before + ' blocking before, ' + repairNote.counts.after + ' after)' : ''}.</b> ${repairNote.text}${repairNote.undo && !ro ? html` <button class="btn sm ghost" disabled=${repairing} onClick=${onUndoRepair} title="Restore the layout as it was before this fix, as a new version">Undo fix</button>` : null}</div>` : null}
     </div>`;
   }
   /** What no layout move can fix, said with its remedy: imagery the composition expects but nobody has made yet, and a mark file
@@ -1167,7 +1168,7 @@
       </div>` : null}
     </div>`;
   }
-  function AssetView({ p, a, sel, setSel, onEdit, onDraftState, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, tab, setTab, conflict, onConflict, neighbours }) {
+  function AssetView({ p, a, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, tab, setTab, conflict, onConflict, neighbours }) {
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.current]);
@@ -1220,8 +1221,12 @@
       // version) leaves nothing recorded, so Measure again sends it again instead of doing nothing
       if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && (force || filed.current !== sigKey)) { setMeasuring(true); try { const sent = await onValidate(a, v, r, comp); if (sent) filed.current = sigKey; } finally { setMeasuring(false); } }
     }, [v && v.id, comp.key, comp.ready, a.readiness && a.readiness.technical]);
-    useEffect(() => { measure(false); }, [measure]);
+    useEffect(() => { const f = forceNext.current; forceNext.current = false; measure(f); }, [measure]);
     const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
+    const undoRepair = async () => { if (!repairNote || !repairNote.undo) return; setRepairing(true); try { await onUndoRepair(a, repairNote.undo); setRepairNote(null); } finally { setRepairing(false); } };
+    // Measure again reloads the images and fonts first (a mark that failed to load, a font that arrived late), then files the measurement
+    const forceNext = useRef(false);
+    const measureAgain = () => { forceNext.current = true; setNonce(n => n + 1); };
     const draftPng = async () => { const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u = URL.createObjectURL(blob); const el = document.createElement('a'); el.href = u; el.download = (a.title + '-v' + vnum(a, v) + '-DRAFT-not-validated.png').replace(/[^a-z0-9.-]+/gi, '_'); document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
     const renderJob = (p.jobs || []).find(j => j.asset === a.id && (j.stage === 'render' || j.stage === 'inspect') && (j.state === 'queued' || j.state === 'running'));
     const imageJob = (p.jobs || []).find(j => j.asset === a.id && j.stage === 'render' && (j.state === 'queued' || j.state === 'running'));
@@ -1242,7 +1247,7 @@
         </div>
       </div>
       <div class=${'st-stage ' + zoom} style=${{ '--ar': ratio }}>
-        <div class="st-stage-inner">${le ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout, v.id); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} />`}</div>
+        <div class="st-stage-inner">${le ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDirty=${onLayoutDirty} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout, v.id); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} />`}</div>
         ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The art director is inspecting this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
         ${flat ? html`<div class="st-flatnote">This is a flattened legacy tile: the text on the image is not editable. Editing the caption does not change the image.</div>` : null}
         ${finished ? html`<div class="st-flatnote st-finnote" role="note"><b>Gemini Finished Creative.</b> ${v.image ? 'The image model painted the whole piece: the ' + Array.from(baked).join(', ') + ((v.layout || {}).baked || []).filter(r => r === 'logo' || r === 'wordmark').map(r => ', the ' + r).join('') + ' and the URL are pixels of one bitmap (' + ((v.image || {}).model || 'image model') + ', ' + ((v.image || {}).size || '') + ((v.image || {}).fallback ? ', fell back from ' + (v.image || {}).requested : '') + '). Nothing is composed over it and nothing on it can be dragged or retyped. Change the words or the picture by regenerating; caption and alt text are edited in the Copy tab. The Art Director reads the words and the mark back before design approval (Review).' : 'Queued: the image model will paint the whole piece, words and mark included. What you see is the plan it is briefed from, not the result.'}</div>` : null}
@@ -1252,7 +1257,7 @@
         ${hasLayout && !v.image && !renderJob && (v.context || {}).imagery !== 'none' && (v.layout.regions || []).length ? html`<div class="st-flatnote">No imagery yet: the composition is drawn over its ground until a render lands (see Jobs).</div>` : null}
         ${(v.context || {}).imagery === 'none' ? html`<div class="st-flatnote">No imagery by choice: a complete typographic composition, nothing to render.</div>` : null}
       </div>
-      ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onMeasure=${() => measure(true)} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} />` : null}
+      ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onUndoRepair=${undoRepair} onMeasure=${measureAgain} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} />` : null}
       ${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} onGenerate=${() => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
       ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
       ${canVary ? html`<${LayoutVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} list=${vars} using=${using} onUse=${useVariant} />` : null}
@@ -1390,7 +1395,7 @@
   }
 
   /* ------------------------------------------------------------ the layout editor: drag, resize and nudge the layers over the same renderer */
-  function LayoutEditor({ v, a, ns, onDone }) {
+  function LayoutEditor({ v, a, ns, onDone, onDirty }) {
     // the working layout with its history: every finished gesture or command is one step that undo and redo walk
     const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
     const layout = hist.now;
@@ -1404,20 +1409,23 @@
     const byId = id => layers.find(l => l.id === id);
     const groupOf = id => { const l = byId(id); return l && l.group ? layers.filter(x => x.group === l.group).map(x => x.id) : [id]; };
     const selected = () => Array.from(new Set(sel.reduce((acc, id) => acc.concat(groupOf(id)), []))).map(byId).filter(Boolean);
-    const movable = l => l && !l.locked;
+    // a mark held by a mandatory campaign rule is not the editor's to move; a locked layer is not the editor's to touch at all
+    const heldMark = l => !!(l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && l.rule && l.rule.mandatory);
+    const movable = l => l && !l.locked && !heldMark(l);
     const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => (patches[l.id] ? Object.assign({}, l, patches[l.id]) : l)) });
     const r1 = x => Math.round(x * 10) / 10;
     const pick = (e, l) => { setFocus(l.id); setSelIds(s => e.shiftKey ? (s.indexOf(l.id) >= 0 ? s.filter(x => x !== l.id) : s.concat([l.id])) : (s.indexOf(l.id) >= 0 && s.length > 1 ? s : [l.id])); };
     const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); pick(e, l);
       // preventDefault keeps the browser from focusing the layer, so focus it by hand: the arrow keys then nudge what was clicked
       try { const el = mode === 'move' ? e.currentTarget : e.currentTarget.parentElement; if (el && el.focus) { clickFocus.current = l.id; el.focus({ preventScroll: true }); clickFocus.current = null; } } catch (x) {}
-      if (l.locked) return; const r = box.current.getBoundingClientRect();
+      if (!movable(l)) return; const r = box.current.getBoundingClientRect();
       const ids = mode === 'move' ? Array.from(new Set((sel.indexOf(l.id) >= 0 ? sel : [l.id]).reduce((acc, id) => acc.concat(groupOf(id)), []))) : [l.id];
       act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const move = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
       if (c.mode === 'move') c.ids.forEach(id => { const o = c.start.layers.find(x => x.id === id); if (movable(o)) patches[id] = { x: r1(Math.max(-o.w + 2, Math.min(98, o.x + dx))), y: r1(Math.max(-2, Math.min(98, o.y + dy))) }; });
-      // the corner resizes the box; the type keeps its size unless "resize scales type" is on (then it scales with the width, as before)
-      else { const o = c.start.layers.find(x => x.id === c.id); if (o.type === 'text' && scaleType) { const w = Math.max(10, o.w + dx); patches[o.id] = { w: r1(w), size: r1(Math.max(2.4, o.size * (w / o.w))), h: r1((o.h || 0) * (w / o.w)) }; } else patches[o.id] = { w: r1(Math.max(o.type === 'text' ? 6 : 4, o.w + dx)), h: r1(Math.max(2, (o.h || 0) + dy)) }; }
+      // the corner resizes the box; the type keeps its size unless "resize scales type" is on (then it scales with the width, as before);
+      // an exact image (a logo or wordmark) keeps its proportions whatever the corner does: a mark is never distorted
+      else { const o = c.start.layers.find(x => x.id === c.id); if (o.type === 'text' && scaleType) { const w = Math.max(10, o.w + dx); patches[o.id] = { w: r1(w), size: r1(Math.max(2.4, o.size * (w / o.w))), h: r1((o.h || 0) * (w / o.w)) }; } else if (o.type === 'img' && (o.exact || o.role === 'logo' || o.role === 'wordmark')) { const w = Math.max(4, o.w + dx); patches[o.id] = { w: r1(w), h: r1(Math.max(1, (o.h || 0) * (w / o.w))) }; } else patches[o.id] = { w: r1(Math.max(o.type === 'text' ? 6 : 4, o.w + dx)), h: r1(Math.max(2, (o.h || 0) + dy)) }; }
       live(patchMany(c.start, patches)); };
     const up = () => { const c = act.current; act.current = null; if (c && JSON.stringify(c.start) !== JSON.stringify(layout)) setHist(h => ({ past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] })); };
     const nudge = (dx, dy) => { const s = selected().filter(movable); if (!s.length) return; const patches = {}; s.forEach(l => { patches[l.id] = { x: r1(l.x + dx), y: r1(l.y + dy) }; }); commit(patchMany(layout, patches)); };
@@ -1431,12 +1439,12 @@
       const gap = (pos(last) + size(last) - pos(first) - s.reduce((n, l) => n + size(l), 0)) / (s.length - 1); let at = pos(first); const patches = {};
       s.forEach(l => { patches[l.id] = axis === 'v' ? { y: r1(at) } : { x: r1(at) }; at += size(l) + gap; }); commit(patchMany(layout, patches)); };
     // paint order: the selection (a group moves as one) goes to the front or back, or one step, keeping its own order
-    const reorder = how => { const s = selected(); if (!s.length) return; const set = new Set(s.map(l => l.id)); const rest = layers.filter(l => !set.has(l.id)); const block = layers.filter(l => set.has(l.id));
+    const reorder = how => { const s = selected().filter(movable); if (!s.length) return; const set = new Set(s.map(l => l.id)); const rest = layers.filter(l => !set.has(l.id)); const block = layers.filter(l => set.has(l.id));
       let at; const firstI = layers.findIndex(l => set.has(l.id)); const before = layers.slice(0, firstI).filter(l => !set.has(l.id)).length;
       at = how === 'front' ? rest.length : how === 'back' ? 0 : how === 'forward' ? Math.min(rest.length, before + 1) : Math.max(0, before - 1);
       commit(Object.assign({}, layout, { layers: rest.slice(0, at).concat(block, rest.slice(at)) })); };
-    const group = () => { const s = selected(); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
-    const ungroup = () => { const patches = {}; selected().forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
+    const group = () => { const s = selected().filter(movable); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
+    const ungroup = () => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
     const setOne = (id, patch) => commit(patchMany(layout, { [id]: patch }));
     const keyAll = e => { const mod = e.metaKey || e.ctrlKey;
       // a key typed into a field edits the field: the canvas shortcuts (nudge, undo, redo, escape) never take it
@@ -1473,6 +1481,9 @@
     const frameRef = useRef(null); const wheelFn = useRef(null); wheelFn.current = frameWheel;
     useEffect(() => { const el = frameRef.current; if (!frame || !el) return; const h = e => { if (wheelFn.current) wheelFn.current(e); }; el.addEventListener('wheel', h, { passive: false }); return () => el.removeEventListener('wheel', h); }, [frame]);
     const changed = JSON.stringify(layout) !== JSON.stringify(v.layout);
+    // unsaved edits are a state the whole page knows about (the header names them, leaving the page asks), never a silent loss
+    useEffect(() => { if (onDirty) onDirty(changed); return () => { if (onDirty) onDirty(false); }; }, [changed]);
+    const cancel = () => { if (changed && !window.confirm('Discard the unsaved layout changes? The saved version stays as it is.')) return; onDone(null); };
     const one = selected().length === 1 ? selected()[0] : null;
     // the type panel follows the layer last clicked, even inside a group (type is set per layer)
     const typed = focusId && sel.length && byId(focusId) && byId(focusId).type === 'text' ? byId(focusId) : one;
@@ -1492,8 +1503,8 @@
         ${guides ? html`<div class="st-le-guide" style=${{ left: (story ? sa.side * 100 : 3) + '%', top: (story ? sa.top * 100 : 3) + '%', right: (story ? sa.side * 100 : 3) + '%', bottom: (story ? sa.bottom * 100 : 3) + '%' }} title=${story ? 'safe area inside the story interface' : '3% margin'}></div>${story ? html`<div class="st-le-zone" style=${{ left: 0, right: 0, top: 0, height: (sa.top * 100) + '%' }} title=${'Instagram story interface (top ' + Math.round(sa.top * 100) + '%)'}></div><div class="st-le-zone" style=${{ left: 0, right: 0, bottom: 0, height: (sa.bottom * 100) + '%' }} title=${'Instagram story interface (bottom ' + Math.round(sa.bottom * 100) + '%)'}></div>` : null}` : null}
         ${guides && subjOn.length ? subjOn.map(s => html`<div key=${'subj-' + s.id} class=${'st-le-subject' + (s.covered >= 0.35 ? ' covered' : '')} aria-hidden="true" style=${{ left: s.x + '%', top: s.y + '%', width: s.w + '%', height: s.h + '%' }} title=${'likely subject ' + s.id + ', confidence ' + Math.round(s.confidence * 100) + '% (an estimate, not detection)' + (s.covered ? '; ' + Math.round(s.covered * 100) + '% covered' : '')}><span>subject? ${Math.round(s.confidence * 100)}%</span></div>`) : null}
         ${frame ? html`<div class="st-le-frame" role="application" aria-label="Frame the photograph: drag to reposition, wheel to zoom" data-ready=${frameTarget() ? '1' : '0'} ref=${frameRef} onPointerDown=${frameDown} onPointerMove=${frameMove} onPointerUp=${frameUp} onPointerCancel=${frameUp}><span class="st-le-frame-hint">drag to reposition the ${frameTarget() && frameTarget().reg ? 'region image' : 'photograph'}; wheel to zoom</span></div>` : null}
-        ${layers.filter(l => !l.hidden).map(l => { const g = geo(l); return html`${g.box ? html`<div key=${l.id + ':box'} class="st-le-box" aria-hidden="true" style=${{ left: g.box.x + '%', top: g.box.y + '%', width: g.box.w + '%', height: g.box.h + '%' }}></div>` : null}<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (bad.has(l.id) ? ' bad' : '') + (g.box ? ' ink' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} data-ink=${g.box ? '1' : '0'} style=${{ left: g.on.x + '%', top: g.on.y + '%', width: g.on.w + '%', height: g.on.h + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (clickFocus.current !== l.id && sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
-          <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}${l.group ? ' (grouped)' : ''}</span>${!l.locked ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
+        ${layers.filter(l => !l.hidden).map(l => { const g = geo(l); return html`${g.box ? html`<div key=${l.id + ':box'} class="st-le-box" aria-hidden="true" style=${{ left: g.box.x + '%', top: g.box.y + '%', width: g.box.w + '%', height: g.box.h + '%' }}></div>` : null}<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (heldMark(l) ? ' held' : '') + (bad.has(l.id) ? ' bad' : '') + (g.box ? ' ink' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} data-ink=${g.box ? '1' : '0'} style=${{ left: g.on.x + '%', top: g.on.y + '%', width: g.on.w + '%', height: g.on.h + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (clickFocus.current !== l.id && sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
+          <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}${heldMark(l) ? ' (held by the campaign rule)' : ''}${l.group ? ' (grouped)' : ''}</span>${movable(l) ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
         </div>`; })}
       </div>
       ${val ? html`<div class=${'st-le-val' + (val.ok ? '' : ' bad')} role="status">${val.ok ? 'Measured at ' + val.W + 'x' + val.H + ': no blocking issue' + (val.issues.length ? ' (' + val.issues.map(i => i.code.replace(/_/g, ' ')).join(', ') + ')' : '') : 'Measured at ' + val.W + 'x' + val.H + ': ' + val.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')}</div>` : null}
@@ -1507,7 +1518,8 @@
         <label>Colour <input class="st-in" value=${one.color || '#ffffff'} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value)) setOne(one.id, { color: e.target.value }); }} aria-label="Colour" /></label>
         <label>Emphasis <select class="st-sel" value=${one.emphasis || ''} onChange=${e => setOne(one.id, { emphasis: e.target.value || undefined })} aria-label="Emphasis"><option value="">none</option><option value="caps">caps</option><option value="highlight">highlight</option><option value="underline">underline</option><option value="box">box</option></select></label>
       </div>`)(typed) : null}
-      ${one && !one.locked ? html`<div class="st-le-type" aria-label="Position and size">
+      ${one && heldMark(one) ? html`<div class="st-le-type" aria-label="Held mark"><span class="st-lbl">${one.role}</span><span class="ov-dim">held where the campaign rule puts it (${one.rule.corner || 'its corner'}${one.rule.note ? ': ' + one.rule.note : ''}); the words move, the mark stays</span></div>` : null}
+      ${one && movable(one) ? html`<div class="st-le-type" aria-label="Position and size">
         <span class="st-lbl">Box: ${one.role || one.type}</span>
         ${[['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].map(([k, lb]) => html`<label key=${k}>${lb} <input class="st-in" type="number" step="0.5" min=${k === 'w' || k === 'h' ? 1 : -50} max=${150} value=${one[k] == null ? 0 : one[k]} onChange=${e => { const n = +e.target.value; if (isFinite(n)) setOne(one.id, { [k]: r1(k === 'w' || k === 'h' ? Math.max(1, n) : n) }); }} aria-label=${lb + ', per cent of the stage'} /></label>`)}
         ${one.type === 'shape' ? html`<label>Opacity <input class="st-in" type="number" step="0.05" min="0" max="1" value=${one.opacity == null ? 1 : one.opacity} onChange=${e => setOne(one.id, { opacity: Math.round(Math.max(0, Math.min(1, +e.target.value)) * 100) / 100 })} aria-label="Panel opacity" /></label><label>Fill <input class="st-in" value=${one.fill || ''} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value) || /^rgba?\(/.test(e.target.value)) setOne(one.id, { fill: e.target.value }); }} aria-label="Panel fill" /></label>` : null}
@@ -1526,7 +1538,7 @@
           ${!reg && suggestion && suggestion.focus ? html`<button class="btn sm" onClick=${() => commit(Object.assign({}, layout, { imageFocus: suggestion.focus }))} title=${suggestion.note}>Keep the subject clear (measured)</button>` : null}
           <span class="ov-dim">${subj && subj.regions && subj.regions.length ? 'likely subject' + (subj.regions.length === 1 ? '' : 's') + ' marked on the stage (confidence ' + Math.round(subj.confidence * 100) + '%: a colour-and-edge estimate, not detection); ' : ''}reframes the same image: no render. The focus is the image point that sits at the same place in the box, so it holds in every format.</span></div>`; })()}
       <div class="st-le-list">${layers.slice().reverse().map(l => html`<span key=${l.id} class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '')}><button class="ov-link" onClick=${e => pick(e, l)}>${l.role || l.type}</button> <button class="st-lock" onClick=${() => setOne(l.id, { hidden: !l.hidden })} title="Hide or show this element">${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => setOne(l.id, { locked: !l.locked })} title="A locked element keeps its place through directions and hand edits">${l.locked ? 'locked' : 'lock'}</button></span>`)}</div>
-      <div class="st-msg-foot" style=${{ marginTop: 8 }}><span class="ov-dim">Drag to move (Shift-click to select several; grouped layers move together), the corner to resize the box (the type keeps its size unless "resize scales type" is on), arrow keys nudge (Shift for 2%), Ctrl or Cmd+Z undoes. The list runs from front to back.</span><button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
+      <div class="st-msg-foot" style=${{ marginTop: 8 }}><span class="ov-dim">Drag to move (Shift-click to select several; grouped layers move together), the corner to resize the box (the type keeps its size unless "resize scales type" is on), arrow keys nudge (Shift for 2%), Ctrl or Cmd+Z undoes. The list runs from front to back.</span>${changed ? html`<span class="st-le-dirty" role="status"><${Chip} kind="warn">unsaved layout changes</${Chip}></span>` : null}<button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${cancel}>Cancel</button></div>
     </div>`;
   }
 
@@ -1796,7 +1808,9 @@
       catch (e) { fail(e, 'Your text was not saved'); }
     };
     const onDraftState = useCallback((id, on) => { if (on) typingSet.current.add(id); else typingSet.current.delete(id); setTyping(typingSet.current.size); }, []);
-    useEffect(() => { const h = e => { if (typingSet.current.size || saveSt.pending) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
+    // an open layout editor with unsaved changes: named in the header, and leaving the page asks first
+    const [layoutDirty, setLayoutDirty] = useState(false); const layoutDirtyRef = useRef(false); layoutDirtyRef.current = layoutDirty;
+    useEffect(() => { const h = e => { if (typingSet.current.size || saveSt.pending || layoutDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
 
     const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The art director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The art director refines ' : 'The art director explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The art director did not start', () => propose(as, feedback, refine, opts)); } });
     const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the art director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
@@ -1823,20 +1837,32 @@
         return false;
       }
     };
-    /* the smallest geometric fix, measured with the real renderer, saved as a layout version: no image call is made */
+    /* the smallest geometric fix, measured with the real renderer, saved as a layout version: no image call is made. The outcome is one
+       of four states - complete, partial, blocked, nothing - with the blocking count before and after, what changed, what still stands
+       and why, and an undo; the fix is bounded (three per asset in a session) and stops when it would return to an arrangement a
+       previous fix already left (oscillation), instead of trading one defect for another for ever */
+    const repairHist = useRef({});
     const repairLayout = async (as, v, comp) => {
       try {
+        const hist = repairHist.current[as.id] || (repairHist.current[as.id] = { sigs: [], n: 0 });
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
         const r = R.repair(v.layout, v.copy, Object.assign({}, comp.imgs), { fonts: comp.fonts, channel: as.channel, format: as.format, locks: as.locks, fixContrast: true, variants: Object.keys(variants).length ? variants : undefined });
+        const blocking = x => x ? x.issues.filter(i => i.severity === 'blocking').length : 0; const counts = { before: blocking(r.before), after: blocking(r.after || r.before) };
         // what no layout move can clear is named with its remedy, so "fixed" never hides a tile that still cannot pass
         const rest = (r.after ? r.after.issues : []).filter(i => i.severity === 'blocking' && !LAYOUT_CODES[i.code] && !/contrast/.test(i.code));
         const restText = rest.length ? ' Still blocking, and not a layout matter: ' + Array.from(new Set(rest.map(i => i.code === 'imagery_missing' ? 'no imagery yet (generate it, or use a solid ground - see below the artwork)' : i.code === 'mark_unloaded' ? 'a mark file did not load (load the marks again)' : i.code === 'imagery_sketch' ? 'an image region is still a sketch (generate it)' : i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')))).join('; ') + '.' : '';
-        if (!r.changed) return { text: (r.conflict ? 'Nothing changed: ' + r.conflict : 'Nothing to fix in the layout: no overflow, collision or unreadable words.') + restText + ' Or choose one of the layout variations below.', conflict: !!r.conflict || !!rest.length };
+        if (!r.changed) return { state: r.conflict ? 'blocked' : 'nothing', counts, text: (r.conflict ? r.conflict : 'No overflow, collision or unreadable words in the layout; nothing was changed and no version was saved.') + restText + ' Or choose one of the layout variations below.', conflict: !!r.conflict || !!rest.length };
+        const sig = JSON.stringify(r.layout);
+        if (hist.sigs.indexOf(sig) >= 0) return { state: 'blocked', counts, text: 'This fix would return the layout to an arrangement an earlier fix already left (the repair is oscillating between two states). Nothing was saved. Move the words by hand, choose a layout variation, or shorten the copy.', conflict: true };
+        if (hist.n >= 3) return { state: 'blocked', counts, text: 'Three fixes have been saved on this asset already; the next step is a designer\'s hand, not another pass. Nothing was saved.', conflict: true };
         const saved = await putLayout(as, r.layout, v.id, 'layout repaired: ' + r.steps.join('; ').slice(0, 170));
-        if (!saved) return { text: 'Not saved: the layout changed elsewhere first.', conflict: true };
-        return { text: (r.ok ? 'Layout fixed with no render: ' : 'Partly fixed with no render: ') + r.steps.join('; ') + '.' + (r.conflict ? ' ' + r.conflict : '') + ' The words were not changed.' + restText + (r.ok ? '' : ' The layout variations below are each measured and may fit where this one cannot.'), conflict: !r.ok || !!rest.length };
-      } catch (e) { fail(e, 'The layout fix was not saved'); return { text: 'The fix failed: ' + e.message, conflict: true }; }
+        if (!saved) return { state: 'blocked', counts, text: 'Not saved: the layout changed elsewhere first.', conflict: true };
+        hist.sigs.push(JSON.stringify(v.layout)); hist.sigs.push(sig); hist.n++;
+        const complete = r.ok && !rest.length;
+        return { state: complete ? 'complete' : r.ok ? 'partial' : 'partial', counts, undo: { from: v.id }, text: (complete ? 'No render: ' : 'No render; still blocking: ' + (r.after ? r.after.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ')).join(', ') : '') + '. ') + r.steps.join('; ') + '.' + (r.conflict && !complete ? ' ' + r.conflict : '') + ' The words were not changed.' + restText + (complete ? '' : ' The layout variations below are each measured and may fit where this one cannot.'), conflict: !complete };
+      } catch (e) { fail(e, 'The layout fix was not saved'); return { state: 'blocked', text: 'The fix failed: ' + e.message, conflict: true }; }
     };
+    const undoRepair = async (as, undo) => { try { const fresh = (pRef.current.assets || []).find(x => x.id === as.id) || as; await call('/studio/version', { asset: as.id, revision: fresh.revision, restoreFrom: undo.from, note: 'undid the layout fix (restored the layout before it)' }); const h = repairHist.current[as.id]; if (h) h.n = Math.max(0, h.n - 1); await reload(); } catch (e) { if (e.status === 409) await reload(); fail(e, 'The fix was not undone'); } };
     const markVariant = async (as, v, comp) => {
       try {
         const variants = {}; for (const l of (v.layout.layers || [])) { if (Array.isArray(l.variants) && l.variants.length) variants[l.id] = await Promise.all(l.variants.map(async x => Object.assign({}, x, { img: await keyedImage(x.src) }))); }
@@ -1946,6 +1972,7 @@
         ${p ? html`<span class="st-sep" aria-hidden="true">/</span><button class="ov-link" onClick=${closeProject}>All projects</button><span class="st-sep" aria-hidden="true">/</span><b class="st-ptitle" title=${p.title}>${p.title}</b>${campName ? html`<${Chip} title="campaign">${campName}</${Chip}>` : html`<span class="ov-dim">no campaign</span>`}${(p.brief || {}).deliverable !== 'copy' ? html`<${Chip} kind=${(p.brief || {}).creationMode === 'finished' ? 'warn' : ''} title=${(p.brief || {}).creationMode === 'finished' ? 'Gemini Finished Creative: the image model paints the whole piece, words and mark included; one bitmap, nothing composed over it' : 'Editable Studio: imagery generated, words and the exact mark composed as live layers'}>${(p.brief || {}).creationMode === 'finished' ? 'Finished creative' : 'Editable'}</${Chip}>` : null}${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}${a && view === 'asset' ? html`<span class="st-sep" aria-hidden="true">/</span><span class="st-curasset">${a.title} <span class="ov-dim">v${vnum(a, current(a))} of ${vtotal(a)}</span></span>` : null}` : html`<span class="ov-dim">project library</span>`}
       </div>
       <div class="st-head-r">
+        ${p && layoutDirty ? html`<${Chip} kind="warn" title="The layout editor has changes that are not saved yet">Unsaved layout</${Chip}>` : null}
         ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save' + (saveSt.err ? ' bad' : saveSt.pending || typing ? ' busy' : ' ok')} role="status" aria-live="polite">${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}
         ${p ? html`<button class=${'st-activity' + (liveJobs.length ? ' on' : '')} onClick=${() => setView('jobs', true)} aria-label=${liveJobs.length ? liveJobs.length + ' jobs running or queued; open Jobs' : 'No jobs running; open Jobs'}>${liveJobs.length ? html`<span class="st-spin" aria-hidden="true"></span>${liveJobs.length} running` : 'Jobs'}</button>` : null}
         ${prov ? (prov.claude && prov.gemini ? html`<span class="st-prov ok" title=${'Claude and image generation are configured on the worker (reachability is checked when a call is made). Model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-') + '. Build ' + status.build + '.'}>Models ready</span>` : html`<span class=${'st-prov ' + (prov.claude ? 'ok' : 'bad')} title=${prov.claude ? 'Claude is configured on the worker' : 'Claude is not configured on the worker: writing, planning and inspection cannot run'}>Claude ${prov.claude ? 'ready' : 'not configured'}</span><span class=${'st-prov ' + (prov.gemini ? 'ok' : 'bad')} title=${prov.gemini ? 'Image generation is configured on the worker' : 'Image generation is not configured: compositions work, imagery cannot be made'}>Images ${prov.gemini ? 'ready' : 'not configured'}</span>`) : null}
@@ -1977,7 +2004,7 @@
     else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('export')} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
     else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
-    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('refine', Object.assign({ compact: true }, tabsFor('refine')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} slot=${slot} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} busy=${busy} /></div>`; }
+    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('refine', Object.assign({ compact: true }, tabsFor('refine')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} slot=${slot} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} busy=${busy} /></div>`; }
     else centre = Staged('refine', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to refine yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction to start production.' : 'Produce the set from the brief first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length ? 'directions' : 'brief')}>${p.directions.length ? 'Go to Directions' : 'Go to the Brief'}</button>` : null}</div>`);
 
     const inRefine = !!(p && view === 'asset' && a && !cmp);

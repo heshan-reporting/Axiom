@@ -12534,9 +12534,32 @@ const AXIOM_WORKER = {
             const layoutTouched = sb.layout && JSON.stringify(sb.layout) !== JSON.stringify(cur.layout); const imageTouched = sb.image !== undefined; const modeTouched = sb.mode && sb.mode !== 'finished';
             if (painted.length || layoutTouched || imageTouched || modeTouched) return jsonResp({ error: 'finished_bitmap', detail: 'This is a finished creative: ' + (painted.length ? 'the ' + painted.join(', ') + ' are painted into the bitmap' : layoutTouched ? 'there are no live layers to lay out' : imageTouched ? 'the bitmap is the piece' : 'its mode is the bitmap\'s') + '. Regenerate it with the new words or direction (a new generated version), or switch to the editable Studio, which makes a derived asset with live layers. Caption and alt text can be edited here.', mode: 'finished', painted }, 409);
           }
+          // locks hold on the server too: a layer the team locked on the layout (layer.locked) is not moved, resized, retyped, recoloured
+          // or removed by any layout version, and a mark a campaign rule holds (layer.rule.mandatory) is not moved - whatever client sent
+          // it - unless the override is explicit (unlock:true), which the version's note then records
+          let heldMoved = false;
+          if (sb.layout && typeof sb.layout === 'object' && cur && cur.layout && Array.isArray(cur.layout.layers) && Array.isArray(sb.layout.layers) && !sb.restoreFrom) {
+            const next = {}; sb.layout.layers.forEach((l, i) => { if (l) next[String(l.id || ('layer' + i))] = l; });
+            const GEO = ['x', 'y', 'w', 'h', 'size', 'text', 'rotate', 'hidden', 'color', 'bg', 'align', 'weight', 'src', 'opacity', 'font', 'emphasis', 'fill'];
+            const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+            for (let i = 0; i < cur.layout.layers.length; i++) {
+              const a = cur.layout.layers[i]; if (!a) continue; const id = String(a.id || ('layer' + i)); const b = next[id]; const name = (a.role || a.type) + ' layer ' + id;
+              const isMark = a.type === 'img' && (a.role === 'logo' || a.role === 'wordmark'); const held = isMark && a.rule && a.rule.mandatory;
+              if (a.locked) {
+                if (!b) { if (!sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + name + ' is locked on the layout and the version removed it. Unlock it first, or send unlock:true to change it deliberately.', element: id }, 409); continue; }
+                const changed = GEO.filter(k => !same(a[k], b[k]));
+                if (changed.length && !sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + name + ' is locked on the layout; this version changes its ' + changed.join(', ') + '. Unlock it first, or send unlock:true to change it deliberately.', element: id, changed }, 409);
+              }
+              if (held) {
+                const moved = !b || ['x', 'y', 'w', 'h'].some(k => Math.abs((Number(a[k]) || 0) - (Number((b || {})[k]) || 0)) > 0.05);
+                if (moved && !sb.unlock) return jsonResp({ error: 'mark_held', detail: 'The ' + a.role + ' is held where the campaign rule puts it (' + (a.rule.corner || 'its corner') + (a.rule.note ? ': ' + a.rule.note : '') + ') and this version ' + (b ? 'moves or resizes' : 'removes') + ' it. Move or shorten the words instead, or send unlock:true to move the mark deliberately against the rule.', element: id }, 409);
+                if (moved) heldMoved = true;
+              }
+            }
+          }
           // a hand edit keeps what the composition was made from (its plan, medium, master), so an adaptation or an inspection later still knows it
           const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
-          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context || carry };
+          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved ? stStr((sb.note || 'layout edited') + ' (a rule-held mark moved against the campaign rule, deliberately)', 200) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context || carry };
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
           let v;

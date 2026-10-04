@@ -1663,6 +1663,30 @@ clear (measured)** applying the suggestion as a layout change (no render).
 Harnesses: `tests/studio-framing-browser.mjs` (17), the framing case in
 `tests/studio-editor-browser.mjs` (4).
 
+**Dependable editing and repair (S5).** Locks hold everywhere: in the layout
+editor a locked layer is left out of every command (move, resize, nudge,
+align, distribute, paint order, group), a mark held by a mandatory campaign
+rule (`layer.rule.mandatory`) is shown as held, has no handle and no position
+fields, and an exact image layer (logo, wordmark) keeps its proportions when
+its corner is dragged; on the server `POST /studio/version` refuses a layout
+that moves, resizes, retypes, recolours or removes a layer with
+`locked: true` (409 `locked`, `element` and `changed` named) or moves a
+rule-held mark (409 `mark_held`), unless `unlock: true`, in which case the
+version's note records that a held mark moved against the rule. Dirty is
+distinct from saved: the editor shows an "unsaved layout changes" chip, the
+header shows "Unsaved layout", Cancel asks before discarding, and leaving the
+page asks while a draft or an unsaved layout exists. **Fix layout** returns
+one of four outcomes - `complete`, `partial`, `blocked`, `nothing` - with the
+blocking count before and after, the steps taken, what still stands and why
+(and that it is not a layout matter where it is not), an **Undo fix** (a
+restore of the version before the fix, as its own version), and a bound:
+three saved fixes per asset in a session, and a stop when a fix would return
+to an arrangement an earlier fix already left (oscillation). **Measure again**
+reloads the images and fonts first (`nonce`), then files the measurement for
+the current version; the signature is recorded only when the worker accepted
+it (S1). Harnesses: `tests/studio-s5-worker.mjs` (2), the two S5 cases in
+`tests/studio-editor-browser.mjs` (6).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
