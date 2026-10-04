@@ -100,7 +100,9 @@ await t('the capability registry says what each operation cannot do: no pixel ma
   const render = c.operations.find(o => o.op === 'render'); eq(render.accepts.sizes, ['1K', '2K']); eq(render.accepts.capped, '2K');
   ok(render.cannot.some(x => /pixel masks: there is no mask input/.test(x)) && /disclosed/.test(render.fallback), JSON.stringify(render));
   ok(c.operations.filter(o => o.provider !== 'browser (docs/studio-render.js)').every(o => /real output not reviewed/.test(o.verified)), 'no claim of verified real output');
-  eq(c.operations.map(o => o.op), ['plan', 'extract', 'inspect', 'render', 'compose']);
+  eq(c.operations.map(o => o.op), ['plan', 'extract', 'inspect', 'render', 'compose', 'finished']);
+  const fin = c.operations.find(o => o.op === 'finished'); ok(fin.cannot.some(x => /guarantee spelling/.test(x)) && /Switch to Editable/.test(fin.fallback), 'finished mode states what it cannot promise and its fallback');
+  ok(c.modes && c.modes.editable && c.modes.finished && c.modes.artwork && /Hybrid/.test(c.modes.artwork.label), 'the three creation modes are described, the legacy one as the hybrid it is');
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

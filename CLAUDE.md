@@ -1564,6 +1564,48 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
+**Two creation modes (S2; page `?v=r2`).** The brief carries `creationMode`
+(`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
+else falls to editable), chosen at intake before anything is generated and
+shown as a header chip. **Editable Studio** is everything above: Gemini makes
+imagery, the Studio composes words, exact mark files, URL and shapes as live
+layers. **Gemini Finished Creative** (`stCopyStage` with the brief in finished
+mode): the plan is forced to `approach: 'artwork'` with `layout.finished`, the
+version is `mode: 'finished'`, and `stPlanRenders` queues one render job
+`{finished:true, marks:[{role,key,...}], baked, bakedText, copy?, edit?}` whose
+prompt (`stFinishedPrompt`) sets the exact words, the URL and the mark
+"exactly as attached"; `stMarkImages` reads the campaign policy's logo and/or
+wordmark from R2 and `stRenderJob` attaches them to Gemini as image inputs with
+the role "exact: reproduce as attached" (HOOF: the wordmark, never the MCA
+logo, and the prompt says the client logo must not appear). A mark not on file
+fails the copy stage before any spend (`mark_missing`, not retried). The filed
+version has `layout.layers = []`, `layout.baked` = text roles plus the mark
+roles, `image.meta.finished` and `marksSent`; `stReadiness` reports
+`technical: 'not_applicable'`, `finished: true` and a `baked` block whose
+`verified` needs an inspection that read every word and every mark back
+(`ST_INSPECT_SYS` now asks for `marks {present, missing, wrong}`;
+`stInspectStage` attaches the mark files beside the bitmap for comparison);
+design approval gates on it (`baked_text_unverified`). `POST /studio/version`
+refuses painted words, layout, image or mode changes with 409
+`finished_bitmap` (caption, alt text and restore stay); `POST
+/studio/finished/regenerate {asset, copy?, instruction?, size?}` is the only
+revision (a new bitmap; direction-only continues the image conversation);
+`POST /studio/derive {asset, to:'editable', regenerate?}` makes a derived asset
+in the family "Editable from finished" from the plan the bitmap was briefed
+from (words as live type, mark placed from its file, no imagery until asked,
+`context.derivedFrom` with the reconstruction note) and leaves the original.
+Export takes the bitmap itself (`exportKey` = the image key, `finished: true`).
+The older `artwork` mode is labelled the hybrid it is (`readiness.hybrid`);
+`GET /studio/capabilities` has op `finished` (cannot guarantee spelling or the
+mark; fallback: Switch to Editable) and `modes`. In-app: the intake's Creation
+mode segment with the explanation, the header chip, the finished note under the
+bitmap (no layout editor, variations, art direction or area edit; painted
+fields read-only with "in the artwork"), the **Finished creative** panel
+(Regenerate with the painted words, a direction and the resolution, 1 render,
+confirmed; Switch to Editable, free), Review and Export reading "words and mark
+read back" in place of the technical validation. Harnesses:
+`tests/studio-s2-worker.mjs` (8), `tests/studio-modes-browser.mjs` (4).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

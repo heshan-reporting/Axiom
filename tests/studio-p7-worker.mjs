@@ -146,7 +146,7 @@ await t('full artwork: the image model paints the whole piece from the exact wor
   eq(job.input.size, '4K', 'the size chosen on Generate travels through concept/apply to the plan render');
   const done = await run(job); eq(done.state, 'done', done.error);
   let a = (await get(P)).assets.find(x => x.id === A); let v = a.versions[a.versions.length - 1]; eq(v.mode, 'artwork'); eq(v.layout.baked, ['headline', 'support']); eq(v.layout.layers.map(l => l.role), ['wordmark'], 'only the mark is a live layer'); eq(v.layout.approach, 'artwork');
-  ok(/full artwork - the words are part of the bitmap/.test((await events(P, 'job')).filter(e => e.render).pop().text));
+  ok(/hybrid artwork - the words are part of the bitmap, the mark is placed over it/.test((await events(P, 'job')).filter(e => e.render).pop().text), 'the hybrid is labelled as the hybrid it is');
   // an edit: the earlier user and model turns are replayed, signatures and all
   const g0 = gem.calls.length;
   const ej = await jobRun(P, 'render', { prompt: 'Make the sky darker and keep every word as it is', edit: true, approach: 'artwork', baked: v.layout.baked, aspect: a.format, size: '4K' }, A); eq(ej.state, 'done', ej.error); eq(gem.calls.length, g0 + 1);
