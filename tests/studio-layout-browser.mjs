@@ -217,7 +217,8 @@ const cases = await page.evaluate(async () => {
   out.rot = codes(v(rot, {})); out.unrot = codes(v(base([Object.assign({}, rot.layers[0], { rotate: 0 })]), {}));
   // emphasis: a highlight reaches past the glyphs; a mark set just beyond the words collides with the highlight only
   const hlL = T('h', 'headline', { x: 6, y: 40, w: 60, h: 10, size: 5 }); const hlT = R.layoutText(c, base([]), hlL, { headline: 'Not a subsidy' }, W, H);
-  const markX = (hlT.tx + Math.max.apply(null, hlT.widths) + 4) / W * 100;
+  // the mark is judged by its ink, which starts a few pixels inside its box: set the box so the ink sits just past the glyphs
+  const markX = (hlT.tx + Math.max.apply(null, hlT.widths) + 1) / W * 100;
   const em = e => base([Object.assign({}, hlL, { emphasis: e, emphasisColor: '#E8B23A', color: '#111' }), { id: 'wordmark', type: 'img', role: 'wordmark', x: markX, y: 40, w: 20, h: 6, src: '/brand/wordmark' }]);
   out.emNone = codes(v(em(''), { headline: 'Not a subsidy' })).filter(x => x.startsWith('collision')); out.emHigh = codes(v(em('highlight'), { headline: 'Not a subsidy' })).filter(x => x.startsWith('collision'));
   // hidden layers are not drawn and not checked; duplicate ids and impossible geometry are refused
@@ -355,7 +356,7 @@ const p22b = await page.evaluate(async ({ L, C, F }) => {
   const others = l => JSON.stringify(l.layers.filter(x => x.id !== 'wordmark'));
   const mark = mv.layout.layers.find(l => l.id === 'wordmark');
   const after = R.validate(mv.layout, C, Object.assign({}, images, { wordmark: im[mark.variant] }), o);
-  out.mark = { changed: mv.changed, variant: mark.variant, steps: mv.steps, othersSame: others(mv.layout) === others(L), readable: !after.issues.some(i => /^mark_/.test(i.code)) };
+  out.mark = { changed: mv.changed, variant: mark.variant, steps: mv.steps, othersSame: others(mv.layout) === others(L), readable: !after.issues.some(i => /^mark_(unreadable|low_contrast|unloaded)$/.test(i.code)) };
   const lockedL = JSON.parse(JSON.stringify(L)); lockedL.layers.find(l => l.id === 'wordmark').locked = true;
   out.lockedChanged = R.markVariants(lockedL, C, Object.assign({}, images), o).changed;
   // a pale label over the pale sky of the photograph

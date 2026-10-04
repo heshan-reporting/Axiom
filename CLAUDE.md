@@ -1606,6 +1606,34 @@ confirmed; Switch to Editable, free), Review and Export reading "words and mark
 read back" in place of the technical validation. Harnesses:
 `tests/studio-s2-worker.mjs` (8), `tests/studio-modes-browser.mjs` (4).
 
+**One scene representation (S3).** What the renderer draws is what it
+measures, hit-tests, judges and exports. `measure()` gives a mark the box of
+its visible pixels (`vx vy vw vh`, from `markStats` bounds inside the
+contained image; `markFill`) and turns a rotated image or mark into the
+axis-aligned bounds of its turned rectangle, so collisions, safe areas and
+clear space are judged by ink, not by boxes; `regionStats` returns the darkest
+and brightest tenth of the ground (`p10`, `p90`) and `contrastOf` records
+`contrastMin`, the worst local contrast under the words. The RULES block
+(byte-identical in the worker) gained `safeAreaOf(format, channel)` - the one
+safe-area table: the Instagram story interface (14 / 20 / 6%, hard) and the
+3% feed margin - which the rules, `repair()`, `variants()`, the editor's
+guides and align, and the worker's `stSafeInset` (placement = the table plus a
+margin) all read; `patchy_contrast` (blocking under 1.6:1 on the worst
+patch, a warning under three quarters of the wanted ratio); `mark_padding`
+(ink under a quarter of the box) and `mark_small` (ink under 6% of the stage
+width); and `pixels_unmeasured` (blocking in production) when
+`validate()` reports `unresolved: ['contrast'|'occlusion']` because
+`getImageData` failed - an unresolved state, never a pass. `repair()` treats a
+blocking patchy finding as a contrast fix (colour, then a 72% plate, then a
+92% plate; the words untouched). `report()` carries `contrastMin`, the
+visible bounds and `unresolved`; `stValidationJudge` adopts the bounds only
+inside the layer's box (refused otherwise), reads `contrastMin`, and marks a
+live text box reported with no contrast as unresolved. The layout editor's
+handles sit on the measured ink (`data-ink`, the layer box drawn faintly
+behind when it differs) and its guides come from `STRender.safeArea`.
+Harnesses: `tests/studio-scene-browser.mjs` (20), `tests/studio-s3-worker.mjs`
+(3), the ink-handle case in `tests/studio-editor-browser.mjs` (3).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

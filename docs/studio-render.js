@@ -244,6 +244,21 @@
       } else if (l.type === 'img') {
         const img = isMark(l) ? markImage(images, l) : images[l.id];
         b.mark = isMark(l); b.asset = img ? 'loaded' : (isMark(l) ? 'missing' : 'sketch'); b.src = l.src || '';
+        // a mark is its visible pixels, not its box: the contained image's drawn rectangle, then the bounds of its opaque pixels,
+        // become the box the rules judge (collisions, safe areas, clear space, size); the layer box stays in ax/ay/aw/ah
+        if (b.mark && img) {
+          const s = Math.min(b.aw / (img.naturalWidth || 1), b.ah / (img.naturalHeight || 1)); const dw = (img.naturalWidth || 1) * s, dh = (img.naturalHeight || 1) * s; const dx = b.ax + (b.aw - dw) / 2, dy = b.ay + (b.ah - dh) / 2;
+          const m = markStats(img);
+          if (m && m.bounds) { b.vx = dx + m.bounds.x * dw; b.vy = dy + m.bounds.y * dh; b.vw = m.bounds.w * dw; b.vh = m.bounds.h * dh; b.markFill = Math.round(m.fill * 100) / 100; }
+          else { b.vx = dx; b.vy = dy; b.vw = dw; b.vh = dh; }
+          b.x = b.vx; b.y = b.vy; b.w = b.vw; b.h = b.vh;
+        }
+        if (l.rotate && (b.mark || b.type === 'img')) {
+          // the axis-aligned bounds of the drawn rectangle turned about the layer's centre, as draw() turns it
+          const cx = b.ax + b.aw / 2, cy = b.ay + b.ah / 2, a = l.rotate * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+          const pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]].map(([px0, py0]) => [cx + (px0 - cx) * cs - (py0 - cy) * sn, cy + (px0 - cx) * sn + (py0 - cy) * cs]);
+          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); b.x = Math.min.apply(null, xs); b.y = Math.min.apply(null, ys); b.w = Math.max.apply(null, xs) - b.x; b.h = Math.max.apply(null, ys) - b.y;
+        }
       }
       boxes.push(b);
     });
@@ -252,11 +267,17 @@
 
   /* ---------------------------------------------------------------- the rules: a byte-identical copy lives in the worker */
   /* RULES:BEGIN */
+  /* The one safe-area table: the Instagram story interface (top 14%, bottom 20%, 6% sides, hard) and the feed margin (3%,
+     advisory). The rules judge by it, the editor draws its guides from it, the worker places marks inside it. */
+  function safeAreaOf(format, channel) {
+    return format === '9:16' && channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+  }
   function layoutRules(boxes, o) {
     o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
     var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
     var tol = Math.max(1, W * 0.0015);
-    var safe = o.format === '9:16' && o.channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+    var safe = safeAreaOf(o.format, o.channel);
+    if (o.unresolved && o.unresolved.length) add('pixels_unmeasured', o.production ? 'blocking' : 'warning', [], 'the ' + o.unresolved.join(' and ') + ' analysis could not read the pixels (a blocked or tainted canvas); what it would have found is unknown, so this measurement is unresolved, not passed');
     var live = [], i, j;
     for (i = 0; i < boxes.length; i++) {
       var b = boxes[i];
@@ -271,10 +292,15 @@
         var pct = b.px / W * 100;
         if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
         else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
-        if (typeof b.contrast === 'number') { var large = pct >= 4; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (large ? 3 : 4.5)) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (large ? 3 : 4.5) + ':1 wanted)'); }
+        if (typeof b.contrast === 'number') { var large = pct >= 4; var want = large ? 3 : 4.5; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < want) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + want + ':1 wanted)');
+          // the mean can hide a bright or dark patch under part of the words: the worst tenth of the ground is judged too
+          if (typeof b.contrastMin === 'number' && b.contrast >= 1.6) { if (b.contrastMin < 1.6) add('patchy_contrast', 'blocking', [b.id], 'part of the ' + (b.role || 'text') + ' sits on a patch of the ground where its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 (the average is ' + b.contrast.toFixed(2) + ':1): those words vanish'); else if (b.contrastMin < want * 0.75) add('patchy_contrast', 'warning', [b.id], 'the ground under the ' + (b.role || 'text') + ' is uneven: its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 on the worst patch (average ' + b.contrast.toFixed(2) + ':1)'); } }
       }
       if (b.mark) {
         if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
+        // the mark is judged by its visible pixels: a box far larger than its ink misleads every placement, and ink under 6% of the
+        // width is not an identity a feed can read
+        if (typeof b.vw === 'number' && b.asset === 'loaded') { if (typeof b.markFill === 'number' && b.markFill < 0.25 && b.vw < b.aw * 0.6) add('mark_padding', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide inside a ' + Math.round(b.aw) + ' px box (' + Math.round(b.markFill * 100) + '% of the box is ink): size, clear space and collisions are judged by the ink, not the box'); if (b.vw < W * 0.06) add('mark_small', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide, under 6% of the stage: too small to read in a feed'); }
         if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
       }
       if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
@@ -285,7 +311,7 @@
           if (cov.length || !(b.occludedBy && b.occludedBy.length)) { var cl = [b.id].concat(cov); if (b.occluded >= 0.2) add('occluded', 'blocking', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? 'a later layer (' + cov.join(', ') + ')' : 'later layers')); else if (b.occluded >= 0.05) add('occluded', 'warning', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? cov.join(', ') : 'later layers')); }
         }
         if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
-        else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top 14%, bottom 20%)' : 'inside the 3% margin'));
+        else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top ' + Math.round(safe.top * 100) + '%, bottom ' + Math.round(safe.bottom * 100) + '%)' : 'inside the ' + Math.round(safe.side * 100) + '% margin'));
       }
     }
     for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
@@ -319,9 +345,11 @@
    *  readability, which an average can hide). */
   function regionStats(data, W, H, r) {
     const x0 = Math.max(0, Math.floor(r.x)), y0 = Math.max(0, Math.floor(r.y)), x1 = Math.min(W, Math.ceil(r.x + r.w)), y1 = Math.min(H, Math.ceil(r.y + r.h));
-    const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 4000))); let n = 0, s = 0, sr = 0, sg = 0, sb = 0, lo = 1, hi = 0;
-    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) { const k = (y * W + x) * 4; const L = lum(data[k], data[k + 1], data[k + 2]); s += L; sr += data[k]; sg += data[k + 1]; sb += data[k + 2]; if (L < lo) lo = L; if (L > hi) hi = L; n++; }
-    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], lo, hi, n } : { lum: 0, rgb: [0, 0, 0], lo: 0, hi: 0, n: 0 };
+    const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 4000))); let n = 0, s = 0, sr = 0, sg = 0, sb = 0, lo = 1, hi = 0; const ls = [];
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) { const k = (y * W + x) * 4; const L = lum(data[k], data[k + 1], data[k + 2]); s += L; sr += data[k]; sg += data[k + 1]; sb += data[k + 2]; if (L < lo) lo = L; if (L > hi) hi = L; ls.push(L); n++; }
+    // the darkest and brightest tenth of the ground (percentiles, so one stray pixel does not decide): local readability
+    ls.sort((a, b) => a - b); const p10 = n ? ls[Math.floor((n - 1) * 0.1)] : 0, p90 = n ? ls[Math.floor((n - 1) * 0.9)] : 0;
+    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], lo, hi, p10, p90, n } : { lum: 0, rgb: [0, 0, 0], lo: 0, hi: 0, p10: 0, p90: 0, n: 0 };
   }
   function regionLum(data, W, H, r) { return regionStats(data, W, H, r).lum; }
   /** The visible pixels of a mark: mean colour and luminance over the pixels that are not transparent, and how much of the
@@ -348,9 +376,11 @@
       const op = b.opacity == null ? 1 : b.opacity;
       if (b.type === 'text') {
         const g = regionStats(data, W, H, b); const fgc = colourRGBA(l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff'));
-        const a = fgc[3] * op; const eff = blend(fgc, a, g.rgb);
-        b.contrast = Math.round(ratio(lum(eff[0], eff[1], eff[2]), g.lum) * 100) / 100; b.alpha = Math.round(a * 100) / 100;
-        b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.lo * 1000) / 1000, Math.round(g.hi * 1000) / 1000];
+        const a = fgc[3] * op; const eff = blend(fgc, a, g.rgb); const fl = lum(eff[0], eff[1], eff[2]);
+        b.contrast = Math.round(ratio(fl, g.lum) * 100) / 100; b.alpha = Math.round(a * 100) / 100;
+        // the worst local contrast: against the brightest and the darkest tenth of the ground, whichever the words lose to
+        b.contrastMin = Math.round(Math.min(ratio(fl, g.p10), ratio(fl, g.p90)) * 100) / 100;
+        b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.p10 * 1000) / 1000, Math.round(g.p90 * 1000) / 1000];
       } else if (b.mark && b.asset === 'loaded') {
         const m = markStats(markImage(images, l)); if (!m) return; const g = regionStats(data, W, H, b);
         const eff = blend(m.rgb, op, g.rgb); b.contrast = Math.round(ratio(lum(eff[0], eff[1], eff[2]), g.lum) * 100) / 100; b.alpha = Math.round(op * 100) / 100;
@@ -393,11 +423,15 @@
     opts = opts || {}; layout = layout || {}; copy = copy || {}; images = images || {};
     const { w: W, h: H } = stageSize(layout, opts.width);
     const boxes = measure(layout, copy, images, W, H);
+    // an analysis that could not run (pixels unreadable: a tainted canvas, a blocked getImageData) is an unresolved state the rules
+    // report, never a quiet pass; an analysis the caller switched off is not unresolved, it was not asked for
+    const unresolved = [];
     const contrasted = opts.contrast === false ? false : contrastOf(layout, copy, images, boxes, W, H);
-    if (opts.occlusion !== false) occlusionOf(layout, copy, images, boxes, W, H);
+    if (opts.contrast !== false && contrasted === false) unresolved.push('contrast');
+    if (opts.occlusion !== false && occlusionOf(layout, copy, images, boxes, W, H) === false) unresolved.push('occlusion');
     const missing = imageryMissing(layout, images);
-    const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing });
-    return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
+    const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing, unresolved });
+    return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
   }
 
   /* ---------------------------------------------------------------- repair: the smallest geometric correction, never the words */
@@ -428,11 +462,11 @@
     if (opts.locks && opts.locks.layout) return Object.assign(result('The layout is locked on this asset; unlock it to let the Studio move anything.'), { layout: layout0, changed: false });
     // unreadable words are always fixed; merely low contrast only when the person asked (opts.fixContrast), since a deliberate
     // brand colour (a gold kicker) may sit just under the bar and is not the repair's to change on its own
-    const contrastIssues = r => r.issues.filter(i => i.code === 'unreadable_contrast' || (opts.fixContrast && i.code === 'low_contrast'));
+    const contrastIssues = r => r.issues.filter(i => i.code === 'unreadable_contrast' || (i.code === 'patchy_contrast' && i.severity === 'blocking') || (opts.fixContrast && (i.code === 'low_contrast' || i.code === 'patchy_contrast')));
     if (!layoutIssues(before).length && !contrastIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
-    const story = (opts.format || L.format) === '9:16' && opts.channel === 'instagram'; const sp = { top: story ? 14 : 3.2, bottom: story ? 20 : 3.2, side: story ? 6 : 3.2 };
+    const sa0 = safeAreaOf(opts.format || L.format, opts.channel); const story = sa0.hard; const sp = { top: sa0.top * 100 + (story ? 0 : 0.2), bottom: sa0.bottom * 100 + (story ? 0 : 0.2), side: sa0.side * 100 + (story ? 0 : 0.2) };
     const geo = () => { const bx = measure(L, copy, images, W, H); const m = {}; bx.forEach(b => { m[b.id] = b; }); return m; };
     const pY = v => v / H * 100, pX = v => v / W * 100;
     // 1. a box takes the height its words need
@@ -517,15 +551,19 @@
     if (opts.variants) swapMarks(L, copy, images, opts, byId, steps);
     // words that do not read against what is behind them: first the colour (white or near-black, whichever reads), then, only
     // if neither is enough, a backing plate behind the same words - the words, their size and their place are not touched
-    contrastIssues(validate(L, copy, images, opts)).forEach(iss => iss.layers.forEach(id => {
+    // each layer once (a low-contrast and a patchy finding may name the same words), and only while it still fails to read
+    Array.from(new Set(contrastIssues(validate(L, copy, images, opts)).reduce((acc, iss) => acc.concat(iss.layers), []))).forEach(id => {
       const l = byId[id]; if (!movable(l) || l.type !== 'text') return;
-      const read = (patch) => { const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, patch) : x) }), copy, images, opts); const tb = t.boxes.find(x => x.id === id); return { c: tb && typeof tb.contrast === 'number' ? tb.contrast : 0, clear: !contrastIssues(t).some(i => i.layers.indexOf(id) >= 0) }; };
-      const was = (validate(L, copy, images, opts).boxes.find(x => x.id === id) || {}).contrast || 0;
+      const read = (patch) => { const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, patch) : x) }), copy, images, opts); const tb = t.boxes.find(x => x.id === id); return { c: tb && typeof tb.contrast === 'number' ? tb.contrast : 0, clear: !contrastIssues(t).some(i => i.layers.indexOf(id) >= 0), ch: tb ? tb.contentH : 0, ovf: !!(tb && tb.overflowH) }; };
+      const v1 = validate(L, copy, images, opts); if (!contrastIssues(v1).some(i => i.layers.indexOf(id) >= 0)) return;
+      const was = (v1.boxes.find(x => x.id === id) || {}).contrast || 0;
       const colours = ['#FFFFFF', '#111111'].filter(c => String(l.color || '').toUpperCase() !== c);
       let best = null; colours.forEach(c => { const r = read({ color: c }); if (!best || (r.clear && !best.clear) || (r.clear === best.clear && r.c > best.c)) best = Object.assign({ patch: { color: c } }, r); });
-      if (!(best && best.clear)) { const light = !best || best.patch.color === '#FFFFFF'; const patch = { color: light ? '#FFFFFF' : '#111111', bg: light ? 'rgba(10,14,22,0.72)' : 'rgba(255,255,255,0.86)' }; const r = read(patch); if (!best || r.c > best.c) best = Object.assign({ patch }, r); }
-      if (best && best.c > was + 0.3) { Object.assign(l, best.patch); steps.push((best.patch.bg ? 'put a backing plate behind' : 'changed the colour of') + ' the ' + (l.role || 'text') + ' ' + id + ' so it reads (contrast ' + was.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
-    }));
+      // a plate at 72% first; over a ground that is uneven under the words (a patchy finding) a denser plate, still translucent, still the same words
+      if (!(best && best.clear)) { const light = !best || best.patch.color === '#FFFFFF'; const plates = light ? ['rgba(10,14,22,0.72)', 'rgba(10,14,22,0.92)'] : ['rgba(255,255,255,0.86)', 'rgba(255,255,255,0.96)']; for (const bg of plates) { const patch = { color: light ? '#FFFFFF' : '#111111', bg }; const r = read(patch); if (!best || r.c > best.c || (r.clear && !best.clear)) best = Object.assign({ patch }, r); if (best.clear) break; } }
+      // a plate adds padding around the same words: the box grows to hold it, the words, their size and their place unchanged
+      if (best && best.c > was + 0.3) { Object.assign(l, best.patch); if (best.patch.bg && best.ovf && best.ch) l.h = Math.round((best.ch / H * 100 + 0.2) * 10) / 10; steps.push((best.patch.bg ? 'put a backing plate behind' : 'changed the colour of') + ' the ' + (l.role || 'text') + ' ' + id + ' so it reads (contrast ' + was.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
+    });
     now = validate(L, copy, images, vopts);
     if (layoutIssues(now).length) {
       const locked = layoutIssues(now).reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
@@ -552,7 +590,8 @@
     const L0 = layout0 || {}; if (opts.locks && opts.locks.layout) return [];
     const fmt = opts.format || L0.format || '1:1'; const { w: W, h: H } = stageSize(L0, opts.width);
     const story = fmt === '9:16'; const wide = fmt === '16:9';
-    const sp = story ? { top: 14, bottom: 20, side: 6 } : { top: 5, bottom: 5, side: 5.5 };
+    // the story interface from the one safe-area table; a feed variation keeps a design margin wider than the 3% minimum
+    const sa0 = safeAreaOf(fmt, 'instagram'); const sp = story ? { top: sa0.top * 100, bottom: sa0.bottom * 100, side: sa0.side * 100 } : { top: 5, bottom: 5, side: 5.5 };
     const layers0 = L0.layers || [];
     const texts0 = layers0.filter(l => l.type === 'text' && !l.hidden && displayedText(L0, l, copy));
     if (!texts0.length) return [];
@@ -669,7 +708,7 @@
   }
   /** The report a browser hands the worker: the measured boxes and the attested measurements, not a verdict (the worker derives that). */
   function report(v, val) {
-    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
+    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf };
+  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, safeArea: safeAreaOf, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf };
 })();

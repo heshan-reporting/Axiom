@@ -66,4 +66,24 @@ await T.t('a key typed into a layout-editor field edits the field: arrow keys do
   ok(!page.errors.length, page.errors.join(' | '));
   await page.ctxB.close();
 });
+await T.t('the editor\'s handles sit on what the renderer measured (the words\' ink, a mark\'s visible pixels), with the layer box drawn faintly behind when it differs', async () => {
+  const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Ink', brief: { channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, objective: 'x', message: 'y' }, idem: 'ink1' });
+  const a0 = await api('POST', '/studio/asset', { project: pr.id, family: 'Set', channel: 'instagram', format: '1:1', title: 'Ink tile', copy: { headline: 'Short', support: 'Not a subsidy.', cta: 'Sign' }, mode: 'composition' });
+  const L = a0.asset.versions[0].layout; const hl = L.layers.find(l => l.role === 'headline');
+  const page = await fx.open({ viewport: { width: 1440, height: 900 } });
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Ink") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"][data-ink="1"]', { timeout: 15000 });
+  const on = await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => ({ w: parseFloat(el.style.width), x: parseFloat(el.style.left) }));
+  ok(on.w < hl.w * 0.8, 'a one-word headline\'s handle is the width of the word (' + on.w.toFixed(1) + '% of a ' + hl.w + '% box), not the box');
+  ok(Math.abs(on.x - hl.x) < 1.5, 'left-aligned, it starts where the box starts (' + on.x.toFixed(1) + '% vs ' + hl.x + '%)');
+  ok(await page.$(R + '.st-le-box'), 'the layer box is drawn faintly behind the ink');
+  // a drag still moves the layer by the same distance, whatever the handle covers
+  const box = await page.$eval(R + '.st-le', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const h = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const hb = await h.boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + box.w * 0.1, hb.y + hb.height / 2, { steps: 4 }); await page.mouse.up(); await page.waitForTimeout(200);
+  const xField = await page.inputValue(R + 'input[aria-label="X, per cent of the stage"]');
+  ok(Math.abs(parseFloat(xField) - (hl.x + 10)) < 1.5, 'dragging the ink moved the layer 10% (x ' + hl.x + ' -> ' + xField + ')');
+  ok(!page.errors.length, page.errors.join(' | '));
+  await page.ctxB.close();
+});
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);
