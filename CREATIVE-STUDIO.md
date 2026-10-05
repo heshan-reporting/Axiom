@@ -933,3 +933,125 @@ visibly better. Two causes:
   Studio harness passes unchanged.
 - Providers are mocked in these harnesses: they prove the page, the renderer and the worker agree, not
   what a live model answers.
+
+## 33. Report: the S-series (builds studio-p25, page r3) - correctness, brand context, two modes, interface, verification
+
+The request was to upgrade the Studio into a reliable, brand-aware production workspace, in this order:
+correctness defects first, then brand-context delivery and the two-mode workflow, then the interface, and
+never to hide a rendering or data problem behind a redesign. Baseline `17fd0ec` (`2026-10-03.studio-p24-r2`).
+Ten commits on `claude/peaceful-gates-g1t4ss`, one per section; nothing deployed, nothing merged to `main`,
+no paid generation run, no migration that drops or rewrites data.
+
+### What was built, by section
+
+- **S1, the seven confirmed defects** (`33db5e2`). Invisible words passed (opacity now measured: `invisible`
+  under 5%, `faint` under 50%); a transparent plate was read as an opaque ground (plates drawn with their real
+  alpha, glyph colour composited before the contrast is read); a later layer covering the words passed
+  (occlusion pass; `occluded` at 20%); the repair and the variations moved a rule-held mark (both hold it, the
+  words move); Measure again did nothing after a failed filing (the signature is recorded only when the worker
+  accepted the evidence); a placement negation ("No logo at bottom left") voted for the corner it denied
+  (clauses read, negation honoured); the reference line omitted the words the analysis read. Each has a test
+  that fails on the baseline.
+- **S2, two creation modes** (`ccccb89`). `creationMode` editable | finished on the brief, chosen at intake and
+  shown as a chip; a finished creative is one Gemini bitmap with the exact words, URL and mark files sent "as
+  attached", `layout.layers = []`, `layout.baked`, readiness `not_applicable` with a `baked` block that needs an
+  inspection reading every word and mark back, `finished_bitmap` 409 on painted-word edits, `regenerate` and
+  `derive` to an editable asset (the S2 paragraph of CLAUDE.md).
+- **S3, one scene representation** (`0edeb98`). Marks measured by their visible ink (`vx vy vw vh`), rotated
+  boxes as their turned bounds, `contrastMin` and `patchy_contrast`, one `safeAreaOf` table read by the rules,
+  the repair, the variations, the editor and the worker, `pixels_unmeasured` as a blocking unresolved state.
+- **S4, background positioning** (`1a7a5ab`). `coverTransform` documented and shared by preview, export,
+  hit-testing and the subject check; Frame by dragging, zoom, centre and reset; `subjects()` as saliency
+  evidence with confidence capped at 0.6; `subject_covered` / `subject_cropped` warnings; `frameSuggest`
+  offered, never applied.
+- **S5, dependable editing and repair** (`408e29c`). Locks hold in every editor command and on the server
+  (`locked`, `mark_held` 409 unless `unlock`); dirty distinct from saved; Fix layout answers complete |
+  partial | blocked | nothing with before and after, steps, what stands and why, Undo fix, three fixes a
+  session and an oscillation stop; Measure again reloads first.
+- **S6, client knowledge** (`8d412c3`). `GET /brand/inventory` (usable, stored but never retrieved,
+  unanalysed, missing, conflicting, recommendations with actions, examples wanted); placement as one row of
+  evidence per reference with basis, confidence, agreement and exceptions, the rule layer above; Teach this
+  brand (inspect writes nothing, preview writes nothing, confirm with a reason writes the campaign `markRule`
+  as a kit revision); the taught rule stamped on the produced mark layer, so the S5 gates fire from real
+  compositions - a gap found and fixed here: `stMarkLayers` had never set `layer.rule`.
+- **S7, one context compiler** (`daf5407`). `stCompileContext` for strategy, directions, production, sequence,
+  revise, concepts and suggestions, with a manifest of what informed the call (facts by id, banned terms,
+  corrections by id, references attached / read / excluded, artwork memory, placement, marks, sections,
+  models, and `omitted[]` with reasons) stored on versions and events; "What informed this creative?" in the
+  app. The directions and revise stages had seen no identity line before; the Studio kit block is now
+  campaign-scoped (other campaigns' facts counted, not sent), the Content Desk unchanged.
+- **S8, genuinely different directions and the six actions** (`209ef22`). Directions measured on argument and
+  medium with one bounded REPLAN; `GET /studio/actions` states each action's changes, preserves, cost,
+  availability and reason before anything runs; the buttons follow it.
+- **S9, workflow and interface** (`b481a0a`). Mode, campaign and content type in the context bar;
+  issue-to-element highlighting from the Quality tab onto the tile; the Art Director panel says what the model
+  saw, what it read against the approved copy, what it did not score, and that it is one read and never an
+  approval; an accessibility audit (named controls and images, heading order, live regions, Alt+1..6, Tab)
+  across the views, which found and fixed two unlabelled brief fields.
+- **S10, verification** (this commit). Build `2026-10-05.studio-p25`, page scripts `?v=r3`;
+  `tests/studio-s10-browser.mjs` and this report.
+
+### Evidence
+
+Every harness runs with the providers MOCKED (a stub Claude, a synthetic gradient as the "photograph"): they
+prove that the page, the renderer and the worker agree with each other and with the rules, not what a live
+model answers. The renderer and the page run in real Chromium.
+
+- The full suite (`node tests/run.mjs all`, backend then browser, sequentially): `check` 18 of 18; the
+  backend and browser harnesses are listed below under "Suite figures" as the run reported them.
+- New in the S-series: `studio-s1-worker` (5), `studio-quality-browser`, `studio-s2-worker` (8),
+  `studio-modes-browser` (4), `studio-scene-browser` (20), `studio-s3-worker` (3), `studio-framing-browser`
+  (17), `studio-editor-browser` (6), `studio-s5-worker` (2), `studio-s6-worker` (7), `studio-brand-browser`
+  (4), `studio-s7-worker` (5), `studio-s8-worker` (5), `studio-actions-browser` (2), `studio-s9-browser` (5),
+  `studio-s10-browser` (3).
+- **The pixel read-back** (S10). One HOOF project: the placement rule taught from the reference evidence
+  (bottom left, mandatory), production carrying `layer.rule` on the wordmark and `informed` on the version,
+  the six actions all available with their costs stated, the inventory at 7 usable items and 0 stored but
+  never retrieved. The composed tile (700 x 875, the Instagram 4:5 export) was then read from its pixels, not
+  from its layout: each text box cropped, scaled three times, binarised and read with tesseract.js (English
+  data on the machine).
+
+  | Role | Approved words | Words read back | Confidence |
+  |---|---|---|---|
+  | headline | 6 | 6 | 94 |
+  | support | 10 | 10 | 95 |
+  | CTA | 3 | 3 | 95 |
+
+  The wordmark's box (x 5%, y 89.6%, w 24%, h 6.4% - the rule's corner) carries ink; every text box carries
+  ink against the ground. A whole-tile OCR pass read almost nothing ("|B "), which is why the read-back is per
+  box - the figures above are what the engine found, and the whole-tile result is reported too.
+- Screenshots of the library, brief, Refine, the actions table, the highlighting, the Art Director, the
+  editor with the held mark, Review, Export and Brand in `tests/shots/s10-*.png` (ignored by git), the
+  figures in `tests/shots/s10-report.json`; its `gaps` array is empty for this run.
+
+### Simulated, unverified, and known limits
+
+- **No live model output was verified.** Every Claude and Gemini answer in the harnesses is a stub. What a
+  real model writes, plans or paints under the new prompts (the identity line, the manifest, REPLAN, the
+  finished-creative brief) is unmeasured until a live run is approved; `tools/studio-showcase.py` and
+  `tools/studio-demo.py` exist for that and spend nothing without `--approve-calls`.
+- **The OCR engine is machine-local.** tesseract.js and its English data are installed in the session
+  scratchpad (`OCR_DIR`), not as a repository dependency, because the CDN that fetches the language data is
+  not reachable from the sandbox and the data should not be vendored. In CI the harness runs the ink check and
+  says so in the report; the word-for-word read-back is a local verification step.
+- **`tests/studio-browser.mjs` is flaky under concurrency.** The art-direction and P21 cases time out when
+  several Chromium harnesses run at once; alone it passes 26/26 every time. `tests/run.mjs` runs the browser
+  suites sequentially for this reason; the cause (a shared port range and slow cold starts, not a product
+  defect) has not been removed.
+- **The artwork-first workspace was not restructured.** S9 kept the Refine order as it stood (composition,
+  measurement strip, remedies, variations, family strip, art direction; words, quality, Art Director and
+  versions in the inspector) and documented it rather than moving panels, since moving them would have been a
+  redesign with no defect behind it.
+- **The S10 harness has one fallback it did not exercise this run:** when no measured issue names a layer on
+  the produced tile, the highlighting step records that in `gaps` and defers to `studio-s9-browser`. This run
+  found an issue to outline.
+- **Subject awareness is saliency, not detection** (S4), and says so with a capped confidence.
+- **Deployment and merge are not done.** The worker ships from a laptop with `tools/deploy-worker.sh`; GitHub
+  Pages serves `main`. Both wait for approval. The page scripts are at `?v=r3`, so a deployed page will not
+  keep a stale renderer.
+
+### Suite figures
+
+Recorded from `node tests/run.mjs all` at build studio-p25 (providers MOCKED). At the time of the S10
+commit the run had completed 70 harnesses with none failing; the final total is recorded in the follow-up
+commit that closes this section.

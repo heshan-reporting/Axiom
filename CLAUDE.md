@@ -1564,7 +1564,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -1823,6 +1823,26 @@ its clearing, the Art Director lines, an audit of the library, the brief,
 Refine (Copy, Quality, Art Director), Brand, Review and Export for unnamed
 controls, unnamed images, heading jumps and live regions, keyboard
 movement, and the same views with a read-only key.
+
+**End-to-end verification (S10; build `2026-10-05.studio-p25`, page
+`?v=r3`; `CREATIVE-STUDIO.md` s.33 is the report).** One HOOF project goes
+through the whole S-series in real Chromium against the worker module, with
+every provider mocked and nothing spent: the placement rule is taught from
+the reference evidence, production carries it on the mark layer
+(`layer.rule`) and records `informed`, the six actions answer with their
+costs, the inventory counts what reaches the models, and the composed tile
+is then **read back from its pixels**, not from the layout: each text box is
+cropped from the export canvas, scaled three times, binarised at luminance
+170 and read with tesseract.js (page segmentation mode 6, English data on the
+machine; `OCR_DIR` names the folder holding `node_modules`, default the
+session scratchpad), and the words found are compared with the approved copy
+per role; the mark box is checked for ink where the rule holds it. Without an
+OCR engine the harness runs an ink check (non-ground pixels in every text box
+and the mark box), says so in the report and never calls it OCR. Screenshots
+of every stage go to `tests/shots/s10-*.png` and the figures to
+`tests/shots/s10-report.json` (both ignored by git). The OCR engine is not a
+repository dependency: CI runs the ink check. Harness:
+`tests/studio-s10-browser.mjs` (3).
 
 Phase 1, the ground:
 
