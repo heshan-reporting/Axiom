@@ -194,5 +194,27 @@ await t('a render that lands on a type-only ground (noImagery) or on a plan with
   const { v: v4 } = await curV(P2, A3); eq(v4.note, 'imagery as directed'); eq(v4.layout.regions.length, 1);
 });
 
+await t('words shown twice: a free layer that repeats the support is hidden on the version as it is written (the note says so, nothing rewritten), and two free layers with the same words are duplicate_text, blocking, in the worker\'s own re-judging of a report', async () => {
+  const p = await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Echo', brief: { objective: 'o', message: 'm', channels: ['instagram'], deliverable: 'set', campaignConfirmed: true }, idem: 's11-echo' }); const P2 = p.d.id;
+  const copy = { headline: 'About 50 cents a litre.', support: 'Removing Fuel Tax Credits would add about 50 cents a litre to diesel used on site.' };
+  const L = { v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial', approach: 'editable', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'keep the current image', refs: [] }], bg: '#0E6A6E', palette: { primary: '#0E6A6E' }, fonts: { display: 'Bricolage Grotesque', body: 'Instrument Sans' },
+    layers: [{ id: 'panel', type: 'shape', role: 'panel', shape: 'rect', x: 0, y: 60, w: 100, h: 40, fill: '#14281C', opacity: 1 },
+      { id: 'headline', type: 'text', role: 'headline', x: 6, y: 63, w: 88, h: 10, size: 6, weight: 800, color: '#FFFFFF', align: 'left', font: 'display' },
+      { id: 'support', type: 'text', role: 'support', x: 6, y: 75, w: 86, h: 7, size: 2.9, weight: 500, color: '#FFFFFF', align: 'left', font: 'body' },
+      { id: 'echo', type: 'text', role: 'label', text: '- ' + copy.support, x: 6, y: 83, w: 86, h: 7, size: 2.9, weight: 500, color: '#9AA4A0', align: 'left', font: 'body', opacity: 0.6 },
+      { id: 'k1', type: 'text', role: 'kicker', text: 'THE COST TRAVELS WITH THE DIESEL', x: 6, y: 92, w: 60, h: 3, size: 2.2, weight: 700, color: '#FFFFFF', align: 'left', font: 'mono' },
+      { id: 'k2', type: 'text', role: 'free', text: 'The cost travels with the diesel.', x: 6, y: 95.5, w: 60, h: 3, size: 2.2, weight: 700, color: '#FFFFFF', align: 'left', font: 'mono' }] };
+  const a = await req('POST', '/studio/asset', { project: P2, family: 'Carousel', channel: 'instagram', format: '4:5', title: 'Frame 3', copy, layout: L, mode: 'composition' }); eq(a.status, 200, JSON.stringify(a.d)); const A = a.d.asset.id;
+  const { a: arow, v } = await curV(P2, A);
+  const echo = v.layout.layers.find(l => l.id === 'echo'); eq(echo.hidden, true, 'the label that repeats the support is hidden on the version'); eq(echo.text, '- ' + copy.support, 'its words are not rewritten');
+  eq(v.layout.layers.find(l => l.id === 'support').hidden, undefined, 'the support itself stays'); ok(/hid echo: the same words as the support, shown once/.test(v.note), 'the note says so: ' + v.note);
+  // two free layers with the same words (case and punctuation aside) are not the copy's: the version keeps them, the judge blocks them
+  eq(v.layout.layers.find(l => l.id === 'k1').hidden, undefined); eq(v.layout.layers.find(l => l.id === 'k2').hidden, undefined);
+  const rep = stubReport(v, arow);
+  const r = await req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: png(3) }); eq(r.status, 200, JSON.stringify(r.d).slice(0, 300));
+  const dup = r.d.validation.issues.find(i => i.code === 'duplicate_text'); ok(dup && dup.severity === 'blocking' && dup.layers.join(',') === 'k1,k2', 'duplicate_text blocking on k1 and k2: ' + JSON.stringify(dup));
+  eq(r.d.validation.ok, false); ok(!r.d.validation.issues.some(i => i.layers.indexOf('echo') >= 0), 'the hidden echo is judged no more');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -6971,6 +6971,26 @@ async function stBump(env, project) { await env.MIND_DB.prepare('UPDATE studio_p
  *  write was built from (and on its revision): two writes from the same base cannot both land. A write that loses
  *  is rebuilt on top of the winner (so two edits of different fields both survive), unless the caller named the
  *  revision it expects (opts.expectRevision), in which case it fails with code 'conflict' and nothing is written. */
+/** Free text layers that repeat a copy role's words (punctuation and case aside, a dash in front allowed) are hidden: the words
+ *  stay on the tile once, in the copy's own layer. Answers the layout and what was hidden, with the roles it repeated. */
+function stDupText(L, copy) {
+  const norm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const roles = ['headline', 'support', 'cta', 'caption']; const hidden = [], of = [];
+  const layers = (Array.isArray(L.layers) ? L.layers : []);
+  const shown = roles.filter(r => norm((copy || {})[r]).length >= 12 && layers.some(l => l && l.type === 'text' && l.role === r && !l.hidden));
+  if (!shown.length) return { layout: L, hidden, of };
+  const out = layers.map(l => {
+    if (!l || l.type !== 'text' || l.hidden || l.locked || roles.indexOf(l.role) >= 0 || !l.text) return l;
+    const t = norm(l.text); if (t.length < 12) return l;
+    // near-equal only, as the shared rule judges it: the shorter is at least seven tenths of the longer, so a headline phrase quoted
+    // inside a longer free line is not a repeat, while the support with a dash in front is
+    const r = shown.find(role => { const c = norm(copy[role]); const sh = t.length <= c.length ? t : c, lg = sh === t ? c : t; return sh.length >= lg.length * 0.7 && lg.indexOf(sh) >= 0; });
+    if (!r) return l;
+    hidden.push(String(l.id || l.role || 'text')); if (of.indexOf(r) < 0) of.push(r);
+    return Object.assign({}, l, { hidden: true, hiddenWhy: 'repeats the ' + r });
+  });
+  return { layout: hidden.length ? Object.assign({}, L, { layers: out }) : L, hidden, of };
+}
 async function stAppendVersion(env, asset, patch, who, opts) {
   opts = opts || {};
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -6988,6 +7008,9 @@ async function stAppendVersion(env, asset, patch, who, opts) {
     };
     // approved words split across layers must still read as the copy: a copy edit that breaks the split undoes it, never rewrites words
     if (v.layout && Array.isArray(v.layout.layers) && v.layout.layers.some(l => l.part != null)) { const pr = stPartsReconcile(v.layout, v.copy); if (pr.collapsed.length) { v.layout = pr.layout; v.note = stStr(v.note + ' (the ' + pr.collapsed.join(' and ') + ' split across layers no longer matched the words; kept as one block)', 200); } }
+    // a free element that repeats the headline, the support or the CTA word for word (a planner's "label" carrying the support
+    // sentence with a dash in front) would show the words twice: it is hidden here, on the version, and the note says so
+    if (v.layout && Array.isArray(v.layout.layers)) { const dd = stDupText(v.layout, v.copy); if (dd.hidden.length) { v.layout = dd.layout; v.note = stStr(v.note + ' (hid ' + dd.hidden.join(', ') + ': the same words as the ' + dd.of.join(' and ') + ', shown once)', 200); } }
     const vals = [v.id, v.asset, v.project, v.parent, v.kind, v.note, JSON.stringify(v.copy), stLayoutJson(v.layout), v.image ? JSON.stringify(v.image) : null, v.mode, jsonFit(v.checks, 20000), jsonFit(v.context, 60000), v.restored_from, v.who, v.created];
     if (opts.branch) { await env.MIND_DB.prepare('INSERT INTO studio_versions(id,asset,project,parent,kind,note,copy,layout,image,mode,checks,context,restored_from,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(...vals).run(); }
     else {
@@ -7920,6 +7943,14 @@ function stWrapLines(text, charsPerLine) {
     }
     for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
       var a = live[i], c = live[j];
+      // the same words shown twice (a free element that repeats the headline or the support, word for word or with a dash in
+      // front): a reader sees them twice, whatever the boxes do; judged on the displayed words, punctuation and case aside
+      if (a.type === 'text' && c.type === 'text' && a.text && c.text) {
+        var na = String(a.text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), nc = String(c.text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        var sh = na.length <= nc.length ? na : nc, lg = sh === na ? nc : na;
+        // near-equal only (the shorter is at least seven tenths of the longer): a headline that quotes a phrase of the support is not a repeat
+        if (sh.length >= 12 && sh.length >= lg.length * 0.7 && lg.indexOf(sh) >= 0) add('duplicate_text', 'blocking', [a.id, c.id], 'the ' + (a.role || 'text') + ' and the ' + (c.role || 'text') + ' show the same words' + (sh === lg ? '' : ' (one repeats the other)') + ': a reader sees them twice');
+      }
       if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
       var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
       if (iw > tol && ih > tol) {
@@ -10499,7 +10530,7 @@ function stValidationJudge(a, v, rep) {
       if (lines < minLines) problems.push('the ' + (l.role || 'text') + ' was reported on ' + lines + ' line' + (lines === 1 ? '' : 's') + '; at ' + l.size + '% of the width it cannot take fewer than ' + minLines);
       const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * (l.lineHeight || 1.12));
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
-      Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken, bg: l.bg || '', emphasis: l.emphasis || '' });
+      Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, text: text.slice(0, 160), px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken, bg: l.bg || '', emphasis: l.emphasis || '' });
       if (num(rb.contrast)) b.contrast = rb.contrast; else unmeasured.push(id);
       if (num(rb.contrastMin)) b.contrastMin = rb.contrastMin;
       if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }

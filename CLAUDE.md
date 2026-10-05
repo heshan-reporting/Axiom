@@ -1949,8 +1949,30 @@ sentence of generic advice and no "Still blocking" repeat when the verdict
 already names what blocks. Properties' composition facts no longer repeat
 the medium and imagery the tag line already carries (size, layers, hidden,
 locked instead). Harnesses: the hidden-render and blocked-fix cases in
-`studio-s11-worker.mjs` (10) and `studio-s11-browser.mjs` (11, the
+`studio-s11-worker.mjs` (11) and `studio-s11-browser.mjs` (11, the
 photograph read back from the canvas pixels before and after).
+
+**Words shown twice, padded marks, thin overlays (the 6 October carousel
+frame).** The shared RULES block gained `duplicate_text` (blocking): two
+live text layers whose displayed words are near-equal (punctuation and case
+aside, the shorter at least seven tenths of the longer and contained in it,
+twelve characters or more), so a planner's "label" carrying the support
+sentence with a dash in front is caught, while a headline that quotes a
+phrase of the support is not; the worker's judge now carries each text
+box's displayed words for it. `stDupText()` hides such a free layer on the
+version as `stAppendVersion` writes it (the copy's own layer stays, the
+note says "hid <id>: the same words as the support, shown once"), and
+`repair()` hides it where it was filed before. `repair()` also enlarges a
+mark whose visible ink is under the minimum width (`mark_small`: the file
+carries padding, or the box was drawn small) about the ink's corner nearest
+the stage edge until the ink reaches the minimum, kept only when the complete
+validation finds nothing new blocking on it (the file is never redrawn), and
+for words that do not read it first makes an editable panel, band or
+gradient already beneath them denser (85%, then 95%) before any word is
+recoloured or plated, so one change serves every word on the overlay and
+the design's own device is kept. Harnesses: section 7 of
+`studio-marks-browser.mjs` (50) and the words-shown-twice case in
+`studio-s11-worker.mjs`.
 
 Phase 1, the ground:
 

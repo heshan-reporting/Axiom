@@ -389,6 +389,14 @@
     }
     for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
       var a = live[i], c = live[j];
+      // the same words shown twice (a free element that repeats the headline or the support, word for word or with a dash in
+      // front): a reader sees them twice, whatever the boxes do; judged on the displayed words, punctuation and case aside
+      if (a.type === 'text' && c.type === 'text' && a.text && c.text) {
+        var na = String(a.text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), nc = String(c.text).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        var sh = na.length <= nc.length ? na : nc, lg = sh === na ? nc : na;
+        // near-equal only (the shorter is at least seven tenths of the longer): a headline that quotes a phrase of the support is not a repeat
+        if (sh.length >= 12 && sh.length >= lg.length * 0.7 && lg.indexOf(sh) >= 0) add('duplicate_text', 'blocking', [a.id, c.id], 'the ' + (a.role || 'text') + ' and the ' + (c.role || 'text') + ' show the same words' + (sh === lg ? '' : ' (one repeats the other)') + ': a reader sees them twice');
+      }
       if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
       var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
       if (iw > tol && ih > tol) {
@@ -726,13 +734,23 @@
     // brand colour (a gold kicker) may sit just under the bar and is not the repair's to change on its own
     const contrastIssues = r => r.issues.filter(i => i.code === 'unreadable_contrast' || (i.code === 'patchy_contrast' && i.severity === 'blocking') || (opts.fixContrast && (i.code === 'low_contrast' || i.code === 'patchy_contrast')));
     // a mark that does not read, or breaks its clear space or placement region: blocking findings always, warnings when asked
-    const markIssues = r => r.issues.filter(i => (markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region') && (i.severity === 'blocking' || opts.fixContrast));
-    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
+    const markIssues = r => r.issues.filter(i => (markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region' || i.code === 'mark_small') && (i.severity === 'blocking' || opts.fixContrast));
+    const dupIssues = r => r.issues.filter(i => i.code === 'duplicate_text');
+    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !dupIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
     const sa0 = safeAreaOf(opts.format || L.format, opts.channel); const story = sa0.hard; const sp = { top: sa0.top * 100 + (story ? 0 : 0.2), bottom: sa0.bottom * 100 + (story ? 0 : 0.2), side: sa0.side * 100 + (story ? 0 : 0.2) };
     const geo = () => { const bx = measure(L, copy, images, W, H); const m = {}; bx.forEach(b => { m[b.id] = b; }); return m; };
     const pY = v => v / H * 100, pX = v => v / W * 100;
+    // words shown twice (a free element that repeats the headline or the support word for word, or with a dash in front): the
+    // copy's own layer stays and the repeating one is hidden, so the words still appear, once; nothing is rewritten
+    validate(L, copy, images, opts).issues.filter(i => i.code === 'duplicate_text').forEach(i => {
+      const pair = i.layers.map(id => byId[id]).filter(l => l && l.type === 'text' && !l.hidden); if (pair.length < 2) return;
+      const isCopy = l => ['headline', 'support', 'cta', 'caption'].indexOf(l.role) >= 0 && l.part == null;
+      const victim = pair.find(l => !isCopy(l) && movable(l)) || pair.filter(l => movable(l)).pop(); if (!victim) return;
+      const kept = pair.find(l => l !== victim) || {};
+      victim.hidden = true; steps.push('hid the ' + (victim.role || 'text') + ' ' + victim.id + ': it repeated the ' + (kept.role || 'other text') + ' word for word, so the words were shown twice (shown once now)');
+    });
     // 1. a box takes the height its words need
     const grow = () => { const g = geo(); let n = 0; layers.forEach(l => { const b = g[String(l.id)]; if (l.type === 'text' && movable(l) && b && b.contentH && Math.abs(pY(b.contentH) + 0.3 - (l.h || 0)) > 0.35 && (b.overflowH || pY(b.contentH) + 0.3 < (l.h || 0) - 0.35)) { l.h = Math.round((pY(b.contentH) + 0.3) * 10) / 10; n++; } }); return n; };
     // 2. related blocks stack in reading order with an explicit gap (a column: text and the small devices between them)
@@ -851,10 +869,29 @@
     };
     // every mark a finding names, at any severity: a blocking one (or any, with fixContrast) is moved; a weak one with approved
     // variants on offer still takes the variant that reads better where it stands
-    const markNamed = r => r.issues.filter(i => markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region');
+    const markNamed = r => r.issues.filter(i => markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region' || i.code === 'mark_small');
+    /* a mark whose visible ink is under the minimum width (the file carries padding, or the box was drawn small): the box is scaled
+       about the ink's corner nearest the stage edge until the ink reaches the minimum (the file is never redrawn or cropped), and
+       kept only when the complete validation finds nothing new blocking on it (a collision, the safe area, its clear space) */
+    const sizeMark = (mk) => {
+      const v0 = validate(L, copy, images, opts); const b0 = v0.boxes.find(x => x.id === String(mk.id));
+      if (!b0 || b0.asset !== 'loaded' || typeof b0.vw !== 'number' || !(b0.vw > 0)) return false;
+      const minW = typeof b0.minWant === 'number' ? b0.minWant : W * 0.06; if (b0.vw >= minW) return false;
+      const k = Math.min(4, (minW * 1.08) / b0.vw);
+      const ax = b0.vx + b0.vw / 2 > W / 2 ? b0.vx + b0.vw : b0.vx, ay = b0.vy + b0.vh / 2 > H / 2 ? b0.vy + b0.vh : b0.vy;
+      const patch = { x: r1((ax - (ax - b0.ax) * k) / W * 100), y: r1((ay - (ay - b0.ay) * k) / H * 100), w: r1(b0.aw * k / W * 100), h: r1(b0.ah * k / H * 100) };
+      const L2 = Object.assign({}, L, { layers: L.layers.map(l => l === mk ? Object.assign({}, l, patch) : l) });
+      const v2 = validate(L2, copy, images, opts); const nb = v2.boxes.find(x => x.id === String(mk.id));
+      const on = r => blockingOf(r).filter(i => i.layers.indexOf(String(mk.id)) >= 0 && i.code !== 'mark_small').map(i => i.code).sort().join('|');
+      if (!nb || !(nb.vw >= minW * 0.98) || on(v2) !== on(v0) || blockingOf(v2).length > blockingOf(v0).length) return false;
+      Object.assign(mk, patch);
+      steps.push('enlarged the ' + mk.role + ' so its visible ink is ' + Math.round(nb.vw) + ' px wide (' + Math.round(b0.vw) + ' px before; ' + (typeof b0.markFill === 'number' ? Math.round(b0.markFill * 100) + '% of the file is ink, the rest padding' : 'the box was small') + '), anchored on its corner');
+      return true;
+    };
     const markIds = Array.from(new Set(markNamed(validate(L, copy, images, opts)).reduce((acc, i) => acc.concat(i.layers.filter(id => isMark(byId[id]))), [])));
     markIds.forEach(id => { const mk = byId[id]; if (!mk || mk.hidden || mk.locked) return;
       const still = any => markNamed(validate(L, copy, images, opts)).some(i => i.layers.indexOf(id) >= 0 && (any || i.severity === 'blocking' || opts.fixContrast));
+      if (still() && movable(mk)) { sizeMark(mk); if (!still(true)) return; }
       let placed = false;
       if (still()) { placed = placeMark(mk); if (placed && !still(true)) return; }
       // (2) the approved variants, measured where the mark now stands; then (3) the panel beneath it, once more, for the chosen variant
@@ -868,6 +905,22 @@
       const read = (patch) => { const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, patch) : x) }), copy, images, opts); const tb = t.boxes.find(x => x.id === id); return { c: tb && typeof tb.contrast === 'number' ? tb.contrast : 0, clear: !contrastIssues(t).some(i => i.layers.indexOf(id) >= 0), ch: tb ? tb.contentH : 0, ovf: !!(tb && tb.overflowH) }; };
       const v1 = validate(L, copy, images, opts); if (!contrastIssues(v1).some(i => i.layers.indexOf(id) >= 0)) return;
       const was = (v1.boxes.find(x => x.id === id) || {}).contrast || 0;
+      // the overlay first: when an editable panel, band or gradient already sits beneath the words and covers them, making it denser
+      // is one change that serves every word on it (and keeps the design's own device), tried before any word is recoloured or plated
+      const under = L.layers.slice(0, L.layers.indexOf(l)).filter(s => s.type === 'shape' && movable(s) && s.shape !== 'circle' && s.shape !== 'rule' && (s.gradient || s.role === 'panel' || s.role === 'overlay' || s.role === 'band' || s.role === 'footer'))
+        .filter(s => { const ix = Math.min(s.x + s.w, l.x + l.w) - Math.max(s.x, l.x), iy = Math.min(s.y + (s.h || 0), l.y + (l.h || 0)) - Math.max(s.y, l.y); return ix > 0 && iy > 0 && ix * iy >= 0.8 * l.w * Math.max(0.5, l.h || 0); }).pop();
+      if (under) {
+        const alphaOf = (fill, a) => { const m = String(fill || '').match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i); if (m) return 'rgba(' + m[1] + ',' + m[2] + ',' + m[3] + ',' + a + ')'; const h = String(fill || '').match(/^#([0-9a-f]{6})$/i); if (h) return 'rgba(' + parseInt(h[1].slice(0, 2), 16) + ',' + parseInt(h[1].slice(2, 4), 16) + ',' + parseInt(h[1].slice(4, 6), 16) + ',' + a + ')'; return 'rgba(10,14,22,' + a + ')'; };
+        const op = under.opacity == null ? 1 : under.opacity; const fa = (String(under.fill || '').match(/rgba\([^)]*,\s*([\d.]+)\s*\)/) || [])[1];
+        const cands = under.gradient || (fa != null && Number(fa) < 0.85) ? [0.85, 0.95].filter(a => fa == null || a > Number(fa)).map(a => ({ fill: alphaOf(under.fill, a) })) : [0.85, 0.95].filter(a => a > op).map(a => ({ opacity: a }));
+        let bestO = null;
+        for (const p of cands) {
+          const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === under ? Object.assign({}, under, p) : x) }), copy, images, opts); const tb = t.boxes.find(x => x.id === id);
+          const r = { patch: p, c: tb && typeof tb.contrast === 'number' ? tb.contrast : 0, clear: !contrastIssues(t).some(i => i.layers.indexOf(id) >= 0), more: blockingOf(t).length > blockingOf(v1).length };
+          if (r.more) continue; if (!bestO || r.c > bestO.c) bestO = r; if (r.clear) break;
+        }
+        if (bestO && bestO.c > was + 0.3) { Object.assign(under, bestO.patch); steps.push('made the ' + (under.role || 'overlay') + ' ' + (under.id || '') + ' beneath the ' + (l.role || 'text') + ' denser (' + (bestO.patch.opacity != null ? Math.round(bestO.patch.opacity * 100) + '% opacity' : 'alpha ' + (String(bestO.patch.fill).match(/,\s*([\d.]+)\s*\)$/) || [])[1]) + ') so the words over it read (contrast ' + was.toFixed(2) + ' to ' + bestO.c.toFixed(2) + ':1)'); if (bestO.clear) return; }
+      }
       const colours = ['#FFFFFF', '#111111'].filter(c => String(l.color || '').toUpperCase() !== c);
       let best = null; colours.forEach(c => { const r = read({ color: c }); if (!best || (r.clear && !best.clear) || (r.clear === best.clear && r.c > best.c)) best = Object.assign({ patch: { color: c } }, r); });
       // a plate at 72% first; over a ground that is uneven under the words (a patchy finding) a denser plate, still translucent, still the same words

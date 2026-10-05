@@ -1190,7 +1190,7 @@
   const TECH_WORD = { passed: 'passed', failed: 'failed', stale: 'not validated (stale)', not_validated: 'not validated', not_applicable: 'not applicable', unknown: 'unknown', none: 'not validated' };
   const TECH_KIND = { passed: 'ok', failed: 'bad', stale: 'warn', not_validated: 'warn' };
   const INS_WORD = { none: 'not inspected', stale: 'inspected an earlier composition', imagery_only: 'imagery only (not a finished-layout review)', inconsistent: 'inconsistent: ship with unresolved problems', ship: 'ship', fix: 'fix', redo: 'redo', stop: 'bounded: a designer next' };
-  const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
+  const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1, duplicate_text: 1 };
   const MARK_FIX_CODES = /^(mark_low_contrast|mark_unreadable|mark_clear_space|mark_outside_region|mark_small|low_contrast|unreadable_contrast|patchy_contrast)$/;
   const fixableOf = val => !!(val && val.issues.some(i => LAYOUT_CODES[i.code] || MARK_FIX_CODES.test(i.code)));
   /* S11: one status hierarchy for a composition - Blocked (a blocking measurement, an incomplete mark, a failed filing), Needs

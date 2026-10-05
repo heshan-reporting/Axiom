@@ -179,6 +179,55 @@ section('6. the CTA: a filled chip with a box emphasis is one device drawn aroun
   ok(r.q3.state === 'passed' && r.q3.word === 'Checks passed', 'and Checks passed when every applicable check passes (' + (r.q3codes.join(', ') || 'no issues') + ')');
 }
 
+/* ------------------------------------------------------------------ 7. the 6 October carousel frame: words shown twice, a padded logo, a thin overlay */
+section('7. words shown twice are blocking and the repair hides the repeat; a mark whose ink is under the minimum is enlarged on its corner; an overlay beneath failing words is made denser before any word is recoloured or plated');
+{
+  // (a) a free "label" carrying the support sentence with a dash in front, as the planner wrote it on the truckie frame
+  const r = await page.evaluate(async ({ L, C }) => {
+    const R = window.STRender; const im = await window.__load(); const images = { wordmark: im.white };
+    const Ld = JSON.parse(JSON.stringify(L)); Ld.layers.splice(6, 0, { id: 'echo', type: 'text', role: 'label', text: '- ' + C.support, x: 6, y: 93.5, w: 50, h: 2.6, size: 2.4, weight: 500, color: '#FFFFFF', align: 'left', font: 'body', opacity: 0.6 });
+    const v = R.validate(Ld, C, images, { format: '4:5', channel: 'instagram' });
+    const rep = R.repair(Ld, C, images, { format: '4:5', channel: 'instagram', fixContrast: true });
+    const v2 = R.validate(rep.layout, C, images, { format: '4:5', channel: 'instagram' });
+    return { codes: window.__codes(v), steps: rep.steps, hidden: !!rep.layout.layers.find(l => l.id === 'echo').hidden, supportHidden: !!rep.layout.layers.find(l => l.id === 'support').hidden, after: window.__codes(v2), supportText: rep.layout.layers.find(l => l.id === 'support').text };
+  }, { L: L0, C: C0 });
+  ok(r.codes.some(c => c === 'duplicate_text/blocking:support,echo'), 'the repeated sentence is duplicate_text, blocking, naming both layers: ' + r.codes.filter(c => /duplicate/.test(c)).join('; '));
+  ok(r.hidden && !r.supportHidden, 'the repair hides the repeating label and keeps the support (the copy\'s own layer)');
+  ok(r.steps.some(s => /hid the label echo: it repeated the support word for word/.test(s)), 'and says so: ' + r.steps.filter(s => /hid/.test(s)).join('; '));
+  ok(!r.after.some(c => /duplicate_text/.test(c)) && r.supportText === undefined, 'no duplicate remains and no word was rewritten');
+  // (b) the wordmark drawn in a box a third of the minimum: enlarged about its bottom-right ink corner until the ink reaches 6% of the stage
+  const s = await page.evaluate(async ({ L, C }) => {
+    const R = window.STRender; const im = await window.__load(); const images = { wordmark: im.white };
+    const Ls = JSON.parse(JSON.stringify(L)); Object.assign(Ls.layers.find(l => l.id === 'wordmark'), { x: 70, y: 90, w: 4, h: 1 });
+    const v = R.validate(Ls, C, images, { format: '4:5', channel: 'instagram' }); const b0 = v.boxes.find(b => b.id === 'wordmark');
+    const rep = R.repair(Ls, C, images, { format: '4:5', channel: 'instagram', fixContrast: true });
+    const v2 = R.validate(rep.layout, C, images, { format: '4:5', channel: 'instagram' }); const b1 = v2.boxes.find(b => b.id === 'wordmark'); const mk = rep.layout.layers.find(l => l.id === 'wordmark');
+    return { codes: window.__codes(v), vw0: b0.vw, vw1: b1.vw, right0: b0.vx + b0.vw, right1: b1.vx + b1.vw, bottom0: b0.vy + b0.vh, bottom1: b1.vy + b1.vh, steps: rep.steps, after: window.__codes(v2), mk: { x: mk.x, y: mk.y, w: mk.w, h: mk.h }, ok: rep.ok, outcome: rep.outcome };
+  }, { L: L0, C: C0 });
+  ok(s.codes.some(c => c.startsWith('mark_small/warning:wordmark')), 'ink under 6% of the stage is mark_small: ' + s.codes.filter(c => /mark_small/.test(c)).join('; '));
+  ok(s.vw0 < 0.06 * W && s.vw1 >= 0.06 * W * 0.98, 'the ink grows from ' + Math.round(s.vw0) + ' to ' + Math.round(s.vw1) + ' px (minimum ' + Math.round(0.06 * W) + ')');
+  ok(near(s.right1, s.right0, 2) && near(s.bottom1, s.bottom0, 2), 'anchored on its bottom-right ink corner (right ' + Math.round(s.right0) + ' to ' + Math.round(s.right1) + ', bottom ' + Math.round(s.bottom0) + ' to ' + Math.round(s.bottom1) + ')');
+  ok(s.steps.some(x => /enlarged the wordmark so its visible ink is \d+ px wide/.test(x)), 'the step names the sizes: ' + s.steps.filter(x => /enlarged/.test(x)).join('; '));
+  ok(!s.after.some(c => /mark_small|collision|safe_area|off_canvas/.test(c)), 'nothing new blocks and the mark is no longer small: ' + s.after.join(', '));
+  // (c) white words over a thin dark overlay on the cream photograph: the overlay is made denser, the words keep their colour and get no plate
+  const o = await page.evaluate(async ({ L, C }) => {
+    const R = window.STRender; const im = await window.__load(); const images = { wordmark: im.white, bg: im.photo };
+    const Lo = JSON.parse(JSON.stringify(L)); const panel = Lo.layers.find(l => l.id === 'panel'); Object.assign(panel, { role: 'overlay', fill: 'rgba(10,14,22,0.25)', opacity: 1 });
+    Lo.layers.find(l => l.id === 'headline').color = '#FFFFFF'; Lo.layers.find(l => l.id === 'support').color = '#FFFFFF'; Lo.layers.find(l => l.id === 'label').color = '#FFFFFF';
+    const v = R.validate(Lo, C, images, { format: '4:5', channel: 'instagram' });
+    const rep = R.repair(Lo, C, images, { format: '4:5', channel: 'instagram', fixContrast: true });
+    const v2 = R.validate(rep.layout, C, images, { format: '4:5', channel: 'instagram' });
+    const h0 = v.boxes.find(b => b.id === 'headline'), h1 = v2.boxes.find(b => b.id === 'headline'); const hl = rep.layout.layers.find(l => l.id === 'headline'), p1 = rep.layout.layers.find(l => l.id === 'panel');
+    return { before: window.__codes(v), c0: h0.contrast, c1: h1.contrast, fill: p1.fill, color: hl.color, bg: hl.bg || '', steps: rep.steps, after: window.__codes(v2) };
+  }, { L: L0, C: C0 });
+  ok(o.before.some(c => /contrast\/blocking:headline|contrast\/warning:headline/.test(c)), 'white words over a 25% overlay on cream do not read: ' + o.before.filter(c => /contrast/.test(c)).join('; '));
+  ok(/rgba\(10,14,22,0\.(85|95)\)/.test(o.fill), 'the overlay beneath them is made denser (' + o.fill + '), one change for every word on it');
+  ok(o.color === '#FFFFFF' && !o.bg, 'the words keep their colour and get no plate');
+  ok(o.c1 > o.c0 + 1, 'the headline reads better (' + o.c0.toFixed(2) + ' to ' + o.c1.toFixed(2) + ':1)');
+  ok(o.steps.some(x => /made the overlay panel beneath the (headline|support|label) denser/.test(x)), 'the step says what was done: ' + o.steps.filter(x => /denser/.test(x)).join('; '));
+  ok(!o.after.some(c => /contrast\/blocking/.test(c)), 'no words remain unreadable: ' + o.after.filter(c => /contrast/.test(c)).join('; '));
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 await browser.close();
 process.exit(fail ? 1 : 0);

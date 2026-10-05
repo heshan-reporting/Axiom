@@ -1299,3 +1299,40 @@ to the tag line. `studio-s11-browser` 11 of 11: the first case now asserts one F
 words so the fix has no colour it may change, runs it, and reads the note (outcome, count without zero kinds, the verdict, no
 generic sentence, the issue not repeated), opens the editor from Move it by hand, reads the pass count on the variations button
 once they are measured, and finds the imagery stated once in Properties.
+
+### 34.12 Words shown twice, padded marks and thin overlays (the 6 October carousel frame)
+
+The third screenshot (Frame 3: the truckie, v3): the support sentence appeared twice - once as the support, once faintly
+beneath it with a dash in front, a free "label" the planner had filled with the same words; the logo sat as 43 px of ink inside
+a 184 px box (the file is mostly padding) with the validation reading "passed, 4 to look at"; and the request named "overlay
+fixes" that did not work well and "logo contrast issues" across the set.
+
+**Words shown twice.** The shared RULES block gained `duplicate_text` (blocking): two live text layers whose displayed words are
+near-equal - punctuation and case aside, the shorter at least seven tenths of the longer and contained in it, twelve characters or
+more - are a repeat a reader sees twice, whatever the boxes do (a headline that quotes a phrase of the support is not: 22 of 83
+characters). The worker's judge carries each text box's displayed words for it, so the finding holds server-side. The version
+never carries the repeat in the first place: `stDupText()` in `stAppendVersion` hides a free layer that repeats the headline, the
+support, the CTA or the caption (the copy's own layer stays; the words are not rewritten; the note says "hid echo: the same words
+as the support, shown once"), and `repair()` hides one filed before this build.
+
+**The padded mark.** `repair()` enlarges a mark whose visible ink is under the minimum width (`mark_small`, now a finding the fix
+acts on) about the ink's corner nearest the stage edge - the box scales, the file is never redrawn or cropped - until the ink
+reaches the minimum, and keeps the change only when the complete validation finds nothing new blocking on the mark (a collision,
+the safe area, its clear space). `mark_padding` stays a warning that says how the mark is judged; it does not by itself call for
+a change.
+
+**The overlay first.** For words that do not read, `repair()` now looks for an editable, unlocked panel, band, footer or gradient
+that already sits beneath them and covers them, and makes it denser (alpha or opacity 0.85, then 0.95) before any word is
+recoloured or plated: one change serves every word on the overlay and keeps the design's own device; the colour and plate steps
+remain for words with nothing beneath them. Not changed: a solid panel at full opacity whose fill is simply too light (no density
+to add) still goes to the word's colour, then a plate.
+
+**Evidence.** `studio-marks-browser` section 7 (50 of 50): the repeated sentence is `duplicate_text/blocking:support,echo`, the
+repair hides the label and keeps the support, no word is rewritten; a wordmark in a box a third of the minimum grows from 42 to
+70 px of ink anchored on its bottom-right ink corner with nothing new blocking; white words over a 25% overlay on the cream
+photograph fail, the overlay becomes `rgba(10,14,22,0.85)`, the words keep their colour and get no plate, the headline's
+contrast rises past the bar. `studio-s11-worker` (11 of 11): the echo is hidden on the version with the note, two free layers
+with the same words are blocked by the worker's re-judging, the hidden echo is judged no more. The straddle, layout, scene and
+S11 browser harnesses re-run clean with the new rule in force. Not verified from the sandbox: the user's frames (no access to the
+live D1); on the next measurement of each, the repeated label reads as blocking with Fix layout hiding it, and the logo's size
+is corrected by the same fix.
