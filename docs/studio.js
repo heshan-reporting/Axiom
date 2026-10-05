@@ -1192,9 +1192,10 @@
     const q = val ? R.qualityOf(val) : null;
     let state = q ? q.state : rd.technical === 'passed' ? 'passed' : rd.technical === 'failed' ? 'blocked' : 'unknown'; let why = '';
     if (v && v.layout && (v.layout.incomplete || []).length) { state = 'blocked'; why = 'the campaign mark is not on file'; }
-    else if (state === 'passed' && rd.technical !== 'passed') { state = 'review'; why = rd.technical === 'failed' ? 'the worker holds a failing measurement of this composition' : rd.technical === 'stale' ? 'the recorded measurement is of an earlier composition' : 'the measurement is not accepted by the worker yet'; }
+    else if ((state === 'passed' || state === 'review') && rd.technical !== 'passed') { state = 'review'; why = rd.technical === 'failed' ? 'the worker holds a failing measurement of this composition' : rd.technical === 'stale' ? 'the recorded measurement is of an earlier composition' : 'the measurement is not accepted by the worker yet'; }
+    // a person's approval on a composition the worker measured as passing is the top of the hierarchy; warnings and the art director's opinion stay listed beneath it
+    else if ((state === 'passed' || state === 'review') && appr) { state = 'approved'; why = q && q.warnings ? q.warnings + ' warning' + (q.warnings === 1 ? '' : 's') + ' to look at; approved by ' + appr.by : 'approved by ' + appr.by; }
     else if (state === 'passed' && ins.state === 'inconsistent') { state = 'review'; why = 'the art director\'s verdict disagrees with the measurements'; }
-    else if (state === 'passed' && appr) state = 'approved';
     else if (state === 'blocked' && q && q.top) why = q.top.code.replace(/_/g, ' ') + (q.top.layers.length ? ' (' + q.top.layers.join(', ') + ')' : '');
     else if (state === 'review' && q) why = q.unresolved ? 'pixels not measured: ' + (val.unresolved || []).join(', ') : (q.warnings + ' to look at');
     return { state, word: QUALITY_WORD[state], kind: QUALITY_KIND[state], top: q ? q.top : null, blocking: q ? q.blocking : 0, warnings: q ? q.warnings : 0, why };
