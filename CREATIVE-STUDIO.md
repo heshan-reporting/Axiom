@@ -1234,3 +1234,17 @@ expectation kept.
 - The left panel's width and open state, the overlays and the checkerboard are this browser's.
 - `tests/studio-browser.mjs` remains sensitive to concurrency; the figures below are from sequential runs.
 - Deployment and merge are not done; the worker ships from a laptop with `tools/deploy-worker.sh`.
+
+### 34.10 Suite figures
+
+`node tests/run.mjs check`: 18 of 18. `node tests/run.mjs all` (providers MOCKED, backend first, then the browser harnesses one
+at a time) at the first complete S11 build: **87 of 90 harnesses passed**; the three that failed were then corrected and re-run
+one at a time, each passing (`studio-compose-test` 11, `studio-demo-test` 20, `studio-editor-browser` 6). Two of the three were
+the same fixture fault: the harnesses used the 4 x 4 photograph placeholder as the client's mark, and a scaled-up 4 x 4 image has
+no strokes to read, so the per-pixel rule refused it (true of the fixture, not the product; the marks are now solid blocks,
+`pngSolid`). The third was the editor case dragging a layer that the larger Fit size had put below the viewport; Fit now keeps the
+whole artwork in view (zoom and full screen are for a closer look). The S11 harnesses: `studio-marks-browser` 35 of 35,
+`studio-s11-worker` 8 of 8, `studio-s11-browser` 9 of 9 (no page errors at either size); `studio-layout-browser` 211 of 211,
+`studio-scene-browser` 20, `studio-quality-browser` 25, `studio-framing-browser` 17; `studio-browser` 26 of 26 and
+`studio-journey-browser` 9 of 9 in sequential runs; the S-series worker harnesses (s1 5, s3 3, s5 2, s6 7, p9 15, p10 9, p8 14,
+s2 8) with their reports updated to contract 2. The figures are the harnesses' own summary lines.
