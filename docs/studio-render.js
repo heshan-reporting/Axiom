@@ -811,14 +811,13 @@
       scale *= 0.94; settle(); now = validate(L, copy, images, vopts);
     }
     if (scale < 1) steps.push('stepped the type in that column down to ' + Math.round(scale * 100) + '% of its size, hierarchy kept, above the readable minimum');
-    // a mark that reads badly takes the approved variant that reads best against what is actually behind it
-    if (opts.variants) swapMarks(L, copy, images, opts, byId, steps);
-    /* a mark that still does not read, or sits too close to the words, or outside its permitted region: the smallest local
+    /* a mark that does not read, or sits too close to the words, or outside its permitted region: the smallest local
        correction, in this order - (1) another place inside its permitted region (the rule's region, else its own corner's
-       neighbourhood: a nudge, never a jump to another corner), measured per pixel at each candidate; (2) an approved variant was
-       tried above; (3) if the mark is held by a mandatory corner rule, or no place reads, an editable supporting panel beneath it
-       is extended to carry it (never a new box, shadow, outline or recolour: those are not the Studio's to add); (4) otherwise the
-       conflict is named for a person to decide (the layout variations are measured alternatives) */
+       neighbourhood: a nudge, never a jump to another corner), measured per pixel at each candidate; (2) the approved variant that
+       reads best against what is actually behind it (after the placement, so a mark that can simply move keeps its file); (3) if
+       the mark is held by a mandatory corner rule, or no place reads, an editable supporting panel beneath it is extended to carry
+       it (never a new box, shadow, outline or recolour: those are not the Studio's to add); (4) otherwise the conflict is named for
+       a person to decide (the layout variations are measured alternatives) */
     const placeMark = (mk) => {
       const now0 = validate(L, copy, images, opts); const b0 = now0.boxes.find(x => x.id === String(mk.id)); if (!b0 || b0.asset !== 'loaded') return false;
       const rule = mk.rule || {}; const heldCorner = !!(rule.mandatory && rule.corner && !rule.region);
@@ -850,8 +849,17 @@
       }
       return false;
     };
-    const markTrouble = markIssues(validate(L, copy, images, opts)); const markIds = Array.from(new Set(markTrouble.reduce((acc, i) => acc.concat(i.layers.filter(id => isMark(byId[id]))), [])));
-    markIds.forEach(id => { const mk = byId[id]; if (!mk || mk.hidden || mk.locked) return; if (!placeMark(mk)) steps.push('could not make the ' + mk.role + ' read by moving it' + ((mk.rule && mk.rule.mandatory && mk.rule.corner && !mk.rule.region) ? ' (held ' + mk.rule.corner + ' by the campaign rule)' : '') + ' or by extending a panel beneath it; no box, shadow or recolour is added to a mark'); });
+    // every mark a finding names, at any severity: a blocking one (or any, with fixContrast) is moved; a weak one with approved
+    // variants on offer still takes the variant that reads better where it stands
+    const markNamed = r => r.issues.filter(i => markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region');
+    const markIds = Array.from(new Set(markNamed(validate(L, copy, images, opts)).reduce((acc, i) => acc.concat(i.layers.filter(id => isMark(byId[id]))), [])));
+    markIds.forEach(id => { const mk = byId[id]; if (!mk || mk.hidden || mk.locked) return;
+      const still = any => markNamed(validate(L, copy, images, opts)).some(i => i.layers.indexOf(id) >= 0 && (any || i.severity === 'blocking' || opts.fixContrast));
+      let placed = false;
+      if (still()) { placed = placeMark(mk); if (placed && !still(true)) return; }
+      // (2) the approved variants, measured where the mark now stands; then (3) the panel beneath it, once more, for the chosen variant
+      if (opts.variants) { const n0 = steps.length; swapMarks(L, copy, images, opts, byId, steps); if (!still(true)) return; if (steps.length > n0 && still() && placeMark(mk) && !still()) return; }
+      if (still() && !placed) steps.push('could not make the ' + mk.role + ' read by moving it' + ((mk.rule && mk.rule.mandatory && mk.rule.corner && !mk.rule.region) ? ' (held ' + mk.rule.corner + ' by the campaign rule)' : '') + (opts.variants ? ', by an approved variant' : '') + ' or by extending a panel beneath it; no box, shadow or recolour is added to a mark'); });
     // words that do not read against what is behind them: first the colour (white or near-black, whichever reads), then, only
     // if neither is enough, a backing plate behind the same words - the words, their size and their place are not touched
     // each layer once (a low-contrast and a patchy finding may name the same words), and only while it still fails to read
@@ -930,7 +938,11 @@
       const lockedText = T.filter(l => l.locked); const moving = T.filter(l => !l.locked);
       if (!moving.length) return;
       if (r.typeOnly) { L.noImagery = true; L.regions = []; L.bg = accent; L.image = null; if (L.v !== 5) { L.style = 'typographic'; L.template = L.template || 'plain'; } }
-      const zone = r.zone; const pad = r.panel === 'band' || r.panel === 'column' || r.panel === 'card' ? 3 : 0;
+      const zone = Object.assign({}, r.zone); const pad = r.panel === 'band' || r.panel === 'column' || r.panel === 'card' ? 3 : 0;
+      // a band or a fade at the foot is where the mark reads best (its own ground, not the photograph's sky): the words leave it room on
+      // the preferred side, so the mark sits on the band rather than being pushed to a top corner over whatever the picture shows there
+      const freeMarks = marks.filter(mk => !mk.locked && !heldMark(mk));
+      if ((r.panel === 'band' || r.panel === 'fade') && r.anchor === 'bottom' && freeMarks.length && zone.w > 55) { const lw = (freeMarks[0].w || 17) + 3; if (observed === 'bl' || observed === 'tl') zone.x += lw; zone.w -= lw; }
       const kz = Math.max(0.7, Math.min(1.15, zone.w / (100 - 2 * sp.side))) * (r.grow || 1) * (story ? 1.12 : 1);
       moving.forEach(l => {
         const o = texts0.find(t => t.id === l.id) || l;
@@ -980,13 +992,22 @@
         const C = { tl: [sp.side, sp.top], tr: [100 - sp.side - lw, sp.top], bl: [sp.side, 100 - sp.bottom - lh], br: [100 - sp.side - lw, 100 - sp.bottom - lh] };
         const pref = [observed, 'br', 'bl', 'tr', 'tl'].filter((c, i, a) => c && a.indexOf(c) === i);
         const clear = c => { const [x, y] = C[c]; return Math.min(x + lw, occupied.x + occupied.w) - Math.max(x, occupied.x) <= 0.5 || Math.min(y + lh, occupied.y + occupied.h) - Math.max(y, occupied.y) <= 0.5; };
-        const pick = pref.find(clear) || pref[0]; mk.x = r1(C[pick][0]); mk.y = r1(C[pick][1]);
+        const clearC = pref.filter(clear); const pick = clearC[0] || pref[0]; mk.x = r1(C[pick][0]); mk.y = r1(C[pick][1]);
+        mk._cands = clearC;   // the clear corners, read per pixel once the ground (the shapes) is in place
       });
       const textIds = new Set(T.map(l => String(l.id)));
       L.layers = keepImgs.concat(lockedShapes, shapes, L.layers.filter(l => l.type === 'text' && textIds.has(String(l.id))), L.layers.filter(l => l.type === 'text' && !textIds.has(String(l.id))), marks.concat(L.layers.filter(l => isMark(l) && l.hidden)));
       void lockedText;
-      // measure; repair what geometry or colour can fix; never the words
       const vopts = Object.assign({}, opts, { production: true });
+      // the mark's corner is chosen by what reads: among the clear corners, the first (in the preferred order) where every stroke reads
+      // against the ground actually there, measured per pixel; the preferred corner stays when none reads (the repair below then tries)
+      marks.filter(mk => Array.isArray(mk._cands)).forEach(mk => {
+        const cands = mk._cands; delete mk._cands; if (cands.length < 2) return;
+        const lh = mk.h || 6; const lw = mk.w || 17; const C = { tl: [sp.side, sp.top], tr: [100 - sp.side - lw, sp.top], bl: [sp.side, 100 - sp.bottom - lh], br: [100 - sp.side - lw, 100 - sp.bottom - lh] };
+        const reads = c => { const L2 = Object.assign({}, L, { layers: L.layers.map(l => l === mk ? Object.assign({}, mk, { x: r1(C[c][0]), y: r1(C[c][1]) }) : l) }); const bx = measure(L2, copy, images, W, H); if (markReadability(L2, copy, images, bx, W, H, { only: String(mk.id) }) === false) return false; const b = bx.find(z => z.id === String(mk.id)); return !!(b && typeof b.inkLost === 'number' && b.inkLost < 0.04 && (b.inkRun || 0) < 2 / 12); };
+        const good = cands.find(reads); if (good) { mk.x = r1(C[good][0]); mk.y = r1(C[good][1]); }
+      });
+      // measure; repair what geometry or colour can fix; never the words
       let v = validate(L, copy, images, vopts); let final = L; let steps = [];
       const pendingCodes = { imagery_missing: 1, mark_unloaded: 1, imagery_sketch: 1 };
       const blockers = x => x.issues.filter(i => i.severity === 'blocking' && !pendingCodes[i.code]);

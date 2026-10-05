@@ -55,7 +55,7 @@ await T.t('S6 + S7: the placement is taught from the evidence, then production c
   for (const ij of (await api('GET', '/studio/get?id=' + P)).jobs.filter(x => x.stage === 'inspect' && x.state === 'queued')) await step(ij.id);
   g = await api('GET', '/studio/get?id=' + P); const a = g.assets[0]; A = a.id; V = a.versions.find(x => x.id === a.current);
   ok(V.image && V.image.key, 'the imagery landed (mocked)'); const wm = (V.layout.layers || []).find(l => l.role === 'wordmark'); ok(wm, 'a wordmark layer');
-  eq(wm.rule, { corner: 'bl', mandatory: true, note: 'the wordmark sits bottom left on every HOOF tile' }); ok(!(V.layout.layers || []).some(l => l.role === 'logo'), 'never the MCA logo on HOOF');
+  eq(wm.rule, { mandatory: true, note: 'the wordmark sits bottom left on every HOOF tile', basis: 'rule', corner: 'bl' }, 'the rule on the layer, with its provenance'); ok(!(V.layout.layers || []).some(l => l.role === 'logo'), 'never the MCA logo on HOOF');
   const m = V.context.informed; ok(m && m.stage === 'copy' && m.placement && m.placement.basis === 'rule' && m.kit.policy === 'wordmark', 'the manifest records the rule and the policy: ' + JSON.stringify(m && m.placement));
   const used = await api('GET', '/studio/used?asset=' + A, null, 'read-key'); ok(used.informed && used.informed.stage === 'copy' && used.marks.some(x => x.role === 'wordmark'), JSON.stringify(used.marks));
   const inv = await api('GET', '/brand/inventory?ns=mca&campaign=hoof', null, 'read-key'); ok(inv.ok && inv.placement.basis === 'rule' && !inv.recommendations.some(r => r.code === 'teach_placement'), 'the inventory sees the rule');

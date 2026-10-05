@@ -1061,3 +1061,176 @@ S-series harnesses: `studio-s1-worker` 5, `studio-quality-browser` 25 checks, `s
 `studio-s10-browser` 3; `studio-browser` 26 of 26 in this sequential run (the concurrency flakiness noted
 above did not appear). The figures are the harnesses' own summary lines; a harness that counts checks rather
 than cases (quality, scene, framing) is listed by what it printed.
+
+## 34. Report: S11 - mark readability per pixel, placement constraints, a trustworthy Fix layout and the artwork-first workspace (build studio-p26, page r4)
+
+The brief for this slice named one screenshot and nine sections. This is what was found, what was changed, how it
+is proved, and what is not claimed.
+
+### 34.1 Versions and the defect, established before anything was changed
+
+- The reviewed baseline is commit `e112a33`, worker build `2026-10-05.studio-p25`, page `?v=r3`. The deployed worker
+  answered that build on `/engine/status` on 5 October (deployed from the laptop; the sandbox cannot reach it). A
+  GitHub merge is not a deploy: the build id and the page's release query are the two facts a browser and a worker
+  can be checked against, and the S11 build bumps both (`2026-10-06.studio-p26`, `?v=r4`) so a stale renderer cannot
+  be mistaken for the new one.
+- **The screenshot could not be retrieved.** The sandbox has no route to the live worker, so the asset and version
+  behind the screenshot were not read. The tile was reconstructed from the picture as a **labelled synthetic
+  fixture**, `HOOF_STRADDLE` in `tests/fixtures/studio-layouts.mjs` (a cream fact panel from 46% to 86% of the
+  stage, a dark green footer below it, a small MYTH label at the top of the panel, a filled CTA chip that also
+  carries a box emphasis, the URL on the footer, and the white wordmark placed at 81.5% to 90.5% so its upper
+  lettering sits on the cream). Nothing of the user's was read, changed or overwritten.
+- **Root cause of the false pass.** A mark's contrast was one number: the mark's mean colour against the mean
+  luminance of the ground under its whole box. A mark straddling a light panel and a dark footer averages to a
+  middling ground and passes (4.6:1 on the reconstruction) while half its lettering has no contrast at all
+  (1.19:1 locally). The same number let a 10% straddle pass in silence. Nothing in the rules looked at where each
+  stroke actually sat.
+- **The wide outline round the CTA** is not in the artwork. Read from the export pixels, the plate is 209 px wide
+  inside a 432 px layer box and no stroke of the plate colour is painted beyond it. The box emphasis the layer also
+  carries is drawn around the plate (never wider), and the two together are now named `double_styling`. The wide
+  dashed rectangle in the screenshot is the layout editor's layer handle (the layer box, drawn when it differs
+  from the ink), which Preview mode never shows.
+- **The label over the artwork** was the composition tag, absolutely positioned at the top left of the canvas. It
+  now sits under the stage.
+
+### 34.2 Pixel-level mark visibility (section 2 of the brief)
+
+`markReadability()` in `docs/studio-render.js` draws three things for each loaded mark at the output size: the
+ground below it (the imagery and only the layers under the mark, with their alpha), the mark alone at full alpha
+through the same contain/cover, scale, rotation and opacity `draw()` uses, and what later layers paint over it.
+Every sampled pixel whose mark alpha is at least half is a stroke; padding is never sampled. Each stroke is
+composited with the layer's opacity and compared with the ground pixel behind it; a stroke under a later opaque
+layer counts as lost. The result is a distribution: `inkLost` (share under the lost bar), `inkWeak`, `inkLocal`
+(the tenth-percentile contrast, so one pixel does not decide), `inkMean`, `inkRun` (the longest run of twelve
+bands along either axis in which most strokes are lost), `inkWhere` (the axis whose bands differ most names the
+part: upper, lower, left, right, whole), `inkBoundary` (the ground's tenth and ninetieth percentiles differ by at
+least 0.35), `inkCovered`. A multicolour mark is read colour by colour by construction (every stroke against its
+own ground), and `markStats` counts the colour families so the fact is recorded. Thresholds, documented in the
+code: a wordmark is lettering, so a stroke under 2:1 is lost and under 3:1 weak; a graphic symbol survives less
+(1.6 and 2.5). The rule: `mark_unreadable` (blocking) at 12% lost or a run of a quarter of the mark's length;
+`mark_low_contrast` (warning) from 4% lost, 30% weak or a tenth percentile under the wanted ratio. `contrast` and
+`contrastMin` on a mark box are now the mean and the worst local value from this pass, so the older fields read
+the new figures.
+
+The worker judges the same way: `stValidationJudge` requires `report.contract === 2` (a report without it is
+refused with "reload the page and measure again"), reads the ink fields bounded to [0, 1], and treats a loaded
+mark with no `inkLost` and no `inkLocal` as unmeasured (`mark readability` in `unresolved`, which is
+`pixels_unmeasured`, blocking in production). The slim report stored with every validation carries the ink
+fields, `clearWant`, `ruleBasis` and `ruleMandatory`. **The contract is versioned:** `ST_VALIDATION_CONTRACT = 2`
+is part of `stCompSig`, so every validation filed before this build reads as `stale` the moment the worker is
+deployed; `studio-s11-worker` proves a row under another signature is stale, refuses approval on it, and passes
+again once measured under contract 2.
+
+Evidence (`tests/studio-marks-browser.mjs`, 35 checks, real Chromium, the expected figures computed from the
+fixture's geometry, not from the validator): on the reconstruction the measured lost share is 50% against 50% by
+geometry (19,314 stroke samples); at seven boundary positions (y 78, 80, 81.5, 83, 84.5, 86.5, 89) the measured
+share matches the geometric share within five points (100/100, 73/72, 50/50, 27/28, 0/0, 0/0, 0/0), blocking
+wherever 12% or more is lost and silent where every stroke is on the footer; a 10% straddle is a warning, never
+silent (the old average passed it at 6.06:1); a black mark over a near-black footer loses its lower part; a
+red-and-white mark on a red panel loses exactly its red half (the left part) and blocks; transparent padding that
+crosses the boundary with every stroke on the footer reads (lost 0%); a quarter-turned mark's lost share follows
+the turned geometry; a half-size mark in the same relative place gives the same share; strokes under a later badge
+count as covered and lost, and an `overlaps` exception for that pair removes them from the count.
+
+### 34.3 Placement constraints and the minimal local correction (section 3)
+
+`markConstraints(rule, b, W, H)` in the shared RULES block (byte-identical in the worker) turns a mark layer's rule
+into pixel wants: `clearWant` (the rule's `clearSpace` as a share of the mark's visible height, default 0.5),
+`minWant` (`minWidth` per cent of the stage, default 6%), `region` in pixels, `ruleMandatory`, `ruleBasis`. The
+rules then judge `mark_clear_space` against any words, URL, CTA or other mark (a warning by the house default,
+blocking under a mandatory rule, suppressed by an `overlaps` exception for that one pair), `mark_outside_region`,
+and `mark_small` by the rule's minimum. On the server `stMarkRuleClean` sanitises a campaign rule (clear space 0 to
+3 heights, minimum 2% to 60%, a region inside the stage; a rule needs a corner or a region to exist), `stLayerRule`
+stamps it on the mark layers with its `basis` (rule, preferred or inferred; a preferred rule rides on the layer
+and does not hold the mark), and Teach this brand accepts the three fields in a placement proposal.
+
+`repair()` corrects a mark that does not read in this order and names each step: (1) another place inside its
+permitted region, or a nudge within its own corner's neighbourhood (never a jump to another corner), each
+candidate measured per pixel and refused if it collides, leaves the safe area or breaks the clear space; (2) the
+approved variant that reads best where the mark now stands (`swapMarks`, an improvement of 0.4 on the ink score
+required); (3) when the mark is held by a mandatory corner rule, or no place reads, the editable supporting panel
+beneath it is extended to carry it; (4) otherwise the conflict is named for a person. No box, shadow, outline or
+recolour is ever added to a mark. `markRegion()` scans the ground under a mark for a flat band (a footer painted
+into the bitmap) and returns it with a confidence and a note saying it is pixel evidence, not a known shape;
+Properties offers "Move into this band" and nothing applies it by itself. Evidence: the reconstruction's wordmark
+is moved 3% down within its corner (same x, same size, same file) and every stroke reads; with a mandatory rule
+holding it bottom right the footer is extended from 86% to 80.6% instead; a mark outside a rule's region is named
+and inside it nothing is raised; the bitmap footer is found at y 86%, h 14%, confidence 0.9.
+
+### 34.4 A trustworthy Fix layout, and alignment (section 4)
+
+`repair()` returns `outcome` (`complete` only when the complete validation of the result has no blocking issue;
+`partial` when it changed the layout and something still blocks; `blocked` when it could change nothing; `nothing`
+only when the tile already passed), `counts` before and after, `kinds` of what remains (geometry, readability,
+brand, pending, other) and `remaining`. The island (`repairLayout`) reads `outcome`, never the geometry-only `ok`
+and never a filtered list that strikes contrast out: "Fixed" is said only for `complete`, "Nothing to fix" only
+for `nothing`, and the note names what still blocks and what is not a layout matter (imagery, a mark file,
+unmeasured pixels). Reproduced in the marks harness: an off-canvas mark plus a locked unreadable text gives
+`partial` with geometry 0 and readability 1 left; a locked unreadable text keeps the outcome off `complete` and
+the conflict names the lock; `nothing` is said only when the tile passes. Alignment of one layer in the editor
+uses the format's own safe-area insets per edge (`safeAreaOf`: a 9:16 story's top 14%, bottom 20%, sides 6%; a feed
+tile's 3%) on the layer's measured ink, and a drag snaps the ink's edges to the same insets (Alt passes);
+`studio-s11-browser` aligns a story headline to 14%, 80% and 6%.
+
+### 34.5 The workspace (sections 5 and 6)
+
+In Refine the context bar is one line (client, All projects, project, campaign, mode, content type, the asset with
+its version and format; Preview, Review, Export; saved state, jobs, models); the workflow strip is compact and
+disappears in Preview. The left panel holds **Layers** (front to back, hide and lock, selection; the editor's
+working layout while editing, through a portal) above the assets, collapses to a strip and resizes by a handle
+(this browser only). The canvas has a toolbar - Fit, zoom 50% to 200%, actual size, Overlays, Checkerboard,
+Preview, Full screen, Edit layout - over a neutral surround; the composition's facts (mode, medium, imagery,
+model, resolution, fallback, incomplete marks, failed loads, fallback fonts) sit under the stage, and nothing is
+written on the artwork. Preview is the artwork alone. The inspector is contextual: **Properties** (a selected mark:
+approved variant, position and size with the aspect locked, clear space, the placement rule with its provenance -
+mandatory rule, preferred, observed on approved references, house default - the local readability figures from
+the measurement, and the band offered from the pixels; a text: typography and box; an image: framing; nothing
+selected: the composition's facts; the editor's own panels render here while editing), Copy, Quality, Art
+Director, **Brand** (the campaign's policy, the marks on file with variants, what is on this composition, the
+provenance, the way to the Brand workspace), Versions. One status at the top of the strip - **Blocked / Needs
+review / Checks passed / Approved** (`qualityState`: the renderer's `qualityOf` plus the worker's record and the
+approvals; an incomplete mark blocks; a pass not yet accepted by the worker, an unresolved measurement or an
+inconsistent inspection is review) - with the top issue named first, "show on the tile" and its remedy (Fix layout,
+Generate the imagery, Load the marks again, Measure again). Technical, the art director's opinion and human
+approval stay as three rows beneath it; no score is hard-coded and a ship verdict never approves. The client's
+palette primary colours the current stage, the selected asset and the active tab (`--st-client`); the sticky bars
+have a faint translucency.
+
+### 34.6 Design quality (section 7)
+
+The reconstruction's own type problems are reported honestly by the same rules - the MYTH label and the URL are
+under the 2.4% feed minimum (`small_type` warnings), the CTA carries a plate and an outline (`double_styling`) - so
+after the mark is fixed the tile is **Needs review**, not Checks passed. The layout variations place the mark where
+it reads: a band or a fade at the foot leaves the mark room on the preferred side, and the mark's corner is chosen
+by per-pixel readability among the clear corners (journey 9's band-foot and fade arrangements, which put the mark
+over the sky, now put it on the band). Approved wording and facts are never changed by any correction; both
+creation modes stand (a finished bitmap gets no live elements composed over it).
+
+### 34.7 Brand knowledge (section 8)
+
+The inventory and Teach this brand workflow (S6) and the context compiler (S7) are unchanged; the rule's new
+fields flow through them, and the Properties and Brand tabs show the provenance of what holds a mark. HOOF keeps
+its wordmark policy (the client logo is named as "must not appear here" on the Brand tab).
+
+### 34.8 Regression coverage (section 9)
+
+New: `tests/studio-marks-browser.mjs` (35), `tests/studio-s11-worker.mjs` (8), `tests/studio-s11-browser.mjs`
+(9, with screenshots `tests/shots/s11-after-*.png` at 1366 x 768 and 1920 x 1080; `tests/studio-shots.mjs
+s11-before` and `s11-after` give the same seeded project at 1440, 1920 and 390 before and after). Updated for the
+contract and the rule's provenance: `studio-s1-worker`, `studio-s3-worker` (reports state contract 2 and carry the
+mark's ink figures), `studio-s6-worker`, `studio-s10-browser` (the layer rule carries `basis: 'rule'`). No test was
+weakened; where an expected figure was wrong by geometry (the 10% straddle position, a black mark on a footer that
+is 2.35:1 rather than 1.19:1, the URL's measured width in the clear-space case) the fixture was corrected and the
+expectation kept.
+
+### 34.9 Limits
+
+- The reconstruction is synthetic: its marks are solid blocks (every pixel ink, with the fixture's darker lower
+  band), its photograph a gradient. The real asset was not inspected; on the deployed worker every earlier
+  validation now reads stale and must be measured again under contract 2 before any approval stands.
+- `markRegion` is colour evidence (a flat band under the mark) with a capped confidence; it is offered, never
+  applied, and is not detection of a footer.
+- Snapping and alignment act on measured ink, so a layer whose image has not loaded aligns by its box.
+- The left panel's width and open state, the overlays and the checkerboard are this browser's.
+- `tests/studio-browser.mjs` remains sensitive to concurrency; the figures below are from sequential runs.
+- Deployment and merge are not done; the worker ships from a laptop with `tools/deploy-worker.sh`.

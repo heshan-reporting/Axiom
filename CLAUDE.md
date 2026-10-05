@@ -1507,11 +1507,13 @@ PLEASE CONFIRM) and analyses unanalysed references only within the
 approved call budget; `requests/` is gitignored. Harnesses:
 `tests/studio-p22-worker.mjs` (4), `tests/studio-brand-gaps-test.mjs` (10).
 From the first live HOOF render (a blue wordmark at 1.28:1 on an orange
-road, a pale label on the sky): the asset view now takes the approved mark
+road, a pale label on the sky): the asset view took the approved mark
 variant that reads (`STRender.markVariants`, measured against what is
-behind the mark) by itself when a measurement finds `mark_unreadable` or
+behind the mark) by itself when a measurement found `mark_unreadable` or
 `mark_low_contrast` - a layout version noted "mark variant chosen for
-contrast", no render, never a locked mark or layout; `repair()` makes words
+contrast", no render, never a locked mark or layout (until S11, which
+reports the mark and leaves the correction to Fix layout: placement first,
+then the variants); `repair()` makes words
 read by colour (white or near-black) and only then a backing plate, words,
 place and size untouched - always for `unreadable_contrast`, for
 `low_contrast` only with `fixContrast` (the Fix button), so a deliberate
@@ -1564,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -1843,6 +1845,76 @@ of every stage go to `tests/shots/s10-*.png` and the figures to
 `tests/shots/s10-report.json` (both ignored by git). The OCR engine is not a
 repository dependency: CI runs the ink check. Harness:
 `tests/studio-s10-browser.mjs` (3).
+
+**Mark readability per pixel, placement constraints and the artwork-first
+workspace (S11; build `2026-10-06.studio-p26`, page `?v=r4`;
+`CREATIVE-STUDIO.md` s.34 is the report).** The 5 October screenshot (the white
+HOOF wordmark across the cream panel and the dark green footer, shown as
+"Technical validation passed") is reconstructed, labelled as such, in
+`tests/fixtures/studio-layouts.mjs` (`HOOF_STRADDLE`); the client's asset was
+not retrievable from the sandbox and nothing of the user's was overwritten.
+Root cause: a mark's contrast was one mean of its colour against the mean
+ground under its box, which a split ground satisfies while half the lettering
+vanishes. Now `markReadability()` in the renderer reads every stroke of a mark
+as drawn (contain or cover, scale, rotation, opacity composited; padding is
+never ink) against the ground actually behind that pixel (the imagery and the
+layers below it) and counts a stroke painted over by a later layer as lost,
+giving the share lost (`inkLost`), the share weak, the worst local contrast (a
+tenth percentile), the longest unreadable stretch along the mark (`inkRun`),
+which part is lost (`inkWhere`), whether the ground is split (`inkBoundary`),
+and multicolour marks colour by colour. Thresholds: a wordmark is lettering
+(under 2:1 lost, under 3:1 weak), a symbol survives less (1.6 / 2.5);
+`mark_unreadable` blocks at 12% lost or a quarter-length run,
+`mark_low_contrast` warns from 4%. `markConstraints()` in the shared RULES
+block carries a campaign rule's `clearSpace` (share of the mark's height,
+default 0.5), `minWidth` (per cent of the stage, default 6) and `region` into
+`mark_clear_space` (warning; blocking when the rule is mandatory; an `overlaps`
+exception covers one pair), `mark_outside_region` and `mark_small`;
+`double_styling` names a text with both a filled plate and a box outline (the
+outline is drawn around the plate, never wider: the wide rectangle in the
+screenshot was editor chrome, absent from the export pixels). **Validation
+contract 2:** `CONTRACT` in the renderer and `ST_VALIDATION_CONTRACT` in the
+worker; the contract is part of `stCompSig`, so every pass filed before S11
+reads as stale on deploy, a report that does not state it is refused (422,
+with the remedy), and a loaded mark reported without its ink figures is
+`unmeasured`, never clean. `markRegion()` finds a flat band painted into the
+bitmap under a mark as pixel evidence with a confidence, offered in Properties
+and never applied by itself. `stMarkRuleClean` / `stLayerRule` carry the
+rule's fields and its `basis` (rule / preferred / inferred) through the kit,
+production (a preferred rule rides on the layer too and does not hold the
+mark) and Teach this brand. **Repair is judged on the complete final
+validation:** `repair()` returns `outcome` complete / partial / blocked /
+nothing with `counts`, `kinds` (geometry, readability, brand, pending) and
+`remaining`; a mark that does not read is first moved within its own corner
+or region (nudges, never a jump to another corner), then takes the approved
+variant that reads best where it stands, then has a supporting panel extended
+beneath it; a locked unreadable text or a missing photograph can never make
+"Fixed" (the island reads `outcome`, never `ok` alone). The view no longer
+swaps a mark's variant on sight. `variants()` leaves a bottom band or fade
+room for the mark and picks the corner where every stroke reads. Alignment of
+one layer uses the format's own insets per edge (`safeAreaOf`: a story's top
+14%, bottom 20%, sides 6%) on the measured ink, and a drag snaps to the same
+edges. **The workspace:** a compact header in Refine (client, campaign, asset,
+format, mode, saved state; Preview / Review / Export), a collapsible and
+resizable left panel with the assets and a **Layers** list (front to back,
+hide and lock, selection; the editor's working layout while editing), a canvas
+toolbar (Fit, zoom, actual size, overlays, checkerboard, Preview, full screen)
+over a neutral surround with the composition's facts (`compTag`) under the
+stage and nothing written on the artwork, and a contextual inspector:
+**Properties** (a mark: approved variant, position and size with the aspect
+locked, clear space, the placement rule with its provenance, local readability
+from the measurement, the band offered from the pixels; text: typography and
+box; image: framing; the editor's panels render here through a portal while
+editing), Copy, Quality, Art Director, **Brand** (policy, marks on file,
+provenance), Versions. One quality hierarchy at the top of the strip -
+Blocked / Needs review / Checks passed / Approved (`qualityState`, from
+`R.qualityOf` plus the worker's record and the approvals) - with the top issue
+named first, "show on the tile" and its remedy; technical, the art director's
+opinion and human approval stay distinct beneath it. The client's palette
+primary is a restrained accent (`--st-client`). Harnesses:
+`studio-marks-browser.mjs` (35), `studio-s11-worker.mjs` (8),
+`studio-s11-browser.mjs` (9, with before and after screenshots at 1366 x 768
+and 1920 x 1080 in `tests/shots/`).
 
 Phase 1, the ground:
 
