@@ -18,7 +18,14 @@
  * and never edits, clips or truncates words. Nothing here calls a model. */
 (function () {
   'use strict';
-  const RENDERER = 'studio-render/2';
+  const RENDERER = 'studio-render/3';
+  /* The validation contract: the shape of the evidence a browser files and the rules it is judged by. The worker refuses
+   * a report from another contract and folds the number into the composition signature, so a measurement filed under an
+   * older contract cannot certify a tile under the new rules - it reads as stale and is measured again.
+   *   1  boxes, text contrast, mark contrast as an average over the mark's bounding box
+   *   2  mark readability per pixel (visible strokes against the ground below them, padding excluded, cover by later
+   *      layers counted), mark constraints (clear space, placement region, minimum size), double styling */
+  const CONTRACT = 2;
   const FAMILIES = { display: '"Bricolage Grotesque", sans-serif', body: '"Instrument Sans", sans-serif', mono: '"Spline Sans Mono", monospace' };
   const APP_FAMILY = { display: 'Bricolage Grotesque', body: 'Instrument Sans', mono: 'Spline Sans Mono' };
   const GENERIC = { display: 'sans-serif', body: 'sans-serif', mono: 'monospace' };
@@ -86,7 +93,7 @@
     if (l.emphasis === 'highlight') { minX -= px * 0.15; maxX += px * 0.15; }
     if (l.emphasis === 'underline' && lines.length) bottom = Math.max(bottom, y + padY + (lines.length - 1) * lh + px * 1.02 + Math.max(1.5, px * 0.08));
     let top = y - (l.emphasis === 'highlight' ? px * 0.05 : 0);
-    if (l.emphasis === 'box') { const sw = Math.max(1.5, px * 0.08) / 2; minX = Math.min(minX, x - sw); maxX = Math.max(maxX, x + w + sw); top = Math.min(top, y - sw); bottom = Math.max(bottom, y + contentH + sw); }
+    if (l.emphasis === 'box') { const sw = Math.max(1.5, px * 0.08) / 2; const x0 = l.bg ? bx : x, x1 = l.bg ? bx + bw : x + w; minX = Math.min(minX, x0 - sw); maxX = Math.max(maxX, x1 + sw); top = Math.min(top, y - sw); bottom = Math.max(bottom, y + contentH + sw); }
     if (!isFinite(minX)) { minX = x; maxX = x; }
     let occ = { x: minX, y: top, w: maxX - minX, h: bottom - top };
     if (l.rotate) {
@@ -144,7 +151,9 @@
     // layersOnly: draw just these layers on a clear stage (no base, no imagery) - the occlusion pass asks what a set of
     // later layers paints over the words and marks beneath them
     const subset = Array.isArray(opts.layersOnly) ? opts.layersOnly : null;
-    const layers = subset || (Array.isArray(layout.layers) ? layout.layers : []);
+    // belowIndex: the base and the layers before that index only - what is really behind a layer, for its readability
+    const all = Array.isArray(layout.layers) ? layout.layers : [];
+    const layers = subset || (typeof opts.belowIndex === 'number' ? all.slice(0, Math.max(0, opts.belowIndex)) : all);
     const pal = layout.palette || {};
     ctx.save(); ctx.clearRect(0, 0, W, H);
     const ib = layout.image && layout.image.w > 0 && layout.image.h > 0 ? { x: layout.image.x / 100 * W, y: layout.image.y / 100 * H, w: layout.image.w / 100 * W, h: layout.image.h / 100 * H } : null;
@@ -189,7 +198,8 @@
         if (l.emphasis === 'highlight') { ctx.fillStyle = l.emphasisColor || 'rgba(255,214,0,.85)'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx - t.px * 0.15, y + t.padY + i * t.lh - t.px * 0.05, lw + t.px * 0.3, t.lh); }); }
         if (glyphs) {
           if (l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || l.color || '#fff'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx, y + t.padY + i * t.lh + t.px * 1.02, lw, Math.max(1.5, t.px * 0.08)); }); }
-          if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, t.px * 0.08); ctx.strokeRect(x, y, w, t.contentH); }
+          // a box outline follows the plate when there is one, so a chip never sits inside a wider second rectangle
+          if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, t.px * 0.08); if (l.bg) ctx.strokeRect(t.bx, y, t.bw, t.contentH); else ctx.strokeRect(x, y, w, t.contentH); }
           ctx.fillStyle = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
           t.lines.forEach((s, i) => ctx.fillText(s, t.tx, y + t.padY + i * t.lh));
         }
@@ -275,7 +285,11 @@
           if (m && m.bounds) { b.vx = dx + m.bounds.x * dw; b.vy = dy + m.bounds.y * dh; b.vw = m.bounds.w * dw; b.vh = m.bounds.h * dh; b.markFill = Math.round(m.fill * 100) / 100; }
           else { b.vx = dx; b.vy = dy; b.vw = dw; b.vh = dh; }
           b.x = b.vx; b.y = b.vy; b.w = b.vw; b.h = b.vh;
+          b.multicolour = !!(m && m.colours > 1);
         }
+        // the placement constraints the mark carries (its campaign rule, or the house defaults), in stage pixels, from the
+        // same helper the worker's judge uses
+        if (b.mark) Object.assign(b, markConstraints(l.rule, b, W, H));
         if (l.rotate && (b.mark || b.type === 'img')) {
           // the axis-aligned bounds of the drawn rectangle turned about the layer's centre, as draw() turns it
           const cx = b.ax + b.aw / 2, cy = b.ay + b.ah / 2, a = l.rotate * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
@@ -294,6 +308,19 @@
      advisory). The rules judge by it, the editor draws its guides from it, the worker places marks inside it. */
   function safeAreaOf(format, channel) {
     return format === '9:16' && channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+  }
+  /* A mark's placement constraints, in stage pixels, from the rule it carries (a campaign rule taught in the Brand view, or a
+     rule set on the layer) and the house defaults: clear space around the visible mark (a share of its ink height, default a
+     half), the minimum visible width (per cent of the stage, default 6), a permitted region (per cent of the stage) when one is
+     set, and whether each is mandatory (a blocking matter) or preferred (a warning). The basis says where the rule came from. */
+  function markConstraints(rule, b, W, H) {
+    rule = rule && typeof rule === 'object' ? rule : {};
+    var vh = typeof b.vh === 'number' && b.vh > 0 ? b.vh : (b.ah || 0);
+    var cs = typeof rule.clearSpace === 'number' && rule.clearSpace >= 0 && rule.clearSpace <= 3 ? rule.clearSpace : 0.5;
+    var mw = typeof rule.minWidth === 'number' && rule.minWidth >= 2 && rule.minWidth <= 60 ? rule.minWidth : 6;
+    var reg = rule.region && typeof rule.region === 'object' && typeof rule.region.x === 'number' && typeof rule.region.w === 'number' && rule.region.w > 0 && typeof rule.region.h === 'number' && rule.region.h > 0
+      ? { x: rule.region.x / 100 * W, y: (rule.region.y || 0) / 100 * H, w: rule.region.w / 100 * W, h: rule.region.h / 100 * H } : null;
+    return { clearWant: Math.round(cs * vh * 10) / 10, clearShare: cs, minWant: Math.round(mw / 100 * W), region: reg, ruleMandatory: !!rule.mandatory, ruleBasis: rule.basis || (rule.corner || reg ? 'rule' : 'default'), ruleCorner: rule.corner || '' };
   }
   function layoutRules(boxes, o) {
     o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
@@ -321,11 +348,34 @@
       }
       if (b.mark) {
         if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
-        // the mark is judged by its visible pixels: a box far larger than its ink misleads every placement, and ink under 6% of the
-        // width is not an identity a feed can read
-        if (typeof b.vw === 'number' && b.asset === 'loaded') { if (typeof b.markFill === 'number' && b.markFill < 0.25 && b.vw < b.aw * 0.6) add('mark_padding', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide inside a ' + Math.round(b.aw) + ' px box (' + Math.round(b.markFill * 100) + '% of the box is ink): size, clear space and collisions are judged by the ink, not the box'); if (b.vw < W * 0.06) add('mark_small', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide, under 6% of the stage: too small to read in a feed'); }
-        if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
+        // the mark is judged by its visible pixels: a box far larger than its ink misleads every placement, and ink under the
+        // minimum width (6% of the stage, or the rule's own) is not an identity a feed can read
+        if (typeof b.vw === 'number' && b.asset === 'loaded') {
+          var minW = typeof b.minWant === 'number' ? b.minWant : W * 0.06;
+          if (typeof b.markFill === 'number' && b.markFill < 0.25 && b.vw < b.aw * 0.6) add('mark_padding', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide inside a ' + Math.round(b.aw) + ' px box (' + Math.round(b.markFill * 100) + '% of the box is ink): size, clear space and collisions are judged by the ink, not the box');
+          if (b.vw < minW) add('mark_small', b.ruleMandatory && typeof b.minWant === 'number' ? 'blocking' : 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide, under ' + Math.round(minW / W * 100) + '% of the stage' + (b.ruleBasis === 'rule' ? ' (the campaign rule\'s minimum)' : '') + ': too small to read in a feed');
+          // the permitted region, when the rule names one: the ink must lie inside it
+          if (b.region && (b.x < b.region.x - tol || b.y < b.region.y - tol || b.x + b.w > b.region.x + b.region.w + tol || b.y + b.h > b.region.y + b.region.h + tol)) add('mark_outside_region', b.ruleMandatory ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' sits outside the placement region the ' + (b.ruleMandatory ? 'rule' : 'preference') + ' allows (' + Math.round(b.region.x / W * 100) + ',' + Math.round(b.region.y / H * 100) + ' to ' + Math.round((b.region.x + b.region.w) / W * 100) + ',' + Math.round((b.region.y + b.region.h) / H * 100) + '% of the stage)');
+        }
+        /* readability per pixel (contract 2): the mark's visible strokes against the ground actually behind each of them, the
+           layer's opacity composited in, transparent padding excluded, strokes covered by a later layer counted as lost. A
+           wordmark is lettering: a stroke under 2:1 locally is lost and under 3:1 weak; a graphic symbol survives less (1.6 / 2.5).
+           The judgment is on the share of ink lost and on its extent (a quarter of the mark's length unreadable in one stretch
+           is a mark a reader cannot complete), never on one average that a split ground can satisfy. */
+        if (b.asset === 'loaded') {
+          if (typeof b.inkLost === 'number') {
+            var wm = b.role === 'wordmark'; var wantM = wm ? 3 : 2.5;
+            var where = b.inkWhere ? ' - the ' + b.inkWhere + ' of the ' + b.role : '';
+            var split = b.inkBoundary ? ': it crosses a light/dark boundary' : '';
+            var worst = typeof b.inkLocal === 'number' ? '; worst local contrast ' + b.inkLocal.toFixed(2) + ':1' : '';
+            var covered = typeof b.inkCovered === 'number' && b.inkCovered >= 0.05 ? ', ' + Math.round(b.inkCovered * 100) + '% painted over by later layers' : '';
+            if (b.inkLost >= 0.12 || (typeof b.inkRun === 'number' && b.inkRun >= 0.25)) add('mark_unreadable', 'blocking', [b.id], Math.round(b.inkLost * 100) + '% of the ' + b.role + '\'s visible strokes do not read against what is behind them' + split + where + worst + covered + ' (measured per pixel, not an average)');
+            else if (b.inkLost >= 0.04 || (typeof b.inkWeak === 'number' && b.inkWeak >= 0.3) || (typeof b.inkLocal === 'number' && b.inkLocal < wantM)) add('mark_low_contrast', 'warning', [b.id], 'parts of the ' + b.role + ' read weakly: ' + Math.round((b.inkWeak || 0) * 100) + '% of its strokes under ' + wantM + ':1' + (b.inkLost ? ', ' + Math.round(b.inkLost * 100) + '% lost' : '') + split + where + worst + '; another approved variant or a quieter ground may read better');
+          } else if (o.unresolved && o.unresolved.length) { /* said once by pixels_unmeasured */ }
+          else add('mark_unmeasured', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + '\'s readability was not measured per pixel (an older measurement, or one made without its image): unknown, not passed');
+        }
       }
+      if (b.type === 'text' && b.bg && b.emphasis === 'box') add('double_styling', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has both a filled plate and a box outline: one device is enough (the outline is drawn around the plate, never wider)');
       if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
       if (b.type === 'text' || b.mark) {
         if (typeof b.opacity === 'number') { if (b.opacity < 0.05) add('invisible', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity: it is not visible'); else if (b.opacity < 0.5) add('faint', 'warning', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity'); }
@@ -344,6 +394,14 @@
       if (iw > tol && ih > tol) {
         var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
         add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
+      } else if ((a.mark || c.mark) && (a.type === 'text' || c.type === 'text' || (a.mark && c.mark))) {
+        // clear space around a mark's ink: the separation from any words, URL, CTA or other mark, judged against the share of
+        // the mark's own height its rule asks for (mandatory: blocking; preferred or the house default: a warning)
+        var mk = a.mark ? a : c, ot = a.mark ? c : a; var want = typeof mk.clearWant === 'number' ? mk.clearWant : 0;
+        if (want > 0) {
+          var gx = Math.max(ot.x - (mk.x + mk.w), mk.x - (ot.x + ot.w)), gy = Math.max(ot.y - (mk.y + mk.h), mk.y - (ot.y + ot.h)); var gap = Math.max(gx, gy);
+          if (gap < want - tol) add('mark_clear_space', mk.ruleMandatory ? 'blocking' : 'warning', [mk.id, ot.id], 'the ' + (ot.role || ot.type) + ' sits ' + Math.round(Math.max(0, gap)) + ' px from the ' + mk.role + '\'s visible edge; the ' + (mk.ruleBasis === 'rule' ? 'campaign rule' : 'house default') + ' asks for ' + Math.round(want) + ' px of clear space (' + Math.round((mk.clearShare || 0.5) * 100) + '% of the mark\'s height)');
+        }
       }
     }
     if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
@@ -382,9 +440,88 @@
   function markStats(img) {
     if (!img) return null; const c = document.createElement('canvas'); const w = Math.min(160, img.naturalWidth || 160), h = Math.max(1, Math.round(w * (img.naturalHeight || 1) / (img.naturalWidth || 1))); c.width = w; c.height = h;
     const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h); let d; try { d = x.getImageData(0, 0, w, h).data; } catch (e) { return null; }
-    let n = 0, s = 0, sr = 0, sg = 0, sb = 0; let minX = w, minY = h, maxX = -1, maxY = -1;
-    for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 128) { s += lum(d[k], d[k + 1], d[k + 2]); sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; n++; const px = (k / 4) % w, py = Math.floor(k / 4 / w); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; }
-    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], fill: n / (w * h), bounds: { x: minX / w, y: minY / h, w: (maxX - minX + 1) / w, h: (maxY - minY + 1) / h } } : null;
+    let n = 0, s = 0, sr = 0, sg = 0, sb = 0; let minX = w, minY = h, maxX = -1, maxY = -1; const hues = {};
+    for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 128) { s += lum(d[k], d[k + 1], d[k + 2]); sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; n++; const px = (k / 4) % w, py = Math.floor(k / 4 / w); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; hues[(d[k] >> 6) * 16 + (d[k + 1] >> 6) * 4 + (d[k + 2] >> 6)] = (hues[(d[k] >> 6) * 16 + (d[k + 1] >> 6) * 4 + (d[k + 2] >> 6)] || 0) + 1; }
+    // distinct colour families with a real share of the ink: a multicolour mark is never averaged into one misleading value
+    const colours = n ? Object.keys(hues).filter(k => hues[k] >= n * 0.08).length : 0;
+    return n ? { lum: s / n, rgb: [sr / n, sg / n, sb / n], fill: n / (w * h), colours, bounds: { x: minX / w, y: minY / h, w: (maxX - minX + 1) / w, h: (maxY - minY + 1) / h } } : null;
+  }
+  /* ---------------------------------------------------------------- mark readability, per pixel
+   * The earlier estimate compared the mark's mean colour with the mean luminance under its box, which a mark straddling a
+   * light panel and a dark footer passes with ease while half its lettering disappears. This reads the mark as drawn - the
+   * same contain/cover, scale, rotation and opacity as draw(), so every sample is a real stroke pixel in its real place -
+   * against the ground actually behind that pixel (the base imagery and only the layers below the mark, with their alpha), and
+   * counts a stroke painted over by a later layer as lost. Padding is not ink and is never sampled. The result is a share and
+   * a distribution, not an average: how much ink is lost, how much reads weakly, the worst local contrast (a tenth-percentile,
+   * so one noisy pixel does not decide), the longest unreadable stretch along the mark, which part of the mark it is, and
+   * whether the ground under the ink is split light/dark. Thresholds: a wordmark is lettering, so a stroke under 2:1 is lost
+   * and under 3:1 weak; a graphic symbol survives less (1.6 and 2.5). The rules decide; this only measures.
+   * opts.only: measure one mark (by id). Returns false when the pixels could not be read (an unresolved state, never a pass). */
+  function markReadability(layout, copy, images, boxes, W, H, opts) {
+    opts = opts || {}; const layers = Array.isArray(layout.layers) ? layout.layers : [];
+    const marks = boxes.filter(b => b.mark && b.asset === 'loaded' && !b.hidden && b.valid !== false && (!opts.only || b.id === opts.only));
+    if (!marks.length) return true;
+    const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    let ok = true;
+    marks.forEach(b => {
+      const i = layers.findIndex((l, k) => String(l.id || ('layer' + k)) === b.id); const l = layers[i]; if (!l) return;
+      const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y)), x1 = Math.min(W, Math.ceil(b.x + b.w)), y1 = Math.min(H, Math.ceil(b.y + b.h));
+      if (x1 <= x0 || y1 <= y0) { b.inkN = 0; b.inkLost = 1; b.inkWeak = 1; b.inkLocal = 1; b.inkRun = 1; b.inkWhere = 'whole'; b.inkBoundary = false; b.inkCovered = 0; return; }
+      const cw = x1 - x0, ch = y1 - y0;
+      // the ground below the mark, the mark alone at full alpha, and what later layers paint over it
+      const G = mk(W, H); draw(G.getContext('2d'), W, H, layout, copy, images, { only: 'ground', belowIndex: i });
+      const M = mk(W, H); draw(M.getContext('2d'), W, H, layout, copy, images, { layersOnly: [Object.assign({}, l, { opacity: 1, hidden: false })] });
+      const later = layers.slice(i + 1).filter(x => !x.hidden && b.overlaps.indexOf(String(x.id)) < 0).filter(x => { const lx = x.x / 100 * W, ly = x.y / 100 * H, lw = x.w / 100 * W, lh = (x.h || 0) / 100 * H; const pad = x.rotate ? Math.max(lw, lh) : 0; return Math.min(lx + lw + pad, b.x + b.w) - Math.max(lx - pad, b.x) > 0 && Math.min(ly + lh + pad, b.y + b.h) - Math.max(ly - pad, b.y) > 0; });
+      let C = null; if (later.length) { C = mk(W, H); draw(C.getContext('2d'), W, H, layout, copy, images, { layersOnly: later }); }
+      let g, m, c; try { g = G.getContext('2d').getImageData(x0, y0, cw, ch).data; m = M.getContext('2d').getImageData(x0, y0, cw, ch).data; c = C ? C.getContext('2d').getImageData(x0, y0, cw, ch).data : null; } catch (e) { ok = false; b.inkUnresolved = true; return; }
+      const op = b.opacity == null ? 1 : b.opacity; const wm = b.role === 'wordmark'; const lostBar = wm ? 2 : 1.6, weakBar = wm ? 3 : 2.5;
+      const step = Math.max(1, Math.floor(Math.sqrt((cw * ch) / 24000)));
+      const N = 12; const rowN = new Array(N).fill(0), rowLost = new Array(N).fill(0), colN = new Array(N).fill(0), colLost = new Array(N).fill(0);
+      let n = 0, lost = 0, weak = 0, cov = 0, sum = 0; const ratios = []; const grounds = [];
+      for (let yy = 0; yy < ch; yy += step) for (let xx = 0; xx < cw; xx += step) {
+        const k = (yy * cw + xx) * 4; const a = m[k + 3]; if (a < 128) continue;
+        n++; const ri = Math.min(N - 1, Math.floor(yy / ch * N)), ci = Math.min(N - 1, Math.floor(xx / cw * N)); rowN[ri]++; colN[ci]++;
+        const gl = lum(g[k], g[k + 1], g[k + 2]); grounds.push(gl);
+        if (c && c[k + 3] >= 128) { cov++; lost++; rowLost[ri]++; colLost[ci]++; ratios.push(1); continue; }
+        const fa = (a / 255) * op; const fr = fa * m[k] + (1 - fa) * g[k], fg = fa * m[k + 1] + (1 - fa) * g[k + 1], fb = fa * m[k + 2] + (1 - fa) * g[k + 2];
+        const r = ratio(lum(fr, fg, fb), gl); ratios.push(r); sum += r;
+        if (r < lostBar) { lost++; rowLost[ri]++; colLost[ci]++; } else if (r < weakBar) weak++;
+      }
+      if (!n) { b.inkN = 0; b.inkLost = 1; b.inkWeak = 0; b.inkLocal = 1; b.inkRun = 1; b.inkWhere = 'whole'; b.inkBoundary = false; b.inkCovered = 0; return; }
+      ratios.sort((p, q) => p - q); grounds.sort((p, q) => p - q);
+      const p10 = ratios[Math.floor((ratios.length - 1) * 0.1)]; const gp10 = grounds[Math.floor((grounds.length - 1) * 0.1)], gp90 = grounds[Math.floor((grounds.length - 1) * 0.9)];
+      // the longest stretch of lost bands along either axis, and which part of the mark it is
+      // a band is unreadable when most of its ink is lost (0.6, so a mark whose every column loses exactly half is judged by its
+      // rows, where the loss is concentrated); the axis that carries the loss is the one whose bands differ most
+      const run = (ns, ls) => { let best = 0, cur = 0, start = -1, bs = -1, lo = 1, hi = 0; for (let k = 0; k < N; k++) { if (ns[k] > 0) { const f = ls[k] / ns[k]; if (f < lo) lo = f; if (f > hi) hi = f; } const bad = ns[k] > 0 && ls[k] / ns[k] >= 0.6; if (bad) { if (!cur) start = k; cur++; if (cur > best) { best = cur; bs = start; } } else cur = 0; } return { len: best / N, at: bs, spread: Math.max(0, hi - lo) }; };
+      const rr = run(rowN, rowLost), rc = run(colN, colLost); const rmax = Math.max(rr.len, rc.len);
+      let where = ''; if (rmax >= 2 / N) { if (rr.spread >= rc.spread) where = rr.at + rr.len * N / 2 < N / 2 ? 'upper part' : 'lower part'; else where = rc.at + rc.len * N / 2 < N / 2 ? 'left part' : 'right part'; }
+      if (lost / n >= 0.85) where = 'whole mark';
+      b.inkN = n; b.inkLost = Math.round(lost / n * 1000) / 1000; b.inkWeak = Math.round(weak / n * 1000) / 1000; b.inkCovered = Math.round(cov / n * 1000) / 1000;
+      b.inkLocal = Math.round(p10 * 100) / 100; b.inkMean = Math.round((sum / Math.max(1, n - cov)) * 100) / 100; b.inkRun = Math.round(rmax * 1000) / 1000; b.inkWhere = where;
+      b.inkBoundary = gp90 - gp10 >= 0.35; b.inkGround = [Math.round(gp10 * 1000) / 1000, Math.round(gp90 * 1000) / 1000];
+      b.contrast = b.inkMean; b.contrastMin = b.inkLocal;
+    });
+    return ok;
+  }
+  /* ---------------------------------------------------------------- the region behind a mark: evidence, not knowledge
+   * When a footer or panel is a live shape its box is known. When it is painted into the bitmap, the only evidence is the
+   * pixels: this scans the ground below the mark for the contiguous band of rows around the mark's lower edge whose mean
+   * luminance stays close and whose spread stays small (a flat footer), and returns that band with a confidence that says how
+   * far to trust it. It is offered to a person as a candidate placement region, never applied on its own. */
+  function markRegion(layout, copy, images, id, opts) {
+    opts = opts || {}; const { w: W, h: H } = stageSize(layout, opts.width);
+    const boxes = measure(layout, copy, images, W, H); const b = boxes.find(x => x.id === id && x.mark); if (!b || b.asset !== 'loaded') return null;
+    const layers = layout.layers || []; const i = layers.findIndex((l, k) => String(l.id || ('layer' + k)) === id);
+    const G = document.createElement('canvas'); G.width = W; G.height = H; draw(G.getContext('2d'), W, H, layout, copy, images, { only: 'ground', belowIndex: i });
+    let d; try { d = G.getContext('2d').getImageData(0, 0, W, H).data; } catch (e) { return { unresolved: true }; }
+    const rowStat = y => { let s = 0, s2 = 0, n = 0; for (let x = 0; x < W; x += 4) { const k = (y * W + x) * 4; const L = lum(d[k], d[k + 1], d[k + 2]); s += L; s2 += L * L; n++; } const mu = s / n; return { mu, sd: Math.sqrt(Math.max(0, s2 / n - mu * mu)) }; };
+    // anchor on the row just under the mark's ink, then grow up and down while the band stays flat and alike
+    const yA = Math.min(H - 1, Math.max(0, Math.round(b.y + b.h) + 2)); const ref = rowStat(yA); if (ref.sd > 0.09) return { x: 0, y: 0, w: 0, h: 0, confidence: 0, note: 'no flat band under the mark: the ground there is textured' };
+    let top = yA, bot = yA; const alike = st => Math.abs(st.mu - ref.mu) <= 0.06 && st.sd <= 0.09;
+    while (top > 0 && alike(rowStat(top - 1))) top--; while (bot < H - 1 && alike(rowStat(bot + 1))) bot++;
+    const h = bot - top + 1; const conf = Math.round(Math.max(0, Math.min(0.9, (h / Math.max(1, b.h)) * 0.3 + (ref.sd < 0.03 ? 0.4 : 0.2))) * 100) / 100;
+    return { x: 0, y: Math.round(top / H * 1000) / 10, w: 100, h: Math.round(h / H * 1000) / 10, lum: Math.round(ref.mu * 1000) / 1000, confidence: conf, px: { x: 0, y: top, w: W, h }, note: h >= b.h * 1.2 ? 'a flat ' + (ref.mu < 0.25 ? 'dark' : ref.mu > 0.6 ? 'light' : 'mid-tone') + ' band of ' + h + ' px under the mark (confidence ' + Math.round(conf * 100) + '%: pixel evidence, not a known shape)' : 'the flat band under the mark is shorter than the mark itself (confidence ' + Math.round(conf * 100) + '%)' };
   }
   function markLum(img) { const m = markStats(img); return m ? m.lum : null; }
   const blend = (fg, a, bg) => [0, 1, 2].map(i => a * fg[i] + (1 - a) * bg[i]);
@@ -407,9 +544,8 @@
         b.contrastMin = Math.round(Math.min(ratio(fl, g.p10), ratio(fl, g.p90)) * 100) / 100;
         b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.p10 * 1000) / 1000, Math.round(g.p90 * 1000) / 1000];
       } else if (b.mark && b.asset === 'loaded') {
-        const m = markStats(markImage(images, l)); if (!m) return; const g = regionStats(data, W, H, b);
-        const eff = blend(m.rgb, op, g.rgb); b.contrast = Math.round(ratio(lum(eff[0], eff[1], eff[2]), g.lum) * 100) / 100; b.alpha = Math.round(op * 100) / 100;
-        b.markFill = Math.round(m.fill * 100) / 100; b.groundLum = Math.round(g.lum * 1000) / 1000;
+        // marks are read per pixel by markReadability(); only the ground's mean is noted here for the record
+        const g = regionStats(data, W, H, b); b.alpha = Math.round(op * 100) / 100; b.groundLum = Math.round(g.lum * 1000) / 1000;
       }
     });
     return true;
@@ -519,23 +655,39 @@
     const unresolved = [];
     const contrasted = opts.contrast === false ? false : contrastOf(layout, copy, images, boxes, W, H);
     if (opts.contrast !== false && contrasted === false) unresolved.push('contrast');
+    // the marks, per pixel (contract 2); switched off with the contrast pass, since both read the pixels
+    if (opts.contrast !== false && markReadability(layout, copy, images, boxes, W, H) === false) unresolved.push('mark readability');
     if (opts.occlusion !== false && occlusionOf(layout, copy, images, boxes, W, H) === false) unresolved.push('occlusion');
     const missing = imageryMissing(layout, images);
     // the photograph's likely subjects under this framing, and what covers them: an estimate with a confidence, a warning at most
     let subj = []; if (opts.subjects !== false) { try { subj = subjectCoverage(layout, images, boxes, W, H); } catch (e) { subj = []; } }
     const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing, unresolved, subjects: subj });
-    return { renderer: RENDERER, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, subjects: subj.length ? subj : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
+    return { renderer: RENDERER, contract: CONTRACT, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, subjects: subj.length ? subj : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
+  }
+  /** The state of a validation in four words a designer can act on, with the technical, assessment and approval parts kept apart:
+   *  blocked (required corrections remain), review (warnings or unmeasured checks remain), passed (every applicable check passed).
+   *  Approval is a person's and is added by the page from the asset's record, never here. */
+  function qualityOf(val) {
+    if (!val) return { state: 'unknown', word: 'Not measured', blocking: 0, warnings: 0, unresolved: 0, top: null };
+    const blocking = val.issues.filter(i => i.severity === 'blocking'), warnings = val.issues.filter(i => i.severity === 'warning');
+    const unresolved = (val.unresolved || []).length;
+    const state = blocking.length ? 'blocked' : (warnings.length || unresolved) ? 'review' : 'passed';
+    return { state, word: state === 'blocked' ? 'Blocked' : state === 'review' ? 'Needs review' : 'Checks passed', blocking: blocking.length, warnings: warnings.length, unresolved, top: blocking[0] || warnings[0] || null };
   }
 
   /* ---------------------------------------------------------------- repair: the smallest geometric correction, never the words */
   const LAYOUT_CODES = { text_overflow: 1, collision: 1, off_canvas: 1, safe_area: 1, text_too_wide: 1 };
   const MIN_SIZE = { headline: 3.2, support: 2.4, cta: 2.2 };
+  /* a mark's readability as one comparable score: the share of its ink that reads, then the worst local contrast */
+  const inkScore = b => (b && typeof b.inkLost === 'number') ? (1 - b.inkLost) * 10 + Math.min(10, b.inkLocal || 0) / 10 : (b && typeof b.contrast === 'number' ? Math.min(10, b.contrast) / 10 : 0);
+  const markBad = i => /^mark_(unreadable|low_contrast)$/.test(i.code);
   function swapMarks(L, copy, images, opts, byId, steps) {
     const v0 = validate(L, copy, images, opts);
-    v0.boxes.filter(b => b.mark && typeof b.contrast === 'number' && b.contrast < (b.role === 'wordmark' ? 4.5 : 3)).forEach(b => {
+    v0.boxes.filter(b => b.mark && v0.issues.some(i => markBad(i) && i.layers.indexOf(b.id) >= 0)).forEach(b => {
       const l = byId[b.id]; const vars = (opts.variants || {})[b.id] || []; if (!l || l.locked || l.hidden || !vars.length) return;
-      let best = null; vars.forEach(vr => { if (!vr.img) return; const imgs = Object.assign({}, images, { [b.id]: vr.img }); const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, { src: vr.src }) : x) }), copy, imgs, opts); const tb = t.boxes.find(x => x.id === b.id); if (tb && typeof tb.contrast === 'number' && (!best || tb.contrast > best.c)) best = { vr, c: tb.contrast }; });
-      if (best && best.c > b.contrast + 0.3 && best.vr.src !== l.src) { l.src = best.vr.src; l.variant = best.vr.variant; images[b.id] = best.vr.img; steps.push('switched the ' + l.role + ' to its approved ' + best.vr.variant + ' variant (contrast ' + b.contrast.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
+      let best = null; vars.forEach(vr => { if (!vr.img) return; const imgs = Object.assign({}, images, { [b.id]: vr.img }); const t = validate(Object.assign({}, L, { layers: L.layers.map(x => x === l ? Object.assign({}, l, { src: vr.src }) : x) }), copy, imgs, opts); const tb = t.boxes.find(x => x.id === b.id); const s = inkScore(tb); if (tb && (!best || s > best.s)) best = { vr, s, b: tb, clear: !t.issues.some(i => markBad(i) && i.layers.indexOf(b.id) >= 0) }; });
+      // the variant that reads best, taken only when it reads materially better than the one in place
+      if (best && best.vr.src !== l.src && best.s > inkScore(b) + 0.4) { l.src = best.vr.src; l.variant = best.vr.variant; images[b.id] = best.vr.img; steps.push('switched the ' + l.role + ' to its approved ' + best.vr.variant + ' variant (' + Math.round((b.inkLost || 0) * 100) + '% of its strokes lost before, ' + Math.round((best.b.inkLost || 0) * 100) + '% after' + (best.clear ? '' : '; still not fully readable') + ')'); }
     });
   }
   /** Only the marks: each approved variant is measured against what is actually behind the mark and the best one is taken.
@@ -545,18 +697,37 @@
     const steps = []; const imgs = Object.assign({}, images || {}); if (opts.variants && !(opts.locks && opts.locks.layout)) swapMarks(L, copy || {}, imgs, opts, byId, steps);
     return { layout: L, changed: steps.length > 0, steps, images: imgs };
   }
+  const PENDING_CODES = { imagery_missing: 1, mark_unloaded: 1, imagery_sketch: 1, pixels_unmeasured: 1, mark_unmeasured: 1 };
+  /** Repair, with its completion judged on the complete final validation (never on the geometry checks alone). The result says
+   *  what it did (steps), what the tile measured before and after, and what remains by kind - geometry, readability (words or
+   *  marks), brand constraints (clear space, placement region, size, a mark not on file), pending matters no layout can fix
+   *  (imagery not made, a mark not loaded), and checks that could not be measured - so a defect the engine cannot solve is named
+   *  as remaining, never folded into "fixed". outcome: complete (nothing blocking remains), partial (fewer or different
+   *  blockers remain), blocked (it changed nothing or nothing improved while blockers remain), nothing (there was nothing to fix). */
   function repair(layout0, copy, images, opts) {
     opts = opts || {}; copy = copy || {}; images = images || {};
     const L = JSON.parse(JSON.stringify(layout0 || {})); const { w: W, h: H } = stageSize(L, opts.width);
     const vopts = Object.assign({}, opts, { contrast: false });
     const before = validate(layout0, copy, images, opts);
     const layoutIssues = r => r.issues.filter(i => LAYOUT_CODES[i.code] && i.severity === 'blocking');
-    const steps = []; const result = (conflict) => { const after = validate(L, copy, images, opts); return { layout: L, changed: JSON.stringify(L) !== JSON.stringify(layout0), steps, before, after, ok: !layoutIssues(after).length, conflict: conflict || (layoutIssues(after).length ? 'unresolved' : '') }; };
+    const blockingOf = r => r.issues.filter(i => i.severity === 'blocking');
+    const codesOf = r => blockingOf(r).map(i => i.code + ':' + i.layers.join(',')).sort().join('|');
+    const steps = [];
+    const result = (conflict) => {
+      const after = validate(L, copy, images, opts); const changed = JSON.stringify(L) !== JSON.stringify(layout0);
+      const blk = blockingOf(after); const b0 = blockingOf(before);
+      const kinds = { geometry: blk.filter(i => LAYOUT_CODES[i.code]).length, readability: blk.filter(i => /contrast|^mark_unreadable$|^occluded$|^invisible$/.test(i.code)).length, brand: blk.filter(i => /^mark_(clear_space|outside_region|small|missing)$/.test(i.code)).length, pending: blk.filter(i => PENDING_CODES[i.code]).length };
+      kinds.other = blk.length - kinds.geometry - kinds.readability - kinds.brand - kinds.pending;
+      const outcome = !changed ? (before.ok ? 'nothing' : 'blocked') : after.ok ? 'complete' : (blk.length < b0.length || codesOf(after) !== codesOf(before)) ? 'partial' : 'blocked';
+      return { layout: L, changed, steps, before, after, ok: after.ok, outcome, counts: { before: b0.length, after: blk.length }, kinds, remaining: { blocking: blk, warnings: after.issues.filter(i => i.severity === 'warning'), unresolved: after.unresolved || [] }, conflict: conflict || (blk.length ? 'unresolved' : '') };
+    };
     if (opts.locks && opts.locks.layout) return Object.assign(result('The layout is locked on this asset; unlock it to let the Studio move anything.'), { layout: layout0, changed: false });
     // unreadable words are always fixed; merely low contrast only when the person asked (opts.fixContrast), since a deliberate
     // brand colour (a gold kicker) may sit just under the bar and is not the repair's to change on its own
     const contrastIssues = r => r.issues.filter(i => i.code === 'unreadable_contrast' || (i.code === 'patchy_contrast' && i.severity === 'blocking') || (opts.fixContrast && (i.code === 'low_contrast' || i.code === 'patchy_contrast')));
-    if (!layoutIssues(before).length && !contrastIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
+    // a mark that does not read, or breaks its clear space or placement region: blocking findings always, warnings when asked
+    const markIssues = r => r.issues.filter(i => (markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region') && (i.severity === 'blocking' || opts.fixContrast));
+    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
     const sa0 = safeAreaOf(opts.format || L.format, opts.channel); const story = sa0.hard; const sp = { top: sa0.top * 100 + (story ? 0 : 0.2), bottom: sa0.bottom * 100 + (story ? 0 : 0.2), side: sa0.side * 100 + (story ? 0 : 0.2) };
@@ -642,6 +813,45 @@
     if (scale < 1) steps.push('stepped the type in that column down to ' + Math.round(scale * 100) + '% of its size, hierarchy kept, above the readable minimum');
     // a mark that reads badly takes the approved variant that reads best against what is actually behind it
     if (opts.variants) swapMarks(L, copy, images, opts, byId, steps);
+    /* a mark that still does not read, or sits too close to the words, or outside its permitted region: the smallest local
+       correction, in this order - (1) another place inside its permitted region (the rule's region, else its own corner's
+       neighbourhood: a nudge, never a jump to another corner), measured per pixel at each candidate; (2) an approved variant was
+       tried above; (3) if the mark is held by a mandatory corner rule, or no place reads, an editable supporting panel beneath it
+       is extended to carry it (never a new box, shadow, outline or recolour: those are not the Studio's to add); (4) otherwise the
+       conflict is named for a person to decide (the layout variations are measured alternatives) */
+    const placeMark = (mk) => {
+      const now0 = validate(L, copy, images, opts); const b0 = now0.boxes.find(x => x.id === String(mk.id)); if (!b0 || b0.asset !== 'loaded') return false;
+      const rule = mk.rule || {}; const heldCorner = !!(rule.mandatory && rule.corner && !rule.region);
+      const bar = b => b && typeof b.inkLost === 'number' && b.inkLost < 0.04 && (b.inkRun || 0) < 2 / 12 && (b.inkWeak || 0) < 0.3;
+      const clean = (L2, id) => { const bx = measure(L2, copy, images, W, H); const iss = layoutRules(bx, { W, H, format: opts.format || L2.format, channel: opts.channel, production: true }); return !iss.some(i => i.severity === 'blocking' && i.layers.indexOf(id) >= 0 && !markBad(i) && i.code !== 'mark_unmeasured'); };
+      const tryAt = (x, y) => { const L2 = Object.assign({}, L, { layers: L.layers.map(l => l === mk ? Object.assign({}, l, { x: r1(x), y: r1(y) }) : l) }); if (!clean(L2, String(mk.id))) return null; const bx = measure(L2, copy, images, W, H); const b = bx.find(z => z.id === String(mk.id)); if (markReadability(L2, copy, images, bx, W, H, { only: String(mk.id) }) === false) return null; return { L2, b, reads: bar(b) }; };
+      if (!heldCorner && movable(mk)) {
+        const reg = rule.region && typeof rule.region === 'object' ? rule.region : null;
+        const cands = [];
+        if (reg) { const xs = [], ys = []; for (let x = reg.x; x <= reg.x + reg.w - mk.w + 0.01; x += Math.max(1, (reg.w - mk.w) / 4)) xs.push(x); for (let y = reg.y; y <= reg.y + reg.h - (mk.h || 0) + 0.01; y += 1) ys.push(y); xs.forEach(x => ys.forEach(y => cands.push([x, y]))); if (!cands.length) cands.push([reg.x, reg.y]); }
+        else { for (let dy = 0; dy <= 12; dy++) for (const sy of (dy ? [1, -1] : [1])) for (const dx of [0, 2, -2, 4, -4, 6, -6]) { const x = Math.min(100 - sp.side - mk.w, Math.max(sp.side, mk.x + dx)), y = Math.min(100 - sp.bottom - (mk.h || 0), Math.max(sp.top, mk.y + dy * sy)); cands.push([x, y]); } }
+        const seen = new Set(); const uniq = cands.filter(([x, y]) => { const k = r1(x) + ':' + r1(y); if (seen.has(k)) return false; seen.add(k); return true; });
+        uniq.sort((p, q) => (Math.abs(p[0] - mk.x) + Math.abs(p[1] - mk.y)) - (Math.abs(q[0] - mk.x) + Math.abs(q[1] - mk.y)));
+        let tried = 0, best = null;
+        for (const [x, y] of uniq) { if (tried >= 28) break; const t = tryAt(x, y); if (!t) continue; tried++; if (t.reads) { best = Object.assign({ x, y }, t); break; } if (!best || (t.b.inkLost || 1) < (best.b.inkLost || 1) - 0.1) best = Object.assign({ x, y, partial: true }, t); }
+        if (best && (best.reads || (best.partial && best.b.inkLost <= (b0.inkLost || 0) * 0.5))) {
+          const dxp = r1(best.x - mk.x), dyp = r1(best.y - mk.y); mk.x = r1(best.x); mk.y = r1(best.y);
+          steps.push('moved the ' + mk.role + ' ' + (dyp ? Math.abs(dyp) + '% ' + (dyp > 0 ? 'down' : 'up') : '') + (dxp ? (dyp ? ' and ' : '') + Math.abs(dxp) + '% ' + (dxp > 0 ? 'right' : 'left') : '') + (reg ? ' inside its placement region' : ' within its corner') + ' so ' + (best.reads ? 'every stroke reads' : 'more of it reads') + ' (' + Math.round((b0.inkLost || 0) * 100) + '% of its strokes lost before, ' + Math.round((best.b.inkLost || 0) * 100) + '% after)');
+          return best.reads;
+        }
+      }
+      // a supporting panel beneath the mark, editable and not locked, extended to carry the mark and its clear space
+      const idx = L.layers.indexOf(mk); const panel = L.layers.slice(0, idx).filter(s => s.type === 'shape' && !s.gradient && (s.role === 'panel' || s.role === 'overlay' || s.role === 'footer' || s.role === 'band') && movable(s) && s.shape !== 'circle' && s.shape !== 'rule').filter(s => Math.min(s.x + s.w, mk.x + mk.w) - Math.max(s.x, mk.x) > 0.5 && (Math.min(s.y + (s.h || 0), mk.y + (mk.h || 0)) - Math.max(s.y, mk.y) > -8)).sort((p, q) => Math.abs(p.y - mk.y) - Math.abs(q.y - mk.y))[0];
+      if (panel) {
+        const clear = pY(b0.clearWant || 0); const top = Math.min(panel.y, (b0.y / H * 100) - clear), bottom = Math.max(panel.y + (panel.h || 0), (b0.y + b0.h) / H * 100 + clear);
+        const L2 = Object.assign({}, L, { layers: L.layers.map(l => l === panel ? Object.assign({}, l, { y: r1(Math.max(0, top)), h: r1(Math.min(100, bottom) - Math.max(0, top)) }) : l) });
+        const bx = measure(L2, copy, images, W, H); const b = bx.find(z => z.id === String(mk.id)); markReadability(L2, copy, images, bx, W, H, { only: String(mk.id) });
+        if (bar(b)) { panel.y = r1(Math.max(0, top)); panel.h = r1(Math.min(100, bottom) - Math.max(0, top)); steps.push('extended the ' + (panel.role || 'panel') + ' ' + panel.id + ' to carry the ' + mk.role + (heldCorner ? ' (the mark itself is held by the campaign rule)' : '') + ': every stroke reads now'); return true; }
+      }
+      return false;
+    };
+    const markTrouble = markIssues(validate(L, copy, images, opts)); const markIds = Array.from(new Set(markTrouble.reduce((acc, i) => acc.concat(i.layers.filter(id => isMark(byId[id]))), [])));
+    markIds.forEach(id => { const mk = byId[id]; if (!mk || mk.hidden || mk.locked) return; if (!placeMark(mk)) steps.push('could not make the ' + mk.role + ' read by moving it' + ((mk.rule && mk.rule.mandatory && mk.rule.corner && !mk.rule.region) ? ' (held ' + mk.rule.corner + ' by the campaign rule)' : '') + ' or by extending a panel beneath it; no box, shadow or recolour is added to a mark'); });
     // words that do not read against what is behind them: first the colour (white or near-black, whichever reads), then, only
     // if neither is enough, a backing plate behind the same words - the words, their size and their place are not touched
     // each layer once (a low-contrast and a patchy finding may name the same words), and only while it still fails to read
@@ -657,16 +867,20 @@
       // a plate adds padding around the same words: the box grows to hold it, the words, their size and their place unchanged
       if (best && best.c > was + 0.3) { Object.assign(l, best.patch); if (best.patch.bg && best.ovf && best.ch) l.h = Math.round((best.ch / H * 100 + 0.2) * 10) / 10; steps.push((best.patch.bg ? 'put a backing plate behind' : 'changed the colour of') + ' the ' + (l.role || 'text') + ' ' + id + ' so it reads (contrast ' + was.toFixed(2) + ' to ' + best.c.toFixed(2) + ':1)'); }
     });
-    now = validate(L, copy, images, vopts);
-    if (layoutIssues(now).length) {
-      const locked = layoutIssues(now).reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
-      const heldMark = layoutIssues(now).filter(i => i.code === 'collision').map(i => i.layers.map(id => byId[id]).find(mk => isMark(mk) && markHeld(mk))).find(Boolean);
+    const fin = validate(L, copy, images, opts); const leftAll = blockingOf(fin).filter(i => !PENDING_CODES[i.code]);
+    if (leftAll.length) {
+      const locked = leftAll.reduce((a, i) => a.concat(i.layers.filter(id => byId[id] && byId[id].locked)), []);
+      const heldMark = leftAll.filter(i => i.code === 'collision' || markBad(i) || i.code === 'mark_clear_space').map(i => i.layers.map(id => byId[id]).find(mk => isMark(mk) && markHeld(mk))).find(Boolean);
       const g = geo(); const longest = Object.keys(g).map(k => g[k]).filter(b => b.type === 'text' && b.chars).sort((a, b) => b.contentH - a.contentH)[0];
-      const left = layoutIssues(now); const textLeft = left.some(i => i.layers.some(id => byId[id] && byId[id].type === 'text' && (i.code === 'text_overflow' || i.code === 'text_too_wide' || i.code === 'collision')));
-      const what = left.map(i => i.code.replace(/_/g, ' ') + ' (' + i.layers.join(', ') + ')').join('; ');
-      return result(locked.length ? 'Locked layers stop the fix: ' + Array.from(new Set(locked)).join(', ') + '. Unlock them, or decide what may move.'
-        : heldMark ? 'The ' + heldMark.role + ' is held by ' + markHeld(heldMark) + ' and the words still run into it (' + what + '); move or shorten the words, the mark stays.'
+      const textLeft = leftAll.some(i => i.layers.some(id => byId[id] && byId[id].type === 'text' && (i.code === 'text_overflow' || i.code === 'text_too_wide' || i.code === 'collision')));
+      const markLeft = leftAll.filter(i => markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region');
+      const readLeft = leftAll.filter(i => /contrast/.test(i.code) && !markBad(i));
+      const what = leftAll.map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ');
+      return result(locked.length ? 'Locked layers stop the fix: ' + Array.from(new Set(locked)).join(', ') + ' (' + what + '). Unlock them, or decide what may move.'
+        : heldMark ? 'The ' + heldMark.role + ' is held by ' + markHeld(heldMark) + ' and ' + (markLeft.length ? 'does not read where the rule puts it' : 'the words still run into it') + ' (' + what + '); no approved variant reads better and no panel beneath it could be extended. Decide: relax the rule for this tile, move the panel by hand, or choose another layout.'
+        : markLeft.length ? 'The ' + markLeft.map(i => (byId[i.layers[0]] || {}).role || 'mark').filter((v, k, a) => a.indexOf(v) === k).join(' and ') + ' still does not read or sit within its constraints (' + what + '): no nearby place, approved variant or supporting panel clears it, and the Studio adds no box, shadow or recolour to a mark. Choose a layout variation, move it by hand, or revise the ground.'
         : textLeft ? 'Geometry alone cannot fit the words without going under the readable minimum (' + what + ').' + (longest ? ' Shorter copy for the ' + (longest.role || 'text') + ' (about ' + Math.max(10, Math.round(longest.chars * 0.75)) + ' characters instead of ' + longest.chars + ') would fit; the Studio does not cut words on its own.' : '')
+        : readLeft.length ? 'Words still do not read against what is behind them (' + what + ') and neither a colour nor a plate was enough or allowed; revise the ground or move the words.'
         : 'The layout still has ' + what + ' and no move within the rules clears it; decide what may move.');
     }
     return result('');
@@ -801,7 +1015,7 @@
   }
   /** The report a browser hands the worker: the measured boxes and the attested measurements, not a verdict (the worker derives that). */
   function report(v, val) {
-    return { renderer: val.renderer, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
+    return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, safeArea: safeAreaOf, validate, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
+  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

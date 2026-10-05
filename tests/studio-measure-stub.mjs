@@ -17,10 +17,14 @@ export function stubReport(version, asset, opts) {
       let lines = 1, cur = 0; t.split(/\s+/).filter(Boolean).forEach(w => { if (cur && cur + 1 + w.length > per) { lines++; cur = w.length; } else cur = cur ? cur + 1 + w.length : w.length; });
       const contentH = lines * px * (l.lineHeight || 1.12) + (l.bg ? px * 0.9 : 0);
       Object.assign(b, { lines, chars: t.length, px, contentH, h: Math.max(contentH, 1), overflowH: !!(b.ah && contentH > b.ah + 0.5), contrast: opts.contrast != null ? opts.contrast : 7 });
-    } else if (l.type === 'img') { b.mark = l.role === 'logo' || l.role === 'wordmark'; b.asset = l.src ? 'loaded' : (b.mark ? 'missing' : 'sketch'); b.src = l.src || ''; if (b.mark) b.contrast = opts.markContrast != null ? opts.markContrast : 6; }
+    } else if (l.type === 'img') {
+      b.mark = l.role === 'logo' || l.role === 'wordmark'; b.asset = l.src ? 'loaded' : (b.mark ? 'missing' : 'sketch'); b.src = l.src || '';
+      // contract 2: a loaded mark reports its per-pixel readability (here: a readable mark unless the case says otherwise)
+      if (b.mark) { b.contrast = opts.markContrast != null ? opts.markContrast : 6; if (b.asset === 'loaded' && opts.markInk !== false) Object.assign(b, { inkN: 400, inkLost: opts.inkLost != null ? opts.inkLost : 0, inkWeak: opts.inkWeak != null ? opts.inkWeak : 0, inkCovered: 0, inkLocal: opts.inkLocal != null ? opts.inkLocal : (opts.markContrast != null ? opts.markContrast : 6), inkMean: opts.markContrast != null ? opts.markContrast : 6, inkRun: opts.inkRun != null ? opts.inkRun : 0, inkWhere: opts.inkWhere || '', inkBoundary: !!opts.inkBoundary }); }
+    }
     return b;
   });
-  return { renderer: 'stub', W, H, production: true, fonts: { roles: {}, fallback: [] }, boxes };
+  return { renderer: 'stub', contract: opts.contract != null ? opts.contract : 2, W, H, production: true, fonts: { roles: {}, fallback: [] }, boxes };
 }
 /** Measure the asset's current version (as a browser would) and file the report; returns the worker's answer. */
 export async function validateAsset(req, project, assetId, opts) {

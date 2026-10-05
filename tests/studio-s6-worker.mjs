@@ -167,7 +167,7 @@ await t('the taught rule holds in production: a composition made for HOOF carrie
   const g = (await req('GET', '/studio/get?id=' + PP)).d; const a = g.assets[0]; const v = a.versions.find(x => x.id === a.current);
   const wm = (v.layout.layers || []).find(l => l.role === 'wordmark'); ok(wm, 'a wordmark layer: ' + JSON.stringify((v.layout.layers || []).map(l => l.role)));
   ok(!(v.layout.layers || []).some(l => l.role === 'logo'), 'never the MCA logo on HOOF');
-  eq(wm.rule, { corner: 'bl', mandatory: true, note: 'the wordmark sits bottom left on every HOOF tile' }, 'the rule rides on the layer');
+  eq(wm.rule, { mandatory: true, note: 'the wordmark sits bottom left on every HOOF tile', basis: 'rule', corner: 'bl' }, 'the rule rides on the layer, with its provenance (a taught rule, not an observation)');
   ok(wm.x < 20 && wm.y > 60, 'bottom left: ' + JSON.stringify({ x: wm.x, y: wm.y }));
   ok(v.layout.markPlacement && v.layout.markPlacement.basis === 'rule', 'the layout says why: ' + JSON.stringify(v.layout.markPlacement));
   const moved = JSON.parse(JSON.stringify(v.layout)); moved.layers.find(l => l.role === 'wordmark').x = 70;

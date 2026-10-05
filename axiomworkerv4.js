@@ -3520,7 +3520,7 @@ function kitStructured(body, cur) {
   // (which mark goes on its tiles: the client logo, the campaign wordmark, both, or none) and an identity note (colours, devices)
   const prev = id => ((cur.campaigns || []).find(x => x && x.id === id) || {});
   out.campaigns = (camps || cur.campaigns || []).map(c => { if (!c || typeof c !== 'object') return null; const id = kitSlug(c.id) || kitSlug(c.name); const was = prev(id); return ({ id, name: pick(c.name, 90), url: pick(c.url, 120), signoff: pick(c.signoff, 160), cta: pick(c.cta, 160),
-    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), markRule: (r => r && ['tl', 'tr', 'bl', 'br'].indexOf(r.corner) >= 0 ? { corner: r.corner, mandatory: !!r.mandatory, note: pick(r.note, 200) } : undefined)(c.markRule !== undefined ? c.markRule : was.markRule), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
+    sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), markRule: stMarkRuleClean(c.markRule !== undefined ? c.markRule : was.markRule), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
   const facts = arr(body.facts, 80);
   out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? ({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }) : null).filter(f => f && f.text);
   const banned = arr(body.banned, 60);
@@ -7828,71 +7828,115 @@ function stWrapLines(text, charsPerLine) {
    (tests/studio-layout-browser.mjs compares them), so the worker derives the verdict from measured boxes exactly as the
    browser does, and a client's own verdict is never taken on trust. */
 /* RULES:BEGIN */
-/* The one safe-area table: the Instagram story interface (top 14%, bottom 20%, 6% sides, hard) and the feed margin (3%,
-   advisory). The rules judge by it, the editor draws its guides from it, the worker places marks inside it. */
-function safeAreaOf(format, channel) {
-  return format === '9:16' && channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
-}
-function layoutRules(boxes, o) {
-  o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
-  var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
-  var tol = Math.max(1, W * 0.0015);
-  var safe = safeAreaOf(o.format, o.channel);
-  if (o.unresolved && o.unresolved.length) add('pixels_unmeasured', o.production ? 'blocking' : 'warning', [], 'the ' + o.unresolved.join(' and ') + ' analysis could not read the pixels (a blocked or tainted canvas); what it would have found is unknown, so this measurement is unresolved, not passed');
-  var live = [], i, j;
-  for (i = 0; i < boxes.length; i++) {
-    var b = boxes[i];
-    if (b.dup) add('duplicate_id', 'blocking', [b.id], 'two layers share the id ' + b.id + '; edits, locks and checks cannot tell them apart');
-    if (b.valid === false) { add('invalid_geometry', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' layer has missing or impossible geometry'); continue; }
-    if (b.hidden || b.empty) continue;
-    if (b.type === 'text' || b.mark) live.push(b);
-    if (b.type === 'text') {
-      if (b.overflowH) add('text_overflow', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' needs ' + Math.round(b.contentH) + ' px over ' + b.lines + ' lines; its box is ' + Math.round(b.ah) + ' px, so it runs into whatever sits below');
-      if (b.overflowW) add('text_too_wide', 'blocking', [b.id], 'a line of the ' + (b.role || 'text') + ' is wider than its box even when broken');
-      if (b.broken) add('word_broken', 'warning', [b.id], 'a word or address in the ' + (b.role || 'text') + ' is too long for the box and is broken across lines');
-      var pct = b.px / W * 100;
-      if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
-      else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
-      if (typeof b.contrast === 'number') { var large = pct >= 4; var want = large ? 3 : 4.5; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < want) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + want + ':1 wanted)');
-        // the mean can hide a bright or dark patch under part of the words: the worst tenth of the ground is judged too
-        if (typeof b.contrastMin === 'number' && b.contrast >= 1.6) { if (b.contrastMin < 1.6) add('patchy_contrast', 'blocking', [b.id], 'part of the ' + (b.role || 'text') + ' sits on a patch of the ground where its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 (the average is ' + b.contrast.toFixed(2) + ':1): those words vanish'); else if (b.contrastMin < want * 0.75) add('patchy_contrast', 'warning', [b.id], 'the ground under the ' + (b.role || 'text') + ' is uneven: its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 on the worst patch (average ' + b.contrast.toFixed(2) + ':1)'); } }
-    }
-    if (b.mark) {
-      if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
-      // the mark is judged by its visible pixels: a box far larger than its ink misleads every placement, and ink under 6% of the
-      // width is not an identity a feed can read
-      if (typeof b.vw === 'number' && b.asset === 'loaded') { if (typeof b.markFill === 'number' && b.markFill < 0.25 && b.vw < b.aw * 0.6) add('mark_padding', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide inside a ' + Math.round(b.aw) + ' px box (' + Math.round(b.markFill * 100) + '% of the box is ink): size, clear space and collisions are judged by the ink, not the box'); if (b.vw < W * 0.06) add('mark_small', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide, under 6% of the stage: too small to read in a feed'); }
-      if (typeof b.contrast === 'number') { if (b.contrast < 1.4) add('mark_unreadable', 'blocking', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < (b.role === 'wordmark' ? 4.5 : 3)) add('mark_low_contrast', 'warning', [b.id], 'the ' + b.role + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + (b.role === 'wordmark' ? '4.5:1 wanted for a mark made of words' : '3:1 wanted') + '); another approved variant may read better'); }
-    }
-    if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
-    if (b.type === 'text' || b.mark) {
-      if (typeof b.opacity === 'number') { if (b.opacity < 0.05) add('invisible', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity: it is not visible'); else if (b.opacity < 0.5) add('faint', 'warning', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity'); }
-      if (typeof b.occluded === 'number') {
-        var cov = (b.occludedBy || []).filter(function (id) { return b.overlaps.indexOf(String(id)) < 0; });
-        if (cov.length || !(b.occludedBy && b.occludedBy.length)) { var cl = [b.id].concat(cov); if (b.occluded >= 0.2) add('occluded', 'blocking', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? 'a later layer (' + cov.join(', ') + ')' : 'later layers')); else if (b.occluded >= 0.05) add('occluded', 'warning', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? cov.join(', ') : 'later layers')); }
+  /* The one safe-area table: the Instagram story interface (top 14%, bottom 20%, 6% sides, hard) and the feed margin (3%,
+     advisory). The rules judge by it, the editor draws its guides from it, the worker places marks inside it. */
+  function safeAreaOf(format, channel) {
+    return format === '9:16' && channel === 'instagram' ? { top: 0.14, bottom: 0.2, side: 0.06, hard: true } : { top: 0.03, bottom: 0.03, side: 0.03, hard: false };
+  }
+  /* A mark's placement constraints, in stage pixels, from the rule it carries (a campaign rule taught in the Brand view, or a
+     rule set on the layer) and the house defaults: clear space around the visible mark (a share of its ink height, default a
+     half), the minimum visible width (per cent of the stage, default 6), a permitted region (per cent of the stage) when one is
+     set, and whether each is mandatory (a blocking matter) or preferred (a warning). The basis says where the rule came from. */
+  function markConstraints(rule, b, W, H) {
+    rule = rule && typeof rule === 'object' ? rule : {};
+    var vh = typeof b.vh === 'number' && b.vh > 0 ? b.vh : (b.ah || 0);
+    var cs = typeof rule.clearSpace === 'number' && rule.clearSpace >= 0 && rule.clearSpace <= 3 ? rule.clearSpace : 0.5;
+    var mw = typeof rule.minWidth === 'number' && rule.minWidth >= 2 && rule.minWidth <= 60 ? rule.minWidth : 6;
+    var reg = rule.region && typeof rule.region === 'object' && typeof rule.region.x === 'number' && typeof rule.region.w === 'number' && rule.region.w > 0 && typeof rule.region.h === 'number' && rule.region.h > 0
+      ? { x: rule.region.x / 100 * W, y: (rule.region.y || 0) / 100 * H, w: rule.region.w / 100 * W, h: rule.region.h / 100 * H } : null;
+    return { clearWant: Math.round(cs * vh * 10) / 10, clearShare: cs, minWant: Math.round(mw / 100 * W), region: reg, ruleMandatory: !!rule.mandatory, ruleBasis: rule.basis || (rule.corner || reg ? 'rule' : 'default'), ruleCorner: rule.corner || '' };
+  }
+  function layoutRules(boxes, o) {
+    o = o || {}; var W = o.W || 1080, H = o.H || 1080; var out = [];
+    var add = function (code, severity, layers, detail) { out.push({ code: code, severity: severity, layers: layers, detail: detail }); };
+    var tol = Math.max(1, W * 0.0015);
+    var safe = safeAreaOf(o.format, o.channel);
+    if (o.unresolved && o.unresolved.length) add('pixels_unmeasured', o.production ? 'blocking' : 'warning', [], 'the ' + o.unresolved.join(' and ') + ' analysis could not read the pixels (a blocked or tainted canvas); what it would have found is unknown, so this measurement is unresolved, not passed');
+    var live = [], i, j;
+    for (i = 0; i < boxes.length; i++) {
+      var b = boxes[i];
+      if (b.dup) add('duplicate_id', 'blocking', [b.id], 'two layers share the id ' + b.id + '; edits, locks and checks cannot tell them apart');
+      if (b.valid === false) { add('invalid_geometry', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' layer has missing or impossible geometry'); continue; }
+      if (b.hidden || b.empty) continue;
+      if (b.type === 'text' || b.mark) live.push(b);
+      if (b.type === 'text') {
+        if (b.overflowH) add('text_overflow', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' needs ' + Math.round(b.contentH) + ' px over ' + b.lines + ' lines; its box is ' + Math.round(b.ah) + ' px, so it runs into whatever sits below');
+        if (b.overflowW) add('text_too_wide', 'blocking', [b.id], 'a line of the ' + (b.role || 'text') + ' is wider than its box even when broken');
+        if (b.broken) add('word_broken', 'warning', [b.id], 'a word or address in the ' + (b.role || 'text') + ' is too long for the box and is broken across lines');
+        var pct = b.px / W * 100;
+        if (pct < 1.8) add('unreadable_type', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width: under 6 px when a feed shows the tile at about 360 px');
+        else if (pct < 2.4) add('small_type', 'warning', [b.id], 'the ' + (b.role || 'text') + ' is ' + pct.toFixed(1) + '% of the width, under the 2.4% feed minimum');
+        if (typeof b.contrast === 'number') { var large = pct >= 4; var want = large ? 3 : 4.5; if (b.contrast < 1.6) add('unreadable_contrast', 'blocking', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it'); else if (b.contrast < want) add('low_contrast', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has a contrast of ' + b.contrast.toFixed(2) + ':1 against what is behind it (' + want + ':1 wanted)');
+          // the mean can hide a bright or dark patch under part of the words: the worst tenth of the ground is judged too
+          if (typeof b.contrastMin === 'number' && b.contrast >= 1.6) { if (b.contrastMin < 1.6) add('patchy_contrast', 'blocking', [b.id], 'part of the ' + (b.role || 'text') + ' sits on a patch of the ground where its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 (the average is ' + b.contrast.toFixed(2) + ':1): those words vanish'); else if (b.contrastMin < want * 0.75) add('patchy_contrast', 'warning', [b.id], 'the ground under the ' + (b.role || 'text') + ' is uneven: its contrast falls to ' + b.contrastMin.toFixed(2) + ':1 on the worst patch (average ' + b.contrast.toFixed(2) + ':1)'); } }
       }
-      if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
-      else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top ' + Math.round(safe.top * 100) + '%, bottom ' + Math.round(safe.bottom * 100) + '%)' : 'inside the ' + Math.round(safe.side * 100) + '% margin'));
+      if (b.mark) {
+        if (b.asset !== 'loaded') add('mark_unloaded', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' image did not load; a placeholder is drawn in its place');
+        // the mark is judged by its visible pixels: a box far larger than its ink misleads every placement, and ink under the
+        // minimum width (6% of the stage, or the rule's own) is not an identity a feed can read
+        if (typeof b.vw === 'number' && b.asset === 'loaded') {
+          var minW = typeof b.minWant === 'number' ? b.minWant : W * 0.06;
+          if (typeof b.markFill === 'number' && b.markFill < 0.25 && b.vw < b.aw * 0.6) add('mark_padding', 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide inside a ' + Math.round(b.aw) + ' px box (' + Math.round(b.markFill * 100) + '% of the box is ink): size, clear space and collisions are judged by the ink, not the box');
+          if (b.vw < minW) add('mark_small', b.ruleMandatory && typeof b.minWant === 'number' ? 'blocking' : 'warning', [b.id], 'the visible ' + b.role + ' is ' + Math.round(b.vw) + ' px wide, under ' + Math.round(minW / W * 100) + '% of the stage' + (b.ruleBasis === 'rule' ? ' (the campaign rule\'s minimum)' : '') + ': too small to read in a feed');
+          // the permitted region, when the rule names one: the ink must lie inside it
+          if (b.region && (b.x < b.region.x - tol || b.y < b.region.y - tol || b.x + b.w > b.region.x + b.region.w + tol || b.y + b.h > b.region.y + b.region.h + tol)) add('mark_outside_region', b.ruleMandatory ? 'blocking' : 'warning', [b.id], 'the ' + b.role + ' sits outside the placement region the ' + (b.ruleMandatory ? 'rule' : 'preference') + ' allows (' + Math.round(b.region.x / W * 100) + ',' + Math.round(b.region.y / H * 100) + ' to ' + Math.round((b.region.x + b.region.w) / W * 100) + ',' + Math.round((b.region.y + b.region.h) / H * 100) + '% of the stage)');
+        }
+        /* readability per pixel (contract 2): the mark's visible strokes against the ground actually behind each of them, the
+           layer's opacity composited in, transparent padding excluded, strokes covered by a later layer counted as lost. A
+           wordmark is lettering: a stroke under 2:1 locally is lost and under 3:1 weak; a graphic symbol survives less (1.6 / 2.5).
+           The judgment is on the share of ink lost and on its extent (a quarter of the mark's length unreadable in one stretch
+           is a mark a reader cannot complete), never on one average that a split ground can satisfy. */
+        if (b.asset === 'loaded') {
+          if (typeof b.inkLost === 'number') {
+            var wm = b.role === 'wordmark'; var wantM = wm ? 3 : 2.5;
+            var where = b.inkWhere ? ' - the ' + b.inkWhere + ' of the ' + b.role : '';
+            var split = b.inkBoundary ? ': it crosses a light/dark boundary' : '';
+            var worst = typeof b.inkLocal === 'number' ? '; worst local contrast ' + b.inkLocal.toFixed(2) + ':1' : '';
+            var covered = typeof b.inkCovered === 'number' && b.inkCovered >= 0.05 ? ', ' + Math.round(b.inkCovered * 100) + '% painted over by later layers' : '';
+            if (b.inkLost >= 0.12 || (typeof b.inkRun === 'number' && b.inkRun >= 0.25)) add('mark_unreadable', 'blocking', [b.id], Math.round(b.inkLost * 100) + '% of the ' + b.role + '\'s visible strokes do not read against what is behind them' + split + where + worst + covered + ' (measured per pixel, not an average)');
+            else if (b.inkLost >= 0.04 || (typeof b.inkWeak === 'number' && b.inkWeak >= 0.3) || (typeof b.inkLocal === 'number' && b.inkLocal < wantM)) add('mark_low_contrast', 'warning', [b.id], 'parts of the ' + b.role + ' read weakly: ' + Math.round((b.inkWeak || 0) * 100) + '% of its strokes under ' + wantM + ':1' + (b.inkLost ? ', ' + Math.round(b.inkLost * 100) + '% lost' : '') + split + where + worst + '; another approved variant or a quieter ground may read better');
+          } else if (o.unresolved && o.unresolved.length) { /* said once by pixels_unmeasured */ }
+          else add('mark_unmeasured', o.production ? 'blocking' : 'warning', [b.id], 'the ' + b.role + '\'s readability was not measured per pixel (an older measurement, or one made without its image): unknown, not passed');
+        }
+      }
+      if (b.type === 'text' && b.bg && b.emphasis === 'box') add('double_styling', 'warning', [b.id], 'the ' + (b.role || 'text') + ' has both a filled plate and a box outline: one device is enough (the outline is drawn around the plate, never wider)');
+      if (b.type === 'img' && !b.mark && b.asset !== 'loaded') add('imagery_sketch', o.production ? 'blocking' : 'warning', [b.id], 'image region ' + b.id + ' is still a sketch: its image has not been made or did not load');
+      if (b.type === 'text' || b.mark) {
+        if (typeof b.opacity === 'number') { if (b.opacity < 0.05) add('invisible', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity: it is not visible'); else if (b.opacity < 0.5) add('faint', 'warning', [b.id], 'the ' + (b.role || b.type) + ' is drawn at ' + Math.round(b.opacity * 100) + '% opacity'); }
+        if (typeof b.occluded === 'number') {
+          var cov = (b.occludedBy || []).filter(function (id) { return b.overlaps.indexOf(String(id)) < 0; });
+          if (cov.length || !(b.occludedBy && b.occludedBy.length)) { var cl = [b.id].concat(cov); if (b.occluded >= 0.2) add('occluded', 'blocking', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? 'a later layer (' + cov.join(', ') + ')' : 'later layers')); else if (b.occluded >= 0.05) add('occluded', 'warning', cl, Math.round(b.occluded * 100) + '% of the ' + (b.role || b.type) + ' is painted over by ' + (cov.length ? cov.join(', ') : 'later layers')); }
+        }
+        if (b.x < -0.5 || b.y < -0.5 || b.x + b.w > W + 0.5 || b.y + b.h > H + 0.5) add('off_canvas', 'blocking', [b.id], 'the ' + (b.role || b.type) + ' runs off the edge of the stage');
+        else if (b.x < W * safe.side - 0.5 || b.x + b.w > W * (1 - safe.side) + 0.5 || b.y < H * safe.top - 0.5 || b.y + b.h > H * (1 - safe.bottom) + 0.5) add('safe_area', safe.hard ? 'blocking' : 'warning', [b.id], 'the ' + (b.role || b.type) + ' sits ' + (safe.hard ? 'under the story interface (top ' + Math.round(safe.top * 100) + '%, bottom ' + Math.round(safe.bottom * 100) + '%)' : 'inside the ' + Math.round(safe.side * 100) + '% margin'));
+      }
     }
-  }
-  for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
-    var a = live[i], c = live[j];
-    if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
-    var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
-    if (iw > tol && ih > tol) {
-      var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
-      add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
+    for (i = 0; i < live.length; i++) for (j = i + 1; j < live.length; j++) {
+      var a = live[i], c = live[j];
+      if (a.overlaps.indexOf(c.id) >= 0 || c.overlaps.indexOf(a.id) >= 0) continue;
+      var iw = Math.min(a.x + a.w, c.x + c.w) - Math.max(a.x, c.x), ih = Math.min(a.y + a.h, c.y + c.h) - Math.max(a.y, c.y);
+      if (iw > tol && ih > tol) {
+        var kind = a.type === 'text' && c.type === 'text' ? 'text' : a.mark && c.mark ? 'marks' : 'text_mark';
+        add('collision', 'blocking', [a.id, c.id], 'the ' + (a.role || a.type) + ' and the ' + (c.role || c.type) + ' overlap by ' + Math.round(iw) + ' x ' + Math.round(ih) + ' px' + (kind === 'text_mark' ? ' (words over a mark)' : kind === 'marks' ? ' (two marks)' : ''));
+      } else if ((a.mark || c.mark) && (a.type === 'text' || c.type === 'text' || (a.mark && c.mark))) {
+        // clear space around a mark's ink: the separation from any words, URL, CTA or other mark, judged against the share of
+        // the mark's own height its rule asks for (mandatory: blocking; preferred or the house default: a warning)
+        var mk = a.mark ? a : c, ot = a.mark ? c : a; var want = typeof mk.clearWant === 'number' ? mk.clearWant : 0;
+        if (want > 0) {
+          var gx = Math.max(ot.x - (mk.x + mk.w), mk.x - (ot.x + ot.w)), gy = Math.max(ot.y - (mk.y + mk.h), mk.y - (ot.y + ot.h)); var gap = Math.max(gx, gy);
+          if (gap < want - tol) add('mark_clear_space', mk.ruleMandatory ? 'blocking' : 'warning', [mk.id, ot.id], 'the ' + (ot.role || ot.type) + ' sits ' + Math.round(Math.max(0, gap)) + ' px from the ' + mk.role + '\'s visible edge; the ' + (mk.ruleBasis === 'rule' ? 'campaign rule' : 'house default') + ' asks for ' + Math.round(want) + ' px of clear space (' + Math.round((mk.clearShare || 0.5) * 100) + '% of the mark\'s height)');
+        }
+      }
     }
+    if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
+    // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
+    (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
+    if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
+    var rank = { blocking: 0, warning: 1, info: 2 };
+    out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
+    return out;
   }
-  if (o.imageryMissing) add('imagery_missing', o.production ? 'blocking' : 'warning', [], 'the composition expects imagery that is not on file yet');
-  // a likely subject of the photograph under the words or a panel: a warning that carries its confidence (saliency, not detection)
-  (o.subjects || []).forEach(function (s) { if (s && typeof s.covered === 'number' && s.covered >= 0.35 && s.by && s.by.length) add('subject_covered', 'warning', s.by.slice(0, 4), Math.round(s.covered * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%: a colour-and-edge estimate, not detection) is under ' + s.by.join(', ') + '; reframe the photograph or move the words'); else if (s && typeof s.cropped === 'number' && s.cropped >= 0.5) add('subject_cropped', 'warning', [], Math.round(s.cropped * 100) + '% of a likely subject of the photograph (' + (s.id || 'subject') + ', confidence ' + Math.round((s.confidence || 0) * 100) + '%) falls outside the crop'); });
-  if (o.fonts && o.fonts.fallback && o.fonts.fallback.length) add('font_fallback', 'warning', [], 'fonts not available where this was drawn: ' + o.fonts.fallback.join('; '));
-  var rank = { blocking: 0, warning: 1, info: 2 };
-  out.sort(function (x, y) { return rank[x.severity] - rank[y.severity]; });
-  return out;
-}
-/* RULES:END */
+  /* RULES:END */
 /** Does the text fit its layer? Sizes are per cent of the stage width, heights per cent of the stage height. */
 function stFit(layout, copy, format) {
   const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const out = [];
@@ -9132,6 +9176,30 @@ function stCornerPos(corner, format, w) {
   return { tl: { x: si.side, y: si.top }, tr: { x: 100 - si.side - lw, y: si.top }, bl: { x: si.side, y: 100 - si.bottom - lh }, br: { x: 100 - si.side - lw, y: 100 - si.bottom - lh } }[corner] || null;
 }
 const ST_MARK_POLICIES = ['logo', 'wordmark', 'both', 'none'];
+/* A campaign's mark placement rule, sanitised: the corner it lives in (or a permitted region in per cent of the stage), whether
+   it is mandatory (held: the editor, the layer ops and /studio/version refuse to move it) or preferred (a warning when broken),
+   the clear space around the visible mark as a share of its height, the minimum visible width as a per cent of the stage, and a
+   note. A rule needs a corner or a region to exist; the rest are optional and fall to the house defaults when left out. */
+function stMarkRuleClean(r) {
+  if (!r || typeof r !== 'object') return undefined;
+  const corner = ['tl', 'tr', 'bl', 'br'].indexOf(r.corner) >= 0 ? r.corner : '';
+  const num = (v, lo, hi) => (typeof v === 'number' && isFinite(v) && v >= lo && v <= hi) ? Math.round(v * 100) / 100 : undefined;
+  const reg = r.region && typeof r.region === 'object' ? { x: num(r.region.x, 0, 100), y: num(r.region.y, 0, 100), w: num(r.region.w, 1, 100), h: num(r.region.h, 1, 100) } : null;
+  const region = reg && reg.x != null && reg.y != null && reg.w != null && reg.h != null && reg.x + reg.w <= 100.01 && reg.y + reg.h <= 100.01 ? reg : undefined;
+  if (!corner && !region) return undefined;
+  const out = { corner: corner || undefined, mandatory: !!r.mandatory, note: String(r.note == null ? '' : r.note).slice(0, 200) };
+  const cs = num(r.clearSpace, 0, 3), mw = num(r.minWidth, 2, 60);
+  if (cs != null) out.clearSpace = cs; if (mw != null) out.minWidth = mw; if (region) out.region = region;
+  if (r.basis === 'preferred' || r.basis === 'inferred' || r.basis === 'rule') out.basis = r.basis;
+  return out;
+}
+/** The rule as it rides on a mark layer: what the renderer's rules and the editor read, with its basis named. */
+function stLayerRule(rule) {
+  const r = stMarkRuleClean(rule); if (!r) return undefined;
+  const out = { mandatory: !!r.mandatory, note: r.note || '', basis: r.basis || (r.mandatory ? 'rule' : 'preferred') };
+  if (r.corner) out.corner = r.corner; if (r.region) out.region = r.region; if (r.clearSpace != null) out.clearSpace = r.clearSpace; if (r.minWidth != null) out.minWidth = r.minWidth;
+  return out;
+}
 function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   opts = opts || {}; kit = kit || {}; const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const aspect = f.w / f.h;
   const camp = (kit.campaigns || []).find(c => c.id === campaign) || null;
@@ -9151,8 +9219,9 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
     const pick = vars.length ? (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
     layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - (opts.w || 24)), y: at.y, w: opts.w || 24, h: Math.round(8 * aspect * ((opts.w || 24) / 24) * 10) / 10, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
   } else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
-  // a mandatory campaign rule rides on the mark layers themselves, so the editor, the layer ops and /studio/version hold the mark wherever the layout travels
-  if (opts.rule && opts.rule.mandatory && ST_CORNER_WORDS[opts.rule.corner]) layers.forEach(l => { l.rule = { corner: opts.rule.corner, mandatory: true, note: opts.rule.note || '' }; });
+  // the campaign rule rides on the mark layers themselves - mandatory (held: the editor, the layer ops and /studio/version hold
+  // the mark wherever the layout travels) or preferred (its clear space, region and size are judged as warnings)
+  const lr = stLayerRule(opts.rule); if (lr) layers.forEach(l => { l.rule = lr; });
   return { layers, policy, notes, campaign: camp, incomplete, overridden, placement: pos ? (opts.rule && opts.rule.mandatory ? { corner: opts.rule.corner, basis: 'rule', text: 'the approved placement rule' + (opts.rule.note ? ': ' + opts.rule.note : '') } : { corner: 'given', basis: 'plan', x: pos.x, y: pos.y, w: lw }) : placement ? { corner: placement.corner, basis: placement.basis, text: placement.text } : { corner: 'br', basis: 'default' } };
 }
 // -- P19: freeform everywhere ---------------------------------------------------------------------------------
@@ -9799,7 +9868,7 @@ async function brTeach(env, ns, body, who) {
   if (kind === 'placement') {
     if (!cid) return { error: 'campaign_required', status: 400, detail: 'A placement rule belongs to a campaign: name it.' };
     const corner = proposal.corner; if (!ST_CORNER_WORDS[corner]) return { error: 'corner_required', status: 400, detail: 'corner is tl, tr, bl or br' };
-    const rule = { corner, mandatory: proposal.mandatory !== false, note: stStr(proposal.note, 200) };
+    const rule = stMarkRuleClean({ corner, mandatory: proposal.mandatory !== false, note: stStr(proposal.note, 200), clearSpace: proposal.clearSpace, minWidth: proposal.minWidth, region: proposal.region });
     const ws = await brandWorkspace(env, ns, cid); const ev = ws.placement.evidence || [];
     let n = 0; try { n = (await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_assets a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND p.campaign=?').bind(ns, cid).first() || {}).n || 0; } catch (e) {}
     const text = ST_CORNER_WORDS[corner] + (rule.mandatory ? ', mandatory: the mark is held there on every ' + (camp.name || cid) + ' composition and /studio/version refuses to move it' : ', preferred: the plan may move it and says so') + (rule.note ? ' (' + rule.note + ')' : '');
@@ -10366,14 +10435,19 @@ function stCompSig(a, v, kit) {
   kit = kit || {}; const L = (v && v.layout) || {};
   const marks = (Array.isArray(L.layers) ? L.layers : []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')).map(l => l.src || '');
   const campaignMarks = (kit.campaigns || []).map(c => [c.id, c.wordmarkV || '', (c.wordmarks || []).map(w => w.variant + ':' + w.v).join(',')]);
-  return stSigHash(JSON.stringify([stSig('design', v), a.format, L.stage || null, marks, kit.logoV || (kit.hasLogo ? 'legacy:' + (kit.logoMime || '') : ''), campaignMarks, L.fonts || null]));
+  // the validation contract is part of the signature: evidence filed under an older contract reads as stale, never as a pass
+  return stSigHash(JSON.stringify([stSig('design', v), a.format, L.stage || null, marks, kit.logoV || (kit.hasLogo ? 'legacy:' + (kit.logoMime || '') : ''), campaignMarks, L.fonts || null, 'contract:' + ST_VALIDATION_CONTRACT]));
 }
 const ST_TOL_PX = 1.6;
+/* The validation contract the worker judges (mirrors CONTRACT in docs/studio-render.js): 2 = mark readability per pixel, mark
+   constraints, double styling. A report from another contract is refused with the reason. */
+const ST_VALIDATION_CONTRACT = 2;
 /** Re-judge a browser's measurement report against the version it claims to be about; problems mean the report is refused. */
 function stValidationJudge(a, v, rep) {
   const L = (v && v.layout) || {}; const stage = L.stage || ST_FORMATS[a.format] || { w: 1080, h: 1080 }; const W = stage.w, H = stage.h;
   const problems = [];
   if (!rep || typeof rep !== 'object' || !Array.isArray(rep.boxes)) return { problems: ['no measurement report'], issues: [], ok: false, W, H };
+  if (Number(rep.contract) !== ST_VALIDATION_CONTRACT) problems.push('the report follows validation contract ' + (rep.contract == null ? '1 (none stated)' : rep.contract) + '; this worker judges contract ' + ST_VALIDATION_CONTRACT + ' (mark readability per pixel): reload the page and measure again');
   if (Number(rep.W) !== W || Number(rep.H) !== H) problems.push('measured at ' + rep.W + 'x' + rep.H + '; the output size is ' + W + 'x' + H);
   const num = x => typeof x === 'number' && isFinite(x);
   const seen = {}; const boxes = []; const ids = new Set(); const unmeasured = [];
@@ -10399,7 +10473,7 @@ function stValidationJudge(a, v, rep) {
       if (lines < minLines) problems.push('the ' + (l.role || 'text') + ' was reported on ' + lines + ' line' + (lines === 1 ? '' : 's') + '; at ' + l.size + '% of the width it cannot take fewer than ' + minLines);
       const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * (l.lineHeight || 1.12));
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
-      Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken });
+      Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken, bg: l.bg || '', emphasis: l.emphasis || '' });
       if (num(rb.contrast)) b.contrast = rb.contrast; else unmeasured.push(id);
       if (num(rb.contrastMin)) b.contrastMin = rb.contrastMin;
       if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }
@@ -10417,6 +10491,17 @@ function stValidationJudge(a, v, rep) {
       }
       if (num(rb.contrast)) b.contrast = rb.contrast;
       if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }
+      if (isMark) {
+        // the mark's constraints come from the layer's rule, never from the report; its per-pixel readability comes from the
+        // report, bounded to what the measure can mean, and a loaded mark reported without it is unmeasured (unresolved, not passed)
+        Object.assign(b, markConstraints(l.rule, b, W, H));
+        const share = x => Math.max(0, Math.min(1, Number(x)));
+        if (b.asset === 'loaded') {
+          if (num(rb.inkLost) && num(rb.inkLocal)) { b.inkLost = share(rb.inkLost); b.inkWeak = num(rb.inkWeak) ? share(rb.inkWeak) : 0; b.inkCovered = num(rb.inkCovered) ? share(rb.inkCovered) : 0; b.inkRun = num(rb.inkRun) ? share(rb.inkRun) : 0; b.inkLocal = Math.max(1, Math.min(21, Number(rb.inkLocal))); b.inkMean = num(rb.inkMean) ? Math.max(1, Math.min(21, Number(rb.inkMean))) : undefined; b.inkWhere = stStr(rb.inkWhere, 20); b.inkBoundary = !!rb.inkBoundary; b.inkN = num(rb.inkN) ? Math.round(rb.inkN) : undefined; if (Array.isArray(rb.inkGround)) b.inkGround = rb.inkGround.slice(0, 2).map(Number); }
+          else unmeasured.push(id);
+        }
+        if (rb.multicolour != null) b.multicolour = !!rb.multicolour;
+      }
     }
     boxes.push(b);
   });
@@ -10424,8 +10509,10 @@ function stValidationJudge(a, v, rep) {
   const imageryMissing = !v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image));
   const fonts = rep.fonts && typeof rep.fonts === 'object' ? { fallback: (Array.isArray(rep.fonts.fallback) ? rep.fonts.fallback : []).map(s => stStr(s, 160)).slice(0, 6), roles: rep.fonts.roles && typeof rep.fonts.roles === 'object' ? rep.fonts.roles : undefined } : null;
   // what the browser could not analyse: what it says it could not, plus any live words it reported with no contrast at all
-  const unresolved = (Array.isArray(rep.unresolved) ? rep.unresolved : []).map(s => stStr(s, 20)).filter(s => /^(contrast|occlusion)$/.test(s));
-  if (unmeasured.length && unresolved.indexOf('contrast') < 0) unresolved.push('contrast');
+  const unresolved = (Array.isArray(rep.unresolved) ? rep.unresolved : []).map(s => stStr(s, 20)).filter(s => /^(contrast|occlusion|mark readability)$/.test(s));
+  const unmeasuredMarks = unmeasured.filter(id => boxes.some(b => b.id === id && b.mark)), unmeasuredText = unmeasured.filter(id => !boxes.some(b => b.id === id && b.mark));
+  if (unmeasuredText.length && unresolved.indexOf('contrast') < 0) unresolved.push('contrast');
+  if (unmeasuredMarks.length && unresolved.indexOf('mark readability') < 0) unresolved.push('mark readability');
   // the photograph's likely subjects as the browser estimated them (a warning at most; the confidence travels with it)
   const subjects = (Array.isArray(rep.subjects) ? rep.subjects : []).slice(0, 3).map(s => s && typeof s === 'object' ? { id: stStr(s.id, 8), covered: Math.max(0, Math.min(1, Number(s.covered) || 0)), cropped: Math.max(0, Math.min(1, Number(s.cropped) || 0)), by: (Array.isArray(s.by) ? s.by : []).map(String).filter(id => ids.has(id)).slice(0, 6), confidence: Math.max(0, Math.min(1, Number(s.confidence) || 0)) } : null).filter(Boolean);
   const issues = layoutRules(boxes, { W, H, format: a.format, channel: a.channel, production: true, fonts, imageryMissing, unresolved, subjects });
@@ -10446,7 +10533,7 @@ async function stValidationSubmit(env, pair, body, who) {
   const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
   const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
   const id = stId('val'); const now = Date.now();
-  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, contrastMin: b.contrastMin, asset: b.asset, opacity: b.opacity, occluded: b.occluded, vw: b.vw != null ? Math.round(b.vw) : undefined, vh: b.vh != null ? Math.round(b.vh) : undefined, markFill: b.markFill })), unresolved: j.unresolved };
+  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), contract: ST_VALIDATION_CONTRACT, W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, contrastMin: b.contrastMin, asset: b.asset, opacity: b.opacity, occluded: b.occluded, vw: b.vw != null ? Math.round(b.vw) : undefined, vh: b.vh != null ? Math.round(b.vh) : undefined, markFill: b.markFill, inkLost: b.inkLost, inkWeak: b.inkWeak, inkCovered: b.inkCovered, inkLocal: b.inkLocal, inkRun: b.inkRun, inkWhere: b.inkWhere, inkBoundary: b.inkBoundary, clearWant: b.clearWant, ruleBasis: b.ruleBasis, ruleMandatory: b.ruleMandatory })), unresolved: j.unresolved };
   await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now).run();
   try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
   const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
