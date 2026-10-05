@@ -7612,7 +7612,11 @@ async function stClaude(env, o) {
     if (!rv.ok) throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)');
     let r;
     try { r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined }); } catch (e) { await aiSettle(env, 'studio', false); throw e; }
-    const d = await r.json().catch(() => ({}));
+    // the body is read as text first: a gateway page (HTTP 502 / 504 / 524 as HTML), an empty body or a cut-off stream is an
+    // upstream failure with its status and an excerpt, never an "empty answer" that looks like the model's own
+    const raw = await r.text().catch(() => ''); let d = {}; try { d = JSON.parse(raw); } catch (e) { d = {}; }
+    if (!d || typeof d !== 'object') d = {};
+    if (!d.error && (!r.ok || !Array.isArray(d.content))) d = { error: { type: 'upstream_' + r.status, message: 'HTTP ' + r.status + ' from the model API ' + (Array.isArray(d.content) ? 'with an unexpected body' : 'without a JSON answer') + (raw ? ' - ' + raw.replace(/\s+/g, ' ').trim().slice(0, 140) : ' (empty body)') + (r.ok ? '' : '; the request is retried') } };
     await aiSettle(env, 'studio', r.ok && !d.error, d.usage);
     // a job cancelled or taken over while this call was in flight files nothing from its answer
     if (o.log && o.log.fence) await o.log.fence();
@@ -7641,6 +7645,9 @@ async function stClaude(env, o) {
   }
   const text = (res.d.content || []).filter(x => x.type === 'text').map(x => x.text).join('').trim();
   if (res.d.stop_reason === 'refusal') throw new Error('refusal: the model declined this request (not retried)');
+  // an answer with no text at all (thinking blocks only, or an empty content list) is the provider's failure, said with the facts
+  // the response carried - stop reason, output tokens, block types - and retried like any other transient failure
+  if (!text) { const blocks = (res.d.content || []).map(x => x.type).join(', ') || 'none'; const u = res.d.usage || {}; rec.error = 'empty answer (stop ' + (res.d.stop_reason || '?') + ', blocks ' + blocks + ')'; if (o.log) await o.log('err', 'the model answered with no text: stop_reason ' + (res.d.stop_reason || 'none') + ', content blocks ' + blocks + ', output tokens ' + (u.output_tokens == null ? '?' : u.output_tokens)); throw new Error('overloaded: the model answered with no text (stop_reason ' + (res.d.stop_reason || 'none') + ', content blocks ' + blocks + ', output tokens ' + (u.output_tokens == null ? '?' : u.output_tokens) + '); the request is retried'); }
   return { text, model, usage: res.d.usage || {} };
 }
 // -- what the Studio knows about the client: the kit, the rules, the shelf, the examples -----------------

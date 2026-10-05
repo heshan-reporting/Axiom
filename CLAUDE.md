@@ -1914,7 +1914,15 @@ opinion and human approval stay distinct beneath it. The client's palette
 primary is a restrained accent (`--st-client`). Harnesses:
 `studio-marks-browser.mjs` (35), `studio-s11-worker.mjs` (8),
 `studio-s11-browser.mjs` (9, with before and after screenshots at 1366 x 768
-and 1920 x 1080 in `tests/shots/`).
+and 1920 x 1080 in `tests/shots/`). **A provider answer that is not the
+model's is never an "empty answer":** `stClaude` reads the body as text first,
+so a gateway page in place of JSON (HTTP 502 / 504 / 524 as HTML) becomes
+`overloaded: HTTP <status> ... without a JSON answer` with an excerpt, and a
+200 whose content has no text block (thinking only, or an empty list) becomes
+`overloaded: the model answered with no text (stop_reason, blocks, output
+tokens)`, logged on the job; both are transient, so the job retries up to its
+three attempts instead of failing a concepts run as `concepts_unparseable`
+(not retried) on nothing (the 6 October screenshot).
 
 Phase 1, the ground:
 

@@ -27,6 +27,9 @@ globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: png(9) } }] } }] }), { status: 200 });
   if (u.indexOf('api.anthropic.com/v1/messages') >= 0) {
+    // the provider's failure modes, switched by the case: a gateway page instead of JSON, an answer with no text block
+    if (globalThis.__anthMode === 'gateway') return new Response('<html><head><title>524 A timeout occurred</title></head><body>cloudflare</body></html>', { status: 524, headers: { 'content-type': 'text/html' } });
+    if (globalThis.__anthMode === 'thinking-only') return new Response(JSON.stringify({ content: [{ type: 'thinking', thinking: '...' }], stop_reason: 'end_turn', usage: { output_tokens: 1200 } }), { status: 200 });
     const body = JSON.parse(init.body); const sys = String(body.system || '');
     const user = typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
     let text = '{}';
@@ -148,6 +151,18 @@ await t('Teach this brand carries the new fields: a confirmed placement proposal
   eq(w.ok, true, JSON.stringify(w)); eq(w.written, true);
   const kit = (await req('GET', '/brand/kit?ns=mca', null, 'read-key')).d.kit; eq(kit.campaigns.find(c => c.id === 'hoof').markRule, { corner: 'bl', mandatory: true, note: 'the wordmark sits in the footer band', clearSpace: 0.6, minWidth: 8, region: { x: 0, y: 84, w: 100, h: 16 } });
   const ws = (await req('GET', '/brand/workspace?ns=mca&campaign=hoof', null, 'read-key')).d; eq([ws.placement.basis, ws.placement.corner, ws.placement.mandatory], ['rule', 'bl', true]);
+});
+
+await t('a provider answer that is not the model\'s - a gateway page in place of JSON, or a reply with no text block - is named with its facts and retried, never reported as the model\'s "empty answer"', async () => {
+  const { stClaude } = mod.__test; const env2 = Object.assign({}, env);
+  globalThis.__anthMode = 'gateway';
+  let e1 = null; try { await stClaude(env2, { role: 'creative', system: 's', user: 'u', maxTok: 500 }); } catch (e) { e1 = String(e.message); }
+  ok(e1 && /^overloaded: HTTP 524/.test(e1) && /without a JSON answer/.test(e1) && /524 A timeout occurred/.test(e1) && !/not retried/.test(e1), 'the gateway page is an upstream failure with its status, retried: ' + e1);
+  globalThis.__anthMode = 'thinking-only';
+  let e2 = null; try { await stClaude(env2, { role: 'creative', system: 's', user: 'u', maxTok: 500 }); } catch (e) { e2 = String(e.message); }
+  ok(e2 && /^overloaded: the model answered with no text/.test(e2) && /stop_reason end_turn/.test(e2) && /blocks thinking/.test(e2) && /output tokens 1200/.test(e2) && !/not retried/.test(e2), 'an answer with no text block names the stop reason, the blocks and the tokens, and is retried: ' + e2);
+  globalThis.__anthMode = '';
+  const r = await stClaude(env2, { role: 'creative', system: 's', user: 'u', maxTok: 500 }); ok(typeof r.text === 'string' && r.text.length > 0, 'a real answer still comes back as text');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
