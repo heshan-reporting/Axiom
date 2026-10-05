@@ -50,6 +50,7 @@ await T.t('the reported tile opens Blocked: the top issue (mark unreadable, the 
   const state = await page.$eval(R + '.st-qstate', el => el.dataset.state); eq(state, 'blocked');
   const top = await page.textContent(R + '.st-qtop'); ok(/mark unreadable/.test(top) && /wordmark/.test(top) && /do not read/.test(top), 'the top issue: ' + top.replace(/\s+/g, ' ').slice(0, 200));
   ok(await page.$(R + '.st-qtop .st-qact:has-text("Fix layout")'), 'the remedy is offered beside the issue');
+  eq(await page.$$eval(R + '.st-readystrip button:has-text("Fix layout")', b => b.length), 1, 'Fix layout is offered once, beside the issue, not again in the action row');
   eq(await page.$(R + '.st-stage .st-comp .st-comp-tag'), null, 'nothing is written over the artwork');
   const info = await page.textContent(R + '.st-comp-info .st-comp-tag'); ok(/editable composition/.test(info), 'the composition facts sit under the stage: ' + info);
   await page.waitForFunction(() => /Technical validation\s*failed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
@@ -175,6 +176,42 @@ await T.t('a render filed on the type-only Story (the ground that hides it still
   const after = await px(); ok(after[0] > 180, 'the photograph (cream) is drawn after: ' + after.join(','));
   ok(!/IMAGERY HIDDEN/.test(await p3.textContent(R + '.st-comp-info .st-comp-tag')), 'the facts no longer say hidden');
   ok(!p3.errors.length, 'no page errors: ' + p3.errors.join(' | ')); await p3.ctxB.close();
+});
+
+await T.t('a fix that cannot clear what blocks says so once: the outcome, a compact count naming only the kinds left, the renderer\'s verdict, "Nothing was saved", and the next steps as buttons (Move it by hand opens the editor; Layout variations with its pass count) - no second sentence of generic advice', async () => {
+  // the Story now shows the cream photograph under white words; locking the headline leaves the fix no colour it may change
+  const { a: s0, v: s1 } = await cur(S);
+  const L2 = JSON.parse(JSON.stringify(s1.layout)); L2.layers.forEach(l => { if (l.type === 'text') l.locked = true; });
+  const lv = await api('POST', '/studio/version', { asset: S, revision: s0.revision, layout: L2, kind: 'layout', note: 'words locked for the blocked-fix case' }); eq(lv._status, 200, JSON.stringify(lv));
+  const p4 = await fx.open({ viewport: { width: 1366, height: 768 }, quiet: true });
+  await p4.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p4.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
+  await p4.waitForSelector(R + '.st-railbtn.asset:has-text("Story")', { timeout: 20000 }); await p4.click(R + '.st-railbtn.asset:has-text("Story")');
+  await p4.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
+  await p4.waitForFunction(() => { const q = document.querySelector('#studio-root .st-qstate'); return q && q.dataset.state === 'blocked' && !/Measuring/.test(q.textContent); }, null, { timeout: 30000 });
+  await p4.waitForSelector(R + '.st-readystrip button:has-text("Fix layout")', { timeout: 30000 });
+  eq(await p4.$$eval(R + '.st-readystrip button:has-text("Fix layout")', b => b.length), 1, 'one Fix layout button (top issue: ' + (await p4.textContent(R + '.st-qtop')).replace(/\s+/g, ' ').slice(0, 160) + ')');
+  const before = (await cur(S)).v.id;
+  await p4.click(R + '.st-readystrip button:has-text("Fix layout")');
+  await p4.waitForSelector(R + '.st-repair-note[data-outcome]', { timeout: 30000 });
+  const outcome = await p4.$eval(R + '.st-repair-note', el => el.dataset.outcome); const note = (await p4.textContent(R + '.st-repair-note')).replace(/\s+/g, ' ').trim();
+  eq(outcome, 'blocked', note.slice(0, 300));
+  ok(/^Blocked\./.test(note), 'the outcome first: ' + note.slice(0, 80));
+  const counts = await p4.textContent(R + '.st-repair-counts'); ok(/blocking before and after \(/.test(counts) && !/geometry 0|brand 0|pending 0/.test(counts), 'the count names only the kinds left: ' + counts);
+  ok(/Locked layers stop the fix/.test(note) && /Nothing was saved/.test(note), note.slice(0, 300));
+  ok(!/Move the words by hand, choose a layout variation, or shorten the copy/.test(note), 'no generic second sentence of advice');
+  eq((note.match(/Still blocking/g) || []).length, 0, 'what blocks is named once, by the verdict, not again as "Still blocking"');
+  eq((await cur(S)).v.id, before, 'nothing was saved');
+  ok(await p4.$(R + '.st-repair-acts button:has-text("Move it by hand")'), 'the next step is a button');
+  // the variations button tells the measured truth: once the arrangements are measured it carries the pass count, and when the
+  // renderer can offer none (every word locked) it is not offered at all
+  await p4.waitForFunction(() => /\d+ arrangements/.test((document.querySelector('#studio-root .st-vars-head') || {}).textContent || ''), null, { timeout: 30000 });
+  const nVars = await p4.$$eval(R + '.st-vars .st-var', x => x.length); const varTxt = await p4.textContent(R + '.st-repair-acts');
+  if (nVars) ok(/Layout variations \(\d+ of \d+ pass\)/.test(varTxt), 'with its pass count: ' + varTxt);
+  else ok(!/Layout variations/.test(varTxt), 'no variations to offer, so no button: ' + varTxt);
+  await p4.click(R + '.st-repair-acts button:has-text("Move it by hand")'); await p4.waitForSelector(R + '.st-le-layer', { timeout: 10000 });
+  await p4.click(R + '.st-le-foot button:has-text("Cancel")'); await p4.waitForSelector(R + '.st-le-layer', { state: 'detached', timeout: 5000 });
+  const props = await p4.textContent(R + '.st-props-none'); eq((props.match(/gemini-3-pro-image/g) || []).length, 1, 'Properties states the imagery once, in the composition line, not again in the facts: ' + props.replace(/\s+/g, ' ').slice(0, 200));
+  ok(!p4.errors.length, 'no page errors: ' + p4.errors.join(' | ')); await shot(p4, 'blocked-fix-1366'); await p4.ctxB.close();
 });
 
 await T.t('the same workspace at a desktop size (1920 x 1080): the artwork, Properties and Quality', async () => {

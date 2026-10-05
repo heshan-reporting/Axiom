@@ -1282,3 +1282,20 @@ render count unchanged. Re-run clean: `studio-worker` 15, `studio-s2-worker` 8, 
 `studio-journey-browser` 9, `check` 18 of 18. Not verified from the sandbox: the user's own asset (no access to the live D1); on
 deploy, opening it shows the hidden state and the remedy if the layout is in either state, and the Jobs view names the one failed
 job the screenshot showed.
+
+**The strip, tightened (the same screenshot).** The second request on that screenshot was the readiness strip itself: Fix layout
+appeared twice (beside the issue and again in the action row); the repair note ran "Blocked (1 blocking before, 1 after; left:
+geometry 0, readability 1, brand 0, pending 0). The logo still does not read ... Choose a layout variation, move it by hand, or
+revise the ground. Still blocking: mark unreadable (logo). Nothing was saved. Move the words by hand, choose a layout variation, or
+shorten the copy." - the issue named three times, zero counts listed, and a closing sentence of advice that did not apply to a
+logo; and Properties repeated the medium and the imagery the tag line under the stage already carried. Now: Fix layout is offered
+once, beside the top issue (the action row keeps Measure again and Download draft PNG, and shows Fix layout only when the top
+issue has another remedy); the note is the outcome first ("Blocked."), a compact count naming only the kinds left ("1 blocking
+before and after (1 readability)"), the renderer's verdict as it stands (it already names what blocks and what would clear it),
+"Nothing was saved", and the next steps as buttons - Undo fix, Move it by hand (opens the layout editor), Layout variations (N of
+M pass, scrolls to them) - with no second sentence of generic advice and no "Still blocking" repeat where the verdict names the
+issue; Properties' composition facts give the size, the layer count, hidden and locked layers, and leave the medium and imagery
+to the tag line. `studio-s11-browser` 11 of 11: the first case now asserts one Fix layout button; a new case locks the Story's
+words so the fix has no colour it may change, runs it, and reads the note (outcome, count without zero kinds, the verdict, no
+generic sentence, the issue not repeated), opens the editor from Move it by hand, reads the pass count on the variations button
+once they are measured, and finds the imagery stated once in Properties.

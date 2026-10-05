@@ -1939,9 +1939,18 @@ finished and hybrid paths are unchanged. In-app `hiddenImagery(v)` names the
 state for versions filed before the fix - the composition facts under the
 stage read `IMAGERY HIDDEN`, a note sits on the stage, and Remedies offers
 **Show the imagery (no render)**, a layout version through `showImagery()`.
-Harnesses: the hidden-render case in `studio-s11-worker.mjs` (10) and
-`studio-s11-browser.mjs` (10, the photograph read back from the canvas
-pixels before and after).
+**The readiness strip says things once.** Fix layout is offered beside the
+top issue only (no second copy in the action row); the repair note is the
+outcome, a compact count (`repairCounts`: "1 blocking before and after
+(1 readability)", only the kinds left), the renderer's verdict, "Nothing was
+saved", and the next steps as buttons - Undo fix, **Move it by hand** (the
+layout editor) and **Layout variations (N of M pass)** - with no second
+sentence of generic advice and no "Still blocking" repeat when the verdict
+already names what blocks. Properties' composition facts no longer repeat
+the medium and imagery the tag line already carries (size, layers, hidden,
+locked instead). Harnesses: the hidden-render and blocked-fix cases in
+`studio-s11-worker.mjs` (10) and `studio-s11-browser.mjs` (11, the
+photograph read back from the canvas pixels before and after).
 
 Phase 1, the ground:
 
