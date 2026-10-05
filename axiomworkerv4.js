@@ -6856,7 +6856,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p27';
+const AXIOM_BUILD = '2026-10-06.studio-p28';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7209,6 +7209,19 @@ async function stImport(env, legacyId, who) {
 // -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
 function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '' }; }
 async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
+/* How long each stage has actually taken here (the last 40 finished attempts per stage, KV studio_dur_<stage>): the app says
+ * "typically N s" from the median and is never a percentage invented from the clock. */
+async function stDurRecord(env, stage, ms) {
+  if (!env.AXIOM_KV || !(ms > 0) || ms > 36e5) return;
+  try { const k = 'studio_dur_' + stClean(stage, 16); const arr = pjs(await env.AXIOM_KV.get(k), []); const list = Array.isArray(arr) ? arr : []; list.push(Math.round(ms)); while (list.length > 40) list.shift(); await env.AXIOM_KV.put(k, JSON.stringify(list)); } catch (e) {}
+}
+async function stDurations(env) {
+  const out = {}; if (!env.AXIOM_KV) return out;
+  for (const s of ['render', 'copy', 'direct', 'strategy', 'concepts', 'extract', 'inspect', 'revise', 'sequence', 'export']) {
+    try { const arr = pjs(await env.AXIOM_KV.get('studio_dur_' + s), []); const a = (Array.isArray(arr) ? arr : []).filter(x => typeof x === 'number' && x > 0).sort((x, y) => x - y); if (a.length) out[s] = { n: a.length, median: a[Math.floor(a.length / 2)], p80: a[Math.min(a.length - 1, Math.floor(a.length * 0.8))] }; } catch (e) {}
+  }
+  return out;
+}
 async function stJobCreate(env, body, who) {
   const p = await stProject(env, body.project);
   if (!p) return { error: 'unknown_project', status: 404 };
@@ -7257,9 +7270,25 @@ async function stJobRun(env, job) {
   job.fence = async () => { if (!(await owned())) { const e = new Error('fenced: attempt ' + attempt + ' of job ' + job.id + ' no longer owns it (cancelled, or another runner took over); nothing more is filed'); e.fenced = true; throw e; } };
   // checkpoint before a long provider call: the lease must outlast the call, so no second runner starts beside this one
   job.lease = async (ms) => { await env.MIND_DB.prepare("UPDATE studio_jobs SET lease_until=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(Date.now() + Math.max(ST_LEASE_MS, ms || 0), Date.now(), job.id, attempt).run(); };
+  // live progress: what this attempt is doing now - a phase, a label, and counts where the work is countable (never a
+  // percentage invented from elapsed time) - persisted while it runs, fenced like the lease, so the app can show it during
+  // a long provider call; throttled to one write per 700 ms unless the phase changes; the lines so far travel with it
+  const act = { startedAt: Date.now(), at: Date.now(), phase: 'starting', label: 'starting attempt ' + (attempt + 1) }; let lastWrite = 0, lastLines = null;
+  job.activity = act;
+  job.progress = async (patch, lines) => {
+    const phaseChanged = !!(patch && patch.phase && patch.phase !== act.phase);
+    if (patch) Object.keys(patch).forEach(k => { if (patch[k] !== undefined) act[k] = patch[k]; });
+    act.at = Date.now(); if (lines) lastLines = lines;
+    if (!phaseChanged && Date.now() - lastWrite < 700) return;
+    lastWrite = Date.now();
+    try { await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit({ activity: act, lines: lastLines || [] }, 30000), Date.now(), job.id, attempt).run(); } catch (e) {}
+  };
   const done = async (state, patch) => {
+    const endedAt = Date.now();
+    const progress = Object.assign({}, patch.progress || {}, { activity: Object.assign({}, act, { at: endedAt, endedAt, phase: state, label: state === 'done' ? 'finished' : state === 'queued' ? 'will retry' : 'stopped' }) });
     const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=? AND state='running' AND attempts=?")
-      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id, attempt).run();
+      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, jsonFit(progress, 60000), endedAt, job.id, attempt).run();
+    if (state === 'done' && u && u.meta && u.meta.changes) await stDurRecord(env, job.stage, endedAt - act.startedAt);
     const now = await stJob(env, job.id);
     // a cancelled or taken-over attempt cannot finish, fail or requeue the job: its state stays what the owner made it
     return (u && u.meta && u.meta.changes) ? now : Object.assign(now || {}, { fenced: true });
@@ -7284,9 +7313,12 @@ async function stJobRun(env, job) {
     if (job.stage === 'render') {
       const pair = await stAsset(env, job.asset);
       if (!pair) return done('failed', { error: 'asset gone' });
-      return stRenderJob(env, job, pair, done, fail);
+      // awaited, not returned: a rejection from inside the stage (a fence thrown when the job was cancelled under a running
+      // provider call) must land in this catch, which answers the job as it now stands; returned un-awaited it escaped to the
+      // route as a 500 and the app saw "studio_failed: fenced ..." for a cancel it had just asked for
+      return await stRenderJob(env, job, pair, done, fail);
     }
-    if (ST_STAGES.indexOf(job.stage) >= 0) return stStageRun(env, job, done, fail);
+    if (ST_STAGES.indexOf(job.stage) >= 0) return await stStageRun(env, job, done, fail);
     return done('failed', { error: 'unknown stage ' + job.stage });
   } catch (e) { if (e && e.fenced) return Object.assign(await stJob(env, job.id) || {}, { fenced: true }); const full = String((e && e.message) || e); return fail(/\(not retried\)/.test(full) && full.length > 200 ? full.slice(0, 180) + '... (not retried)' : full.slice(0, 200)); }
 }
@@ -7592,7 +7624,8 @@ async function stStatus(env) {
   const p = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(legacy_id IS NOT NULL) imported, SUM(archived) archived FROM studio_projects').first()) || {};
   const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
   const budget = await stBudget(env);
-  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  const durations = await stDurations(env);
+  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, durations, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
 }
 
 // -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
@@ -7622,6 +7655,7 @@ async function stClaude(env, o) {
   const model = stModel(env, o.role);
   const imgs = (Array.isArray(o.images) ? o.images : []).filter(im => im && im.b64).slice(0, 4);
   const content = imgs.length ? imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime || 'image/png', data: im.b64 } })).concat([{ type: 'text', text: o.user }]) : o.user;
+  if (o.log && o.log.phase) await o.log.phase('model', 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; one call, no progress until it answers', { model });
   const base = { model, max_tokens: o.maxTok || 6000, system: String(o.system || '') + AX_UNTRUSTED_RULE, messages: [{ role: 'user', content }] };
   const effort = ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium');
   // adaptive thinking is paid out of max_tokens: at high effort a small cap leaves the JSON cut off mid-sentence, so the cap has
@@ -8636,6 +8670,7 @@ async function stCopyStage(env, job, p, log) {
   }
   const assets = [], versions = [], renders = [], mediums = [], fallbacks = []; let flagged = 0, incomplete = 0; const now = Date.now();
   for (const c of channels) {
+    await log.phase('composing', 'laying out ' + c + ' (' + (channels.indexOf(c) + 1) + ' of ' + channels.length + ')', { completed: channels.indexOf(c), total: channels.length });
     const piece = j.pieces.find(x => String(x.channel || '').toLowerCase() === c) || j.pieces.find(x => !x._used) || j.pieces[0]; piece._used = true;
     const copy = stCopy({ headline: piece.headline, support: piece.support, cta: piece.cta, caption: (piece.caption || '') + ((Array.isArray(piece.hashtags) && piece.hashtags.length && (CONTENT_PLATFORMS[c] || {}).hashtags) ? ' ' + piece.hashtags.slice(0, CONTENT_PLATFORMS[c].hashtags).map(h => '#' + String(h).replace(/^#/, '')).join(' ') : ''), alt: piece.alt });
     const format = formats[c];
@@ -8674,6 +8709,7 @@ async function stCopyStage(env, job, p, log) {
     }
   }
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='production', revision=revision+1, updated=? WHERE id=?").bind(Date.now(), p.id).run();
+  await log.phase('queueing', channels.length + ' composition' + (channels.length === 1 ? '' : 's') + ' written' + (renders.length ? '; ' + renders.length + ' render job' + (renders.length === 1 ? '' : 's') + ' queued' : ''), { completed: channels.length, total: channels.length, renders: renders.length });
   if (fallbacks.length) await log('info', 'house composition used for ' + fallbacks.join('; ') + ' - not a plan, shown as such on the version');
   if (incomplete) await log('info', incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete: the campaign mark is not on file; nothing drawn in its place, approval and export wait for the file');
   await log('out', assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ' written' + (mediums.length ? ' (' + mediums.join('; ') + ')' : '') + (flagged ? ', ' + flagged + ' with checks to look at' : ', every figure traced') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued at ' + size : deliverable === 'copy' ? '; copy only, no renders' : '; no renders queued'));
@@ -10373,6 +10409,7 @@ function stLayoutShowImage(L) {
 async function stRenderJob(env, job, pair, done, fail) {
   const inp = job.input || {}; const p = pair.project; const a = pair.asset;
   if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
+  if (job.progress) await job.progress({ phase: 'preparing', label: 'reading the current version' + (Array.isArray(inp.referenceIds) && inp.referenceIds.length ? ', ' + inp.referenceIds.length + ' reference' + (inp.referenceIds.length === 1 ? '' : 's') : '') + (inp.finished ? ' and the mark files' : '') });
   const cur = await stCurrent(env, a);
   // references: ids on the project (with roles from the plan), or raw data a caller supplied
   const references = (Array.isArray(inp.references) ? inp.references.filter(r => r && r.data) : []).concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : []));
@@ -10399,8 +10436,11 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
   if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
   if (job.lease) await job.lease(300000);
+  const what = areaEdit ? 'the ' + areaEdit.kind + ' edit' : finished ? 'the finished creative (words and mark painted)' : inp.approach === 'artwork' ? 'the hybrid artwork' : inp.region && inp.region !== 'bg' ? 'the ' + (inp.regionRole || 'region') + ' image' : 'the background image';
+  if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' attached' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: references.length });
   const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
   if (job.fence) await job.fence();
+  if (job.progress) await job.progress({ phase: out.ok ? 'filing' : 'failed', label: out.ok ? 'the image is back (' + out.model + (out.ms ? ', ' + (out.ms / 1000).toFixed(1) + ' s' : '') + '); saving it and the version' : 'the image model did not answer with an image', model: out.ok ? out.model : undefined });
   const compiledKey = out.sent ? await stCompiledSave(env, job, [Object.assign({ at: Date.now(), op: areaEdit ? 'area edit (' + areaEdit.kind + ')' : finished ? 'finished creative render (marks attached: ' + (marksSent.join(', ') || 'none') + ')' : inp.approach === 'artwork' ? 'artwork render' : 'render ' + (inp.region || 'bg'), answered: out.ok ? out.model : '', fallback: !!out.fallback, error: out.ok ? undefined : out.error + (out.detail ? ': ' + out.detail : ''), masks: false, areaNote: areaEdit ? 'the area is described in words; no pixel mask is sent' : undefined }, out.sent)]) : '';
   if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''), compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : undefined);
   const again = await stJob(env, job.id);
@@ -10825,7 +10865,9 @@ async function stActions(env, p, a, v) {
   return { ok: true, asset: a.id, version: v ? v.id : '', mode, size, inspect, actions: acts, note: 'Each statement is computed from the version as it stands (mode, imagery, locks, marks, jobs in flight). A cost names the calls and renders the action itself spends; a concept generated later from a card costs its own renders, shown on the card. Nothing here runs anything.' };
 }
 async function stStageRun(env, job, done, fail) {
-  const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
+  const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); if (job.progress) await job.progress({ label: String(t).slice(0, 200) }, lines); };
+  // a phase is what the stage is doing now (planning, composing, queueing, the model call), with counts where the work is countable
+  log.phase = async (phase, label, extra) => { if (job.progress) await job.progress(Object.assign({ phase: String(phase).slice(0, 24), label: String(label).slice(0, 200) }, extra || {}), lines); };
   log.compiled = []; log.fence = job.fence; log.lease = job.lease;
   const p = await stProject(env, job.project);
   if (!p) return done('failed', { error: 'project gone (not retried)' });

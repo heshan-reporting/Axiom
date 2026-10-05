@@ -94,12 +94,12 @@
 
   /* ------------------------------------------------------------ the workflow: six stages, each with its views, its state worked out from the project */
   const STAGES = [
-    { id: 'brief', label: 'Brief', views: ['brief', 'sources', 'references'], purpose: 'Say what the work must do, for whom, on which channels, and what it may claim.' },
-    { id: 'directions', label: 'Directions', views: ['directions'], purpose: 'Compare different ideas for the brief and choose the one production follows.' },
-    { id: 'produce', label: 'Produce', views: ['board', 'sequence', 'production', 'jobs'], purpose: 'Make the set from the chosen direction or the brief: copy per channel, laid out as editable compositions.' },
-    { id: 'refine', label: 'Refine', views: ['asset', 'copy'], purpose: 'Edit the words, the layout and the imagery of each asset until it passes validation.' },
-    { id: 'review', label: 'Review', views: ['review'], purpose: 'Approve copy and design for each exact version, then share it with the client.' },
-    { id: 'export', label: 'Export', views: ['export'], purpose: 'Download exactly the approved, validated versions at their native size.' },
+    { id: 'brief', label: 'Brief', views: ['brief', 'sources', 'references'], purpose: 'Say what the work must do, for whom, on which channels, and what it may claim.', next: 'Pressing Produce (or Directions on the guided route) starts one model call for the words and plans, then one composition per channel, then one image generation per composition. Each runs as a job you can watch in the activity panel above the work; nothing is spent before you press.' },
+    { id: 'directions', label: 'Directions', views: ['directions'], purpose: 'Compare different ideas for the brief and choose the one production follows.', next: 'Choosing a direction starts production from it: one model call writes the copy and plans, then each channel is composed and its imagery generated. The activity panel shows every step as it runs.' },
+    { id: 'produce', label: 'Produce', views: ['board', 'sequence', 'production', 'jobs'], purpose: 'Make the set from the chosen direction or the brief: copy per channel, laid out as editable compositions.', next: 'While the set is made, the activity panel names each job, what it is doing now and how long such a step typically takes here. When the imagery lands, open an asset in Refine; the Art Director review follows each render on its own.' },
+    { id: 'refine', label: 'Refine', views: ['asset', 'copy'], purpose: 'Edit the words, the layout and the imagery of each asset until it passes validation.', next: 'Each asset is measured at its output size as you open it. Blocked names the first thing to fix with its remedy; Fix layout, the variations and the Art Director are free unless they say otherwise; a render is one paid image generation and is always announced first. Checks passed, then Review.' },
+    { id: 'review', label: 'Review', views: ['review'], purpose: 'Approve copy and design for each exact version, then share it with the client.', next: 'Approve copy and design here (a reason is recorded); a client link shows exactly the validated version. Any later edit drops the approval it changed, on purpose.' },
+    { id: 'export', label: 'Export', views: ['export'], purpose: 'Download exactly the approved, validated versions at their native size.', next: 'Export writes the files for the versions whose approvals stand; nothing unvalidated or unapproved is included, and the manifest names each version.' },
   ];
   const stageOfView = v => (STAGES.find(s => s.views.indexOf(v) >= 0) || { id: '' }).id;
   /* a finished creative has no layers to measure: it is ready once its words and marks were read back (readiness.production) */
@@ -215,6 +215,54 @@
     </div>`;
   }
 
+  /* ------------------------------------------------------------ workspace activity: everything that runs, visibly */
+  /* Every job is shown while it runs: what it is (the stage in plain words), what it is doing now (the phase the worker
+     reports mid-run, else its latest log line), how long it has taken against how long that stage typically takes here,
+     a bar that is determinate only where the work is countable (the copy stage's channels, the run's finished steps) and
+     indeterminate otherwise - a model call shows no share until it answers; nothing is estimated from the clock. The job
+     model is STProgress (docs/studio-progress.js); this is its one consumer in the Studio. */
+  const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
+  function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset }) {
+    const S = window.STProgress; if (!S || !p) return null;
+    const all = p.jobs || []; const jobs = S.jobsForDisplay(all);
+    const live = jobs.filter(S.active); const failed = jobs.filter(j => j.state === 'failed');
+    const recent = jobs.filter(j => j.state === 'done' && now - (j.updated || 0) < 90000);
+    if (!live.length && !failed.length && !recent.length) return null;
+    const dur = (status && status.durations) || {}; const run = S.run(all, now);
+    const title = id => (p.assets.find(x => x.id === id) || {}).title || '';
+    const top = live.find(j => j.state === 'running') || live[0] || failed[0] || recent[0];
+    const topJ = top ? S.job(top, now, dur[top.stage]) : null;
+    const cards = (open ? live.concat(failed).concat(recent) : live.concat(failed)).slice(0, 12);
+    const beacon = live.some(j => j.state === 'running') ? 'live' : live.length ? 'queued' : failed.length ? 'failed' : 'done';
+    const running = live.filter(j => j.state === 'running').length, queued = live.length - running;
+    return html`<section class=${'st-workspace-activity ' + beacon} aria-label="Activity">
+      <div class="st-work-summary">
+        <button class="st-work-toggle" onClick=${onToggle} aria-expanded=${open ? 'true' : 'false'} aria-controls="st-work-detail">
+          <span class=${'st-work-beacon ' + beacon} aria-hidden="true"></span>
+          <span class="st-work-lead"><span class="st-work-eyebrow">${live.length ? 'Working' : failed.length ? 'Needs attention' : 'Just finished'}</span><b>${topJ ? topJ.title + (top.asset && title(top.asset) ? ' for ' + title(top.asset) : '') : 'Nothing running'}</b>${topJ ? html`<span class="st-work-now" role="status" aria-live="polite">${topJ.phaseText}${live.length && topJ.time ? ' - ' + topJ.time : ''}${live.length && topJ.typical ? ' (typically ' + topJ.typical + ')' : ''}</span>` : null}</span>
+          <span class="st-work-more">${open ? 'hide' : 'details'}</span>
+        </button>
+        <div class="st-work-metrics">
+          ${live.length ? html`<div><b>${running}</b><span>running</span></div><div><b>${queued}</b><span>queued</span></div>` : null}
+          ${failed.length ? html`<div class="bad"><b>${failed.length}</b><span>failed</span></div>` : null}
+          ${run && run.total > 1 ? html`<div class="st-work-run" title=${run.text}><b>${run.done} of ${run.total}</b><span>steps done</span><div class=${'st-progress-track small' + (run.active ? ' active' : '')} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${run.percent} aria-valuetext=${run.done + ' of ' + run.total + ' steps finished'}><span style=${{ width: run.percent + '%' }}></span></div></div>` : null}
+        </div>
+      </div>
+      ${open ? html`<div class="st-work-detail" id="st-work-detail"><div class="st-work-grid">${cards.map(j => { const x = S.job(j, now, dur[j.stage]); return html`<div key=${j.id} class=${'st-work-card ' + j.state + (x.slow ? ' slow' : '')} data-job=${j.id} data-stage=${j.stage} data-phase=${x.phase || ''}>
+          <div class="st-work-card-head"><b>${x.title}</b><span class=${'st-status ' + j.state}>${j.state}</span></div>
+          ${j.asset ? html`<div class="st-work-asset">${onOpenAsset && title(j.asset) ? html`<button class="ov-link" onClick=${() => onOpenAsset(j.asset)}>${title(j.asset)}</button>` : title(j.asset) || j.asset}</div>` : null}
+          <div class="st-work-phase">${x.phaseText}</div>
+          <div class=${'st-progress-track' + (x.percent == null ? ' indeterminate' : '') + (x.running ? ' active' : '')} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${x.percent == null ? undefined : x.percent} aria-valuetext=${x.percent == null ? (x.running ? 'in progress, no measurable share yet' : x.label) : x.percent + '%'}><span style=${{ width: (x.percent == null ? (j.state === 'done' ? 100 : 0) : x.percent) + '%' }}></span></div>
+          <div class="st-work-meta"><span>${x.percent != null ? x.completed + ' of ' + x.total + ' (' + x.percent + '%)' : STAGE_NOTE[j.stage] || ''}</span><span>${x.time}${x.typical ? ' / typically ' + x.typical : ''}${x.attempt > 1 ? ' / attempt ' + x.attempt + ' of 3' : ''}</span></div>
+          ${x.slow ? html`<div class="st-work-slow">No update for ${Math.round((now - x.lastAt) / 1000)} s. A provider call can take a few minutes; if this tab was asleep, the worker's tick resumes the job.</div>` : null}
+          ${j.state === 'failed' ? html`<div class="st-work-error">${explain({ message: j.error, code: (String(j.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title}</div>` : null}
+          ${j.state === 'queued' && j.error ? html`<div class="st-work-hint ov-dim">${j.error}</div>` : null}
+          <div class="st-work-acts">${!ro && j.state === 'failed' ? html`<button class="btn sm" onClick=${() => onRetry(j)}>Retry</button>` : null}${!ro && S.active(j) ? html`<button class="btn sm ghost" onClick=${() => onCancel(j.id)}>Cancel</button>` : null}<button class="ov-link" onClick=${onOpenJobs}>log</button></div>
+        </div>`; })}</div>
+        <div class="st-work-foot"><span>Shares are counts of finished steps; a model call shows none until it answers. Nothing here is estimated from the clock.</span><button class="ov-link" onClick=${onOpenJobs}>All jobs</button></div></div>` : null}
+    </section>`;
+  }
+
   /* ------------------------------------------------------------ the frame: navigator, stage heading, notices */
   const FLOW_WORD = { done: 'done', current: 'in progress', todo: 'to do', running: 'running', skipped: 'skipped', blocked: 'blocked' };
   /** The workflow navigator: every stage reachable (a blocked one opens on its explanation), its state and a short note. */
@@ -226,15 +274,16 @@
         <span class="st-step-n" aria-hidden="true">${f.state === 'done' ? '✓' : f.state === 'skipped' ? '–' : i + 1}</span><span class="st-step-l">${s.label}</span><span class="st-step-note">${f.state === 'blocked' ? 'blocked' : f.note || FLOW_WORD[f.state] || ''}</span><span class="st-vh">, ${FLOW_WORD[f.state] || ''}</span></button>`; })}</nav>`;
   }
   /** The head of every stage: what it is for, when it is done (or why it is blocked), its main action and the views inside it. */
-  function StageHead({ id, title, purpose, flow, children, tabs, tab, onTab, focusRef, compact }) {
+  function StageHead({ id, title, purpose, next, flow, children, tabs, tab, onTab, focusRef, compact }) {
     const f = (flow && flow[id]) || {};
-    if (compact) return html`<div class="st-stagehead compact"><div class="st-stagehead-row"><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef} title=${purpose}>${title}</h2>
+    if (compact) return html`<div class="st-stagehead compact"><div class="st-stagehead-row"><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef} title=${purpose + (next ? ' ' + next : '')}>${title}</h2>
       ${tabs ? html`<div class="st-subnav" role="tablist" aria-label=${title + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null}
       <span class="st-stage-purpose st-purpose-inline">${purpose}</span><div class="st-stagehead-acts">${children}</div></div></div>`;
     return html`<div class="st-stagehead">
       <div class="st-stagehead-row"><div class="st-stagehead-main"><h2 class="st-stage-title" tabIndex="-1" ref=${focusRef}>${title}</h2><span class="st-stage-purpose">${purpose}</span></div>
         <div class="st-stagehead-acts">${children}</div></div>
       ${f.state === 'blocked' ? html`<div class="st-blocked" role="status"><${Chip} kind="warn">blocked</${Chip}> ${f.blocked}</div>` : null}
+      ${next ? html`<div class="st-stage-next"><span class="st-lbl">What happens next</span><span>${next}</span></div>` : null}
       ${tabs ? html`<div class="st-subnav" role="tablist" aria-label=${title + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null}
     </div>`;
   }
@@ -1903,6 +1952,17 @@
     const [typing, setTyping] = useState(0);
     const [conflict, setConflict] = useState(null);
     const stepping = useRef(new Set()); const pidRef = useRef(null); pidRef.current = pid;
+    // the activity panel: a clock for elapsed times while anything runs or just finished, and a poll of the jobs this browser
+    // (or the worker's tick) is stepping, so the phase the worker reports mid-call reaches the screen while the call is in flight
+    const [actOpen, setActOpen] = useState(false); const [now, setNow] = useState(Date.now());
+    const liveIds = ((p && p.jobs) || []).filter(j => j.state === 'running' || j.state === 'queued').map(j => j.id).join(',');
+    const recentDone = ((p && p.jobs) || []).some(j => j.state === 'done' && Date.now() - (j.updated || 0) < 90000);
+    useEffect(() => { if (!liveIds && !recentDone) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [liveIds, recentDone]);
+    useEffect(() => {
+      if (!liveIds) return; let on = true;
+      const poll = async () => { for (const id of liveIds.split(',')) { if (!on) return; try { const r = await call('/studio/job?id=' + encodeURIComponent(id)); if (on && r && r.job) setP(prev => prev && prev.id === r.job.project ? Object.assign({}, prev, { jobs: (prev.jobs || []).map(j => j.id === r.job.id ? Object.assign({}, j, r.job) : j) }) : prev); } catch (e) {} } };
+      const t = setInterval(poll, 2500); return () => { on = false; clearInterval(t); };
+    }, [liveIds]);
     const pRef = useRef(null); const pSeen = useRef(null); if (pSeen.current !== p) { pSeen.current = p; pRef.current = p; }
     const clientRef = useRef(clientId); clientRef.current = clientId;
     const once = useRef(new Set()); const libSeq = useRef(0); const resumed = useRef(false); const intakeRef = useRef(false); intakeRef.current = intake;
@@ -2291,18 +2351,19 @@
         ${p && a && view === 'asset' && !cmp ? html`<span class="st-head-acts"><button class=${'btn sm' + (preview ? ' on' : ' ghost')} aria-pressed=${!!preview} onClick=${() => setPreview(!preview)} title="The artwork alone: no handles, outlines, labels or diagnostics">${preview ? 'Exit preview' : 'Preview'}</button><button class="btn sm ghost" onClick=${() => goStage('review')} title="Approvals and the client review">Review</button><button class="btn sm ghost" onClick=${() => goStage('export')} title="The approved, validated versions at native size">Export</button></span>` : null}
         ${p && layoutDirty ? html`<${Chip} kind="warn" title="The layout editor has changes that are not saved yet">Unsaved layout</${Chip}>` : null}
         ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save' + (saveSt.err ? ' bad' : saveSt.pending || typing ? ' busy' : ' ok')} role="status" aria-live="polite">${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}
-        ${p ? html`<button class=${'st-activity' + (liveJobs.length ? ' on' : '')} onClick=${() => setView('jobs', true)} aria-label=${liveJobs.length ? liveJobs.length + ' jobs running or queued; open Jobs' : 'No jobs running; open Jobs'}>${liveJobs.length ? html`<span class="st-spin" aria-hidden="true"></span>${liveJobs.length} running` : 'Jobs'}</button>` : null}
+        ${p ? html`<button class=${'st-activity' + (liveJobs.length ? ' on' : '') + ((p.jobs || []).some(j => j.state === 'failed') ? ' bad' : '')} onClick=${() => { const el = document.querySelector('#studio-root .st-workspace-activity'); if (el) { setActOpen(true); if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } else setView('jobs', true); }} aria-label=${liveJobs.length ? liveJobs.length + ' job' + (liveJobs.length === 1 ? '' : 's') + ' running or queued; show the activity' : 'No jobs running; open Jobs'} title=${liveJobs.length ? 'Show what is running now' : 'Open the jobs list'}>${liveJobs.length ? html`<span class="st-work-beacon live small" aria-hidden="true"></span>${liveJobs.length} running` : (p.jobs || []).some(j => j.state === 'failed') ? html`<span class="st-work-beacon failed small" aria-hidden="true"></span>needs attention` : 'Jobs'}</button>` : null}
         ${prov ? (prov.claude && prov.gemini ? html`<span class="st-prov ok" title=${'Claude and image generation are configured on the worker (reachability is checked when a call is made). Model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-') + '. Build ' + status.build + '.'}>Models ready</span>` : html`<span class=${'st-prov ' + (prov.claude ? 'ok' : 'bad')} title=${prov.claude ? 'Claude is configured on the worker' : 'Claude is not configured on the worker: writing, planning and inspection cannot run'}>Claude ${prov.claude ? 'ready' : 'not configured'}</span><span class=${'st-prov ' + (prov.gemini ? 'ok' : 'bad')} title=${prov.gemini ? 'Image generation is configured on the worker' : 'Image generation is not configured: compositions work, imagery cannot be made'}>Images ${prov.gemini ? 'ready' : 'not configured'}</span>`) : null}
         ${status && !p ? html`<${Chip} title=${'Worker build; model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-')}>${status.build}</${Chip}>` : null}
       </div>
     </div>`;
 
-    const headOf = (id, extra) => { const s0 = STAGES.find(x => x.id === id); return Object.assign({ id, title: s0.label, purpose: s0.purpose, flow, focusRef: titleRef }, extra || {}); };
+    const headOf = (id, extra) => { const s0 = STAGES.find(x => x.id === id); return Object.assign({ id, title: s0.label, purpose: s0.purpose, next: s0.next, flow, focusRef: titleRef }, extra || {}); };
     const tabsFor = id => id === 'brief' ? { tabs: [['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length]], tab: view, onTab: k => setView(k) }
       : id === 'produce' ? { tabs: [['board', 'Board', p.assets.length || null], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['production', 'Recipes and usage'], ['jobs', 'Jobs', liveJobs.length || null]], tab: view, onTab: k => setView(k) }
       : id === 'refine' ? { tabs: [['asset', a ? a.title : 'Asset'], ['copy', 'Copy deck']], tab: view, onTab: k => { if (k === 'asset' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } } : {};
     const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
-    const jobsLine = p && (liveJobs.length || (p.jobs || []).some(j => j.state === 'failed')) ? html`<div class="st-jobline-strip" aria-label="Jobs in progress">${liveJobs.slice(0, 4).map(j => html`<span key=${j.id} class="st-jobchip"><span class="st-spin" aria-hidden="true"></span>${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${j.state}${j.attempts ? ', attempt ' + (j.attempts + 1) + ' of 3' : ''}</span>${canWrite() ? html` <button class="ov-link" title=${RUN_NOTE} onClick=${() => cancelJob(j.id)}>cancel</button>` : null}</span>`)}${(p.jobs || []).filter(j => j.state === 'failed' && !(p.jobs || []).some(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && x.state !== 'failed')).slice(-3).map(j => html`<span key=${j.id} class="st-jobchip bad"><${Chip} kind="bad">failed</${Chip}> ${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${explain({ message: j.error }).title}</span>${canWrite() ? html` <button class="ov-link" onClick=${() => retryJob(j)}>retry</button>` : null}</span>`)}</div>` : null;
+    // the activity panel replaces the old line of job chips: every running, queued, failed or just-finished job with its phase
+    const jobsLine = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
 
     let centre;
     if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;

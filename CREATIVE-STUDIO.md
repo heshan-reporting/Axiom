@@ -1283,6 +1283,46 @@ render count unchanged. Re-run clean: `studio-worker` 15, `studio-s2-worker` 8, 
 deploy, opening it shows the hidden state and the remedy if the layout is in either state, and the Jobs view names the one failed
 job the screenshot showed.
 
+## 35. S12 - everything that runs is visible (build studio-p28, page r6)
+
+The brief, in the user's words: "everything is running silently ... add completion percentage ... everything happening silently
+should show in the UI as a progress". A ChatGPT draft had arrived as a helper (`docs/studio-progress.js`) and a stylesheet
+(`docs/studio-progress.css`) referenced from the page, with no consumer in the island, no worker support (the shape it read,
+`progress.activity`, did not exist), and chrome against the shell rules (glass, 14 px radius, an entrance animation). Reviewed,
+kept as the starting point, rewritten.
+
+**What can honestly be shown.** The models give no progress during a call: a percentage for a running image generation would be
+invented from the clock, and the draft itself said never to do that. So the worker now reports what it is doing - a phase, a
+label, and counts where the work is countable - and the Studio shows that, with the elapsed time against how long the stage has
+typically taken here. A share is determinate in two places only: the copy stage's channels ("laying out facebook (2 of 2)") and
+the run's finished steps ("3 of 7 steps finished"). A model call shows an indeterminate stripe and the words "no share until it
+answers".
+
+**Worker (S12a).** `job.progress(patch, lines)` in `stJobRun` persists `progress.activity` mid-run under the attempt's fence
+(throttled to one write per 700 ms unless the phase changes); `log.phase()` for the stages; `stClaude` reports the model call
+with the model named; `stRenderJob` reports preparing / generating / filing; the copy stage reports composing per channel and
+queueing; `done()` closes the activity with `endedAt` and records the duration (KV `studio_dur_<stage>`, the last 40;
+`/studio/status.durations`). **A bug found on the way:** `stJobRun` returned the stage's promise rather than awaiting it inside
+its try, so a fence thrown when a job was cancelled under a running provider call escaped to the route as `500 studio_failed:
+fenced ...` - a cancel the person had just asked for answered as a server failure. It is awaited now; the cancel answers with
+the cancelled job and the attempt files nothing. `studio-progress-worker` 3 of 3 reads the job's row inside the mocked provider
+calls to prove the phase is visible while the call is in flight.
+
+**Island (S12b).** `STProgress` (`job`, `run`, `jobsForDisplay`, `typical`) is the model; `WorkspaceActivity` is its consumer,
+replacing the chips above the work: summary (beacon, the top job's phase, elapsed and typical, counts, the run's finished
+steps), cards per job (stage in plain words, asset, phase text or latest log line, bar determinate only from counts, elapsed,
+attempt, slow hint, explained error, Retry / Cancel / log). The island polls `GET /studio/job?id=` every 2.5 s for live jobs and
+ticks a clock while anything runs or just finished. The header chip opens the panel. The stylesheet is on the Studio tokens: flat
+8 px surfaces, no glass, the beacon and the indeterminate stripe the only motion, both off under reduced motion.
+`studio-progress-test` 22 of 22 (Node); `studio-activity-browser` 3 of 3: a nine-second render is visible as "the image model is
+making the background image at 1K" with an indeterminate bar and "1 running" in the header, then done at 100; a refused render is
+failed with the explanation and Retry, and the run counter reads 1 of 2.
+
+**Flow (S12c).** Every stage head carries "What happens next": what the main action runs, what is paid, what the person will see.
+Journey 6 of the journey harness moved to the panel's selectors; the journey harness ran 9 of 9 alone (8 timed out only under
+four concurrent browser suites). Not done here, said plainly: the image generation engine itself is unchanged - what changed is
+that its work is now visible - and nothing live was verified from the sandbox.
+
 **The strip, tightened (the same screenshot).** The second request on that screenshot was the readiness strip itself: Fix layout
 appeared twice (beside the issue and again in the action row); the repair note ran "Blocked (1 blocking before, 1 after; left:
 geometry 0, readability 1, brand 0, pending 0). The logo still does not read ... Choose a layout variation, move it by hand, or

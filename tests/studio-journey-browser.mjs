@@ -242,11 +242,11 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
   eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_jobs WHERE stage='copy'").get().n - copy0, 1, 'one production job for a double click');
   eq(d.assets.length, 1, 'the composition was made and kept'); const rj = d.jobs.find(j => j.stage === 'render'); eq([rj.state, rj.attempts], ['failed', 3], 'three attempts, then failed');
   ok(/Your work is kept/.test(await page.textContent(R + '.st-notice')) && await page.$(R + '.st-notice button:has-text("Retry render")'), 'the notice explains and offers Retry');
-  ok(/failed/.test(await page.textContent(R + '.st-jobline-strip')), 'the failed job is visible beside the work');
+  ok(/failed/.test(await page.textContent(R + '.st-workspace-activity')), 'the failed job is visible beside the work (the activity panel)');
   await shot(page, 'provider-down');
   fx.setProvider('gemini', 'ok'); const g0 = calls.gemini;
   // two retries pressed together: one retry job
-  await page.evaluate(() => { const b = [...document.querySelectorAll('#studio-root .st-notice button')].find(x => /Retry render/.test(x.textContent)); const c = [...document.querySelectorAll('#studio-root .st-jobline-strip .ov-link')].find(x => /retry/.test(x.textContent)); b.click(); b.click(); if (c) c.click(); });
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#studio-root .st-notice button')].find(x => /Retry render/.test(x.textContent)); const c = [...document.querySelectorAll('#studio-root .st-work-card button')].find(x => /Retry/.test(x.textContent)); b.click(); b.click(); if (c) c.click(); });
   await page.waitForFunction(() => /ran on retry/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 60000 });
   d = await settle(pr.id);
   const retries = d.jobs.filter(j => /^retry:/.test(j.idem)); eq(retries.length, 1, 'one retry job'); eq(retries[0].state, 'done');

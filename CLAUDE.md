@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -1973,6 +1973,50 @@ recoloured or plated, so one change serves every word on the overlay and
 the design's own device is kept. Harnesses: section 7 of
 `studio-marks-browser.mjs` (50) and the words-shown-twice case in
 `studio-s11-worker.mjs`.
+
+**Everything that runs is visible (S12; build `2026-10-06.studio-p28`, page
+`?v=r6`; `CREATIVE-STUDIO.md` s.35).** Until S12 a job's progress was written
+once, when it ended, and the Studio ran silently through a long image
+generation. Now the attempt reports what it is doing while it runs:
+`job.progress(patch, lines)` in `stJobRun` persists `progress.activity`
+(`phase`, `label`, `startedAt`, `at`, and counts `completed` / `total` where
+the work is countable) with the log lines so far, under the attempt's fence
+and throttled to one write per 700 ms unless the phase changes; `log.phase()`
+from the stage runner, `stClaude` reports the model call (`phase: 'model'`,
+the model named), `stRenderJob` reports `preparing` / `generating` /
+`filing`, the copy stage counts its channels (`composing`, then `queueing`
+with the renders queued), and `done()` closes the activity (`endedAt`) and
+records the finished attempt's duration in KV `studio_dur_<stage>` (the last
+40), which `/studio/status` publishes as `durations {stage: {n, median,
+p80}}`. **Never a percentage invented from the clock**: a model call shows no
+share until it answers. A bug found on the way: `stJobRun` returned the
+stage's promise instead of awaiting it, so a fence thrown when a job was
+cancelled under a running provider call escaped to the route as a 500
+("studio_failed: fenced ..."); it is awaited now and the cancel answers with
+the cancelled job. In-app, `docs/studio-progress.js` (`window.STProgress`:
+`job`, `run`, `jobsForDisplay`, `typical`; loads before the island, also
+runs in Node) is the job model and `WorkspaceActivity` in `docs/studio.js`
+its one consumer, replacing the line of job chips above the work: a summary
+(beacon live / queued / failed / done, the top job and its phase with the
+elapsed time and "typically about N s" from the history, running / queued /
+failed counts, the run's finished steps as the only determinate share) and
+cards per job (stage in plain words, asset, the phase text or latest log
+line, a bar determinate only from counts, elapsed, attempt, a slow hint
+after 90 s without an update, the explained error, Retry / Cancel / log).
+The island polls `GET /studio/job?id=` every 2.5 s for queued and running
+jobs while a step is in flight and ticks a clock while anything runs or
+just finished; the header's chip ("N running" / "needs attention") opens the
+panel. Each stage head now carries **What happens next** (`STAGES[].next`):
+what the main action runs, what is paid, what the person will see.
+`docs/studio-progress.css` holds the panel's styles on the Studio tokens
+(flat, 8px, no glass or entrance animation; the beacon and the indeterminate
+stripe stop under reduced motion). Started from a ChatGPT draft of the
+helper and stylesheet (branch `chatgpt/index-html`), which had no consumer,
+no worker support and glass chrome; rewritten here. Harnesses:
+`studio-progress-worker.mjs` (3: phases read inside the provider call,
+channel counts, the fenced cancel), `studio-progress-test.mjs` (22, Node),
+`studio-activity-browser.mjs` (3, Chromium: a slow render visible while it
+runs, done at 100, a refused render with Retry).
 
 Phase 1, the ground:
 
