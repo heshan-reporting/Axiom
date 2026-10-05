@@ -200,9 +200,15 @@ await t('a custom model is honoured', async () => {
 });
 await t('the cron judges within the budget and skips when the key is missing', async () => {
   put('reddit_comment', 'reddit', 'Comment on: y', 'Good on Chris Bowen for the battery scheme, well done', 'x:rcmt:c10', { sub: 'australia', thread: 't3', issues: ['energy'] }, 1 * H, 0);
+  // automated model work is gated (AI_AUTOMATION; daily by default since 5 October 2026): held, the tick makes no call
+  env.AI_AUTOMATION = 'off'; const held = claude.calls.length;
+  await handler.scheduled({}, env, ctx); await drain();
+  eq(claude.calls.length, held, 'held (AI_AUTOMATION=off): the cron made no classifier call');
+  env.AI_AUTOMATION = 'always';
   const before = claude.calls.length;
   await handler.scheduled({}, env, ctx); await drain();
-  ok(claude.calls.length > before, 'the cron called the classifier');
+  delete env.AI_AUTOMATION;
+  ok(claude.calls.length > before, 'the cron called the classifier (AI_AUTOMATION=always)');
   const c = row("SELECT e.stance FROM sent_entities e JOIN arc_items a ON a.id=e.item WHERE a.url='x:rcmt:c10'"); eq(c && c.stance, 1, 'the cron judged the new row');
   delete env.ANTHROPIC_API_KEY;
   const st = await req('GET', '/sentiment/status', null, 'read-key'); eq(st.d.configured, false);

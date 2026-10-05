@@ -2841,7 +2841,8 @@ async function topicResults(env, idOrKeyword, days) {
   };
 }
 /** Every tick: pull SIFA's list hourly, then run the two stalest active topics. */
-async function topicsCron(env) {
+async function topicsCron(env, o) {
+  o = o || {};
   if (!env.MIND_DB || !(await ensureTopics(env))) return { ok: false };
   const now = Date.now();
   const out = { ok: true, synced: false, ran: [] };
@@ -2854,6 +2855,9 @@ async function topicsCron(env) {
     await kvPut(env.AXIOM_KV, 'topics_sync_result', JSON.stringify({ at: now, ok: r.ok, n: (r.keywords || []).length, error: r.error || '', detail: r.detail || '', added: up ? up.added : 0, updated: up ? up.updated : 0 }), 7 * 86400);
     out.synced = r.ok;
   }
+  // research spends a model call per topic: the scheduled run does it only in the day's window (o.research false holds it);
+  // Run on a topic in the app, or POST /sifa/run, still researches on demand
+  if (o.research === false) { out.researchHeld = true; return out; }
   const due = (await env.MIND_DB.prepare('SELECT id FROM topics WHERE active=1 AND COALESCE(last_run,0)<? ORDER BY priority DESC, COALESCE(last_run,0) ASC LIMIT 2').bind(now - 6 * 3600000).all()).results || [];
   for (const t of due) {
     const params = { id: t.id, hours: 168 };
@@ -6698,6 +6702,29 @@ async function overview(env, opts) {
 const BRIEF_DAYS_KEPT = 120;
 const BRIEF_HOUR = 7;                 // Sydney hour after which the cron writes the day's brief
 function auDayKey(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).toISOString().slice(0, 10); }
+/* Automated model spend. The cron's Claude work - sentiment verdicts, narrative naming and alerts, topic research, the
+ * Sentinel's drafted angles, the daily brief - is gated by the var AI_AUTOMATION: 'always' (every tick, as before 5 October
+ * 2026), 'daily' (one window a day: the first tick at or after 07:00 Sydney, each module running one tick's worth; KV
+ * ai_cron_day remembers the day) or 'off' (none until a person asks). The default is daily, set to save credits. Collection
+ * (news, sources, full text, social, Reddit, Meta, forums, petitions), Sentinel detection and Slack alerts (without an angle),
+ * narrative placement (Workers AI, not the model account) and the Creative Studio's own jobs (a person's commands, finished by
+ * the tick when a tab closed) are never gated. */
+const AI_AUTOMATION_DEFAULT = 'daily';
+function aiAutomationMode(env) { const m = String((env && env.AI_AUTOMATION) || AI_AUTOMATION_DEFAULT).trim().toLowerCase(); return m === 'always' || m === 'off' ? m : 'daily'; }
+async function aiAutomationGate(env, now) {
+  now = now || Date.now(); const mode = aiAutomationMode(env); const day = auDayKey(now);
+  const hour = new Date(now + auOffsetMs(now)).getUTCHours();
+  let last = null; try { last = env.AXIOM_KV ? await env.AXIOM_KV.get('ai_cron_day') : null; } catch (e) { last = null; }
+  if (mode === 'always') return { mode, run: true, day, last, why: 'every tick (AI_AUTOMATION=always)' };
+  if (mode === 'off') return { mode, run: false, day, last, why: 'automated model work is off (AI_AUTOMATION=off); the Studio and every on-demand action still run' };
+  const due = hour >= 7 && last !== day;
+  if (due && env.AXIOM_KV) { try { await env.AXIOM_KV.put('ai_cron_day', day); } catch (e) {} }
+  return { mode, run: due, day, last: due ? day : last, why: due ? 'the day\'s one window (first tick at or after 07:00 Sydney)' : last === day ? 'already ran today (' + day + ')' : 'waits for 07:00 Sydney' };
+}
+async function aiAutomationStatus(env, now) {
+  now = now || Date.now(); const mode = aiAutomationMode(env); let last = null; try { last = env.AXIOM_KV ? await env.AXIOM_KV.get('ai_cron_day') : null; } catch (e) {}
+  return { mode, lastDay: last, today: auDayKey(now), text: mode === 'always' ? 'Automated model work runs every tick.' : mode === 'off' ? 'Automated model work is off; on-demand actions and the Studio run as asked.' : 'Automated model work runs once a day, the first tick at or after 07:00 Sydney' + (last === auDayKey(now) ? ' (ran today).' : last ? ' (last ran ' + last + ').' : ' (not yet run).') };
+}
 function auHour(at) { at = at || Date.now(); return new Date(at + auOffsetMs(at)).getUTCHours(); }
 const BRIEF_SYS = 'You are the senior analyst at Curious Minds, an Australian public affairs agency, writing the daily intelligence brief that the managing director reads first thing and presents to clients. You are given the day\'s evidence: Sentinel alerts (spikes on client issues), the narratives the public conversation is telling (each a cluster of rows across news, Reddit, X, Bluesky, YouTube and the clients\' own pages, with its claim, counter-claim and stance toward the client), stances toward parties, people, organisations and topics with their change against the window before, every client issue against its own fourteen-day baseline, tone by issue, the newest headlines, and what the collection covered. Write for a director: what changed, why it matters and to which client, what to do about it. Concrete and plain, Australian spelling, no hype, no filler, no restating the data as a list of numbers. Every point cites its evidence by the ids given, in square brackets: [N:<id>] a narrative, [E:<id>] an entity, [I:<id>] an issue, [A:<id>] an alert, [L:<id>] a headline. Never invent a figure, a name, a quote or an event that is not in the evidence; where the evidence is thin, say so under gaps. Reply with strict JSON only, no prose outside it: {"headline":"one line of at most fourteen words","summary":"three to five sentences a director could read aloud","changed":[{"what":"one sentence","why":"one sentence on who it matters to and how","evidence":["N:abc","I:ftc"]}],"clients":[{"ns":"mca","client":"Minerals Council of Australia","read":"two or three sentences on the day for this client","watch":["a narrative or shift to watch"],"risks":["a risk"],"openings":["an opening"],"actions":["a concrete action for the team"],"evidence":["N:abc","E:mca"]}],"narratives":[{"id":"abc","why":"one sentence on what it means and where it is heading","stance":"hostile|supportive|mixed|unknown"}],"sentiment":[{"id":"albanese","direction":"more critical|warmer|steady","why":"one sentence"}],"risks":["..."],"actions":["..."],"gaps":["what the evidence cannot say yet"]}. Cover every client namespace given, most change first; a client with nothing today gets a one-sentence read saying so and empty lists. At most six items in changed, five narratives, six sentiment lines, four risks, five actions, three gaps. Use only narrative and entity ids that appear in the evidence.';
 /** Everything the brief rests on, read together for one window. */
@@ -6856,7 +6883,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p28';
+const AXIOM_BUILD = '2026-10-06.studio-p29';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7624,8 +7651,8 @@ async function stStatus(env) {
   const p = (await env.MIND_DB.prepare('SELECT COUNT(*) n, SUM(legacy_id IS NOT NULL) imported, SUM(archived) archived FROM studio_projects').first()) || {};
   const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
   const budget = await stBudget(env);
-  const durations = await stDurations(env);
-  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, durations, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  const durations = await stDurations(env); const aiAutomation = await aiAutomationStatus(env);
+  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, durations, aiAutomation, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
 }
 
 // -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
@@ -11565,7 +11592,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -15509,9 +15536,13 @@ async function handleScheduled(env) {
   try { const ft = await fulltextCron(env); if (ft && ft.tried) console.log('Full text:', ft.got, 'of', ft.tried); } catch (e) { console.log('fulltext cron failed', String(e).slice(0, 120)); }
   // The Sentinel runs every tick: detect spikes on client issues, draft the
   // angle, push it to Slack. This is the loop that makes response time small.
+  // Automated model spend is gated (AI_AUTOMATION: always / daily / off): detection, alerts and every collector run on;
+  // only the steps that spend the model account wait for the day's window.
+  let ai = { mode: 'always', run: true, why: 'gate unavailable' }; try { ai = await aiAutomationGate(env); } catch (e) {}
+  console.log('AI automation:', ai.mode, ai.run ? 'runs this tick' : 'held', '-', ai.why);
   try {
-    const s = await sentinelScan(env);
-    if (s && s.fired) console.log('Sentinel fired', s.fired, 'alert(s)');
+    const s = await sentinelScan(env, { noAngle: !ai.run });
+    if (s && s.fired) console.log('Sentinel fired', s.fired, 'alert(s)', ai.run ? '' : '(angles not drafted: automated model work held)');
   } catch (e) { console.log('Sentinel scan failed', String(e).slice(0, 120)); }
   try {
     const [ms, rd, bs] = await Promise.all([
@@ -15535,16 +15566,20 @@ async function handleScheduled(env) {
   try { await signalsCron(env); } catch (e) {}
   // Social capture: Bluesky, Mastodon, X timelines, YouTube comments and captions, petitions (two-hourly).
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
-  // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget.
-  try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); }
-  // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take off on a client issue, reported.
-  try { const nr = await narrativesCron(env); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named, 'named'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
+  // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget (a model call per batch:
+  // held outside the day's window).
+  if (ai.run) { try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); } }
+  // Narratives: the newest rows join or start the stories the conversation is telling; new ones are named and, when they take
+  // off on a client issue, reported. Placement embeds with Workers AI (not the model account) and runs every tick; naming
+  // spends model calls and waits for the day's window.
+  try { const nr = ai.run ? await narrativesCron(env) : await narrativesRun(env, { budgetMs: 120000, skipNaming: true }); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named || 0, 'named', ai.run ? '' : '(naming held)'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
   // Creative Studio jobs: anything queued, or abandoned by a runner that stopped, is claimed and run here.
   try { const sj = await studioCron(env, 120000); if (sj && sj.ran) console.log('Studio jobs:', sj.ran, 'run,', sj.done, 'done,', sj.failed, 'failed'); } catch (e) { console.log('studio cron failed', String(e).slice(0, 120)); }
   // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
-  try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); }
-  // Topics: SIFA's keyword list hourly, then the two stalest topics researched.
-  try { await topicsCron(env); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
+  // (already once a day by its own guard; held only when automated model work is off)
+  if (ai.mode !== 'off') { try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); } }
+  // Topics: SIFA's keyword list hourly (no model), then the two stalest topics researched (a model call each: the day's window).
+  try { await topicsCron(env, { research: ai.run }); } catch (e) { console.log('topics cron failed', String(e).slice(0, 120)); }
   try {
     const jf = await Promise.allSettled([forumOzRss(), forumWhirlpoolQ('politics'), forumBigfootyLatest(), forumHotcopperLatest(), forumPropertyChat()]);
     const th = jf.flatMap(s => (s.status === 'fulfilled' ? s.value : []));

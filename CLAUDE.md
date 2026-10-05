@@ -2423,6 +2423,32 @@ CI runs the same on every push with providers MOCKED and no secrets):
   fixture. Backups of the earlier states: branches
   `backup/2026-10-02-main-p23` and `backup/2026-10-02-studio-p24`.
 
+## Automated model spend (AI_AUTOMATION; from 5 October 2026)
+
+The cron used to spend the Anthropic account every tick (sentiment verdicts,
+narrative naming, topic research, the Sentinel's drafted angles); $14 went in
+one evening. The var `AI_AUTOMATION` now gates that work in `handleScheduled`
+through `aiAutomationGate()`: **`daily` (the default)** runs it in one window a
+day, the first tick at or after 07:00 Sydney, each module doing one tick's
+worth (KV `ai_cron_day` remembers the day); `always` restores every tick;
+`off` stops it until a person asks. Held outside the window: `sentimentCron`,
+narrative naming (`narrativesRun` places rows with `skipNaming`, since
+placement embeds with Workers AI, not the model account), the research half of
+`topicsCron` (`{research:false}`; the SIFA keyword sync still runs hourly) and
+the Sentinel's angle (`sentinelScan(env, {noAngle})`: spikes are still
+detected, stored and posted to Slack, without the drafted angle). The daily
+brief keeps its own once-a-day guard and is held only by `off`. **Never
+gated:** news, the Source Registry sweep, full text, social, Reddit, Meta,
+forums, petitions, the pulse, Sentinel detection and alerts, narrative
+placement, and the Creative Studio's jobs (a person's commands, finished by
+the tick when a tab closes), nor any on-demand action (Classify now, Place
+and name now, Run on a topic, Write today's brief, the research agent, chat).
+`/studio/status` reports `aiAutomation {mode, lastDay, today, text}`.
+Harness: `tests/ai-automation-worker.mjs` (4: the window, the modes, a whole
+held tick on seeded data making no Anthropic call while the same data with
+the gate open does, and the Studio answering on command); the sentiment
+cron case asserts both `off` and `always`.
+
 ## Working conventions
 
 - Verify changes with the harnesses in `tests/` (`npm test`; a new defect
