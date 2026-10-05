@@ -1052,6 +1052,12 @@ model answers. The renderer and the page run in real Chromium.
 
 ### Suite figures
 
-Recorded from `node tests/run.mjs all` at build studio-p25 (providers MOCKED). At the time of the S10
-commit the run had completed 70 harnesses with none failing; the final total is recorded in the follow-up
-commit that closes this section.
+Recorded from `node tests/run.mjs all` at build studio-p25 (providers MOCKED; backend first, then the browser
+harnesses one at a time): **86 of 86 harnesses passed, none failed**, after `check` 18 of 18. Among them the
+S-series harnesses: `studio-s1-worker` 5, `studio-quality-browser` 25 checks, `studio-s2-worker` 8,
+`studio-modes-browser` 4, `studio-scene-browser` 20, `studio-s3-worker` 3, `studio-framing-browser` 17,
+`studio-editor-browser` 6, `studio-s5-worker` 2, `studio-s6-worker` 7, `studio-brand-browser` 4,
+`studio-s7-worker` 5, `studio-s8-worker` 5, `studio-actions-browser` 2, `studio-s9-browser` 5,
+`studio-s10-browser` 3; `studio-browser` 26 of 26 in this sequential run (the concurrency flakiness noted
+above did not appear). The figures are the harnesses' own summary lines; a harness that counts checks rather
+than cases (quality, scene, framing) is listed by what it printed.
