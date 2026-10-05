@@ -8262,15 +8262,38 @@ async function stDirectStage(env, job, p, log) {
   if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   const known = new Set(led.claims.map(c => c.id)); const ids = []; const rows = []; let similar = 0;
   const MEDIA = ['photo-cinematic', 'photo-documentary', 'editorial', 'composite', 'cutout', 'collage', 'illustration', 'diagram', 'infographic', 'typographic', 'carousel'];
-  const dirs = j.directions.slice(0, n).map(d => ({ idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: r.model, job: job.id }));
-  dirs.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, dirs[k].headline + ' ' + dirs[k].message) > 0.6 || (d.medium && d.medium === dirs[k].medium && stSimilar(d.idea + ' ' + d.message, dirs[k].idea + ' ' + dirs[k].message) > 0.45)) { d.similar = dirs[k].title; similar++; break; } });
+  const norm = (d, model) => ({ idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: model || r.model, job: job.id });
+  // a look-alike is measured on the argument (headline and message) and on the medium: the same medium with a near idea is one direction twice
+  const measure = list => { let s = 0; list.forEach(d => { d.similar = undefined; }); list.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, list[k].headline + ' ' + list[k].message) > 0.6 || (d.medium && d.medium === list[k].medium && stSimilar(d.idea + ' ' + d.message, list[k].idea + ' ' + list[k].message) > 0.45)) { d.similar = list[k].title; s++; break; } }); return s; };
+  let dirs = j.directions.slice(0, n).map(d => norm(d));
+  similar = measure(dirs);
+  // S8: genuinely different means different in what is drawn as well as what is argued - three or more directions in one medium are a narrow set
+  const mediaOf = list => Array.from(new Set(list.map(d => d.medium).filter(Boolean)));
+  let narrow = dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
+  let replanned = 0, replanWhy = '', model2 = '';
+  if ((similar || narrow) && job.input.replan !== false) {
+    // one bounded replanning round, like the concepts stage: the look-alikes (or the last direction of a one-medium set) go back with the measure
+    const dup = similar ? dirs.filter(d => d.similar) : [dirs[dirs.length - 1]];
+    const stand = dirs.filter(d => dup.indexOf(d) < 0);
+    replanWhy = similar ? 'alike' : 'one medium';
+    await log('info', (similar ? dup.length + ' direction' + (dup.length === 1 ? ' reads' : 's read') + ' as another in different words (' + dup.map(d => '"' + d.title + '" ~ "' + d.similar + '"').join(', ') + ')' : 'every direction is ' + dirs[0].medium) + '; asking once for ' + dup.length + ' replacement' + (dup.length === 1 ? '' : 's') + ' that differ in argument and medium');
+    try {
+      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log });
+      const j2 = relJson(again.text); model2 = again.model;
+      if (j2 && Array.isArray(j2.directions) && j2.directions.length) {
+        const fresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model));
+        dirs = stand.concat(fresh).slice(0, n); replanned = fresh.length; similar = measure(dirs); narrow = dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
+        dirs.filter(d => d.similar).forEach(d => { d.replanFailed = true; });
+      }
+    } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
+  }
   const diversity = stDiversity(dirs);
   for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 8000), 0, 'studio', Date.now())); }
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
-  await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title).join(' / ') + (similar ? ' - ' + similar + ' read as close to another; ask for another' : ' - distinct arguments'));
-  await stEvent(env, p.id, 'directions', { diversity: diversity.score, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
-  return { directions: ids, titles: dirs.map(d => d.title), similar, diversity: diversity.score, model: r.model };
+  await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title + (d.medium ? ' [' + d.medium + ']' : '')).join(' / ') + (similar ? ' - ' + similar + ' still read as close to another; ask for another' : ' - distinct arguments') + (replanned ? ' (' + replanned + ' replanned once: ' + replanWhy + ')' : '') + (narrow ? ' - still one medium' : ''));
+  await stEvent(env, p.id, 'directions', { diversity: diversity.score, media: mediaOf(dirs), replanned: replanned || undefined, replanWhy: replanWhy || undefined, narrow: narrow || undefined, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + (replanned ? ' ' + replanned + ' direction' + (replanned === 1 ? ' was' : 's were') + ' replanned once because ' + (replanWhy === 'alike' ? 'it read as another in different words' : 'every direction shared one medium') + '.' : '') + (similar ? ' ' + similar + ' still read' + (similar === 1 ? 's' : '') + ' as close to another and ' + (similar === 1 ? 'is' : 'are') + ' marked.' : '') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
+  return { directions: ids, titles: dirs.map(d => d.title), media: mediaOf(dirs), similar, replanned, replanWhy: replanWhy || undefined, narrow, diversity: diversity.score, model: r.model, model2: model2 || undefined };
 }
 // -- the brief: what is settled, what is assumed, what blocks spending ------------------------------------------
 // A brief carries objective, audience, message, action and deliverables, plus design requirements in three bands
@@ -10608,6 +10631,55 @@ function stCapabilities(env) {
     modes: ST_MODES,
     masks: false, note: 'What an operation cannot do is stated, not worked around in silence. A capability marked integration-tested has run its whole path against stub models; it says nothing about the quality of real output.' };
 }
+/* -- S8: the six creative actions, each stated before it is taken -------------------------------------------------
+   For one composition as it stands, each action says what it changes, what it preserves and what it costs (model
+   calls, renders at which size, an inspection), and whether it can run now - with the reason when it cannot (copy
+   only, a finished bitmap, a locked layout, no imagery yet, a render in flight). The page shows the statements beside
+   the buttons; nothing here spends anything. */
+const ST_ACTION_IDS = ['refine', 'explore', 'layouts', 'new', 'imagery', 'area'];
+async function stActions(env, p, a, v) {
+  const mode = v ? (v.mode || 'composition') : 'none'; const copyOnly = mode === 'copy'; const finished = mode === 'finished'; const hybrid = mode === 'artwork';
+  const hasImage = !!(v && v.image && v.image.key); const locks = a.locks || {}; const L = (v && v.layout) || {};
+  const noImagery = !!(v && v.context && v.context.imagery === 'none');
+  const size = (v && v.image && v.image.size) || (v && v.context && v.context.size) || (p.brief || {}).size || env.IMAGE_SIZE || '2K';
+  const inspect = !!env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0';
+  let inflight = null; try { inflight = await env.MIND_DB.prepare("SELECT id, stage, state FROM studio_jobs WHERE asset=? AND stage IN ('render','inspect') AND state IN ('queued','running') ORDER BY created DESC LIMIT 1").bind(a.id).first(); } catch (e) {}
+  const regions = (L.regions || []).filter(r => r.role !== 'background').length;
+  const marks = (L.layers || []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')).map(l => l.role);
+  const held = (L.layers || []).some(l => l.rule && l.rule.mandatory);
+  const callCost = (n, extra) => ({ calls: n, renders: 0, text: n + ' model call' + (n === 1 ? '' : 's') + (extra ? ' ' + extra : '') });
+  const renderCost = (n, why) => ({ calls: inspect ? n : 0, renders: n, size, text: n + ' render' + (n === 1 ? '' : 's') + ' at ' + size + (inspect ? ' plus ' + n + ' inspection call' + (n === 1 ? '' : 's') : '') + (why ? ' ' + why : '') });
+  const no = (why) => ({ available: false, why });
+  const yes = () => ({ available: true, why: '' });
+  const keepWords = 'the approved words (headline, support, CTA, caption)';
+  const keepMarks = marks.length ? 'the campaign mark' + (marks.length === 1 ? '' : 's') + ' (' + marks.join(', ') + ') placed from ' + (marks.length === 1 ? 'its file' : 'their files') + (held ? ', where the campaign rule holds ' + (marks.length === 1 ? 'it' : 'them') : '') : 'the campaign mark policy';
+  const blockedAll = copyOnly ? 'copy only: there is no composition to direct' : finished ? 'a finished creative is one bitmap with no layers' : !v ? 'the asset has no version yet' : '';
+  const lockedLayout = !!locks.layout;
+  const acts = [
+    { id: 'refine', label: 'Refine this design', what: 'keep the idea, improve the finish in named ways (one or two refined concepts, sketched on the current imagery)', changes: ['hierarchy, spacing, panel or type treatment as the art director names them', 'the headline only when it is not locked and the concept asks'], preserves: ['the idea and the message', keepWords, hasImage ? 'the current imagery (the concept may ask for a new photograph, confirmed separately)' : 'the imagery brief', keepMarks], cost: callCost(1, 'at high effort (a second only if two concepts would look alike); no render until a card is generated'), stage: 'concepts', input: { mode: 'refine' } },
+    { id: 'explore', label: 'Explore variations', what: 'three visibly different interpretations of the same message - different medium, composition and hierarchy, measured on the drawn result', changes: ['medium, composition, hierarchy and devices', 'the imagery when a concept needs it (a render per concept generated, confirmed on the card)'], preserves: ['the message and the argument', keepWords, keepMarks, 'the approved facts and banned terms'], cost: callCost(1, 'at high effort (a second only if two concepts would look alike); renders only when a card is generated'), stage: 'concepts', input: { mode: 'explore' } },
+    { id: 'layouts', label: 'Explore layouts (same image and copy)', what: 'three arrangements of this exact tile: where the words sit, their hierarchy, the panel treatment', changes: ['the arrangement only: placement, hierarchy, panel or none, CTA treatment, scale and spacing'], preserves: ['the photograph exactly (its focus too)', keepWords + ' exactly', keepMarks], cost: callCost(1, '(a second only if two layouts would look alike); no render, ever'), stage: 'concepts', input: { mode: 'layouts' } },
+    { id: 'new', label: 'Create a new design', what: 'a fresh visual concept from the brief and the campaign identity, as a new asset in the family "New designs"', changes: ['everything the team does not ask to retain: imagery, composition, medium, devices (the current panel and layout are never inherited)'], preserves: ['the mandatory requirements: ' + keepMarks + ', the approved facts, the banned terms', 'the current copy unless the team unticks it'], cost: callCost(1, 'at high effort; renders only when a card is generated (per image region, or one for a full artwork)'), stage: 'concepts', input: { mode: 'new' } },
+    { id: 'imagery', label: hasImage ? 'Re-render the imagery' : 'Generate the imagery', what: hasImage ? 'a new photograph from a description; the composition is drawn over it unchanged' : 'the imagery this composition expects, from its own art direction', changes: ['the photograph' + (regions ? ' and ' + regions + ' image region' + (regions === 1 ? '' : 's') : '')], preserves: ['the layout', keepWords, keepMarks, 'the framing is reset to the new image'], cost: renderCost(1 + regions), stage: 'render', input: {} },
+    { id: 'area', label: 'Edit an area of the imagery', what: 'change one described area of the photograph (semantic masking, no pixel mask); what moved outside it is measured afterwards', changes: ['the named area of the photograph'], preserves: ['everything outside the area (asked for, then measured: held / drifted / changed)', keepWords, keepMarks, 'the layout'], cost: renderCost(1, '(the limit is stated before spending: nothing outside the area is guaranteed)'), stage: 'render', input: { edit: true, editKind: 'area' } },
+  ];
+  acts.forEach(x => {
+    let st = yes();
+    if (blockedAll) st = no(blockedAll);
+    else if (hybrid && (x.id === 'layouts' || x.id === 'area')) st = no('hybrid artwork: the words are painted into the image, so ' + (x.id === 'area' ? 'an area edit would repaint words' : 'there is no live arrangement to rearrange'));
+    else if (lockedLayout && (x.id === 'refine' || x.id === 'explore' || x.id === 'layouts')) st = no('the layout is locked on this asset: unlock it, or create a new design');
+    else if (x.id === 'layouts' && !hasImage && !noImagery) st = no('no imagery yet to keep: generate it first, or explore variations');
+    else if (x.id === 'area' && !hasImage) st = no('no imagery on this version to edit');
+    else if ((x.id === 'imagery' || x.id === 'area') && noImagery) st = no('this composition has no imagery by choice (typographic); explore variations to add a photograph');
+    else if ((x.id === 'imagery' || x.id === 'area') && inflight) st = no((inflight.stage === 'render' ? 'a render' : 'an inspection') + ' is ' + inflight.state + ' for this asset; wait for it');
+    Object.assign(x, st);
+  });
+  if (finished) {
+    acts.push({ id: 'regenerate', label: 'Regenerate', what: 'the image model paints the whole piece again from the approved words and the mark files', changes: ['the entire bitmap: picture, painted words and mark'], preserves: ['the approved words and the URL as the brief (read back afterwards, never guaranteed as pixels)', 'caption and alt text'], cost: renderCost(1), available: !inflight, why: inflight ? 'a render is ' + inflight.state : '', stage: 'render', input: { finished: true } });
+    acts.push({ id: 'derive', label: 'Switch to Editable', what: 'a derived asset in the editable mode: the words as live type, the mark placed from its file; the finished original is kept', changes: ['a new asset is made; the words become layers'], preserves: ['the finished original, unchanged', keepWords, 'the campaign mark, now exact'], cost: { calls: 0, renders: 0, text: 'free: no model call, no render' }, available: true, why: '', stage: 'derive', input: {} });
+  }
+  return { ok: true, asset: a.id, version: v ? v.id : '', mode, size, inspect, actions: acts, note: 'Each statement is computed from the version as it stands (mode, imagery, locks, marks, jobs in flight). A cost names the calls and renders the action itself spends; a concept generated later from a card costs its own renders, shown on the card. Nothing here runs anything.' };
+}
 async function stStageRun(env, job, done, fail) {
   const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
   log.compiled = []; log.fence = job.fence; log.lease = job.lease;
@@ -12631,6 +12703,7 @@ const AXIOM_WORKER = {
           if (path === '/studio/usage') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stUsage(env, p)); }
           if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
+          if (path === '/studio/actions') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (qf('version') && (!v || v.asset !== pair.asset.id)) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stActions(env, pair.project, pair.asset, v)); }
           if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit

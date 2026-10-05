@@ -1766,6 +1766,33 @@ creative?** inside "What the Studio used" on every asset, and the client
 context view names the other campaigns' facts it leaves out. Harness:
 `tests/studio-s7-worker.mjs` (5).
 
+**Genuinely different directions, and the six actions stated first (S8).**
+Directions are measured on the argument (headline and message) and on the
+medium: two that argue the same thing in different words, or share a medium
+with a near idea, are look-alikes; three or more in one medium are a
+`narrow` set even when the arguments differ. Either sends the set back to
+the model once (`REPLAN.`, like the concepts stage) for replacements that
+differ from every standing direction in the argument AND in the medium;
+the result is re-measured, a replacement that still reads alike is marked
+`replanFailed` and never hidden, and `replan:false` declines the round.
+The `directions` event and the job result record `media`, `replanned`,
+`replanWhy` (`alike` | `one medium`) and `narrow`. `GET /studio/actions?
+asset=&version=` (read; `stActions`) states, for one composition as it
+stands, the six creative actions - `refine`, `explore`, `layouts`, `new`,
+`imagery` (Generate or Re-render), `area` - each with `what`, `changes[]`,
+`preserves[]`, `cost {calls, renders, size, text}` (an inspection counted
+when `STUDIO_INSPECT` is on), `available` and `why`: copy only and a
+finished bitmap close all six (a finished creative is offered `regenerate`
+and the free `derive` instead), a locked layout closes refine, explore and
+layouts (a new design stays open), hybrid artwork closes layouts and area,
+no imagery closes layouts and area (typographic by choice closes imagery and
+area), a render or inspection in flight closes imagery and area. Nothing in
+the registry runs anything. In-app the Art direction panel has "Show what
+each action changes, keeps and costs" (a table with the reasons), and the
+action buttons carry the statement as their title and are disabled when the
+worker says not now. Harnesses: `tests/studio-s8-worker.mjs` (5),
+`tests/studio-actions-browser.mjs` (2).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
