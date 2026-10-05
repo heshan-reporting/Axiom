@@ -1,0 +1,74 @@
+/* Studio activity: client-tinted glass chrome, never a tint on the artwork. */
+.st .st-workspace-activity {
+  --work-accent: var(--st-client, var(--st-accent));
+  margin: 12px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--work-accent) 28%, var(--st-line));
+  border-radius: 14px;
+  background: linear-gradient(115deg, color-mix(in srgb, var(--work-accent) 9%, transparent), transparent 65%), color-mix(in srgb, var(--st-surface) 94%, transparent);
+  box-shadow: inset 0 1px 0 #ffffff09, 0 8px 28px #00000012;
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+.st .st-work-summary { display: flex; align-items: center; gap: 20px; padding: 12px 16px; flex-wrap: wrap; }
+.st .st-work-toggle { display: flex; align-items: center; gap: 12px; color: var(--st-ink); font: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; min-width: 200px; flex: 1; }
+.st .st-work-toggle > span:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
+.st .st-work-toggle > span:last-child { color: var(--st-ink-3); margin-left: 4px; }
+.st .st-work-eyebrow { font: 10px/1.3 var(--font-mono, monospace); letter-spacing: .15em; color: var(--st-ink-3); }
+.st .st-work-toggle b { font-size: 13px; font-weight: 550; }
+.st .st-work-beacon { width: 9px; height: 9px; border-radius: 50%; background: var(--st-ink-3); flex-shrink: 0; }
+.st .st-work-beacon.live { background: var(--st-accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--st-accent) 12%, transparent); animation: st-work-pulse 2.4s ease-in-out infinite; }
+.st .st-work-metrics { display: flex; gap: 24px; font-size: 11px; }
+.st .st-work-metrics > div { display: grid; grid-template-columns: auto auto; column-gap: 10px; align-items: baseline; }
+.st .st-work-metrics span, .st .st-work-metrics small { color: var(--st-ink-3); }
+.st .st-work-metrics b { font-size: 19px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.st .st-work-metrics small { grid-column: 1/-1; font-size: 10px; }
+.st .st-work-detail { padding: 0 16px 12px; animation: st-work-enter .22s ease-out; }
+.st .st-work-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+.st .st-work-card { min-width: 0; background: color-mix(in srgb, var(--st-ground) 78%, transparent); border: 1px solid var(--st-line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.st .st-work-card.failed { border-color: color-mix(in srgb, var(--st-bad) 55%, var(--st-line)); }
+.st .st-work-card-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.st .st-work-card-head b { font-weight: 600; }
+.st .st-work-card-head .st-status { font-size: 10px; white-space: nowrap; }
+.st .st-work-asset { color: var(--st-ink-3); font-size: 11px; overflow-wrap: anywhere; }
+.st .st-work-phase { color: var(--st-ink-2); min-height: 2.8em; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.st .st-progress-track { position: relative; height: 5px; border-radius: 20px; background: color-mix(in srgb, var(--st-ink) 10%, transparent); overflow: hidden; }
+.st .st-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--st-accent); transition: width .35s ease; }
+.st .st-progress-track.active > span { background: linear-gradient(90deg, var(--st-client, var(--st-accent)), var(--st-accent)); }
+.st .st-progress-track.indeterminate > span { width: 0; }
+.st .st-progress-track.indeterminate.active > span { width: 32%; animation: st-work-travel 1.8s ease-in-out infinite; }
+.st .st-work-card.done .st-progress-track > span { background: var(--st-ok); }
+.st .st-work-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; color: var(--st-ink-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+.st .st-work-hint { font-size: 10px; line-height: 1.5; }
+.st .st-work-card > button { align-self: flex-start; margin-top: auto; }
+.st .st-work-slow, .st .st-work-error { color: var(--st-warn); font-size: 11px; line-height: 1.5; }
+.st .st-work-error { color: var(--st-bad); }
+.st .st-work-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--st-ink-3); font-size: 10px; }
+.st .st-work-connection { padding: 10px 14px; margin: 6px 0; border-left: 2px solid var(--st-warn); color: var(--st-ink-2); background: color-mix(in srgb, var(--st-warn) 6%, var(--st-ground)); font-size: 12px; line-height: 1.6; }
+.st .st-local-progress { border: 1px solid var(--st-line); background: var(--st-surface); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 12px; }
+.st .st-workspace-activity > .st-local-progress { margin: 0 16px 12px; }
+.st .st-local-progress > div:first-child { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.st .st-local-progress .ov-dim { display: block; margin-top: 6px; font-size: 11px; }
+.st .st-progress-number { margin-left: auto; font-variant-numeric: tabular-nums; }
+.st .st-next-step { border-radius: 8px; }
+.st .st-flow .st-step { transition: background .18s ease, border-color .18s ease; }
+.st .st-flow .st-step.on { background: color-mix(in srgb, var(--st-client, var(--st-accent)) 12%, var(--st-ground)); }
+.st .st-flow .st-step.done .st-step-n { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-ok) 45%, transparent); }
+.st .st-work-toggle:focus-visible, .st .st-work-card button:focus-visible { outline: 2px solid var(--st-accent); outline-offset: 4px; border-radius: 4px; }
+@keyframes st-work-travel { 0% { transform: translateX(-110%); } 100% { transform: translateX(420%); } }
+@keyframes st-work-pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--st-accent) 5%, transparent); } }
+@keyframes st-work-enter { from { opacity: .4; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 860px) {
+  .st .st-work-summary { gap: 12px; padding: 10px 12px; }
+  .st .st-work-toggle { min-width: 160px; }
+  .st .st-work-metrics { gap: 12px; }
+  .st .st-work-detail { padding: 0 12px 12px; }
+  .st .st-workspace-activity { margin-top: 8px; }
+  .st .st-work-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st .st-work-detail, .st .st-work-beacon.live, .st .st-progress-track.indeterminate.active > span, .st .st-spin { animation: none; }
+  .st .st-progress-track > span, .st .st-flow .st-step { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .st .st-workspace-activity { background: var(--st-surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
