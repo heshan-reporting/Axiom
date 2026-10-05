@@ -7234,9 +7234,23 @@ async function stJobRun(env, job) {
   job.fence = async () => { if (!(await owned())) { const e = new Error('fenced: attempt ' + attempt + ' of job ' + job.id + ' no longer owns it (cancelled, or another runner took over); nothing more is filed'); e.fenced = true; throw e; } };
   // checkpoint before a long provider call: the lease must outlast the call, so no second runner starts beside this one
   job.lease = async (ms) => { await env.MIND_DB.prepare("UPDATE studio_jobs SET lease_until=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(Date.now() + Math.max(ST_LEASE_MS, ms || 0), Date.now(), job.id, attempt).run(); };
+  // Durable checkpoints, not guessed model percentages. Each completed milestone is real; a provider call
+  // stays indeterminate until it answers. Updates carry the same attempt fence as the result itself.
+  const milestones = job.stage === 'render' ? ['prepare', 'generate', 'save', 'publish'] : ['prepare', 'work', 'publish'];
+  const startedAt = Date.now();
+  job.checkpoint = async (phase, label, extra) => {
+    const now = Date.now();
+    const progress = Object.assign({}, job.progress || {}, extra || {}, { activity: { phase, label: stStr(label, 240), completed: Math.max(0, milestones.indexOf(phase)), total: milestones.length, startedAt, at: now, attempt } });
+    const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit(progress, 30000), now, job.id, attempt).run();
+    if (!(u && u.meta && u.meta.changes)) await job.fence();
+    job.progress = progress;
+  };
   const done = async (state, patch) => {
+    const progress = Object.assign({}, job.progress || {}, patch.progress || {});
+    progress.activity = Object.assign({}, progress.activity || {}, { phase: state, label: state === 'done' ? 'Completed' : state === 'queued' ? 'Waiting to retry' : 'Stopped with an error', total: milestones.length, startedAt, at: Date.now(), attempt });
+    if (state === 'done') progress.activity.completed = milestones.length;
     const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=? AND state='running' AND attempts=?")
-      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, JSON.stringify(patch.progress || {}), Date.now(), job.id, attempt).run();
+      .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, jsonFit(progress, 30000), Date.now(), job.id, attempt).run();
     const now = await stJob(env, job.id);
     // a cancelled or taken-over attempt cannot finish, fail or requeue the job: its state stays what the owner made it
     return (u && u.meta && u.meta.changes) ? now : Object.assign(now || {}, { fenced: true });
@@ -7253,6 +7267,7 @@ async function stJobRun(env, job) {
   try {
     const live = await stJob(env, job.id);
     if (!live || live.state !== 'running') return live;   // cancelled between claim and run
+    await job.checkpoint('prepare', 'Preparing the brief, client context and source files');
     // a stored input that does not parse is never run as {}: the person's instruction would be silently replaced
     if (live.inputCorrupt) return done('failed', { error: 'input_corrupt: the stored input of this job does not parse, so it was not run with an empty one (not retried). Start the step again from the app; GET /integrity lists such records.' });
     if (job.stage === 'echo') {
@@ -7261,9 +7276,9 @@ async function stJobRun(env, job) {
     if (job.stage === 'render') {
       const pair = await stAsset(env, job.asset);
       if (!pair) return done('failed', { error: 'asset gone' });
-      return stRenderJob(env, job, pair, done, fail);
+      return await stRenderJob(env, job, pair, done, fail);
     }
-    if (ST_STAGES.indexOf(job.stage) >= 0) return stStageRun(env, job, done, fail);
+    if (ST_STAGES.indexOf(job.stage) >= 0) return await stStageRun(env, job, done, fail);
     return done('failed', { error: 'unknown stage ' + job.stage });
   } catch (e) { if (e && e.fenced) return Object.assign(await stJob(env, job.id) || {}, { fenced: true }); const full = String((e && e.message) || e); return fail(/\(not retried\)/.test(full) && full.length > 200 ? full.slice(0, 180) + '... (not retried)' : full.slice(0, 200)); }
 }
@@ -10340,8 +10355,9 @@ function stLayoutShowImage(L) {
   return { layout: out, why: L.noImagery ? 'the type-only ground that would have hidden the imagery is lifted' : 'the plan had no background region; one is added so the imagery shows' };
 }
 async function stRenderJob(env, job, pair, done, fail) {
-  const inp = job.input || {}; const p = pair.project; const a = pair.asset;
+  const inp = job.input || {}; const p = pair.project; let a = pair.asset;
   if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
+  if (!env.MIND_DOCS) return done('failed', { error: 'storage_not_configured: image storage is unavailable; no image was requested (not retried)' });
   const cur = await stCurrent(env, a);
   // references: ids on the project (with roles from the plan), or raw data a caller supplied
   const references = (Array.isArray(inp.references) ? inp.references.filter(r => r && r.data) : []).concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : []));
@@ -10368,12 +10384,14 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
   if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
   if (job.lease) await job.lease(300000);
+  if (job.checkpoint) await job.checkpoint('generate', 'Image model is generating ' + (finished ? 'the finished creative' : inp.region && inp.region !== 'bg' ? 'the ' + inp.region + ' region' : 'the background') + '; waiting for its response');
   const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
   if (job.fence) await job.fence();
   const compiledKey = out.sent ? await stCompiledSave(env, job, [Object.assign({ at: Date.now(), op: areaEdit ? 'area edit (' + areaEdit.kind + ')' : finished ? 'finished creative render (marks attached: ' + (marksSent.join(', ') || 'none') + ')' : inp.approach === 'artwork' ? 'artwork render' : 'render ' + (inp.region || 'bg'), answered: out.ok ? out.model : '', fallback: !!out.fallback, error: out.ok ? undefined : out.error + (out.detail ? ': ' + out.detail : ''), masks: false, areaNote: areaEdit ? 'the area is described in words; no pixel mask is sent' : undefined }, out.sent)]) : '';
   if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''), compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : undefined);
   const again = await stJob(env, job.id);
   if (!again || again.state !== 'running') return again;   // cancelled while the render ran: the image is not filed
+  if (job.checkpoint) await job.checkpoint('save', 'Image received; saving the original and edit history');
   const vid = stId('v'); const key = 'studio/' + p.id + '/' + a.id + '/' + vid + '.png'; let convKey = '';
   if (env.MIND_DOCS) {
     await env.MIND_DOCS.put(key, bufFromB64(out.imageB64), { httpMetadata: { contentType: out.mime || 'image/png' } });
@@ -10381,11 +10399,14 @@ async function stRenderJob(env, job, pair, done, fail) {
   }
   // a region render merges into whatever the asset's current version is now (a sibling region may have landed meanwhile);
   // only a whole-image render for a version the asset has moved past is filed as a branch
+  const freshPair = await stAsset(env, a.id);
+  if (!freshPair) return done('failed', { error: 'asset gone while generating (not retried)' });
+  a = freshPair.asset;
   const isRegion = !!(inp.region && inp.region !== 'bg');
   let live = isRegion ? (await stCurrent(env, a)) || cur : cur;
   // a region the current layout no longer has (a newer design replaced it) must not touch that design: branch off the version it was asked for
   const regionGone = isRegion && !!(live && live.layout && Array.isArray(live.layout.layers) && !live.layout.layers.some(x => x.type === 'img' && x.region === inp.region));
-  const stale = (!isRegion || regionGone) && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
+  let stale = (!isRegion || regionGone) && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
   const baseV = stale ? await stVersion(env, job.inputVersion) : null;
   if (regionGone && baseV) live = baseV;
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
@@ -10427,7 +10448,16 @@ async function stRenderJob(env, job, pair, done, fail) {
     }
   }
   if (job.fence) await job.fence();
-  const v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined });
+  if (job.checkpoint) await job.checkpoint('publish', 'Saved; attaching the image to its composition and queuing review');
+  let v;
+  try { v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined, expectRevision: a.revision }); }
+  catch (e) {
+    if (e.code !== 'conflict') throw e;
+    // A last-moment edit must not receive a stale layout patch. Keep the completed image as an alternate,
+    // rather than rerunning the provider or overwriting the designer's newer work.
+    await job.fence(); stale = true; patch.note = 'render finished while the asset changed; filed as a branch';
+    v = await stAppendVersion(env, a, patch, 'studio', { branch: true, baseVersion: live || cur });
+  }
   await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : finished ? ', finished creative - the words' + (marksSent.length ? ', the ' + marksSent.join(' and ') : '') + ' and the URL are part of the one bitmap; nothing is composed over it' : inp.approach === 'artwork' ? ', hybrid artwork - the words are part of the bitmap, the mark is placed over it' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
   if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
@@ -10532,7 +10562,9 @@ function stValidationJudge(a, v, rep) {
     boxes.push(b);
   });
   rep.boxes.forEach(x => { if (x && x.id != null && !ids.has(String(x.id))) problems.push('the report has a layer ' + String(x.id).slice(0, 24) + ' this version does not'); });
-  const imageryMissing = !v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image));
+  // An image record is not proof that its pixels loaded in the browser. Retain that failure when re-judging
+  // the measurement instead of turning the browser's blocked result into a server-side pass.
+  const imageryMissing = !L.noImagery && (rep.imageryMissing === true || (!v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image))));
   const fonts = rep.fonts && typeof rep.fonts === 'object' ? { fallback: (Array.isArray(rep.fonts.fallback) ? rep.fonts.fallback : []).map(s => stStr(s, 160)).slice(0, 6), roles: rep.fonts.roles && typeof rep.fonts.roles === 'object' ? rep.fonts.roles : undefined } : null;
   // what the browser could not analyse: what it says it could not, plus any live words it reported with no contrast at all
   const unresolved = (Array.isArray(rep.unresolved) ? rep.unresolved : []).map(s => stStr(s, 20)).filter(s => /^(contrast|occlusion|mark readability)$/.test(s));
@@ -10794,7 +10826,10 @@ async function stActions(env, p, a, v) {
   return { ok: true, asset: a.id, version: v ? v.id : '', mode, size, inspect, actions: acts, note: 'Each statement is computed from the version as it stands (mode, imagery, locks, marks, jobs in flight). A cost names the calls and renders the action itself spends; a concept generated later from a card costs its own renders, shown on the card. Nothing here runs anything.' };
 }
 async function stStageRun(env, job, done, fail) {
-  const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); };
+  const lines = []; const log = async (k, t) => {
+    lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) });
+    if (job.checkpoint) await job.checkpoint('work', String(t), { lines: lines.slice(-40) });
+  };
   log.compiled = []; log.fence = job.fence; log.lease = job.lease;
   const p = await stProject(env, job.project);
   if (!p) return done('failed', { error: 'project gone (not retried)' });
@@ -10813,6 +10848,7 @@ async function stStageRun(env, job, done, fail) {
     else return done('failed', { error: 'unknown stage ' + job.stage });
     const again = await stJob(env, job.id);
     if (!again || again.state !== 'running') return again;
+    if (job.checkpoint) await job.checkpoint('publish', 'Work saved; filing the result and its provenance');
     return done('done', { result, cost: (lines.filter(l => l.kind === 'cmd').length), progress: { lines, compiled: await filed() } });
   } catch (e) {
     const full = String((e && e.message) || e); let m = full.slice(0, 220);
@@ -15570,5 +15606,3 @@ async function handleScheduled(env) {
 
   console.log(`AXIOM Cron complete: ${totalItems} items across ${topicsArr.length} topics`);
 }
-
-

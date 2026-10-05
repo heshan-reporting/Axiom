@@ -13,7 +13,7 @@
  * standing preference is offered - campaign, client or no - never saved alone. */
 (function () {
   'use strict';
-  if (!window.AXUI || !window.STRender) {
+  if (!window.AXUI || !window.STRender || !window.STProgress) {
     window.studioInit = function () {
       const root = document.getElementById('studio-root');
       if (root) root.innerHTML = '<div class="aud-notice" style="margin:12px 0"><b>The Studio runtime did not load.</b> The files under <code>docs/vendor/</code> or <code>docs/studio-render.js</code> are missing from this deployment.</div>';
@@ -22,6 +22,7 @@
   }
   const { html, call, blobUrl, toastMsg, ago, useGoto } = window.AXUI;
   const R = window.STRender;
+  const P = window.STProgress;
   const { useState, useEffect, useMemo, useRef, useCallback } = React;
   const fmtAest = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
   const aest = ts => (ts ? fmtAest.format(new Date(+ts)) : '');
@@ -81,6 +82,49 @@
   }
   const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent; a provider call already in flight may still finish and be billed.';
 
+  function ProgressBar({ value, label, active }) {
+    return html`<div class=${'st-progress-track' + (value == null ? ' indeterminate' : '') + (active ? ' active' : '')} role="progressbar" aria-label=${label} aria-valuemin="0" aria-valuemax="100" aria-valuenow=${value == null ? undefined : value} aria-valuetext=${value == null ? 'In progress; completion percentage is not available' : value + '% of confirmed checkpoints complete'}><span style=${value == null ? null : { width: value + '%' }}></span></div>`;
+  }
+  /** Small local operations use the same visual language as durable jobs, without claiming to run after the tab closes. */
+  function LocalProgress({ label, detail, value }) {
+    return html`<div class="st-local-progress" role="status" aria-live="polite"><div><span class="st-spin" aria-hidden="true"></span><b>${label}</b>${value != null ? html`<span class="st-progress-number">${value}%</span>` : null}</div><${ProgressBar} value=${value == null ? null : value} label=${label} active=${true} />${detail ? html`<span class="ov-dim">${detail}</span>` : null}</div>`;
+  }
+  function JobProgress({ j, now, title, onCancel, onRetry }) {
+    const m = P.job(j, now);
+    return html`<article class=${'st-work-card ' + j.state} data-job=${j.id} aria-label=${m.title + (title ? ': ' + title : '')}>
+      <div class="st-work-card-head"><b>${m.title}</b><span class=${'st-status ' + j.state}>${j.state === 'done' ? 'Complete' : j.state === 'failed' ? 'Needs attention' : j.state}</span></div>
+      ${title ? html`<div class="st-work-asset">${title}</div>` : null}
+      <div class="st-work-phase" role="status">${m.label}</div>
+      <${ProgressBar} value=${m.percent} label=${m.title + ' checkpoints'} active=${m.running} />
+      <div class="st-work-meta"><span>${m.percent != null ? m.percent + '% · ' + (m.total ? m.completed + '/' + m.total + ' checkpoints' : 'completed') : j.state === 'failed' ? 'Stopped; not complete' : j.state === 'cancelled' ? 'Result will not be applied' : 'Completion not yet reported'}</span><span>${m.attempt ? 'Attempt ' + m.attempt + ' of 3 · ' : ''}${m.time}${m.terminal ? ' duration' : ' elapsed'}</span></div>
+      ${m.waiting ? html`<div class="ov-dim st-work-hint">The percentage counts finished steps, not the model’s generation progress.</div>` : null}
+      ${m.slow ? html`<div class="st-work-slow">Taking longer than usual. Still waiting for the worker; no duplicate request has been sent.</div>` : null}
+      ${j.error ? html`<div class="st-work-error">${explain({ message: j.error }).title}${j.state === 'queued' ? ' · another attempt is queued' : ''}</div>` : null}
+      ${onCancel && P.active(j) ? html`<button class="ov-link" title=${RUN_NOTE} onClick=${() => onCancel(j.id)}>Cancel job</button>` : null}
+      ${onRetry && j.state === 'failed' ? html`<button class="btn sm ghost" onClick=${() => onRetry(j)}>Retry…</button>` : null}
+    </article>`;
+  }
+  function ActivityPanel({ p, flow, busy, sync, onJobs, onRefresh, onCancel, onRetry, onGo, stage }) {
+    const jobs = P.jobsForDisplay(p.jobs); const live = jobs.filter(P.active), failed = jobs.filter(j => j.state === 'failed');
+    const [expanded, setExpanded] = useState(false), [now, setNow] = useState(Date.now());
+    useEffect(() => { if (live.length || failed.length) setExpanded(true); }, [live.length > 0, failed.length > 0]);
+    useEffect(() => { if (!live.length) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [live.length > 0]);
+    const c = flow.counts;
+    const next = live.length ? null : !p.assets.length ? (!((p.brief || {}).channels || []).length ? ['brief', 'Complete the brief'] : p.directions.length && !p.directions.some(d => d.chosen) ? ['directions', 'Choose a direction'] : ['produce', 'Produce your assets']) : c.valid < c.n ? ['refine', 'Resolve quality checks'] : c.approved < c.n ? ['review', 'Review & approve'] : ['export', 'Export approved work'];
+    const status = sync && sync.error ? 'Live updates interrupted' : live.length ? live.length + ' job' + (live.length === 1 ? '' : 's') + ' in progress' : failed.length ? failed.length + ' job' + (failed.length === 1 ? '' : 's') + ' need attention' : busy ? 'Working in the Studio' : 'No background jobs running';
+    return html`<section class=${'st-workspace-activity' + (live.length || busy ? ' is-working' : '')} aria-label="Studio activity">
+      <div class="st-work-summary"><button class="st-work-toggle" aria-expanded=${expanded} onClick=${() => setExpanded(!expanded)}><span class=${'st-work-beacon' + (live.length || busy ? ' live' : '')} aria-hidden="true"></span><span><span class="st-work-eyebrow">STUDIO ACTIVITY</span><b role="status" aria-live="polite">${status}</b></span><span aria-hidden="true">${expanded ? '−' : '+'}</span></button>
+        <div class="st-work-metrics">${[['Checks', c.valid], ['Approvals', c.approved]].map(([label, count]) => html`<div key=${label}><span>${label}</span><b>${c.n ? P.percent(count, c.n) + '%' : '—'}</b><small>${count}/${c.n} assets</small></div>`)}</div>
+        ${next && next[0] !== stage ? html`<button class="btn sm st-next-step" onClick=${() => onGo(next[0])}>${next[1]} <span aria-hidden="true">→</span></button>` : null}
+        <button class="ov-link" onClick=${onJobs}>All jobs</button>
+      </div>
+      ${sync && sync.error ? html`<div class="st-work-connection" role="status">The last saved state is shown. Check your connection; updates retry automatically. <button class="ov-link" onClick=${onRefresh}>Refresh now</button></div>` : null}
+      ${busy && !live.length ? html`<${LocalProgress} label=${busy} detail="Waiting for confirmation. Keep this tab open until the request is saved." />` : null}
+      ${expanded ? html`<div class="st-work-detail"><div class="st-work-grid">${jobs.slice(0, 4).map(j => html`<${JobProgress} key=${j.id} j=${j} now=${now} title=${((p.assets || []).find(a => a.id === j.asset) || {}).title} onCancel=${onCancel} onRetry=${onRetry} />`)}</div>
+        <div class="st-work-foot">${jobs.length ? (jobs.length > 4 ? 'Showing 4 of ' + jobs.length + ' jobs. ' : '') + 'Generation, technical checks and human approval are separate steps.' : 'Start with the brief. Saved jobs appear here as soon as work begins.'} <span>${sync && sync.at ? 'Last synced ' + aest(sync.at) : 'Connecting…'}</span></div></div>` : null}
+    </section>`;
+  }
+
   /* ------------------------------------------------------------ where the team left off: this browser only, never shared */
   const STORE = 'ax_studio_v1';
   const store = {
@@ -135,12 +179,19 @@
   async function keyedImage(url) {
     if (!url) return null;
     if (imgCache.has(url)) return imgCache.get(url);
-    const pr = (async () => { try { const b = await blobUrl(url); const im = await R.loadImage(b); imgFailed.delete(url); return im; } catch (e) { imgFailed.set(url, String((e && e.message) || e).slice(0, 120)); imgCache.delete(url); return null; } })();
+    const pr = (async () => {
+      const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 45000); let b;
+      try { b = await blobUrl(url, { signal: controller.signal }); const im = await R.loadImage(b); imgFailed.delete(url); return im; }
+      catch (e) { imgFailed.set(url, String((e && e.message) || e).slice(0, 120)); imgCache.delete(url); return null; }
+      finally { clearTimeout(timer); if (b) URL.revokeObjectURL(b); }
+    })();
     imgCache.set(url, pr); return pr;
   }
-  async function loadImages(v, ns) {
+  async function loadImages(v, ns, onProgress) {
     const layout = (v && v.layout) || {}; const want = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src);
-    const [bg, logo, ...rest] = await Promise.all([keyedImage(v && v.image && v.image.url), keyedImage(ns ? '/brand/logo?ns=' + encodeURIComponent(ns) : '')].concat(want.map(l => keyedImage(l.src))));
+    let loaded = 0; const total = want.length + 2;
+    const read = async url => { try { return await keyedImage(url); } finally { loaded++; if (onProgress) onProgress({ loaded, total }); } };
+    const [bg, logo, ...rest] = await Promise.all([read(v && v.image && v.image.url), read(ns && (layout.layers || []).some(l => l.type === 'img' && l.role === 'logo' && !l.src) ? '/brand/logo?ns=' + encodeURIComponent(ns) : '')].concat(want.map(l => read(l.src))));
     const out = { bg, logo }; want.forEach((l, i) => { if (rest[i]) out[l.id] = rest[i]; });
     const failed = [v && v.image && v.image.url].concat(want.map(l => l.src)).filter(u => u && imgFailed.has(u));
     return Object.defineProperty(out, '_failed', { value: failed, enumerable: false });
@@ -152,20 +203,23 @@
     const bgUrl = v && v.image && v.image.url;
     const srcs = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src).map(l => l.id + '=' + l.src).join('|');
     const words = JSON.stringify((Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'text').map(l => [l.font, l.weight])) + JSON.stringify(layout.fonts || {});
-    const [st, setSt] = useState({ imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: '' });
+    const requestKey = (bgUrl || '') + '|' + srcs + '|' + words + '|' + ns + '|' + (nonce || 0);
+    const [st, setSt] = useState({ imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: '', requestKey: '', progress: null });
     useEffect(() => {
-      let live = true; setSt(s => Object.assign({}, s, { ready: false }));
+      let live = true; setSt(s => Object.assign({}, s, { imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, requestKey, progress: null }));
       (async () => {
-        const imgs = await loadImages(Object.assign({}, v || {}, { layout }), ns);
-        const fonts = layout.layers ? await R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 4000 }) : null;
-        if (live) setSt({ imgs, fonts, failed: imgs._failed || [], ready: true, key: (bgUrl || '') + '|' + srcs + '|' + words + '|' + Date.now() });
+        const [imgs, fonts] = await Promise.all([
+          loadImages(Object.assign({}, v || {}, { layout }), ns, progress => { if (live) setSt(s => Object.assign({}, s, { progress, requestKey })); }),
+          layout.layers ? R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 4000 }) : Promise.resolve(null),
+        ]);
+        if (live) setSt({ imgs, fonts, failed: imgs._failed || [], ready: true, requestKey, progress: null, key: requestKey + '|' + Date.now() });
       })();
       // a face that finishes loading later still changes the measure: redraw and re-measure
       const onFonts = () => { if (live && layout.layers) R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 1500 }).then(fonts => { if (live) setSt(s => Object.assign({}, s, { fonts, key: s.key + '+f' })); }); };
       if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', onFonts);
       return () => { live = false; if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', onFonts); };
     }, [bgUrl, srcs, words, ns, nonce || 0]);
-    return st;
+    return st.requestKey === requestKey ? st : { imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: requestKey, progress: null };
   }
   function useImages(v, ns, layoutOverride) { return useComposition(v, ns, layoutOverride).imgs; }
 
@@ -893,6 +947,7 @@
       <table class="ov-table"><thead><tr><th>Asset</th><th>Version</th><th>Copy</th><th>Design</th><th>Validation</th><th>Export</th></tr></thead><tbody>${rows.map(x => html`<tr key=${x.a.id}><td>${x.a.title}<div class="ov-dim">${chanLabel(x.a.channel)} ${x.a.format}${x.v && x.v.layout && x.v.layout.stage ? ', ' + x.v.layout.stage.w + ' x ' + x.v.layout.stage.h + ' px' : ''}</div></td><td class="ov-dim">v${vnum(x.a, x.v)}</td><td>${x.c ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.v && x.v.mode === 'copy' ? html`<span class="ov-dim">copy only</span>` : x.d ? html`<${Chip} kind="ok">approved</${Chip}>` : html`<${Chip}>draft</${Chip}>`}</td><td>${x.valid ? html`<${Chip} kind="ok">${x.v && x.v.mode === 'copy' ? 'n/a' : x.fin ? 'read back' : 'passed'}</${Chip}>` : html`<${Chip} kind=${x.tech === 'failed' ? 'bad' : 'warn'}>${x.tech === 'failed' ? 'failing' : x.fin ? 'not read back' : 'not validated'}</${Chip}>`}${x.fin ? html`<div class="ov-dim">finished bitmap: the file is the generated image</div>` : null}</td><td>${x.ok ? html`<${Chip} kind="ok">included</${Chip}>` : html`<span class="ov-dim">left out${x.c && (x.d || (x.v && x.v.mode === 'copy')) && !x.valid ? ' (approved, but ' + (x.tech === 'failed' ? 'its validation fails' : x.fin ? 'its words and mark were not read back' : 'not validated') + ')' : x.partly ? ' (partly approved)' : ' (not approved)'}</span>`}</td></tr>`)}</tbody></table>
       ${!ready.length && p.assets.length ? html`<div class="st-empty-state"><b>Nothing is ready to export.</b><span>An asset goes in once its copy and design are approved and its current version passes validation.</span><button class="btn sm" onClick=${() => onGo('review')}>Go to Review</button></div>` : null}
       ${state && state.msg ? html`<div class=${'st-export-msg' + (state.error ? ' bad' : '')} role="status">${state.msg}</div>` : null}
+      ${busy ? html`<${LocalProgress} label="Building the delivery bundle" value=${state.total ? P.percent(state.completed, state.total) : null} detail=${state.total ? state.completed + '/' + state.total + ' assets prepared; recording and packaging follow.' : 'Validating the files and recording the approved versions. Keep this tab open.'} />` : null}
       ${state && state.files ? html`<table class="ov-table st-export-files" aria-label="Files in the bundle"><thead><tr><th>File</th><th class="num">Size</th><th>Pixels</th></tr></thead><tbody>${state.files.map(f => html`<tr key=${f.name}><td>${f.name}</td><td class="num">${Math.max(1, Math.round(f.bytes / 1024))} KB</td><td>${f.w ? html`${f.w} x ${f.h}${f.want ? (f.w === f.want.w && f.h === f.want.h ? html` <${Chip} kind="ok">native size</${Chip}>` : html` <${Chip} kind="bad">expected ${f.want.w} x ${f.want.h}</${Chip}>`) : null}` : html`<span class="ov-dim">-</span>`}</td></tr>`)}</tbody></table>` : null}
       ${ready.length ? html`<div class="st-pad"><button class="btn sm ghost" disabled=${!canWrite()} onClick=${() => onClickup(ready)}>Send to ClickUp...</button> <span class="ov-dim">a separate, confirmed step: one task per asset with the approved copy</span></div>` : null}
     </div>`;
@@ -1400,7 +1455,11 @@
       <div class="ov-dim">Knowledge is per client and per campaign: another client's or another campaign's marks, facts and references never reach this project.</div>
     </div>`;
   }
-  function AssetView({ p, a, kit, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, railSlot, tab, setTab, conflict, onConflict, neighbours, preview, setPreview, onBrand }) {
+  function AssetView(props) {
+    if (!current(props.a)) return html`<div class="st-centre-pad"><div class="ov-empty" role="alert">${props.a.currentMissing ? 'The current version could not be found. Open Versions to restore one; no older version is shown as current.' : 'This asset has no version yet.'}</div></div>`;
+    return html`<${AssetWorkspace} ...${props} />`;
+  }
+  function AssetWorkspace({ p, a, kit, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, railSlot, tab, setTab, conflict, onConflict, neighbours, preview, setPreview, onBrand }) {
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.current]);
@@ -1440,10 +1499,13 @@
     const comp = useComposition(v, p.ns, v.layout, v.copy, nonce);
     // the variations are worked out once the fonts and images are in, so every one is measured as it would export
     const canVary = !copyOnly && !flat && !finished && v.mode !== 'artwork' && v.layout && Array.isArray(v.layout.layers);
-    const [vars, setVars] = useState(null); const [using, setUsing] = useState('');
+    const [vars, setVars] = useState(null); const [using, setUsing] = useState(''); const [variantProgress, setVariantProgress] = useState(0); const [variantError, setVariantError] = useState('');
     useEffect(() => {
-      setVars(null); if (!canVary || !comp.ready) return; let live = true;
-      const t = setTimeout(() => { try { const r = R.variants(v.layout, v.copy, comp.imgs, { fonts: comp.fonts, format: a.format, channel: a.channel, locks: a.locks }); if (live) setVars(r); } catch (e) { if (live) setVars([]); } }, 40);
+      setVars(null); setVariantProgress(0); setVariantError(''); if (!canVary || !comp.ready) return; let live = true;
+      const ids = ['band-foot', 'band-head', 'col-left', 'col-right', 'card-low', 'card-high', 'centre', 'fade', 'type-only'];
+      // Yield between arrangements so progress paints and the editor remains responsive. An old version's
+      // computation is abandoned rather than publishing its suggestions over the new one.
+      const t = setTimeout(async () => { try { const out = []; for (let i = 0; i < ids.length; i++) { if (!live) return; out.push(...R.variants(v.layout, v.copy, comp.imgs, { fonts: comp.fonts, format: a.format, channel: a.channel, locks: a.locks, only: [ids[i]] })); if (!live) return; setVariantProgress(i + 1); await sleep(0); } if (live) setVars(out); } catch (e) { if (live) { setVars([]); setVariantError('Layout previews could not be measured. Use Measure again to retry.'); } } }, 40);
       return () => { live = false; clearTimeout(t); };
     }, [v && v.id, comp.key, comp.ready, !!(a.locks || {}).layout]);
     const useVariant = async x => { setUsing(x.id); try { await onVariant(a, x.layout, v.id, x.name); } finally { setUsing(''); } };
@@ -1463,7 +1525,7 @@
       if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && (force || filed.current !== sigKey)) { setMeasuring(true); try { const sent = await onValidate(a, v, r, comp); if (sent) filed.current = sigKey; } finally { setMeasuring(false); } }
     }, [v && v.id, comp.key, comp.ready, a.readiness && a.readiness.technical]);
     useEffect(() => { const f = forceNext.current; forceNext.current = false; measure(f); }, [measure]);
-    const repair = async () => { setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
+    const repair = async () => { setRepairing(true); try { await sleep(32); const r = await onRepair(a, v, comp); setRepairNote(r); } finally { setRepairing(false); } };
     const undoRepair = async () => { if (!repairNote || !repairNote.undo) return; setRepairing(true); try { await onUndoRepair(a, repairNote.undo); setRepairNote(null); } finally { setRepairing(false); } };
     // Measure again reloads the images and fonts first (a mark that failed to load, a font that arrived late), then files the measurement
     const forceNext = useRef(false);
@@ -1503,7 +1565,7 @@
         ${stageTools}
         <div class="st-stage-inner" style=${zoomStyle}>${le && !preview ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDirty=${onLayoutDirty} propsSlot=${propsSlot} layersSlot=${layersSlot} onSel=${ids => { setLayerSel(ids); if (ids.length) setTab('properties'); }} guides=${overlays} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout, v.id); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${overlays && !preview ? hlIds : []} tagOut=${true} />`}</div>
         ${hlIds.length && overlays && !preview ? html`<div class="st-hl-note" role="status">Outlined on the tile: ${hlIds.join(', ')}. <button class="ov-link" onClick=${() => setHlIds([])}>clear</button></div>` : null}
-        ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The art director is inspecting this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
+        ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${P.job(renderJob).title}: ${P.job(renderJob).label}. Follow progress in Studio activity above. The composition stays editable meanwhile.</div>` : null}
       ${!preview ? html`${flat ? html`<div class="st-flatnote">This is a flattened legacy tile: the text on the image is not editable. Editing the caption does not change the image.</div>` : null}
         ${finished ? html`<div class="st-flatnote st-finnote" role="note"><b>Gemini Finished Creative.</b> ${v.image ? 'The image model painted the whole piece: the ' + Array.from(baked).join(', ') + ((v.layout || {}).baked || []).filter(r => r === 'logo' || r === 'wordmark').map(r => ', the ' + r).join('') + ' and the URL are pixels of one bitmap (' + ((v.image || {}).model || 'image model') + ', ' + ((v.image || {}).size || '') + ((v.image || {}).fallback ? ', fell back from ' + (v.image || {}).requested : '') + '). Nothing is composed over it and nothing on it can be dragged or retyped. Change the words or the picture by regenerating; caption and alt text are edited in the Copy tab. The Art Director reads the words and the mark back before design approval (Review).' : 'Queued: the image model will paint the whole piece, words and mark included. What you see is the plan it is briefed from, not the result.'}</div>` : null}
         ${v.mode === 'artwork' ? html`<div class="st-flatnote">Hybrid artwork (legacy mode): the ${((v.layout || {}).baked || ['headline', 'support', 'cta']).join(', ')} are painted into the generated image (${(v.image || {}).model || 'image model'}, ${(v.image || {}).size || ''}${(v.image || {}).fallback ? ', fell back from ' + (v.image || {}).requested : ''}) and are not independently editable; the ${(v.layout || {}).layers && v.layout.layers.some(l => l.role === 'wordmark') ? 'wordmark' : 'logo'} is a live layer placed from its original file. Change the words by editing the artwork with an instruction, or switch to an editable composition. A bitmap is never repaired by composing live elements over it.</div>` : null}
@@ -1514,6 +1576,11 @@
         ${hiddenImagery(v) ? html`<div class="st-flatnote st-hidden-imagery">Imagery on file but not shown: ${hiddenImagery(v)}. Show the imagery (below the artwork) lifts it, no render.</div>` : null}` : null}
       </div>
       ${!preview ? html`<div class="st-comp-info" aria-label="About this composition"><span class="st-comp-tag">${tagText}</span>${v.layout && v.layout.stage ? html`<span class="ov-dim"> - ${v.layout.stage.w} x ${v.layout.stage.h} px</span>` : null}</div>` : null}
+      ${!preview && !comp.ready ? html`<${LocalProgress} label="Loading imagery & fonts" detail=${comp.progress ? comp.progress.loaded + '/' + comp.progress.total + ' image slots checked; waiting for all required resources before measurement.' : 'Fetching the saved files. This does not generate a new image.'} />` : null}
+      ${!preview && comp.failed.length ? html`<div class="st-work-connection" role="alert">${comp.failed.length} image file${comp.failed.length === 1 ? '' : 's'} could not load. This preview is incomplete. <button class="ov-link" onClick=${measureAgain}>Reload files & measure</button></div>` : null}
+      ${!preview && (measuring || repairing) ? html`<${LocalProgress} label=${repairing ? 'Repairing & rechecking the layout' : 'Measuring & saving quality checks'} detail=${repairing ? 'Testing geometry, readability and brand constraints. The result will say what is still unresolved.' : 'Checking this exact version at its output size; approval remains a separate decision.'} />` : null}
+      ${!preview && canVary && comp.ready && !vars ? html`<${LocalProgress} label="Checking layout alternatives" value=${P.percent(variantProgress, 9)} detail=${variantProgress + '/9 arrangements measured. No model call or image generation.'} />` : null}
+      ${variantError ? html`<div class="st-work-connection" role="alert">${variantError}</div>` : null}
       ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onUndoRepair=${undoRepair} onMeasure=${measureAgain} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} highlight=${hlIds} onHighlight=${ids => { toggleHl(ids); if (!overlays) setOverlays(true); if (preview) setPreview(false); }} onAction=${k => { if (k === 'imagery' && window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onEditLayout=${() => { setLe(true); if (preview) setPreview(false); }} onVariations=${canVary ? () => { const el = document.querySelector('#studio-root .st-vars'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } : null} varsOk=${vars ? vars.filter(x => x.ok).length : null} varsN=${vars ? vars.length : 0} />` : null}
       ${!preview ? html`${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} hidden=${hiddenImagery(v)} onShow=${() => onLayoutSave(a, showImagery(v.layout), v.id, 'show the imagery: the ground that hid it is lifted')} onGenerate=${() => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
         ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
@@ -1889,6 +1956,8 @@
     const [exportState, setExportState] = useState(null);
     const [preset, setPreset] = useState(null); const [panel, setPanel] = useState(null); const [ctxTick, setCtxTick] = useState(0);
     const [notice, setNotice] = useState(null);
+    const [sync, setSync] = useState({ at: 0, error: false });
+    const reloadSeq = useRef(0), appliedSeq = useRef(0);
     const [tab, setTab] = useState('copy');
     const [slot, setSlot] = useState(null); const [railSlot, setRailSlot] = useState(null);
     // S11: preview (the artwork alone) is a page state, so the header can switch it; the left panel's width and whether it is open are this browser's
@@ -1945,11 +2014,29 @@
     useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
     useGoto('studio', q => { q = q || {}; resumed.current = true; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
-    const reload = useCallback(async (id) => {
+    const reload = useCallback(async (id, quiet) => {
       const want = id || pidRef.current; if (!want) return null;
+      const seq = ++reloadSeq.current;
       // the ref moves with the answer, not with the next render: a write that follows a reload in the same handler sends the fresh revision
-      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
+      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < appliedSeq.current) return pRef.current; appliedSeq.current = seq; pRef.current = d; setP(d); setSync({ at: Date.now(), error: false }); } return d; }
+      catch (e) { if (pidRef.current === want && seq >= appliedSeq.current) { setSync(s => ({ at: s.at, error: true })); if (!quiet) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); } return null; }
     }, []);
+    // The execution request may be open for minutes. Observe independently with read-only GETs, never another
+    // step request. One poll at a time; pause in hidden tabs, reconnect immediately, and ignore older responses.
+    useEffect(() => {
+      if (!pid) return; let live = true, timer, polling = false;
+      setSync({ at: 0, error: false });
+      const poll = async () => {
+        if (!live || polling) return; clearTimeout(timer); polling = true;
+        if (!document.hidden) await reload(pid, true);
+        polling = false; if (!live) return;
+        const active = ((pRef.current || {}).jobs || []).some(P.active) || stepping.current.size > 0;
+        timer = setTimeout(poll, active ? 2000 : 10000);
+      };
+      const wake = () => { if (!document.hidden) poll(); };
+      timer = setTimeout(poll, 800); window.addEventListener('online', wake); document.addEventListener('visibilitychange', wake);
+      return () => { live = false; clearTimeout(timer); window.removeEventListener('online', wake); document.removeEventListener('visibilitychange', wake); };
+    }, [pid, reload]);
     /* an error explained where the work is, with a real retry when one makes sense; a provider problem refreshes the status chips */
     const fail = (e, what, retry) => { const x = explain(e, what); setNotice(Object.assign(x, { actions: retry ? [{ label: 'Retry', fn: retry }] : [] })); setBusy(''); if (x.kind === 'provider') refreshStatus(); };
     /* the same action twice while it is still running is refused here, before any request: a double click never makes two jobs or two charges */
@@ -1958,13 +2045,16 @@
     /* a job: step it until it ends; a lease held elsewhere is waited out; the project is reloaded as it moves */
     const runJob = useCallback(async (id, label) => {
       if (stepping.current.has(id)) return null; stepping.current.add(id);
+      const origin = pidRef.current;
       try {
         let waits = 0;
         for (let i = 0; i < 60; i++) {
+          if (pidRef.current !== origin) return null;
           if (label) setBusy(label);
           let j;
           try { j = (await call('/studio/job/step', { id })).job; } catch (e) { fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
-          const d = await reload();
+          if (pidRef.current !== origin) return j;
+          const d = await reload(origin);
           if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') {
             if (j.state === 'failed' && pidRef.current === j.project) { const x = explain({ message: j.error, code: (String(j.error).match(/^[a-z_0-9]+/) || [''])[0] }, 'The ' + j.stage + ' step failed'); setNotice(Object.assign(x, { title: x.title + (x.title.indexOf(j.stage) < 0 ? ' (' + j.stage + ')' : ''), actions: canWrite() && !/not retried|not_configured|budget_exhausted|account_limit/.test(j.error) ? [{ label: 'Retry ' + j.stage, fn: () => retryJob(j) }, { label: 'Jobs', fn: () => setView('jobs', true) }] : [{ label: 'Jobs', fn: () => setView('jobs', true) }] })); if (x.kind === 'provider') refreshStatus(); }
             return j;
@@ -1973,7 +2063,7 @@
           if (j.note && /waiting for the step before/.test(j.note)) { if (++waits >= 4) return j; await sleep(2500); continue; }
           await sleep(j.note && /another runner/.test(j.note) ? 3000 : 600);
         }
-      } finally { stepping.current.delete(id); setBusy(''); }
+      } finally { stepping.current.delete(id); if (pidRef.current === origin) setBusy(''); }
       return null;
     }, [reload]);
     /* the composed tile for one version, drawn by the one renderer at native size and saved as that version's export PNG */
@@ -2014,7 +2104,7 @@
     /* switching client leaves nothing of the other client on screen: project, kit, suggestions, notices, export, dialogs */
     const switchClient = id => { if (id === clientId) return; resumed.current = true; setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setDialog(null); setPanel(null); setPreset(null); setIntake(false); setSelAsset(null); setSelField(null); setSugg(null); setKit(null); setLib(null); setTab('copy'); setClientId(id); };
 
-    const job = async (stage, input, asset, idem, label) => { const r = await call('/studio/job', { project: pidRef.current, asset: asset || undefined, stage, input, idem }); return runJob(r.job.id, label); };
+    const job = async (stage, input, asset, idem, label) => { const origin = pidRef.current; setBusy(label || 'Queuing the next step'); const r = await call('/studio/job', { project: origin, asset: asset || undefined, stage, input, idem }); if (pidRef.current !== origin) return r.job; await reload(origin); return runJob(r.job.id, label); };
     const produce = (extra) => guard('produce:' + pidRef.current, async () => {
       try {
         const d = pRef.current || await reload(); const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]);
@@ -2240,14 +2330,25 @@
         const files = []; const sheet = []; const list = [];
         const dims = u8 => (u8 && u8.length > 24 && u8[1] === 80 && u8[2] === 78 && u8[3] === 71) ? { w: ((u8[16] << 24) | (u8[17] << 16) | (u8[18] << 8) | u8[19]) >>> 0, h: ((u8[20] << 24) | (u8[21] << 16) | (u8[22] << 8) | u8[23]) >>> 0 } : null;
         for (const x of ready) {
+          setExportState({ busy: true, completed: sheet.filter(s => /^== /.test(s)).length, total: ready.length, msg: 'Preparing ' + x.a.title + ' at its output size…' });
           const v = x.v; const safe = (x.a.title + '-v' + vnum(x.a, v)).replace(/[^a-z0-9-]+/gi, '_');
           // a finished creative is exported as the generated bitmap itself: nothing is drawn over it and no composed PNG is saved
           if (v.layout && v.layout.layers && v.mode !== 'finished') {
-            const imgs = await loadImages(v, p0.ns); await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+            const imgs = await loadImages(v, p0.ns); const fonts = await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+            if (imgs._failed.length) throw new Error(x.a.title + ': an image file could not load. Reload its files in Refine before exporting. No incomplete bundle was downloaded.');
+            const check = R.validate(v.layout, v.copy, imgs, { fonts, format: x.a.format, channel: x.a.channel });
+            if (!check.ok) throw new Error(x.a.title + ': export preflight found ' + check.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ')).join(', ') + '. Return to Refine to resolve these checks. No incomplete bundle was downloaded.');
             const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
             files.push({ name: safe + '.png', data: u8 }); const d0 = dims(u8); list.push(Object.assign({ name: safe + '.png', bytes: u8.length, want: v.layout.stage ? { w: v.layout.stage.w, h: v.layout.stage.h } : null }, d0 || {}));
             if (canWrite() && !p0.readOnly) { let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); await call('/studio/render/save', { asset: x.a.id, version: v.id, imageB64: btoa(bin), mime: 'image/png' }); }
-          } else if (v.image && v.image.url) { try { const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); const u8 = new Uint8Array(await r.arrayBuffer()); files.push({ name: safe + '.png', data: u8 }); list.push(Object.assign({ name: safe + '.png', bytes: u8.length }, dims(u8) || {})); } catch (e) {} }
+          } else if (v.image && v.image.url) {
+            const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {}, signal: AbortSignal.timeout(45000) });
+            if (!r.ok) throw new Error(x.a.title + ': image download failed (HTTP ' + r.status + '). Nothing was downloaded as a finished bundle.');
+            const blob = await r.blob(); const url = URL.createObjectURL(blob); let im;
+            try { im = await R.loadImage(url); } finally { URL.revokeObjectURL(url); }
+            const u8 = new Uint8Array(await blob.arrayBuffer()); const ext = /jpeg/.test(blob.type) ? '.jpg' : /webp/.test(blob.type) ? '.webp' : '.png';
+            files.push({ name: safe + ext, data: u8 }); list.push({ name: safe + ext, bytes: u8.length, w: im.naturalWidth, h: im.naturalHeight });
+          } else if (v.mode !== 'copy') throw new Error(x.a.title + ': no image or editable composition is available to export.');
           sheet.push('== ' + x.a.title + ' (' + x.a.channel + ' ' + x.a.format + ') - version ' + v.id + ' ==', ...['headline', 'support', 'cta', 'caption', 'alt'].filter(k => v.copy[k]).map(k => k.toUpperCase() + ': ' + v.copy[k]), 'CHECKS: ' + ((v.checks || []).map(c => c.state + ' ' + c.text).join('; ') || 'none'), 'APPROVALS: ' + Object.keys(x.a.approvals || {}).map(k => k + ' by ' + x.a.approvals[k].by + ' - ' + x.a.approvals[k].reason).join('; '), '');
         }
         let manifest = null;
@@ -2302,7 +2403,7 @@
       : id === 'produce' ? { tabs: [['board', 'Board', p.assets.length || null], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null], ['production', 'Recipes and usage'], ['jobs', 'Jobs', liveJobs.length || null]], tab: view, onTab: k => setView(k) }
       : id === 'refine' ? { tabs: [['asset', a ? a.title : 'Asset'], ['copy', 'Copy deck']], tab: view, onTab: k => { if (k === 'asset' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } } : {};
     const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
-    const jobsLine = p && (liveJobs.length || (p.jobs || []).some(j => j.state === 'failed')) ? html`<div class="st-jobline-strip" aria-label="Jobs in progress">${liveJobs.slice(0, 4).map(j => html`<span key=${j.id} class="st-jobchip"><span class="st-spin" aria-hidden="true"></span>${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${j.state}${j.attempts ? ', attempt ' + (j.attempts + 1) + ' of 3' : ''}</span>${canWrite() ? html` <button class="ov-link" title=${RUN_NOTE} onClick=${() => cancelJob(j.id)}>cancel</button>` : null}</span>`)}${(p.jobs || []).filter(j => j.state === 'failed' && !(p.jobs || []).some(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && x.state !== 'failed')).slice(-3).map(j => html`<span key=${j.id} class="st-jobchip bad"><${Chip} kind="bad">failed</${Chip}> ${j.stage}${j.asset ? ' - ' + ((p.assets.find(x => x.id === j.asset) || {}).title || '') : ''} <span class="ov-dim">${explain({ message: j.error }).title}</span>${canWrite() ? html` <button class="ov-link" onClick=${() => retryJob(j)}>retry</button>` : null}</span>`)}</div>` : null;
+    const jobsLine = null; // The Activity panel owns job status on every stage, without duplicate strips.
 
     let centre;
     if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
@@ -2334,7 +2435,7 @@
     return html`<div ref=${rootRef} class=${'st' + (p ? ' has-project' : '') + (inRefine ? ' has-asset' : '') + (preview && inRefine ? ' previewing' : '')} data-stage=${stage} style=${Object.assign({}, accent ? { '--st-client': accent } : {}, headH > 46 ? { '--st-head-h': headH + 'px' } : {})}>
       ${header}
       ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
-      ${busy && p ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
+      ${p && !preview ? html`<${ActivityPanel} p=${p} flow=${flow} busy=${busy || (sugg && sugg.loading ? 'Preparing creative suggestions' : '')} sync=${sync} stage=${stage} onGo=${goStage} onJobs=${() => setView('jobs', true)} onRefresh=${() => reload()} onCancel=${canWrite() && !p.readOnly ? cancelJob : null} onRetry=${canWrite() && !p.readOnly ? retryJob : null} />` : null}
       <${Notice} n=${notice} onClose=${() => setNotice(null)} />
       <div class=${'st-body' + (p ? '' : ' lib') + (p && !showAside ? ' noaside' : '') + (p && !railOpen ? ' norail' : '')} style=${p && railOpen ? { '--st-rail-w': railW + 'px' } : null}>
         ${p && railOpen ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${setRailSlot} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the left panel" title="Show assets and layers">›</button>` : null}

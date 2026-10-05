@@ -226,7 +226,7 @@
     return new Promise(res => canvas.toBlob(b => res(b), 'image/png'));
   }
   function loadImage(url) {
-    return new Promise((res, rej) => { if (!url) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('image failed: ' + String(url).slice(0, 80))); im.src = url; });
+    return new Promise((res, rej) => { if (!url) return res(null); const im = new Image(); const timer = setTimeout(() => { im.onload = null; im.onerror = null; im.src = ''; rej(new Error('image decode timed out')); }, 15000); im.onload = () => { clearTimeout(timer); res(im); }; im.onerror = () => { clearTimeout(timer); rej(new Error('image failed: ' + String(url).slice(0, 80))); }; im.src = url; });
   }
 
   /* ---------------------------------------------------------------- fonts: load, wait, and say what was actually used */
@@ -930,6 +930,7 @@
     if (opts.allowNoImagery !== false) recipes.push({ id: 'type-only', name: 'Type only, no photograph', panel: 'none', typeOnly: true, zone: { x: sp.side + 2, y: sp.top + 4, w: 100 - 2 * sp.side - 4, h: 100 - sp.top - sp.bottom - 8 }, anchor: 'middle', grow: 1.25 });
     const out = [];
     recipes.forEach(r => {
+      if (opts.only && opts.only.indexOf(r.id) < 0) return;
       const L = JSON.parse(JSON.stringify(L0)); const byId = {}; (L.layers || []).forEach(l => { byId[String(l.id)] = l; });
       const keepImgs = r.typeOnly ? [] : L.layers.filter(l => l.type === 'img' && !isMark(l));
       const lockedShapes = L.layers.filter(l => l.type === 'shape' && l.locked);
@@ -938,6 +939,10 @@
       const lockedText = T.filter(l => l.locked); const moving = T.filter(l => !l.locked);
       if (!moving.length) return;
       if (r.typeOnly) { L.noImagery = true; L.regions = []; L.bg = accent; L.image = null; if (L.v !== 5) { L.style = 'typographic'; L.template = L.template || 'plain'; } }
+      else if (images && images.bg) {
+        delete L.noImagery;
+        if (L.v === 5 && !(L.regions || []).some(x => x.role === 'background')) L.regions = [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'keep the current image' }].concat(L.regions || []);
+      }
       const zone = Object.assign({}, r.zone); const pad = r.panel === 'band' || r.panel === 'column' || r.panel === 'card' ? 3 : 0;
       // a band or a fade at the foot is where the mark reads best (its own ground, not the photograph's sky): the words leave it room on
       // the preferred side, so the mark sits on the band rather than being pushed to a top corner over whatever the picture shows there
