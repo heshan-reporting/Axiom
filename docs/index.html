@@ -2966,6 +2966,14 @@ body.kiosk .kprog{display:block}
 let CLAUDE_KEY = localStorage.getItem('axiom_claude_key') || '';
 let WORKER_URL = localStorage.getItem('axiom_worker_url') || 'https://newsaus.heshan-998.workers.dev';
 let AX_KEY = localStorage.getItem('axiom_access_key') || '';
+/* A sign-in link: index.html#k=<key>[&v=<view>] stores the key for this browser (Settings -> Access key) and is
+   struck out of the address at once, so the key is never sent to any server, never in a referrer and never left in
+   the history; #v= opens that view once the page is ready. Anyone holding the link holds the key: send it privately. */
+(function(){try{
+  const h=location.hash||'';const m=h.match(/(?:^#|&)k=([A-Za-z0-9_-]{8,})/);const v=(h.match(/(?:^#|&)v=([a-z]+)/)||[])[1]||'';
+  if(m){AX_KEY=m[1];localStorage.setItem('axiom_access_key',AX_KEY);history.replaceState(null,'',location.pathname+location.search+(v?'#v='+v:''));}
+  if(v){const run=()=>{try{if(typeof go==='function'&&document.getElementById('v-'+v))go(v);}catch(e){}};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(run,0));else setTimeout(run,0);}
+}catch(e){}})();
 /* Worker access key header — private routes (Mind, sessions, archive content,
    conversation logs) require it once the AXIOM_ACCESS_KEY secret is set. */
 function axHeaders(){const h={'Content-Type':'application/json'};if(AX_KEY)h['X-Axiom-Key']=AX_KEY;return h;}

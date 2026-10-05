@@ -2159,6 +2159,14 @@ use their own tokens; every non-GET is full; GETs that act (`/collect`,
 claims, Meta sync, the self-test, `/fulltext?save=1`, `/studio/brief/suggest?
 ai=1`) are full; other GETs are read. Writes and acting GETs with a read key
 return `403 read_only`. The app hides mutating buttons for read-only keys.
+**A sign-in link** hands a person their key without a Settings visit:
+`docs/index.html#k=<key>&v=studio` stores the key as that browser's access
+key and strikes it out of the address at once (`history.replaceState`), so
+the key is never sent to a server, never in a referrer and never left in the
+history; `#v=<view>` opens that view. Keys are `[A-Za-z0-9_-]{8,}`; anything
+else is ignored. The link is the key: send it privately, and make each
+person their own roster entry so a leaked link is one entry to remove.
+Harness: `tests/access-link-browser.mjs` (3).
 URLs a person supplies (`/fetchurl`, the forum readers) are fetched only when
 `axUrlProblem` finds a public http(s) address (no private, local, credentialed
 or non-default-port host; redirects rechecked by hand).
