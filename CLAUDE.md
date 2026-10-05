@@ -1793,6 +1793,37 @@ action buttons carry the statement as their title and are disabled when the
 worker says not now. Harnesses: `tests/studio-s8-worker.mjs` (5),
 `tests/studio-actions-browser.mjs` (2).
 
+**Workflow and interface (S9).** The context bar names, on every project,
+the campaign, the creation mode (Editable / Finished creative) and the
+content type with its channels (Copy only / Visual / Set - Instagram,
+Facebook; the title says what that means). The Refine workspace stays
+artwork-first: the composition, then the measurement strip, the remedies,
+the layout variations, the family strip, then art direction; the words,
+quality, Art Director and versions in the inspector. **Issue-to-element
+highlighting:** every issue in the Quality tab that names layers has "show
+on the tile" (`aria-pressed`), which outlines those layers on the
+composition itself (`Composition` takes `highlight`, drawing `.st-hl` boxes
+from the layers' per-cent geometry with the role and id as the label, and
+a status line under the stage with "clear"); the outline toggles off and is
+cleared when the version moves. **An honest Art Director:** the pinned
+review says what the model saw (the composed tile as it exports, or the
+imagery only, in which case the words and marks were not in the picture),
+the words it read against the approved copy (present, not in the approved
+copy, approved words it could not find), what it did not score (nothing
+assumed), that one read by one model is an opinion and not a measurement,
+when the verdict disagrees with the measurements (`inconsistent`), when it
+judged an earlier version, and that it never approves. **Accessibility:**
+every control in the island carries a name (the brief's combo fields now
+have `aria-label`s - the audit found two textareas without one), every
+image and canvas has a name (`role="img"` with `aria-label`), headings do
+not skip a level, status lines are `aria-live` / `role="status"`, Alt+1..6
+moves between stages and Tab leaves a stage button for the next control.
+Harness: `tests/studio-s9-browser.mjs` (5): the chips, the highlighting and
+its clearing, the Art Director lines, an audit of the library, the brief,
+Refine (Copy, Quality, Art Director), Brand, Review and Export for unnamed
+controls, unnamed images, heading jumps and live regions, keyboard
+movement, and the same views with a read-only key.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
