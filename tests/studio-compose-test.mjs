@@ -3,6 +3,7 @@
  * version's export; the inspection then reads that composed tile.
  * Run: node --experimental-sqlite tests/studio-compose-test.mjs */
 import http from 'node:http'; import { spawn } from 'node:child_process'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { pngSolid } from './studio-fixture.mjs';
 import { D1Lite } from './d1lite.mjs';
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -10,6 +11,9 @@ const env = { MIND_DB: new D1Lite(), AXIOM_KV: { get: async k => (kv.has(k) ? kv
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => r2.get(k).v.buffer.slice(r2.get(k).v.byteOffset, r2.get(k).v.byteOffset + r2.get(k).v.byteLength), text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }) };
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+// a mark with real ink (a white block): since S11 a mark is read per pixel against what is behind it, and a
+// scaled-up 4 x 4 placeholder has no strokes to read - the photograph stand-in stays the 4 x 4 image
+const MARK = pngSolid(40, 16, [255, 255, 255]).toString('base64');
 const realFetch = globalThis.fetch;
 const mod = await import(new URL('../axiomworkerv4.js', import.meta.url).href); const handler = mod.default;
 const server = http.createServer(async (rq, rs) => { const chunks = []; for await (const c of rq) chunks.push(c); const body = Buffer.concat(chunks);
@@ -19,7 +23,7 @@ await new Promise(r => server.listen(0, '127.0.0.1', r)); const BASE = 'http://1
 const api = async (m, p, b) => (await realFetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', 'X-Axiom-Key': 'full-key' }, body: b ? JSON.stringify(b) : undefined })).json();
 let pass = 0, fail = 0; const ok = (v, m) => { if (v) { pass++; console.log('  ok   ' + m); } else { fail++; console.log('  FAIL ' + m); } };
 await api('POST', '/brand/kit', { ns: 'mca', name: 'MCA', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark' }] });
-await api('POST', '/brand/kit', { ns: 'mca', wordmarkB64: PNG, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
+await api('POST', '/brand/kit', { ns: 'mca', wordmarkB64: MARK, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
 const p = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Compose', brief: { objective: 'o', message: 'm' } });
 const layout = { v: 5, format: '1:1', stage: { w: 1080, h: 1080 }, bg: '#C8102E', regions: [], palette: { primary: '#0E6A6E' }, fonts: { display: 'Bricolage Grotesque', body: 'Instrument Sans' }, layers: [
   { id: 'k', type: 'text', role: 'kicker', text: 'MYTH', x: 6, y: 8, w: 30, h: 6, size: 3.2, weight: 800, color: '#FFFFFF', emphasis: 'caps' },

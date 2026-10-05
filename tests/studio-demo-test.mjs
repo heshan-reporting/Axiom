@@ -7,6 +7,7 @@
  * the isolation audit is clean, that no image was generated, and that the synthetic kit refuses to overwrite a real one.
  * Run: node --experimental-sqlite tests/studio-demo-test.mjs */
 import http from 'node:http'; import { spawn } from 'node:child_process'; import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { pngSolid } from './studio-fixture.mjs';
 import { D1Lite } from './d1lite.mjs';
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -15,6 +16,9 @@ const env = { MIND_DB: new D1Lite(), AXIOM_KV: { get: async k => (kv.has(k) ? kv
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => r2.get(k).v.buffer.slice(r2.get(k).v.byteOffset, r2.get(k).v.byteOffset + r2.get(k).v.byteLength), text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }), ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' };
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+// a mark with real ink (a white block): since S11 a mark is read per pixel against what is behind it, and a
+// scaled-up 4 x 4 placeholder has no strokes to read - the photograph stand-in stays the 4 x 4 image
+const MARK = pngSolid(40, 16, [255, 255, 255]).toString('base64');
 const realFetch = globalThis.fetch; const seen = { gemini: 0, claude: 0 };
 const T = (role, x, y, w, h, size) => ({ type: 'text', role, text: '', x, y, w, h, size, weight: 750, color: '#FFFFFF' });
 const TYPO = { medium: 'typographic', approach: 'editable', story: 'the words carry it', mark: 'campaign', bg: '#0E3B5C', regions: [], elements: [T('headline', 6, 10, 88, 40, 7.5), T('support', 6, 54, 80, 14, 3.4), T('cta', 6, 74, 60, 8, 3.2)] };
@@ -45,8 +49,8 @@ await new Promise(r => server.listen(0, '127.0.0.1', r)); const BASE = 'http://1
 const api = async (m, p, b) => (await realFetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', 'X-Axiom-Key': 'full-key' }, body: b ? JSON.stringify(b) : undefined })).json();
 let pass = 0, fail = 0; const ok = (v, m) => { if (v) { pass++; console.log('  ok   ' + m); } else { fail++; console.log('  FAIL ' + m); } };
 console.log('studio-demo-test (tools/studio-demo.py: the six steps, three cases, separation, no paid image)');
-await api('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark', cta: 'handsoffourfuel.com.au' }, { id: 'national', name: 'Australian mining', logoPolicy: 'logo' }], facts: [{ text: 'The credit is used by more than 150,000 businesses', source: 'MCA', status: 'approved' }], logoB64: PNG, logoMime: 'image/png' });
-await api('POST', '/brand/kit', { ns: 'mca', wordmarkB64: PNG, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
+await api('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark', cta: 'handsoffourfuel.com.au' }, { id: 'national', name: 'Australian mining', logoPolicy: 'logo' }], facts: [{ text: 'The credit is used by more than 150,000 businesses', source: 'MCA', status: 'approved' }], logoB64: MARK, logoMime: 'image/png' });
+await api('POST', '/brand/kit', { ns: 'mca', wordmarkB64: MARK, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
 const runPy = (extra) => new Promise(res => { const out = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-')); const c = spawn('python3', [new URL('../tools/studio-demo.py', import.meta.url).pathname, '--key', 'full-key', '--worker', BASE, '--out', out, '--keep'].concat(extra), { env: Object.assign({}, process.env) }); let so = '', se = ''; c.stdout.on('data', x => { so += x; }); c.stderr.on('data', x => { se += x; }); c.on('close', code => res({ code, so, se, out })); });
 
 const dry = await runPy([]);

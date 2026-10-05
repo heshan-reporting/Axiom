@@ -9,7 +9,7 @@
  * (1920 x 1080) size go to tests/shots/s11-after-*.png (ignored by git).
  * Run: node --experimental-sqlite tests/studio-s11-browser.mjs */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok, pngGradient } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, pngGradient, pngSolid } from './studio-fixture.mjs';
 import { HOOF_STRADDLE, HOOF_STRADDLE_COPY } from './fixtures/studio-layouts.mjs';
 const fx = await makeStudio({ port: 8819, inspect: false });
 const { api, r2 } = fx;
@@ -21,7 +21,7 @@ const step = async id => { let j; for (let i = 0; i < 8; i++) { j = (await api('
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 // the kit: HOOF carries three approved wordmark files (synthetic solid blocks: every pixel is ink, so the geometry decides)
-const solid = rgb => pngGradient(480, 120, rgb, rgb).toString('base64');
+const solid = rgb => pngSolid(480, 120, rgb).toString('base64');
 await api('POST', '/brand/kit', { ns: 'mca', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark', identity: 'MYTH in red, FACT in teal', cta: 'handsoffourfuel.com.au' }], wordmarkCampaign: 'hoof', wordmarkVariant: 'white', wordmarkTone: 'light', wordmarkB64: solid([255, 255, 255]), wordmarkMime: 'image/png', wordmarkDefault: true });
 await api('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkVariant: 'blue', wordmarkTone: 'colour', wordmarkB64: solid([31, 95, 168]), wordmarkMime: 'image/png' });
 await api('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkVariant: 'black', wordmarkTone: 'dark', wordmarkB64: solid([17, 17, 17]), wordmarkMime: 'image/png' });

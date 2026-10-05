@@ -16,10 +16,10 @@ export const W = 'https://newsaus.heshan-998.workers.dev';
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 const crc32 = buf => { let c = 0xffffffff; for (const b of buf) c = CRC[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
 function chunk(type, data) { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type, 'ascii'), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td)); return Buffer.concat([len, td, crc]); }
-export function pngGradient(w, h, top = [232, 138, 74], bottom = [28, 46, 58]) {
+export function pngGradient(w, h, top = [232, 138, 74], bottom = [28, 46, 58], flat) {
   const raw = Buffer.alloc((w * 3 + 1) * h);
   for (let y = 0; y < h; y++) {
-    raw[y * (w * 3 + 1)] = 0; const t = y / (h - 1); const hz = y > h * 0.62;
+    raw[y * (w * 3 + 1)] = 0; const t = h > 1 ? y / (h - 1) : 0; const hz = !flat && y > h * 0.62;
     for (let x = 0; x < w; x++) {
       const o = y * (w * 3 + 1) + 1 + x * 3; const k = hz ? 0.55 : 1;
       raw[o] = Math.round((top[0] + (bottom[0] - top[0]) * t) * k); raw[o + 1] = Math.round((top[1] + (bottom[1] - top[1]) * t) * k); raw[o + 2] = Math.round((top[2] + (bottom[2] - top[2]) * t) * k);
@@ -28,6 +28,8 @@ export function pngGradient(w, h, top = [232, 138, 74], bottom = [28, 46, 58]) {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
+/** a solid block of one colour: a mark whose every pixel is ink and reads as one tone (the gradient's darker lower band is not wanted on a mark) */
+export const pngSolid = (w, h, rgb) => pngGradient(w, h, rgb, rgb, true);
 /** width and height read from a PNG's header, and whether the signature is right */
 export function pngSize(buf) { const b = Buffer.from(buf); const sig = b.slice(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); return { ok: sig && b.slice(12, 16).toString('ascii') === 'IHDR', w: b.readUInt32BE(16), h: b.readUInt32BE(20) }; }
 /** the entries of a stored (uncompressed) zip as the renderer writes it: name and bytes */

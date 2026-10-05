@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
-import { pngGradient } from './studio-fixture.mjs';
+import { pngSolid } from './studio-fixture.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 const PORT = 8776, W = 'https://newsaus.heshan-998.workers.dev';
@@ -23,9 +23,9 @@ const env = {
 };
 // a real 4x4 PNG (teal) so the browser can decode the background and the logo
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
-// the client logo is a mark with real ink (a white block with a darker lower band), not the 4 x 4 photograph stand-in: since S11 a
+// the client logo is a mark with real ink (a white block), not the 4 x 4 photograph stand-in: since S11 a
 // mark is read per pixel against what is behind it, and a scaled-up 4 x 4 image has no strokes to read
-const LOGO = pngGradient(40, 16, [255, 255, 255], [255, 255, 255]).toString('base64');
+const LOGO = pngSolid(40, 16, [255, 255, 255]).toString('base64');
 const RELEASE = 'MEDIA RELEASE - 30 September 2026\n\nFuel tax credits keep regional Australia moving\n\nThe Minerals Council of Australia today released new analysis showing that mining paid $74 billion in company tax and royalties in 2023-24, more than any other industry.\n\nMCA Chief Executive Officer Tania Constable said fuel tax credits were not a subsidy. "Businesses do not pay a road fuel tax on fuel used off-road. The credit simply returns a tax that was never meant to apply," Ms Constable said.\n\nThe analysis found the credit is used by more than 150,000 businesses of all sizes, including farmers, tradies and tourism operators.\n\nENDS';
 const STRATEGY = { problem: 'Voters hear subsidy and assume a handout.', audience: { who: 'Regional voters', now: 'It is a handout to miners', wanted: 'It is a road tax never meant for off-road fuel', insight: 'Farmers claim the same credit' }, idea: 'It is your tractor too', proposition: 'Not a subsidy: a road tax returned', proof: [], tone: 'plain, regional', avoid: ['the word subsidy unless denied'], risks: ['called a handout'], measures: ['regional comments turn'], questions: ['Lead with farmers or miners?'] };
 const SEQ = { name: 'Your tractor too', arc: 'From the myth to the farmer to the ask', cadence: 'over five days', items: [
