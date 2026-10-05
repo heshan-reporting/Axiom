@@ -6856,7 +6856,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p26';
+const AXIOM_BUILD = '2026-10-06.studio-p27';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -10329,6 +10329,16 @@ async function stDerive(env, p, a, body, who) {
   await stEvent(env, p.id, 'derived', { asset: aid, from: a.id, fromVersion: cur.id, version: v.id, jobs, text: 'Derived "' + title + '" in the family Editable from finished from ' + a.title + ' (' + (ST_MODES[cur.mode] ? ST_MODES[cur.mode].label : cur.mode) + '). ' + note + (jobs.length ? ' ' + jobs.length + ' imagery render queued.' : '') + ' The original is untouched.', changed: [aid] }, who);
   return { ok: true, asset: aid, version: v.id, from: a.id, how, note, jobs };
 }
+/** Would this layout hide a whole-image render? A type-only ground (noImagery) and a v5 plan with no background region both
+ *  tell the renderer to draw no photograph. Answers the reopened layout and why, or null when the image would show as it is. */
+function stLayoutShowImage(L) {
+  if (!L || !Array.isArray(L.layers)) return null;
+  const noBg = L.v === 5 && !(Array.isArray(L.regions) ? L.regions : []).some(r => r && r.role === 'background');
+  if (!L.noImagery && !noBg) return null;
+  const out = JSON.parse(JSON.stringify(L)); delete out.noImagery;
+  if (noBg) out.regions = [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'keep the current image', refs: [] }].concat(Array.isArray(out.regions) ? out.regions : []);
+  return { layout: out, why: L.noImagery ? 'the type-only ground that would have hidden the imagery is lifted' : 'the plan had no background region; one is added so the imagery shows' };
+}
 async function stRenderJob(env, job, pair, done, fail) {
   const inp = job.input || {}; const p = pair.project; const a = pair.asset;
   if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
@@ -10394,6 +10404,15 @@ async function stRenderJob(env, job, pair, done, fail) {
     patch.layout = layout; patch.image = undefined; patch.context.regions = Object.assign({}, (live.context || {}).regions || {}, { [inp.region]: { key, url: image.url, model: out.model, size: meta.size, fallback: !!out.fallback, alpha: alpha == null ? undefined : alpha } });
   } else {
     patch.image = image;
+    // a render asked for on purpose must be seen: a type-only ground (layout.noImagery, from the "solid ground" variation) or a
+    // plan with no background region tells the renderer to draw no photograph, so the image would land on the version and
+    // stay hidden behind the ground (the 6 October report: three renders filed, every tile still flat teal). The layout is
+    // reopened for it here, once, on the version the render makes; the words, marks and shapes are untouched.
+    if (!finished && inp.approach !== 'artwork') {
+      const shown = stLayoutShowImage((stale && baseV ? baseV.layout : (cur && cur.layout)) || null);
+      if (shown) { patch.layout = shown.layout; patch.note = stStr(patch.note + ' (' + shown.why + ')', 200); }
+      if (patch.context.imagery === 'none') delete patch.context.imagery;
+    }
     if (finished) {
       // a finished creative: the bitmap is the whole piece - words, mark and URL - and nothing is composed over it; the layout keeps the
       // plan it was briefed from (for the record and for a later switch to editable) with no live layers and every painted role named
@@ -10404,7 +10423,7 @@ async function stRenderJob(env, job, pair, done, fail) {
     } else if (inp.approach === 'artwork') {
       // the hybrid: the words are in the bitmap and not editable; only the exact marks stay live layers over it, placed by the Studio
       const L = (cur && cur.layout) || {}; const marks = (L.layers || []).filter(x => x.type === 'img' && (x.role === 'logo' || x.role === 'wordmark'));
-      patch.layout = Object.assign({}, L, { layers: marks, baked: Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'], approach: 'artwork' }); patch.mode = 'artwork';
+      patch.layout = Object.assign({}, L, { layers: marks, baked: Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'], approach: 'artwork', noImagery: undefined }); patch.mode = 'artwork';
     }
   }
   if (job.fence) await job.fence();

@@ -150,6 +150,33 @@ await T.t('export takes exactly the corrected version: design approval stands on
   await shot(page, 'export-1366');
 });
 
+await T.t('a render filed on the type-only Story (the ground that hides it still on the layout) is named as hidden under the stage and on it, and Show the imagery lifts it as a layout version, no render: the photograph is then drawn under the words', async () => {
+  // a render version written as the earlier worker filed it: the image on the version, the noImagery ground left in place
+  const { a: s0 } = await cur(S);
+  const rv = await api('POST', '/studio/version', { asset: S, revision: s0.revision, image: { key: PHOTO_KEY, url: '/studio/file?key=' + PHOTO_KEY, model: 'gemini-3-pro-image', size: '2K' }, kind: 'render', note: 'imagery as directed' }); eq(rv._status, 200, JSON.stringify(rv));
+  const { v: s1 } = await cur(S); eq(s1.layout.noImagery, true, 'the fixture reproduces the state: image on the version, type-only ground still on the layout');
+  const p3 = await fx.open({ viewport: { width: 1366, height: 768 }, quiet: true });
+  await p3.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p3.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
+  await p3.waitForSelector(R + '.st-railbtn.asset:has-text("Story")', { timeout: 20000 }); await p3.click(R + '.st-railbtn.asset:has-text("Story")');
+  await p3.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
+  await p3.waitForSelector(R + '.st-remedy-hidden', { timeout: 30000 });
+  const rem = await p3.textContent(R + '.st-remedy-hidden'); ok(/Imagery on file but not shown/.test(rem) && /type-only/.test(rem) && /gemini-3-pro-image/.test(rem), rem.replace(/\s+/g, ' ').slice(0, 240));
+  ok(/IMAGERY HIDDEN/.test(await p3.textContent(R + '.st-comp-info .st-comp-tag')), 'the composition facts under the stage say the imagery is hidden');
+  ok(await p3.$(R + '.st-stage .st-hidden-imagery'), 'the note on the stage');
+  // before: the canvas shows the green ground at the top-left (the photograph is cream)
+  const px = async () => p3.$eval(R + '.st-stage canvas', c => { const d = c.getContext('2d').getImageData(Math.round(c.width * 0.05), Math.round(c.height * 0.05), 1, 1).data; return [d[0], d[1], d[2]]; });
+  const before = await px(); ok(before[1] > before[0] + 20 && before[0] < 80, 'the ground is green before: ' + before.join(','));
+  await p3.click(R + '.st-remedy-hidden button:has-text("Show the imagery")');
+  await p3.waitForFunction(() => !document.querySelector('#studio-root .st-remedy-hidden'), null, { timeout: 30000 });
+  const { v: s2, a: sa } = await cur(S); ok(s2.id !== s1.id, 'a new version'); eq(s2.kind, 'layout'); eq(s2.layout.noImagery, undefined, 'the flag is lifted'); ok((s2.layout.regions || []).some(r => r.role === 'background'), 'a background region holds the image');
+  eq(s2.image.key, PHOTO_KEY, 'the image stays the one that landed'); ok(/show the imagery/.test(s2.note) && /no render/.test(s2.note), s2.note);
+  eq(sa.versions.filter(x => x.kind === 'render').length, 1, 'no render was spent');
+  await p3.waitForFunction(() => { const c = document.querySelector('#studio-root .st-stage canvas'); if (!c) return false; const d = c.getContext('2d').getImageData(Math.round(c.width * 0.05), Math.round(c.height * 0.05), 1, 1).data; return d[0] > 180 && d[2] > 140; }, null, { timeout: 20000 });
+  const after = await px(); ok(after[0] > 180, 'the photograph (cream) is drawn after: ' + after.join(','));
+  ok(!/IMAGERY HIDDEN/.test(await p3.textContent(R + '.st-comp-info .st-comp-tag')), 'the facts no longer say hidden');
+  ok(!p3.errors.length, 'no page errors: ' + p3.errors.join(' | ')); await p3.ctxB.close();
+});
+
 await T.t('the same workspace at a desktop size (1920 x 1080): the artwork, Properties and Quality', async () => {
   const p2 = await fx.open({ viewport: { width: 1920, height: 1080 }, quiet: true });
   await p2.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p2.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');

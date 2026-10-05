@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -1923,6 +1923,25 @@ so a gateway page in place of JSON (HTTP 502 / 504 / 524 as HTML) becomes
 tokens)`, logged on the job; both are transient, so the job retries up to its
 three attempts instead of failing a concepts run as `concepts_unparseable`
 (not retried) on nothing (the 6 October screenshot).
+
+**Renders that landed but were never seen (build `2026-10-06.studio-p27`,
+page `?v=r5`; `CREATIVE-STUDIO.md` s.34.11).** The 6 October report ("i still
+cannot see Gemini renders": three render versions filed, every tile flat
+teal). Two layout states tell the renderer to draw no photograph -
+`layout.noImagery`, set by the type-only "solid ground" variation, and a
+`v: 5` plan with no `background` region (`planNoBg`) - and a whole-image
+render used to land on `v.image` under either and stay hidden behind the
+ground. `stLayoutShowImage()` in the worker reopens the layout on the version
+a render makes (the flag lifted, a full-stage background region added with
+"keep the current image", `context.imagery` of `none` dropped, the words,
+marks and shapes untouched) and the note says why; region renders and the
+finished and hybrid paths are unchanged. In-app `hiddenImagery(v)` names the
+state for versions filed before the fix - the composition facts under the
+stage read `IMAGERY HIDDEN`, a note sits on the stage, and Remedies offers
+**Show the imagery (no render)**, a layout version through `showImagery()`.
+Harnesses: the hidden-render case in `studio-s11-worker.mjs` (10) and
+`studio-s11-browser.mjs` (10, the photograph read back from the canvas
+pixels before and after).
 
 Phase 1, the ground:
 

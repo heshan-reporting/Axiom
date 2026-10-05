@@ -1248,3 +1248,37 @@ whole artwork in view (zoom and full screen are for a closer look). The S11 harn
 `studio-scene-browser` 20, `studio-quality-browser` 25, `studio-framing-browser` 17; `studio-browser` 26 of 26 and
 `studio-journey-browser` 9 of 9 in sequential runs; the S-series worker harnesses (s1 5, s3 3, s5 2, s6 7, p9 15, p10 9, p8 14,
 s2 8) with their reports updated to contract 2. The figures are the harnesses' own summary lines.
+
+### 34.11 Renders that landed but were never seen (build studio-p27, page r5)
+
+The report after the S11 deploy, with a screenshot: "i still cannot see Gemini renders" - an Instagram portrait at v11, three
+earlier versions labelled `render` ("imagery as directed", "restyle: give me real images", "re-brief: Render the planned
+illustration"), and every one of them a flat teal tile.
+
+**Cause.** Two layout states tell the renderer to draw no photograph: `layout.noImagery`, which the type-only "Use a solid ground"
+variation sets (the words on the campaign colour, offered when no imagery exists yet), and a `v: 5` plan with no `background`
+region (`planNoBg`: the plan's ground is drawn and nothing else). A whole-image render filed its bitmap on `v.image` without
+touching the layout, so under either state the image landed, was recorded (the composition facts said "gemini-3-pro-image 2K"),
+and stayed behind the ground. The renders were made and paid for; nothing showed them. The repair's panel extension was checked
+and ruled out: it grows a panel only to carry the mark and its clear space, bounded to a few per cent.
+
+**Fix.** `stLayoutShowImage(L)` in the worker: when a plain render (not a region, not the finished or hybrid path) lands on a
+layout in either state, the version it makes carries the layout reopened for it - `noImagery` lifted, a full-stage `background`
+region added ahead of the plan's own with the prompt "keep the current image", `context.imagery` of `none` dropped - with the
+words, marks and shapes exactly as they were, and the note says why ("the type-only ground that would have hidden the imagery is
+lifted" / "the plan had no background region; one is added so the imagery shows"). A layout already showing its imagery is left
+as it is; a region render still touches only its layer. In the island, `hiddenImagery(v)` names the state for versions filed
+before this build: the facts under the stage read `IMAGERY HIDDEN: <why>`, a note sits on the stage, and Remedies offers **Show
+the imagery (no render)** - a layout version through `showImagery()`, no render spent. The page scripts move to `?v=r5` and the
+build to `2026-10-06.studio-p27` so a stale island cannot hide the fix.
+
+**Evidence.** `studio-s11-worker` gained the case (10 of 10): a render on a `noImagery` layout and on a plan without a background
+region is shown with the note; a region render leaves the ground alone; a layout already showing its imagery is untouched.
+`studio-s11-browser` gained the case (10 of 10): a render version written as the earlier worker filed it (image on the version,
+`noImagery` still on the layout) opens with the hidden state named under and on the stage, the canvas pixel at the top-left is the
+green ground before and the cream photograph after Show the imagery, the new version is kind `layout` with the flag lifted and the
+render count unchanged. Re-run clean: `studio-worker` 15, `studio-s2-worker` 8, `studio-p8-worker` 14, `studio-p17-worker` 5,
+`studio-p18-worker` 3, `studio-p19-worker` 10, `studio-s8-worker` 5, `jobs-lifecycle-worker` 10, `studio-browser` 26,
+`studio-journey-browser` 9, `check` 18 of 18. Not verified from the sandbox: the user's own asset (no access to the live D1); on
+deploy, opening it shows the hidden state and the remedy if the layout is in either state, and the Jobs view names the one failed
+job the screenshot showed.

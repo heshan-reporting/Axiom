@@ -176,11 +176,25 @@
   const CHECK_WORD = { matches: 'matches source', fact: 'approved fact', differs: 'differs from source', unsupported: 'not supported', banned: 'banned term', overflow: 'overflow', over_limit: 'over the limit', too_many_hashtags: 'hashtags', exclamation: 'exclamation', small_type: 'small type', logo_size: 'logo size', mark_missing: 'mark missing' };
   /** The composition: the one renderer at preview size. A copy-only version is a text card; a flattened legacy tile is its image. */
   /** What this composition is, in one line: mode, medium, imagery and model, incomplete marks, failed loads, fallback fonts. */
+  /** An image on the version that the layout tells the renderer not to draw: the type-only ground (noImagery, from the "solid
+      ground" variation) or a plan with no background region. Answers why, or '' when the imagery shows (or there is none). */
+  function hiddenImagery(v) {
+    const L = v && v.image && v.layout && Array.isArray(v.layout.layers) ? v.layout : null; if (!L || v.mode === 'finished' || v.mode === 'artwork') return '';
+    if (L.noImagery) return 'the layout is the type-only arrangement (solid ground), which draws no photograph';
+    if (L.v === 5 && !(L.regions || []).some(r => r && r.role === 'background')) return 'the plan has no background region, so the renderer draws its ground instead of the photograph';
+    return '';
+  }
+  /** The same layout with the imagery allowed to show: the type-only flag lifted and a full-stage background region present. */
+  function showImagery(L) {
+    const out = JSON.parse(JSON.stringify(L)); delete out.noImagery;
+    if (out.v === 5 && !(out.regions || []).some(r => r && r.role === 'background')) out.regions = [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'keep the current image', refs: [] }].concat(out.regions || []);
+    return out;
+  }
   function compTag(v, layout, comp) {
     if (!v) return '';
     const base = v.mode === 'finished' ? (v.image ? 'finished creative: one bitmap, words' + ((layout && layout.baked || []).some(r => r === 'logo' || r === 'wordmark') ? ', ' + (layout.baked.indexOf('wordmark') >= 0 ? 'wordmark' : 'logo') : '') + ' and URL painted by the image model; nothing composed over it' : 'finished creative queued: this sketch is the plan the image model is briefed from, not the result') : v.mode === 'artwork' ? 'hybrid artwork: words in the bitmap' + (layout && layout.layers.some(l => l.role === 'logo' || l.role === 'wordmark') ? ', mark live' : '') : layout ? (layout.v === 5 ? (v.image || (layout.regions || []).every(r => /keep the current/i.test(r.prompt || '')) ? 'editable composition, ' : 'sketch (imagery not generated yet), ') + (layout.mediumName || 'plan') : 'editable composition, ' + (layout.templateName || layout.template)) : v.mode === 'generated' ? 'generated artwork, text baked in' : 'image';
     const img = v.image ? ' - ' + (v.image.model || '') + ' ' + (v.image.size || '') + (v.image.fallback ? ' (fallback from ' + (v.image.requested || 'the requested model') + ')' : '') + ((v.context || {}).size && v.image.size && v.context.size !== v.image.size ? ', asked ' + v.context.size : '') : layout ? ((v.context || {}).imagery === 'none' ? ' - no imagery, by choice' : ' - no imagery yet') : '';
-    return base + img + (layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : '') + (comp && comp.failed.length ? ' - ' + comp.failed.length + ' image' + (comp.failed.length === 1 ? '' : 's') + ' failed to load' : '') + (comp && comp.fonts && comp.fonts.fallback.length ? ' - fallback fonts' : '');
+    return base + img + (hiddenImagery(v) ? ' - IMAGERY HIDDEN: ' + hiddenImagery(v) : '') + (layout && (layout.incomplete || []).length ? ' - INCOMPLETE: mark not on file' : '') + (comp && comp.failed.length ? ' - ' + comp.failed.length + ' image' + (comp.failed.length === 1 ? '' : 's') + ' failed to load' : '') + (comp && comp.fonts && comp.fonts.fallback.length ? ' - fallback fonts' : '');
   }
   function Composition({ v, a, ns, size, copy, highlight, tagOut }) {
     const layout = v && v.layout && v.layout.layers ? v.layout : null; const c = copy || (v && v.copy) || {};
@@ -1221,12 +1235,14 @@
   }
   /** What no layout move can fix, said with its remedy: imagery the composition expects but nobody has made yet, and a mark file
       that did not load. Generating the imagery is one render (paid, announced); a solid ground is a layout version, no render. */
-  function Remedies({ a, v, val, ro, renderJob, lastRender, typeOnly, onGenerate, onSolid, onRetry, onRefresh }) {
+  function Remedies({ a, v, val, ro, renderJob, lastRender, typeOnly, hidden, onGenerate, onSolid, onShow, onRetry, onRefresh }) {
     if (!val) return null;
     const missing = val.issues.some(i => i.code === 'imagery_missing'); const unloaded = val.issues.filter(i => i.code === 'mark_unloaded');
-    if (!missing && !unloaded.length) return null;
+    if (!missing && !unloaded.length && !hidden) return null;
     const failed = lastRender && lastRender.state === 'failed' ? lastRender : null;
     return html`<div class="st-remedy" role="region" aria-label="What a layout cannot fix">
+      ${hidden ? html`<div class="st-remedy-row st-remedy-hidden"><div><b>Imagery on file but not shown.</b> <span class="ov-dim">A render landed on this version (${(v.image || {}).model || 'image model'}${v.image && v.image.size ? ', ' + v.image.size : ''}), but ${hidden}. No layout move changes that; lifting it is a layout version, no render.</span></div>
+        ${!ro ? html`<div class="st-remedy-acts"><button class="btn sm" onClick=${onShow} title="Lifts the type-only ground (or adds the background region) so the photograph is drawn under the words and marks. A layout version, no render.">Show the imagery (no render)</button></div>` : null}</div>` : null}
       ${missing ? html`<div class="st-remedy-row"><div><b>No imagery yet.</b> <span class="ov-dim">This composition expects a photograph or illustration that has not been made, so it cannot pass validation. Moving the words does not change that.</span>
           ${renderJob ? html`<div class="ov-dim">${renderJob.state === 'running' ? 'The imagery is being generated now.' : 'A render is queued for this asset.'}</div>` : failed ? html`<div class="st-remedy-fail"><${Chip} kind="bad">last render failed</${Chip}> <span class="ov-dim">${explain({ message: failed.error, code: (String(failed.error).match(/^[a-z_0-9]+/) || [''])[0] }).title}</span></div>` : null}</div>
         ${!ro && !renderJob ? html`<div class="st-remedy-acts">
@@ -1486,11 +1502,12 @@
         ${v.image && v.image.fallback && v.mode !== 'artwork' ? html`<div class="st-flatnote">The image model fell back: ${v.image.requested} was requested, ${v.image.model} answered at ${v.image.size}.</div>` : null}
         ${v.layout && (v.layout.incomplete || []).length ? html`<div class="st-flatnote st-incomplete"><${Chip} kind="bad">incomplete</${Chip}> ${v.layout.incomplete.map(i => i.text).join('; ')}. Design approval and export wait for the file.</div>` : null}
         ${hasLayout && !v.image && !renderJob && (v.context || {}).imagery !== 'none' && (v.layout.regions || []).length ? html`<div class="st-flatnote">No imagery yet: the composition is drawn over its ground until a render lands (see Jobs).</div>` : null}
-        ${(v.context || {}).imagery === 'none' ? html`<div class="st-flatnote">No imagery by choice: a complete typographic composition, nothing to render.</div>` : null}` : null}
+        ${(v.context || {}).imagery === 'none' && !hiddenImagery(v) ? html`<div class="st-flatnote">No imagery by choice: a complete typographic composition, nothing to render.</div>` : null}
+        ${hiddenImagery(v) ? html`<div class="st-flatnote st-hidden-imagery">Imagery on file but not shown: ${hiddenImagery(v)}. Show the imagery (below the artwork) lifts it, no render.</div>` : null}` : null}
       </div>
       ${!preview ? html`<div class="st-comp-info" aria-label="About this composition"><span class="st-comp-tag">${tagText}</span>${v.layout && v.layout.stage ? html`<span class="ov-dim"> - ${v.layout.stage.w} x ${v.layout.stage.h} px</span>` : null}</div>` : null}
       ${hasLayout ? html`<${ReadyStrip} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onUndoRepair=${undoRepair} onMeasure=${measureAgain} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('quality')} highlight=${hlIds} onHighlight=${ids => { toggleHl(ids); if (!overlays) setOverlays(true); if (preview) setPreview(false); }} onAction=${k => { if (k === 'imagery' && window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} />` : null}
-      ${!preview ? html`${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} onGenerate=${() => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
+      ${!preview ? html`${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} hidden=${hiddenImagery(v)} onShow=${() => onLayoutSave(a, showImagery(v.layout), v.id, 'show the imagery: the ground that hid it is lifted')} onGenerate=${() => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); }} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
         ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
         ${canVary ? html`<${LayoutVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} list=${vars} using=${using} onUse=${useVariant} />` : null}
         <${Preservation} p=${p} a=${a} v=${v} ro=${ro} onCompare=${onCompare} onFile=${onPreservation} />

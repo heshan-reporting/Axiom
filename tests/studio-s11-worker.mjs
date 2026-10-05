@@ -165,5 +165,34 @@ await t('a provider answer that is not the model\'s - a gateway page in place of
   const r = await stClaude(env2, { role: 'creative', system: 's', user: 'u', maxTok: 500 }); ok(typeof r.text === 'string' && r.text.length > 0, 'a real answer still comes back as text');
 });
 
+await t('a render that lands on a type-only ground (noImagery) or on a plan with no background region is shown: the layout is reopened for the imagery on the version the render makes, the words and marks untouched, and the note says why (the 6 October report: three renders filed, every tile still flat teal)', async () => {
+  const p = await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Hidden renders', brief: { objective: 'o', message: 'm', channels: ['instagram'], deliverable: 'set', campaignConfirmed: true }, idem: 's11-hidden' }); eq(p.status, 200, JSON.stringify(p.d)); const P2 = p.d.id;
+  const layers = [{ id: 'headline', type: 'text', role: 'headline', x: 10, y: 40, w: 80, h: 14, size: 7, weight: 800, color: '#FFFFFF', align: 'left', font: 'display' }, { id: 'support', type: 'text', role: 'support', x: 10, y: 58, w: 80, h: 8, size: 3.2, weight: 500, color: '#FFFFFF', align: 'left', font: 'body' }];
+  // (a) the "solid ground" variation: noImagery, the kit colour as the ground, no regions
+  const solid = { v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'typographic', approach: 'editable', regions: [], noImagery: true, bg: '#0E6A6E', palette: { primary: '#0E6A6E' }, fonts: { display: 'Bricolage Grotesque', body: 'Instrument Sans' }, layers };
+  const a1 = await req('POST', '/studio/asset', { project: P2, family: 'HOOF', channel: 'instagram', format: '4:5', title: 'Solid', copy: { headline: 'Not a subsidy', support: 'Fuel used off-road never owed a road tax.' }, layout: solid, mode: 'composition' }); eq(a1.status, 200, JSON.stringify(a1.d)); const A1 = a1.d.asset.id;
+  const j1 = await run((await req('POST', '/studio/job', { project: P2, asset: A1, stage: 'render', input: { prompt: 'a regional road at dusk', size: '2K', note: 'imagery as directed' }, idem: 's11-hidden-r1' })).d.job); eq(j1.state, 'done', j1.error);
+  const { v: v1 } = await curV(P2, A1);
+  ok(v1.image && v1.image.key && v1.image.key.indexOf('studio/' + P2 + '/' + A1 + '/') === 0, 'the render landed on the version: ' + JSON.stringify(v1.image));
+  eq(v1.layout.noImagery, undefined, 'the type-only flag is lifted so the renderer draws the photograph');
+  ok((v1.layout.regions || []).some(r => r.role === 'background' && /keep the current/i.test(r.prompt)), 'a full-stage background region keeps the image: ' + JSON.stringify(v1.layout.regions));
+  eq(v1.layout.layers.map(l => [l.id, l.x, l.y, l.w, l.size]), layers.map(l => [l.id, l.x, l.y, l.w, l.size]), 'the words are untouched'); eq(v1.layout.bg, '#0E6A6E', 'the ground stays as the colour under the photograph');
+  ok(/type-only ground/.test(v1.note) && /imagery as directed/.test(v1.note), 'the note says why: ' + v1.note);
+  // (b) a plan with no background region (the renderer draws the plan's ground, never a photograph)
+  const noBg = Object.assign({}, solid, { noImagery: undefined, regions: [{ id: 'inset', role: 'inset', x: 60, y: 8, w: 32, h: 24, fit: 'cover', prompt: 'a tank', refs: [] }], layers: layers.concat([{ id: 'inset', type: 'img', role: 'region', region: 'inset', x: 60, y: 8, w: 32, h: 24, fit: 'cover' }]) });
+  const a2 = await req('POST', '/studio/asset', { project: P2, family: 'HOOF', channel: 'instagram', format: '4:5', title: 'No background', copy: { headline: 'Not a subsidy' }, layout: noBg, mode: 'composition' }); const A2 = a2.d.asset.id;
+  const j2 = await run((await req('POST', '/studio/job', { project: P2, asset: A2, stage: 'render', input: { prompt: 'a road', size: '2K' }, idem: 's11-hidden-r2' })).d.job); eq(j2.state, 'done', j2.error);
+  const { v: v2 } = await curV(P2, A2);
+  ok(v2.image && v2.image.key, 'the render landed'); eq((v2.layout.regions || []).map(r => r.role), ['background', 'inset'], 'a background region is added ahead of the plan\'s own: ' + JSON.stringify(v2.layout.regions.map(r => r.id)));
+  ok(/no background region/.test(v2.note), v2.note);
+  // (c) a region render for the inset touches only its layer, never the ground
+  const j3 = await run((await req('POST', '/studio/job', { project: P2, asset: A2, stage: 'render', input: { prompt: 'a tank', region: 'inset', regionRole: 'inset', size: '1K' }, idem: 's11-hidden-r3' })).d.job); eq(j3.state, 'done', j3.error);
+  const { v: v3 } = await curV(P2, A2); ok(v3.layout.layers.find(l => l.id === 'inset').src, 'the inset layer carries its image'); eq(v3.image.key, v2.image.key, 'the background image is the one that landed before');
+  // (d) a layout already showing its imagery is left exactly as it is
+  const a3 = await req('POST', '/studio/asset', { project: P2, family: 'HOOF', channel: 'instagram', format: '4:5', title: 'Plain', copy: { headline: 'Not a subsidy' }, layout: Object.assign({}, solid, { noImagery: undefined, regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'a road', refs: [] }] }), mode: 'composition' }); const A3 = a3.d.asset.id;
+  const j4 = await run((await req('POST', '/studio/job', { project: P2, asset: A3, stage: 'render', input: { prompt: 'a road', size: '2K', note: 'imagery as directed' }, idem: 's11-hidden-r4' })).d.job); eq(j4.state, 'done', j4.error);
+  const { v: v4 } = await curV(P2, A3); eq(v4.note, 'imagery as directed'); eq(v4.layout.regions.length, 1);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
