@@ -92,17 +92,19 @@
     setDraft(pid, d) { try { if (d) localStorage.setItem('ax_studio_brief_' + pid, JSON.stringify(d)); else localStorage.removeItem('ax_studio_brief_' + pid); } catch (e) {} },
   };
 
-  /* ------------------------------------------------------------ the workflow: six stages, each with its views, its state worked out from the project */
-  /* the six steps of the guided flow (S13, from the reviewed mockup): Brief, Direction, Copy, Design, Review, Export. The words are
-     settled before the design is built - "ready for design" is the agency's copy approval of that exact version - and the client's
-     final approval belongs to Review. Each step names its purpose, what its main action runs, and the views inside it as tabs. */
+  /* ------------------------------------------------------------ the workflow: seven steps, each with its views; their state is the worker's */
+  /* S17: the guided workflow - Brief, Objectives, Strategy, Directions, Copy, Design, Review - each depending on the one before.
+     The state of every step (not started, in progress, processing, needs review, complete, locked with the reason, error) is
+     worked out by the worker from the record (p.workflow) and enforced there; the island shows it and never moves the person
+     to another step by itself. Export is the last view of Review. Each step names its purpose and what its action spends. */
   const STAGES = [
-    { id: 'brief', label: 'Brief', sub: 'Set the foundations', headline: 'Start with a clear brief.', views: ['brief', 'sources', 'references'], purpose: 'Say what the work must do, for whom, on which channels, and what it may claim.', next: 'Proposing directions is one model call; writing the copy is one model call for the words and plans, then one composition per channel. Nothing is spent before you press, and the activity panel shows every step as it runs.' },
-    { id: 'directions', label: 'Direction', sub: 'Choose the idea', headline: 'Choose an idea, not just a background.', views: ['directions'], purpose: 'Compare genuinely different ideas for the brief and choose the one the copy and design follow.', next: 'Choosing a direction writes the copy from it: one model call for the words and plans, then one composition per channel. The imagery follows the brief\'s setting - with the copy, or in Design once the words are ready.' },
-    { id: 'copy', label: 'Copy', sub: 'Get the words right', headline: 'Get the words right first.', views: ['copywrite', 'copy', 'kit', 'sequence'], purpose: 'Get each channel\'s words right before the design is built: headline, supporting line, call to action, caption.', next: 'An edit here is a text version (no render), checked again against the facts, the ledger and the banned terms. Marking a piece ready for design is the agency\'s copy approval of that exact version; the client\'s approval comes in Review.' },
-    { id: 'design', label: 'Design', sub: 'Build the creative', headline: 'Make the creative yours.', views: ['asset', 'board', 'production', 'jobs'], purpose: 'Build each creative on the canvas: imagery, layout, type and the exact marks, measured at the output size as you work.', next: 'Generating imagery is one paid image call per planned region (stated before it runs); layout variations, Fix layout and the layout editor are free; the Art Director\'s review is one model call and is advice, never approval.' },
-    { id: 'review', label: 'Review', sub: 'Check and approve', headline: 'One final check, before it leaves the studio.', views: ['review'], purpose: 'Check every piece against the preflight - copy, design, brand, accessibility - then approve it, and share it with the client.', next: 'Each check is read from the measurement and the checks of the current version, never estimated. Approval is a person\'s decision about that exact version; a later edit drops the approval it changes.' },
-    { id: 'export', label: 'Export', sub: 'Prepare delivery', headline: 'Ready to hand over.', views: ['export'], purpose: 'Download exactly the approved, validated versions at their native size, with the copy sheet and a delivery record.', next: 'Export draws each approved version at its native size, checks it once more, and writes the bundle; nothing unvalidated or unapproved goes in, and the manifest names each version.' },
+    { id: 'brief', label: 'Brief', sub: 'Understand the situation', headline: 'Start with what happened.', views: ['brief', 'sources', 'references'], purpose: 'Give Axiom the brief - text, links, files, screenshots, notes, or something Axiom already holds - and review what it understood.', next: 'Analysing is one model call that reads every piece of material together against the client. Confirming the understanding opens the objectives.' },
+    { id: 'objectives', label: 'Objectives', sub: 'What the work must achieve', headline: 'Decide what this must achieve.', views: ['objectives'], purpose: 'Choose the objective, the key message under it and the topics in play, from what Axiom proposed for this client.', next: 'Confirming writes the objective, the message and the call to action into the brief and opens the strategy. Nothing is spent.' },
+    { id: 'strategy', label: 'Strategy', sub: 'How to respond', headline: 'Choose how to respond.', views: ['strategy'], purpose: 'Choose the response strategy (or decide not to respond) and settle the campaign.', next: 'Confirming opens Directions; generating them is one model call, built on the objective, the message and this strategy.' },
+    { id: 'directions', label: 'Directions', sub: 'Choose the idea', headline: 'Choose an idea, not just a background.', views: ['directions'], purpose: 'Compare genuinely different directions built on the confirmed strategy; refine, merge or ask for alternatives, then select one.', next: 'Selecting opens Copy. Refining, merging and alternatives are one model call each; previews are free.' },
+    { id: 'copy', label: 'Copy', sub: 'Get the words right', headline: 'Get the words right first.', views: ['copywrite', 'copy', 'kit', 'sequence'], purpose: 'Write each channel\'s words and its visual narrative from the selected direction, then mark each piece ready for design.', next: 'Generating the copy is one model call for the words and plans; nothing is rendered. Marking a piece ready is the agency\'s copy approval of that exact version.' },
+    { id: 'design', label: 'Design', sub: 'Build the creative', headline: 'Make the creative yours.', views: ['asset', 'board', 'production', 'jobs'], purpose: 'Choose the production mode, then build each creative on the canvas: imagery, layout, type and the exact marks, measured as you work.', next: 'Generating imagery is one paid render per planned image (stated first); the canvas, layout variations and Fix layout are free; the Art Director\'s review is one model call and is advice, never approval.' },
+    { id: 'review', label: 'Review', sub: 'Check, approve, export', headline: 'One final check, before it leaves the studio.', views: ['review', 'export'], purpose: 'Check every piece against the preflight, approve it, share it with the client, then export exactly the approved, validated versions.', next: 'Each check is read from the current version, never estimated. Approval is a person\'s decision about that exact version; export draws each one at its native size.' },
   ];
   const stageOfView = v => (STAGES.find(s => s.views.indexOf(v) >= 0) || { id: '' }).id;
   /* a finished creative has no layers to measure: it is ready once its words and marks were read back (readiness.production) */
@@ -110,8 +112,18 @@
   const MODE_WORD = { editable: 'Editable Studio', finished: 'Finished creative', artwork: 'Hybrid artwork', generated: 'Legacy flattened', copy: 'Copy only' };
   const modeOf = v => !v ? '' : v.mode === 'finished' ? 'finished' : v.mode === 'artwork' ? 'artwork' : v.mode === 'generated' ? 'generated' : v.mode === 'copy' ? 'copy' : 'editable';
   const approvedOf = a => !!(standing(a, 'copy') && (standing(a, 'design') || (current(a) || {}).mode === 'copy'));
-  /** Where the project stands, stage by stage: done, current, to do, running, skipped or blocked (with the reason). */
+  /* the worker's step states as the navigator draws them */
+  const WF_CLASS = { complete: 'done', processing: 'running', in_progress: 'current', needs_review: 'review', not_started: 'todo', locked: 'locked', error: 'error', skipped: 'skipped' };
+  /** Where the project stands: the worker's workflow (S17) for every step, with the counts the stages show. */
   function flowOf(p) {
+    const base = flowCounts(p); const wf = p.workflow;
+    if (!wf || !wf.steps) return base;
+    const out = { counts: base.counts, wf };
+    STAGES.forEach(s0 => { const st = wf.steps[s0.id] || {}; out[s0.id] = { state: WF_CLASS[st.state] || 'todo', raw: st.state, note: st.note || '', blocked: st.need || '', why: st.why || '' }; });
+    return out;
+  }
+  /** Where the project stands, stage by stage: done, current, to do, running, skipped or blocked (with the reason). */
+  function flowCounts(p) {
     const A = p.assets || [], n = A.length, b = p.brief || {}, jobs = p.jobs || [];
     const live = j => j.state === 'queued' || j.state === 'running';
     const chosen = p.directions.find(d => d.chosen);
@@ -211,6 +223,34 @@
     eye: '<path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
     download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 19.5h14"/>',
     folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+    // S17: the wizard's project types, the material starting points and the board's actions
+    flag: '<path d="M5.5 21V4"/><path d="M5.5 4.5h11l-2.2 4 2.2 4h-11"/>',
+    reply: '<path d="M9.5 6.5L4 12l5.5 5.5"/><path d="M4.5 12h9a6 6 0 0 1 6 6v1"/>',
+    chat: '<path d="M4.5 5.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4.5 3.5V16.5h-2.5a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/>',
+    megaphone: '<path d="M4 10v4a1 1 0 0 0 1 1h2.5l7.5 4V5L7.5 9H5a1 1 0 0 0-1 1z"/><path d="M18 9.5a3.5 3.5 0 0 1 0 5"/>',
+    bell: '<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2h-14z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+    news: '<rect x="3.5" y="5" width="13.5" height="14" rx="1.5"/><path d="M17 8.5h2.5a1 1 0 0 1 1 1V17a2 2 0 0 1-2 2h-1.5"/><path d="M6.5 8.5h7.5"/><path d="M6.5 12h7.5"/><path d="M6.5 15.5h5"/>',
+    bulb: '<path d="M9 17.5h6"/><path d="M10 20.5h4"/><path d="M12 3.5a5.5 5.5 0 0 0-3.2 10c.8.6 1.2 1.4 1.2 2.3v1.7h4v-1.7c0-.9.4-1.7 1.2-2.3A5.5 5.5 0 0 0 12 3.5z"/>',
+    diamond: '<path d="M7 4.5h10l3.5 5-8.5 10-8.5-10z"/><path d="M3.5 9.5h17"/><path d="M12 19.5l-3-10 3-5 3 5z"/>',
+    bolt: '<path d="M13 3l-7.5 10.5H12l-1 7.5 7.5-10.5H12z"/>',
+    dots: '<circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/>',
+    link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+    upload: '<path d="M12 15.5V4.5"/><path d="M7 9.5l5-5 5 5"/><path d="M5 19.5h14"/>',
+    sparkle: '<path d="M12 3.5l1.8 5 5 1.8-5 1.8-1.8 5-1.8-5-5-1.8 5-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>',
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    x: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
+    refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4.5H15"/>',
+    merge: '<path d="M6 4v5a6 6 0 0 0 6 6h6"/><path d="M18 4v5"/><path d="M15 12l3 3-3 3"/>',
+    copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>',
+    bookmark: '<path d="M6.5 4.5h11v15.5l-5.5-4-5.5 4z"/>',
+    archive: '<rect x="3.5" y="4.5" width="17" height="4.5" rx="1"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
+    compass: '<circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>',
+    pen: '<path d="M4.5 19.5l1-4.5L16 4.5l3.5 3.5L9 18.5z"/><path d="M13.5 7l3.5 3.5"/>',
+    grid: '<rect x="4" y="4" width="7" height="7" rx="1.2"/><rect x="13" y="4" width="7" height="7" rx="1.2"/><rect x="4" y="13" width="7" height="7" rx="1.2"/><rect x="13" y="13" width="7" height="7" rx="1.2"/>',
+    review: '<path d="M4.5 12.5l4 4L19.5 6"/><path d="M4.5 19.5h15"/>',
+    alert: '<path d="M12 4l9 15.5H3z"/><path d="M12 10v4.5"/><path d="M12 17.2v.3"/>',
   };
   const Icon = ({ n, size }) => html`<svg class=${'st-ic st-ic-' + n} viewBox="0 0 24 24" width=${size || 16} height=${size || 16} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{ __html: ICON[n] || '' }}></svg>`;
   const FORMAT_ICON = { '1:1': 'square', '4:5': 'portrait', '9:16': 'phone', '16:9': 'wide' };
@@ -307,14 +347,14 @@
   }
 
   /* ------------------------------------------------------------ the frame: navigator, stage heading, notices */
-  const FLOW_WORD = { done: 'done', current: 'in progress', todo: 'to do', running: 'running', skipped: 'skipped', blocked: 'blocked' };
-  /** The workflow navigator: every stage reachable (a blocked one opens on its explanation), its state and a short note. */
+  const FLOW_WORD = { done: 'complete', current: 'in progress', todo: 'not started', running: 'processing', skipped: 'skipped', blocked: 'locked', locked: 'locked', review: 'needs review', error: 'error' };
+  /** The workflow navigator: every step reachable (a locked one opens on what unlocks it), its state and a short note. */
   function Flow({ flow, at, onGo }) {
     const ref = useRef(null);
     useEffect(() => { const el = ref.current && ref.current.querySelector('.st-step.on'); if (el && el.scrollIntoView && ref.current.scrollWidth > ref.current.clientWidth) { try { el.scrollIntoView({ inline: 'center', block: 'nearest' }); } catch (e) {} } }, [at]);
-    return html`<nav class="st-steps st-flow" aria-label="Workflow" ref=${ref}>${STAGES.map((s, i) => { const f = flow[s.id] || {}; const on = at === s.id;
-      return html`<button key=${s.id} class=${'st-step ' + (f.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} title=${s.sub + ': ' + (f.state === 'blocked' ? 'blocked - ' + f.blocked : f.state === 'skipped' ? (s.id === 'design' ? 'skipped - copy only, nothing to design' : 'skipped - a clear instruction needs no direction step') : s.purpose)} onClick=${() => onGo(s.id)}>
-        <span class="st-step-n" aria-hidden="true">${f.state === 'done' ? html`<${Icon} n="check" size=${13} />` : f.state === 'skipped' ? '–' : String(i + 1).padStart(2, '0')}</span><span class="st-step-txt"><span class="st-step-l">${s.label}</span><span class="st-step-meta"><span class="st-step-sub">${s.sub}</span><span class="st-step-note">${f.state === 'blocked' ? 'blocked' : f.note || FLOW_WORD[f.state] || ''}</span></span></span><span class="st-vh">, ${FLOW_WORD[f.state] || ''}</span>${f.state === 'running' ? html`<span class="st-step-live" aria-hidden="true"></span>` : null}</button>`; })}</nav>`;
+    return html`<nav class="st-steps st-flow" aria-label="Workflow" ref=${ref}>${STAGES.map((s, i) => { const f = flow[s.id] || {}; const on = at === s.id; const locked = f.state === 'locked' || f.state === 'blocked';
+      return html`<button key=${s.id} class=${'st-step ' + (f.state || '') + (on ? ' on' : '')} aria-current=${on ? 'step' : undefined} data-state=${f.raw || f.state || ''} title=${s.sub + ': ' + (locked ? (f.blocked || 'locked') : f.state === 'skipped' ? 'skipped - ' + (f.note || 'not needed') : f.note || s.purpose)} onClick=${() => onGo(s.id)}>
+        <span class="st-step-n" aria-hidden="true">${f.state === 'done' ? html`<${Icon} n="check" size=${13} />` : locked ? html`<${Icon} n="lock" size=${12} />` : f.state === 'error' ? '!' : f.state === 'skipped' ? '-' : String(i + 1).padStart(2, '0')}</span><span class="st-step-txt"><span class="st-step-l">${s.label}</span><span class="st-step-meta">${(() => { const note = locked ? 'Locked' : f.state === 'review' ? 'Needs review' : f.state === 'error' ? 'Error' : f.note || ''; return note ? html`<span class="st-step-note">${note}</span>` : html`<span class="st-step-sub">${s.sub}</span>`; })()}</span></span><span class="st-vh">, ${FLOW_WORD[f.state] || ''}</span>${f.state === 'running' ? html`<span class="st-step-live" aria-hidden="true"></span>` : null}${f.state === 'review' ? html`<span class="st-step-dot" aria-hidden="true"></span>` : null}</button>`; })}</nav>`;
   }
   /** The head of every stage: what it is for, when it is done (or why it is blocked), its main action and the views inside it. */
   function StageHead({ id, title, purpose, next, flow, children, tabs, tab, onTab, focusRef, compact }) {
@@ -329,6 +369,7 @@
       <div class="st-stagehead-row"><div class="st-stagehead-main">${eyebrow}<h2 class="st-stage-title" tabIndex="-1" ref=${focusRef}>${title}</h2><span class="st-stage-purpose">${purpose}</span></div>
         <div class="st-stagehead-acts">${children}</div></div>
       ${f.state === 'blocked' ? html`<div class="st-blocked" role="status"><${Chip} kind="warn">blocked</${Chip}> ${f.blocked}</div>` : null}
+      ${f.state === 'review' || f.state === 'error' || f.state === 'running' ? html`<div class=${'st-stepstate ' + f.state} role="status"><span class="st-stepstate-dot" aria-hidden="true"></span>${f.state === 'review' ? 'Needs review' : f.state === 'error' ? 'Error' : 'Processing'}${f.note ? html`<span class="ov-dim"> - ${f.note}</span>` : null}</div>` : null}
       ${next ? html`<div class="st-stage-next"><span class="st-lbl">What happens next</span><span>${next}</span></div>` : null}
       ${tabs ? html`<div class="st-subnav" role="tablist" aria-label=${title + ' views'}>${tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${tab === k} class=${'st-railbtn st-subtab' + (tab === k ? ' on' : '')} onClick=${() => onTab(k)}>${l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>` : null}
     </div>`;
@@ -892,7 +933,7 @@
   const FORMAT_WORD = { '1:1': 'square creative', '4:5': 'portrait creative', '9:16': 'vertical creative', '16:9': 'landscape creative' };
   /** One channel's words at a time, beside the list of the set and a copy partner. "Ready for design" is the agency's copy
    *  approval of exactly this version (reason "copy ready"); an edit to the words makes a new version and the mark falls away. */
-  function CopyStage({ p, a, head, activity, prov, busy, onSel, onEdit, onReady, onDirect, onPick, onWrite, onGo, onDraftState }) {
+  function CopyStage({ p, a, head, activity, banner, prov, busy, onSel, onEdit, onReady, onDirect, onPick, onWrite, onGo, onDraftState }) {
     const ro = !canWrite() || p.readOnly; const noClaude = prov && prov.claude === false;
     const sel = (a && p.assets.indexOf(a) >= 0 ? a : null) || p.assets[0] || null;
     const [draft, setDraft] = useState({}); const [ask, setAsk] = useState('');
@@ -907,6 +948,7 @@
     const flagsOf = x => (vOf(x).checks || []).filter(c => COPY_BAD[c.state]);
     const ready = x => !!standing(x, 'copy');
     const n = p.assets.length, nReady = p.assets.filter(ready).length;
+    const staleIds = new Set((((p.workflow || {}).steps || {}).copy || {}).stale || []);
     const b = p.brief || {}; const afterCopy = b.imageryTiming === 'after_copy';
     if (!n) return html`<div class="st-centre-pad st-copystage"><${StageHead} ...${head}>${!ro ? html`<button class="btn sm" disabled=${!!busy || noClaude || !(b.channels || []).length} title=${noClaude ? 'Claude is not configured on the worker' : !(b.channels || []).length ? 'Choose at least one channel in the brief first' : 'One model call for the words and plans, then one composition per channel'} onClick=${onWrite}>Write the copy</button>` : null}</${StageHead}>${activity}
       <div class="st-empty-state"><b>Get the words right first.</b><span>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, or write the copy straight from the brief.' : 'Writing the copy is one model call: one piece per channel in the brief (' + ((b.channels || []).map(chanLabel).join(', ') || 'none chosen yet') + '), each laid out as an editable composition. ' + (b.deliverable === 'copy' ? 'This project is copy only.' : afterCopy ? 'The imagery waits for Design, as the brief says.' : 'The imagery is queued with it, as the brief says; set "Imagery: after the copy" in the brief to hold it.')}</span>${!ro && p.directions.length && !p.directions.some(d => d.chosen) ? html`<button class="btn sm ghost" onClick=${() => onGo('directions')}>Go to Direction</button>` : null}</div></div>`;
@@ -916,10 +958,10 @@
     const toggle = () => { if (dirty) return; if (!isReady && flags.length && !window.confirm(flags.length + ' check' + (flags.length === 1 ? '' : 's') + ' on these words still to look at (' + flags.map(c => CHECK_WORD[c.state] || c.state).join(', ') + '). Mark them ready for design anyway?')) return; onReady(sel, !isReady); };
     const quick = [['Shorter headline', 'Write a shorter headline for this piece: same claim, fewer words. Offer it as alternatives.'], ['Plainer words', 'Make the words plainer: shorter sentences, no jargon, the same claims and figures.'], ['Three headline options', 'Offer three different headlines for this piece as alternatives; keep every figure as it is.']];
     return html`<div class="st-centre-pad st-copystage">
-      <${StageHead} ...${head}><span class="st-copy-count" role="status">${nReady} of ${n} ready for design</span>${nReady ? html`<button class=${'btn sm' + (nReady === n ? '' : ' ghost')} onClick=${() => onGo('design')}>Continue to Design</button>` : null}</${StageHead}>${activity}
+      <${StageHead} ...${head}><span class="st-copy-count" role="status">${nReady} of ${n} ready for design</span>${nReady ? html`<button class=${'btn sm' + (nReady === n ? '' : ' ghost')} onClick=${() => onGo('design')}>Continue to Design</button>` : null}</${StageHead}>${activity}${banner || null}
       <div class="st-copy3">
         <nav class="st-copy-list" aria-label="The copy set">${Object.keys(byChannel).map(c => html`<div key=${c} class="st-copy-chan" role="group" aria-label=${chanLabel(c)}><div class="st-famname">${chanLabel(c)}</div>${byChannel[c].map(x => { const f = flagsOf(x).length; const on = x.id === sel.id; return html`<button key=${x.id} class=${'st-copy-pick' + (on ? ' on' : '')} aria-current=${on ? 'true' : undefined} onClick=${() => onSel(x.id)}>
-          <span class="st-copy-pick-ic"><${Icon} n=${FORMAT_ICON[x.format] || 'file'} size=${15} /></span><span class="st-copy-pick-t">${x.title}<small>${FORMAT_WORD[x.format] || x.format}${(vOf(x).mode === 'copy') ? ', copy only' : ''}</small></span>
+          <span class="st-copy-pick-ic"><${Icon} n=${FORMAT_ICON[x.format] || 'file'} size=${15} /></span><span class="st-copy-pick-t">${x.title}<small>${FORMAT_WORD[x.format] || x.format}${(vOf(x).mode === 'copy') ? ', copy only' : ''}${staleIds.has(x.id) ? html`<span class="st-mini-chip warn" title="Written on an earlier objective, message or strategy">earlier choice</span>` : null}</small></span>
           <span class=${'st-copy-state' + (ready(x) ? ' ok' : f ? ' warn' : '')}>${ready(x) ? 'Ready' : f ? f + ' to check' : 'Draft'}</span></button>`; })}</div>`)}</nav>
         <section class="st-copy-edit" aria-label=${'Copy for ' + sel.title}>
           <div class="st-copy-title"><h3>${chanLabel(sel.channel)} copy <span class="ov-dim">${sel.title}, v${vnum(sel, v)}${v.note ? ' - ' + v.note : ''}</span></h3><span class=${'st-copy-badge' + (isReady ? ' ok' : '')} role="status">${isReady ? 'Ready for design' : dirty ? 'Unsaved words' : 'Working draft'}</span></div>
@@ -2326,6 +2368,9 @@
     const [saveSt, setSaveSt] = useState({ pending: 0, err: null, at: 0 });
     const [typing, setTyping] = useState(0);
     const [conflict, setConflict] = useState(null);
+    // S17: the question a change to an earlier choice asks before anything is written (update the work built on it, keep it, cancel)
+    const [impactQ, setImpactQ] = useState(null);
+    const viewRef = useRef('brief');
     const stepping = useRef(new Set()); const pidRef = useRef(null); pidRef.current = pid;
     // the activity panel: a clock for elapsed times while anything runs or just finished, and a poll of the jobs this browser
     // (or the worker's tick) is stepping, so the phase the worker reports mid-call reaches the screen while the call is in flight
@@ -2352,7 +2397,10 @@
        the previous step or project inside AXIOM; a move made by Back itself is not pushed again (histRestoring) */
     const histRestoring = useRef(false);
     const pushHist = useCallback((pidV, viewV) => { if (histRestoring.current) return; try { const cur = history.state && history.state.studio; if (cur && cur.pid === (pidV || null) && cur.view === (viewV || null)) return; history.pushState({ ax: 1, v: 'studio', studio: { pid: pidV || null, view: viewV || null } }, '', location.pathname + location.search + '#v=studio'); } catch (e) {} }, []);
-    const setView = useCallback((v, focus) => { setView0(v); setCmp(null); if (focus) { focusNext.current = true; pushHist(pidRef.current, v); } }, []);
+    const setView = useCallback((v, focus) => { viewRef.current = v; setView0(v); setCmp(null); if (focus) { focusNext.current = true; pushHist(pidRef.current, v); } }, []);
+    /* S17: finished work is announced where the person is, with a button to go and see it - the Studio never moves them by itself */
+    const ready = (stageId, title, text, label) => { if (stageOfView(viewRef.current) === stageId) { toastMsg(title); return; } setNotice({ kind: 'success', title, text: text || '', actions: [{ label: label || 'Go to ' + ((STAGES.find(x => x.id === stageId) || {}).label || stageId), fn: () => goStageRef.current(stageId) }] }); };
+    const goStageRef = useRef(() => {});
     // the heading is brought to just under the sticky context bar and navigator (its scroll-margin), so a new stage starts at its top
     useEffect(() => { if (focusNext.current && titleRef.current) { focusNext.current = false; try { titleRef.current.focus({ preventScroll: true }); titleRef.current.scrollIntoView({ block: 'start' }); } catch (e) {} } }, [view, p && p.id]);
     /* suggested next directions for the selected composition: one small, cached model call per version, made only when the team asks for it */
@@ -2480,14 +2528,14 @@
         const before = new Set(d.assets.map(x => x.id));
         const j = await job('copy', { channels, deliverable: b.deliverable || 'set', formats: b.formats || {}, template: b.template || '', instruction: (extra && extra.instruction) || '', acknowledge: !!(extra && extra.acknowledge) || undefined, size: imagery === 'none' ? undefined : (extra && extra.size) || b.size || undefined, imagery: imagery === 'none' ? 'none' : undefined, quick: !!(extra && extra.instruction) || undefined }, null, 'copy:' + pidRef.current + ':' + Date.now(), 'Writing ' + channels.length + ' piece' + (channels.length === 1 ? '' : 's') + ' in the ' + (d.ns || '').toUpperCase() + ' voice' + ((b.deliverable || 'set') === 'copy' ? ', copy only' : ', then laying out compositions'));
         const d2 = await reload(); const fresh = d2 ? d2.assets.filter(x => !before.has(x.id)) : [];
-        // the guided flow: the words first - production lands in Copy on the first new piece (the imagery, if queued, runs meanwhile)
-        if (fresh.length) { setSelAsset(fresh[0].id); setTab('copy'); setView('copywrite', true); }
+        // the words first: the first new piece is selected for the Copy step, and the person is told where it is (never moved there)
+        if (fresh.length) { setSelAsset(fresh[0].id); setTab('copy'); ready('copy', fresh.length + ' piece' + (fresh.length === 1 ? '' : 's') + ' of copy ready', 'Each channel\'s words and its visual narrative are written; check them and mark each ready for design.', 'Go to Copy'); }
         if (j && j.state === 'done') pump(d2);
       } catch (e) { fail(e, 'Production did not start', () => produce(extra)); }
     });
-    const direct = (n) => guard('direct:' + pidRef.current, async () => { n = Math.max(1, Math.min(5, +n || 3)); try { const j = await job('direct', { n, channels: ((pRef.current && pRef.current.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing ' + n + ' direction' + (n === 1 ? '' : 's') + ' from the brief, the strategy and the ledger'); if (j && j.state === 'done') setView('directions', true); } catch (e) { fail(e, 'Directions did not start', () => direct(n)); } });
-    const draftStrategy = (instruction) => guard('strategy:' + pidRef.current, async () => { try { await job('strategy', { instruction: instruction || undefined }, null, 'strategy:' + pidRef.current + ':' + Date.now(), 'Drafting the creative strategy'); setView('brief'); } catch (e) { fail(e, 'The strategy did not start', () => draftStrategy(instruction)); } });
-    const planSequence = (input) => guard('sequence:' + pidRef.current, async () => { try { await job('sequence', input, null, 'sequence:' + pidRef.current + ':' + Date.now(), 'Planning the campaign sequence'); setView('sequence'); } catch (e) { fail(e, 'The sequence did not start', () => planSequence(input)); } });
+    const direct = (n) => guard('direct:' + pidRef.current, async () => { n = Math.max(1, Math.min(5, +n || 3)); try { const j = await job('direct', { n, channels: ((pRef.current && pRef.current.brief) || {}).channels || [] }, null, 'direct:' + pidRef.current + ':' + Date.now(), 'Proposing ' + n + ' direction' + (n === 1 ? '' : 's') + ' from the brief, the strategy and the ledger'); if (j && j.state === 'done') ready('directions', 'Creative Directions ready', 'Compare them and select one; nothing is produced until you do.', 'View directions'); } catch (e) { fail(e, 'Directions did not start', () => direct(n)); } });
+    const draftStrategy = (instruction) => guard('strategy:' + pidRef.current, async () => { try { await job('strategy', { instruction: instruction || undefined }, null, 'strategy:' + pidRef.current + ':' + Date.now(), 'Drafting the creative strategy'); } catch (e) { fail(e, 'The strategy did not start', () => draftStrategy(instruction)); } });
+    const planSequence = (input) => guard('sequence:' + pidRef.current, async () => { try { await job('sequence', input, null, 'sequence:' + pidRef.current + ':' + Date.now(), 'Planning the campaign sequence'); ready('copy', 'Sequence planned', 'Each asset is an editable composition with no image spent.', 'View the sequence'); } catch (e) { fail(e, 'The sequence did not start', () => planSequence(input)); } });
     const createProject = (o) => guard('create:' + clientId, async () => {
       try {
         setBusy('Creating the project'); setIntake(false);
@@ -2547,7 +2595,7 @@
         await reload(); setBusy('');
         const kind = o.kind || (via === 'url' ? 'url' : via === 'item' ? (s0.kind || 'item') : via === 'file' ? (o.mime === 'application/pdf' ? 'pdf' : 'image') : 'brief');
         await job('analyse', { source: s0.id, kind, instruction: o.instruction || undefined }, null, 'analyse:' + s0.id, 'Reading "' + (s0.name || o.name || 'the material') + '" against ' + ((client && client.name) || 'the client') + ': situation, objectives, messages, strategies and directions');
-        await reload(); setView('brief', true);
+        await reload(); ready('brief', 'Axiom\'s understanding is ready', 'Review it on the Brief.', 'Review the understanding');
       } catch (e) { fail(e, 'The analysis did not run', () => analyse(o)); } finally { setBusy(''); }
     });
     /* the team's choices on the reading: each fills the brief and is recorded for the engine to learn from */
@@ -2565,12 +2613,97 @@
       try {
         for (const id of ids) { const dir = d.directions.find(x => x.id === id); if (!dir) continue;
           await job('copy', { channels, deliverable: b.deliverable === 'copy' ? 'copy' : (b.deliverable || 'set'), formats: b.formats || {}, direction: id, variant: true, creationMode: dir.route || undefined, size: b.size || undefined, imagery: b.imagery === 'none' ? 'none' : undefined, acknowledge: true }, null, 'variant:' + id + ':' + Date.now(), 'Producing "' + dir.title + '" as a variant (' + (dir.route === 'finished' ? 'finished creative' : 'editable') + ')'); }
-        const d2 = await reload(); setView('board', true); if (d2) pump(d2);
+        const d2 = await reload(); ready('design', ids.length + ' variants produced', 'Each in its own family on the Board.', 'View on the Board'); if (d2) pump(d2);
       } catch (e) { fail(e, 'The variants were not produced', () => produceVariants(ids)); }
     });
-    const writeKit = (direction, kinds) => guard('kit:' + pidRef.current, async () => { try { await job('kit', { direction, kinds }, null, 'kit:' + direction + ':' + Date.now(), 'Writing the message kit: ' + kinds.length + ' piece' + (kinds.length === 1 ? '' : 's')); await reload(); setView('kit', true); } catch (e) { fail(e, 'The message kit was not written', () => writeKit(direction, kinds)); } });
+    const writeKit = (direction, kinds) => guard('kit:' + pidRef.current, async () => { try { await job('kit', { direction, kinds }, null, 'kit:' + direction + ':' + Date.now(), 'Writing the message kit: ' + kinds.length + ' piece' + (kinds.length === 1 ? '' : 's')); await reload(); ready('copy', 'Message kit ready', kinds.length + ' piece' + (kinds.length === 1 ? '' : 's') + ', each traced and checked.', 'View the kit'); } catch (e) { fail(e, 'The message kit was not written', () => writeKit(direction, kinds)); } });
     const updateText = async (t, body) => { try { await call('/studio/text/update', { id: t.id, body, revision: t.revision }); await reload(); return true; } catch (e) { if (e.status === 409) await reload(); fail(e, 'The piece was not saved'); return false; } };
     const textVerdict = async (t, verdict) => { const reason = window.prompt((verdict === 'approve' ? 'Approve' : 'Reject') + ' "' + t.label + '": why? (recorded; the engine learns from it)', ''); if (reason == null) return; if (reason.trim().length < 4) { toastMsg('Nothing recorded: a reason of a few words is needed', true); return; } try { await call('/studio/text/verdict', { id: t.id, verdict, reason }); await reload(); toastMsg(verdict === 'approve' ? 'Approved' : 'Rejected'); } catch (e) { fail(e, 'The verdict was not recorded'); } };
+
+    /* ------------------------------------------------------------ S17: the guided workflow's own actions */
+    /** A project from the wizard: the campaign made in the kit first when asked, the project as guided workflow 2, the material
+        as sources, and - when asked - one analysis of all of it. The project opens on its Brief; nothing else is spent. */
+    const createGuided = (o) => guard('create:' + o.ns, async () => {
+      try {
+        setBusy('Creating the project'); setIntake(false);
+        let campaign = o.campaign || '';
+        if (o.campaignMode === 'new' && o.newCampaign) { const c = await call('/studio/campaign/create', { ns: o.ns, name: o.newCampaign.name, description: o.newCampaign.description }); campaign = c.campaign.id; }
+        const formats = {}; o.channels.forEach(c => { formats[c] = (CHANNELS[c] || {}).format || '1:1'; }); if (o.deliverable === 'visual') formats.instagram = '4:5';
+        const first = (o.text || '').split('\n').map(x => x.replace(/^#+\s*/, '').trim()).filter(Boolean)[0] || ((o.items || [])[0] || {}).label || '';
+        const typeName = ((window.STFlow && window.STFlow.TYPES.find(t => t[0] === o.type)) || [0, 'Project'])[1];
+        const brief = { workflow: 2, projectType: o.type, campaignMode: o.campaignMode, channels: o.channels, deliverable: o.deliverable, formats, deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'One visual for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), creationMode: 'editable', imageryTiming: 'after_copy', campaignConfirmed: o.campaignMode !== 'detect', assumptions: o.campaignMode === 'standalone' ? ['Standalone: no campaign identity or campaign facts apply'] : [] };
+        const pr = await call('/studio/project', { ns: o.ns, campaign, title: (o.title || first || typeName + ' ' + new Date().toLocaleDateString('en-AU')).slice(0, 80), brief, idem: 'p:' + o.ns + ':' + Date.now() });
+        if (o.ns !== clientRef.current) { resumed.current = true; clientRef.current = o.ns; setClientId(o.ns); }
+        setPid(pr.id); pidRef.current = pr.id; setSelAsset(null); setView('brief', true); await reload(pr.id);
+        const m = await window.STFlow.materialSources(pr.id, o.text, o.kind, o.items);
+        if (m.fails.length) setNotice({ kind: 'warn', title: 'Some material was not added', text: m.fails.join('; ') });
+        await reload(pr.id);
+        if (o.analyse && m.ids.length) await job('analyse', { sources: m.ids, kind: m.ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + m.ids.join(','), 'Reading the brief against ' + ((CLIENTS.find(c => c.id === o.ns) || {}).name || o.ns));
+        await reload(pr.id);
+      } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); }
+    });
+    /** Material added on the Brief (text, links, files, notes, Axiom items) plus sources already on the project, read as one. */
+    const analyseGuided = (o) => guard('analyse:' + pidRef.current, async () => {
+      try {
+        setBusy('Adding the material');
+        const m = await window.STFlow.materialSources(pidRef.current, o.text, o.kind, o.items);
+        if (m.fails.length) setNotice({ kind: 'warn', title: 'Some material was not added', text: m.fails.join('; ') });
+        const ids = m.ids.concat(o.sources || []); await reload(); setBusy('');
+        if (!ids.length) { setNotice({ kind: 'warn', title: 'Nothing to analyse', text: 'Write, paste, link or upload the brief first.' }); return false; }
+        await job('analyse', { sources: ids, kind: ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + ids.join(',') + ':' + Date.now(), 'Reading the brief against ' + ((client && client.name) || 'the client'));
+        await reload(); return true;
+      } catch (e) { fail(e, 'The analysis did not run', () => analyseGuided(o)); return false; } finally { setBusy(''); }
+    });
+    /** A step confirmed by a person. A change that would leave work on an earlier choice asks first (impactQ); nothing is written until answered. */
+    const confirmStep = async (step, body, opts) => {
+      opts = opts || {};
+      try {
+        setBusy(step === 'brief' ? 'Confirming the understanding' : 'Confirming the ' + step);
+        await call('/studio/workflow/confirm', Object.assign({ project: pRef.current.id, step }, body));
+        await reload();
+        if (opts.then) await opts.then();
+        return true;
+      } catch (e) {
+        if (e.status === 409 && e.code === 'affects_downstream') { setImpactQ({ step, body, opts, impact: e.body ? e.body.impact : (e.impact || {}), title: step === 'objectives' ? 'Changing this objective may affect your current Creative Directions' : 'Changing the strategy may affect your current Creative Directions' }); return false; }
+        if (e.status === 409) await reload();
+        fail(e, 'The ' + step + ' was not confirmed'); return false;
+      } finally { setBusy(''); }
+    };
+    const answerImpact = async (ans) => {
+      const q = impactQ; setImpactQ(null); if (!q || !ans) return;
+      const ok = await confirmStep(q.step, Object.assign({}, q.body, { acknowledge: ans }), q.opts);
+      // "Update directions": the earlier work stays, and new directions are built on the new choice (one model call)
+      if (ok && ans === 'update') { const d = pRef.current; const wf = d && d.workflow; if (wf && wf.steps.directions && wf.steps.directions.state !== 'locked') await directGuided({ n: 3 }); else setNotice({ kind: 'info', title: 'The earlier work is kept, marked as built on the earlier choice.', text: 'Confirm the strategy to build new directions on the new choice.' }); }
+    };
+    /** Directions in a guided project: fresh, alternatives, refine or merge - one model call; the board shows them where they land. */
+    const directGuided = (o) => guard('direct:' + pidRef.current, async () => {
+      try {
+        const n = o.mode === 'refine' || o.mode === 'merge' ? 1 : Math.max(1, Math.min(5, +o.n || 3));
+        const j = await job('direct', Object.assign({ n, channels: ((pRef.current && pRef.current.brief) || {}).channels || [] }, o), null, 'direct:' + (o.mode || 'fresh') + ':' + pidRef.current + ':' + Date.now(), o.mode === 'refine' ? 'Refining the direction' : o.mode === 'merge' ? 'Merging the directions' : o.mode === 'alternatives' ? 'Asking for alternatives' : 'Building creative directions');
+        if (j && j.state === 'done') ready('directions', o.mode === 'refine' ? 'Refined direction ready' : o.mode === 'merge' ? 'Merged direction ready' : 'Creative Directions ready', 'Compare them and select one; nothing is produced until you do.', 'View directions');
+      } catch (e) { fail(e, 'The directions did not start', () => directGuided(o)); }
+    });
+    const chooseGuided = async (d) => {
+      const d0 = pRef.current; const other = (d0.assets || []).length && !d.chosen;
+      if (other && !window.confirm('Select "' + d.title + '"? The ' + d0.assets.length + ' piece' + (d0.assets.length === 1 ? '' : 's') + ' already written stay as they are; new copy follows this direction.')) return;
+      try { setBusy('Selecting the direction'); await call('/studio/direction/choose', { id: d.id }); await reload(); ready('copy', 'Direction selected: ' + d.title, 'Copy is open: the words and the visual narrative are written from it.', 'Continue to Copy'); }
+      catch (e) { if (e.status === 409) await reload(); fail(e, 'The direction was not selected'); } finally { setBusy(''); }
+    };
+    const updateDirection = async (d, patch, reason) => { try { await call('/studio/direction/update', { id: d.id, patch, reason: reason || undefined }); await reload(); if (patch.saved != null) toastMsg(patch.saved ? 'Saved for later' : 'No longer saved'); if (patch.archived) toastMsg('Set aside; the reason is recorded'); } catch (e) { fail(e, 'The direction was not changed'); } };
+    const duplicateDirection = async (d) => { try { await call('/studio/direction/duplicate', { id: d.id }); await reload(); toastMsg('Duplicated "' + d.title + '"'); } catch (e) { fail(e, 'The direction was not duplicated'); } };
+    /** The production mode, chosen in Design once the words are ready: editable queues the planned imagery; finished paints each piece. */
+    const produceMode = (mode, assets, size) => guard('production:' + pidRef.current, async () => {
+      if (!window.confirm((mode === 'finished' ? 'Paint ' : 'Generate the imagery for ') + assets.length + ' piece' + (assets.length === 1 ? '' : 's') + ' at ' + size + '? ' + (mode === 'finished' ? 'One paid painting per piece, words and mark included.' : 'One paid render per planned image.') + ' Each is a job you can watch or cancel.')) return;
+      try {
+        setBusy('Queuing the ' + (mode === 'finished' ? 'paintings' : 'imagery'));
+        const r = await call('/studio/production', { project: pidRef.current, mode, assets, size });
+        const d = await reload(); if (r.jobs && r.jobs.length && d) pump(d);
+        setNotice({ kind: r.skipped && r.skipped.length ? 'warn' : 'info', title: (r.done || []).length + ' piece' + ((r.done || []).length === 1 ? '' : 's') + ' in production (' + (mode === 'finished' ? 'full AI creative' : 'editable') + ')', text: (r.jobs || []).length + ' render' + ((r.jobs || []).length === 1 ? '' : 's') + ' queued at ' + r.size + '.' + (r.skipped && r.skipped.length ? ' Not queued: ' + r.skipped.map(x => x.title + ' (' + x.why + ')').join('; ') + '.' : '') });
+      } catch (e) { fail(e, 'Production did not start'); } finally { setBusy(''); }
+    });
+    const saveBriefPatch = async (patch) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { brief: patch } }); await reload(); return true; } catch (e) { if (e.status === 409) await reload(); fail(e, 'The brief was not saved'); return false; } };
+    /** Pieces (or directions) written on an earlier choice, kept under the current one: nothing regenerated, nothing deleted. */
+    const keepEarlier = async (assets, directions) => { try { setBusy('Keeping the earlier work'); const r = await call('/studio/workflow/confirm', { project: pRef.current.id, step: 'keep', assets: assets || undefined, directions: directions || undefined }); await reload(); toastMsg('Kept ' + [r.keptAssets ? r.keptAssets + ' piece' + (r.keptAssets === 1 ? '' : 's') : '', r.keptDirections ? r.keptDirections + ' direction' + (r.keptDirections === 1 ? '' : 's') : ''].filter(Boolean).join(' and ') + ' under the current choice'); } catch (e) { if (e.status === 409) await reload(); fail(e, 'Nothing was kept'); } finally { setBusy(''); } };
 
     /* text edits: one queue per asset, sent one at a time on the latest revision, so a fast second edit waits for the first
        instead of racing it; a revision taken by someone else is retried only when they did not touch the same words */
@@ -2624,7 +2757,7 @@
 
     const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The art director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The art director refines ' : 'The art director explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The art director did not start', () => propose(as, feedback, refine, opts)); } });
     const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the art director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
-    const applyConcept = (eid, index, render, imageFrom, size) => guard('apply:' + eid + ':' + index, async () => { try { const r = await call('/studio/concept/apply', { project: pRef.current.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e, 'The concept was not applied'); } });
+    const applyConcept = (eid, index, render, imageFrom, size) => guard('apply:' + eid + ':' + index, async () => { try { const r = await call('/studio/concept/apply', { project: pRef.current.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset && r.fresh) setNotice({ kind: 'success', title: 'New design made', text: 'It is a new asset in the family "New designs".', actions: [{ label: 'Open it', fn: () => setSelAsset(r.asset) }] }); else if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e, 'The concept was not applied'); } });
     /* a measurement of one version at its output size, with the composed PNG: the worker re-judges it with the shared rules */
     const fileValidation = async (as, v, val, comp) => {
       try {
@@ -2732,18 +2865,18 @@
     const render = (as, prompt, edit, size) => guard('render:' + as.id, async () => { try { const v = current(as); const artwork = v.mode === 'artwork'; await job('render', { prompt: prompt || (v.context || {}).visual || 'documentary background, no text', edit: !!edit, approach: artwork ? 'artwork' : undefined, baked: artwork ? (v.layout || {}).baked : undefined, aspect: as.format, size: ['1K', '2K', '4K'].indexOf(size) >= 0 ? size : (v.image && v.image.size) || '2K', note: edit ? 'edit: ' + String(prompt || '').slice(0, 60) : 'imagery as directed' }, as.id, 'render:' + as.id + ':' + v.id + ':' + Date.now(), (edit ? 'Editing the artwork of ' : 'Rendering new imagery for ') + as.title); pump(await reload()); } catch (e) { fail(e, 'The render did not start'); } });
     /* the two creation modes: a finished creative is revised by regenerating the whole piece, and leaves the mode only as a derived editable asset */
     const regenerateFinished = (as, o) => guard('render:' + as.id, async () => { try { const r = await call('/studio/finished/regenerate', { asset: as.id, copy: o.copy, instruction: o.instruction, size: o.size }); const d = await reload(); if (r.job) pump(d); } catch (e) { fail(e, 'The regeneration did not start'); } });
-    const deriveEditable = (as, o) => guard('derive:' + as.id, async () => { try { const r = await call('/studio/derive', { asset: as.id, to: 'editable', regenerate: !!(o && o.regenerate) }); const d = await reload(); if (r.asset) { setSelAsset(r.asset); setTab('copy'); setView('asset'); } if (r.jobs && r.jobs.length) pump(d); setNotice({ kind: 'info', title: 'Derived an editable asset.', text: r.note || 'The words and the mark are live layers again; the finished original is untouched.' }); } catch (e) { fail(e, 'The editable asset was not derived'); } });
+    const deriveEditable = (as, o) => guard('derive:' + as.id, async () => { try { const r = await call('/studio/derive', { asset: as.id, to: 'editable', regenerate: !!(o && o.regenerate) }); const d = await reload(); if (r.jobs && r.jobs.length) pump(d); setNotice({ kind: 'info', title: 'Derived an editable asset.', text: r.note || 'The words and the mark are live layers again; the finished original is untouched.', actions: r.asset ? [{ label: 'Open the editable copy', fn: () => { setSelAsset(r.asset); setTab('copy'); setView('asset', true); } }] : [] }); } catch (e) { fail(e, 'The editable asset was not derived'); } });
     const areaEdit = (as, o) => guard('render:' + as.id, async () => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (o.kind === 'area' ? 'area edit: ' : o.kind === 'background' ? 'background swap: ' : 'restyle: ') + o.instruction.slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (o.kind === 'area' ? 'Editing the marked area of ' : o.kind === 'background' ? 'Changing the background of ' : 'Restyling ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e, 'The edit did not start'); } });
     const filePreservation = async (m) => { try { await call('/studio/preservation', m); await reload(); } catch (e) { toastMsg('Preservation not filed: ' + e.message, true); } };
     const note = async (text, tgt) => { try { await call('/studio/note', { project: pRef.current.id, text, target: tgt }); await reload(); } catch (e) { fail(e, 'The note was not recorded'); } };
-    const directTeam = (text, tgt) => guard('revise:' + pidRef.current, async () => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + pRef.current.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { setSelAsset(j.result.changed[0]); setTab('copy'); setView('asset'); } } catch (e) { fail(e, 'The direction was not sent'); } });
+    const directTeam = (text, tgt) => guard('revise:' + pidRef.current, async () => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + pRef.current.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { const first = j.result.changed[0]; setNotice({ kind: 'success', title: j.result.changed.length + ' adaptation' + (j.result.changed.length === 1 ? '' : 's') + ' made', text: 'New assets in the family, the words kept.', actions: [{ label: 'Open the first', fn: () => { setSelAsset(first); setTab('copy'); setView('asset', true); } }] }); } } catch (e) { fail(e, 'The direction was not sent'); } });
     /* the paid remedies of the impact list: one revise call on that asset, locked fields kept by the stage itself */
     const reviseFromImpact = async (x, r) => { const ins = r.remedy === 'readapt' ? 'The master this was adapted from has changed. Bring this asset\'s words in line with the master\'s current version, fitted to this channel and format. Keep the locked fields.' : 'The creative strategy was confirmed after this asset was made. Bring the words in line with the confirmed strategy (proposition, audience, tone). Keep the locked fields.'; await job('revise', { target: 'asset', asset: x.asset, instruction: ins }, null, 'revise:' + x.asset + ':' + r.code + ':' + x.version, (r.remedy === 'readapt' ? 'Re-adapting ' : 'Revising ') + x.title); await reload(); };
-    const pickAlternative = async (assetId, field, option) => { try { const as = pRef.current.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); if (view !== 'copywrite') setView('asset'); } catch (e) { if (e.status === 409) await reload(); fail(e, 'The alternative was not applied'); } };
+    const pickAlternative = async (assetId, field, option) => { try { const as = pRef.current.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); } catch (e) { if (e.status === 409) await reload(); fail(e, 'The alternative was not applied'); } };
     const decideProposal = async (eid, decision) => { try { const r = await call('/studio/proposal', { project: pRef.current.id, eid, decision }); const d = await reload(); if (decision === 'do' && r.jobs && r.jobs.length) pump(d); } catch (e) { fail(e, 'The decision was not recorded'); } };
     const remember = async (eid, scope, offer) => { try { const ta = document.getElementById('offer-' + eid); const rule = ta ? ta.value.trim() : offer.rule; const r = await call('/studio/remember', { project: pRef.current.id, eid, scope, rule, task: offer.task, campaign: offer.campaign, instruction: offer.instruction }); toastMsg(r.saved ? 'Saved as ' + (r.scope === 'campaign' ? 'a campaign preference for ' + r.campaign : 'a lasting ' + pRef.current.ns.toUpperCase() + ' rule') : 'Not saved; applied to this work only'); await reload(); } catch (e) { fail(e, 'The preference was not recorded'); } };
     /* a retry is a new job named after the one that failed and how many retries it has had: pressing Retry twice runs it once */
-    const retryJob = (j) => guard('retry:' + j.id, async () => { try { const n = ((pRef.current || {}).jobs || []).filter(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && (x.state === 'failed' || x.state === 'cancelled')).length; const r = await call('/studio/job', { project: j.project || pidRef.current, asset: j.asset || undefined, stage: j.stage, input: j.input, idem: 'retry:' + j.id + ':' + n }); const done = await runJob(r.job.id, 'Retrying ' + j.stage); const d = await reload(); if (done && done.state === 'done') { setNotice({ kind: 'info', title: 'The ' + j.stage + ' step ran on retry.', text: 'Nothing was lost; the result is in place.' }); if (j.stage === 'copy' && d) { const fresh = d.assets[d.assets.length - 1]; if (fresh) { setSelAsset(fresh.id); setView('copywrite'); } } pump(d); } } catch (e) { fail(e, 'The retry did not start'); } });
+    const retryJob = (j) => guard('retry:' + j.id, async () => { try { const n = ((pRef.current || {}).jobs || []).filter(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && (x.state === 'failed' || x.state === 'cancelled')).length; const r = await call('/studio/job', { project: j.project || pidRef.current, asset: j.asset || undefined, stage: j.stage, input: j.input, idem: 'retry:' + j.id + ':' + n }); const done = await runJob(r.job.id, 'Retrying ' + j.stage); const d = await reload(); if (done && done.state === 'done') { setNotice({ kind: 'info', title: 'The ' + j.stage + ' step ran on retry.', text: 'Nothing was lost; the result is in place.' }); if (j.stage === 'copy' && d) { const fresh = d.assets[d.assets.length - 1]; if (fresh) setSelAsset(fresh.id); } pump(d); } } catch (e) { fail(e, 'The retry did not start'); } });
     const cancelJob = async (id) => { try { const r = await call('/studio/job/cancel', { id }); await reload(); setNotice({ kind: 'info', title: 'Cancelled.', text: (r && r.note) || RUN_NOTE }); } catch (e) { fail(e, 'The job was not cancelled'); } };
     const importLegacy = async (l) => { try { setBusy('Importing ' + l.title); const r = await call('/studio/import', { legacy: l.id }); toastMsg(r.existing ? 'Already imported: opening that project' : 'Imported; the original is untouched'); await openProject(r.id); } catch (e) { fail(e, 'The import did not run'); } finally { setBusy(''); } };
 
@@ -2799,14 +2932,16 @@
     const goStage = (id) => {
       if (id === 'produce') id = 'copy'; else if (id === 'refine') id = 'design';   // the names before S13, from older links and stored places
       const visual = p ? p.assets.filter(x => (current(x) || {}).mode !== 'copy') : [];
-      if (id === 'brief') setView('brief', true); else if (id === 'directions') setView('directions', true);
+      if (id === 'brief-details') { setView('brief', true); setTimeout(() => { const el = document.getElementById('st-brief-details'); if (el) { el.open = true; el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }, 60); return; }
+      if (id === 'brief' || id === 'objectives' || id === 'strategy' || id === 'directions') setView(id, true);
       else if (id === 'copy') { if (p && p.assets[0] && !a) setSelAsset(p.assets[0].id); setView('copywrite', true); }
-      else if (id === 'design') { if (!visual.length) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
+      else if (id === 'design') { const guided = !!(p && p.workflow && p.workflow.v === 2); const needsMode = guided && !(p.brief || {}).production && visual.length && !visual.some(x => { const v = current(x); return v && v.image && v.image.key; }); if (!visual.length || needsMode) setView('board', true); else { if (!a || visual.indexOf(a) < 0) setSelAsset(visual[0].id); setView('asset', true); } }
       else if (id === 'review') setView('review', true); else if (id === 'export') setView('export', true);
     };
+    goStageRef.current = goStage;
     const openAsset = id => { setSelAsset(id); setSelField(null); setView('asset'); };
-    /* Alt+1..6 jumps to a stage from anywhere in the Studio, except while typing */
-    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const n = +e.key; if (n >= 1 && n <= 6 && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(STAGES[n - 1].id); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
+    /* Alt+1..7 jumps to a step from anywhere in the Studio, except while typing */
+    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const n = +e.key; if (n >= 1 && n <= STAGES.length && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(STAGES[n - 1].id); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
 
     const inRefine = !!(p && view === 'asset' && a && !cmp);
     const liveJobs = p ? (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running') : [];
@@ -2830,28 +2965,42 @@
     const headOf = (id, extra) => { const s0 = STAGES.find(x => x.id === id); return Object.assign({ id, title: s0.label, purpose: s0.purpose, next: s0.next, flow, focusRef: titleRef }, extra || {}); };
     const tabsFor = id => id === 'brief' ? { tabs: [['brief', 'Brief'], ['sources', 'Sources', p.sources.length], ['references', 'References', p.references.length]], tab: view, onTab: k => setView(k) }
       : id === 'copy' ? { tabs: [['copywrite', 'By channel'], ['copy', 'All copy', p.assets.length || null], ['kit', 'Message kit', (p.texts || []).length || null], ['sequence', 'Sequence', ((p.brief || {}).sequences || []).length || null]], tab: view, onTab: k => { if (k === 'copywrite' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } }
-      : id === 'design' ? { tabs: [['asset', a ? a.title : 'Canvas'], ['board', 'Board', p.assets.length || null], ['production', 'Recipes and usage'], ['jobs', 'Jobs', liveJobs.length || null]], tab: view, onTab: k => { if (k === 'asset' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } } : {};
+      : id === 'design' ? { tabs: [['asset', a ? a.title : 'Canvas'], ['board', 'Board', p.assets.length || null], ['production', 'Recipes and usage'], ['jobs', 'Jobs', liveJobs.length || null]], tab: view, onTab: k => { if (k === 'asset' && !a && p.assets[0]) setSelAsset(p.assets[0].id); setView(k); } }
+      : id === 'review' ? { tabs: [['review', 'Preflight and approvals'], ['export', 'Export', flow.counts.ready || null]], tab: view, onTab: k => setView(k) } : {};
     const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
     // the activity panel replaces the old line of job chips: every running, queued, failed or just-finished job with its phase
     const jobsLine = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
 
+    const F = window.STFlow; const guided = !!(p && p.workflow && p.workflow.v === 2 && F);
+    const lockedAt = id => guided && flow && flow[id] && flow[id].state === 'locked';
+    const lastJob = st => p ? ((p.jobs || []).filter(j => j.stage === st).sort((x, y) => (y.created || 0) - (x.created || 0))[0] || null) : null;
+    const notUsed = step => html`<div class="st-empty-state"><b>Not used in this project.</b><span>This project was made before the guided workflow${step === 'objectives' ? ': its objective and key message are written in the Brief' : ': its strategy, if any, is in the Brief'}. New projects choose ${step === 'objectives' ? 'their objectives' : 'their strategy'} here, from Axiom's reading of the brief.</span><button class="btn sm ghost" onClick=${() => goStage('brief')}>Open the Brief</button></div>`;
+    const wizPreset = preset ? Object.assign({}, preset, { type: preset.type || (preset.from === 'release' || preset.start === 'release' ? 'announcement' : preset.from === 'content' ? 'social' : preset.from === 'sentinel' || preset.start === 'analyse' ? 'response' : preset.start === 'reference' ? 'campaign' : ''), kind: preset.start === 'release' ? 'article' : preset.from === 'sentinel' ? 'situation' : 'brief', text: [preset.text, preset.instruction].filter(Boolean).join('\n\n') }) : null;
     let centre;
-    if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
+    if (!pid && intake && F && F.Wizard) centre = html`<${F.Wizard} key=${'wiz:' + ((preset && preset.at) || 0)} clients=${CLIENTS} clientId=${clientId} preset=${wizPreset} busy=${busy} onClient=${() => {}} onCreate=${o => { setPreset(null); createGuided(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />`;
+    else if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
     else if (!p) centre = html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
+    else if (lockedAt(stage) && view !== 'brand' && view !== 'context') centre = Staged(stage, null, html`<${F.LockedStage} step=${stage} wf=${p.workflow} onGo=${goStage} />`);
+    else if (view === 'brief' && guided) centre = Staged('brief', null, html`<${F.BriefWorkspace} key=${p.id} p=${p} client=${client} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('analyse')} now=${now} durations=${(status || {}).durations} onAnalyse=${analyseGuided} onConfirm=${() => confirmStep('brief', {}, { then: async () => { const st = ((pRef.current || {}).workflow || {}).steps || {}; if (st.objectives && st.objectives.state !== 'locked' && (st.brief || {}).state === 'complete') setView('objectives', true); } })} onCampaign=${setCampaign} onRetry=${() => { const j = lastJob('analyse'); if (j) retryJob(j); }} onCancel=${() => { const j = lastJob('analyse'); if (j) cancelJob(j.id); }} onGo=${goStage} onSaveBrief=${saveBriefPatch} />`);
+    else if (view === 'objectives') centre = Staged('objectives', null, p.intel && F ? html`<${F.ObjectivesStep} key=${p.intel.id} p=${p} busy=${busy} onConfirm=${body => guided ? confirmStep('objectives', body, { then: () => setView('strategy', true) }) : selectIntel({ objective: body.objective, message: body.message })} onDecision=${intelDecision} />` : notUsed('objectives'));
+    else if (view === 'strategy') centre = Staged('strategy', null, p.intel && F ? html`<${F.StrategyStep} key=${p.intel.id} p=${p} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('direct')} now=${now} durations=${(status || {}).durations} onConfirm=${(body, gen) => !body ? directGuided({ n: 3 }) : guided ? confirmStep('strategy', body, { then: gen ? () => directGuided({ n: 3 }) : null }) : selectIntel({ strategy: body.strategy })} onDecision=${intelDecision} onDraftStrategy=${draftStrategy} onSaveStrategy=${st => saveBriefPatch({ strategy: st })} onRetry=${() => { const j = lastJob('direct'); if (j) retryJob(j); }} onGo=${goStage} />` : notUsed('strategy'));
+    else if (view === 'directions' && guided) centre = Staged('directions', null, html`<${F.DirectionsBoard} p=${p} kit=${kit} busy=${busy} wf=${p.workflow} job=${lastJob('direct')} now=${now} durations=${(status || {}).durations} onDirect=${directGuided} onChoose=${chooseGuided} onUpdate=${updateDirection} onDuplicate=${duplicateDirection} onDecision=${intelDecision} onRetry=${() => { const j = lastJob('direct'); if (j) retryJob(j); }} onGo=${goStage} onKeep=${d => keepEarlier(null, [d.id])} />`);
     else if (view === 'brief') centre = html`<${BriefView} key=${p.id} p=${p} head=${headOf('brief', tabsFor('brief'))} prov=${prov} onGo=${goStage} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} onAnalyse=${analyse} onChoose=${chooseDirection} onSelect=${selectIntel} onDecision=${intelDecision} onVariants=${produceVariants} onKit=${writeKit} kit=${kit} client=${client} busy=${busy} />`;
     else if (view === 'sources') centre = Staged('brief', null, html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`);
     else if (view === 'references') centre = Staged('brief', null, html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} busy=${busy} />`);
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} head=${headOf('directions')} prov=${prov} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
-    else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} prov=${prov} busy=${busy} onSel=${id => { setSelAsset(id); setSelField(null); }} onEdit=${editAsset} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
+    else if ((view === 'copywrite' || view === 'copy') && guided && !p.assets.length) centre = Staged('copy', null, html`<${F.CopyStart} key=${'cs:' + p.id} p=${p} busy=${busy} prov=${prov} job=${lastJob('copy')} now=${now} durations=${(status || {}).durations} onGenerate=${() => produce({})} onSaveBrief=${saveBriefPatch} onRetry=${() => { const j = lastJob('copy'); if (j) retryJob(j); }} onGo=${goStage} />`);
+    else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} banner=${guided ? html`<${F.StaleCopy} p=${p} wf=${p.workflow} busy=${busy} onRewrite=${() => produce({})} onKeep=${ids => keepEarlier(ids)} />` : null} prov=${prov} busy=${busy} onSel=${id => { setSelAsset(id); setSelField(null); }} onEdit=${editAsset} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
+    else if (view === 'board' && guided && !(p.brief || {}).production && p.assets.some(x => { const v = current(x); return v && v.mode !== 'copy' && !(v.image && v.image.key); }) && !(p.jobs || []).some(j => j.stage === 'render')) centre = Staged('design', null, html`${jobsLine}<${F.ProductionModes} p=${p} busy=${busy} prov=${prov} onProduce=${produceMode} /><${BoardView} p=${p} onOpen=${openAsset} />`);
     else if (view === 'board') { const wait = p.assets.filter(needsImagery); const imgRunning = (p.jobs || []).some(j => j.stage === 'render' && (j.state === 'queued' || j.state === 'running')); centre = Staged('design', p.assets.length ? html`${wait.length && canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.gemini) || imgRunning} title=${prov && !prov.gemini ? 'Image generation is not configured on the worker' : imgRunning ? 'Renders are already running' : 'One paid image generation per planned region, confirmed first'} onClick=${() => generateImagery(wait)}>Generate imagery (${wait.length})</button>` : null}${p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<button class=${'btn sm' + (wait.length ? ' ghost' : '')} onClick=${() => goStage('design')}>Open the canvas</button>` : html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>`}` : canWrite() && !p.readOnly ? html`<button class="btn sm" onClick=${() => goStage('copy')}>Write the copy first</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to design yet.</b><span>The words come first: write and check the copy, then build each creative here.</span></div>` : !p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<div class="st-empty-state"><b>Copy only: nothing to design.</b><span>This project's pieces are words for the channels, with no creative to build. Approve them in Review.</span></div>` : wait.length ? html`<div class="st-imagery-wait" role="status"><b>${wait.length} composition${wait.length === 1 ? '' : 's'} waiting for imagery.</b> <span class="ov-dim">${(p.brief || {}).imageryTiming === 'after_copy' ? 'The brief holds the imagery until the copy is ready: ' + p.assets.filter(x => wait.indexOf(x) >= 0 && standing(x, 'copy')).length + ' of them have their copy marked ready.' : 'Their renders have not landed (or did not run).'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`); }
     else if (view === 'kit') centre = Staged('copy', null, html`<${KitView} p=${p} busy=${busy} onWrite=${writeKit} onUpdate=${updateText} onVerdict=${textVerdict} />`);
     else if (view === 'sequence') centre = Staged('copy', null, html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${openAsset} busy=${busy} />`);
     else if (view === 'production') centre = Staged('design', null, html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${openAsset} onReview=${() => setView('review', true)} onRevise=${reviseFromImpact} />`);
     else if (view === 'jobs') centre = Staged('design', null, html`<${JobsView} p=${p} onRetry=${retryJob} onCancel=${cancelJob} onStep=${j => runJob(j.id, 'Running ' + j.stage)} budget=${status ? status.budget : null} />`);
     else if (view === 'copy') centre = Staged('copy', null, html`<${CopyView} p=${p} onEdit=${editAsset} onOpen=${id => { setSelAsset(id); setView('copywrite'); }} />`);
-    else if (view === 'review') centre = html`<${ReviewStage} p=${p} head=${headOf('review')} flow=${flow} onGo=${goStage} onApprove=${approve} onOpen=${openAsset} />`;
-    else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('export')} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
+    else if (view === 'review') centre = html`<${ReviewStage} p=${p} head=${headOf('review', tabsFor('review'))} flow=${flow} onGo=${goStage} onApprove=${approve} onOpen=${openAsset} />`;
+    else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('review', tabsFor('review'))} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
     else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('design', Object.assign({ compact: true }, tabsFor('design')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} kit=${kit} slot=${slot} railSlot=${railSlot} preview=${preview} setPreview=${setPreview} onBrand=${() => setView('brand', true)} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} busy=${busy} /></div>`; }
@@ -2859,7 +3008,10 @@
 
     const insTabs = [['properties', 'Properties'], ['copy', 'Copy'], ['quality', 'Quality'], ['partner', 'Art Director'], ['brand', 'Brand'], ['versions', 'Versions']];
     const tabKey = e => { const i = insTabs.findIndex(t => t[0] === tab); if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const n = insTabs[(i + (e.key === 'ArrowRight' ? 1 : insTabs.length - 1)) % insTabs.length][0]; setTab(n); setTimeout(() => { const el = document.getElementById('st-tabbtn-' + n); if (el) el.focus(); }, 0); } };
-    const showAside = !!p && (inRefine || partnerOpen);
+    // before there is anything to design, the frame is the work and its context: no assets rail, no canvas tools
+    const early = !!p && !inRefine && view !== 'brand' && view !== 'context' && (['brief', 'objectives', 'strategy', 'directions'].indexOf(stage) >= 0 || (guided && stage === 'copy' && !p.assets.length && (view === 'copywrite' || view === 'copy')));
+    const showCtx = early && !!F;
+    const showAside = !!p && (inRefine || showCtx || (stage !== 'copy' && !early && partnerOpen));
     const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${inRefine ? reviewNow : null} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} />` : null;
     const accent = kit && kit.palette && /^#[0-9a-fA-F]{6}$/.test(kit.palette.primary || '') ? kit.palette.primary : null;
     const rootRef = useRef(null); const [headH, setHeadH] = useState(0);
@@ -2869,22 +3021,26 @@
       ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
       ${busy && p ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
       <${Notice} n=${notice} onClose=${() => setNotice(null)} />
-      <div class=${'st-body' + (p ? '' : ' lib') + (p && !showAside ? ' noaside' : '') + (p && !railOpen ? ' norail' : '')} style=${p && railOpen ? { '--st-rail-w': railW + 'px' } : null}>
-        ${p && railOpen ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${setRailSlot} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the left panel" title="Show assets and layers">›</button>` : null}
-        ${p && railOpen ? html`<div class="st-rail-handle" role="separator" aria-orientation="vertical" aria-label="Resize the left panel" title="Drag to resize" onPointerDown=${railDown} onPointerMove=${railMove} onPointerUp=${railUp} onPointerCancel=${railUp}></div>` : null}
+      <div class=${'st-body' + (p ? '' : ' lib') + (p && !showAside ? ' noaside' : '') + (p && (!railOpen || early) ? ' norail' : '') + (early ? ' early' : '')} style=${p && railOpen && !early ? { '--st-rail-w': railW + 'px' } : null}>
+        ${p && early ? null : p && railOpen ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${setRailSlot} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the left panel" title="Show assets and layers">›</button>` : null}
+        ${p && railOpen && !early ? html`<div class="st-rail-handle" role="separator" aria-orientation="vertical" aria-label="Resize the left panel" title="Drag to resize" onPointerDown=${railDown} onPointerMove=${railMove} onPointerUp=${railUp} onPointerCancel=${railUp}></div>` : null}
         <main class="st-centre" aria-label="Workspace">${centre}</main>
-        ${p ? (showAside ? html`<aside class="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Art Director'}>
+        ${p && showCtx && !inRefine ? html`<aside class="st-inspector st-ctxaside" aria-label="Project context"><${F.ContextPanel} p=${p} client=${client} kit=${kit} wf=${p.workflow} /><div class="st-ctx-links"><button class="ov-link" onClick=${() => setView('brand', true)}>Brand</button><button class="ov-link" onClick=${() => setView('context', true)}>Client context</button><button class="ov-link" onClick=${() => setView('jobs', true)}>Jobs</button></div></aside>` : p ? (showAside ? html`<aside class="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Art Director'}>
           ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '')} onClick=${() => setTab(k)}>${l}${k === 'quality' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}</div>` : html`<div class="st-insp-head"><span class="st-lbl">Art Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Art Director">hide</button></div>`}
           <div class="st-slot" ref=${setSlot}></div>
           <div class="st-partner-wrap" id="st-tab-partner" role=${inRefine ? 'tabpanel' : undefined} hidden=${inRefine && tab !== 'partner'}>${partnerEl}</div>
-        </aside>` : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the Art Director">Art Director</button>`) : null}
+        </aside>` : stage === 'copy' || early ? null : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the Art Director">Art Director</button>`) : null}
       </div>
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
       ${panel && p ? html`<${ClientPanel} p=${p} kind=${panel} onClose=${() => setPanel(null)} onChanged=${() => { setCtxTick(t => t + 1); loadLib(); }} />` : null}
+      ${impactQ && F ? html`<${F.ImpactDialog} q=${impactQ} onAnswer=${answerImpact} />` : null}
       ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.'} onDone=${recordDecision} />` : null}
     </div>`;
   }
 
+  /* S17: the parts the guided workflow (docs/studio-guided.js) builds on - one renderer, one set of chips and icons, one way of
+     explaining an error - shared rather than copied; studio-guided.js loads after this file and registers window.STFlow */
+  window.STKit = { html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
   let mounted = false;
   window.studioInit = function () {
     const root = document.getElementById('studio-root');

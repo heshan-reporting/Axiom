@@ -23,6 +23,11 @@ const ACTS = [
   ['GET', '/social/coverage?probe=1'],
   ['GET', '/reddit/comments?thread=abc&live=1'],
   ['POST', '/studio/project', { ns: 'mca', title: 'x' }],
+  // S17: the guided workflow's writes - a confirmation, the production mode (queues renders), a campaign in the kit, a direction edit
+  ['POST', '/studio/workflow/confirm', { project: 'none', step: 'brief' }],
+  ['POST', '/studio/production', { project: 'none', mode: 'editable' }],
+  ['POST', '/studio/campaign/create', { ns: 'aep', name: 'Policy test campaign' }],
+  ['POST', '/studio/direction/update', { id: 'none', patch: { saved: true } }],
   ['POST', '/nano', { prompt: 'x' }],
   ['POST', '/chat', { messages: [] }],
 ];

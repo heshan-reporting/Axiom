@@ -18,7 +18,7 @@
   async function call(path, body) {
     const r = await fetch(base() + path, body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() });
     let d = {}; try { d = await r.json(); } catch (e) {}
-    if (!r.ok || d.error) { const e = new Error(scrub(d.detail || d.error || ('HTTP ' + r.status))); e.code = d.error || ''; e.status = r.status; e.requestId = d.requestId || (r.headers && r.headers.get ? r.headers.get('X-Request-Id') : '') || ''; throw e; }
+    if (!r.ok || d.error) { const e = new Error(scrub(d.detail || d.error || ('HTTP ' + r.status))); e.code = d.error || ''; e.status = r.status; e.body = d; e.requestId = d.requestId || (r.headers && r.headers.get ? r.headers.get('X-Request-Id') : '') || ''; throw e; }
     return d;
   }
   /* Private images (rendered tiles, logos) sit behind the access key, so an

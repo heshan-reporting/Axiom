@@ -6883,7 +6883,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p32';
+const AXIOM_BUILD = '2026-10-07.studio-p33';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7121,6 +7121,8 @@ async function stGet(env, id, opts) {
   // S16: the latest whole reading of the material and the message kit
   try { const it = await stIntelGet(env, p.id); if (it) { const ki = it.knowItems || {}; it.knowItems = {}; Object.keys(ki).forEach(k => { it.knowItems[k] = (Array.isArray(ki[k]) ? ki[k] : []).map(x => ({ id: x.id, label: stStr(x.title || x.label || x.what || x.entity || x.text || '', 140), kind: x.kind || '', why: stStr(x.why || x.claim || x.angle || '', 160) })); }); out.intel = it; } } catch (e) {}
   try { out.texts = ((await db.prepare('SELECT * FROM studio_texts WHERE project=? ORDER BY created DESC LIMIT 60').bind(p.id).all()).results || []).map(stTextRow); } catch (e) { out.texts = []; }
+  // S17: where every step stands, from the record (the island and the gates read the same answer)
+  try { out.workflow = stWorkflow(out); } catch (e) { out.workflow = { v: stWfOn(p) ? 2 : 1, error: String((e && e.message) || e).slice(0, 160) }; }
   return out;
 }
 async function stList(env, f) {
@@ -7276,6 +7278,8 @@ async function stJobCreate(env, body, who) {
   if (stage === 'extract') { const src = input0.source ? await env.MIND_DB.prepare('SELECT id FROM studio_sources WHERE id=? AND project=?').bind(stClean(input0.source, 24), p.id).first() : null; if (!src) return { error: 'source_required', status: 400, detail: 'extract needs input.source, a source of this project.' }; }
   if ((stage === 'concepts' || stage === 'inspect') && !asset) return { error: 'asset_required', status: 400, detail: stage + ' needs the asset it is about.' };
   if (stage === 'copy' && !(Array.isArray(input0.channels) && input0.channels.some(c => ST_CHANNELS[String(c).toLowerCase()]))) return { error: 'channels_required', status: 400, detail: 'copy needs input.channels from ' + Object.keys(ST_CHANNELS).join(', ') + '.' };
+  // S17: a guided project's steps cannot be skipped by any client: directions need the confirmed strategy, the copy a chosen direction
+  if (['direct', 'copy', 'sequence', 'kit', 'strategy'].indexOf(stage) >= 0) { const g = await stWfGate(env, p, stage, input0); if (g) return g; }
   const idem = body.idem ? stStr(body.idem, 80) : null;
   if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
   const id = stId('j'); const now = Date.now();
@@ -7696,7 +7700,7 @@ async function stClaude(env, o) {
   const imgs = (Array.isArray(o.images) ? o.images : []).filter(im => im && im.b64).slice(0, 4);
   const docs = (Array.isArray(o.docs) ? o.docs : []).filter(dc => dc && dc.b64).slice(0, 2);
   const content = imgs.length || docs.length ? docs.map(dc => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: dc.b64 } })).concat(imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime || 'image/png', data: im.b64 } }))).concat([{ type: 'text', text: o.user }]) : o.user;
-  if (o.log && o.log.phase) await o.log.phase('model', 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; one call, no progress until it answers', { model });
+  if (o.log && o.log.phase) await o.log.phase('model', (o.phaseLabel ? o.phaseLabel + ' - ' : '') + 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; one call, no progress until it answers', { model, step: o.phaseStep || undefined });
   const base = { model, max_tokens: o.maxTok || 6000, system: String(o.system || '') + AX_UNTRUSTED_RULE, messages: [{ role: 'user', content }] };
   const effort = ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium');
   // adaptive thinking is paid out of max_tokens: at high effort a small cap leaves the JSON cut off mid-sentence, so the cap has
@@ -8421,7 +8425,7 @@ async function stSequenceStage(env, job, p, log) {
 // narratives - each narrative naming whether it is an editable composition or a finished Gemini artwork - and names the
 // next step. Nothing is approved or produced here: the narratives become directions to choose from, the proposed brief
 // fills only empty fields (marked as the Studio's proposal), and the claims enter the ledger through the source's passages.
-const ST_ANALYSE_KINDS = ['brief', 'article', 'daily', 'release', 'upload', 'other', 'url', 'image', 'pdf', 'social', 'statement', 'situation', 'item'];
+const ST_ANALYSE_KINDS = ['brief', 'article', 'daily', 'release', 'upload', 'other', 'url', 'image', 'pdf', 'social', 'statement', 'situation', 'item', 'mixed', 'note'];
 // -- S16: the Brief Intelligence and Creative Response Engine ---------------------------------------------------
 // One reading of the material, in the order a strategist works: what kind of input it is; what it says once it is
 // understood (every brief field, each stated, inferred or taken from what Axiom knows); what happened and why it matters
@@ -8486,15 +8490,24 @@ async function stTranscribeSource(env, src, log) {
   return { passages, image: pdf ? null : { b64, mime, name: src.name }, model: r.model };
 }
 async function stAnalyseStage(env, job, p, log) {
-  const inp = job.input || {};
-  let src = inp.source ? await env.MIND_DB.prepare('SELECT * FROM studio_sources WHERE id=? AND project=?').bind(stClean(inp.source, 24), p.id).first() : null;
-  if (!src) throw new Error('no_source: analyse needs a source added to this project (not retried)');
+  const inp = job.input || {}; const db = env.MIND_DB;
+  // S17: one brief may arrive as several pieces - pasted text, links, files, screenshots and notes - each its own source; they are
+  // read together, numbered P1..Pn in order across the sources, and each kept paragraph returns to its own source's focus
+  const srcIds = (Array.isArray(inp.sources) && inp.sources.length ? inp.sources : [inp.source]).map(x => stClean(x, 24)).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, 8);
+  const srcs = [];
+  for (const sid of srcIds) { const s0 = await db.prepare('SELECT * FROM studio_sources WHERE id=? AND project=?').bind(sid, p.id).first(); if (s0) srcs.push(s0); }
+  if (!srcs.length) throw new Error('no_source: analyse needs a source added to this project (not retried)');
   if (job.lease) await job.lease(300000);
-  let passages = pjs(src.passages, {}); let seenImage = null;
-  if (!Object.keys(passages).length && src.file) { const t = await stTranscribeSource(env, src, log); passages = t.passages; seenImage = t.image; src = await env.MIND_DB.prepare('SELECT * FROM studio_sources WHERE id=?').bind(src.id).first(); }
-  const keys = Object.keys(passages);
-  if (!keys.length) throw new Error('empty_source: the source has no text to read (not retried)');
-  if (log.phase) await log.phase('reading', 'reading ' + keys.length + ' paragraph' + (keys.length === 1 ? '' : 's') + ' of "' + stStr(src.name, 60) + '" against the client');
+  const seenImages = [];
+  for (let i = 0; i < srcs.length; i++) {
+    if (!Object.keys(pjs(srcs[i].passages, {})).length && srcs[i].file) { const t = await stTranscribeSource(env, srcs[i], log); if (t && t.image && seenImages.length < 3) seenImages.push(t.image); srcs[i] = await db.prepare('SELECT * FROM studio_sources WHERE id=?').bind(srcs[i].id).first(); }
+  }
+  const items = []; srcs.forEach((s0, si) => { const ps = pjs(s0.passages, {}); Object.keys(ps).forEach(k => { if (items.length < 80 && String(ps[k] || '').trim()) items.push({ src: s0, si, key: k, text: String(ps[k]) }); }); });
+  if (!items.length) throw new Error('empty_source: the source has no text to read (not retried)');
+  const src = srcs[0]; const multi = srcs.length > 1; const guided = stWfOn(p);
+  const keys = items.map((x, i) => 'P' + (i + 1));
+  const passages = {}; items.forEach((x, i) => { passages[keys[i]] = x.text; });
+  if (log.phase) await log.phase('reading', 'Reading ' + items.length + ' paragraph' + (items.length === 1 ? '' : 's') + (multi ? ' from ' + srcs.length + ' sources' : ' of "' + stStr(src.name, 60) + '"') + ' against the client', { step: 'reading', completed: 0, total: 4 });
   const cc = await stCompileContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'analyse', refs: null, art: 0 });
   const ctx = cc.ctx; const kit = ctx.kit || {};
   const camps = (kit.campaigns || []).filter(c => c && c.id && c.active !== false);
@@ -8502,16 +8515,25 @@ async function stAnalyseStage(env, job, p, log) {
   const bannedRows = (kit.banned || []).map(b => typeof b === 'string' ? { term: b } : b).filter(b => b && b.term).slice(0, 40);
   const banned = bannedRows.map(b => b.term + (b.allowNegated ? ' (fine when negated)' : ''));
   const lexicon = CLIENT_ISSUES.filter(ci => ci.ns === p.ns).map(ci => ({ id: ci.id, label: ci.label }));
-  const know = await stIntelKnowledge(env, p, keys.slice(0, 6).map(k => passages[k]).join(' '), log);
+  if (log.phase) await log.phase('knowledge', 'Matching client knowledge: the Mind, live narratives, alerts, recorded decisions and sentiment', { step: 'knowledge', completed: 1, total: 4 });
+  const know = await stIntelKnowledge(env, p, items.slice(0, 6).map(x => x.text).join(' '), log);
   const K = know.K;
   await log('info', 'client context: ' + ctx.client + ', ' + camps.length + ' campaign' + (camps.length === 1 ? '' : 's') + ', ' + facts.length + ' approved facts, ' + banned.length + ' banned terms, ' + lexicon.length + ' client issues');
-  const sys = 'You are the strategy lead of an Australian political communications agency, working for ' + ctx.client + ' only - a creative strategist, issues manager, political analyst and brand guardian in one. You receive material that may or may not be a brief: a written brief, a pasted daily intelligence brief covering many clients, a news article, a competitor or government statement, a social post, a screenshot, a research finding, an email paragraph, or a situation that has just happened. You never jump from the material to copy. You work in order: '
+  // in a guided project the directions are a later step, built on the objective, message and strategy the team confirms: the
+  // reading stops at the recommendation, and nothing that looks like a direction is filed before the strategy is chosen
+  const dirPart = guided
+    ? '(9) CREATIVE DIRECTIONS: none here - return an empty list. Directions are developed in a later step, from the objective, key message and strategy the team confirms. '
+    : '(9) CREATIVE DIRECTIONS: three or four genuinely different narratives, not wording variations, each an approach (informational, emotional, reactive, authority, problem_solution, myth_fact, human_story, data, urgency, community, contrarian, explainer, social_first, news_response, campaign_continuation, leadership, reputation_defence) with its core narrative, why it is relevant, audience, key message (message id), desired response, hook, visual idea, platforms, risks, evidence, three headlines and two caption options, the visual format (statement_card, quote_card, breaking_response, data_viz, myth_fact, headline_artwork, explainer_carousel, comparison, screenshot_response, timeline, short_video, leadership_statement, community_message, photo_led, illustration), a medium, a full visual narrative (scene, art direction, composition, subject, environment, camera, lighting, typography, hierarchy, colour, brand treatment, data visualisation, emotional tone, motion idea, dimensions, text placement, CTA placement) and its production route: "editable" (generated imagery with the words and the exact mark composed as live, editable layers - best when words may change, figures must be exact, or several formats are needed) or "finished" (the image model paints the whole piece - best for one striking hero image whose words are settled). ';
+  const recPart = guided
+    ? '(10) RECOMMENDATION: the strategy, objective and message you would run, and why (direction 0); then the next step: "objectives" when the team can choose, "brief" when something essential is missing, "decide" when you recommend not responding. '
+    : '(10) RECOMMENDATION: the strategy, objective, message and direction you would run, and why; then the next step: "copy" when the brief is clear, "directions" when the idea is open, "brief" when something essential is missing, "decide" when you recommend not responding. ';
+  const sys = 'You are the strategy lead of an Australian political communications agency, working for ' + ctx.client + ' only - a creative strategist, issues manager, political analyst and brand guardian in one. You receive material that may or may not be a brief: a written brief, a pasted daily intelligence brief covering many clients, a news article, a competitor or government statement, a social post, a screenshot, a research finding, an email paragraph, or a situation that has just happened' + (multi ? ' - here, several pieces of material that together make one brief: read them as one situation and say where they disagree' : '') + '. You never jump from the material to copy. You work in order: '
     + '(1) INPUT: classify the input type. (2) UNDERSTANDING: extract or infer every brief field; for each say whether it was stated in the material, inferred from it, or taken from what Axiom knows about the client. (3) SITUATION: what happened (the facts only), why it matters to THIS client specifically (never generic - the same story means different things to different clients), the kind of opportunity or risk it is, and whether the client should respond (yes / no / monitor) - recommend not responding when engaging would amplify an attack, add nothing, or risk more than it gains. '
     + '(4) PARAGRAPHS: read paragraph by paragraph (ids P1..Pn); keep a paragraph that bears on this client and say what it is (client, campaign, background, fact, mandatory, evidence, quote, statistic); set the rest aside and say why (irrelevant, duplicate, other_client, unverified, misleading, outdated, contradictory). (5) TOPICS: every topic, issue and sub-issue the material raises, each judged high / potential / not relevant for this client against its issue lexicon and knowledge. '
     + '(6) COMPARISON with what Axiom knows (cite K, N, A, D, H, S, F ids): what is new, what is already known, what supports, what contradicts, which campaign it affects, whether a narrative is emerging or already running, whether the client has already said this, whether it is already being discussed publicly, messaging gaps, missing context, conflicts with current objectives, and how the brief itself could be better; then a short Creative Intelligence Summary. '
     + '(7) OBJECTIVES: three to five communication objectives derived from this situation and this client (never generic templates), ranked by strategic relevance, each with two or three key messages: primary, supporting, evidence (fact or paragraph ids), proof, audience takeaway, emotional takeaway, desired reaction, CTA. (8) RESPONSE STRATEGIES: several of direct, indirect, evidence, values, rapid, education, campaign, none (do not respond) - each with objective id, audience, key message, benefit, risk, urgency, platforms and format; mark exactly one recommended. '
-    + '(9) CREATIVE DIRECTIONS: three or four genuinely different narratives, not wording variations, each an approach (informational, emotional, reactive, authority, problem_solution, myth_fact, human_story, data, urgency, community, contrarian, explainer, social_first, news_response, campaign_continuation, leadership, reputation_defence) with its core narrative, why it is relevant, audience, key message (message id), desired response, hook, visual idea, platforms, risks, evidence, three headlines and two caption options, the visual format (statement_card, quote_card, breaking_response, data_viz, myth_fact, headline_artwork, explainer_carousel, comparison, screenshot_response, timeline, short_video, leadership_statement, community_message, photo_led, illustration), a medium, a full visual narrative (scene, art direction, composition, subject, environment, camera, lighting, typography, hierarchy, colour, brand treatment, data visualisation, emotional tone, motion idea, dimensions, text placement, CTA placement) and its production route: "editable" (generated imagery with the words and the exact mark composed as live, editable layers - best when words may change, figures must be exact, or several formats are needed) or "finished" (the image model paints the whole piece - best for one striking hero image whose words are settled). '
-    + '(10) RECOMMENDATION: the strategy, objective, message and direction you would run, and why; then the next step: "copy" when the brief is clear, "directions" when the idea is open, "brief" when something essential is missing, "decide" when you recommend not responding. '
+    + dirPart
+    + recPart
     + 'Check every factual claim against the APPROVED FACTS (matches_fact, conflicts_fact naming the fact, new_unverified); never present an unverified figure as fact; respect the banned terms and the voice. Cite only ids you were given. Return strict JSON only: '
     + '{"input":{"type":"formal_brief|news|reactive|client_request|campaign_update|competitor|political|research|social|reputation|proactive|response_artwork|daily_brief|other","why":""},'
     + '"understanding":{"client":{"v":"","basis":"stated|inferred|knowledge"},"campaign":{"v":"","basis":""},"situation":{"v":"","basis":""},"objective":{"v":"","basis":""},"topic":{"v":"","basis":""},"issue":{"v":"","basis":""},"audience":{"v":"","basis":""},"platforms":{"v":"","basis":""},"deliverable":{"v":"","basis":""},"keyMessage":{"v":"","basis":""},"cta":{"v":"","basis":""},"tone":{"v":"","basis":""},"timing":{"v":"","basis":""},"urgency":{"v":"low|medium|high|critical","basis":""},"mandatory":{"v":"","basis":""},"restrictions":{"v":"","basis":""},"compliance":{"v":"","basis":""},"sources":{"v":"","basis":""},"evidence":{"v":"","basis":""},"stakeholders":{"v":"","basis":""}},'
@@ -8525,9 +8547,9 @@ async function stAnalyseStage(env, job, p, log) {
     + '"claims":[{"text":"","p":"P1","status":"matches_fact|conflicts_fact|new_unverified","fact":"F1"}],"knowledge":[{"k":"K1","use":""}],'
     + '"objectives":[{"title":"","kind":"correct|reinforce|educate|lead|mobilise|defend|inform|other","why":"","messages":[{"primary":"","supporting":"","evidence":["F1","P2"],"proof":"","takeaway":"","emotion":"","reaction":"","cta":""}]}],'
     + '"strategies":[{"kind":"direct|indirect|evidence|values|rapid|education|campaign|none","objective":"O1","audience":"","message":"","benefit":"","risk":"","urgency":"low|medium|high|critical","platforms":[],"format":"","recommended":false}],'
-    + '"directions":[{"name":"","approach":"","core":"","relevance":"","audience":"","objective":"O1","message":"M1.1","strategy":"S1","response":"","hook":"","visualIdea":"","platforms":[],"risks":[""],"evidence":["F1"],"headlines":["","",""],"captions":["",""],"format":"","medium":"","route":"editable|finished","routeWhy":"","visual":{"scene":"","artDirection":"","composition":"","subject":"","environment":"","camera":"","lighting":"","typography":"","hierarchy":"","colour":"","brand":"","dataViz":"","emotion":"","motion":"","dimensions":"","textPlacement":"","ctaPlacement":""}}],'
-    + '"recommendation":{"strategy":"S1","objective":"O1","message":"M1.1","direction":1,"why":""},'
-    + '"risks":[""],"gaps":[""],"next":{"stage":"copy|directions|brief|decide","why":""}}';
+    + (guided ? '"directions":[],' : '"directions":[{"name":"","approach":"","core":"","relevance":"","audience":"","objective":"O1","message":"M1.1","strategy":"S1","response":"","hook":"","visualIdea":"","platforms":[],"risks":[""],"evidence":["F1"],"headlines":["","",""],"captions":["",""],"format":"","medium":"","route":"editable|finished","routeWhy":"","visual":{"scene":"","artDirection":"","composition":"","subject":"","environment":"","camera":"","lighting":"","typography":"","hierarchy":"","colour":"","brand":"","dataViz":"","emotion":"","motion":"","dimensions":"","textPlacement":"","ctaPlacement":""}}],')
+    + '"recommendation":{"strategy":"S1","objective":"O1","message":"M1.1","direction":' + (guided ? '0' : '1') + ',"why":""},'
+    + '"risks":[""],"gaps":[""],"next":{"stage":"' + (guided ? 'objectives|brief|decide' : 'copy|directions|brief|decide') + '","why":""}}';
   const kn = (lbl, rows, fmt) => '\n\n' + lbl + ' (' + rows.length + '):\n' + (rows.map(fmt).join('\n') || '(none)');
   const user = 'CLIENT CONTEXT (voice, rules, wording, facts in force):\n' + stStr(ctx.text, 9000)
     + '\n\nCLIENT ISSUE LEXICON: ' + (lexicon.map(x => x.id + '=' + x.label).join('; ') || '(none recorded)')
@@ -8542,14 +8564,17 @@ async function stAnalyseStage(env, job, p, log) {
     + kn('SENTIMENT TOWARD THE CLIENT (7 days)', know.S, s => '[' + s.id + '] ' + s.entity + ': ' + s.mentions + ' judged mentions, net stance ' + s.net)
     + '\n\nCURRENT BRIEF: ' + ['objective', 'audience', 'message', 'action'].map(k => k + '=' + ((p.brief || {})[k] || '-')).join('; ') + '; channels=' + (((p.brief || {}).channels || []).join(',') || '-') + '; campaign=' + (p.campaign || '-') + '; creation mode=' + ((p.brief || {}).creationMode || 'editable')
     + (inp.instruction ? '\n\nTEAM NOTE: ' + stStr(inp.instruction, 800) : '')
-    + '\n\nMATERIAL "' + stStr(src.name, 120) + '" (' + (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'unknown kind') + (src.provenance ? ', from ' + stStr(src.provenance, 160) : '') + '), ' + keys.length + ' paragraphs:\n' + keys.slice(0, 80).map((k, i) => '[P' + (i + 1) + '] ' + stStr(passages[k], 1600)).join('\n\n');
-  await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): understand, situate, compare and propose for ' + ctx.client + ' from ' + keys.length + ' paragraphs');
-  const r = await stClaude(env, { role: 'creative', op: 'analyse', effort: 'high', system: sys, user, images: seenImage ? [seenImage] : [], maxTok: 16000, timeoutMs: 240000, log });
+    + (multi
+      ? '\n\nMATERIAL: ' + srcs.length + ' sources that make one brief, ' + items.length + ' paragraphs numbered across them:' + srcs.map((s0, si) => '\n\n--- SOURCE ' + (si + 1) + ' "' + stStr(s0.name, 120) + '" (' + stStr(String(s0.kind || '').replace(/^analyse:/, ''), 30) + (s0.provenance ? ', from ' + stStr(s0.provenance, 160) : '') + ') ---\n' + items.map((x, i) => x.si === si ? '[P' + (i + 1) + '] ' + stStr(x.text, 1600) : '').filter(Boolean).join('\n\n')).join('')
+      : '\n\nMATERIAL "' + stStr(src.name, 120) + '" (' + (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'unknown kind') + (src.provenance ? ', from ' + stStr(src.provenance, 160) : '') + '), ' + keys.length + ' paragraphs:\n' + items.map((x, i) => '[P' + (i + 1) + '] ' + stStr(x.text, 1600)).join('\n\n'));
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): understand, situate, compare and propose for ' + ctx.client + ' from ' + keys.length + ' paragraphs' + (multi ? ' in ' + srcs.length + ' sources' : ''));
+  const r = await stClaude(env, { role: 'creative', op: 'analyse', effort: 'high', system: sys, user, images: seenImages, maxTok: 16000, timeoutMs: 240000, log, phaseLabel: 'Checking campaign relevance, topics, issues, facts and risks; drafting objectives and the strategy Axiom recommends', phaseStep: 'model' });
+  if (log.phase) await log.phase('checking', 'Checking every paragraph, fact and knowledge id the answer cites against what was given', { step: 'checking', completed: 3, total: 4 });
   const j = relJson(r.text);
   if (!j || typeof j !== 'object' || (!Array.isArray(j.relevant) && !j.brief && !Array.isArray(j.objectives))) throw new Error('analysis_unparseable: the model did not return the analysis as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   // normalise against what is real: paragraph ids that exist, a campaign the kit has, ids that were given
   const pid = x => { const m = String(x || '').match(/^P?(\d{1,3})$/i); const n = m ? parseInt(m[1], 10) : 0; return n >= 1 && n <= keys.length ? 'P' + n : ''; };
-  const para = id => passages[keys[parseInt(id.slice(1), 10) - 1]] || '';
+  const para = id => passages[id] || '';
   const seen = new Set();
   const relevant = (Array.isArray(j.relevant) ? j.relevant : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'client') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 240) }));
   const filtered = (Array.isArray(j.filtered) ? j.filtered : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'irrelevant') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 140) }));
@@ -8595,7 +8620,7 @@ async function stAnalyseStage(env, job, p, log) {
   const strIds = new Set(strategies.map(s => s.id));
   // CREATIVE DIRECTIONS with VISUAL NARRATIVES; each carries its trace back to the source
   const keptIds = relevant.map(x => x.p);
-  const directions = (Array.isArray(j.directions) ? j.directions : (Array.isArray(j.narratives) ? j.narratives : [])).slice(0, 4).map((d, i) => {
+  const directions = guided ? [] : (Array.isArray(j.directions) ? j.directions : (Array.isArray(j.narratives) ? j.narratives : [])).slice(0, 4).map((d, i) => {
     const v = d && d.visual && typeof d.visual === 'object' ? d.visual : {}; const visual = {}; ST_VISUAL_FIELDS.forEach(k => { if (v[k]) visual[k] = stStr(v[k], 240); });
     const dir = { n: i + 1, name: stStr(d && (d.name || d.title), 80), approach: stOneOf(d && d.approach, ST_APPROACHES, ''), core: stStr(d && (d.core || d.idea), 400), relevance: stStr(d && d.relevance, 300), audience: stStr(d && d.audience, 200),
       objective: d && objIds.has(d.objective) ? d.objective : '', message: d && msgIds.has(d.message) ? d.message : '', strategy: d && strIds.has(d.strategy) ? d.strategy : '',
@@ -8609,7 +8634,9 @@ async function stAnalyseStage(env, job, p, log) {
   const recommendation = { strategy: strIds.has(jr.strategy) ? jr.strategy : ((strategies.find(s => s.recommended) || {}).id || ''), objective: objIds.has(jr.objective) ? jr.objective : ((objectives[0] || {}).id || ''), message: msgIds.has(jr.message) ? jr.message : '', direction: Math.max(0, Math.min(directions.length, parseInt(jr.direction, 10) || 0)), why: stStr(jr.why, 500) };
   const recStrategy = strategies.find(s => s.id === recommendation.strategy);
   const noResponse = situation.respond === 'no' || (recStrategy && recStrategy.kind === 'none');
-  const next = { stage: noResponse ? 'decide' : ['copy', 'directions', 'brief', 'decide'].indexOf(j.next && j.next.stage) >= 0 ? j.next.stage : (directions.length ? 'directions' : 'brief'), why: stStr(j.next && j.next.why, 300) || (noResponse ? 'Axiom recommends not responding; the team decides.' : '') };
+  const next = guided
+    ? { stage: noResponse ? 'decide' : (j.next && j.next.stage === 'brief') ? 'brief' : 'objectives', why: stStr(j.next && j.next.why, 300) || (noResponse ? 'Axiom recommends not responding; the team decides.' : 'Review the understanding, then choose the objective and the key message.') }
+    : { stage: noResponse ? 'decide' : ['copy', 'directions', 'brief', 'decide'].indexOf(j.next && j.next.stage) >= 0 ? j.next.stage : (directions.length ? 'directions' : 'brief'), why: stStr(j.next && j.next.why, 300) || (noResponse ? 'Axiom recommends not responding; the team decides.' : '') };
   // v1-compatible fields the S15 views and tests read
   // the copy angles: the model's own when it gave them, else the first headline of each direction and the leading messages
   const angles = (Array.isArray(j.angles) ? j.angles : []).filter(a => a && a.headline).slice(0, 4).map(a => ({ headline: stStr(a.headline, 140), line: stStr(a.line, 260), why: stStr(a.why, 200) }));
@@ -8617,7 +8644,7 @@ async function stAnalyseStage(env, job, p, log) {
   angles.forEach(a => { const b = bannedOf(a.headline + ' ' + a.line); if (b) a.banned = b; });
   const narratives = directions.map(d => ({ name: d.name, idea: d.core, medium: d.medium, route: d.route, composition: d.visual.composition || '', imagery: d.visual.scene || d.visualIdea, headline: d.headlines[0] || '', why: d.routeWhy || d.relevance }));
   const intelId = stId('i');
-  const record = { v: 2, id: intelId, at: Date.now(), job: job.id, source: src.id, sourceName: stStr(src.name, 120), provenance: stStr(src.provenance, 200), kind: ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'other', input, understanding, situation, summary: stStr(j.summary, 600),
+  const record = { v: 2, id: intelId, at: Date.now(), job: job.id, source: src.id, sources: srcs.map(s0 => s0.id), sourceName: multi ? stStr(srcs.length + ' sources: ' + srcs.map(s0 => s0.name).join('; '), 120) : stStr(src.name, 120), provenance: stStr(multi ? srcs.map(s0 => s0.provenance).filter(Boolean).join('; ') : src.provenance, 200), kind: multi ? 'mixed' : ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'other', guided: guided || undefined, input, understanding, situation, summary: stStr(j.summary, 600),
     paragraphs: keys.length, relevant, filtered, unplaced, topics, campaign, claims, knowledge, retrieved: { K: K.length, N: know.N.length, A: know.A.length, D: know.D.length, H: know.H.length, S: know.S.length, F: facts.length }, knowItems: know,
     comparison, intelSummary: stStr(j.intelSummary, 1200), brief, objectives, strategies, directions, recommendation, angles, narratives, risks: stStrs(j.risks, 6), gaps: stStrs(j.gaps, 6), next, model: r.model,
     counts: { facts: facts.length, campaigns: camps.length, banned: banned.length, corrections: ((cc.manifest || {}).corrections || []).length } };
@@ -8636,25 +8663,33 @@ async function stAnalyseStage(env, job, p, log) {
   record.directionIds = ids;
   // the ledger: figures and quotations from the kept paragraphs only (the rule pass, no further model call), and the
   // source's focus, so every later stage reads what concerns the client and nothing set aside
-  const focus = relevant.map(x => keys[parseInt(x.p.slice(1), 10) - 1]).filter(Boolean);
-  const kept = {}; focus.forEach(k => { kept[k] = passages[k]; });
-  const had = pjs(src.claims, []); const ruleClaims = had.length ? had : stExtractLocal(kept);
-  const ex0 = pjs(src.extract, {}) || {};
-  await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(jsonFit(ruleClaims, 120000), JSON.stringify(Object.assign({}, ex0, { focus, analysis: job.id, at: Date.now(), model: ex0.model || 'rules', figures: ruleClaims.filter(c => c.value != null).length, quotes: ruleClaims.filter(c => c.quote).length })), src.id).run();
-  record.ledger = { claims: ruleClaims.length, focus: focus.length };
+  if (log.phase) await log.phase('filing', 'Filing the understanding: the kept paragraphs become the ledger\'s focus', { step: 'filing', completed: 4, total: 4 });
+  let ledClaims = 0, ledFocus = 0;
+  for (const s0 of srcs) {
+    const ps = pjs(s0.passages, {});
+    const focus = relevant.map(x => items[parseInt(x.p.slice(1), 10) - 1]).filter(x => x && x.src.id === s0.id).map(x => x.key);
+    const kept = {}; focus.forEach(k => { kept[k] = ps[k]; });
+    const had = pjs(s0.claims, []); const ruleClaims = had.length ? had : stExtractLocal(kept);
+    const ex0 = pjs(s0.extract, {}) || {};
+    await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(jsonFit(ruleClaims, 120000), JSON.stringify(Object.assign({}, ex0, { focus, analysis: job.id, at: Date.now(), model: ex0.model || 'rules', figures: ruleClaims.filter(c => c.value != null).length, quotes: ruleClaims.filter(c => c.quote).length })), s0.id).run();
+    ledClaims += ruleClaims.length; ledFocus += focus.length;
+  }
+  record.ledger = { claims: ledClaims, focus: ledFocus };
   await env.MIND_DB.prepare('INSERT INTO studio_intel(id,project,job,source,data,created) VALUES(?,?,?,?,?,?)').bind(intelId, p.id, job.id, src.id, jsonFit(record, 240000), Date.now()).run();
   // the brief: a compact copy of the analysis; empty fields take the proposal, marked as the Studio's; a team field is never replaced
   const filled = [];
   await stBriefPatch(env, p.id, b => {
-    b.analysis = { v: 2, intel: intelId, at: record.at, job: job.id, source: src.id, sourceName: record.sourceName, kind: record.kind, input, summary: record.summary, intelSummary: record.intelSummary, situation: { what: situation.what, respond: situation.respond, kinds: situation.kinds }, urgency: (understanding.urgency || {}).v || '',
+    b.analysis = { v: 2, intel: intelId, at: record.at, job: job.id, source: src.id, sources: record.sources, sourceName: record.sourceName, kind: record.kind, guided: guided || undefined, input, summary: record.summary, intelSummary: record.intelSummary, situation: { what: situation.what, respond: situation.respond, kinds: situation.kinds }, urgency: (understanding.urgency || {}).v || '',
       paragraphs: keys.length, relevant: relevant.map(x => ({ p: x.p, class: x.class, why: x.why, text: stStr(x.text, 160) })), filtered: filtered.map(x => ({ p: x.p, class: x.class, why: x.why, text: stStr(x.text, 100) })), unplaced, campaign, claims, knowledge, retrieved: K.length, brief, angles, narratives, risks: record.risks, gaps: record.gaps, next, model: r.model, counts: record.counts, directions: ids, ledger: record.ledger,
       objectives: objectives.map(o => ({ id: o.id, title: o.title, kind: o.kind })), recommendation };
+    const prev = b.intel && typeof b.intel === 'object' && b.intel.id ? b.intel : null;
     b.intel = { id: intelId, selected: {} };
+    if (prev && guided) b.intel.previous = { intel: prev.id, selected: prev.selected || {}, confirmed: prev.confirmed || undefined, kept: prev.kept || undefined, at: Date.now() };
     ['objective', 'audience', 'message', 'action'].forEach(k => { if (!String(b[k] || '').trim() && brief[k]) { b[k] = brief[k]; b[k + 'Source'] = 'ai'; filled.push(k); } });
     if (!(b.channels || []).length && brief.channels.length) { b.channels = brief.channels; filled.push('channels'); }
   });
   await log('out', 'input: ' + input.type + '; kept ' + relevant.length + ' of ' + keys.length + ' paragraphs, set aside ' + filtered.length + (unplaced.length ? ', ' + unplaced.length + ' unplaced' : '') + '; campaign ' + (cid ? campaign.name + ' (' + Math.round(campaign.confidence * 100) + '%)' : 'none matched') + '; respond: ' + situation.respond + '; ' + objectives.length + ' objectives, ' + strategies.length + ' strategies, ' + directions.length + ' directions; next: ' + next.stage);
-  await stEvent(env, p.id, 'analysis', { text: 'Analysed "' + stStr(src.name, 80) + '" (' + input.type.replace(/_/g, ' ') + '): ' + relevant.length + ' of ' + keys.length + ' paragraphs concern ' + ctx.client + (filtered.length ? ', ' + filtered.length + ' set aside' : '') + '. ' + (cid ? 'Campaign: ' + campaign.name + '. ' : 'No campaign matched. ') + 'Respond: ' + situation.respond + '. ' + objectives.length + ' objectives, ' + strategies.length + ' response strategies, ' + directions.length + ' creative directions proposed. Next: ' + next.stage + '.', intel: intelId }, 'studio');
+  await stEvent(env, p.id, 'analysis', { text: 'Analysed "' + stStr(record.sourceName, 80) + '" (' + input.type.replace(/_/g, ' ') + '): ' + relevant.length + ' of ' + keys.length + ' paragraphs concern ' + ctx.client + (filtered.length ? ', ' + filtered.length + ' set aside' : '') + '. ' + (cid ? 'Campaign: ' + campaign.name + '. ' : 'No campaign matched. ') + 'Respond: ' + situation.respond + '. ' + objectives.length + ' objectives, ' + strategies.length + ' response strategies, ' + directions.length + ' creative directions proposed. Next: ' + next.stage + '.', intel: intelId }, 'studio');
   return { analysis: { relevant: relevant.length, filtered: filtered.length, paragraphs: keys.length, campaign: cid, claims: claims.length, narratives: directions.length, objectives: objectives.length, strategies: strategies.length, respond: situation.respond, input: input.type, next: next.stage }, intel: intelId, directions: ids, filled, model: r.model };
 }
 // -- S16: what the team chose, and the message kit ----------------------------------------------------------------------
@@ -8746,38 +8781,368 @@ async function stIntakeFeed(env, ns) {
   try { const rec = await briefGet(env, ''); if (rec) out.brief = { day: rec.day, today: rec.day === auDayKey(), headline: stStr((rec.brief || {}).headline, 200) }; } catch (e) {}
   return out;
 }
+// -- S17: the guided workflow ---------------------------------------------------------------------------------------
+// A project made by the project wizard (brief.workflow = 2) is one progressive workflow: Brief -> Objectives -> Strategy ->
+// Directions -> Copy -> Design -> Review, each step depending on the one before. stWorkflow() says where every step stands,
+// from the record alone: not_started, in_progress, processing (a job of that step is running), needs_review (work is there
+// and waits for a person, or was built on an earlier choice), complete, locked (with the requirement in words, such as
+// "Complete Strategy Selection to continue.") or error (its last job failed and left nothing). The same rules hold on the
+// server: a job or a choice that would skip a step is refused with 409 workflow_locked naming what is missing (stWfGate),
+// so no client can skip a step. Nothing downstream is deleted when an earlier choice changes: directions and the copy carry
+// the basis they were built on (the analysis, objective, key message and strategy), and work on another basis is reported
+// as built on an earlier choice - the team updates it or keeps it (keeping is recorded, never assumed). Projects made
+// before the wizard (workflow 1) keep their free order: their steps are reported and never locked.
+const ST_WF_STEPS = ['brief', 'objectives', 'strategy', 'directions', 'copy', 'design', 'review'];
+const ST_WF_TYPES = { campaign: 'Campaign creative', response: 'Response creative', social: 'Social content', paid: 'Paid advertisement', announcement: 'Announcement', news_response: 'News response', explainer: 'Explainer', brand: 'Brand content', reactive: 'Reactive content', other: 'Other' };
+const ST_STRAT_WORD = { direct: 'Direct response', indirect: 'Indirect response', evidence: 'Evidence-led', values: 'Values-based', rapid: 'Rapid reaction', education: 'Education', campaign: 'Campaign integration', none: 'Do not respond' };
+function stWfOn(p) { return Number(((p && p.brief) || {}).workflow) >= 2; }
+/** What the work downstream is built on: the analysis and the objective, key message and strategy chosen from it. */
+function stWfBasis(p) {
+  const b = (p && p.brief) || {}; const i = b.intel && typeof b.intel === 'object' ? b.intel : {}; const sel = i.selected || {};
+  return { intel: String(i.id || ''), objective: String((sel.objective || {}).id || ''), message: String((sel.message || {}).id || ''), strategy: String((sel.strategy || {}).id || '') };
+}
+function stWfKey(bs) { return bs ? [bs.intel || '', bs.objective || '', bs.message || '', bs.strategy || ''].join('|') : ''; }
+/** Is work built on this basis current? The confirmed basis, or one the team chose to keep across a change. */
+function stWfCurrent(p, bs) {
+  if (!bs) return true; const i = ((p && p.brief) || {}).intel || {}; const k = stWfKey(bs);
+  return k === stWfKey(stWfBasis(p)) || (Array.isArray(i.kept) && i.kept.indexOf(k) >= 0);
+}
+/** One piece of work (a direction or an asset) on its basis: current when the basis is, or when the team kept that piece itself
+ *  under the current choice after the fact (intel.keptItems - the piece named, not every piece on its basis). */
+function stWfItemCurrent(p, x, bs) { if (!bs) return true; if (stWfCurrent(p, bs)) return true; const i = ((p && p.brief) || {}).intel || {}; return !!(x && x.id && Array.isArray(i.keptItems) && i.keptItems.indexOf(x.id) >= 0); }
+/** The basis an asset's words were written on: the newest version that records one (hand edits carry it forward). */
+function stWfAssetBasis(a) { const vs = (a && Array.isArray(a.versions) ? a.versions : []).slice().reverse(); const v = vs.find(x => x && x.context && x.context.basis); return v ? v.context.basis : null; }
+function stWfVer(a) { return (a && Array.isArray(a.versions) ? a.versions : []).find(x => x.id === a.current) || null; }
+function stWfValid(a) {
+  const v = stWfVer(a); if (!v) return false;
+  if (v.mode === 'copy' || v.mode === 'generated') return true;
+  if (v.mode === 'finished') return !!(a.readiness || {}).production;
+  return (a.readiness || {}).technical === 'passed';
+}
+function stWfHasImagery(a) { const v = stWfVer(a); if (!v) return false; return !!(v.image && v.image.key) || ((v.layout || {}).layers || []).some(l => l && l.type === 'img' && l.region && l.src); }
+/** Where every step of the project stands, worked out from the project view (stGet): the island and the gates read the same answer. */
+function stWorkflow(p) {
+  const on = stWfOn(p); const b = p.brief || {}; const i0 = b.intel && typeof b.intel === 'object' ? b.intel : {};
+  const jobs = Array.isArray(p.jobs) ? p.jobs : []; const dirs = Array.isArray(p.directions) ? p.directions : []; const assets = Array.isArray(p.assets) ? p.assets : [];
+  const live = stages => jobs.find(j => stages.indexOf(j.stage) >= 0 && (j.state === 'queued' || j.state === 'running')) || null;
+  const lastOf = stages => jobs.filter(j => stages.indexOf(j.stage) >= 0).sort((x, y) => (y.created || 0) - (x.created || 0))[0] || null;
+  const failed = stages => { const j = lastOf(stages); return j && j.state === 'failed' ? j : null; };
+  const an = b.analysis && typeof b.analysis === 'object' ? b.analysis : null;
+  const intelId = String(i0.id || (an && an.intel) || '');
+  const basis = stWfBasis(p); const sel = i0.selected || {}; const conf = i0.confirmed || {};
+  const reviewed = i0.reviewed && i0.reviewed.intel === intelId ? i0.reviewed : null;
+  const steps = {}; const S = (state, o) => Object.assign({ state }, o || {});
+  const lock = text => S('locked', { need: text });
+  const err = (j, note) => S('error', { job: j.id, error: String(j.error || '').slice(0, 300), note });
+  // BRIEF: the material in, read by Axiom, and the understanding reviewed by a person
+  const anRun = live(['analyse', 'extract']);
+  if (anRun) steps.brief = S('processing', { job: anRun.id, note: anRun.stage === 'analyse' ? 'Axiom is reading the material' : 'reading the source' });
+  else if (!an) { const f = failed(['analyse']); steps.brief = f ? err(f, 'the analysis did not complete') : (p.sources || []).length ? S('in_progress', { note: p.sources.length + ' source' + (p.sources.length === 1 ? '' : 's') + ' added, not analysed yet' }) : !on && ((b.objective && b.message) || assets.length || dirs.length) ? S('complete', { note: 'written by hand' }) : S('not_started', { note: 'add the brief or the source material' }); }
+  else if (on && !reviewed) steps.brief = S('needs_review', { note: 'review Axiom\'s understanding' });
+  else if (on && (reviewed.campaign || '') !== (p.campaign || '')) steps.brief = S('needs_review', { why: 'campaign_changed', note: 'the campaign changed after the analysis: analyse again, or keep the reading' });
+  else steps.brief = S('complete', { note: (an.relevant || []).length + ' of ' + (an.paragraphs || 0) + ' paragraphs concern the client' });
+  const briefOk = steps.brief.state === 'complete';
+  // OBJECTIVES: the objective and the key message (and the topics in play), confirmed by a person
+  const proposed = ((an && an.objectives) || []).length;
+  const objConf = !!(conf.objectives && conf.objectives.intel === intelId && basis.objective && basis.message && conf.objectives.objective === basis.objective && conf.objectives.message === basis.message);
+  if (on && !briefOk) steps.objectives = lock(steps.brief.state === 'processing' ? 'Wait for Axiom to finish reading the brief.' : !an ? 'Add the brief and let Axiom analyse it to continue.' : steps.brief.why === 'campaign_changed' ? 'The campaign changed after the analysis: analyse again, or keep the reading, to continue.' : 'Review Axiom\'s understanding of the brief to continue.');
+  else if (!on && !an) steps.objectives = S(b.objective ? 'complete' : 'skipped', { note: b.objective ? 'from the brief' : 'not used in this project', optional: true });
+  else if (on ? objConf : !!basis.objective) steps.objectives = S('complete', { note: (sel.objective || {}).title || '' });
+  else if (basis.objective) steps.objectives = S('in_progress', { note: 'chosen, not confirmed' });
+  else steps.objectives = S(proposed ? 'not_started' : 'needs_review', { note: proposed ? 'choose an objective and a key message' : 'the analysis proposed no objective: analyse again with more of the brief' });
+  const objOk = steps.objectives.state === 'complete';
+  // STRATEGY: the response strategy confirmed, or the decision not to respond
+  const stratConf = !!(conf.strategy && conf.strategy.intel === intelId && basis.strategy && conf.strategy.strategy === basis.strategy);
+  if (on && !objOk) steps.strategy = lock('Confirm the objective and key message to continue.');
+  else if (!on && !an) steps.strategy = S(b.strategy && b.strategy.status === 'confirmed' ? 'complete' : 'skipped', { note: b.strategy ? 'creative strategy ' + (b.strategy.status || 'proposed') : 'not used in this project', optional: true });
+  else if (i0.noResponse) steps.strategy = S('complete', { noResponse: true, note: 'decided not to respond' });
+  else if (on ? stratConf : !!basis.strategy) steps.strategy = S('complete', { note: ST_STRAT_WORD[(sel.strategy || {}).kind] || (sel.strategy || {}).kind || '' });
+  else if (basis.strategy) steps.strategy = S('in_progress', { note: 'chosen, not confirmed' });
+  else steps.strategy = S('not_started', { note: 'choose how to respond' });
+  const stratOk = steps.strategy.state === 'complete' && !steps.strategy.noResponse;
+  // DIRECTIONS: built on the confirmed basis; one chosen. A direction made before the guided workflow carries no basis.
+  const curDirs = dirs.filter(d => !on || (d.basis ? stWfItemCurrent(p, d, d.basis) : false));
+  const earlier = on ? dirs.filter(d => d.basis && !stWfItemCurrent(p, d, d.basis)) : [];
+  const chosen = dirs.find(d => d.chosen) || null; const chosenCur = !!chosen && (!on || (chosen.basis ? stWfItemCurrent(p, chosen, chosen.basis) : false));
+  const dRun = live(['direct']);
+  if (on && steps.strategy.noResponse) steps.directions = lock('The team decided not to respond. Choose "Respond after all" in Strategy to continue.');
+  else if (on && !stratOk) steps.directions = lock('Complete Strategy Selection to continue.');
+  else if (dRun) steps.directions = S('processing', { job: dRun.id, note: 'building creative directions' });
+  else if (chosenCur) steps.directions = S('complete', { note: chosen.title || '', chosen: chosen.id });
+  else if (chosen && on) steps.directions = S('needs_review', { why: 'chosen_earlier', chosen: chosen.id, note: 'the chosen direction was built on an earlier objective, message or strategy' });
+  else if (curDirs.length) steps.directions = S('needs_review', { note: curDirs.length + ' direction' + (curDirs.length === 1 ? '' : 's') + ' to choose from' });
+  else { const f = failed(['direct']); steps.directions = f ? err(f, 'the directions did not complete') : !on && assets.length ? S('skipped', { note: 'not needed' }) : S('not_started', { note: earlier.length ? earlier.length + ' from an earlier choice; generate directions for this one' : on ? 'generate creative directions' : 'optional' }); }
+  const dirOk = steps.directions.state === 'complete' || (!on && steps.directions.state === 'skipped');
+  // COPY: the words and the visual narrative per channel, each piece marked ready for design
+  const staleAssets = on ? assets.filter(a => { const bs = stWfAssetBasis(a); return bs && !stWfItemCurrent(p, a, bs); }).map(a => a.id) : [];
+  const ready = assets.filter(a => a.approvals && a.approvals.copy);
+  const cRun = live(['copy', 'sequence']);
+  if (on && !dirOk && !assets.length) steps.copy = lock(steps.directions.why === 'chosen_earlier' ? 'The chosen direction was built on an earlier choice: choose a current direction, or keep the existing ones, to continue.' : 'Select a Creative Direction to continue.');
+  else if (cRun) steps.copy = S('processing', { job: cRun.id, note: 'writing the copy and the visual narrative' });
+  else if (!assets.length) { const f = failed(['copy', 'sequence']); steps.copy = f ? err(f, 'the copy did not complete') : S('not_started', { note: on ? 'generate the copy and the visual narrative' : 'write the copy' }); }
+  else if (staleAssets.length) steps.copy = S('needs_review', { why: 'earlier_choice', stale: staleAssets, note: staleAssets.length + ' piece' + (staleAssets.length === 1 ? ' was' : 's were') + ' written on an earlier choice' });
+  else if (ready.length === assets.length) steps.copy = S('complete', { note: 'all ' + assets.length + ' ready for design' });
+  else steps.copy = S('in_progress', { note: ready.length + ' of ' + assets.length + ' ready for design' });
+  // DESIGN: the production mode, the imagery, the canvas; every visual validated at its output size
+  const visual = assets.filter(a => { const v = stWfVer(a); return v && v.mode !== 'copy'; });
+  const rRun = live(['render', 'inspect', 'concepts']);
+  if (assets.length && !visual.length) steps.design = S('skipped', { note: 'copy only: nothing to design' });
+  else if (on && !ready.length) steps.design = lock(assets.length ? 'Mark at least one piece of copy ready for design to continue.' : 'Generate the copy to continue.');
+  else if (!assets.length) steps.design = S('not_started', { note: 'write the copy first' });
+  else if (rRun) steps.design = S('processing', { job: rRun.id, note: rRun.stage === 'render' ? 'generating imagery' : rRun.stage === 'inspect' ? 'the Art Director is reviewing' : 'proposing art directions' });
+  else { const ok = visual.filter(stWfValid).length; steps.design = S(ok === visual.length ? 'complete' : on && !b.production && !visual.some(stWfHasImagery) ? 'not_started' : 'in_progress', { note: ok + ' of ' + visual.length + ' validated' + (on && !b.production && !visual.some(stWfHasImagery) ? '; choose the production mode' : '') }); }
+  // REVIEW: the preflight, the approvals, the client, the export
+  const reviewReady = assets.filter(a => a.approvals && a.approvals.copy && stWfValid(a));
+  const approved = assets.filter(a => a.approvals && a.approvals.copy && (a.approvals.design || (stWfVer(a) || {}).mode === 'copy'));
+  const exported = (p.thread || []).some(e => e.kind === 'export');
+  if (on && !reviewReady.length) steps.review = lock(!assets.length ? 'Complete a creative in Design to continue.' : visual.length ? 'Validate at least one creative in Design, with its copy marked ready, to continue.' : 'Mark at least one piece of copy ready to continue.');
+  else if (!assets.length) steps.review = S('not_started', { note: 'nothing made yet' });
+  else if (approved.length === assets.length) steps.review = S('complete', { note: exported ? 'approved and exported' : 'every piece approved; export when ready', exported });
+  else steps.review = S(approved.length ? 'in_progress' : 'not_started', { note: approved.length + ' of ' + assets.length + ' approved', exported });
+  const current = ST_WF_STEPS.find(k => steps[k].state !== 'complete' && steps[k].state !== 'skipped') || 'review';
+  // what a change to the confirmed basis would leave on an earlier choice (the island asks before it changes anything)
+  const onCur = curDirs.filter(d => d.basis);
+  const builtAssets = on ? assets.filter(a => { const bs = stWfAssetBasis(a); return bs && stWfItemCurrent(p, a, bs); }) : [];
+  const impact = { directions: onCur.length, chosen: !!(chosen && chosen.basis && chosenCur), assets: builtAssets.length, approvals: builtAssets.filter(a => a.approvals && (a.approvals.copy || a.approvals.design)).length, any: onCur.length + builtAssets.length > 0 };
+  return { v: on ? 2 : 1, enforced: on, steps, order: ST_WF_STEPS, current, basis, key: stWfKey(basis), kept: Array.isArray(i0.kept) ? i0.kept : [], earlier: { directions: earlier.map(d => d.id), assets: staleAssets }, impact, type: b.projectType || '', production: b.production || null };
+}
+/** A light project view for the gates: the brief and the directions are enough to judge every step up to Copy. */
+async function stWfView(env, p, withAssets) {
+  const dirs = ((await env.MIND_DB.prepare('SELECT id,data,chosen FROM studio_directions WHERE project=?').bind(p.id).all()).results || []).map(r => Object.assign({ id: r.id, chosen: !!r.chosen }, pjs(r.data, {})));
+  return Object.assign({}, p, { directions: dirs, assets: withAssets || [], jobs: [], sources: [], thread: [] });
+}
+/** The server's half of the gating: what a job or a choice needs before it may run in a guided project (null: allowed). */
+async function stWfGate(env, p, what, input) {
+  if (!stWfOn(p)) return null;
+  input = input || {};
+  const view = await stWfView(env, p); const wf = stWorkflow(view); const st = wf.steps;
+  const no = (step, text) => ({ error: 'workflow_locked', status: 409, step, detail: text, need: text });
+  if (what === 'objectives') return st.objectives.state === 'locked' ? no('objectives', st.objectives.need) : null;
+  if (what === 'strategy') return st.strategy.state === 'locked' ? no('strategy', st.strategy.need) : null;
+  if (what === 'direct' || what === 'choose') return st.directions.state === 'locked' ? no('directions', st.directions.need) : null;
+  if (what === 'copy' || what === 'sequence' || what === 'kit') {
+    if (st.directions.state === 'locked') return no('copy', st.directions.need);
+    // a direction named in the input (a variant from the board) must be this project's and built on the current choice
+    if (input.direction) {
+      const d = view.directions.find(x => x.id === stClean(input.direction, 24));
+      if (!d) return { error: 'unknown_direction', status: 400, detail: 'That direction is not one of this project\'s.' };
+      if (d.basis && !stWfItemCurrent(view, d, d.basis)) return no('copy', 'That direction was built on an earlier objective, message or strategy: keep it under the current choice, or choose a current direction, to continue.');
+      return null;
+    }
+    const chosen = view.directions.find(x => x.chosen);
+    if (!chosen) return no('copy', 'Select a Creative Direction to continue.');
+    if (chosen.basis && !stWfItemCurrent(view, chosen, chosen.basis)) return no('copy', 'The chosen direction was built on an earlier choice: choose a current direction, or keep the existing ones, to continue.');
+    return null;
+  }
+  return null;
+}
+/** A person's confirmation of a step (Brief reviewed, Objectives, Strategy). A change that leaves work downstream on an earlier
+ *  choice is refused once with the impact (409 affects_downstream) unless the team says what to do with that work:
+ *  acknowledge 'keep' (it stays current under the new choice, recorded) or 'update' (it stays, marked as built on an earlier
+ *  choice, for new work to replace). Nothing is deleted and nothing is regenerated here. */
+async function stWfConfirm(env, p, sb, who) {
+  if (!stWfOn(p)) return { error: 'not_guided', status: 400, detail: 'This project was made before the guided workflow; its choices are made in the brief.' };
+  const step = String(sb.step || '');
+  const it = await stIntelGet(env, p.id, ((p.brief || {}).intel || {}).id || ((p.brief || {}).analysis || {}).intel);
+  if (!it) return { error: 'no_analysis', status: 409, detail: 'Nothing has been analysed yet: add the brief and let Axiom analyse it first.' };
+  const ack = sb.acknowledge === 'keep' || sb.acknowledge === 'update' ? sb.acknowledge : '';
+  const view = await stGet(env, p.id, { light: true }); const wf = stWorkflow(view);
+  if (step === 'brief') {
+    // reviewed, or the reading kept across a campaign change (the team chose not to analyse again)
+    await stBriefPatch(env, p.id, b => { const i0 = b.intel && typeof b.intel === 'object' && b.intel.id === it.id ? b.intel : { id: it.id, selected: {} }; i0.reviewed = { intel: it.id, at: Date.now(), by: stStr(who, 40), campaign: p.campaign || '' }; b.intel = i0; });
+    await stIntelLog(env, p.ns, p.id, 'reviewed', it.id, 'reviewed the understanding of "' + stStr(it.sourceName, 80) + '"' + (wf.steps.brief.why === 'campaign_changed' ? ' and kept it after the campaign changed to ' + (p.campaign || 'none') : ''), who);
+    await stEvent(env, p.id, 'workflow', { step, text: wf.steps.brief.why === 'campaign_changed' ? 'Kept the analysis after the campaign changed (not analysed again).' : 'Reviewed Axiom\'s understanding of the brief. Objectives are open.' }, who);
+    return { ok: true, step };
+  }
+  if (step === 'keep') {
+    // work built on an earlier choice, kept under the current one after the fact: its basis joins the kept list and it is
+    // current again. Nothing is regenerated or deleted; the pieces (or directions) named are the only ones looked at.
+    const wantA = Array.isArray(sb.assets) ? sb.assets.map(x => stClean(x, 24)) : null; const wantD = Array.isArray(sb.directions) ? sb.directions.map(x => stClean(x, 24)) : [];
+    const ids = []; let na = 0, nd = 0;
+    (view.assets || []).forEach(a => { const bs = stWfAssetBasis(a); if (bs && !stWfItemCurrent(view, a, bs) && (!wantA || wantA.indexOf(a.id) >= 0)) { ids.push(a.id); na++; } });
+    (view.directions || []).forEach(d => { if (d.basis && !stWfItemCurrent(view, d, d.basis) && wantD.indexOf(d.id) >= 0) { ids.push(d.id); nd++; } });
+    if (!ids.length) return { error: 'nothing_to_keep', status: 400, detail: 'Nothing named here was built on an earlier choice.' };
+    await stBriefPatch(env, p.id, b => { const i0 = b.intel && typeof b.intel === 'object' ? b.intel : { id: it.id, selected: {} }; i0.keptItems = Array.from(new Set((Array.isArray(i0.keptItems) ? i0.keptItems : []).concat(ids))).slice(-200); b.intel = i0; });
+    const what = [na ? na + ' piece' + (na === 1 ? '' : 's') : '', nd ? nd + ' direction' + (nd === 1 ? '' : 's') : ''].filter(Boolean).join(' and ');
+    await stIntelLog(env, p.ns, p.id, 'kept_downstream', 'keep', 'kept ' + what + ' built on an earlier choice under the current one', who);
+    await stEvent(env, p.id, 'workflow', { step, text: 'Kept ' + what + ' built on an earlier choice under the current objective, message and strategy. Nothing was regenerated.' }, who);
+    return { ok: true, step, kept: ids, keptAssets: na, keptDirections: nd };
+  }
+  if (step !== 'objectives' && step !== 'strategy') return { error: 'bad_step', status: 400, detail: 'step is brief, objectives, strategy or keep' };
+  const gate = await stWfGate(env, p, step); if (gate) return gate;
+  const basis0 = stWfBasis(p); const next = Object.assign({}, basis0, { intel: it.id });
+  let obj = null, msg = null, strat = null;
+  if (step === 'objectives') {
+    obj = (it.objectives || []).find(o => o.id === sb.objective) || null; if (!obj) return { error: 'unknown_objective', status: 400, detail: 'Choose one of the objectives Axiom proposed.' };
+    msg = (obj.messages || []).find(m => m.id === sb.message) || null; if (!msg) return { error: 'message_not_under_objective', status: 400, detail: 'Choose a key message under ' + obj.id + '.' };
+    next.objective = obj.id; next.message = msg.id;
+  } else {
+    strat = (it.strategies || []).find(s => s.id === sb.strategy) || null; if (!strat) return { error: 'unknown_strategy', status: 400, detail: 'Choose one of the response strategies.' };
+    if (strat.kind === 'none') return { error: 'use_decision', status: 400, detail: 'Not responding is recorded as a decision with its reason (POST /studio/intel/decision kind no_response).' };
+    next.strategy = strat.id;
+  }
+  const changes = stWfKey(next) !== stWfKey(basis0);
+  if (changes && wf.impact.any && !ack) return { error: 'affects_downstream', status: 409, step, impact: wf.impact, detail: (step === 'objectives' ? 'Changing the objective or key message' : 'Changing the strategy') + ' may affect your current work: ' + [wf.impact.directions ? wf.impact.directions + ' creative direction' + (wf.impact.directions === 1 ? '' : 's') + (wf.impact.chosen ? ' (one chosen)' : '') : '', wf.impact.assets ? wf.impact.assets + ' piece' + (wf.impact.assets === 1 ? '' : 's') + ' of copy and design' + (wf.impact.approvals ? ', ' + wf.impact.approvals + ' with an approval' : '') : ''].filter(Boolean).join(' and ') + '. Update them (they stay, marked as built on the earlier choice) or keep them under the new choice.' };
+  const topics = (Array.isArray(sb.topics) ? sb.topics : []).map(t => stStr(t, 100)).filter(t => (it.topics || []).some(x => x.name === t)).slice(0, 12);
+  const changed = [];
+  await stBriefPatch(env, p.id, b => {
+    const i0 = b.intel && typeof b.intel === 'object' && b.intel.id === it.id ? b.intel : { id: it.id, selected: {} }; const sel = Object.assign({}, i0.selected || {}); const conf = Object.assign({}, i0.confirmed || {});
+    const prevKey = stWfKey({ intel: i0.id, objective: (sel.objective || {}).id, message: (sel.message || {}).id, strategy: (sel.strategy || {}).id });
+    if (obj) { sel.objective = { id: obj.id, title: obj.title, kind: obj.kind }; sel.message = { id: msg.id, primary: msg.primary, supporting: msg.supporting, cta: msg.cta, evidence: msg.evidence }; b.objective = obj.title; b.objectiveSource = 'ai'; b.message = msg.primary + (msg.supporting ? ' ' + msg.supporting : ''); b.messageSource = 'ai'; changed.push('objective', 'message'); if (msg.cta) { b.action = msg.cta; b.actionSource = 'ai'; changed.push('action'); } if (topics.length || Array.isArray(sb.topics)) b.topics = topics; conf.objectives = { intel: it.id, objective: obj.id, message: msg.id, at: Date.now(), by: stStr(who, 40) }; }
+    if (strat) { sel.strategy = { id: strat.id, kind: strat.kind, message: strat.message, platforms: strat.platforms, format: strat.format }; if (strat.audience && !String(b.audience || '').trim()) { b.audience = strat.audience; b.audienceSource = 'ai'; changed.push('audience'); } conf.strategy = { intel: it.id, strategy: strat.id, at: Date.now(), by: stStr(who, 40) }; delete i0.noResponse; }
+    if (changes && ack === 'keep') i0.kept = Array.from(new Set((Array.isArray(i0.kept) ? i0.kept : []).concat([prevKey]))).slice(-12);
+    if (changes && ack === 'update') { i0.kept = []; i0.keptItems = []; }
+    i0.selected = sel; i0.confirmed = conf; i0.selectedAt = Date.now(); i0.selectedBy = stStr(who, 40); b.intel = i0;
+  });
+  // the campaign decision rides on the strategy: the campaign Axiom detected, or standalone, chosen by a person
+  if (step === 'strategy' && sb.campaign !== undefined) {
+    const cid = kitSlug(sb.campaign || ''); const kit = (await brandKit(env, p.ns)) || {};
+    if (cid && !(kit.campaigns || []).some(c => c.id === cid)) return { error: 'unknown_campaign', status: 400, detail: 'The kit has no campaign "' + cid + '".' };
+    if (cid !== (p.campaign || '')) { await env.MIND_DB.prepare('UPDATE studio_projects SET campaign=?, revision=revision+1, updated=? WHERE id=?').bind(cid, Date.now(), p.id).run(); await stBriefPatch(env, p.id, b => { b.campaignConfirmed = true; const i0 = b.intel || {}; if (i0.reviewed) i0.reviewed.campaign = cid; b.intel = i0; }); changed.push('campaign'); }
+  }
+  if (obj) { await stIntelLog(env, p.ns, p.id, 'objective', obj.id, obj.kind + ': ' + obj.title, who); await stIntelLog(env, p.ns, p.id, 'message', msg.id, msg.primary, who); }
+  if (strat) await stIntelLog(env, p.ns, p.id, 'strategy', strat.id, strat.kind + (strat.message ? ': ' + strat.message : ''), who);
+  if (changes && ack) await stIntelLog(env, p.ns, p.id, ack === 'keep' ? 'kept_downstream' : 'updated_downstream', step, (ack === 'keep' ? 'kept ' : 'set aside for new work ') + [wf.impact.directions ? wf.impact.directions + ' directions' : '', wf.impact.assets ? wf.impact.assets + ' pieces' : ''].filter(Boolean).join(' and ') + ' when the ' + step + ' changed', who);
+  await stEvent(env, p.id, 'workflow', { step, text: (step === 'objectives' ? 'Confirmed objective ' + obj.id + ' ("' + stStr(obj.title, 70) + '") with key message ' + msg.id + (topics.length ? ' and ' + topics.length + ' topic' + (topics.length === 1 ? '' : 's') : '') + '.' : 'Confirmed the ' + strat.kind + ' response strategy (' + strat.id + ')' + (changed.indexOf('campaign') >= 0 ? ' and the campaign ' + (kitSlug(sb.campaign || '') || 'standalone') : '') + '.') + (changes && ack === 'keep' ? ' The existing work was kept under the new choice.' : changes && ack === 'update' ? ' The existing work stays, marked as built on the earlier choice.' : ''), acknowledge: ack || undefined }, who);
+  return { ok: true, step, changed: Array.from(new Set(changed)), acknowledged: ack || undefined };
+}
+/** S17: the production mode, chosen in Design once the words are ready. editable: the Studio composes the words and the exact
+ *  mark as live layers over generated imagery, so the imagery each composition plans is queued. finished: the image model paints
+ *  the whole piece from the approved words and the mark files, so a finished version is appended from the composition's plan and
+ *  its one painting queued. Each asset is judged on its own: one that cannot go is named with the reason and the rest go. In a
+ *  guided project a piece goes only once its copy is marked ready for design (no render is spent on words that will change). */
+async function stProduction(env, p, sb, who) {
+  const mode = sb.mode === 'finished' ? 'finished' : sb.mode === 'editable' ? 'editable' : '';
+  if (!mode) return { error: 'bad_mode', status: 400, detail: 'mode is editable or finished' };
+  if (!env.GEMINI_KEY) return { error: 'gemini_not_configured', status: 409, detail: 'Image generation is not configured on the worker (GEMINI_KEY): neither production mode can make imagery yet. Compositions and copy work without it.' };
+  const want = Array.isArray(sb.assets) && sb.assets.length ? sb.assets.map(x => stClean(x, 24)) : null;
+  const list = ((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow).filter(a => !want || want.indexOf(a.id) >= 0);
+  if (!list.length) return { error: 'no_assets', status: 409, detail: 'Nothing to produce yet: generate the copy first.' };
+  const size = /^(1K|2K|4K)$/.test(String(sb.size || '')) ? sb.size : ((p.brief || {}).size || undefined);
+  const guided = stWfOn(p); const done = [], skipped = [], jobs = [];
+  let ctx = null;
+  if (mode === 'finished') {
+    ctx = await stContext(env, p, { channels: [] });
+    const mf = await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
+    if (mf.missing.length) return { error: 'mark_missing', status: 409, detail: mf.missing.map(m => m.text).join('; ') + '. A finished creative paints the mark from its file, so nothing was changed; upload it in Brand, or choose the editable mode, which places the mark as a layer.' };
+  }
+  for (const a of list) {
+    const cur = await stCurrent(env, a); const skip = (why, code) => skipped.push({ asset: a.id, title: a.title, why, code: code || '' });
+    if (!cur) { skip('it has no version'); continue; }
+    if (cur.mode === 'copy') { skip('copy only: nothing to design', 'copy_only'); continue; }
+    if (guided) { const st0 = await stStanding(env, a); if (!st0.copy) { skip('its copy is not marked ready for design yet', 'copy_not_ready'); continue; } }
+    if (mode === 'editable' || cur.mode === 'finished') {
+      if (mode === 'editable' && cur.mode === 'finished') { skip('it is already a finished creative: derive an editable copy of it instead', 'is_finished'); continue; }
+      const r = await stImageryQueue(env, p, a, { size }, who);
+      if (r.error) { skip(r.detail || r.error, r.error); continue; }
+      jobs.push(...r.jobs); done.push(a.id); continue;
+    }
+    const L = cur.layout || {};
+    if (!Array.isArray(L.layers) || !L.layers.some(l => l && l.type === 'text')) { skip('it has no composition to brief the painting from', 'no_plan'); continue; }
+    if (a.locks.layout) { skip('its layout is locked', 'locked'); continue; }
+    const layout = Object.assign({}, L, { approach: 'artwork', finished: true, templateName: String(L.templateName || L.mediumName || 'composition').replace(/, finished creative$/, '') + ', finished creative' });
+    const v = await stAppendVersion(env, a, { kind: 'layout', note: 'production mode: finished creative - the image model paints the whole piece from the approved words and the mark files (no render yet)', copy: cur.copy, layout, image: null, mode: 'finished', context: Object.assign({}, cur.context || {}, { creationMode: 'finished', convertedFrom: cur.id }) }, who);
+    await stVersionChecks(env, p, a, v);
+    try { const js = await stPlanRenders(env, p, a, v, layout, (cur.context || {}).planIn || null, { ctx, who, idem: 'finished:' + v.id, note: 'finished creative for ' + a.title, size, forceAll: true }); jobs.push(...js); done.push(a.id); }
+    catch (e) { skip(String((e && e.message) || e).slice(0, 200), 'render_failed'); }
+  }
+  if (done.length) await stBriefPatch(env, p.id, b => { b.production = { mode, at: Date.now(), by: stStr(who, 40), size: size || undefined }; });
+  await stEvent(env, p.id, 'production', { mode, assets: done, jobs, text: 'Production mode: ' + (mode === 'finished' ? 'finished creative (the image model paints the whole piece, words and mark included)' : 'editable (imagery generated; words and the exact mark composed as live layers)') + '. ' + done.length + ' piece' + (done.length === 1 ? '' : 's') + ' queued, ' + jobs.length + ' render' + (jobs.length === 1 ? '' : 's') + (size ? ' at ' + size : '') + '.' + (skipped.length ? ' Not queued: ' + skipped.map(x => x.title + ' (' + x.why + ')').join('; ') + '.' : '') }, who);
+  return { ok: true, mode, done, skipped, jobs, size: size || env.IMAGE_SIZE || '2K' };
+}
+/** S17: the clients the wizard offers, each with what the Studio holds for it: campaigns, marks, knowledge, recent work. */
+async function stClients(env, list) {
+  const nss = (Array.isArray(list) ? list : []).map(x => relNs(x)).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, 24);
+  const out = [];
+  for (const ns of nss) {
+    let kit = {}; try { kit = (await brandKit(env, ns)) || {}; } catch (e) { kit = {}; }
+    let projects = 0, last = null;
+    try { const r = await env.MIND_DB.prepare('SELECT COUNT(*) AS n, MAX(updated) AS u FROM studio_projects WHERE ns=? AND archived=0').bind(ns).first(); projects = Number((r || {}).n || 0); if (projects) { const lp = await env.MIND_DB.prepare('SELECT id,title,updated,status FROM studio_projects WHERE ns=? AND archived=0 ORDER BY updated DESC LIMIT 1').bind(ns).first(); if (lp) last = { id: lp.id, title: stStr(lp.title, 100), updated: lp.updated, status: lp.status }; } } catch (e) {}
+    let corrections = 0; try { const r = await env.MIND_DB.prepare("SELECT COUNT(*) AS n FROM engine_fixes WHERE ns=? AND COALESCE(active,1)=1").bind(ns).first(); corrections = Number((r || {}).n || 0); } catch (e) {}
+    const camps = (kit.campaigns || []).filter(c => c && c.id && c.active !== false);
+    out.push({ ns, name: stStr(kit.name || '', 90), hasLogo: !!kit.hasLogo, logoV: kit.logoV || '', palette: kit.palette || {}, campaigns: camps.map(c => ({ id: c.id, name: c.name || c.id, logoPolicy: c.logoPolicy || 'logo', hasWordmark: !!c.hasWordmark, notes: stStr(c.notes || c.tone || '', 160) })), projects, last, knowledge: { facts: (kit.facts || []).filter(f => f && f.status !== 'pending').length, pending: (kit.facts || []).filter(f => f && f.status === 'pending').length, banned: (kit.banned || []).length, voice: !!String(kit.voice || '').trim(), corrections, campaigns: camps.length } });
+  }
+  return { ok: true, clients: out };
+}
+/** S17: a new campaign, created deliberately in the client's brand kit from the wizard (recorded as a kit revision). */
+async function stCampaignCreate(env, sb, who) {
+  const ns = relNs(sb.ns); if (!sb.ns) return { error: 'missing_ns', status: 400 };
+  const name = stStr(sb.name, 90).trim(); if (name.length < 2) return { error: 'name_required', status: 400, detail: 'Name the campaign.' };
+  // the id is the name in words, cut at a word under the kit's 24 characters (never mid-word)
+  const words = String(sb.id || name).toLowerCase().replace(/['\u2019]/g, '').split(/[^a-z0-9]+/).filter(Boolean); let id = '';
+  for (const wd of words) { const nx = id ? id + '-' + wd : wd; if (nx.length > 24) break; id = nx; }
+  id = kitSlug(id || words.join('').slice(0, 24)); if (!id) return { error: 'bad_name', status: 400, detail: 'The name needs letters or digits.' };
+  const cur = (await brandKit(env, ns)) || {}; const camps = Array.isArray(cur.campaigns) ? cur.campaigns : [];
+  if (camps.some(c => c && c.id === id)) return { error: 'exists', status: 409, detail: 'The kit already has a campaign "' + id + '".', campaign: camps.find(c => c.id === id) };
+  if (camps.length >= 12) return { error: 'too_many', status: 409, detail: 'The kit holds twelve campaigns; retire one before adding another.' };
+  const kit = await brandSave(env, ns, { campaigns: camps.concat([{ id, name, notes: stStr(sb.description, 1400), tone: stStr(sb.tone, 700), active: true, logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(sb.logoPolicy) >= 0 ? sb.logoPolicy : 'logo' }]) }, who);
+  return { ok: true, campaign: (kit.campaigns || []).find(c => c.id === id) || { id, name } };
+}
 async function stDirectStage(env, job, p, log) {
-  const n = Math.min(Math.max(parseInt(job.input.n, 10) || 3, 1), 5);   // the exploration budget: three by default, one to five
-  const cc = await stCompileContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'direct', refs: { images: 0 }, art: 4 }); const ctx = cc.ctx;
+  const inp = job.input || {}; const guided = stWfOn(p);
+  // S17 modes: fresh (a new set), alternatives (more, unlike the ones standing), refine (one direction, as instructed),
+  // merge (two or more combined into one; "combine" names the parts taken from each)
+  const mode = ['fresh', 'alternatives', 'refine', 'merge'].indexOf(inp.mode) >= 0 ? inp.mode : 'fresh';
+  const allDirs = ((await env.MIND_DB.prepare('SELECT id,data,chosen FROM studio_directions WHERE project=? ORDER BY created').bind(p.id).all()).results || []).map(r => Object.assign({ id: r.id, chosen: !!r.chosen }, pjs(r.data, {})));
+  const named = (Array.isArray(inp.ids) ? inp.ids : []).map(x => allDirs.find(d => d.id === stClean(x, 24))).filter(Boolean);
+  if (mode === 'refine' && named.length !== 1) throw new Error('directions_required: refine needs one direction of this project (not retried)');
+  if (mode === 'merge' && named.length < 2) throw new Error('directions_required: merge needs two or more directions of this project (not retried)');
+  const n = mode === 'refine' || mode === 'merge' ? 1 : Math.min(Math.max(parseInt(inp.n, 10) || 3, 1), 5);   // the exploration budget: three by default, one to five
+  if (log.phase) await log.phase('strategy', guided ? 'Reviewing the selected strategy, objective and key message' : 'Reading the brief and the strategy', { step: 'strategy', completed: 0, total: 4 });
+  const cc = await stCompileContext(env, p, { channels: (inp.channels || (p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'direct', refs: { images: 0 }, art: 4 }); const ctx = cc.ctx;
   const led = await stLedger(env, p.id);
-  const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: {"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","idea":"<=15 words: the campaign idea","copyApproach":"<=20 words: how the words work (hierarchy, register, device)","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","references":["reference names it draws on"],"plan":["<=12 words each: the production steps"],"renders":0}]}. The directions must differ in what is drawn as well as in what is argued: change the medium and composition when the argument allows, never only the photograph behind the same panel. "renders" is the number of images the first asset would need (0 for typography-led or diagram work). Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.' + ctx.text;
-  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (job.input.instruction ? '\n\nINSTRUCTION: ' + stStr(job.input.instruction, 1200) : '')
+  if (log.phase) await log.phase('campaign', 'Matching campaign messaging: ' + ((ctx.block && ctx.block.facts) || []).length + ' approved facts, ' + led.claims.length + ' ledger claims' + (p.campaign ? ', the campaign identity' : ''), { step: 'campaign', completed: 1, total: 4 });
+  const basis = guided ? stWfBasis(p) : null; const sel = ((p.brief || {}).intel || {}).selected || {};
+  const schemaV1 = '{"directions":[{"title":"<=5 words","message":"<=25 words: the one thing the audience should take away","insight":"<=25 words: why this lands with this audience","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","visual":"<=30 words: the image, its mood, what to avoid","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","idea":"<=15 words: the campaign idea","copyApproach":"<=20 words: how the words work (hierarchy, register, device)","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","references":["reference names it draws on"],"plan":["<=12 words each: the production steps"],"renders":0}]}';
+  const schemaV2 = '{"directions":[{"title":"<=5 words","idea":"<=25 words: the strategic idea","message":"<=25 words: the key message as this direction argues it","audience":"<=15 words: who it speaks to","tone":"<=8 words","hook":"<=14 words: what stops the scroll","headline":"<=' + ST_HEADLINE_FIT['1:1'] + ' characters, in the client voice","opening":"<=140 characters: the first line of the caption","why":"<=30 words: why it could work for this client, now","risks":["<=15 words each"],"platforms":["linkedin|facebook|instagram|x"],"layout":"<=20 words: the suggested layout","medium":"photo-cinematic|photo-documentary|editorial|composite|cutout|collage|illustration|diagram|infographic|typographic|carousel","composition":"<=20 words","typography":"<=15 words","colour":"<=15 words","visual":"<=30 words: the image, its mood, what to avoid","visualNarrative":{"scene":"","subject":"","composition":"","lighting":"","typography":"","colour":"","textPlacement":"","ctaPlacement":""},"route":"editable|finished","insight":"<=25 words","rationale":"<=25 words: why this fits the client\'s rules and past approvals","claims":["c1"],"uncertainty":"<=25 words: what the source does not give","copyApproach":"<=20 words","references":["reference names it draws on"],"plan":["<=12 words each"],"renders":0}]}';
+  const sys = 'You are the creative director of an Australian political communications agency, working for ' + ctx.client + '. For an open brief you propose ' + n + ' genuinely different directions: different arguments, not the same idea reworded. Each cites the ledger claims it would use by id and says what the source does not settle. Return strict JSON only, no prose: ' + (guided ? schemaV2 : schemaV1) + '. The directions must differ in what is drawn as well as in what is argued: change the medium and composition when the argument allows, never only the photograph behind the same panel. "renders" is the number of images the first asset would need (0 for typography-led or diagram work). Figures only from the LEDGER or the APPROVED FACTS, quoted exactly. No exclamation marks.'
+    + (guided ? ' Every direction serves the CONFIRMED objective, key message and response strategy below: it is a different way to argue that message, never a different message. "route" is editable (generated imagery, the words and the exact mark as live layers - best when words may change, figures must be exact or several formats are needed) or finished (the image model paints the whole piece - one striking hero image with settled words).' : '') + ctx.text;
+  const standing = allDirs.filter(d => !basis || !d.basis || stWfItemCurrent(p, d, d.basis));
+  const dirLine = d => '"' + stStr(d.title, 60) + '": ' + stStr(d.idea || d.message, 200) + (d.hook ? ' | hook: ' + stStr(d.hook, 120) : '') + (d.headline ? ' | headline: ' + stStr(d.headline, 120) : '') + (d.medium ? ' | medium: ' + d.medium : '') + (d.visual ? ' | visual: ' + stStr(d.visual, 160) : '');
+  const modeText = mode === 'alternatives' ? '\n\nALTERNATIVES. The team already has these directions:\n' + standing.map(d => '- ' + dirLine(d)).join('\n') + '\nPropose ' + n + ' new direction' + (n === 1 ? '' : 's') + ' that differ from every one of them in the argument AND in the medium.'
+    : mode === 'refine' ? '\n\nREFINE this direction as the team asks, keeping everything they did not ask to change:\n' + dirLine(named[0]) + '\nTEAM: ' + (stStr(inp.instruction, 800) || 'make it stronger and more specific') + '\nAnswer with exactly one direction: the refined one.'
+    : mode === 'merge' ? '\n\nMERGE these directions into one that keeps the strongest of each' + (Array.isArray(inp.parts) && inp.parts.length ? ', taking exactly: ' + inp.parts.slice(0, 8).map(x => (x && x.part ? stStr(x.part, 30) : '') + ' from "' + stStr((named.find(d => d.id === (x && x.id)) || {}).title || '?', 60) + '"').join('; ') : '') + ':\n' + named.map(d => '- ' + dirLine(d)).join('\n') + (inp.instruction ? '\nTEAM: ' + stStr(inp.instruction, 600) : '') + '\nAnswer with exactly one direction: the merged one.' : '';
+  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (guided ? stAnalysisText(p) + ((p.brief || {}).topics || []).map((t, i) => (i ? ', ' : '\nTOPICS IN PLAY: ') + stStr(t, 80)).join('') : '') + (inp.instruction && mode === 'fresh' ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1200) : '')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
-    + cc.refs.text + cc.mem.text + cc.identityText
-    + '\n\nGive ' + n + ' directions.';
-  await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + n + ' directions for an open brief, grounded in ' + led.claims.length + ' ledger claims, the references and the client context');
-  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log });
+    + cc.refs.text + cc.mem.text + cc.identityText + modeText
+    + '\n\nGive ' + n + ' direction' + (n === 1 ? '' : 's') + '.';
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + (mode === 'refine' ? 'refine "' + named[0].title + '"' : mode === 'merge' ? 'merge ' + named.length + ' directions' : mode === 'alternatives' ? n + ' alternatives to the ' + standing.length + ' standing' : n + ' directions') + (guided ? ' on the confirmed ' + [basis.objective, basis.message, basis.strategy].join(' / ') : ' for an open brief') + ', grounded in ' + led.claims.length + ' ledger claims, the references and the client context');
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Developing visual narratives and generating creative concepts', phaseStep: 'model' });
   const j = relJson(r.text);
   if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
+  if (log.phase) await log.phase('checking', 'Measuring how different the directions are, in argument and in medium', { step: 'checking', completed: 3, total: 4 });
   const known = new Set(led.claims.map(c => c.id)); const ids = []; const rows = []; let similar = 0;
   const MEDIA = ['photo-cinematic', 'photo-documentary', 'editorial', 'composite', 'cutout', 'collage', 'illustration', 'diagram', 'infographic', 'typographic', 'carousel'];
-  const norm = (d, model) => ({ idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: model || r.model, job: job.id });
+  const CH = Object.keys(ST_CHANNELS);
+  const norm = (d, model) => {
+    const out = { idea: stStr(d.idea, 200), copyApproach: stStr(d.copyApproach, 200), medium: MEDIA.indexOf(d.medium) >= 0 ? d.medium : '', composition: stStr(d.composition, 200), typography: stStr(d.typography, 160), colour: stStr(d.colour, 160), references: (Array.isArray(d.references) ? d.references : []).map(x => stStr(x, 80)).slice(0, 5), plan: (Array.isArray(d.plan) ? d.plan : []).map(x => stStr(x, 120)).slice(0, 6), renders: Math.max(0, Math.min(6, parseInt(d.renders, 10) || 0)), title: stStr(d.title, 60), message: stStr(d.message, 300), insight: stStr(d.insight, 300), headline: stStr(d.headline, 140), opening: stStr(d.opening, 200), visual: stStr(d.visual, 300), rationale: stStr(d.rationale, 300), claims: (Array.isArray(d.claims) ? d.claims : []).map(String).filter(c => known.has(c)).slice(0, 8), uncertainty: stStr(d.uncertainty, 300), model: model || r.model, job: job.id };
+    if (guided) {
+      const vn = d.visualNarrative && typeof d.visualNarrative === 'object' ? d.visualNarrative : {}; const visualNarrative = {}; ['scene', 'subject', 'composition', 'lighting', 'typography', 'colour', 'textPlacement', 'ctaPlacement'].forEach(k => { if (vn[k]) visualNarrative[k] = stStr(vn[k], 240); });
+      Object.assign(out, { audience: stStr(d.audience, 200), tone: stStr(d.tone, 120), hook: stStr(d.hook, 200), why: stStr(d.why, 300), risks: stStrs(d.risks, 4, 200), platforms: (Array.isArray(d.platforms) ? d.platforms : []).map(x => String(x).toLowerCase()).filter(x => CH.indexOf(x) >= 0).slice(0, 4), layout: stStr(d.layout, 200), visualNarrative, route: d.route === 'finished' ? 'finished' : 'editable',
+        basis, objectiveTitle: (sel.objective || {}).title || '', messageText: (sel.message || {}).primary || '', strategyKind: (sel.strategy || {}).kind || '',
+        trace: { intel: basis.intel, source: ((p.brief || {}).analysis || {}).source || '', evidence: [], objective: basis.objective, objectiveTitle: (sel.objective || {}).title || '', message: basis.message, messageText: (sel.message || {}).primary || '', strategy: basis.strategy, strategyKind: (sel.strategy || {}).kind || '' } });
+    }
+    if (mode === 'refine') { out.refinedFrom = named[0].id; out.instruction = stStr(inp.instruction, 300); }
+    if (mode === 'merge') { out.mergedFrom = named.map(x => x.id); out.parts = (Array.isArray(inp.parts) ? inp.parts : []).slice(0, 8).map(x => ({ id: stClean(x && x.id, 24), part: stStr(x && x.part, 30) })); }
+    if (mode === 'alternatives') out.alternativeTo = standing.map(x => x.id).slice(0, 8);
+    return out;
+  };
   // a look-alike is measured on the argument (headline and message) and on the medium: the same medium with a near idea is one direction twice
-  const measure = list => { let s = 0; list.forEach(d => { d.similar = undefined; }); list.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, list[k].headline + ' ' + list[k].message) > 0.6 || (d.medium && d.medium === list[k].medium && stSimilar(d.idea + ' ' + d.message, list[k].idea + ' ' + list[k].message) > 0.45)) { d.similar = list[k].title; s++; break; } }); return s; };
+  const measure = list => { let s0 = 0; list.forEach(d => { d.similar = undefined; }); list.forEach((d, i) => { for (let k = 0; k < i; k++) if (stSimilar(d.headline + ' ' + d.message, list[k].headline + ' ' + list[k].message) > 0.6 || (d.medium && d.medium === list[k].medium && stSimilar(d.idea + ' ' + d.message, list[k].idea + ' ' + list[k].message) > 0.45)) { d.similar = list[k].title; s0++; break; } }); return s0; };
   let dirs = j.directions.slice(0, n).map(d => norm(d));
-  similar = measure(dirs);
+  similar = mode === 'refine' || mode === 'merge' ? 0 : measure(dirs);
   // S8: genuinely different means different in what is drawn as well as what is argued - three or more directions in one medium are a narrow set
   const mediaOf = list => Array.from(new Set(list.map(d => d.medium).filter(Boolean)));
-  let narrow = dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
+  let narrow = mode !== 'refine' && mode !== 'merge' && dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
   let replanned = 0, replanWhy = '', model2 = '';
-  if ((similar || narrow) && job.input.replan !== false) {
+  if ((similar || narrow) && inp.replan !== false) {
     // one bounded replanning round, like the concepts stage: the look-alikes (or the last direction of a one-medium set) go back with the measure
     const dup = similar ? dirs.filter(d => d.similar) : [dirs[dirs.length - 1]];
     const stand = dirs.filter(d => dup.indexOf(d) < 0);
     replanWhy = similar ? 'alike' : 'one medium';
     await log('info', (similar ? dup.length + ' direction' + (dup.length === 1 ? ' reads' : 's read') + ' as another in different words (' + dup.map(d => '"' + d.title + '" ~ "' + d.similar + '"').join(', ') + ')' : 'every direction is ' + dirs[0].medium) + '; asking once for ' + dup.length + ' replacement' + (dup.length === 1 ? '' : 's') + ' that differ in argument and medium');
     try {
-      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log });
+      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model' });
       const j2 = relJson(again.text); model2 = again.model;
       if (j2 && Array.isArray(j2.directions) && j2.directions.length) {
         const fresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model));
@@ -8787,12 +9152,14 @@ async function stDirectStage(env, job, p, log) {
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
   }
   const diversity = stDiversity(dirs);
-  for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 8000), 0, 'studio', Date.now())); }
+  if (log.phase) await log.phase('filing', 'Filing ' + dirs.length + ' direction' + (dirs.length === 1 ? '' : 's'), { step: 'filing', completed: 4, total: 4 });
+  for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 12000), 0, 'studio', Date.now())); }
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
-  await log('out', dirs.length + ' directions: ' + dirs.map(d => d.title + (d.medium ? ' [' + d.medium + ']' : '')).join(' / ') + (similar ? ' - ' + similar + ' still read as close to another; ask for another' : ' - distinct arguments') + (replanned ? ' (' + replanned + ' replanned once: ' + replanWhy + ')' : '') + (narrow ? ' - still one medium' : ''));
-  await stEvent(env, p.id, 'directions', { diversity: diversity.score, media: mediaOf(dirs), replanned: replanned || undefined, replanWhy: replanWhy || undefined, narrow: narrow || undefined, text: (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions for an open brief: ' + dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ') + (replanned ? ' ' + replanned + ' direction' + (replanned === 1 ? ' was' : 's were') + ' replanned once because ' + (replanWhy === 'alike' ? 'it read as another in different words' : 'every direction shared one medium') + '.' : '') + (similar ? ' ' + similar + ' still read' + (similar === 1 ? 's' : '') + ' as close to another and ' + (similar === 1 ? 'is' : 'are') + ' marked.' : '') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
-  return { directions: ids, titles: dirs.map(d => d.title), media: mediaOf(dirs), similar, replanned, replanWhy: replanWhy || undefined, narrow, diversity: diversity.score, model: r.model, model2: model2 || undefined };
+  await log('out', dirs.length + ' direction' + (dirs.length === 1 ? '' : 's') + ': ' + dirs.map(d => d.title + (d.medium ? ' [' + d.medium + ']' : '')).join(' / ') + (mode === 'refine' ? ' (refined from "' + named[0].title + '")' : mode === 'merge' ? ' (merged from ' + named.map(x => '"' + x.title + '"').join(', ') + ')' : similar ? ' - ' + similar + ' still read as close to another; ask for another' : ' - distinct arguments') + (replanned ? ' (' + replanned + ' replanned once: ' + replanWhy + ')' : '') + (narrow ? ' - still one medium' : ''));
+  const lead = mode === 'refine' ? 'Refined "' + named[0].title + '" into "' + dirs[0].title + '". ' : mode === 'merge' ? 'Merged ' + named.map(x => '"' + x.title + '"').join(' and ') + ' into "' + dirs[0].title + '". ' : mode === 'alternatives' ? dirs.length + ' alternative direction' + (dirs.length === 1 ? '' : 's') + ': ' : (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions' + (guided ? ' on the confirmed strategy' : ' for an open brief') + ': ';
+  await stEvent(env, p.id, 'directions', { mode, diversity: diversity.score, media: mediaOf(dirs), replanned: replanned || undefined, replanWhy: replanWhy || undefined, narrow: narrow || undefined, text: lead + (mode === 'refine' || mode === 'merge' ? '' : dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ')) + (replanned ? ' ' + replanned + ' direction' + (replanned === 1 ? ' was' : 's were') + ' replanned once because ' + (replanWhy === 'alike' ? 'it read as another in different words' : 'every direction shared one medium') + '.' : '') + (similar ? ' ' + similar + ' still read' + (similar === 1 ? 's' : '') + ' as close to another and ' + (similar === 1 ? 'is' : 'are') + ' marked.' : '') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
+  return { directions: ids, titles: dirs.map(d => d.title), media: mediaOf(dirs), similar, replanned, replanWhy: replanWhy || undefined, narrow, diversity: diversity.score, mode, model: r.model, model2: model2 || undefined };
 }
 // -- the brief: what is settled, what is assumed, what blocks spending ------------------------------------------
 // A brief carries objective, audience, message, action and deliverables, plus design requirements in three bands
@@ -8820,6 +9187,13 @@ function stBriefNorm(b) {
   // when the imagery is made: with the copy (production queues the renders at once, the default) or after the copy is ready
   // (production writes and lays out; the Design step queues the renders through POST /studio/imagery when the words are settled)
   out.imageryTiming = b.imageryTiming === 'after_copy' ? 'after_copy' : 'with_copy';
+  // S17: the guided workflow's own fields: the version of the workflow, the project type, how the campaign was settled, the
+  // topics in play and the production mode chosen in Design
+  if (b.workflow != null) out.workflow = Number(b.workflow) >= 2 ? 2 : 1;
+  if (b.projectType != null) out.projectType = ST_WF_TYPES[b.projectType] ? b.projectType : 'other';
+  if (b.campaignMode != null) out.campaignMode = ['existing', 'new', 'standalone', 'detect'].indexOf(b.campaignMode) >= 0 ? b.campaignMode : 'existing';
+  if (b.topics != null) out.topics = (Array.isArray(b.topics) ? b.topics : []).map(t => stStr(t, 100)).filter(Boolean).slice(0, 12);
+  if (b.production != null) out.production = b.production && typeof b.production === 'object' && (b.production.mode === 'editable' || b.production.mode === 'finished') ? { mode: b.production.mode, at: Number(b.production.at) || 0, by: stStr(b.production.by, 40), size: b.production.size ? stStr(b.production.size, 4) : undefined } : null;
   return out;
 }
 function stBriefText(p) {
@@ -8992,9 +9366,12 @@ async function stCopyStage(env, job, p, log) {
   const cc = await stCompileContext(env, p, { channels, log, stage: 'copy', refs: deliverable === 'copy' ? null : { images: 2, mode: inp.refMode, chosen: inp.refs }, art: deliverable === 'copy' ? 0 : 4 }); const ctx = cc.ctx;
   // the creation mode was chosen on the brief; finished mode paints the mark from its file, so the file must exist before anything is spent
   // a variant produced from a narrative carries its own route; otherwise the project's creation mode decides
-  const finished = deliverable !== 'copy' && (inp.creationMode === 'finished' || inp.creationMode === 'editable' ? inp.creationMode === 'finished' : (p.brief || {}).creationMode === 'finished') && inp.imagery !== 'none';
+  // S17: in a guided project the copy step writes the words and the visual narrative only; the production mode (editable, or the
+  // whole piece painted by the image model) is chosen afterwards in Design, so nothing is rendered or painted here
+  const guided = stWfOn(p);
+  const finished = deliverable !== 'copy' && (inp.creationMode === 'finished' || inp.creationMode === 'editable' ? inp.creationMode === 'finished' : !guided && (p.brief || {}).creationMode === 'finished') && inp.imagery !== 'none';
   // the brief may say the imagery waits for the copy: the words and layouts are made now, the renders when Design asks (render:true forces them)
-  const afterCopy = (p.brief || {}).imageryTiming === 'after_copy';
+  const afterCopy = guided || (p.brief || {}).imageryTiming === 'after_copy';
   let markFiles = null;
   if (finished) {
     markFiles = await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
@@ -9090,7 +9467,7 @@ async function stCopyStage(env, job, p, log) {
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, inp.variant && direction ? stStr('Narrative: ' + direction.title, 60) : deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
     const bgRegion = how === 'plan' ? (layout.regions || []).find(x => x.role === 'background') : null;
-    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', trace: direction && direction.trace ? Object.assign({}, direction.trace, { direction: direction.id, directionTitle: direction.title, route: direction.route || '', format: direction.format || '' }) : undefined, claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
+    const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', trace: direction && direction.trace ? Object.assign({}, direction.trace, { direction: direction.id, directionTitle: direction.title, route: direction.route || '', format: direction.format || '' }) : undefined, basis: guided ? Object.assign(stWfBasis(p), { direction: direction ? direction.id : '' }) : undefined, claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
     assets.push(aid); versions.push(v.id);
     if (deliverable !== 'copy' && inp.render !== false && !(afterCopy && inp.render !== true)) {
       if (how === 'plan' || finished) renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true, marks: markFiles ? markFiles.marks : undefined }));
@@ -9099,7 +9476,7 @@ async function stCopyStage(env, job, p, log) {
   }
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='production', revision=revision+1, updated=? WHERE id=?").bind(Date.now(), p.id).run();
   await log.phase('queueing', channels.length + ' composition' + (channels.length === 1 ? '' : 's') + ' written' + (renders.length ? '; ' + renders.length + ' render job' + (renders.length === 1 ? '' : 's') + ' queued' : ''), { completed: channels.length, total: channels.length, renders: renders.length });
-  if (afterCopy && deliverable !== 'copy' && inp.render !== false && inp.render !== true) await log('info', 'the brief says the imagery waits for the copy: no render queued; generate it in Design once the words are ready');
+  if (afterCopy && deliverable !== 'copy' && inp.render !== false && inp.render !== true) await log('info', guided ? 'the copy and the visual narrative are written: no render queued; the production mode and the imagery are chosen in Design once the words are ready' : 'the brief says the imagery waits for the copy: no render queued; generate it in Design once the words are ready');
   if (fallbacks.length) await log('info', 'house composition used for ' + fallbacks.join('; ') + ' - not a plan, shown as such on the version');
   if (incomplete) await log('info', incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete: the campaign mark is not on file; nothing drawn in its place, approval and export wait for the file');
   await log('out', assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ' written' + (mediums.length ? ' (' + mediums.join('; ') + ')' : '') + (flagged ? ', ' + flagged + ' with checks to look at' : ', every figure traced') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued at ' + size : deliverable === 'copy' ? '; copy only, no renders' : '; no renders queued'));
@@ -10663,6 +11040,8 @@ async function stImageryQueue(env, p, a, body, who) {
   const L = v.layout || {}; const finished = v.mode === 'finished' || !!L.finished;
   if (v.mode === 'copy' || !(L.layers || L.regions || finished)) return { error: 'copy_only', status: 409, detail: 'A copy-only asset has no imagery to make.' };
   if (!env.GEMINI_KEY) return { error: 'gemini_not_configured', status: 409, detail: 'Image generation is not configured on the worker (GEMINI_KEY).' };
+  // S17: in a guided project no render is spent on words that may still change: the piece's copy is marked ready for design first
+  if (stWfOn(p)) { const st0 = await stStanding(env, a); if (!st0.copy) return { error: 'copy_not_ready', status: 409, detail: 'Mark this piece\'s copy ready for design first: no render is spent on words that may still change.' }; }
   if ((v.context || {}).imagery === 'none' && !body.again) return { error: 'no_imagery_by_choice', status: 409, detail: 'This version was made with no imagery on purpose (type only). Ask for imagery as a new direction instead.' };
   const hasImage = !!(v.image && v.image.key) || (L.layers || []).some(l => l.type === 'img' && l.region && l.src);
   if (hasImage && !body.again) return { error: 'has_imagery', status: 409, detail: 'This version already has its imagery. Re-render from the Art direction area, which says what it changes.' };
@@ -13337,6 +13716,8 @@ const AXIOM_WORKER = {
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
           if (path === '/studio/intake/feed') return jsonResp(await stIntakeFeed(env, qf('ns')));
+          if (path === '/studio/clients') return jsonResp(await stClients(env, String(qf('ns') || '').split(',')));
+          if (path === '/studio/workflow') { const p = await stGet(env, qf('project'), { light: true }); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp({ ok: true, workflow: p.workflow }); }
           if (path === '/studio/intel') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const it = await stIntelGet(env, p.id, qf('id')); return it ? jsonResp({ ok: true, intel: it }) : jsonResp({ error: 'no_analysis', detail: 'Nothing has been analysed in this project yet.' }, 404); }
           if (path === '/studio/texts') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_texts WHERE project=? ORDER BY created DESC LIMIT 200').bind(p.id).all()).results || []; return jsonResp({ ok: true, texts: rows.map(stTextRow), kinds: ST_TEXT_KINDS }); }
           if (path === '/studio/brief/check') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const ns0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_sources WHERE project=?').bind(p.id).first(); const nd0 = await env.MIND_DB.prepare('SELECT COUNT(*) AS n FROM studio_directions WHERE project=?').bind(p.id).first(); const chk = await stBriefCheck(env, p, null, { hasSource: Number((ns0 || {}).n) > 0, hasDirection: Number((nd0 || {}).n) > 0, instruction: qf('instruction') }); let brand = null; try { const ws = await brandWorkspace(env, p.ns, p.campaign || ''); if (ws && ws.readiness) brand = { state: ws.readiness.state, blocking: ws.readiness.blocking, gaps: ws.readiness.gaps.length, conflicts: ws.readiness.conflicts, outdated: ws.readiness.outdated.length }; } catch (e) {} return jsonResp(Object.assign({ ok: true, brand }, chk)); }
@@ -13420,6 +13801,14 @@ const AXIOM_WORKER = {
           await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + name + ' (' + paras.length + ' passages, from ' + stStr(prov, 120) + '). It is read against the client as a job (stage analyse).', source: sid }, who);
           return jsonResp({ ok: true, id: sid, name, kind, passages: paras.length });
         }
+        // S17: a person confirms a step of the guided workflow (brief reviewed, objectives, strategy); downstream work is never touched silently
+        if (path === '/studio/workflow/confirm') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          const r = await stWfConfirm(env, p, sb, who);
+          if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
+          await stBump(env, p.id);
+          return jsonResp(Object.assign({}, r, await stGet(env, p.id, { light: true })));
+        }
         if (path === '/studio/intel/select' || path === '/studio/intel/decision') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
           const it = await stIntelGet(env, p.id, sb.intel || ((p.brief || {}).intel || {}).id); if (!it) return jsonResp({ error: 'no_analysis' }, 404);
@@ -13434,6 +13823,7 @@ const AXIOM_WORKER = {
             return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true })));
           }
           // a selection: the objective, a key message under it, a response strategy, a direction; each is recorded and the brief follows
+          if (stWfOn(p)) { const g = (sb.objective || sb.message) ? await stWfGate(env, p, 'objectives') : null; const g2 = !g && sb.strategy ? await stWfGate(env, p, 'strategy') : null; const gg = g || g2; if (gg) return jsonResp({ ok: false, error: gg.error, detail: gg.detail, step: gg.step, need: gg.need }, gg.status); }
           const obj = (it.objectives || []).find(o => o.id === sb.objective) || null;
           const msgs = [].concat(...(it.objectives || []).map(o => (o.messages || []).map(m => Object.assign({ objective: o.id }, m))));
           const msg = msgs.find(m => m.id === sb.message) || null; const strat = (it.strategies || []).find(s => s.id === sb.strategy) || null;
@@ -13518,8 +13908,40 @@ const AXIOM_WORKER = {
           await stBump(env, p.id); await stEvent(env, p.id, 'direction', { text: (sb.chosen ? 'Direction chosen: ' : 'Direction recorded: ') + stStr((sb.data || {}).title || '', 80), direction: id }, who);
           return jsonResp({ ok: true, id });
         }
+        // S17: the team works on the directions themselves: save for later, set aside, edit a line, duplicate
+        if (path === '/studio/direction/update' || path === '/studio/direction/duplicate') {
+          const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
+          const pr = await stProject(env, d.project); if (!pr) return jsonResp({ error: 'unknown_project' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pr.id) return jsonResp({ error: 'cross_project' }, 403);
+          const data = pjs(d.data, {});
+          if (path === '/studio/direction/duplicate') {
+            const nid = stId('d'); const copy = Object.assign({}, data, { title: stStr((data.title || 'Direction') + ' (copy)', 60), duplicatedFrom: d.id, saved: false, archived: false });
+            await env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(nid, pr.id, jsonFit(copy, 12000), 0, who, Date.now()).run();
+            await stBump(env, pr.id); await stEvent(env, pr.id, 'direction', { text: 'Duplicated the direction "' + stStr(data.title, 60) + '" to work on a variation of it.', direction: nid }, who);
+            return jsonResp(Object.assign({ ok: true }, await stGet(env, pr.id, { light: true }), { direction: nid }));
+          }
+          const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {}; const next = Object.assign({}, data); const changed = [];
+          ['title', 'idea', 'message', 'hook', 'headline', 'audience', 'tone', 'layout', 'why', 'visual', 'opening'].forEach(k => { if (patch[k] != null && stStr(patch[k], 400) !== (data[k] || '')) { next[k] = stStr(patch[k], k === 'title' ? 60 : 400); changed.push(k); } });
+          if (patch.saved != null) { next.saved = !!patch.saved; changed.push(patch.saved ? 'saved' : 'unsaved'); }
+          if (patch.archived != null) { next.archived = !!patch.archived; changed.push(patch.archived ? 'set aside' : 'restored'); }
+          if (!changed.length) return jsonResp({ ok: true, unchanged: true });
+          if (changed.some(k => ['title', 'idea', 'message', 'hook', 'headline', 'audience', 'tone', 'layout', 'why', 'visual', 'opening'].indexOf(k) >= 0)) { next.edited = true; next.editedBy = stStr(who, 40); next.editedAt = Date.now(); }
+          await env.MIND_DB.prepare('UPDATE studio_directions SET data=? WHERE id=?').bind(jsonFit(next, 12000), d.id).run();
+          await stBump(env, pr.id); await stEvent(env, pr.id, 'direction', { text: 'Direction "' + stStr(next.title, 60) + '": ' + changed.join(', ') + '.', direction: d.id }, who);
+          if (patch.archived && sb.reason) await stIntelLog(env, pr.ns, pr.id, 'reject_direction', d.id, stStr(next.title, 80) + ' - because: ' + stStr(sb.reason, 300), who);
+          return jsonResp(Object.assign({ ok: true, changed }, await stGet(env, pr.id, { light: true })));
+        }
+        if (path === '/studio/production') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          const r = await stProduction(env, p, sb, who);
+          if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
+          await stBump(env, p.id);
+          return jsonResp(r);
+        }
+        if (path === '/studio/campaign/create') { const r = await stCampaignCreate(env, sb, who); return jsonResp(Object.assign({ ok: !r.error }, r), r.status || 200); }
         if (path === '/studio/direction/choose') {
           const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
+          { const pr0 = await stProject(env, d.project); if (pr0 && stWfOn(pr0)) { const g = await stWfGate(env, pr0, 'choose'); if (g) return jsonResp({ ok: false, error: g.error, detail: g.detail, step: g.step, need: g.need }, g.status); const dd0 = pjs(d.data, {}); if (dd0.basis && !stWfItemCurrent(pr0, { id: d.id }, dd0.basis)) return jsonResp({ ok: false, error: 'direction_earlier', detail: 'This direction was built on an earlier objective, message or strategy. Keep the existing directions under the current choice, or choose one built on it.' }, 409); } }
           await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE studio_directions SET chosen=0 WHERE project=?').bind(d.project), env.MIND_DB.prepare('UPDATE studio_directions SET chosen=1 WHERE id=?').bind(d.id)]);
           await stBump(env, d.project); await stEvent(env, d.project, 'direction', { text: 'Direction chosen: ' + stStr(pjs(d.data, {}).title || '', 80) + '. Saved as the project decision; nothing saved as a rule.', direction: d.id }, who);
           { const dd = pjs(d.data, {}); const pr = await stProject(env, d.project); if (pr) await stIntelLog(env, pr.ns, pr.id, 'direction', d.id, stStr(dd.title, 80) + (dd.approach ? ' (' + dd.approach + ', ' + (dd.route || 'editable') + ')' : '') + ': ' + stStr(dd.idea || dd.message, 200), who); }
@@ -13589,7 +14011,7 @@ const AXIOM_WORKER = {
             }
           }
           // a hand edit keeps what the composition was made from (its plan, medium, master), so an adaptation or an inspection later still knows it
-          const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
+          const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of', 'basis', 'trace', 'direction', 'creationMode', 'imagery'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
           let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved ? stStr((sb.note || 'layout edited') + ' (a rule-held mark moved against the campaign rule, deliberately)', 200) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context || carry };
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
@@ -13752,7 +14174,7 @@ const AXIOM_WORKER = {
         }
         if (path === '/studio/job') {
           const r = await stJobCreate(env, sb, who);
-          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '' }, r.status || 400);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '', step: r.step, need: r.need }, r.status || 400);
           return jsonResp({ ok: true, existing: r.existing, job: r.job });
         }
         if (path === '/studio/job/step') { const j = await stJobStep(env, sb.id); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
