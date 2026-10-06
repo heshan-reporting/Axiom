@@ -46,21 +46,6 @@
 .st .st-copy-ctx{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--st-line);padding-top:8px}
 .st .st-copy-count{font-family:var(--fm,monospace);font-size:11px;color:var(--st-ink-2);align-self:center}
 
-/* ---- Design: the dock over the canvas and the creation mode */
-.st .st-dock{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;margin:6px 0 8px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:8px}
-.st .st-dock-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid transparent;border-radius:6px;padding:5px 10px;font:inherit;font-size:var(--st-fs-s,12px);color:var(--st-ink-2);cursor:pointer}
-.st .st-dock-btn:hover:not([disabled]){background:var(--st-raised,var(--st-ground));color:var(--st-ink)}
-.st .st-dock-btn.on{color:var(--st-ink);border-color:var(--st-accent);background:color-mix(in srgb,var(--st-accent) 8%,transparent)}
-.st .st-dock-btn[disabled]{opacity:.45;cursor:not-allowed}
-.st .st-dock-btn:focus-visible{outline:2px solid var(--st-focus,var(--st-accent));outline-offset:1px}
-.st .st-dock-ic{width:14px;text-align:center;font-size:12px;line-height:1;color:var(--st-ink-3)}
-.st .st-dock-ic.ic-design::before{content:"\25A6"}
-.st .st-dock-ic.ic-text::before{content:"T";font-weight:700}
-.st .st-dock-ic.ic-images::before{content:"\25A8"}
-.st .st-dock-ic.ic-brand::before{content:"\25C6"}
-.st .st-dock-ic.ic-layers::before{content:"\2261"}
-.st .st-dock-ic.ic-partner::before{content:"\2726"}
-.st .st-modeseg{margin-left:auto}
 .st .st-tool-anchor{scroll-margin-top:calc(var(--st-head-h,46px) + 72px)}
 .st .st-imagery-wait{margin:8px 0;padding:10px 12px;border:1px solid var(--st-warn);border-radius:8px;background:color-mix(in srgb,var(--st-warn) 8%,transparent);font-size:var(--st-fs-s,12px)}
 

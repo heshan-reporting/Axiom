@@ -29,7 +29,7 @@
   ];
   const TYPE_CHANNELS = { campaign: ['facebook', 'instagram', 'linkedin'], response: ['facebook', 'x', 'linkedin'], social: ['facebook', 'instagram'], paid: ['facebook', 'instagram'], announcement: ['linkedin', 'facebook', 'x'], news_response: ['x', 'facebook', 'linkedin'], explainer: ['instagram', 'linkedin'], brand: ['instagram', 'linkedin'], reactive: ['x', 'facebook'], other: ['facebook', 'instagram'] };
   const STEP_WORD = { not_started: 'Not started', in_progress: 'In progress', processing: 'Processing', needs_review: 'Needs review', complete: 'Complete', locked: 'Locked', error: 'Error', skipped: 'Skipped' };
-  const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Directions', copy: 'Copy', design: 'Design', review: 'Review' };
+  const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Directions', copy: 'Copy', design: 'Design', review: 'Review & Delivery' };
   const STARTS = [
     ['brief', 'Paste a Brief', 'pen'], ['situation', 'Describe a Situation', 'chat'], ['article', 'Paste an Article', 'news'], ['url', 'Add a URL', 'link'],
     ['file', 'Upload Files', 'upload'], ['screenshot', 'Upload Screenshot', 'image'], ['campaign', 'Use Existing Campaign', 'flag'], ['axiom', 'Start With Axiom', 'sparkle'],

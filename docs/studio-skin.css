@@ -13,7 +13,7 @@
   /* the mockup palette */
   --sk-bg:#101318; --sk-panel:#191d24; --sk-raised:#232831; --sk-hover:#2a303a; --sk-line:#303741; --sk-line-2:#3b4350;
   --sk-ink:#edf0f5; --sk-ink-2:#c9d0da; --sk-sub:#a5afbd; --sk-quiet:#8b97a7; --sk-canvas:#0c1015;
-  --sk-accent:var(--st-client-accent,#5dd4e5); --sk-accent-ink:#062e39;
+  --sk-accent:var(--st-client-accent,#5dd4e5); --sk-accent-ink:var(--st-client-ink,#062e39);
   --sk-soft:color-mix(in srgb,var(--sk-accent) 14%,#101318); --sk-soft-2:color-mix(in srgb,var(--sk-accent) 22%,#101318);
   --sk-good:#93dcb5; --sk-warn:#f5c27a; --sk-bad:#f5a08a;
   --sk-r-xs:5px; --sk-r-sm:7px; --sk-r:10px; --sk-r-lg:14px; --sk-r-xl:16px;
@@ -107,102 +107,16 @@
 #studio-root .st .ov-table tbody tr:hover td{background:color-mix(in srgb,var(--sk-raised) 45%,transparent)}
 #studio-root .st .ov-table tr:last-child td{border-bottom:0}
 
-/* ---------------------------------------------------------------------------------------------- the frame: header */
-#studio-root .st .st-head{min-height:68px;padding:14px 20px;gap:18px;background:color-mix(in srgb,var(--sk-panel) 92%,transparent);
-  backdrop-filter:saturate(1.3) blur(10px);-webkit-backdrop-filter:saturate(1.3) blur(10px);border-bottom:1px solid var(--sk-line);flex-wrap:nowrap}
-#studio-root .st .st-head-l{gap:18px;flex-wrap:nowrap;min-width:0;flex:1}
-#studio-root .st .st-hbrand{display:flex;align-items:center;gap:9px;flex-shrink:0;padding-right:18px;border-right:1px solid var(--sk-line);height:32px}
-#studio-root .st .st-brandmark{width:27px;height:27px;display:grid;place-items:center;border:1px solid var(--sk-sub);border-radius:7px;font:500 16px/1 var(--sk-display);color:var(--sk-ink);
-  background:linear-gradient(160deg,color-mix(in srgb,var(--sk-accent) 18%,transparent),transparent 60%)}
-#studio-root .st .st-brandname{font:750 14px/1 var(--sk-display);letter-spacing:.16em;color:var(--sk-ink)}
-#studio-root .st .st-appname{font:400 13px/1 var(--sk-font);color:var(--sk-sub);letter-spacing:0;text-transform:none}
-#studio-root .st .st-ptitle-block{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-#studio-root .st .st-ptitle-row{display:flex;align-items:center;gap:8px;min-width:0}
-#studio-root .st .st-ptitle{font:650 14px/1.2 var(--sk-display);color:var(--sk-ink);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#studio-root .st .st-allp{font-size:12px;color:var(--sk-sub);white-space:nowrap}
-#studio-root .st .st-allp:hover{color:var(--sk-ink)}
-#studio-root .st .st-psub{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--sk-sub)}
-#studio-root .st .st-psub .st-chip{padding:3px 6px;font-size:10px}
-#studio-root .st .st-libword{font:600 13px/1 var(--sk-display);color:var(--sk-ink-2);flex:1}
-#studio-root .st .st-sep{color:var(--sk-line-2)}
-#studio-root .st .st-client{min-width:200px;font-weight:550}
-#studio-root .st .st-head-r{gap:10px;flex-wrap:nowrap}
-#studio-root .st .st-save{font-size:11.5px;color:var(--sk-sub);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
-#studio-root .st .st-save::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--sk-good);box-shadow:0 0 0 3px color-mix(in srgb,var(--sk-good) 18%,transparent)}
-#studio-root .st .st-save.busy::before{background:var(--sk-warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--sk-warn) 18%,transparent);animation:sk-pulse 1.1s var(--sk-ease) infinite}
-#studio-root .st .st-save.bad::before{background:var(--sk-bad)}
-#studio-root .st .st-activity{font:550 11.5px/1 var(--sk-font);color:var(--sk-ink-2);background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:999px;padding:7px 12px;display:inline-flex;gap:7px;align-items:center;cursor:pointer;transition:border-color .18s,background-color .18s}
-#studio-root .st .st-activity:hover{border-color:var(--sk-line-2);background:var(--sk-raised)}
-#studio-root .st .st-activity.on{color:var(--sk-accent);border-color:color-mix(in srgb,var(--sk-accent) 45%,transparent);background:var(--sk-soft)}
-#studio-root .st .st-activity.bad{color:var(--sk-bad);border-color:color-mix(in srgb,var(--sk-bad) 45%,transparent)}
-#studio-root .st .st-prov{font:550 10.5px/1 var(--sk-font);padding:6px 9px;border-radius:999px;background:var(--sk-panel);border:1px solid var(--sk-line);color:var(--sk-sub);display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
-#studio-root .st .st-prov::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
-#studio-root .st .st-prov.ok{color:var(--sk-good)}
-#studio-root .st .st-prov.bad{color:var(--sk-bad)}
-
-/* ---------------------------------------------------------------------------------------------- the six steps */
-#studio-root .st .st-steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;padding:0 16px;background:var(--sk-panel);border-bottom:1px solid var(--sk-line);top:var(--st-head-h,68px)}
-#studio-root .st .st-step{position:relative;display:flex;align-items:center;gap:10px;min-width:0;padding:15px 8px 14px;border:0;border-bottom:0;background:transparent;color:var(--sk-sub);cursor:pointer;text-align:left;border-radius:0;transition:background-color .2s var(--sk-ease)}
-#studio-root .st .st-step::after{content:'';position:absolute;left:6px;right:6px;bottom:0;height:2px;border-radius:2px 2px 0 0;background:var(--sk-accent);transform:scaleX(0);transform-origin:left center;transition:transform .45s var(--sk-ease-out)}
-#studio-root .st .st-step.on::after{transform:scaleX(1)}
-#studio-root .st .st-step:hover{background:color-mix(in srgb,var(--sk-raised) 50%,transparent)}
-#studio-root .st .st-step-n{width:26px;height:26px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--sk-line-2);border-radius:50%;font:600 10.5px/1 var(--sk-font);font-variant-numeric:tabular-nums;color:var(--sk-sub);background:transparent;grid-row:auto;transition:background-color .3s var(--sk-ease),color .3s,border-color .3s,box-shadow .3s}
-#studio-root .st .st-step-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
-#studio-root .st .st-step-l{font:650 12.5px/1.2 var(--sk-display);color:var(--sk-ink);letter-spacing:-.005em}
-#studio-root .st .st-step-meta{display:flex;align-items:center;gap:0;min-width:0;font-size:10.5px;color:var(--sk-sub);white-space:nowrap;overflow:hidden}
-#studio-root .st .st-step-sub{overflow:hidden;text-overflow:ellipsis}
-#studio-root .st .st-step-note{font-size:10.5px;color:var(--sk-quiet);overflow:hidden;text-overflow:ellipsis}
-#studio-root .st .st-step-note:not(:empty)::before{content:'\00b7';margin:0 5px;color:var(--sk-line-2)}
-#studio-root .st .st-step.on .st-step-n{background:var(--sk-accent);border-color:transparent;color:var(--sk-accent-ink);box-shadow:0 0 0 4px color-mix(in srgb,var(--sk-accent) 18%,transparent)}
-#studio-root .st .st-step.done .st-step-n{background:color-mix(in srgb,var(--sk-good) 14%,var(--sk-panel));border-color:transparent;color:var(--sk-good)}
-#studio-root .st .st-step.done.on .st-step-n{background:var(--sk-accent);color:var(--sk-accent-ink)}
-#studio-root .st .st-step.current:not(.on) .st-step-n{border-color:color-mix(in srgb,var(--sk-warn) 70%,transparent);color:var(--sk-warn)}
-#studio-root .st .st-step.running .st-step-n{border-color:var(--sk-accent);color:var(--sk-accent)}
-#studio-root .st .st-step.blocked .st-step-l, #studio-root .st .st-step.blocked .st-step-meta{color:var(--sk-quiet)}
-#studio-root .st .st-step.blocked .st-step-n{border-style:dashed;opacity:.7}
-#studio-root .st .st-step.skipped .st-step-l{text-decoration:line-through;text-decoration-color:var(--sk-quiet);opacity:.75}
-#studio-root .st .st-step-live{position:absolute;top:12px;left:28px;width:8px;height:8px;border-radius:50%;background:var(--sk-accent);box-shadow:0 0 0 0 color-mix(in srgb,var(--sk-accent) 60%,transparent);animation:sk-ring 1.6s var(--sk-ease) infinite}
-
-/* ---------------------------------------------------------------------------------------------- body columns */
-#studio-root .st .st-body{background:var(--sk-bg);gap:0}
-#studio-root .st .st-centre{min-width:0;animation:sk-rise .42s var(--sk-ease-out) both}
-#studio-root .st .st-centre-pad{padding:22px 24px 28px}
-#studio-root .st .st-rail{background:var(--sk-panel);border-right:1px solid var(--sk-line);padding:14px 10px;gap:16px;align-self:stretch}
-#studio-root .st .st-rail-handle{background:transparent;transition:background-color .2s}
-#studio-root .st .st-rail-handle:hover{background:color-mix(in srgb,var(--sk-accent) 40%,transparent)}
 #studio-root .st .st-railbtn{font:500 12px/1.3 var(--sk-font);color:var(--sk-ink-2);background:transparent;border:1px solid transparent;border-radius:var(--sk-r-sm);padding:8px 9px;transition:background-color .15s,border-color .15s,color .15s}
 #studio-root .st .st-railbtn:hover{background:var(--sk-raised);color:var(--sk-ink)}
 #studio-root .st .st-railbtn.on, #studio-root .st .st-railbtn[aria-current=true]{background:var(--sk-soft);border-color:color-mix(in srgb,var(--sk-accent) 45%,transparent);color:var(--sk-ink)}
 #studio-root .st .st-railbtn.asset{padding:6px;gap:9px}
 #studio-root .st .st-railbtn.asset canvas, #studio-root .st .st-railbtn.asset .st-comp{border-radius:4px;box-shadow:0 4px 12px -4px rgba(0,0,0,.6)}
 #studio-root .st .st-dot{box-shadow:0 0 0 3px color-mix(in srgb,currentColor 16%,transparent)}
-#studio-root .st .st-inspector{background:var(--sk-panel);border-left:1px solid var(--sk-line);padding:0 16px 18px;align-self:stretch}
-#studio-root .st .st-instabs{gap:16px;margin:0 -16px 14px;padding:0 16px;background:var(--sk-panel);border-bottom:1px solid var(--sk-line)}
-#studio-root .st .st-instab{padding:15px 0 11px;font:550 12px/1 var(--sk-font);color:var(--sk-sub);border-bottom:2px solid transparent;transition:color .15s,border-color .25s var(--sk-ease)}
-#studio-root .st .st-instab.on{color:var(--sk-ink);border-bottom-color:var(--sk-accent)}
-#studio-root .st .st-insp-head{padding:14px 0 10px;border-bottom:1px solid var(--sk-line);margin-bottom:12px}
-#studio-root .st .st-aside-open{background:var(--sk-panel);border:1px solid var(--sk-line);color:var(--sk-ink-2);border-radius:999px;padding:8px 14px;font:550 12px/1 var(--sk-font);box-shadow:var(--sk-sh-2)}
-
-/* ---------------------------------------------------------------------------------------------- stage head */
-#studio-root .st .st-stagehead{padding:4px 0 18px;margin-bottom:18px;border-bottom:1px solid var(--sk-line);gap:10px}
-#studio-root .st .st-stagehead-row{align-items:center;gap:20px}
-#studio-root .st .st-stagehead-main{gap:6px}
-#studio-root .st .st-eyebrow{display:flex;align-items:center;gap:8px;font:650 10px/1 var(--sk-font);letter-spacing:.16em;text-transform:uppercase;color:var(--sk-accent)}
-#studio-root .st .st-eyebrow-n{display:inline-grid;place-items:center;min-width:22px;height:18px;padding:0 5px;border-radius:5px;background:var(--sk-soft);color:var(--sk-accent);letter-spacing:.04em;font-variant-numeric:tabular-nums}
-#studio-root .st .st-stage-title{font:700 26px/1.15 var(--sk-display);letter-spacing:-.035em;color:var(--sk-ink);text-wrap:balance}
-#studio-root .st .st-stage-purpose{font-size:13px;color:var(--sk-sub);line-height:1.55;max-width:64ch}
-#studio-root .st .st-stagehead-acts{gap:8px}
-#studio-root .st .st-stage-next{margin:2px 0 0;padding:10px 12px;border-radius:var(--sk-r-sm);background:color-mix(in srgb,var(--sk-panel) 70%,transparent);border:1px solid var(--sk-line);font-size:12px;color:var(--sk-sub);max-width:none}
-#studio-root .st .st-stage-next .st-lbl{color:var(--sk-accent)}
-#studio-root .st .st-subnav{gap:4px;padding:3px;border:1px solid var(--sk-line);border-radius:9px;background:var(--sk-panel);width:max-content;max-width:100%;overflow-x:auto}
 #studio-root .st .st-subtab{border:0!important;border-radius:6px!important;padding:7px 12px!important;font:550 12px/1 var(--sk-font)!important;color:var(--sk-sub)!important;background:transparent!important;display:inline-flex;gap:7px;align-items:center;transition:background-color .18s,color .18s}
 #studio-root .st .st-subtab:hover{color:var(--sk-ink)!important}
 #studio-root .st .st-subtab.on{background:var(--sk-raised)!important;color:var(--sk-ink)!important;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 #studio-root .st .st-n{font:600 10px/1 var(--sk-font);padding:3px 6px;border-radius:999px;background:var(--sk-bg);color:var(--sk-sub);font-variant-numeric:tabular-nums}
-#studio-root .st .st-stagehead.compact{padding:0 0 12px;margin-bottom:12px}
-#studio-root .st .st-stagehead.compact .st-stage-title{font-size:19px;letter-spacing:-.025em}
-#studio-root .st .st-stagehead.compact .st-purpose-inline{display:none}
-#studio-root .st .st-blocked{font-size:12px;color:var(--sk-sub)}
 
 /* ---------------------------------------------------------------------------------------------- notices, busy, empty states */
 #studio-root .st .st-notice{margin:12px 24px 0;padding:12px 14px;border-radius:var(--sk-r);border:1px solid var(--sk-line);border-left:3px solid var(--sk-bad);background:var(--sk-panel);box-shadow:var(--sk-sh-2);animation:sk-drop .35s var(--sk-ease-out) both}
@@ -308,33 +222,9 @@
 #studio-root .st .st-copydeck-scroll{border:1px solid var(--sk-line);border-radius:var(--sk-r);background:var(--sk-panel);overflow:auto}
 
 /* ---------------------------------------------------------------------------------------------- Design: the desk */
-#studio-root .st .st-asset{display:grid;grid-template-columns:62px minmax(0,1fr);column-gap:14px;row-gap:0;align-items:start}
-#studio-root .st .st-asset > *{grid-column:2;min-width:0;margin-bottom:12px}
-#studio-root .st .st-asset > .st-dock{grid-column:1;grid-row:1 / span 40;margin-bottom:0;position:sticky;top:calc(var(--st-head-h,68px) + 74px);align-self:start}
-#studio-root .st .st-asset.preview{grid-template-columns:minmax(0,1fr)}
-#studio-root .st .st-asset.preview > *{grid-column:1}
-#studio-root .st .st-asset-head{padding:2px 0 4px;align-items:center}
-#studio-root .st .st-asset-title b{font:700 15px/1.3 var(--sk-display);letter-spacing:-.015em}
-#studio-root .st .st-dock{display:flex;flex-direction:column;align-items:stretch;gap:6px;padding:8px 5px;margin:0;background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:var(--sk-r-lg);box-shadow:var(--sk-sh-2);flex-wrap:nowrap}
-#studio-root .st .st-dock-btn{flex-direction:column;gap:5px;align-items:center;justify-content:center;padding:9px 2px 8px;border:0;border-radius:9px;background:transparent;color:var(--sk-sub);font:550 10px/1 var(--sk-font);letter-spacing:.01em;transition:background-color .18s var(--sk-ease),color .18s}
-#studio-root .st .st-dock-btn .st-dock-ic{display:grid;place-items:center;width:auto;transition:transform .2s var(--sk-ease)}
-#studio-root .st .st-dock-btn:hover:not(:disabled){background:var(--sk-raised);color:var(--sk-ink)}
-#studio-root .st .st-dock-btn:hover:not(:disabled) .st-dock-ic{transform:translateY(-1px)}
-#studio-root .st .st-dock-btn.on{background:var(--sk-soft);color:var(--sk-accent);border:0}
-#studio-root .st .st-dock-btn[disabled]{opacity:.35}
-#studio-root .st .st-dock .st-modeseg{margin:6px 0 0;padding:3px;flex-direction:column;border-radius:9px;gap:2px}
-#studio-root .st .st-dock .st-modeseg .st-segbtn{padding:6px 2px;font-size:9.5px;text-align:center;white-space:normal;line-height:1.15}
 #studio-root .st .st-stage{border-radius:var(--sk-r-lg);border:1px solid var(--sk-line);background-color:var(--sk-canvas);
   background-image:radial-gradient(color-mix(in srgb,var(--sk-sub) 16%,transparent) .8px,transparent .8px);background-size:15px 15px;padding:0 0 26px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 #studio-root .st .st-stage.checker{background-image:linear-gradient(45deg,#1a1f27 25%,transparent 25%),linear-gradient(-45deg,#1a1f27 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#1a1f27 75%),linear-gradient(-45deg,transparent 75%,#1a1f27 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
-#studio-root .st .st-stage-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:9px 12px;margin:0 0 22px;background:var(--sk-panel);border-bottom:1px solid var(--sk-line)}
-#studio-root .st .st-stage-tools .btn.sm{min-height:28px;padding:4px 10px;font-size:11.5px;background:var(--sk-raised);border-color:transparent;color:var(--sk-ink-2);box-shadow:none}
-#studio-root .st .st-stage-tools .btn.sm:hover:not(:disabled){background:var(--sk-hover);color:var(--sk-ink)}
-#studio-root .st .st-stage-tools .btn.sm.on{background:var(--sk-soft);color:var(--sk-accent)}
-#studio-root .st .st-stage-tools .st-sel{padding:5px 28px 5px 9px;font-size:11.5px;background-color:var(--sk-raised);border-color:transparent}
-#studio-root .st .st-stage-inner{position:relative;margin:0 auto}
-#studio-root .st .st-stage-inner > canvas, #studio-root .st .st-stage-inner .st-comp canvas, #studio-root .st .st-stage-inner .st-le{box-shadow:var(--sk-sh-art);border-radius:2px;transition:box-shadow .3s}
-#studio-root .st .st-stage-job{margin:12px auto 0;width:max-content;max-width:92%;padding:8px 12px;border-radius:999px;background:color-mix(in srgb,var(--sk-panel) 90%,transparent);border:1px solid var(--sk-line);box-shadow:var(--sk-sh-2);backdrop-filter:blur(8px)}
 #studio-root .st .st-comp-info{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--sk-sub);padding:8px 12px;background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:var(--sk-r-sm)}
 #studio-root .st .st-comp-tag{font-family:var(--sk-font);letter-spacing:.06em;text-transform:uppercase;font-size:10px}
 /* the page strip under the canvas */
@@ -403,31 +293,6 @@
 @keyframes sk-attn{0%,100%{box-shadow:none}30%{box-shadow:0 0 0 4px color-mix(in srgb,var(--sk-bad) 25%,transparent)}}
 
 /* ---------------------------------------------------------------------------------------------- responsive */
-@media (max-width:1180px){
-  #studio-root .st .st-steps{grid-template-columns:repeat(6,minmax(118px,1fr));overflow-x:auto}
-  #studio-root .st .st-step-sub{display:none}
-  #studio-root .st .st-step-note:not(:empty)::before{display:none}
-  #studio-root .st .st-stage-title{font-size:22px}
-}
-@media (max-width:900px){
-  #studio-root .st{border-radius:12px}
-  #studio-root .st .st-head{flex-wrap:wrap;padding:12px 14px}
-  #studio-root .st .st-hbrand{border-right:0;padding-right:0}
-  #studio-root .st .st-appname{display:none}
-  #studio-root .st .st-centre-pad{padding:18px 16px 24px}
-  #studio-root .st .st-asset{grid-template-columns:minmax(0,1fr)}
-  #studio-root .st .st-asset > *{grid-column:1}
-  #studio-root .st .st-asset > .st-dock{grid-row:auto;position:static;flex-direction:row;flex-wrap:wrap;justify-content:flex-start}
-  #studio-root .st .st-asset > .st-dock .st-dock-btn{flex:1 0 64px}
-  #studio-root .st .st-dock .st-modeseg{flex-direction:row;margin:0}
-}
-@media (max-width:640px){
-  #studio-root .st .st-steps{grid-template-columns:repeat(6,minmax(96px,1fr));padding:0 8px}
-  #studio-root .st .st-step{padding:11px 6px}
-  #studio-root .st .st-step-n{width:22px;height:22px}
-  #studio-root .st .st-stage-title{font-size:20px}
-  #studio-root .st .st-client{min-width:0;width:100%}
-}
 @media (pointer:coarse){
   #studio-root .st .btn, #studio-root .st .st-dock-btn, #studio-root .st .st-step, #studio-root .st .st-copy-pick, #studio-root .st .st-segbtn{min-height:44px}
   #studio-root .st .st-in, #studio-root .st .st-ta, #studio-root .st .st-sel{font-size:16px}
@@ -436,27 +301,7 @@
   #studio-root .st *, #studio-root .st *::before, #studio-root .st *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
 }
 
-/* the stage heading lands below the sticky header and navigator (both taller in this skin), its eyebrow in view */
-#studio-root .st .st-stage-title{scroll-margin-top:calc(var(--st-head-h,68px) + 104px)}
-#studio-root .st .st-asset, #studio-root .st .st-centre-pad{scroll-margin-top:calc(var(--st-head-h,68px) + 76px)}
 #studio-root .st .st-dir-title{text-transform:none;letter-spacing:-.01em}
-
-/* the step bar is taller in this skin (numbered steps with a sub-line): every sticky column starts below it, so the
-   inspector's tabs, the rail and its handle are never under the navigator (a click there used to land on a step) */
-#studio-root .st{--sk-steps-h:64px}
-#studio-root .st .st-steps{min-height:var(--sk-steps-h)}
-#studio-root .st .st-inspector{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));max-height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h))}
-#studio-root .st .st-rail{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));max-height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h));overflow-y:auto}
-#studio-root .st .st-rail-handle{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h))}
-#studio-root .st .st-rail-open{top:calc(var(--st-head-h,68px) + var(--sk-steps-h) + 8px)}
-#studio-root .st .st-asset > .st-dock{top:calc(var(--st-head-h,68px) + var(--sk-steps-h) + 12px)}
-/* the inspector is a fixed-height column: its tab bar never shrinks (it collapsed to a 1px strip under flexbox when the
-   column got shorter), and the column scrolls rather than squeezing its children */
-#studio-root .st .st-inspector{overflow-y:auto;overscroll-behavior:contain}
-#studio-root .st .st-inspector > *{flex-shrink:0}
-/* preview is the artwork alone: the step bar steps aside (the skin's grid outranks the shell's rule) */
-#studio-root .st.previewing .st-steps{display:none}
-#studio-root .st.previewing{--sk-steps-h:0px}
 
 /* ---- S15: the brief engine - material in, read against the client */
 #studio-root .st .st-analyse,#studio-root .st .st-analysis{background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;animation:sk-rise .32s cubic-bezier(.2,.7,.2,1) both}

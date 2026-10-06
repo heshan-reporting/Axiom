@@ -6,7 +6,7 @@
    the typical-duration reading. Loads before studio.js; also usable in Node for its tests. */
 (function (root) {
   'use strict';
-  const names = { render: 'Image generation', copy: 'Words and composition', direct: 'Creative directions', strategy: 'Creative strategy', concepts: 'Design exploration', extract: 'Source analysis', analyse: 'Brief analysis', kit: 'Message kit', inspect: 'Art Director review', revise: 'Design revision', sequence: 'Campaign sequence', export: 'Export', echo: 'Connection check' };
+  const names = { render: 'Image generation', copy: 'Words and composition', direct: 'Creative directions', strategy: 'Creative strategy', concepts: 'Design exploration', extract: 'Source analysis', analyse: 'Brief analysis', kit: 'Message kit', inspect: 'Creative Director review', revise: 'Design revision', sequence: 'Campaign sequence', export: 'Export', echo: 'Connection check' };
   const active = j => !!j && (j.state === 'queued' || j.state === 'running');
   const percent = (done, total) => total > 0 ? Math.min(100, Math.max(0, Math.floor(done / total * 100))) : null;
   const fmt = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60 ? (s % 60) + ' s' : ''); };

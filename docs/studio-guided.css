@@ -6,10 +6,7 @@
    scoped to #studio-root. Motion explains a change of state and stops under reduced motion (end of file).
    ========================================================================================================== */
 
-/* ---------------------------------------------------------------------------------------------- the frame: seven steps, no rail before the copy */
-#studio-root .st .st-steps{grid-template-columns:repeat(7,minmax(0,1fr))}
-@media(max-width:1180px){#studio-root .st .st-steps{grid-template-columns:repeat(7,minmax(118px,1fr));overflow-x:auto}}
-@media(max-width:860px){#studio-root .st .st-steps{grid-template-columns:repeat(7,minmax(96px,1fr))}}
+/* ---------------------------------------------------------------------------------------------- the steps (the frame itself is studio-shell.css) */
 #studio-root .st .st-step.locked .st-step-l, #studio-root .st .st-step.locked .st-step-meta{color:var(--sk-quiet)}
 /* one line under each step's name: its note when it has one (the choice made, "Locked", "Needs review"), else what it is for */
 #studio-root .st .st-step-meta .st-step-note, #studio-root .st .st-step-meta .st-step-sub{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--sk-sub)}
@@ -31,9 +28,6 @@
 #studio-root .st .st-stepstate.error{color:var(--sk-bad);background:color-mix(in srgb,var(--sk-bad) 12%,var(--sk-panel))}
 #studio-root .st .st-stepstate.running{color:var(--sk-accent);background:var(--sk-soft)}
 #studio-root .st .st-stepstate.running .st-stepstate-dot{animation:sk-pulse 1.2s var(--sk-ease) infinite}
-#studio-root .st .st-body.early{grid-template-columns:minmax(0,1fr) 320px}
-#studio-root .st .st-body.early.noaside{grid-template-columns:minmax(0,1fr)}
-@media(max-width:1180px){#studio-root .st .st-body.early{grid-template-columns:minmax(0,1fr)}#studio-root .st .st-body.early .st-ctxaside{display:none}}
 #studio-root .st .st-notice.success{border-left-color:var(--sk-good);background:linear-gradient(90deg,color-mix(in srgb,var(--sk-good) 12%,var(--sk-panel)),var(--sk-panel) 45%)}
 
 /* ---------------------------------------------------------------------------------------------- shared pieces */
