@@ -447,7 +447,7 @@ section('evidence: tests/shot-layout-repair.png (synthetic fixture, real rendere
   ok(fs.statSync(file).size > 50000, 'written ' + path.relative(path.join(HERE, '..'), file) + ' (' + Math.round(fs.statSync(file).size / 1024) + ' KB)');
 }
 
-ok(!requests.some(u => /anthropic|googleapis|generativelanguage|workers\.dev/.test(u)), 'no request left the page for a model, a font CDN or the live worker (' + requests.length + ' requests, all to the local fixture origin)');
+{ const out = requests.filter(u => /anthropic|googleapis|generativelanguage|workers\.dev/.test(u)); ok(!out.length, 'no request left the page for a model, a font CDN or the live worker (' + requests.length + ' requests, all to the local fixture origin)' + (out.length ? ': ' + out.slice(0, 4).join(' ') : '')); }
 await browser.close();
 console.log('\n' + pass + ' passed, ' + fail + ' failed' + (HAVE_FONTS ? '' : ' (font cases skipped)'));
 process.exit(fail ? 1 : 0);

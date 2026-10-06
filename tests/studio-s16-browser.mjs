@@ -60,8 +60,9 @@ await T.t('two directions compared side by side, then produced as variants: each
   const rows = await page.$$eval(R + '.st-compare tbody tr', trs => trs.map(t => Array.from(t.children).map(c => c.innerText.trim()).join(' ')));
   ok(rows.some(r => /^Route editable layout Gemini finished/i.test(r.trim())), rows.join(' | ')); ok(rows.some(r => /^Approach data campaign continuation/i.test(r.trim())), rows.join(' | '));
   await page.click(R + '.st-compare button:has-text("Produce 2 as variants")');
-  await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-railbtn.asset').length >= 4, null, { timeout: 60000 });
-  const g = await api('GET', '/studio/get?id=' + P);
+  // the page stays on the Brief while the variants are made (the assets rail belongs to the later steps)
+  let g = null; for (let i = 0; i < 240; i++) { g = await api('GET', '/studio/get?id=' + P); if (g.assets.length >= 4 && !(g.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }
+  ok(g.assets.length >= 4, 'both variants produced: ' + g.assets.length);
   const fams = Array.from(new Set(g.assets.map(a => a.family))).sort(); eq(fams, ['Narrative: One striking poster', 'Narrative: The quiet road']);
   const cur = a => a.versions.find(v => v.id === a.current);
   ok(g.assets.filter(a => a.family === 'Narrative: The quiet road').every(a => cur(a).mode !== 'finished'), 'the editable direction is editable');
@@ -82,6 +83,9 @@ await T.t('the message kit is written from one direction, each piece traced and 
   // the kit is written from exactly one direction: tick that one (the comparison was left on the Brief before production)
   await page.uncheck(R + '.st-an-narr:has-text("One striking poster") .st-check input'); await page.check(R + '.st-an-narr:has-text("The quiet road") .st-check input');
   await page.click(R + '.st-kitpick button:has-text("Write the message kit")');
+  // the kit is written as a job; the page stays on the Brief and the kit is read in Copy's Message kit tab
+  for (let i = 0; i < 160 && !(((await api('GET', '/studio/texts?project=' + P)).texts || []).length); i++) await new Promise(r => setTimeout(r, 250));
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await page.click(R + '.st-subtab:has-text("Message kit")');
   await page.waitForSelector(R + '.st-kit-item', { timeout: 30000 });
   const items = await page.$$eval(R + '.st-kit-item h3', hs => hs.map(h => h.textContent)); ok(items.indexOf('Talking points') >= 0 && items.indexOf('Statement') >= 0, items.join(','));
   ok(/unsupported/.test(await page.textContent(R + '.st-kit-item:has(h3:text-is("Talking points"))')), 'the invented figure is flagged');

@@ -9,6 +9,7 @@
  * Run: node --experimental-sqlite tests/studio-s10-browser.mjs      (OCR_DIR=/path/with/node_modules for the OCR pass) */
 import fs from 'node:fs'; import path from 'node:path';
 import { makeStudio, runner, eq, ok, PHOTO } from './studio-fixture.mjs';
+import { openTool } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8800 });
 const { api, env } = fx;
 const R = '#studio-root ';
@@ -66,8 +67,9 @@ await T.t('the composed tile is drawn, measured and read back from its pixels: t
   page = await fx.open(); page.on('dialog', d => d.accept());
   await page.waitForSelector(R + '.st-lib tbody tr:has-text("S10 verification")'); await shot(page, 'library');
   await page.click(R + '.st-lib tbody tr:has-text("S10 verification") .ov-link'); await page.waitForSelector(R + '.st-railbtn.asset');
-  await page.click(R + '.st-step:has-text("Brief")'); await page.waitForSelector(R + '#brief-objective'); await shot(page, 'brief');
-  await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Brief"))'); await page.waitForSelector(R + '#brief-objective'); await shot(page, 'brief');
+  // the brief is an early step with no assets rail since S17: the composition is reached through Design
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.waitForSelector(R + '.st-railbtn.asset'); await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => { const c = document.querySelector('#studio-root .st-stage canvas'); return c && c.width > 300; });
   await page.waitForTimeout(1500);
   const comp = await page.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas'); return { png: c.toDataURL('image/png').split(',')[1], w: c.width, h: c.height }; });
@@ -112,9 +114,9 @@ await T.t('S9 + S8 + S5 in the page: an issue outlines its layer, the action sta
   await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-adreview'); const ad = (await page.textContent(R + '.st-adreview')).replace(/\s+/g, ' '); ok(/Advice, not approval|Not reviewed yet/.test(ad), ad.slice(0, 200)); await shot(page, 'art-director');
   await page.click(R + '.st-asset-acts .btn:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer'); const le = (await page.textContent(R + '.st-le-wrap')).replace(/\s+/g, ' ');
   ok(/held by the campaign rule/.test(le), 'the editor names the held mark: ' + le.slice(0, 300)); await shot(page, 'editor'); await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {});
-  await page.click(R + '.st-step:has-text("Review")'); await page.waitForSelector(R + '.st-approvals'); await shot(page, 'review');
-  await page.click(R + '.st-step:has-text("Export")'); await page.waitForTimeout(500); await shot(page, 'export');
-  await page.click(R + '.st-step:has-text("Design")'); await page.waitForSelector(R + '.st-railbtn:has-text("Brand")'); await page.click(R + '.st-railbtn:has-text("Brand")'); await page.waitForSelector(R + '.st-brand');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Review"))'); await page.waitForSelector(R + '.st-approvals'); await shot(page, 'review');
+  await page.click(R + '.st-subtab:has-text("Export")'); await page.waitForTimeout(500); await shot(page, 'export');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand');
   await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); });
   const br = (await page.textContent(R + '.st-brand')).replace(/\s+/g, ' '); ok(/approved rule, held/.test(br) && /by the approved placement rule/.test(br), 'the Brand workspace shows the taught rule: ' + br.slice(0, 300)); await shot(page, 'brand');

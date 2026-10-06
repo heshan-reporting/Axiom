@@ -5,6 +5,7 @@
  * the kit history names it, and a read-only key sees no Teach controls.
  * Run: node --experimental-sqlite tests/studio-brand-browser.mjs */
 import { makeStudio, runner, eq, ok, PHOTO } from './studio-fixture.mjs';
+import { openTool } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8796 });
 const { api } = fx;
 const R = '#studio-root ';
@@ -21,8 +22,7 @@ await api('POST', '/brand/kit', { ns: 'mca', facts: [{ text: 'Mining directly em
 let page;
 await T.t('the Brand workspace counts what the models can use and what is stored but never sent, names the recommendations with their actions, and lists the curated examples still wanted', async () => {
   page = await fx.open(); page.on('dialog', d => d.accept());
-  await page.waitForSelector(R + '.st-lib tbody tr:has-text("HOOF refs")'); await page.click(R + '.st-lib tbody tr:has-text("HOOF refs") .ov-link'); await page.waitForSelector(R + '.st-railbtn:has-text("Brand")');
-  await page.click(R + '.st-railbtn:has-text("Brand")'); await page.waitForSelector(R + '.st-brand');
+  await page.waitForSelector(R + '.st-lib tbody tr:has-text("HOOF refs")'); await page.click(R + '.st-lib tbody tr:has-text("HOOF refs") .ov-link'); await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand');
   await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await page.waitForFunction(S => { const el = document.querySelector('#studio-root ' + S); return el && /usable/.test(el.textContent) && !/Counting/.test(el.textContent); }, S);
   const t = (await page.textContent(R + S)).replace(/\s+/g, ' ');
@@ -69,8 +69,7 @@ await T.t('Teach this brand: inspect proposes the placement and the pending fact
 });
 await T.t('a read-only key sees the inventory and the evidence but no Teach controls', async () => {
   const p2 = await fx.open({ role: 'read' });
-  await p2.waitForSelector(R + '.st-lib tbody tr:has-text("HOOF refs")'); await p2.click(R + '.st-lib tbody tr:has-text("HOOF refs") .ov-link'); await p2.waitForSelector(R + '.st-railbtn:has-text("Brand")');
-  await p2.click(R + '.st-railbtn:has-text("Brand")'); await p2.waitForSelector(R + '.st-brand');
+  await p2.waitForSelector(R + '.st-lib tbody tr:has-text("HOOF refs")'); await p2.click(R + '.st-lib tbody tr:has-text("HOOF refs") .ov-link'); await openTool(p2, 'Brand'); await p2.waitForSelector(R + '.st-brand');
   await p2.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await p2.waitForFunction(S => { const el = document.querySelector('#studio-root ' + S); return el && /usable/.test(el.textContent) && !/Counting/.test(el.textContent); }, S);
   ok(await p2.$(R + '.st-place-table'), 'the evidence table is shown');

@@ -154,7 +154,9 @@
     return u ? html`<img class="st-clogo" src=${u} alt="" style=${{ width: (size || 44) + 'px', height: (size || 44) + 'px' }} />` : html`<span class="st-clogo ph" aria-hidden="true" style=${{ width: (size || 44) + 'px', height: (size || 44) + 'px', '--c': (c && c.accent) || '#5dd4e5' }}>${initials}</span>`;
   }
   /** Four steps before a project exists: what kind of work, for which client, in which campaign context, and the brief. */
-  function Wizard({ clients, clientId, preset, onCreate, onCancel, onClient, busy }) {
+  function Wizard({ clients, clientId, preset, onCreate, onCancel, onClient, busy, prov }) {
+    // the model that reads the brief is checked before it is asked for: without it the project is made, unanalysed
+    const noClaude = !!(prov && prov.claude === false); const NO_CLAUDE = 'Claude is not configured on the worker (ANTHROPIC_API_KEY): create the project now and analyse the brief once it is. Nothing is spent.';
     const pr = preset || {};
     const [step, setStep] = useState(0);
     const [type, setType] = useState(pr.type || '');
@@ -212,7 +214,7 @@
         ${step > 0 ? html`<button class="btn sm ghost" onClick=${() => setStep(step - 1)}><${Icon} n="back" size=${14} /> Back</button>` : html`<span></span>`}
         <span class="ov-dim">${step === 0 ? (type ? TYPES.find(t => t[0] === type)[1] + ' chosen' : 'Choose what kind of work this is') : step === 1 ? (client ? client.name : 'Choose the client') : step === 2 ? (cmode ? { existing: camp ? 'Inside ' + ((camps.find(c => c.id === camp) || {}).name || camp) : 'Choose the campaign', new: 'A new campaign in the kit', standalone: 'Standalone', detect: 'Axiom will recommend a campaign' }[cmode] : 'Choose the campaign context') : 'Analysing is one model call; nothing else is spent until you choose'}</span>
         ${step < 3 ? html`<button class="btn sm" disabled=${!can} onClick=${next}>Next <${Icon} n="arrow" size=${14} /></button>`
-          : html`<span class="st-wiz-go"><button class="btn sm ghost" disabled=${!!busy || (deliverable !== 'visual' && !(chs || []).length)} onClick=${() => make(false)}>Create without analysing</button><button class="btn sm" disabled=${!!busy || !hasMaterial || (deliverable !== 'visual' && !(chs || []).length)} title=${!hasMaterial ? 'Write, paste, link or upload the brief first' : ''} onClick=${() => make(true)}>Create and analyse <span class="ov-dim">(1 model call)</span></button></span>`}
+          : html`<span class="st-wiz-go"><button class="btn sm ghost" disabled=${!!busy || (deliverable !== 'visual' && !(chs || []).length)} onClick=${() => make(false)}>Create without analysing</button><button class="btn sm" disabled=${!!busy || noClaude || !hasMaterial || (deliverable !== 'visual' && !(chs || []).length)} title=${noClaude ? NO_CLAUDE : !hasMaterial ? 'Write, paste, link or upload the brief first' : ''} onClick=${() => make(true)}>Create and analyse <span class="ov-dim">(1 model call)</span></button></span>`}
       </div>
     </div>`;
   }
@@ -254,7 +256,8 @@
       </div>` : null}
     </div>`;
   }
-  function BriefWorkspace({ p, client, kit, busy, wf, job, now, durations, onAnalyse, onConfirm, onCampaign, onRetry, onCancel, onGo, onSaveBrief }) {
+  function BriefWorkspace({ p, client, kit, busy, wf, job, now, durations, onAnalyse, onConfirm, onCampaign, onRetry, onCancel, onGo, onSaveBrief, prov }) {
+    const noClaude = !!(prov && prov.claude === false);
     const ro = !canWrite() || p.readOnly; const it = p.intel && ((p.brief || {}).analysis || {}).intel === p.intel.id ? p.intel : null;
     const [again, setAgain] = useState(false);
     const [text, setText] = useState(''); const [kind, setKind] = useState('brief'); const [items, setItems] = useState([]);
@@ -272,7 +275,7 @@
         <${MaterialComposer} client=${client} kit=${kit} text=${text} setText=${setText} kind=${kind} setKind=${setKind} items=${items} setItems=${setItems} busy=${busy} />
         ${pending.length ? html`<label class="st-check st-pending"><input type="checkbox" checked=${useSources} onChange=${e => setUseSources(e.target.checked)} /> Include the ${pending.length} source${pending.length === 1 ? '' : 's'} already on the project (${pending.map(s => s.name).join(', ')})</label>` : null}
         <div class="st-stepbar"><div><b>Analyse the brief</b><span class="ov-dim">One model call reads ${n || 'the'} piece${n === 1 ? '' : 's'} of material: what happened, why it matters, what to keep, the objectives and the strategy Axiom recommends. Nothing else is spent.</span></div>
-          <div class="st-stepbar-acts"><button class="btn sm" disabled=${!!busy || !n} title=${!n ? 'Write, paste, link or upload the brief first' : ''} onClick=${go}><${Icon} n="sparkle" size=${14} /> Analyse brief</button></div></div>
+          <div class="st-stepbar-acts"><button class="btn sm" disabled=${!!busy || !n || noClaude} title=${noClaude ? 'Claude is not configured on the worker (ANTHROPIC_API_KEY): the brief is kept and is analysed once it is. Nothing is spent.' : !n ? 'Write, paste, link or upload the brief first' : ''} onClick=${go}><${Icon} n="sparkle" size=${14} /> Analyse brief</button></div></div>
       </section>` : null}
       ${it && !(live && again) ? html`<${UnderstandingReview} p=${p} it=${it} client=${client} kit=${kit} ro=${ro} busy=${busy} wf=${wf} onConfirm=${onConfirm} onCampaign=${onCampaign} onAgain=${() => setAgain(true)} />` : null}
       ${!it && !showCompose && !live && ro ? html`<div class="st-empty-state"><b>No brief has been analysed yet.</b><span>A full key adds the material and analyses it.</span></div>` : null}

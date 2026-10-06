@@ -110,7 +110,7 @@ await t('in the Studio the agency sees the link and the pinned comment, makes th
   await studio.evaluate(() => go('studio'));
   await studio.waitForSelector('#studio-root .st-lib tbody tr');
   await studio.click('#studio-root .st-lib tbody tr:has-text("Fuel tax review") .ov-link');
-  await studio.click('#studio-root .st-step:has-text("Review")');
+  await studio.click('#studio-root .st-step:has(.st-step-l:text-is("Review"))');
   await studio.waitForSelector('#studio-root .st-review');
   const tx = (await studio.textContent('#studio-root .st-review')).replace(/\s+/g, ' ');
   ok(/HOOF round 1/.test(tx) && /active/.test(tx) && /Make the headline bigger/.test(tx) && /Tania \(name as given\)/.test(tx) && /client approval/.test(tx) && /of an earlier version/.test(tx), tx.slice(0, 700));

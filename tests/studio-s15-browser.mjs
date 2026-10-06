@@ -47,15 +47,19 @@ await T.t('inside the Studio, opening a project is a history entry: Back returns
   await page.goForward(); await page.waitForFunction(() => !document.querySelector('#studio-root .st-lib') && /History project/.test(document.querySelector('#studio-root .st-head').textContent), null, { timeout: 15000 });
 });
 
-await T.t('a pasted daily brief is analysed at intake: kept and set aside, the campaign offered, the claims, angles and narratives with their routes, and the next step', async () => {
+await T.t('a pasted daily brief is analysed (a project made before the guided workflow, as the retired intake made it): kept and set aside, the campaign offered, the claims, angles and narratives with their routes, and the next step', async () => {
   const page = fx.page;
+  // the calls the retired intake made; guided projects read their material through the wizard and the Brief step (S17)
+  const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: '', title: 'AXIOM daily brief - 6 October 2026', brief: { objective: '', channels: ['instagram', 'facebook'], deliverable: 'set', campaignConfirmed: false }, idem: 's15:1' });
+  const src = await api('POST', '/studio/source', { project: pr.id, kind: 'analyse:daily', name: 'Daily brief: AXIOM daily brief - 6 October 2026', text: DAILY, provenance: 'daily brief' });
+  const jb = await api('POST', '/studio/job', { project: pr.id, stage: 'analyse', input: { source: src.id, kind: 'daily' }, idem: 'analyse:' + src.id });
+  for (let i = 0; i < 6; i++) { const j = (await api('POST', '/studio/job/step', { id: jb.job.id })).job; if (/done|failed/.test(j.state)) { eq(j.state, 'done', JSON.stringify(j.error || '')); break; } }
   await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib');
-  await page.click(R + 'button:has-text("New project")'); await page.waitForSelector(R + '.st-intake');
-  await page.click(R + '.st-intake .st-segbtn:has-text("A brief or article to analyse")');
-  await page.click(R + '.st-intake-an .st-segbtn:has-text("Today\'s daily brief")');
-  await page.fill(R + '.st-intake textarea', DAILY);
-  const sel = await page.$(R + '.st-intake select[aria-label="Campaign"]'); if (sel) await page.selectOption(R + '.st-intake select[aria-label="Campaign"]', '');
-  await page.click(R + '.st-intake-foot .btn:has-text("Create project")');
+  await page.selectOption(R + '.st-head select', 'aep'); await page.waitForFunction(() => /Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib-head') || {}).textContent || ''));
+  await page.selectOption(R + '.st-head select', 'mca'); await page.waitForSelector(R + '.st-lib tbody tr:has-text("AXIOM daily brief")');
+  await page.click(R + '.st-lib tbody tr:has-text("AXIOM daily brief") .ov-link');
+  // the reading made directions too, so the project opens on them; the reading itself sits on the Brief
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Brief"))');
   await page.waitForSelector(R + '.st-analysis', { timeout: 30000 });
   const strip = (await page.textContent(R + '.st-an-strip')).replace(/\s+/g, ' ');
   ok(/2 kept/.test(strip) && /2 set aside/.test(strip) && /1 not placed/.test(strip), strip);

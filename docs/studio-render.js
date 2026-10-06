@@ -435,8 +435,9 @@
     const wait = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
     const layers = ((layout && layout.layers) || []).filter(l => l.type === 'text' && displayedText(layout, l, copy || {}));
     const faces = new Set(); layers.forEach(l => { [layerFamily(l), kitFamily(layout, l), APP_FAMILY[roleKind(l)]].filter(Boolean).forEach(f => faces.add((l.italic ? 'italic ' : '') + (l.weight || 600) + ' 40px "' + f + '"')); });
-    // the faces a layer or the kit names are fetched first (their @font-face rules must exist before the browser can load them)
-    const fetches = []; layers.forEach(l => { [layerFamily(l), kitFamily(layout, l)].filter(Boolean).forEach(f => fetches.push(loadFace(f, l.weight || 600, l.italic))); });
+    // the faces a layer names are fetched first (their @font-face rules must exist before the browser can load them); a kit's
+    // family only when the catalogue knows it is on Google Fonts - a brand's own face renders where installed and is reported
+    const fetches = []; layers.forEach(l => { const kf = kitFamily(layout, l); [layerFamily(l), kf && fontEntry(kf) ? kf : ''].filter(Boolean).forEach(f => fetches.push(loadFace(f, l.weight || 600, l.italic))); });
     if (fetches.length) await wait(Promise.all(fetches), timeout);
     if (typeof document !== 'undefined' && document.fonts && document.fonts.load) { await wait(Promise.all(Array.from(faces).map(f => document.fonts.load(f).catch(() => []))), timeout); if (document.fonts.ready) await wait(document.fonts.ready, timeout); }
     const roles = {}; const fallback = [];

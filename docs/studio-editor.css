@@ -117,7 +117,10 @@
 #studio-root .st .st-layers .st-le-item{display:flex;align-items:center;gap:3px;min-width:0;padding:3px 4px;border-radius:6px}
 #studio-root .st .st-layers .st-le-item:hover, #studio-root .st .st-layers .st-le-item:focus-within{background:var(--sk-raised)}
 #studio-root .st .st-layers .st-le-item.on{background:var(--sk-soft)}
-#studio-root .st .st-layers .st-layer-pick{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+#studio-root .st .st-layers .st-layer-pick{flex:1 1 auto;min-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+/* the order, duplicate and delete controls are icons, so the layer's name always keeps its room in a narrow panel */
+#studio-root .st .st-layers .st-lord-ic{display:none;padding:2px 3px;line-height:0}
+#studio-root .st .st-layers .st-le-item:hover .st-lord-ic, #studio-root .st .st-layers .st-le-item:focus-within .st-lord-ic{display:inline-flex;align-items:center}
 #studio-root .st .st-layers .st-lock{flex:0 0 auto;padding:1px 4px;font-size:10px}
 #studio-root .st .st-layers .st-lord{display:none}
 #studio-root .st .st-layers .st-le-item:hover .st-lord, #studio-root .st .st-layers .st-le-item:focus-within .st-lord{display:inline-block}

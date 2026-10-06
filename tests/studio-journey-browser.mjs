@@ -1,7 +1,8 @@
 /* The Creative Studio workspace, journey by journey, in real Chromium against the worker module in this process
  * (SQLite behind the D1 API; stub Claude and Gemini that can be switched to fail; see studio-fixture.mjs).
  * MOCKED PROVIDERS: these journeys prove the page, its wiring and the worker agree - not what a live model answers.
- *   1. create -> client -> brief -> direction -> copy (ready for design) -> design -> review -> export (the zip unpacked, each PNG checked)
+ *   1. wizard (type, client, campaign, brief) -> understanding -> objectives -> strategy -> direction -> copy (ready for design)
+ *      -> production mode -> design -> review -> export (the zip unpacked, each PNG checked)
  *   2. save, reload and resume (the project, the stage, the asset, and unsaved brief edits)
  *   3. switch clients with no carried-over context (and a slow answer for the old client dropped)
  *   4. a no-imagery composition: complete, validated, nothing rendered
@@ -13,6 +14,7 @@
  * Run: node --experimental-sqlite tests/studio-journey-browser.mjs     (SHOT=1 writes tests/shots/journey-*.png) */
 import fs from 'node:fs';
 import { makeStudio, runner, eq, ok, pngSize, unzipStored } from './studio-fixture.mjs';
+import { wizardCreate, toDirections, selectDirection, generateCopy, markCopyReady, produce, step } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8792 });
 const { api, calls, env } = fx;
 const R = '#studio-root ';
@@ -20,14 +22,19 @@ const T = runner('studio-journey-browser (the workspace, end to end; providers M
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SHOTS = new URL('./shots/', import.meta.url).pathname; fs.mkdirSync(SHOTS, { recursive: true });
 const shot = async (page, name) => { if (process.env.SHOT) await page.screenshot({ path: SHOTS + 'journey-' + name + '.png' }); };
-const goStep = (pg, name) => pg.click(R + '.st-step:has-text("' + name + '")');
+const goStep = (pg, name) => pg.click(step(name));
+const goExport = async pg => { await goStep(pg, 'Review'); await pg.click(R + '.st-subtab:has-text("Export")'); };
+/* the library is read on opening and on a client switch: a project made through the routes shows after one */
+const reloadLibrary = async pg => { await pg.selectOption(R + '.st-head select', 'aep'); await pg.waitForFunction(() => /Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib-head') || {}).textContent || '')); await pg.selectOption(R + '.st-head select', 'mca'); await pg.waitForSelector(R + '.st-lib tbody tr'); };
+const stepTo = async id => { for (let i = 0; i < 20; i++) { const j = (await api('POST', '/studio/job/step', { id })).job; if (!j || /done|failed|cancelled/.test(j.state)) return j; } };
+const BRIEF = 'Something for regional voters about fuel tax credits: a crossbencher called the credit a subsidy for miners on regional radio, and we need an answer on social this week.';
 const itab = (pg, name) => pg.click(R + '.st-instab:has-text("' + name + '")');
 const latest = async ns => env.MIND_DB.db.prepare('SELECT id, title FROM studio_projects WHERE ns=? ORDER BY created DESC, rowid DESC LIMIT 1').get(ns);
 /* wait until the project has nothing queued or running (the page steps its jobs while it is open) */
 async function settle(pid, ms = 90000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle: ' + JSON.stringify((d.jobs || []).map(j => j.stage + ':' + j.state))); await sleep(300); } }
 /* open one asset in Design and wait for its measurement to be filed and passing */
 async function validated(page, title) {
-  if (!(await page.$(R + '.st-step.on:has-text("Design")'))) await goStep(page, 'Design');   // the canvas lives in Design (S13)
+  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) await goStep(page, 'Design');   // the canvas lives in Design (S13)
   await page.click(R + '.st-railbtn.asset:has-text("' + title + '")');
   await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
@@ -43,39 +50,30 @@ async function approveAll(page) {
 let J1 = null;
 
 /* ---------------------------------------------------------------------------------------------------- 1 */
-await T.t('1. create, choose the client, brief, choose a direction, write and mark the copy ready, design, review and export: the bundle holds exactly the approved versions at their native size', async () => {
+await T.t('1. the wizard, the understanding, the objective, the strategy and a direction; the copy written and marked ready; the production mode; design, review and export: the bundle holds exactly the approved versions at their native size', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-first');
-  ok(/No projects yet for Minerals Council of Australia/.test(await page.textContent(R + '.st-first')), 'the first-use state explains a project and offers three starts');
+  ok(/No projects yet for Minerals Council of Australia/.test(await page.textContent(R + '.st-first')), 'the first-use state explains a project and offers its starts');
+  ok(!/straight to production/.test(await page.textContent(R + '.st-first')), 'no start promises to skip the steps');
   eq(await page.inputValue(R + '.st-head select'), 'mca', 'the client is chosen in the context bar');
   await shot(page, 'first-use');
   await page.click(R + '.st-first-btn:has-text("A brief or one line")');
-  await page.waitForSelector(R + '.st-intake'); ok(await page.$(R + '.st-segbtn.on:has-text("A brief or one line")'), 'the start chosen on the empty state carries into the intake');
-  eq(await page.inputValue(R + '.st-intake select'), 'hoof', 'the campaign comes from the client kit');
-  await page.fill(R + '.st-intake textarea', 'Something for regional voters about fuel tax credits');
-  await page.click(R + '.st-intake-foot .btn:has-text("Create project")');
-  await page.waitForSelector(R + '.st-dir', { timeout: 30000 });
-  ok(/Fuel|regional/.test(await page.textContent(R + '.st-head .st-ptitle')) && /Hands Off Our Fuel/.test(await page.textContent(R + '.st-head')), 'project and campaign in the context bar');
-  ok(await page.$(R + '.st-step.on:has-text("Direction")'), 'the navigator is on Direction');
-  eq(await page.$$eval(R + '.st-railbtn.asset', x => x.length), 0, 'nothing produced before a choice');
-  // the brief: an edit is unsaved until saved, and the state says so
-  await goStep(page, 'Brief'); await page.waitForSelector(R + '#brief-audience');
-  await page.fill(R + '#brief-audience', 'Regional voters, farmers and tradies');
-  await page.waitForSelector(R + '.st-dirty'); ok(/Unsaved changes/.test(await page.textContent(R + '.st-stagehead')));
-  await page.click(R + '.st-stagehead .btn:has-text("Save brief")'); await page.waitForFunction(() => !document.querySelector('#studio-root .st-dirty'));
+  await page.waitForSelector(R + '.st-wiz');
+  await wizardCreate(page, { type: 'Campaign Creative', campaign: 'Hands Off Our Fuel', title: 'Something for regional voters', text: BRIEF });
+  ok(/Something for regional voters/.test(await page.textContent(R + '.st-head .st-ptitle')) && /Hands Off Our Fuel/.test(await page.textContent(R + '.st-head')), 'project and campaign in the context bar');
+  ok(await page.$(step('Brief', true)), 'the navigator is on the Brief, with the understanding to review');
+  eq(await page.$$eval(R + '.st-railbtn.asset', x => x.length), 0, 'nothing produced before a direction');
   const pr = await latest('mca'); J1 = pr.id;
-  eq((await api('GET', '/studio/get?id=' + pr.id)).brief.audience, 'Regional voters, farmers and tradies', 'the brief edit reached this project');
-  await shot(page, 'brief');
-  // the direction decides what production makes
-  await goStep(page, 'Direction'); await page.waitForSelector(R + '.st-dir');
+  await shot(page, 'understanding');
+  await toDirections(page);
   const g0 = calls.gemini;
-  await page.click(R + '.st-dir:nth-child(2) button:has-text("Choose this direction")');
-  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 30000 });
+  await selectDirection(page, 'Who it really is');
+  await generateCopy(page);
   let d = await settle(pr.id);
   eq(d.assets.length, 3, 'one asset per channel in the brief');
-  ok(d.assets.every(a => /from "Who it really is"/.test(a.versions[0].note)), 'every asset was made from the chosen direction: ' + d.assets.map(a => a.versions[0].note).join(' | '));
-  ok(calls.gemini - g0 >= 3, 'the background renders ran as jobs');
-  ok(await page.$(R + '.st-step.on:has-text("Copy")'), 'production lands on Copy: the words first');
+  ok(d.assets.every(a => /Who it really is/.test(JSON.stringify(a.versions[0].context || {}) + a.versions[0].note)), 'every asset was made from the chosen direction: ' + d.assets.map(a => a.versions[0].note).join(' | '));
+  eq(calls.gemini, g0, 'the words come first: no image call before the copy is ready');
+  ok(await page.$(step('Copy', true)), 'production lands on Copy: the words first');
   // copy: a headline edit on the chosen piece becomes a text version of that asset only
   const first = d.assets[0]; await page.click(R + '.st-copy-pick:has-text("' + first.title + '")'); await page.waitForSelector(R + '#st-cf-headline');
   const n0 = d.assets.map(a => a.versions.length);
@@ -88,27 +86,29 @@ await T.t('1. create, choose the client, brief, choose a direction, write and ma
   // each piece marked ready for design: the agency's copy approval of its current version
   // a piece whose words still carry checks asks first, naming them; the team has looked, and says yes
   const asked = []; const onDlg = dl => { asked.push(dl.message()); dl.accept(); }; page.on('dialog', onDlg);
-  for (const a of d.assets) {
-    await page.click(R + '.st-copy-pick:has-text("' + a.title + '")'); await page.waitForSelector(R + '.st-ready-check input:not([disabled])');
-    await page.click(R + '.st-ready-check input');
-    await page.waitForFunction(t => { const b = [...document.querySelectorAll('#studio-root .st-copy-pick')].find(x => x.textContent.indexOf(t) >= 0); return b && /Ready/.test(b.textContent); }, a.title, { timeout: 15000 });
-  }
+  await markCopyReady(page);
   page.off('dialog', onDlg);
   ok(asked.every(m => /still to look at/.test(m) && /Mark them ready for design anyway/.test(m)), 'any question named the checks: ' + asked.join(' | '));
-  ok(await page.$(R + '.st-step.done:has-text("Copy")'), 'Copy is done once every piece is ready');
+  await page.waitForSelector(R + '.st-step.done:has(.st-step-l:text-is("Copy"))', { timeout: 15000 });
   d = await api('GET', '/studio/get?id=' + pr.id);
   ok(d.assets.every(a => a.approvals.copy && a.approvals.copy.version === a.current && a.approvals.copy.reason === 'copy ready'), 'ready for design is the copy approval of the current version');
   await shot(page, 'copy');
+  // the production mode, then the imagery as jobs the page runs
+  await produce(page, 'editable');
+  d = await settle(pr.id);
+  ok(calls.gemini - g0 >= 3, 'the background renders ran as jobs once the mode was chosen');
   for (const a of d.assets) await validated(page, a.title);
   await shot(page, 'refine');
   // review: approvals name the exact version
   await approveAll(page);
   d = await api('GET', '/studio/get?id=' + pr.id);
-  ok(d.assets.every(a => a.approvals.copy && a.approvals.design && a.approvals.copy.version === a.current && a.approvals.design.version === a.current), 'both approvals stand on each current version');
-  ok(await page.$(R + '.st-step.done:has-text("Review")'), 'the navigator marks Review done');
+  // the words were approved before the imagery: that approval names the version it was given on and stands on the rendered
+  // one by its unchanged signature (carried); the design approval names the current version
+  ok(d.assets.every(a => a.approvals.copy && a.approvals.design && (a.approvals.copy.version === a.current || a.approvals.copy.carried) && a.approvals.design.version === a.current), 'both approvals stand on each current version: ' + JSON.stringify(d.assets.map(a => a.approvals)));
+  await page.waitForSelector(R + '.st-step.done:has(.st-step-l:text-is("Review"))', { timeout: 15000 });
   await shot(page, 'review');
   // export: the download is unpacked and every PNG checked against its version's stage size
-  await goStep(page, 'Export'); await page.waitForSelector(R + '.st-exportstage');
+  await goExport(page); await page.waitForSelector(R + '.st-exportstage');
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click(R + '.st-exportstage .st-stagehead button:has-text("Prepare bundle")')]);
   const zip = fs.readFileSync(await dl.path()); const files = unzipStored(zip);
   const pngs = files.filter(f => /\.png$/.test(f.name)); eq(pngs.length, 3, 'one PNG per approved asset');
@@ -132,7 +132,7 @@ await T.t('1. create, choose the client, brief, choose a direction, write and ma
 await T.t('2. save, reload and resume: the project reopens at the same stage and asset, and unsaved brief edits come back to be saved or discarded', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr');
-  await page.click(R + '.st-lib tbody tr button.st-lib-open');
+  await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const d = await api('GET', '/studio/get?id=' + J1);
   const second = d.assets[1]; await page.click(R + '.st-railbtn.asset:has-text("' + second.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
@@ -141,7 +141,11 @@ await T.t('2. save, reload and resume: the project reopens at the same stage and
   ok(/Resumed where you left off/.test(await page.textContent(R + '.st-notice')), 'the resume is said');
   ok(/Design/.test(await page.textContent(R + '.st-notice')) && new RegExp(second.title).test(await page.textContent(R + '.st-notice')), await page.textContent(R + '.st-notice'));
   ok(await page.$(R + '.st-railbtn.asset.on:has-text("' + second.title + '")'), 'the same asset is open');
-  // an unsaved brief edit survives a reload in this browser, and is offered back, not silently applied
+  // an unsaved brief edit survives a reload in this browser, and is offered back, not silently applied: the brief editor of a
+  // project made before the guided workflow (a guided project's brief is set by its Objectives and Strategy steps)
+  const OLD = (await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'An earlier brief', brief: { objective: 'Answer the subsidy framing', channels: ['facebook'], deliverable: 'set', campaignConfirmed: true }, idem: 'j2old' })).id;
+  await page.click(R + '.st-head .ov-link:has-text("All projects")'); await reloadLibrary(page);
+  await page.click(R + '.st-lib tbody tr:has-text("An earlier brief") button.st-lib-open');
   await goStep(page, 'Brief'); await page.waitForSelector(R + '#brief-message');
   await page.fill(R + '#brief-message', 'Fuel tax credits return a road tax that never applied');
   await page.waitForSelector(R + '.st-dirty');
@@ -149,17 +153,17 @@ await T.t('2. save, reload and resume: the project reopens at the same stage and
   await page.waitForSelector(R + '.st-notice.info'); await goStep(page, 'Brief');
   await page.waitForFunction(() => /Unsaved brief edits restored/.test(document.querySelector('#studio-root .st-centre').textContent), null, { timeout: 10000 });
   eq(await page.inputValue(R + '#brief-message'), 'Fuel tax credits return a road tax that never applied', 'the words came back');
-  ok((await api('GET', '/studio/get?id=' + J1)).brief.message !== 'Fuel tax credits return a road tax that never applied', 'nothing was saved behind the team\'s back');
+  ok((await api('GET', '/studio/get?id=' + OLD)).brief.message !== 'Fuel tax credits return a road tax that never applied', 'nothing was saved behind the team\'s back');
   await page.click(R + '.st-centre .st-notice button:has-text("Save them")');
   await page.waitForFunction(() => !/Unsaved brief edits restored/.test(document.querySelector('#studio-root .st-centre').textContent));
-  eq((await api('GET', '/studio/get?id=' + J1)).brief.message, 'Fuel tax credits return a road tax that never applied', 'saved when asked');
+  eq((await api('GET', '/studio/get?id=' + OLD)).brief.message, 'Fuel tax credits return a road tax that never applied', 'saved when asked');
   // a brief saved elsewhere meanwhile is merged field by field, never overwritten
   await page.fill(R + '#brief-action', 'Read the facts at the campaign site');
-  const p0 = await api('GET', '/studio/get?id=' + J1);
-  await api('POST', '/studio/project/update', { id: J1, revision: p0.revision, patch: { brief: Object.assign({}, p0.brief, { audience: 'Changed by a teammate' }) } });
+  const p0 = await api('GET', '/studio/get?id=' + OLD);
+  await api('POST', '/studio/project/update', { id: OLD, revision: p0.revision, patch: { brief: Object.assign({}, p0.brief, { audience: 'Changed by a teammate' }) } });
   await page.click(R + '.st-stagehead .btn:has-text("Save brief")');
   await page.waitForFunction(() => !document.querySelector('#studio-root .st-dirty'), null, { timeout: 15000 });
-  const b = (await api('GET', '/studio/get?id=' + J1)).brief; eq([b.action, b.audience], ['Read the facts at the campaign site', 'Changed by a teammate'], 'both changes kept');
+  const b = (await api('GET', '/studio/get?id=' + OLD)).brief; eq([b.action, b.audience], ['Read the facts at the campaign site', 'Changed by a teammate'], 'both changes kept');
   ok(!page.errors.length, page.errors.join(' | '));
   await page.ctxB.close();
 });
@@ -167,16 +171,20 @@ await T.t('2. save, reload and resume: the project reopens at the same stage and
 /* ---------------------------------------------------------------------------------------------------- 3 */
 await T.t('3. switching clients leaves nothing of the other client on screen, and a slow answer for the old client is dropped', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
-  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const mcaTitle = await page.textContent(R + '.st-head .st-ptitle');
   await page.selectOption(R + '.st-head select', 'aep');
   await page.waitForFunction(() => /No projects yet for Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib') || {}).textContent || ''));
   const all = await page.textContent('#studio-root');
   ok(all.indexOf(mcaTitle) < 0 && !/Hands Off Our Fuel/.test(all), 'no MCA project, campaign or work on screen');
   ok(!(await page.$(R + '.st-rail')) && !(await page.$(R + '.st-inspector')), 'no rail, inspector or thread from the other client');
-  await page.click(R + '.st-first-btn:has-text("A brief or one line")'); await page.waitForSelector(R + '.st-intake');
-  const opts = await page.$$eval(R + '.st-intake select option', o => o.map(x => x.textContent)); ok(opts.some(x => /Gas for the transition/.test(x)) && !opts.some(x => /Hands Off Our Fuel/.test(x)), 'only AEP\'s campaigns: ' + opts.join(', '));
-  await page.click(R + '.st-intake-foot .btn:has-text("Cancel")');
+  await page.click(R + '.st-first-btn:has-text("A brief or one line")'); await page.waitForSelector(R + '.st-wiz');
+  await page.click(R + '.st-type:has-text("Campaign Creative")'); await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  await page.waitForSelector(R + '.st-client-card[aria-checked="true"]'); ok(/Australian Energy Producers/.test(await page.textContent(R + '.st-client-card[aria-checked="true"]')), 'the wizard starts on the client in the context bar');
+  await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.click(R + '.st-cmodes .st-type:has-text("Select existing campaign")');
+  await page.waitForSelector(R + '.st-camp'); const opts = await page.$$eval(R + '.st-camp', o => o.map(x => x.textContent));
+  ok(opts.some(x => /Gas for the transition/.test(x)) && !opts.some(x => /Hands Off Our Fuel/.test(x)), 'only AEP\'s campaigns: ' + opts.join(', '));
+  await page.click(R + '.st-wiz-top .ov-link:has-text("Cancel")'); await page.waitForSelector(R + '.st-lib');
   // a slow AEP library answer arriving after the switch back to MCA is not shown
   const release = fx.hold(/^\/studio\/list\?ns=aep/);
   await page.selectOption(R + '.st-head select', 'mca'); await page.waitForSelector(R + '.st-lib tbody tr');
@@ -189,20 +197,18 @@ await T.t('3. switching clients leaves nothing of the other client on screen, an
 });
 
 /* ---------------------------------------------------------------------------------------------------- 4 */
-await T.t('4. no imagery: production makes complete typographic compositions with no empty image region, nothing rendered, each validated', async () => {
+await T.t('4. no imagery (a project made before the guided workflow, written from its brief): production makes complete typographic compositions with no empty image region, nothing rendered, each validated', async () => {
+  const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'The employment figure, type only', brief: { objective: 'An open brief on the employment figure', channels: ['linkedin', 'instagram', 'facebook'], deliverable: 'set', campaignConfirmed: true }, idem: 'j4' });
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
-  await page.waitForSelector(R + '.st-lib-head .btn'); await page.click(R + '.st-lib-head .btn');
-  await page.click(R + '.st-segbtn:has-text("A brief or one line")');
-  await page.fill(R + '.st-intake textarea', 'An open brief on the employment figure');
-  await page.click(R + '.st-intake-foot .btn:has-text("Create project")'); await page.waitForSelector(R + '.st-dir', { timeout: 30000 });
-  const pr = await latest('mca');
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("The employment figure, type only") button.st-lib-open');
   await goStep(page, 'Brief'); await page.waitForSelector(R + '.st-produce');
   await page.selectOption(R + '.st-produce select[aria-label="Imagery resolution"]', 'none');
   ok(/No image will be generated/.test(await page.textContent(R + '.st-produce')), 'the choice is explained before anything runs');
   const g0 = calls.gemini;
   await page.click(R + '.st-produce button:has-text("Write the copy")');
-  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 30000 });
-  const d = await settle(pr.id);
+  // the page stays on the Brief (nothing moves the team); the pieces arrive as the job the page runs finishes
+  for (let i = 0; i < 160 && (await api('GET', '/studio/get?id=' + pr.id)).assets.length < 3; i++) await sleep(250);
+  const d = await settle(pr.id); eq(d.assets.length, 3, 'one composition per channel');
   eq(calls.gemini, g0, 'no image call'); eq(d.jobs.filter(j => j.stage === 'render').length, 0, 'no render queued');
   for (const a of d.assets) {
     const v = a.versions.find(x => x.id === a.current);
@@ -243,18 +249,15 @@ await T.t('5. adapting a master to another format keeps its words and image, and
 /* ---------------------------------------------------------------------------------------------------- 6 */
 await T.t('6. a provider outage: the set is kept, the failure is explained with a Retry, a double Retry runs one job, and the image lands; a missing key is stated before anything is spent', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
-  await page.waitForSelector(R + '.st-lib-head .btn'); await page.click(R + '.st-lib-head .btn');
-  await page.click(R + '.st-segbtn:has-text("A brief or one line")');
-  await page.click(R + '.st-segbtn:has-text("Instagram 4:5")'); await page.click(R + '.st-segbtn:has-text("Facebook 1:1")');   // LinkedIn only
-  await page.fill(R + '.st-intake textarea', 'Write one LinkedIn post on the $74 billion figure');
+  await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', title: 'One post on the figure', text: 'Write one post on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
+  await toDirections(page); await selectDirection(page, 0); await generateCopy(page); await markCopyReady(page);
+  const pr = await latest('mca');
   fx.setProvider('gemini', 'down');
-  const copy0 = env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_jobs WHERE stage='copy'").get().n;
-  // a double click on Create runs one production
-  await page.dblclick(R + '.st-intake-foot .btn:has-text("Create project")');
-  await page.waitForSelector(R + '.st-notice', { timeout: 60000 });
+  const prod0 = env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_events WHERE kind='production'").get().n;
+  await produce(page, 'editable');
   await page.waitForFunction(() => /provider is busy/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 60000 });
-  const pr = await latest('mca'); let d = await settle(pr.id);
-  eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_jobs WHERE stage='copy'").get().n - copy0, 1, 'one production job for a double click');
+  let d = await settle(pr.id);
+  eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_events WHERE kind='production'").get().n - prod0, 1, 'one production');
   eq(d.assets.length, 1, 'the composition was made and kept'); const rj = d.jobs.find(j => j.stage === 'render'); eq([rj.state, rj.attempts], ['failed', 3], 'three attempts, then failed');
   ok(/Your work is kept/.test(await page.textContent(R + '.st-notice')) && await page.$(R + '.st-notice button:has-text("Retry render")'), 'the notice explains and offers Retry');
   ok(/failed/.test(await page.textContent(R + '.st-workspace-activity')), 'the failed job is visible beside the work (the activity panel)');
@@ -270,15 +273,13 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
   fx.setProvider('claude', 'missing');
   await page.click(R + '.st-head .ov-link:has-text("All projects")'); await page.waitForSelector(R + '.st-lib-head .btn');
   await page.waitForFunction(() => /Claude not configured/.test(document.querySelector('#studio-root .st-head').textContent));
-  await page.click(R + '.st-lib-head .btn'); await page.click(R + '.st-segbtn:has-text("A brief or one line")'); await page.fill(R + '.st-intake textarea', 'An open brief about regional jobs');
   const a0 = calls.anthropic;
-  await page.click(R + '.st-intake-foot .btn:has-text("Create project")');
-  await page.waitForFunction(() => /Claude is not configured on the worker/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 30000 });
+  await wizardCreate(page, { type: 'Social Content', title: 'Regional jobs', text: 'An open brief about regional jobs and what the credit means for them.', analyse: false });
+  await page.waitForSelector(R + '.st-briefws, ' + R + '.st-compose', { timeout: 15000 });
+  const an = page.locator(R + 'button:has-text("Analyse brief")').first();
+  ok(await an.isDisabled(), 'Analyse is disabled while the model is not configured');
+  ok(/not configured/.test((await an.getAttribute('title')) || ''), 'and says why: ' + await an.getAttribute('title'));
   eq(calls.anthropic, a0, 'no model call was attempted');
-  ok(/Nothing was spent/.test(await page.textContent(R + '.st-notice')), 'the notice says nothing was spent');
-  await goStep(page, 'Brief'); await page.waitForSelector(R + '.st-produce');
-  ok(await page.isDisabled(R + '.st-produce button:has-text("Write the copy")'), 'Write the copy is disabled with the reason');
-  ok(/not configured/.test(await page.getAttribute(R + '.st-produce button:has-text("Write the copy")', 'title')));
   await shot(page, 'missing-key');
   fx.setProvider('claude', 'ok');
   await page.ctxB.close();
@@ -325,31 +326,35 @@ await T.t('7. a second edit while the first save is still in flight waits its tu
 });
 
 /* ---------------------------------------------------------------------------------------------------- 8 */
-await T.t('8. the essential workflow by keyboard: start a project, move between stages, use the inspector tabs, approve with a reason; focus is always visible', async () => {
+await T.t('8. the essential workflow by keyboard: start a project in the wizard, move between stages, use the inspector tabs, approve with a reason; focus is always visible', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib-head .btn');
   const focused = () => page.evaluate(() => { const e = document.activeElement; return { tag: e.tagName, text: (e.textContent || '').trim().slice(0, 60), label: e.getAttribute('aria-label') || '', outline: getComputedStyle(e).outlineStyle, role: e.getAttribute('role') || '' }; });
   async function tabTo(pred, max = 120, back) { for (let i = 0; i < max; i++) { await page.keyboard.press(back ? 'Shift+Tab' : 'Tab'); const f = await focused(); if (pred(f)) return f; } throw new Error('not reached by Tab'); }
   await page.focus(R + '.st-head select');
   const nb = await tabTo(f => /New project/.test(f.text)); ok(nb.outline !== 'none', 'focus is visible on New project');
-  await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-intake');
-  await tabTo(f => /A brief or one line/.test(f.text)); await page.keyboard.press('Enter');
-  await tabTo(f => f.tag === 'TEXTAREA'); await page.keyboard.type('Write one LinkedIn post on the $74 billion figure');
-  await tabTo(f => /^Instagram/.test(f.text)); await page.keyboard.press('Enter');
-  await tabTo(f => /^Facebook/.test(f.text)); await page.keyboard.press('Enter');
-  const cb = await tabTo(f => /Create project/.test(f.text)); ok(cb.outline !== 'none', 'focus is visible on Create project');
-  await page.keyboard.press('Enter');
-  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 60000 });   // the words first (S13); generous under a full-suite load
+  await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-wiz');
+  // the wizard by keyboard: a type card, Next, the client (already the one in the context bar), Next, the campaign, Next, the brief
+  const tc = await tabTo(f => f.role === 'radio' && /Social Content/.test(f.text)); ok(tc.outline !== 'none', 'focus is visible on a type card');
+  await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-type[aria-checked="true"]:has-text("Social Content")');
+  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-client-card[aria-checked="true"]');
+  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-cmodes');
+  await tabTo(f => f.role === 'radio' && /Standalone/.test(f.text)); await page.keyboard.press('Enter');
+  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-compose-ta');
+  await tabTo(f => f.tag === 'TEXTAREA'); await page.keyboard.type('Write one post on the $74 billion figure: more company tax and royalties than any other industry.');
+  const cb = await tabTo(f => /Create and analyse/.test(f.text)); ok(cb.outline !== 'none', 'focus is visible on Create and analyse');
+  await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-under', { timeout: 60000 });
+  // to a composition (by mouse: the steps are covered above), then the keyboard again
+  await toDirections(page); await selectDirection(page, 0); await generateCopy(page); await markCopyReady(page); await produce(page, 'editable');
   const pr = await latest('mca'); await settle(pr.id);
-  await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+4');
+  await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+6');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
-  // stages by keyboard: Alt+1 to Alt+6, focus lands on the stage heading
+  // stages by keyboard: Alt+1 to Alt+7, focus lands on the stage heading (its editorial headline)
   await page.focus('#studio-root .st-head select'); await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());
-  // each stage's heading is its editorial headline (S14); focus lands on it
-  await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /clear brief/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
-  await page.keyboard.press('Alt+5'); await page.waitForFunction(() => /^One final check, before it leaves the studio\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
+  await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /Start with what happened/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
+  await page.keyboard.press('Alt+7'); await page.waitForFunction(() => /^One final check, before it leaves the studio\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
   // the navigator itself by Tab and Enter
   const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Design/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-instabs');
@@ -357,14 +362,14 @@ await T.t('8. the essential workflow by keyboard: start a project, move between 
   await page.focus(R + '#st-tabbtn-copy'); await page.keyboard.press('ArrowRight');
   await page.waitForFunction(() => document.activeElement.id === 'st-tabbtn-quality' && document.activeElement.getAttribute('aria-selected') === 'true');
   ok(await page.isVisible(R + '#st-tab-quality') && !(await page.isVisible(R + '#st-tab-copy')), 'the panel follows the tab');
-  // approve with a reason, by keyboard only
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-approvals');
-  await tabTo(f => /Approve copy/.test(f.label || f.text)); await page.keyboard.press('Enter');
+  // approve the design with a reason, by keyboard only (the copy was marked ready in Copy)
+  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-approvals');
+  await tabTo(f => /Approve design/.test(f.label || f.text)); await page.keyboard.press('Enter');
   await page.waitForSelector(R + '.st-dialog textarea'); eq((await focused()).tag, 'TEXTAREA', 'the reason field takes focus');
   await page.keyboard.type('Read out and agreed with the client');
   await tabTo(f => /Record/.test(f.text), 5); await page.keyboard.press('Enter');
   await page.waitForSelector(R + '.st-dialog', { state: 'detached' });
-  const d = await api('GET', '/studio/get?id=' + pr.id); ok(d.assets[0].approvals.copy && /Read out and agreed/.test(d.assets[0].approvals.copy.reason), 'approved by keyboard');
+  const d = await api('GET', '/studio/get?id=' + pr.id); ok(d.assets[0].approvals.design && /Read out and agreed/.test(d.assets[0].approvals.design.reason), 'approved by keyboard');
   await shot(page, 'keyboard');
   await page.ctxB.close();
 });
@@ -374,7 +379,6 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   // a production whose render failed: the composition exists, the photograph does not
   fx.setProvider('gemini', 'down');
   const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'No photograph yet', brief: { channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, objective: 'x', message: 'y' }, idem: 'j9' });
-  const stepTo = async id => { for (let i = 0; i < 20; i++) { const j = (await api('POST', '/studio/job/step', { id })).job; if (!j || /done|failed|cancelled/.test(j.state)) return j; } };
   await stepTo((await api('POST', '/studio/job', { project: pr.id, stage: 'copy', input: { channels: ['instagram'], deliverable: 'set', acknowledge: true, instruction: 'write it' }, idem: 'j9copy' })).job.id);
   let d = await api('GET', '/studio/get?id=' + pr.id); for (const j of d.jobs.filter(j => j.stage === 'render')) await stepTo(j.id);
   fx.setProvider('gemini', 'ok');

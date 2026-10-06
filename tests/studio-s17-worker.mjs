@@ -128,6 +128,19 @@ await T.t('no render is spent on words that may change: imagery and the producti
   eq(g.brief.production.mode, 'finished'); eq(g.workflow.steps.design.state, 'processing');
 });
 
+await T.t('after production a word change sends the piece back to Copy for review, but the canvas is never locked away from the work on it; Review waits for the copy again', async () => {
+  for (const j of (await get(P)).jobs.filter(x => x.state === 'queued' || x.state === 'running')) await run(j);
+  let g = await get(P); const a0 = g.assets.find(x => x.id === A[0]);
+  const cv = a0.versions.find(x => x.id === a0.current);
+  const ed = await call('POST', '/studio/version', { asset: A[0], revision: a0.revision, copy: Object.assign({}, cv.copy, { caption: 'A caption changed on the canvas.' }), note: 'caption edit' }); eq(ed.status, 200, JSON.stringify(ed.body).slice(0, 200));
+  await call('POST', '/studio/approve', { asset: A[1], part: 'copy', decision: 'withdraw', reason: 'checking the words again' });
+  g = await get(P);
+  ok(!g.assets.some(x => x.approvals && x.approvals.copy), 'no piece has its copy marked ready now');
+  ok(g.workflow.steps.design.state !== 'locked', 'Design stays open once something was produced: ' + JSON.stringify(g.workflow.steps.design));
+  eq(g.workflow.steps.copy.state, 'in_progress', 'Copy says the words need marking ready again');
+  eq(g.workflow.steps.review.state, 'locked', 'Review waits for ready copy');
+});
+
 await T.t('changing the objective after work exists is refused once with the impact; keeping keeps the work current; updating leaves it in place as built on an earlier choice, and the gates then hold until a current direction is chosen', async () => {
   const r0 = await call('POST', '/studio/workflow/confirm', { project: P, step: 'objectives', objective: 'O1', message: 'M1.2' });
   eq(r0.status, 409); eq(r0.body.error, 'affects_downstream'); ok(r0.body.impact.directions >= 3 && r0.body.impact.chosen && r0.body.impact.assets === 2, JSON.stringify(r0.body.impact));

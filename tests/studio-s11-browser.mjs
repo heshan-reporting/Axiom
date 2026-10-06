@@ -146,7 +146,7 @@ await T.t('export takes exactly the corrected version: design approval stands on
   const man = JSON.parse(String(r2.get(key).v)); const row = (man.assets || man.items || []).find(x => x.asset === A || x.id === A) || (man.assets || man.items || [])[0];
   ok(row && row.version === v.id, 'the exported version is the corrected one: ' + JSON.stringify(row && { version: row.version, want: v.id }));
   const wmx = row.layout ? row.layout.layers.find(l => l.id === 'wordmark') : null; ok(!row.layout || (wmx && wmx.y > 81.5 && wmx.y === v.layout.layers.find(l => l.id === 'wordmark').y), 'the manifest layout carries the moved mark: ' + JSON.stringify(wmx && { y: wmx.y }));
-  await page.click(R + '.st-head-acts button:has-text("Export")'); await page.waitForSelector(R + '.st-step.on:has-text("Export")', { timeout: 10000 });
+  await page.click(R + '.st-head-acts button:has-text("Export")'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))', { timeout: 10000 }); await page.waitForSelector(R + '.st-subtab.on:has-text("Export")', { timeout: 10000 });
   ok(/Fact tile/.test(await page.textContent(R + '.st-centre')), 'the Export stage lists the asset');
   await shot(page, 'export-1366');
 });

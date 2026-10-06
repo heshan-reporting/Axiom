@@ -8889,7 +8889,9 @@ function stWorkflow(p) {
   const visual = assets.filter(a => { const v = stWfVer(a); return v && v.mode !== 'copy'; });
   const rRun = live(['render', 'inspect', 'concepts']);
   if (assets.length && !visual.length) steps.design = S('skipped', { note: 'copy only: nothing to design' });
-  else if (on && !ready.length) steps.design = lock(assets.length ? 'Mark at least one piece of copy ready for design to continue.' : 'Generate the copy to continue.');
+  // the gate keeps design from starting before the words are settled; once something has been produced, a later word change
+  // sends that piece back to Copy for review but never locks the canvas away from the work already on it
+  else if (on && !ready.length && !b.production && !visual.some(stWfHasImagery)) steps.design = lock(assets.length ? 'Mark at least one piece of copy ready for design to continue.' : 'Generate the copy to continue.');
   else if (!assets.length) steps.design = S('not_started', { note: 'write the copy first' });
   else if (rRun) steps.design = S('processing', { job: rRun.id, note: rRun.stage === 'render' ? 'generating imagery' : rRun.stage === 'inspect' ? 'the Art Director is reviewing' : 'proposing art directions' });
   else { const ok = visual.filter(stWfValid).length; steps.design = S(ok === visual.length ? 'complete' : on && !b.production && !visual.some(stWfHasImagery) ? 'not_started' : 'in_progress', { note: ok + ' of ' + visual.length + ' validated' + (on && !b.production && !visual.some(stWfHasImagery) ? '; choose the production mode' : '') }); }
@@ -8897,7 +8899,8 @@ function stWorkflow(p) {
   const reviewReady = assets.filter(a => a.approvals && a.approvals.copy && stWfValid(a));
   const approved = assets.filter(a => a.approvals && a.approvals.copy && (a.approvals.design || (stWfVer(a) || {}).mode === 'copy'));
   const exported = (p.thread || []).some(e => e.kind === 'export');
-  if (on && !reviewReady.length) steps.review = lock(!assets.length ? 'Complete a creative in Design to continue.' : visual.length ? 'Validate at least one creative in Design, with its copy marked ready, to continue.' : 'Mark at least one piece of copy ready to continue.');
+  const onlyFinished = visual.length && visual.every(a => (stWfVer(a) || {}).mode === 'finished');
+  if (on && !reviewReady.length) steps.review = lock(!assets.length ? 'Complete a creative in Design to continue.' : onlyFinished ? 'Have the Art Director read the painted words and the mark back (Review in Design) for at least one finished creative, with its copy marked ready, to continue.' : visual.length ? 'Validate at least one creative in Design, with its copy marked ready, to continue.' : 'Mark at least one piece of copy ready to continue.');
   else if (!assets.length) steps.review = S('not_started', { note: 'nothing made yet' });
   else if (approved.length === assets.length) steps.review = S('complete', { note: exported ? 'approved and exported' : 'every piece approved; export when ready', exported });
   else steps.review = S(approved.length ? 'in_progress' : 'not_started', { note: approved.length + ' of ' + assets.length + ' approved', exported });
