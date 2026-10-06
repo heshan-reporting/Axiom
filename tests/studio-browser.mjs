@@ -113,7 +113,8 @@ async function open(role) {
 }
 const R = '#studio-root ';
 /* the Studio's navigation: six stages in the navigator, views inside a stage as tabs, the inspector's tabs beside the artwork */
-const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Produce', Sequence: 'Produce', 'Recipes and usage': 'Produce', 'Copy deck': 'Refine' };
+/* S13: the guided steps - Brief, Direction, Copy, Design, Review, Export */
+const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', 'Recipes and usage': 'Design', 'All copy': 'Copy' };
 const goStep = (pg, name) => pg.click(R + '.st-step:has-text("' + name + '")');
 const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
 const itab = (pg, name) => pg.click(R + '.st-instab:has-text("' + name + '")');
@@ -140,7 +141,7 @@ await t('a release with a clear instruction: the source is read into a ledger, n
   await page.click(R + '.st-segbtn:has-text("X 16:9")');   // four channels
   await shot(page, 'studio-intake');
   await page.click(R + '.st-intake-foot .btn:has-text("Create project")');
-  await page.waitForSelector(R + '.st-asset', { timeout: 30000 });
+  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 30000 });   // production lands on the words first (S13)
   await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-railbtn.asset').length === 4, null, { timeout: 30000 });
   const th = await page.textContent(R + '.st-thread');
   ok(/Read Pasted release: 3 figures, 1 quotations/.test(th) && /marked unverified/.test(th) && /brief was proposed/.test(th), th.slice(0, 600));
@@ -406,10 +407,11 @@ await t('an open brief, copy only: two distinct directions first, nothing produc
   await shot(page, 'studio-directions');
   await page.click(R + '.st-dir:first-child button:has-text("Choose this direction")');
   await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-railbtn.asset').length === 3, null, { timeout: 30000 });
-  await page.waitForSelector(R + '.st-copycard');
+  await page.waitForSelector(R + '.st-copystage .st-copy-edit');
   ok(/Copy only: no render spent/.test(await page.textContent(R + '.st-thread'))); eq(calls.gemini, g0, 'no render for copy-only work');
   eq(await texts(page, R + '.st-railbtn.asset'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);
-  ok(/from "The plain ask"/.test(await page.textContent(R + '.st-asset-head')));
+  ok(/from "The plain ask"/.test(await page.textContent(R + '.st-copy-title')));
+  ok(await page.$(R + '.st-step.skipped:has-text("Design")'), 'copy only: nothing to design, the step says so');
 });
 await t('P12: the guided route drafts a creative strategy the team confirms, then directions with their medium, plan and diversity, then a campaign sequence planned in order and made with no image', async () => {
   await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr');
@@ -427,7 +429,7 @@ await t('P12: the guided route drafts a creative strategy the team confirms, the
   await page.click(R + '.st-strategy button:has-text("Confirm the strategy")');
   await page.waitForFunction(() => /confirmed/.test(document.querySelector('#studio-root .st-strategy .st-chip').textContent));
   eq(await page.inputValue(R + '.st-strategy label:has-text("Campaign idea") input'), 'It is your tractor too, and your truck');
-  await goStep(page, 'Directions'); await page.waitForSelector(R + '.st-dir');
+  await goStep(page, 'Direction'); await page.waitForSelector(R + '.st-dir');
   ok(await page.$(R + 'select[aria-label="Exploration budget"]') && await page.$(R + 'button:has-text("Explore further")'), 'the exploration budget');
   await goView(page, 'Sequence'); await page.waitForSelector(R + '.st-seq');
   await page.selectOption(R + 'select[aria-label="Number of assets"]', '3');
@@ -538,7 +540,7 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   ok(hl.size === 5.2 && hl.align === 'center' && hl.group && hl.group === sp.group, 'type, alignment and the group saved: ' + JSON.stringify([hl.size, hl.align, hl.group, sp.group]));
   await goView(page, 'Board'); await page.waitForSelector(R + '.st-board-card');
   ok((await texts(page, R + '.st-board-card')).some(x => /LinkedIn post/.test(x) && /(validated|not validated|stale|failing)/.test(x)), 'the board shows each asset and where it stands');
-  await goView(page, 'Copy deck'); await page.waitForSelector(R + '.st-copydeck table');
+  await goView(page, 'All copy'); await page.waitForSelector(R + '.st-copydeck table');
   const cap = R + '.st-copydeck textarea[aria-label="caption of LinkedIn post"]'; const v0 = +((await texts(page, R + '.st-copydeck tbody tr')).find(x => /LinkedIn post/.test(x)).match(/v(\d+)/) || [])[1];
   await page.fill(cap, 'Fuel tax credits return a road tax. That is all.'); await page.click(R + '.st-copydeck .ov-title');
   await page.waitForFunction(v => [...document.querySelectorAll('#studio-root .st-copydeck tbody tr')].some(r => /LinkedIn post/.test(r.textContent) && new RegExp(', v' + (v + 1) + '(?!\\d)').test(r.textContent)), v0, { timeout: 15000 });

@@ -114,7 +114,7 @@ await T.t('S9 + S8 + S5 in the page: an issue outlines its layer, the action sta
   ok(/held by the campaign rule/.test(le), 'the editor names the held mark: ' + le.slice(0, 300)); await shot(page, 'editor'); await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {});
   await page.click(R + '.st-step:has-text("Review")'); await page.waitForSelector(R + '.st-approvals'); await shot(page, 'review');
   await page.click(R + '.st-step:has-text("Export")'); await page.waitForTimeout(500); await shot(page, 'export');
-  await page.click(R + '.st-step:has-text("Refine")'); await page.waitForSelector(R + '.st-railbtn:has-text("Brand")'); await page.click(R + '.st-railbtn:has-text("Brand")'); await page.waitForSelector(R + '.st-brand');
+  await page.click(R + '.st-step:has-text("Design")'); await page.waitForSelector(R + '.st-railbtn:has-text("Brand")'); await page.click(R + '.st-railbtn:has-text("Brand")'); await page.waitForSelector(R + '.st-brand');
   await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); });
   const br = (await page.textContent(R + '.st-brand')).replace(/\s+/g, ' '); ok(/approved rule, held/.test(br) && /by the approved placement rule/.test(br), 'the Brand workspace shows the taught rule: ' + br.slice(0, 300)); await shot(page, 'brand');

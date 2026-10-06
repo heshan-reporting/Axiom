@@ -79,4 +79,41 @@ await T.t('a worker with no image storage refuses a render before calling the im
   } finally { w.env.MIND_DOCS = docs; during = prev; }
 });
 
+/* --- imagery timing: the guided flow writes the copy first and makes the imagery when Design asks ------------------------- */
+const PLAN = { medium: 'photo-documentary', approach: 'editable', mark: 'none', story: 'the credit, plainly', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'A quiet regional road at dusk' }],
+  elements: [{ id: 'panel', type: 'shape', role: 'panel', shape: 'rect', x: 5, y: 56, w: 70, h: 36, fill: '#0E6A6E', opacity: 0.92 }, { id: 'hl', type: 'text', role: 'headline', x: 8, y: 59, w: 64, h: 16, size: 5.2, color: '#FFFFFF' }, { id: 'sp', type: 'text', role: 'support', x: 8, y: 76, w: 64, h: 8, size: 2.6, color: '#FFFFFF' }] };
+w.env.ANTHROPIC_API_KEY = 'test';
+w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
+  const body = JSON.parse(init.body); const sys = String(body.system || ''); let text = '{}';
+  if (/producing a coordinated set/.test(sys)) text = JSON.stringify({ pieces: [{ channel: 'instagram', headline: 'Fuel tax credits are not a subsidy', support: 'Businesses do not pay a road fuel tax on fuel used off-road.', cta: 'Read more', caption: 'The credit returns a tax that never applied.', alt: 'A teal fact tile', visual: 'A regional road at dusk', claims: [], hashtags: [], plan: JSON.parse(JSON.stringify(PLAN)) }] });
+  return new Response(JSON.stringify({ content: [{ type: 'text', text }], stop_reason: 'end_turn', model: body.model }), { status: 200 });
+});
+await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'national', name: 'Australian mining', logoPolicy: 'none' }] });
+const P2 = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'national', title: 'Copy first', brief: { objective: 'o', message: 'm', channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, imageryTiming: 'after_copy' }, idem: 's13-p2' })).body.id;
+let A2 = '';
+
+await T.t('a brief that says "imagery after the copy": production writes the words and lays them out, queues no render, and says so; the brief keeps the setting (anything else falls to with_copy)', async () => {
+  const pj = await get(P2); eq(pj.brief.imageryTiming, 'after_copy');
+  const j0 = (await call('POST', '/studio/job', { project: P2, stage: 'copy', input: { channels: ['instagram'], deliverable: 'set', formats: { instagram: '4:5' }, instruction: 'One tile', acknowledge: true }, idem: 's13-copy' })).body.job;
+  const j = (await call('POST', '/studio/job/step', { id: j0.id })).body.job; eq(j.state, 'done', j.error);
+  eq((j.result.renders || []).length, 0, 'no render queued');
+  ok((j.progress.lines || []).some(l => /imagery waits for the copy/.test(l.text)), 'the log says why');
+  const d = await get(P2); A2 = d.assets[0].id; eq(d.jobs.filter(x => x.stage === 'render').length, 0, 'no render job on the project');
+  const P3 = (await call('POST', '/studio/project', { ns: 'mca', title: 'x', brief: { imageryTiming: 'whenever' }, idem: 's13-p3' })).body.id;
+  eq((await get(P3)).brief.imageryTiming, 'with_copy', 'unknown -> with_copy');
+});
+
+await T.t('POST /studio/imagery queues the planned imagery for the current version (one job per planned region), refuses a second press while it runs, and refuses once the imagery is there; copy only and read keys are refused', async () => {
+  const r = await call('POST', '/studio/imagery', { asset: A2, size: '1K' }); eq(r.status, 200, JSON.stringify(r.body));
+  eq(r.body.jobs.length, 1, 'one planned background region'); eq(r.body.size, '1K');
+  const again = await call('POST', '/studio/imagery', { asset: A2 }); eq(again.status, 409); eq(again.body.error, 'render_in_flight');
+  const ro = await call('POST', '/studio/imagery', { asset: A2 }, 'read-key'); eq(ro.status, 403, 'a read key cannot spend');
+  const j = (await call('POST', '/studio/job/step', { id: r.body.jobs[0] })).body.job; eq(j.state, 'done', j.error);
+  const { v } = await curV(P2, A2); ok(v.image && v.image.key, 'the imagery landed on the composition');
+  const third = await call('POST', '/studio/imagery', { asset: A2 }); eq(third.status, 409); eq(third.body.error, 'has_imagery');
+  const C = (await call('POST', '/studio/asset', { project: P2, family: 'Copy', channel: 'linkedin', format: '1:1', title: 'Copy', copy: { headline: 'x' }, mode: 'copy' })).body.asset.id;
+  const cr = await call('POST', '/studio/imagery', { asset: C }); eq(cr.status, 409); eq(cr.body.error, 'copy_only');
+  ok((await get(P2)).thread.some(e => /Imagery asked for/.test(e.text || '')), 'the thread records the request');
+});
+
 const res = T.done(); w.restore(); process.exit(res.fail ? 1 : 0);

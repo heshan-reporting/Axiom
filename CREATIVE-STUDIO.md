@@ -1376,3 +1376,62 @@ with the same words are blocked by the worker's re-judging, the hidden echo is j
 S11 browser harnesses re-run clean with the new rule in force. Not verified from the sandbox: the user's frames (no access to the
 live D1); on the next measurement of each, the repeated label reads as blocking with Fix layout hiding it, and the logo's size
 is corrected by the same fix.
+
+## 36. S13 - the guided flow from the reviewed mockup (build studio-p30, page r7)
+
+### 36.1 What was reviewed
+
+An interactive mockup of a guided Creative Studio (`design/mockups/creative-studio-guided/creative-studio-guided-mock.html`
+on branch `mockup/creative-studio-guided`, with six visual variants beside it). It is a single static page: six steps
+(Brief - Set the foundations, Direction - Choose the idea, Copy - Get the words right, Design - Build the creative,
+Review - Check & approve, Export - Prepare delivery), a Canva-like design workspace (a tool dock of Design, Text, Images,
+Brand, Layers and Partner; a library panel; the canvas with a page strip of formats; an inspector of Properties and a
+creative partner), a copy step with one channel at a time and "Mark this copy ready for design", a review preflight
+(Copy, Design, Brand, Accessibility) with a human approval that resets on edits, and an export delivery package. Its
+progress ("N of 4 demo checkpoints"), its partner's scores and suggestions, and its preflight results are simulated -
+the page says so itself in places ("Simulation only", "SAMPLE"). The mockup files stay out of `docs/` (GitHub Pages
+serves only that folder); they were read as data and never served.
+
+### 36.2 What was kept, what was wired, what was not taken
+
+| Mockup | AXIOM now | Source of truth |
+|---|---|---|
+| Six steps in that order | `STAGES`: Brief, Direction, Copy, Design, Review, Export, each with purpose, sub-label and "What happens next" | the project (`flowOf`) |
+| Copy before design | Copy step (`CopyStage`); production lands there; with "Imagery: after the copy is ready" no render is spent until Design | `brief.imageryTiming`, the copy stage's `afterCopy` |
+| "Mark this copy ready for design" | the agency's copy approval of that exact version (reason `copy ready`); any word change drops it | `studio_approvals` signatures (`stStanding`) |
+| "Final client approval happens in Review" | the client review link in Review (P11), separate from the agency's approvals | `studio_shares`, `studio_review` |
+| Copy partner: a shorter headline, "Use this headline" | Shorter headline / Plainer words / Three headline options / a free ask, each one `revise` call; options become a text version | the `alternatives` event |
+| Dock: Design, Text, Images, Brand, Layers, Partner | `DesignDock`, each going to the existing tool (variations, Copy tab, art direction, Brand tab, layout editor, Art Director); disabled with the reason | the version's mode, locks and role |
+| Editable / AI finished toggle | the creation mode stated; a finished creative offers its free editable copy; an editable one cannot become finished (the words would be painted from an unsettled copy) | `brief.creationMode`, `/studio/derive` |
+| Page strip of formats | the family strip directly under the canvas | `studio_assets.family` |
+| Generate background | Board: Generate imagery (N), the cost confirmed first; `POST /studio/imagery` | `stImageryQueue` -> `stPlanRenders` |
+| Preflight: Copy, Design, Brand, Accessibility | read from the record: copy checks, the stored technical validation (blocking findings and warnings named), mark findings, contrast and type findings, alt text; the Art Director's reading as advice | `stChecks`, `studio_validations`, the inspection event |
+| Activity bar with a percentage over checkpoints | not copied: the S12 activity panel shows the worker's phases; a percentage only from counts | `progress.activity` |
+| Partner scores 1-5, verdict, "Ship" | not copied: the Art Director's real inspection (scores with reasons, missing scores said, never approval) | the `inspection` event |
+| Manrope / DM Sans, glass and gradients | not taken: the shell's flat token styling (`docs/studio-flow.css` on the Studio tokens) | the Phase 5 shell rules |
+
+### 36.3 The parallel ChatGPT branch (`chatgpt/local-work`)
+
+Reviewed line by line before anything was taken. Kept, each with a test that fails on the code before it
+(`tests/studio-s13-worker.mjs`): a render that keeps an edit made while the image was generated (the bug was real:
+a layout the render had to change - the imagery reopened on a type-only ground - was built from the version read
+before the provider call and silently reverted a hand move; region renders merged into the old version too); a worker
+with no image storage refusing before the call; the judge treating a type-only ground as expecting no photograph and
+keeping a browser's "imagery did not load". Kept in the page: a 15 s image decode timeout, ordered reloads, a composition
+never reported ready with the previous version's images, variations that show a photograph on file, and an export that
+stops with the asset named rather than downloading a bundle with a hole or a blocked tile. Not kept: its progress model
+(fixed milestones counted as a percentage of the work, which S12 had already replaced with phases and counts) and a
+variant of the stale guard that would have hidden every render landing after an edit as a branch - the same "I cannot
+see the render" failure the p27 fix removed.
+
+### 36.4 Verified, and not
+
+Verified in the sandbox with every provider mocked: `studio-s13-worker` (7 of 7), `studio-guided-browser` (6 of 6,
+Chromium: the six steps, imagery after the copy with no image call, a copy edit as a text version, ready for design as
+the copy approval and its falling away on an edit, the partner's three options and the chosen one applied, the dock
+reaching each tool, Generate imagery as one confirmed call landing on the composition, the preflight read from the
+measurement with a warning named rather than passed, a missing alt text named, a read-only key), and the studio (26),
+journey (9), modes (4), S9 accessibility (5, now auditing the Copy step), S10 (3), S11 (11), activity (3) and actions (2)
+browser harnesses on the new steps. Not verified: anything a live model answers, and the deployed worker (the Mac's
+`tools/deploy-worker.sh` ships build `studio-p30`; until then `POST /studio/imagery` is an unknown route and production ignores
+the imagery timing, while the page's Copy step and preflight work against p29).

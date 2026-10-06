@@ -1,0 +1,86 @@
+/* The guided flow (S13): Copy step, Design dock, Review preflight, imagery timing. Studio tokens only; flat 8px surfaces,
+   no glass or entrance animation (the shell rules). Loaded after studio-progress.css. */
+
+/* ---- Copy: list of the set, one channel's words, the copy partner */
+.st .st-copystage{container-type:inline-size;container-name:stcopy}
+.st .st-copy3{display:grid;grid-template-columns:minmax(150px,200px) minmax(0,1fr);gap:var(--st-s3,16px);align-items:start;margin-top:var(--st-s2,12px)}
+.st .st-copy3 > .st-copy-partner{grid-column:1 / -1}
+@container stcopy (min-width:1060px){.st .st-copy3{grid-template-columns:minmax(170px,210px) minmax(0,1fr) minmax(240px,300px)}.st .st-copy3 > .st-copy-partner{grid-column:auto}}
+@container stcopy (max-width:560px){.st .st-copy3{grid-template-columns:1fr}.st .st-copy-list{position:static}}
+.st .st-copy-list,.st .st-copy-edit,.st .st-copy-partner{background:var(--st-surface);border:1px solid var(--st-line);border-radius:8px;padding:var(--st-s2,12px)}
+.st .st-copy-list{display:flex;flex-direction:column;gap:10px;position:sticky;top:calc(var(--st-head-h,46px) + 64px)}
+.st .st-copy-chan{display:flex;flex-direction:column;gap:4px}
+.st .st-copy-pick{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:6px;padding:7px 8px;color:var(--st-ink);cursor:pointer;font:inherit}
+.st .st-copy-pick:hover{background:var(--st-raised,var(--st-ground))}
+.st .st-copy-pick.on{border-color:var(--st-accent);background:color-mix(in srgb,var(--st-accent) 8%,transparent)}
+.st .st-copy-pick:focus-visible{outline:2px solid var(--st-focus,var(--st-accent));outline-offset:1px}
+.st .st-copy-pick-t{display:flex;flex-direction:column;min-width:0;font-size:var(--st-fs-m,13px)}
+.st .st-copy-pick-t small{color:var(--st-ink-3);font-size:var(--st-fs-xs,11px)}
+.st .st-copy-state{flex-shrink:0;font-family:var(--fm,monospace);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--st-ink-3);border:1px solid var(--st-line);border-radius:4px;padding:1px 6px}
+.st .st-copy-state.ok{color:var(--st-ok);border-color:var(--st-ok)}
+.st .st-copy-state.warn{color:var(--st-warn);border-color:var(--st-warn)}
+.st .st-copy-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+.st .st-copy-title h3{margin:0;font-size:var(--st-fs-l,16px);font-weight:650}
+.st .st-copy-title h3 .ov-dim{font-weight:400;font-size:var(--st-fs-s,12px)}
+.st .st-copy-badge{font-family:var(--fm,monospace);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--st-line);border-radius:4px;padding:2px 8px;color:var(--st-ink-2);white-space:nowrap}
+.st .st-copy-badge.ok{color:var(--st-ok);border-color:var(--st-ok);background:color-mix(in srgb,var(--st-ok) 10%,transparent)}
+.st .st-copy-field{display:flex;flex-direction:column;gap:4px;margin:12px 0}
+.st .st-copy-flabel{display:flex;justify-content:space-between;gap:8px;font-size:var(--st-fs-s,12px)}
+.st .st-copy-flabel label{font-weight:600;color:var(--st-ink)}
+.st .st-copy-field .st-ta{width:100%;box-sizing:border-box}
+.st .st-copy-field .st-copy-hl{font-size:17px;font-weight:650;line-height:1.3;min-height:3.2em}
+.st .st-copy-field small{font-size:var(--st-fs-xs,11px)}
+.st .st-copy-checks{display:flex;flex-direction:column;gap:4px;margin:10px 0;padding:8px 0;border-top:1px solid var(--st-line)}
+.st .st-ready-check{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--st-line);border-radius:8px;font-size:var(--st-fs-s,12px);line-height:1.5;color:var(--st-ink-2);cursor:pointer}
+.st .st-ready-check input{margin-top:3px;width:16px;height:16px;accent-color:var(--st-ok)}
+.st .st-ready-check b{color:var(--st-ink)}
+.st .st-ready-check.on{border-color:var(--st-ok);background:color-mix(in srgb,var(--st-ok) 7%,transparent)}
+.st .st-copy-partner{display:flex;flex-direction:column;gap:10px;font-size:var(--st-fs-s,12px)}
+.st .st-copy-partner p{margin:0}
+.st .st-copy-asks{display:flex;flex-wrap:wrap;gap:6px}
+.st .st-copy-ask{display:flex;gap:6px;align-items:flex-end}
+.st .st-copy-ask .st-ta{flex:1;min-width:0}
+.st .st-copy-alts{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--st-line);padding-top:8px}
+.st .st-copy-alt{border:1px solid var(--st-line);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.st .st-copy-alt p{font-size:var(--st-fs-m,13px);color:var(--st-ink);line-height:1.35}
+.st .st-copy-ctx{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--st-line);padding-top:8px}
+.st .st-copy-count{font-family:var(--fm,monospace);font-size:11px;color:var(--st-ink-2);align-self:center}
+
+/* ---- Design: the dock over the canvas and the creation mode */
+.st .st-dock{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;margin:6px 0 8px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:8px}
+.st .st-dock-btn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid transparent;border-radius:6px;padding:5px 10px;font:inherit;font-size:var(--st-fs-s,12px);color:var(--st-ink-2);cursor:pointer}
+.st .st-dock-btn:hover:not([disabled]){background:var(--st-raised,var(--st-ground));color:var(--st-ink)}
+.st .st-dock-btn.on{color:var(--st-ink);border-color:var(--st-accent);background:color-mix(in srgb,var(--st-accent) 8%,transparent)}
+.st .st-dock-btn[disabled]{opacity:.45;cursor:not-allowed}
+.st .st-dock-btn:focus-visible{outline:2px solid var(--st-focus,var(--st-accent));outline-offset:1px}
+.st .st-dock-ic{width:14px;text-align:center;font-size:12px;line-height:1;color:var(--st-ink-3)}
+.st .st-dock-ic.ic-design::before{content:"\25A6"}
+.st .st-dock-ic.ic-text::before{content:"T";font-weight:700}
+.st .st-dock-ic.ic-images::before{content:"\25A8"}
+.st .st-dock-ic.ic-brand::before{content:"\25C6"}
+.st .st-dock-ic.ic-layers::before{content:"\2261"}
+.st .st-dock-ic.ic-partner::before{content:"\2726"}
+.st .st-modeseg{margin-left:auto}
+.st .st-tool-anchor{scroll-margin-top:calc(var(--st-head-h,46px) + 72px)}
+.st .st-imagery-wait{margin:8px 0;padding:10px 12px;border:1px solid var(--st-warn);border-radius:8px;background:color-mix(in srgb,var(--st-warn) 8%,transparent);font-size:var(--st-fs-s,12px)}
+
+/* ---- Imagery timing (intake and brief) */
+.st .st-timing{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.st .st-timing-row{margin-top:10px}
+
+/* ---- Review: the preflight */
+.st .st-pf-sum{margin:8px 0;font-size:var(--st-fs-s,12px);color:var(--st-ink-2)}
+.st .st-pf-sum b{color:var(--st-ink)}
+.st td.st-pf{font-size:var(--st-fs-s,12px);min-width:96px;vertical-align:top}
+.st .st-pf-chip{display:inline-block;font-family:var(--fm,monospace);font-size:10px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--st-line);border-radius:4px;padding:0 6px;line-height:16px;margin-right:4px}
+.st .st-pf-chip.ok{color:var(--st-ok);border-color:var(--st-ok)}
+.st .st-pf-chip.warn{color:var(--st-warn);border-color:var(--st-warn)}
+.st .st-pf-chip.bad{color:var(--st-bad);border-color:var(--st-bad);background:color-mix(in srgb,var(--st-bad) 10%,transparent)}
+.st .st-pf-chip.na{color:var(--st-ink-3)}
+.st .st-pf-t{color:var(--st-ink-2)}
+.st .st-pf-advice{margin-top:3px;font-size:var(--st-fs-xs,11px)}
+
+@media (max-width:720px){.st .st-modeseg{margin-left:0}}
+.st td.st-pf-ap{min-width:180px}
+.st td.st-pf-ap > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:2px 0 6px}
+.st td.st-pf-ap .st-lbl{min-width:48px;margin:0}

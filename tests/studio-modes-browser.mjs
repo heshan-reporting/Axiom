@@ -31,7 +31,7 @@ await T.t('the intake offers the creation mode before anything is generated, exp
   const rj = d.jobs.find(j => j.stage === 'render'); eq(rj.input.finished, true); eq(rj.input.marks.map(m => m.role), ['logo']);
 });
 await T.t('the asset view shows one bitmap labelled as such: no layout editor, no draggable layers, painted words read-only, caption editable, Regenerate and Switch to Editable offered', async () => {
-  await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-finnote');
+  await page.click(R + '.st-step:has-text("Design")'); await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-finnote');
   const note = await page.textContent(R + '.st-finnote'); ok(/Gemini Finished Creative/.test(note) && /one bitmap/.test(note) && /Nothing is composed over it/.test(note), note);
   eq(await page.$(R + '.st-asset-acts .btn:has-text("Edit layout")'), null, 'no layout editor on a bitmap');
   const tag = await page.textContent(R + '.st-comp-tag'); ok(/finished creative: one bitmap/.test(tag) && /nothing composed over it/.test(tag), tag);
@@ -58,7 +58,7 @@ await T.t('the Review stage says design approval waits for the painted words and
   ok(await page.isDisabled(R + '.st-approvals .st-apcell button:has-text("Approve design")'), 'design approval is blocked until the reading');
 });
 await T.t('Regenerate opens a form for the painted words and a direction, states the cost, and queues one finished render; Switch to Editable derives a live-layer asset and leaves the original', async () => {
-  await page.click(R + '.st-step:has-text("Refine")'); await page.waitForSelector(R + '.st-finished');
+  await page.click(R + '.st-step:has-text("Design")'); await page.waitForSelector(R + '.st-finished');
   await page.click(R + '.st-finished .btn:has-text("Regenerate (1 render)")'); await page.waitForSelector(R + '.st-regen');
   ok(await page.$(R + '.st-regen #st-rg-headline'), 'the painted headline is offered for regeneration');
   await page.fill(R + '.st-regen #st-rg-ins', 'warmer light');

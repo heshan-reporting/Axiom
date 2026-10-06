@@ -6883,7 +6883,7 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p29';
+const AXIOM_BUILD = '2026-10-06.studio-p30';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8461,6 +8461,9 @@ function stBriefNorm(b) {
   // words and marks as live layers over generated imagery) or finished (the image model paints the whole piece). An
   // unknown value is not stored as given: it falls to editable, the mode every safeguard was built for.
   out.creationMode = b.creationMode === 'finished' ? 'finished' : 'editable';
+  // when the imagery is made: with the copy (production queues the renders at once, the default) or after the copy is ready
+  // (production writes and lays out; the Design step queues the renders through POST /studio/imagery when the words are settled)
+  out.imageryTiming = b.imageryTiming === 'after_copy' ? 'after_copy' : 'with_copy';
   return out;
 }
 function stBriefText(p) {
@@ -8633,6 +8636,8 @@ async function stCopyStage(env, job, p, log) {
   const cc = await stCompileContext(env, p, { channels, log, stage: 'copy', refs: deliverable === 'copy' ? null : { images: 2, mode: inp.refMode, chosen: inp.refs }, art: deliverable === 'copy' ? 0 : 4 }); const ctx = cc.ctx;
   // the creation mode was chosen on the brief; finished mode paints the mark from its file, so the file must exist before anything is spent
   const finished = deliverable !== 'copy' && ((p.brief || {}).creationMode === 'finished' || inp.creationMode === 'finished') && inp.imagery !== 'none';
+  // the brief may say the imagery waits for the copy: the words and layouts are made now, the renders when Design asks (render:true forces them)
+  const afterCopy = (p.brief || {}).imageryTiming === 'after_copy';
   let markFiles = null;
   if (finished) {
     markFiles = await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
@@ -8730,13 +8735,14 @@ async function stCopyStage(env, job, p, log) {
     const bgRegion = how === 'plan' ? (layout.regions || []).find(x => x.role === 'background') : null;
     const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
     assets.push(aid); versions.push(v.id);
-    if (deliverable !== 'copy' && inp.render !== false) {
+    if (deliverable !== 'copy' && inp.render !== false && !(afterCopy && inp.render !== true)) {
       if (how === 'plan' || finished) renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true, marks: markFiles ? markFiles.marks : undefined }));
       else { const rj = await stJobCreate(env, { project: p.id, asset: aid, stage: 'render', input: { prompt: stArtPrompt(Object.assign({}, piece, { visual: stStr(piece.visual, 200), headline: copy.headline, support: copy.support }), direction, ctx, format, template, layout.design), aspect: format, size, note: 'background for ' + title }, idem: 'render:' + aid + ':' + v.id }, 'studio'); if (rj.job) renders.push(rj.job.id); }
     }
   }
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='production', revision=revision+1, updated=? WHERE id=?").bind(Date.now(), p.id).run();
   await log.phase('queueing', channels.length + ' composition' + (channels.length === 1 ? '' : 's') + ' written' + (renders.length ? '; ' + renders.length + ' render job' + (renders.length === 1 ? '' : 's') + ' queued' : ''), { completed: channels.length, total: channels.length, renders: renders.length });
+  if (afterCopy && deliverable !== 'copy' && inp.render !== false && inp.render !== true) await log('info', 'the brief says the imagery waits for the copy: no render queued; generate it in Design once the words are ready');
   if (fallbacks.length) await log('info', 'house composition used for ' + fallbacks.join('; ') + ' - not a plan, shown as such on the version');
   if (incomplete) await log('info', incomplete + ' composition' + (incomplete === 1 ? ' is' : 's are') + ' incomplete: the campaign mark is not on file; nothing drawn in its place, approval and export wait for the file');
   await log('out', assets.length + ' asset' + (assets.length === 1 ? '' : 's') + ' written' + (mediums.length ? ' (' + mediums.join('; ') + ')' : '') + (flagged ? ', ' + flagged + ' with checks to look at' : ', every figure traced') + (renders.length ? '; ' + renders.length + ' render' + (renders.length === 1 ? '' : 's') + ' queued at ' + size : deliverable === 'copy' ? '; copy only, no renders' : '; no renders queued'));
@@ -10290,6 +10296,36 @@ async function stPlanRenders(env, p, a, v, layout, planIn, opts) {
     if (r.job) jobs.push(r.job.id);
   }
   return jobs;
+}
+/** Queue the imagery the current version plans, on request: every planned region of an editable plan, the one painting of a
+ *  finished creative (with the mark files) or of hybrid artwork, or the background of a house composition. Refused for copy only,
+ *  for a version that already has its imagery (unless again:true), while a render for the asset is in flight, and for a version
+ *  that keeps no imagery by choice. Idempotent per version and attempt, so a second press returns the same jobs. */
+async function stImageryQueue(env, p, a, body, who) {
+  const v = await stCurrent(env, a); if (!v) return { error: 'no_version', status: 404 };
+  const L = v.layout || {}; const finished = v.mode === 'finished' || !!L.finished;
+  if (v.mode === 'copy' || !(L.layers || L.regions || finished)) return { error: 'copy_only', status: 409, detail: 'A copy-only asset has no imagery to make.' };
+  if (!env.GEMINI_KEY) return { error: 'gemini_not_configured', status: 409, detail: 'Image generation is not configured on the worker (GEMINI_KEY).' };
+  if ((v.context || {}).imagery === 'none' && !body.again) return { error: 'no_imagery_by_choice', status: 409, detail: 'This version was made with no imagery on purpose (type only). Ask for imagery as a new direction instead.' };
+  const hasImage = !!(v.image && v.image.key) || (L.layers || []).some(l => l.type === 'img' && l.region && l.src);
+  if (hasImage && !body.again) return { error: 'has_imagery', status: 409, detail: 'This version already has its imagery. Re-render from the Art direction area, which says what it changes.' };
+  const live = await env.MIND_DB.prepare("SELECT id FROM studio_jobs WHERE asset=? AND stage='render' AND state IN ('queued','running') LIMIT 1").bind(a.id).first();
+  if (live) return { error: 'render_in_flight', status: 409, detail: 'An image for this asset is already queued or being made (job ' + live.id + ').' };
+  const size = /^(1K|2K|4K)$/.test(String(body.size || '')) ? body.size : ((p.brief || {}).size || undefined);
+  const attempt = Math.max(0, Math.min(99, parseInt(body.attempt, 10) || 0));
+  const idem = 'imagery:' + v.id + (attempt ? ':' + attempt : '');
+  const ctx = await stContext(env, p, { channels: [a.channel] });
+  let jobs = [];
+  try {
+    if (finished || L.v === 5 || L.approach === 'artwork') jobs = await stPlanRenders(env, p, a, v, L, (v.context || {}).planIn || null, { ctx, who, idem, note: 'imagery for ' + a.title + ' (asked in Design)', size, forceAll: true });
+    else {
+      const rj = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stArtPrompt({ visual: stStr((v.context || {}).visual || '', 200), headline: (v.copy || {}).headline, support: (v.copy || {}).support }, null, ctx, a.format, L.template || '', L.design), aspect: a.format, size, note: 'background for ' + a.title + ' (asked in Design)' }, idem }, who);
+      if (rj.job) jobs.push(rj.job.id);
+    }
+  } catch (e) { const m = String((e && e.message) || e); return { error: m.split(':')[0].slice(0, 40) || 'imagery_failed', status: 409, detail: m.slice(0, 300) }; }
+  if (!jobs.length) return { error: 'nothing_planned', status: 409, detail: 'The version plans no imagery to make.' };
+  await stEvent(env, p.id, 'job', { text: 'Imagery asked for ' + a.title + ': ' + jobs.length + ' render' + (jobs.length === 1 ? '' : 's') + ' queued' + (size ? ' at ' + size : '') + (finished ? ' (the finished creative, words and mark painted from the approved copy and the mark files)' : '') + '.', asset: a.id, version: v.id, jobs }, who);
+  return { ok: true, asset: a.id, version: v.id, jobs, size: size || env.IMAGE_SIZE || '2K', finished };
 }
 /** Apply a proposed concept: a layout version now (or a new asset for a fresh design; one asset per frame for a carousel); the image work only when asked. imageFrom takes another card's imagery. */
 async function stConceptApply(env, p, body, who) {
@@ -13160,6 +13196,15 @@ const AXIOM_WORKER = {
           let proposal = null;
           if (decision !== 'withdraw' && String(sb.reason || '').trim().length >= 12) proposal = await brPropose(env, pair.project.ns, pair.project.campaign || '', decision === 'approve' ? 'accepted' : 'rejected', (decision === 'approve' ? 'Accepted ' : 'Rejected ') + part + ': ' + stStr(pair.asset.title, 120), stStr(sb.reason, 600), { type: 'approval', id: pair.asset.id, label: (decision === 'approve' ? 'approval' : 'rejection') + ' of the ' + part + ' of ' + stStr(pair.asset.title, 80) + ' on project ' + stStr(pair.project.title, 80), project: pair.project.id, asset: pair.asset.id, version: cur.id }, who);
           return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal });
+        }
+        // the imagery a composition's current version plans, queued when a person asks (the guided flow: copy first, then design)
+        if (path === '/studio/imagery') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The asset belongs to another project; nothing was written.' }, 403);
+          const r = await stImageryQueue(env, pair.project, pair.asset, sb, who);
+          if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '' }, r.status || 400);
+          await stBump(env, pair.project.id);
+          return jsonResp(r);
         }
         // the two creation modes: a finished creative is revised by regenerating, and leaves the mode only as a derived editable asset
         if (path === '/studio/finished/regenerate' || path === '/studio/derive') {

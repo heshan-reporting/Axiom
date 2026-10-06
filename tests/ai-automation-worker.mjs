@@ -34,6 +34,9 @@ await T.t('a whole scheduled tick that is held makes no call to the Anthropic AP
   const today = new Date(Date.now() + 10 * 3600000).toISOString().slice(0, 10);
   w.env.AI_AUTOMATION = 'daily';
   for (const d of [today, new Date(Date.now() + 11 * 3600000).toISOString().slice(0, 10)]) await w.env.AXIOM_KV.put('ai_cron_day', d);
+  // the daily brief keeps its own once-a-day guard (only 'off' holds it): after 07:00 Sydney with no brief for the day it is
+  // written once, whatever the gate says. Today's brief is recorded as written, so the tick is held at any hour the test runs.
+  for (const d of [today, new Date(Date.now() + 11 * 3600000).toISOString().slice(0, 10)]) await w.env.AXIOM_KV.put('brief_' + d, JSON.stringify({ day: d, at: Date.now(), brief: { headline: 'already written' } }));
   // fresh rows naming register entities on a client issue, and a topic waiting: an ungated tick has something to spend on
   const now = Date.now();
   const rows = Array.from({ length: 12 }, (_, i) => ({ src: 'abc', title: 'Albanese government and Chalmers face pressure over fuel tax credits for miners, report ' + i, body: 'The Minerals Council said fuel tax credits are not a subsidy; Labor and the Coalition traded blows over the diesel rebate in question time.', url: 'https://example.test/news/' + i, ts: now - i * 600000 }));

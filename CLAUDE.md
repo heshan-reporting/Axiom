@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -2017,6 +2017,62 @@ no worker support and glass chrome; rewritten here. Harnesses:
 channel counts, the fenced cancel), `studio-progress-test.mjs` (22, Node),
 `studio-activity-browser.mjs` (3, Chromium: a slow render visible while it
 runs, done at 100, a refused render with Retry).
+
+**The guided flow (S13; build `2026-10-06.studio-p30`, page `?v=r7`;
+`CREATIVE-STUDIO.md` s.36).** From a reviewed interactive mockup (branch
+`mockup/creative-studio-guided`, folder `design/mockups/`, never served): its
+flow and its Canva-like workspace were kept, its scores, progress and AI
+answers were placeholders and are wired to the worker's real data instead.
+The six steps are **Brief, Direction, Copy, Design, Review, Export**
+(`STAGES[].sub`; the old `produce` / `refine` names still route, to Copy and
+Design). **Copy** (`CopyStage`, view `copywrite`; tabs By channel / All copy /
+Sequence): the set by channel on the left, one piece's headline, supporting
+line, CTA, caption and alt text with counts and help in the middle (an edit is
+a text version, saved on leaving the field), its checks, and **Mark this copy
+ready for design** - the agency's copy approval of exactly that version, with
+the short reason `copy ready` (under the length that proposes a brand item);
+an edit to the words drops it, as every approval does. Beside it the copy
+partner: Shorter headline / Plainer words / Three headline options and a free
+ask, each one `revise` call, answered as options with "Use this headline" (a
+text version; the view stays in Copy) and the brief's objective, audience,
+message and action. **Imagery timing** (`brief.imageryTiming`, `stBriefNorm`:
+`with_copy` by default or `after_copy`; chosen at intake and on the brief's
+action bar): with `after_copy` the copy stage writes and lays out but queues no
+render (`render:true` forces), and the log says so. `POST /studio/imagery
+{asset, size, attempt?}` (full; `stImageryQueue`) queues the imagery the current
+version plans - every planned region (`stPlanRenders`, forced), the finished
+painting with the mark files, or a house background (`stArtPrompt`) -
+idempotent per version, refused for copy only (`copy_only`), with imagery on
+file (`has_imagery` unless `again`), with a render in flight
+(`render_in_flight`), with no imagery by choice, without `GEMINI_KEY`; the
+thread records it. **Design** (views asset / Board / Recipes and usage / Jobs):
+the canvas with the **dock** (`DesignDock`: Design -> layout variations, Text ->
+the Copy tab, Images -> art direction or the finished panel, Brand -> the Brand
+tab, Layers -> the layout editor, Partner -> the Art Director; disabled with the
+reason where a tool does not apply) and the creation mode stated (Editable /
+AI finished; a finished creative offers the free editable copy, an editable one
+cannot become finished), the page strip of the family directly under the
+canvas, and on the Board **Generate imagery (N)** for the compositions that wait
+(`needsImagery`), the cost stated in a confirm first. **Review** is a preflight
+per piece read from the record (`preflight()`): Copy (the copy checks), Design
+(technical validation, its blocking findings, warnings named), Brand (mark
+findings, a missing mark), Accessibility (contrast and type findings, alt text),
+with the Art Director's last reading as advice, then the approvals.
+`flowOf` counts copy-ready, visual assets and those awaiting imagery; Design is
+`skipped` for a copy-only set. Also adopted from the parallel ChatGPT branch
+(`chatgpt/local-work`) after review, each with a test: a render keeps an edit
+made while the image was generated (the image lands on the version current
+when it returns, a layout the render changes is built from that version, region
+renders merge there; the stale guard is unchanged), a worker with no `MIND_DOCS`
+refuses a render before calling, the judge treats a type-only ground as
+expecting no photograph and keeps a browser's `imageryMissing`, a 15 s image
+decode timeout, variations show a photograph on file over a type-only ground,
+ordered reloads, a composition never ready with the previous version's images,
+and an export that stops with the asset named when an image does not load, the
+preflight blocks or a bitmap does not download. Its milestone percentages were
+not taken. Styles: `docs/studio-flow.css`. Harnesses: `studio-s13-worker.mjs`
+(7), `studio-guided-browser.mjs` (6, Chromium); the studio, journey, modes, S9
+and S10 browser harnesses follow the new steps.
 
 Phase 1, the ground:
 
