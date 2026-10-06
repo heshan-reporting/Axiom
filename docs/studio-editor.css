@@ -22,6 +22,7 @@
 #studio-root .st .st-le-rot::after{content:'';position:absolute;left:50%;top:100%;width:1px;height:16px;background:var(--sk-accent)}
 #studio-root .st .st-le-rot:active{cursor:grabbing}
 #studio-root .st .st-le.marqueeing{cursor:crosshair}
+#studio-root .st .st-le:focus{outline:none}
 #studio-root .st .st-le-marquee{position:absolute;border:1px solid var(--sk-accent);background:color-mix(in srgb,var(--sk-accent) 14%,transparent);pointer-events:none;z-index:6}
 #studio-root .st .st-le-snap{position:absolute;pointer-events:none;z-index:7;background:#ff3d8b}
 #studio-root .st .st-le-snap.x{top:0;bottom:0;width:1px}

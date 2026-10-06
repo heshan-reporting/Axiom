@@ -1510,3 +1510,142 @@ the next slice. Video scripts and motion ideas are text: no video is produced. A
 cannot reach is refused with the attempts, never guessed. Uploads are images and PDFs up to 8 MB; Word files are pasted or
 go through `tools/engine-ingest.py`.
 
+## 40. S17 - one creative operating system: the guided workflow and the canvas editor (build studio-p33, page r11)
+
+Asked for: the whole Creative Studio reviewed as a production product before launch and made into one structured creative
+operating system - a strict progressive workflow with real gating (Brief, Objectives, Strategy, Directions, Copy, Design,
+Review), a project wizard, a brief workspace that takes mixed input, a processing view that says what is happening, Axiom's
+understanding reviewed before anything is built on it; dependency prompts ("Update Directions / Keep Existing Directions")
+so nothing is silently regenerated or destroyed, and no automatic navigation; a rich Directions board; a professional canvas
+editor (inline text, a contextual toolbar, fonts, snapping, layers, effects, image adjustments and AI image operations,
+shapes and icons, style variations, an AI Creative Director, handles and rotation and marquee, undo and redo, autosave, zoom
+and pan, responsive resize, a Creative Quality summary with Fix automatically); meaningful loading states with no invented
+percentages; errors that offer Retry, Change input and Continue manually; keyboard shortcuts.
+
+### 40.1 The workflow, held on both sides
+
+A project made in the wizard carries `brief.workflow = 2`. `stWorkflow(p)` works out every step's state from the record -
+not started, in progress, processing, needs review, complete, skipped, locked (with the sentence that says what opens it) or
+error - and the island and the server read the same answer: the navigator draws it, `stWfGate` refuses a job or a choice
+that would skip a step (409 `workflow_locked` with the need), so a stale tab or a direct API call cannot skip ahead either.
+What each step needs:
+
+| Step | Opens when | What a person does |
+|---|---|---|
+| Brief | always | adds the material (text, links, files and screenshots, notes, Axiom items - several at once, read as one), Axiom analyses it, a person reviews the understanding; a campaign change afterwards sends it back for review |
+| Objectives | the understanding is reviewed | chooses and confirms an objective, a key message and the topics in play |
+| Strategy | the objective is confirmed | confirms a response strategy (Axiom's recommendation marked) and the campaign, or records not responding with a reason |
+| Directions | the strategy is confirmed | generates, refines, merges, makes alternatives, saves, sets aside, duplicates, compares, and chooses one |
+| Copy | a current direction is chosen | writes the words and the visual narrative per channel (one call, no image) and marks each piece ready for design |
+| Design | a piece is ready, or anything was produced | chooses the production mode per ready piece, then works on the canvas |
+| Review | a validated piece with ready copy (a finished creative: words and mark read back) | the preflight, the approvals, the client review; Export is a tab here |
+
+Projects made before the guided workflow keep their free order (the old steps report "not used in this project").
+
+**Changing an earlier choice.** A confirm that would leave directions or pieces built on the earlier choice is refused once
+with 409 `affects_downstream` and the impact (directions, whether one is chosen, pieces, approvals). The island asks:
+**Update directions** (the work stays, marked as built on the earlier choice, and new directions are built on the new one),
+**Keep existing directions** (the work stays current under the new choice; nothing is regenerated) or **Cancel** (nothing
+written). Copy written on an earlier choice is said once, with Rewrite or Keep, and Keep is per piece
+(`brief.intel.keptItems`): the piece named is current again, its neighbours on the same basis are not. Nothing is deleted
+anywhere in this path.
+
+**No automatic navigation.** Generation finishes where the person left it: a ready card or a notice with a button ("View
+directions", "Open the editable copy"), never a jump. Back walks the history the Studio pushes (S15).
+
+### 40.2 The Directions board and copy before imagery
+
+Each direction card carries the approach, the core idea, the hook, three headlines, the visual narrative, the route and a
+**free preview** drawn by the renderer from the direction's plan (no image call). Directions carry the basis they were built
+on (`basis {intel, objective, message, strategy}`) and the copy carries it forward on every version (`context.basis`), so
+"built on an earlier choice" is a fact read from the record, not a guess. The copy step renders nothing; imagery waits for the
+words to be marked ready, because a render spent on words that will change is money spent twice. Then, in Design,
+`POST /studio/production {mode editable|finished}` (`stProduction`) goes piece by piece: editable queues the imagery each
+composition plans; finished appends a finished version and queues its one painting with the mark files attached; a piece
+whose copy is not ready, a copy-only piece, a finished piece asked to be editable, or a locked layout is named with its
+reason and the rest go. A finished request with no mark on file fails before any spend.
+
+### 40.3 The canvas editor
+
+`LayoutEditor` (in `docs/studio.js`) with its parts in `docs/studio-editor.js`, drawing through the one renderer:
+
+- **Selection and gestures.** Eight handles (an edge resizes from that edge, in the layer's own frame so a turned layer
+  resizes along its own sides; Shift keeps proportions, Alt from the centre; a mark always keeps its proportions), a rotation
+  handle (Shift for 15 degree steps; it settles on the square angles within 3), a marquee from the empty stage (Shift adds),
+  and snapping of the measured ink - its edges and centre - to the stage edges and centre, the format's safe area, a 10% grid
+  when shown and the other layers' edges and centres within 0.8% of the stage (Alt passes), with the guide drawn while the
+  gesture lasts. Gestures run on the display's frames; each is one undo step.
+- **Words.** Double-click or Enter edits the words where they sit, set in the layer's face, size and colour; a copy role
+  writes the approved copy field and saves with the layout as one version; a locked field or a part of a split headline is
+  not opened. Each text layer names its words to a screen reader.
+- **The floating toolbar** over the selection: font, size, bold, italic, alignment, colour and edit the words for text; fill
+  and opacity for a shape; flip, fit and replace for an image; duplicate, lock, order, delete and more for every layer.
+- **Fonts.** The picker groups the brand faces, recommended faces and recent ones over a 40-family Google Fonts catalogue,
+  with search and preview on hover. A brand-kit font name outside the catalogue is never sent to Google; a face that does not
+  load is reported by the validation, never silently replaced.
+- **Effects and image treatment.** Drop shadow, outline, glow, blend modes, blur, opacity; brightness, contrast, saturation,
+  warmth, tint, sharpness, flip, circle mask, corner radius - drawn by the renderer in the layer's own box, never on a mark.
+- **Adding.** Heading, body text, a label; rectangle, pill, circle, triangle, line; an icon from the catalogue; an image from a
+  file (`POST /studio/image/upload`, checked by its bytes, kept in the project's uploads).
+- **Layers.** Ctrl+D duplicates, Delete removes (a copy-role layer is hidden, so the approved words are never lost; a mark is
+  never duplicated or deleted), Ctrl+C and Ctrl+V copy and paste (an image from another project is not carried), Ctrl+G
+  groups, Ctrl+] and Ctrl+[ reorder; the Layers panel orders by dragging, hides, locks, duplicates and deletes.
+- **Autosave.** An unsaved layout is a draft for this person only (D1 `studio_drafts`, one per person per asset, naming the
+  version it was made on) and is offered back after a reload; it never becomes a version by itself.
+- **Zoom and pan.** Fit, 50 to 200% and actual size in the control; Shift+1 fits, Shift+0 is actual size, Shift+2 is 200%;
+  Ctrl or Cmd with the wheel zooms from 25 to 400%; Space and drag pans.
+- **Style variations.** Ten named treatments of the same words, marks and imagery - Minimal, Bold, Editorial, Data-led,
+  Social-first, Corporate, Premium, High-impact, Clean, Campaign-style - each measured (and repaired) at the output size;
+  "Use this style" is a layout version with no model call.
+- **Resize to other formats.** Eight platform presets (Meta square and portrait, Story or reel, LinkedIn link and square, X
+  landscape, Display, YouTube thumbnail): one new asset per format in the same family from the composition as it stands -
+  words, styling, placed images and photograph - with no model call and no render; a painted bitmap is refused with the way
+  forward (make an editable copy first).
+- **The Creative quality summary.** Readability, Layout, Imagery, Brand, Accessibility and Platform fit (and Other findings,
+  so no finding is dropped) rated Good, Fair or Poor from the renderer's measurement and the copy checks - never a model's
+  opinion. **Fix automatically** is the bounded repair (it never changes a word) and is offered only when a blocking finding
+  is a layout matter; what no layout move can fix (no imagery yet, a mark that did not load, pixels that could not be read) is
+  named with its remedy.
+- **The Art Director on the selection.** With layers selected the composer names them and the revise job carries them, so a
+  direction like "make it bolder" is aimed where the person pointed.
+- **AI image operations** stay edits by description (Gemini's semantic masking): change a marked area, remove an object (the
+  marked area is enough), a new background keeping the subject, change the light (the words of the change), restyle keeping
+  the content; each states its cost before it runs and is measured for preservation afterwards.
+
+### 40.4 Loading, errors, keyboard
+
+The processing card names the step a job is on from its live activity (S12) and counts only what is countable; a model call
+shows elapsed time and the typical duration, never a share. A failure says what failed, that nothing made before was
+touched, and offers Retry, Change input and Continue manually. Cancel says that a call already sent may still finish and be
+billed. Alt+1..7 move between the steps; the canvas shortcuts work wherever the focus is not in a field, including after the
+focused layer has left the canvas. **?** or the Shortcuts button opens the sheet of every shortcut (Selection, Layers, Words,
+Gestures, History, View, Studio), written from the same list the editor answers to, naming Cmd on a Mac and Ctrl elsewhere;
+while it is open the canvas takes no key.
+
+### 40.5 What the ported suites found
+
+Moving every browser suite onto the wizard and the seven gated steps (`tests/studio-flow.mjs` holds the shared steps) found
+defects that are fixed in this release, each now covered: the renderer fetched any brand-kit font name from Google Fonts;
+Design locked itself after production when a word changed, taking the canvas away from work already on it; the header named
+the old intake's creation mode on guided projects; analysis was offered without a model key; the empty library promised a
+start "straight to production"; the Layers panel squeezed a layer's name to nothing beside its order controls; Review's lock
+spoke of validation for a painted bitmap; a new job did not appear until the next refresh, so the processing card was never
+seen while the job ran; after Delete hid the focused layer the keyboard fell to the page and Ctrl+Z no longer reached the
+editor; a text layer did not say its words to assistive technology; Ctrl+Shift+] and Ctrl+Shift+[ (to the front, to the
+back) never fired, because with Shift held the key arrives as a brace; and Alt+1..7 never moved between steps on a Mac, where
+Option with a digit types a symbol (both are now read by the key's code). The floating toolbar sits over the layer above a
+selection, so the older suites now reach a covered layer through the Layers list, as a designer would.
+
+### 40.6 Limits, stated
+
+- Every model step in this release (analysis, objectives, strategy, directions, copy, the Art Director) ran against mocked
+  providers in the harnesses. No live model output was judged here.
+- Image operations are by description, never a pixel mask; there is no upscaling and no cut-out to transparency in the
+  editor. A removal or relight can change more than asked: the preservation measure says how much, and a person decides.
+- Handles appear for one layer at a time; a multi-selection moves, aligns, distributes, groups and reorders but is not scaled
+  as one. A turned layer snaps by its box rather than its ink.
+- Fonts come from Google Fonts at run time; the sandbox has no network, so the harnesses prove that a face that fails is
+  reported, and real loading is seen only on the live page.
+- A draft is one per person per asset: two tabs of the same person on one asset keep the later autosave.
+- Projects made before the guided workflow are not moved into it; they keep their free order.
+

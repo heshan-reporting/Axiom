@@ -135,17 +135,20 @@ await T.t('locks hold in every canvas command: a locked layer is not reordered o
   await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await page.click(R + '.st-le-tools button:has-text("To front")'); await page.waitForTimeout(100);
   eq(await order(), o0, 'a locked layer is not brought to the front');
   ok(await page.isDisabled(R + '.st-le-tools button:has-text("Group")'), 'nothing to group with one layer');
-  await page.click(R + '.st-le-layer[aria-label="Layer headline"]', { modifiers: ['Shift'] }); await page.click(R + '.st-le-tools button:has-text("Group")'); await page.waitForTimeout(100);
+  // the floating toolbar sits over the layer above the selection, so the second layer is added from the Layers list (Shift adds
+  // there as on the canvas) - what a designer does when the toolbar covers the layer they want
+  const row = role => R + '.st-le-list button.st-layer-pick[title^="' + role + ' "]';
+  await page.click(row('headline'), { modifiers: ['Shift'] }); await page.click(R + '.st-le-tools button:has-text("Group")'); await page.waitForTimeout(100);
   const grouped = await page.$$eval(R + '.st-le-layer', els => els.filter(e => /grouped/.test(e.textContent)).map(e => e.getAttribute('aria-label')));
   ok(grouped.indexOf('Layer support') < 0, 'a locked layer is not grouped (' + grouped.join(', ') + ')');
   // the rule-held mark has no drag handle and says why
   const held = await page.$eval(R + '.st-le-layer[aria-label="Layer logo"]', el => ({ text: el.textContent, cls: el.className, handle: !!el.querySelector('.st-le-h') }));
   ok(/held/.test(held.text) && /held/.test(held.cls) && !held.handle, 'the rule-held mark is shown as held, with no resize handle (' + held.text.trim() + ')');
   // resizing the mark by the corner is not offered; its proportions are kept by the editor when its box is typed in
-  await page.click(R + '.st-le-layer[aria-label="Layer logo"]');
+  await page.click(row('logo'));
   eq(await page.$(R + 'input[aria-label="Width, per cent of the stage"]'), null, 'a held mark has no position fields either');
   // unsaved edits: nudge the headline, the header names the unsaved layout, Cancel asks
-  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
+  await page.click(row('headline')); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
   ok(await page.$(R + '.st-le-dirty'), 'the editor says the layout has unsaved changes');
   const headTxt = await page.textContent(R + '.st-head'); ok(/Unsaved layout/.test(headTxt), 'the header says so too: ' + headTxt.replace(/\s+/g, ' ').slice(0, 120));
   await page.click(R + '.st-le-wrap .btn:has-text("Cancel")'); await page.waitForTimeout(150);
