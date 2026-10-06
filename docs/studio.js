@@ -152,20 +152,23 @@
     const bgUrl = v && v.image && v.image.url;
     const srcs = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src).map(l => l.id + '=' + l.src).join('|');
     const words = JSON.stringify((Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'text').map(l => [l.font, l.weight])) + JSON.stringify(layout.fonts || {});
-    const [st, setSt] = useState({ imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: '' });
+    // what this composition needs, as one key: the state answered for another key (the version before, a layout just edited)
+    // is never handed out as ready, so nothing measures the new version against the old version's images in the render between
+    const want = (bgUrl || '') + '|' + srcs + '|' + words + '|' + (ns || '') + '|' + (nonce || 0);
+    const [st, setSt] = useState({ imgs: { bg: null, logo: null }, fonts: null, failed: [], ready: false, key: '', want: '' });
     useEffect(() => {
-      let live = true; setSt(s => Object.assign({}, s, { ready: false }));
+      let live = true; setSt(s => Object.assign({}, s, { ready: false, want }));
       (async () => {
         const imgs = await loadImages(Object.assign({}, v || {}, { layout }), ns);
         const fonts = layout.layers ? await R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 4000 }) : null;
-        if (live) setSt({ imgs, fonts, failed: imgs._failed || [], ready: true, key: (bgUrl || '') + '|' + srcs + '|' + words + '|' + Date.now() });
+        if (live) setSt({ imgs, fonts, failed: imgs._failed || [], ready: true, want, key: (bgUrl || '') + '|' + srcs + '|' + words + '|' + Date.now() });
       })();
       // a face that finishes loading later still changes the measure: redraw and re-measure
       const onFonts = () => { if (live && layout.layers) R.ensureFonts(layout, copy || (v && v.copy) || {}, { timeout: 1500 }).then(fonts => { if (live) setSt(s => Object.assign({}, s, { fonts, key: s.key + '+f' })); }); };
       if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', onFonts);
       return () => { live = false; if (document.fonts && document.fonts.removeEventListener) document.fonts.removeEventListener('loadingdone', onFonts); };
     }, [bgUrl, srcs, words, ns, nonce || 0]);
-    return st;
+    return st.want === want ? st : Object.assign({}, st, { ready: false });
   }
   function useImages(v, ns, layoutOverride) { return useComposition(v, ns, layoutOverride).imgs; }
 
@@ -2005,10 +2008,13 @@
     useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
     useGoto('studio', q => { q = q || {}; resumed.current = true; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
+    const reloadSeq = useRef(0), reloadApplied = useRef(0);
     const reload = useCallback(async (id) => {
       const want = id || pidRef.current; if (!want) return null;
+      // reloads overlap (the poll, an action's own reload): an answer older than one already applied is never laid over it
+      const seq = ++reloadSeq.current;
       // the ref moves with the answer, not with the next render: a write that follows a reload in the same handler sends the fresh revision
-      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
+      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < reloadApplied.current) return pRef.current; reloadApplied.current = seq; pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want && seq >= reloadApplied.current) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
     }, []);
     /* an error explained where the work is, with a real retry when one makes sense; a provider problem refreshes the status chips */
     const fail = (e, what, retry) => { const x = explain(e, what); setNotice(Object.assign(x, { actions: retry ? [{ label: 'Retry', fn: retry }] : [] })); setBusy(''); if (x.kind === 'provider') refreshStatus(); };
@@ -2303,11 +2309,22 @@
           const v = x.v; const safe = (x.a.title + '-v' + vnum(x.a, v)).replace(/[^a-z0-9-]+/gi, '_');
           // a finished creative is exported as the generated bitmap itself: nothing is drawn over it and no composed PNG is saved
           if (v.layout && v.layout.layers && v.mode !== 'finished') {
-            const imgs = await loadImages(v, p0.ns); await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+            const imgs = await loadImages(v, p0.ns); const fonts = await R.ensureFonts(v.layout, v.copy, { timeout: 4000 });
+            // the bundle is the approved version as validated: an image that did not load, or a composition that no longer passes
+            // here, stops the export with the asset named - never a zip with a hole or a blocked tile in it
+            if ((imgs._failed || []).length) throw new Error(x.a.title + ': an image file did not load (' + imgs._failed.length + '). Open it in Design and measure again; no bundle was made.');
+            const pre = R.validate(v.layout, v.copy, imgs, { fonts, format: x.a.format, channel: x.a.channel });
+            if (!pre.ok) throw new Error(x.a.title + ': the export preflight found ' + pre.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ')).join(', ') + '. Open it in Design to fix it; no bundle was made.');
             const blob = await R.toBlob(v.layout, v.copy, imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
             files.push({ name: safe + '.png', data: u8 }); const d0 = dims(u8); list.push(Object.assign({ name: safe + '.png', bytes: u8.length, want: v.layout.stage ? { w: v.layout.stage.w, h: v.layout.stage.h } : null }, d0 || {}));
             if (canWrite() && !p0.readOnly) { let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); await call('/studio/render/save', { asset: x.a.id, version: v.id, imageB64: btoa(bin), mime: 'image/png' }); }
-          } else if (v.image && v.image.url) { try { const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); const u8 = new Uint8Array(await r.arrayBuffer()); files.push({ name: safe + '.png', data: u8 }); list.push(Object.assign({ name: safe + '.png', bytes: u8.length }, dims(u8) || {})); } catch (e) {} }
+          } else if (v.image && v.image.url) {
+            // the generated bitmap itself: a failed download stops the export (it used to be skipped in silence), and the file keeps its own type
+            const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} });
+            if (!r.ok) throw new Error(x.a.title + ': the image did not download (HTTP ' + r.status + '); no bundle was made.');
+            const ct = r.headers.get('content-type') || ''; const ext = /jpe?g/.test(ct) ? '.jpg' : /webp/.test(ct) ? '.webp' : '.png';
+            const u8 = new Uint8Array(await r.arrayBuffer()); files.push({ name: safe + ext, data: u8 }); list.push(Object.assign({ name: safe + ext, bytes: u8.length }, dims(u8) || {}));
+          } else if (v.mode !== 'copy') throw new Error(x.a.title + ': there is no image or composition to export for this version.');
           sheet.push('== ' + x.a.title + ' (' + x.a.channel + ' ' + x.a.format + ') - version ' + v.id + ' ==', ...['headline', 'support', 'cta', 'caption', 'alt'].filter(k => v.copy[k]).map(k => k.toUpperCase() + ': ' + v.copy[k]), 'CHECKS: ' + ((v.checks || []).map(c => c.state + ' ' + c.text).join('; ') || 'none'), 'APPROVALS: ' + Object.keys(x.a.approvals || {}).map(k => k + ' by ' + x.a.approvals[k].by + ' - ' + x.a.approvals[k].reason).join('; '), '');
         }
         let manifest = null;

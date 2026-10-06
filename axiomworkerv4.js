@@ -10434,8 +10434,10 @@ function stLayoutShowImage(L) {
   return { layout: out, why: L.noImagery ? 'the type-only ground that would have hidden the imagery is lifted' : 'the plan had no background region; one is added so the imagery shows' };
 }
 async function stRenderJob(env, job, pair, done, fail) {
-  const inp = job.input || {}; const p = pair.project; const a = pair.asset;
+  const inp = job.input || {}; const p = pair.project; let a = pair.asset;
   if (!env.GEMINI_KEY) return done('failed', { error: 'gemini_not_configured: set GEMINI_KEY on the worker (not retried)' });
+  // an image with nowhere to keep it would be paid for and lost: refuse before the call
+  if (!env.MIND_DOCS) return done('failed', { error: 'storage_not_configured: the worker has no image storage bound (MIND_DOCS), so no image was requested (not retried)' });
   if (job.progress) await job.progress({ phase: 'preparing', label: 'reading the current version' + (Array.isArray(inp.referenceIds) && inp.referenceIds.length ? ', ' + inp.referenceIds.length + ' reference' + (inp.referenceIds.length === 1 ? '' : 's') : '') + (inp.finished ? ' and the mark files' : '') });
   const cur = await stCurrent(env, a);
   // references: ids on the project (with roles from the plan), or raw data a caller supplied
@@ -10477,14 +10479,20 @@ async function stRenderJob(env, job, pair, done, fail) {
     await env.MIND_DOCS.put(key, bufFromB64(out.imageB64), { httpMetadata: { contentType: out.mime || 'image/png' } });
     if (out.content && out.turn) { convKey = 'studio/' + p.id + '/' + a.id + '/' + vid + '-conv.json'; try { await env.MIND_DOCS.put(convKey, JSON.stringify({ contents: history.concat([out.turn, { role: 'model', parts: out.content.parts || [] }]), model: out.model, at: Date.now() }), { httpMetadata: { contentType: 'application/json' } }); } catch (e) { convKey = ''; } }
   }
+  // the asset as it is now, not as it was before the image call. The app keeps the composition editable while an image is made,
+  // so an edit made meanwhile (words, a layout move) is kept: the image lands on that version. Staleness stays what it was - the
+  // asset had moved past the version the job was asked for before the job read it - but a layout the render must change (the
+  // imagery reopened, a finished or hybrid piece) is built from the version current now, never from the row read before the call
+  const fresh = await stAsset(env, a.id); if (!fresh) return done('failed', { error: 'asset gone while the image was generated (not retried)' });
+  const movedDuring = fresh.asset.current !== a.current; const curNow = movedDuring ? (await stCurrent(env, fresh.asset)) || cur : cur;
   // a region render merges into whatever the asset's current version is now (a sibling region may have landed meanwhile);
   // only a whole-image render for a version the asset has moved past is filed as a branch
   const isRegion = !!(inp.region && inp.region !== 'bg');
-  let live = isRegion ? (await stCurrent(env, a)) || cur : cur;
+  let live = isRegion ? curNow || cur : cur;
   // a region the current layout no longer has (a newer design replaced it) must not touch that design: branch off the version it was asked for
   const regionGone = isRegion && !!(live && live.layout && Array.isArray(live.layout.layers) && !live.layout.layers.some(x => x.type === 'img' && x.region === inp.region));
-  const stale = (!isRegion || regionGone) && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
-  const baseV = stale ? await stVersion(env, job.inputVersion) : null;
+  let stale = regionGone ? !!(job.inputVersion && fresh.asset.current !== job.inputVersion) : !isRegion && !!(job.inputVersion && a.current && a.current !== job.inputVersion);
+  let baseV = stale ? await stVersion(env, job.inputVersion) : null;
   if (regionGone && baseV) live = baseV;
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
   let alpha = null;
@@ -10507,25 +10515,36 @@ async function stRenderJob(env, job, pair, done, fail) {
     // stay hidden behind the ground (the 6 October report: three renders filed, every tile still flat teal). The layout is
     // reopened for it here, once, on the version the render makes; the words, marks and shapes are untouched.
     if (!finished && inp.approach !== 'artwork') {
-      const shown = stLayoutShowImage((stale && baseV ? baseV.layout : (cur && cur.layout)) || null);
+      const shown = stLayoutShowImage((stale && baseV ? baseV.layout : (curNow && curNow.layout)) || null);
       if (shown) { patch.layout = shown.layout; patch.note = stStr(patch.note + ' (' + shown.why + ')', 200); }
       if (patch.context.imagery === 'none') delete patch.context.imagery;
     }
     if (finished) {
       // a finished creative: the bitmap is the whole piece - words, mark and URL - and nothing is composed over it; the layout keeps the
       // plan it was briefed from (for the record and for a later switch to editable) with no live layers and every painted role named
-      const L = (cur && cur.layout) || {}; const textRoles = Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'];
+      const L = (curNow && curNow.layout) || {}; const textRoles = Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'];
       patch.layout = Object.assign({}, L, { layers: [], baked: textRoles.concat(marksSent), bakedText: Array.isArray(inp.bakedText) ? inp.bakedText : (L.bakedText || []), approach: 'artwork', finished: true, incomplete: [] }); patch.mode = 'finished';
       if (inp.copy && typeof inp.copy === 'object') patch.copy = stCopy(inp.copy);
       patch.context.creationMode = 'finished'; patch.context.marksSent = marksSent;
     } else if (inp.approach === 'artwork') {
       // the hybrid: the words are in the bitmap and not editable; only the exact marks stay live layers over it, placed by the Studio
-      const L = (cur && cur.layout) || {}; const marks = (L.layers || []).filter(x => x.type === 'img' && (x.role === 'logo' || x.role === 'wordmark'));
+      const L = (curNow && curNow.layout) || {}; const marks = (L.layers || []).filter(x => x.type === 'img' && (x.role === 'logo' || x.role === 'wordmark'));
       patch.layout = Object.assign({}, L, { layers: marks, baked: Array.isArray(inp.baked) && inp.baked.length ? inp.baked : ['headline', 'support', 'cta'], approach: 'artwork', noImagery: undefined }); patch.mode = 'artwork';
     }
   }
   if (job.fence) await job.fence();
-  const v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined });
+  let v;
+  // the write expects the revision just read: an edit landing in the last moment makes the render a branch rather than
+  // a version carrying a layout read before that edit (the image is kept; nothing is asked of the provider again)
+  if (!stale) a = fresh.asset;
+  try { v = await stAppendVersion(env, a, patch, 'studio', { branch: stale, baseVersion: baseV || undefined, expectRevision: stale ? undefined : fresh.asset.revision }); }
+  catch (e) {
+    if (e.code !== 'conflict') throw e;
+    if (job.fence) await job.fence();
+    stale = true; baseV = (job.inputVersion && await stVersion(env, job.inputVersion)) || live || cur;
+    patch.note = stStr('render finished while the asset changed; filed as a branch', 200);
+    v = await stAppendVersion(env, a, patch, 'studio', { branch: true, baseVersion: baseV || undefined });
+  }
   await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : finished ? ', finished creative - the words' + (marksSent.length ? ', the ' + marksSent.join(' and ') : '') + ' and the URL are part of the one bitmap; nothing is composed over it' : inp.approach === 'artwork' ? ', hybrid artwork - the words are part of the bitmap, the mark is placed over it' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
   if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
@@ -10630,7 +10649,9 @@ function stValidationJudge(a, v, rep) {
     boxes.push(b);
   });
   rep.boxes.forEach(x => { if (x && x.id != null && !ids.has(String(x.id))) problems.push('the report has a layer ' + String(x.id).slice(0, 24) + ' this version does not'); });
-  const imageryMissing = !v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image));
+  // as the renderer judges it: a type-only ground (noImagery) expects no photograph; an image on record is not proof its pixels
+  // loaded in the browser, so a report saying the imagery was missing keeps that finding rather than becoming a server-side pass
+  const imageryMissing = !L.noImagery && (rep.imageryMissing === true || (!v.image && (L.v === 5 ? (L.regions || []).some(r => r.role === 'background') : !!(L.layers || []).length && !(L.style === 'typographic' && !L.image))));
   const fonts = rep.fonts && typeof rep.fonts === 'object' ? { fallback: (Array.isArray(rep.fonts.fallback) ? rep.fonts.fallback : []).map(s => stStr(s, 160)).slice(0, 6), roles: rep.fonts.roles && typeof rep.fonts.roles === 'object' ? rep.fonts.roles : undefined } : null;
   // what the browser could not analyse: what it says it could not, plus any live words it reported with no contrast at all
   const unresolved = (Array.isArray(rep.unresolved) ? rep.unresolved : []).map(s => stStr(s, 20)).filter(s => /^(contrast|occlusion|mark readability)$/.test(s));

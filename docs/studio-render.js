@@ -226,7 +226,8 @@
     return new Promise(res => canvas.toBlob(b => res(b), 'image/png'));
   }
   function loadImage(url) {
-    return new Promise((res, rej) => { if (!url) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('image failed: ' + String(url).slice(0, 80))); im.src = url; });
+    // a decode that never settles (a stalled blob, a browser that drops the event) fails after 15 s instead of holding the measurement forever
+    return new Promise((res, rej) => { if (!url) return res(null); const im = new Image(); const timer = setTimeout(() => { im.onload = null; im.onerror = null; rej(new Error('image decode timed out: ' + String(url).slice(0, 80))); }, 15000); im.onload = () => { clearTimeout(timer); res(im); }; im.onerror = () => { clearTimeout(timer); rej(new Error('image failed: ' + String(url).slice(0, 80))); }; im.src = url; });
   }
 
   /* ---------------------------------------------------------------- fonts: load, wait, and say what was actually used */
@@ -991,6 +992,9 @@
       const lockedText = T.filter(l => l.locked); const moving = T.filter(l => !l.locked);
       if (!moving.length) return;
       if (r.typeOnly) { L.noImagery = true; L.regions = []; L.bg = accent; L.image = null; if (L.v !== 5) { L.style = 'typographic'; L.template = L.template || 'plain'; } }
+      // every other arrangement is an arrangement over the photograph: one on file shows, even where the layout had been set to a
+      // type-only ground (or a plan without a background region) - otherwise each variation would hide the imagery it was made for
+      else if (images && images.bg) { delete L.noImagery; if (L.v === 5 && !(L.regions || []).some(x => x.role === 'background')) L.regions = [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'keep the current image' }].concat(L.regions || []); }
       const zone = Object.assign({}, r.zone); const pad = r.panel === 'band' || r.panel === 'column' || r.panel === 'card' ? 3 : 0;
       // a band or a fade at the foot is where the mark reads best (its own ground, not the photograph's sky): the words leave it room on
       // the preferred side, so the mark sits on the band rather than being pushed to a top corner over whatever the picture shows there
