@@ -6925,6 +6925,8 @@ async function ensureStudio(env) {
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_intel_log_ns ON studio_intel_log(ns, created)'),
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_texts(id TEXT PRIMARY KEY, project TEXT, ns TEXT, kind TEXT, title TEXT, body TEXT, trace TEXT, checks TEXT, status TEXT, revision INTEGER, job TEXT, who TEXT, created INTEGER, updated INTEGER)'),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_texts_p ON studio_texts(project, created)'),
+    // S17: the editor's autosaved working layout, one per person per asset: not a version, kept until saved or discarded
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_drafts(asset TEXT, who TEXT, project TEXT, version TEXT, layout TEXT, copy TEXT, at INTEGER, PRIMARY KEY(asset, who))'),
   ]); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN file TEXT').run(); } catch (e) {}   // S16: an uploaded image or PDF the analysis reads
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
@@ -6948,7 +6950,7 @@ function stCopy(c) {
   const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
   return out;
 }
-function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ['area', 'background', 'restyle'].indexOf(im.meta.edit.kind) >= 0 ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined, finished: im.meta.finished ? true : undefined, marksSent: im.meta.finished ? (Array.isArray(im.meta.marksSent) ? im.meta.marksSent : []).map(x => stStr(x, 12)).slice(0, 4) : undefined }; return out; }
+function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ST_EDIT_KINDS[im.meta.edit.kind] ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined, finished: im.meta.finished ? true : undefined, marksSent: im.meta.finished ? (Array.isArray(im.meta.marksSent) ? im.meta.marksSent : []).map(x => stStr(x, 12)).slice(0, 4) : undefined }; return out; }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -7516,8 +7518,8 @@ async function stPreservation(env, p, a, body, who) {
   if (outside == null || moved == null) return { error: 'bad_measurement', status: 400, detail: 'outside and changedOutside are fractions from 0 to 1.' };
   const verdict = outside <= 0.02 && moved <= 0.03 ? 'held' : outside <= 0.06 && moved <= 0.15 ? 'drifted' : 'changed';
   const word = { held: 'held: the rest of the image is essentially as it was', drifted: 'drifted: small changes outside the area (light, grain or edges) - look before approving', changed: 'changed: the image moved outside the area - compare the versions before using it' }[verdict];
-  const where = ed.kind === 'area' ? 'outside the marked area' : ed.kind === 'background' ? 'across the whole frame (a background swap: the subject should hold, the rest should change)' : 'across the whole frame (a restyle changes everything by design)';
-  const data = { asset: a.id, version: v.id, against: ed.of, editKind: ed.kind, area: ed.area, outside, inside, changedOutside: moved, size: stStr(body.size, 20), verdict: ed.kind === 'area' ? verdict : 'measured',
+  const where = ed.kind === 'area' || ed.kind === 'remove' ? 'outside the marked area' : ed.kind === 'background' ? 'across the whole frame (a background swap: the subject should hold, the rest should change)' : 'across the whole frame (a restyle changes everything by design)';
+  const data = { asset: a.id, version: v.id, against: ed.of, editKind: ed.kind, area: ed.area, outside, inside, changedOutside: moved, size: stStr(body.size, 20), verdict: ed.kind === 'area' || ed.kind === 'remove' ? verdict : 'measured',
     text: 'Preservation of ' + a.title + ' (' + ST_EDIT_KINDS[ed.kind] + '): mean change ' + where + ' ' + (outside * 100).toFixed(1) + '%' + (inside != null ? ', inside ' + (inside * 100).toFixed(1) + '%' : '') + ', ' + (moved * 100).toFixed(1) + '% of pixels moved visibly. ' + (ed.kind === 'area' ? word.charAt(0).toUpperCase() + word.slice(1) + '.' : 'Recorded for comparison; a person judges whether the subject held.') + (ed.kind === 'area' && inside != null && inside < 0.01 ? ' Almost nothing changed inside the area either: the edit may not have taken.' : '') };
   await stEvent(env, p.id, 'preservation', data, who);
   return Object.assign({ ok: true }, data);
@@ -7680,8 +7682,8 @@ const ST_MODEL_CREATIVE = 'claude-opus-5-5';
 const ST_MODEL_EXTRACT = 'claude-sonnet-5-5';
 const ST_DAILY_CALLS = 200;
 const ST_CHANNELS = { linkedin: { label: 'LinkedIn', format: '1:1' }, facebook: { label: 'Facebook', format: '1:1' }, instagram: { label: 'Instagram', format: '4:5' }, x: { label: 'X', format: '16:9' } };
-const ST_FORMATS = { '1:1': { w: 1080, h: 1080, label: 'Square 1:1' }, '4:5': { w: 1080, h: 1350, label: 'Portrait 4:5' }, '9:16': { w: 1080, h: 1920, label: 'Story 9:16' }, '16:9': { w: 1920, h: 1080, label: 'Landscape 16:9' } };
-const ST_HEADLINE_FIT = { '1:1': 64, '4:5': 56, '9:16': 44, '16:9': 60 };
+const ST_FORMATS = { '1:1': { w: 1080, h: 1080, label: 'Square 1:1' }, '4:5': { w: 1080, h: 1350, label: 'Portrait 4:5' }, '9:16': { w: 1080, h: 1920, label: 'Story 9:16' }, '16:9': { w: 1920, h: 1080, label: 'Landscape 16:9' }, '1.91:1': { w: 1200, h: 628, label: 'Link 1.91:1' }, '6:5': { w: 1200, h: 1000, label: 'Display 6:5' } };
+const ST_HEADLINE_FIT = { '1:1': 64, '4:5': 56, '9:16': 44, '16:9': 60, '1.91:1': 56, '6:5': 58 };
 const ST_TEMPLATES = { teal: { name: 'teal fact panel', fill: '#0E6A6E' }, gold: { name: 'gold panel', fill: '#B8901E' }, plain: { name: 'plain photographic', fill: 'rgba(10,14,22,0.58)' }, kit: { name: 'client palette', fill: '' } };
 function stModel(env, role) { return role === 'extract' ? (env.EXTRACT_MODEL || ST_MODEL_EXTRACT) : (env.CREATIVE_MODEL || ST_MODEL_CREATIVE); }
 async function stBudget(env) {
@@ -9006,6 +9008,45 @@ async function stWfConfirm(env, p, sb, who) {
   await stEvent(env, p.id, 'workflow', { step, text: (step === 'objectives' ? 'Confirmed objective ' + obj.id + ' ("' + stStr(obj.title, 70) + '") with key message ' + msg.id + (topics.length ? ' and ' + topics.length + ' topic' + (topics.length === 1 ? '' : 's') : '') + '.' : 'Confirmed the ' + strat.kind + ' response strategy (' + strat.id + ')' + (changed.indexOf('campaign') >= 0 ? ' and the campaign ' + (kitSlug(sb.campaign || '') || 'standalone') : '') + '.') + (changes && ack === 'keep' ? ' The existing work was kept under the new choice.' : changes && ack === 'update' ? ' The existing work stays, marked as built on the earlier choice.' : ''), acknowledge: ack || undefined }, who);
   return { ok: true, step, changed: Array.from(new Set(changed)), acknowledged: ack || undefined };
 }
+/** S17: resize a composition to other platform formats. Each format becomes a new asset in the same family, built from the
+ *  composition as it stands - its words, every element's own position read back as a plan and moved to the new stage, the
+ *  editor's styling, the placed images and the photograph reused - so nothing is generated: no model call, no render. A
+ *  finished or hybrid bitmap cannot be re-laid (its words are painted) and a copy-only piece has nothing to resize. */
+const ST_RESIZE_PRESETS = {
+  'meta-square': { format: '1:1', channel: 'facebook', label: 'Meta square' }, 'meta-portrait': { format: '4:5', channel: 'instagram', label: 'Meta portrait' },
+  story: { format: '9:16', channel: 'instagram', label: 'Story or reel' }, linkedin: { format: '1.91:1', channel: 'linkedin', label: 'LinkedIn link' },
+  'linkedin-square': { format: '1:1', channel: 'linkedin', label: 'LinkedIn square' }, x: { format: '16:9', channel: 'x', label: 'X landscape' },
+  display: { format: '6:5', channel: '', label: 'Display (medium rectangle)' }, youtube: { format: '16:9', channel: '', label: 'YouTube thumbnail' },
+};
+async function stResize(env, p, a, sb, who) {
+  const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 400 };
+  if (src.mode === 'copy') return { error: 'copy_only', status: 409, detail: 'A copy-only piece has no composition to resize.' };
+  if (src.mode === 'finished' || src.mode === 'artwork') return { error: 'not_reflowable', status: 409, detail: 'This creative is one painted bitmap: its words cannot be re-laid for another format. Make an editable copy first (free), or regenerate it in the other format.' };
+  if (!src.layout || !Array.isArray(src.layout.layers) || !src.layout.layers.some(l => l.type === 'text')) return { error: 'no_layout', status: 409, detail: 'The composition has no live words to lay out again.' };
+  const want = (Array.isArray(sb.presets) ? sb.presets : []).map(k => ST_RESIZE_PRESETS[k] ? Object.assign({ preset: k }, ST_RESIZE_PRESETS[k]) : null).filter(Boolean)
+    .concat((Array.isArray(sb.formats) ? sb.formats : []).map(f => (typeof f === 'string' ? { format: f } : f)).filter(f => f && ST_FORMATS[f.format]).map(f => ({ format: f.format, channel: f.channel, label: f.label || ST_FORMATS[f.format].label })));
+  if (!want.length) return { error: 'no_formats', status: 400, detail: 'Name at least one format or preset: ' + Object.keys(ST_RESIZE_PRESETS).join(', ') + ', or a format of ' + Object.keys(ST_FORMATS).join(', ') + '.' };
+  if (want.length > 8) return { error: 'too_many', status: 400, detail: 'At most eight formats at a time.' };
+  const kit = (await brandKit(env, p.ns)) || {}; const now = Date.now(); const made = [], skipped = [];
+  for (const w of want) {
+    const format = w.format; const channel = ST_CHANNELS[w.channel] ? w.channel : a.channel;
+    if (format === a.format && channel === a.channel) { skipped.push({ format, why: 'the same format as the original' }); continue; }
+    const copy = Object.assign({}, src.copy);
+    const planIn = stPlanForFormat(stLayoutToPlan(src.layout, src), a.format, format);
+    const layout = stPlanNormalise(planIn, format, { keepStyle: true, project: p.id, kit, ns: p.ns, campaign: p.campaign, placement: src.layout.markPlacement && (src.layout.markPlacement.basis === 'observed' || src.layout.markPlacement.basis === 'rule') ? src.layout.markPlacement : null, copy, regionSrc: stRegionSrc(src.layout) });
+    if (src.layout.v !== 5) { layout.template = src.layout.template || layout.template; layout.templateName = (src.layout.templateName || 'composition') + ', resized for ' + format; }
+    (layout.regions || []).forEach(x => { if (x.role === 'background') x.prompt = 'keep the current image'; });
+    if (src.layout.imageFocus) layout.imageFocus = src.layout.imageFocus;
+    const aid = stId('a'); const title = stStr(a.title + ' - ' + (w.label || ST_FORMATS[format].label), 80);
+    await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, a.family, channel, format, title, '', JSON.stringify(a.locks || {}), 1, now, now).run();
+    const na = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
+    const v = await stAppendVersion(env, na, { kind: 'layout', note: 'resized from ' + a.title + ' (v' + (src.id || '') + ') for ' + (w.label || ST_FORMATS[format].label) + ': the composition as it stands, re-laid for ' + format + '; the image reused, no render', copy, layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { resizedFrom: a.id + ':' + src.id, planIn, how: 'resize', master: a.id, masterVersion: src.id, preset: w.preset || undefined }) }, who);
+    await stVersionChecks(env, p, na, v);
+    made.push({ asset: aid, format, channel, title, preset: w.preset || '' });
+  }
+  if (made.length) await stEvent(env, p.id, 'resized', { asset: a.id, text: 'Resized ' + a.title + ' to ' + made.map(m => m.title.replace(a.title + ' - ', '')).join(', ') + ': the same words, styling and image, re-laid for each format. Nothing generated; each new composition is measured before it is approved.' + (skipped.length ? ' Not made: ' + skipped.map(x => x.format + ' (' + x.why + ')').join('; ') + '.' : '') }, who);
+  return { ok: true, made, skipped };
+}
 /** S17: the production mode, chosen in Design once the words are ready. editable: the Studio composes the words and the exact
  *  mark as live layers over generated imagery, so the imagery each composition plans is queued. finished: the image model paints
  *  the whole piece from the approved words and the mark files, so a finished version is appended from the composition's plan and
@@ -9712,7 +9753,11 @@ async function stReviseStage(env, job, p, log) {
     + 'KINDS. text: the words change (headline, support, CTA, caption, alt) - give the full new value of every field you change, only for the assets named, never a locked field (say in reply what stayed locked). alternatives: the lead asks for options or variants for one field - give two to four, apply nothing. render: the lead wants a different image, background, photograph, mood or visual - describe it and the steps; the render is not yours to run. adapt: the lead wants the asset on other channels or formats - write the adapted copy per channel in its register, same argument. layout: only a bigger or smaller headline. layers: the lead names particular elements to move, resize, restyle, hide or add and everything else stays ("move only the CTA to the left", "make the panel smaller and translucent", "put the headline in the upper-right negative space and the support at the bottom"): give ops for the named layers by their id from the list, with absolute values in per cent; nothing else; never a locked layer; the words themselves change through a text edit, not here. design: the lead wants a different composition ("three completely different layouts" belongs to the art direction area; here, one new composition): give the whole plan for the assets named - every element with its own position and size in per cent, the panel, gradient or devices, the reading order - keeping the current photograph unless a new one is asked for (the background region prompt then says "keep the current image"); reuse the element ids from the layer list for elements that carry over; when the lead says the new composition must not inherit the current one, do not copy its positions; set image to null to reuse the current photograph, or to {"subject","setting","framing","lighting","mood","focal"} when a new photograph is part of it (the composition is applied at once, the photograph is proposed for confirmation). markPlace says where the campaign mark goes (a corner, or x, y and width); the mark is placed from its file, never drawn, and an approved placement rule keeps it where the rule says.\n' + ST_PLAN_RULES + ' question: only when nothing can be done without an answer.\n' + ST_SPEC_RULES + '\n'
     + 'RULES. Australian English, sentence case, no exclamation marks. Every figure comes from the LEDGER or the APPROVED FACTS, quoted exactly; never invent, round or update one. Quotations verbatim or not at all. Keep the sign-off and the source line the client uses. Do not favour a political party. memory.standing is true only for a preference that should shape future work for this client (a wording, a term, a tone, an always or a never, an imagery rule); false for a one-off (this figure, this asset, this time). Scope campaign when it is about this campaign\'s identity, client when it holds for everything the client does.'
     + ctx.text;
-  const user = 'INSTRUCTION FROM THE TEAM LEAD (target: ' + (target === 'set' ? 'the whole set' : target === 'family' ? 'the family ' + targets[0].asset.family : 'one asset') + '):\n' + instruction
+  // the layers the team had selected in the editor when they spoke: the instruction is about those, and the rest stays
+  const selIds = target === 'asset' && Array.isArray(inp.layers) ? inp.layers.map(x => stClean(x, 24)).filter(Boolean).slice(0, 12) : [];
+  const selLayers = selIds.length && targets[0] && targets[0].version && targets[0].version.layout ? (targets[0].version.layout.layers || []).filter(l => selIds.indexOf(String(l.id)) >= 0) : [];
+  const selText = selLayers.length ? '\n\nSELECTED IN THE EDITOR: ' + selLayers.map(l => l.id + ' (' + (l.role || l.type) + (l.type === 'text' && l.role && ['headline', 'support', 'cta'].indexOf(l.role) >= 0 ? ', the ' + l.role + ' words' : '') + ')').join(', ') + '. The instruction is about these layers: change them (kind "layers" or "text" for their words) and leave every other layer exactly as it is, unless the instruction names it.' : '';
+  const user = 'INSTRUCTION FROM THE TEAM LEAD (target: ' + (target === 'set' ? 'the whole set' : target === 'family' ? 'the family ' + targets[0].asset.family : 'one asset') + '):\n' + instruction + selText
     + '\n\nASSETS IN SCOPE (' + targets.length + '):\n' + targets.map(stAssetBrief).join('\n\n')
     + (p.campaign ? '\n\nCAMPAIGN: ' + p.campaign : '') + cc.identityText + '\n\nBRIEF: ' + [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' - ')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.verified === false ? ' [UNVERIFIED - do not use]' : '')).join('\n') || '(no source: only the APPROVED FACTS may carry figures)')
@@ -9849,7 +9894,7 @@ async function stReviseStage(env, job, p, log) {
       // new stage (type rescaled to the stage's short side); a full artwork cannot be re-flowed, so it restarts from its first plan
       const asStands = !copyOnly && src.mode !== 'artwork' && src.layout && Array.isArray(src.layout.layers) && src.layout.layers.some(l => l.type === 'text') ? stPlanForFormat(stLayoutToPlan(src.layout, src), from.asset.format, format) : null;
       const planIn = asStands || (src.layout && src.layout.v === 5 && src.context && src.context.planIn && typeof src.context.planIn === 'object' ? src.context.planIn : null);
-      const layout = copyOnly ? {} : planIn ? stPlanNormalise(planIn, format, { kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement: src.layout.markPlacement && src.layout.markPlacement.basis === 'observed' ? src.layout.markPlacement : null, copy, regionSrc: stRegionSrc(src.layout) }) : src.layout && src.layout.design ? stLayoutFromSpec(ctx.kit, p.ns, format, src.layout.design, copy, null, p.campaign) : stLayout(ctx.kit, p.ns, format, (src.layout && src.layout.template) || stTemplateFor(ctx.kit, p.campaign), copy, { campaign: p.campaign });
+      const layout = copyOnly ? {} : planIn ? stPlanNormalise(planIn, format, { keepStyle: !!asStands, project: p.id, kit: ctx.kit, ns: p.ns, campaign: p.campaign, placement: src.layout.markPlacement && src.layout.markPlacement.basis === 'observed' ? src.layout.markPlacement : null, copy, regionSrc: stRegionSrc(src.layout) }) : src.layout && src.layout.design ? stLayoutFromSpec(ctx.kit, p.ns, format, src.layout.design, copy, null, p.campaign) : stLayout(ctx.kit, p.ns, format, (src.layout && src.layout.template) || stTemplateFor(ctx.kit, p.campaign), copy, { campaign: p.campaign });
       if (asStands && src.layout.v !== 5) { layout.template = src.layout.template || layout.template; layout.templateName = (src.layout.templateName || 'composition') + ', re-composed for ' + format; }
       if (planIn && (layout.regions || []).some(x => x.role === 'background')) { (layout.regions || []).forEach(x => { if (x.role === 'background') x.prompt = 'keep the current image'; }); }
       const aid = stId('a'); const title = ST_CHANNELS[channel].label + ' ' + (copyOnly ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
@@ -10071,8 +10116,45 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
    layout reads back as a plan with the same element ids, a plan moves between formats with its type rescaled to the
    new stage, focused edits address layers by id, locked layers are carried through, and approved words split across
    several layers are held to reproduce the copy exactly. */
-const ST_TEXT_KEYS = ['id', 'role', 'text', 'x', 'y', 'w', 'h', 'size', 'weight', 'color', 'bg', 'align', 'font', 'emphasis', 'emphasisColor', 'letterSpacing', 'lineHeight', 'part', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
-const ST_SHAPE_KEYS = ['id', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius', 'x', 'y', 'w', 'h', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
+const ST_TEXT_KEYS = ['id', 'role', 'text', 'x', 'y', 'w', 'h', 'size', 'weight', 'color', 'bg', 'align', 'font', 'emphasis', 'emphasisColor', 'letterSpacing', 'lineHeight', 'part', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'family', 'italic', 'case', 'paraSpacing', 'shadow', 'stroke', 'glow', 'blend', 'blur'];
+const ST_SHAPE_KEYS = ['id', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius', 'x', 'y', 'w', 'h', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'fill2', 'icon', 'iconFill', 'strokeWidth', 'shadow', 'stroke', 'blend', 'blur'];
+const ST_IMAGE_KEYS = ['id', 'role', 'name', 'key', 'x', 'y', 'w', 'h', 'fit', 'focus', 'adjust', 'flipX', 'flipY', 'mask', 'radius', 'shadow', 'stroke', 'blend', 'blur', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
+/* The editor's styling, sanitised: a plain family name, the case, the paragraph gap, effects in per cent of the stage width
+   with bounded values and plain colours, a blend from the canvas's own list. Anything else is dropped, never passed on. */
+const ST_BLENDS = ['multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+function stStyleKeys(e, kind) {
+  const o = {}; if (!e || typeof e !== 'object') return o;
+  const fx = (v, keys) => { if (!v || typeof v !== 'object') return undefined; const r = {}; keys.forEach(([k, lo, hi]) => { if (v[k] != null && isFinite(Number(v[k]))) r[k] = Math.round(Math.max(lo, Math.min(hi, Number(v[k]))) * 100) / 100; }); const c = stColour(v.color, null); if (c) r.color = c; return Object.keys(r).length ? r : undefined; };
+  if (e.name) o.name = stStr(e.name, 40);
+  if (e.shadow) o.shadow = fx(e.shadow, [['x', -10, 10], ['y', -10, 10], ['blur', 0, 20]]);
+  if (e.stroke) o.stroke = fx(e.stroke, [['width', 0, 5]]);
+  if (ST_BLENDS.indexOf(e.blend) >= 0) o.blend = e.blend;
+  if (e.blur != null && isFinite(Number(e.blur)) && Number(e.blur) > 0) o.blur = Math.min(20, Math.round(Number(e.blur) * 10) / 10);
+  if (kind === 'text') {
+    if (typeof e.family === 'string' && /^[A-Za-z0-9][A-Za-z0-9 \-']{0,48}$/.test(e.family)) o.family = e.family;
+    if (e.italic) o.italic = true;
+    if (['upper', 'lower', 'title'].indexOf(e.case) >= 0) o.case = e.case;
+    if (e.paraSpacing != null && isFinite(Number(e.paraSpacing)) && Number(e.paraSpacing) > 0) o.paraSpacing = Math.min(3, Math.round(Number(e.paraSpacing) * 100) / 100);
+    if (e.glow) o.glow = fx(e.glow, [['blur', 0, 40]]);
+  }
+  if (kind === 'shape') {
+    const f2 = stColour(e.fill2, null); if (f2) o.fill2 = f2;
+    if (typeof e.icon === 'string' && /^[a-z][a-z0-9-]{0,24}$/.test(e.icon)) o.icon = e.icon;
+    const fi = stColour(e.iconFill, null); if (fi) o.iconFill = fi;
+    if (e.strokeWidth != null && isFinite(Number(e.strokeWidth))) o.strokeWidth = Math.max(0.5, Math.min(4, Number(e.strokeWidth)));
+  }
+  if (kind === 'image') {
+    const a = e.adjust && typeof e.adjust === 'object' ? e.adjust : null; if (a) { const r = {}; ['brightness', 'contrast', 'saturation', 'warmth', 'tint', 'sharpness'].forEach(k => { if (a[k] != null && isFinite(Number(a[k])) && Number(a[k])) r[k] = Math.max(-100, Math.min(100, Math.round(Number(a[k])))); }); if (Object.keys(r).length) o.adjust = r; }
+    if (e.flipX) o.flipX = true; if (e.flipY) o.flipY = true; if (e.mask === 'circle') o.mask = 'circle';
+    if (e.radius != null && isFinite(Number(e.radius)) && Number(e.radius) > 0) o.radius = Math.min(50, Number(e.radius));
+    o.fit = e.fit === 'cover' ? 'cover' : 'contain';
+    if (e.focus && typeof e.focus === 'object') { const f = stFocus ? stFocus(e.focus) : null; if (f) o.focus = f; }
+  }
+  Object.keys(o).forEach(k => { if (o[k] === undefined) delete o[k]; });
+  return o;
+}
+/** An image the team placed on a layout lives in the project's uploads; its address is rebuilt from the key, never taken as given. */
+function stUploadKey(k, pid) { k = String(k || ''); const pp = pid ? String(pid).replace(/[^a-z0-9]/gi, '') : '[a-z0-9]+'; return new RegExp('^studio/' + pp + '/uploads/[a-z0-9]{6,32}\\.(png|jpe?g|webp)$').test(k) ? k : ''; }
 function stPickKeys(o, keys) { const out = {}; keys.forEach(k => { if (o[k] !== undefined && o[k] !== null && o[k] !== '') out[k] = o[k]; }); return out; }
 function stWords(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
 /** Any layout - a plan, a preset spec, a hand-edited composition - read back as a plan with the same element ids. */
@@ -10090,7 +10172,8 @@ function stLayoutToPlan(L, v) {
   regions.forEach(r => { const ly = layers.find(l => l.type === 'img' && l.role === 'region' && (l.region === r.id || l.id === r.id)); if (ly) { r.x = ly.x; r.y = ly.y; r.w = ly.w; r.h = ly.h; if (ly.focus) r.focus = ly.focus; else delete r.focus; } });
   const elements = [];
   layers.forEach(l => {
-    if (l.type === 'img') return; // marks are placed from the kit; region images come back through their regions
+    // marks are placed from the kit; region images come back through their regions; an image the team placed travels as itself
+    if (l.type === 'img') { if (l.role === 'image' && l.key) elements.push(Object.assign({ type: 'image' }, stPickKeys(l, ST_IMAGE_KEYS))); return; }
     if (l.type === 'text') elements.push(Object.assign({ type: 'text' }, stPickKeys(l, ST_TEXT_KEYS)));
     else if (l.type === 'shape') elements.push(Object.assign({ type: l.shape === 'rule' ? 'rule' : 'shape' }, stPickKeys(l, ST_SHAPE_KEYS)));
   });
@@ -10200,18 +10283,21 @@ function stPlanNormalise(plan, format, opts) {
   const layers = [];
   (Array.isArray(plan.elements) ? plan.elements : []).slice(0, 24).forEach((e, i) => {
     if (!e || typeof e !== 'object') return;
-    const type = e.type === 'shape' || e.type === 'rule' ? 'shape' : e.type === 'text' ? 'text' : null;
+    const type = e.type === 'shape' || e.type === 'rule' ? 'shape' : e.type === 'text' ? 'text' : e.type === 'image' ? 'image' : null;
     if (!type) { unsupported.push('element ' + (i + 1) + ' of type "' + stStr(e.type, 20) + '" cannot be drawn'); return; }
-    const base = { id: stClean(e.id, 24) || (type + (i + 1)), type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: isFinite(Number(e.opacity)) && e.opacity !== null && e.opacity !== '' ? Math.round(Math.min(1, Math.max(0, Number(e.opacity))) * 100) / 100 : 1, rotate: stNum(e.rotate, -20, 20, 0) };
+    // a model's plan turns an element by twenty degrees at most; a layout the team made keeps the turn they gave it
+    const rotMax = opts.keepStyle ? 180 : 20;
+    const base = { id: stClean(e.id, 24) || (type + (i + 1)), type: type === 'image' ? 'img' : type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: isFinite(Number(e.opacity)) && e.opacity !== null && e.opacity !== '' ? Math.round(Math.min(1, Math.max(0, Number(e.opacity))) * 100) / 100 : 1, rotate: stNum(e.rotate, -rotMax, rotMax, 0) };
+    if (type === 'image') { const key = stUploadKey(e.key, opts.project); if (!key) { unsupported.push('element ' + (i + 1) + ': an image that is not one of this project\'s uploads cannot be placed'); return; } if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24); layers.push(Object.assign(base, { role: 'image', key, src: '/studio/file?key=' + encodeURIComponent(key) }, stStyleKeys(e, 'image'))); return; }
     if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24);
     if (type === 'text') {
       const role = ST_ROLES.indexOf(e.role) >= 0 ? e.role : 'free';
       const part = (role === 'headline' || role === 'support' || role === 'cta') && e.part != null && isFinite(Number(e.part)) ? Math.max(0, Math.min(9, parseInt(e.part, 10))) : null;
       if (part != null) base.part = part; if (e.lineHeight != null) base.lineHeight = stNum(e.lineHeight, 0.8, 2, 1.12);
-      layers.push(Object.assign(base, { role, text: (role === 'headline' || role === 'support' || role === 'cta') && part == null ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stNum(e.letterSpacing, -0.1, 0.6, 0) || undefined }));
+      layers.push(Object.assign(base, stStyleKeys(e, 'text'), { role, text: (role === 'headline' || role === 'support' || role === 'cta') && part == null ? '' : stStr(e.text, 400), size: stNum(e.size, 1.5, 18, role === 'headline' ? 6.2 : role === 'support' ? 3 : 2.5), weight: stNum(e.weight, 300, 900, role === 'headline' ? 750 : role === 'cta' ? 650 : 500), color: stColour(e.color, '#FFFFFF'), bg: stColour(e.bg, null) || undefined, align: ['left', 'center', 'right'].indexOf(String(e.align).replace('centre', 'center')) >= 0 ? String(e.align).replace('centre', 'center') : 'left', font: ['display', 'body', 'mono'].indexOf(e.font) >= 0 ? e.font : (role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body'), emphasis: ST_EMPHASIS.indexOf(e.emphasis) >= 0 && e.emphasis !== 'none' ? e.emphasis : undefined, emphasisColor: stColour(e.emphasisColor, null) || undefined, letterSpacing: stNum(e.letterSpacing, -0.1, 0.6, 0) || undefined }));
     } else {
-      const shape = ['rect', 'pill', 'circle', 'rule'].indexOf(e.shape) >= 0 ? e.shape : (e.type === 'rule' ? 'rule' : 'rect');
-      layers.push(Object.assign(base, { role: ['panel', 'overlay', 'device'].indexOf(e.role) >= 0 ? e.role : 'device', shape, fill: stColour(e.fill, 'rgba(0,0,0,0.5)'), gradient: !!e.gradient, dir: ['up', 'down', 'left', 'right'].indexOf(e.dir) >= 0 ? e.dir : undefined, radius: e.radius != null ? stNum(e.radius, 0, 50, 0) : undefined }));
+      const shape = ['rect', 'pill', 'circle', 'rule', 'triangle', 'icon'].indexOf(e.shape) >= 0 ? e.shape : (e.type === 'rule' ? 'rule' : 'rect');
+      layers.push(Object.assign(base, stStyleKeys(e, 'shape'), { role: ['panel', 'overlay', 'device'].indexOf(e.role) >= 0 ? e.role : 'device', shape, fill: stColour(e.fill, 'rgba(0,0,0,0.5)'), gradient: !!e.gradient, dir: ['up', 'down', 'left', 'right'].indexOf(e.dir) >= 0 ? e.dir : undefined, radius: e.radius != null ? stNum(e.radius, 0, 50, 0) : undefined }));
     }
   });
   // regions that are not the background become image layers the renderer fills when their image lands, and show as sketched boxes until then
@@ -11125,7 +11211,7 @@ async function stConceptApply(env, p, body, who) {
 /* Edits by described area (P17). Gemini's image models edit by semantic, text-described masking: there is no pixel mask
    to send, so an "area" is said in words and nothing outside it is guaranteed to stay. The prompt asks for it plainly,
    the record says so, and the browser measures what changed outside the area afterwards (POST /studio/preservation). */
-const ST_EDIT_KINDS = { area: 'change only the marked area', background: 'change the background, keep the subject', restyle: 'restyle the imagery, keep its content' };
+const ST_EDIT_KINDS = { area: 'change only the marked area', background: 'change the background, keep the subject', restyle: 'restyle the imagery, keep its content', remove: 'remove what is in the marked area', relight: 'change the light, keep everything else' };
 function stEditArea(a) {
   if (!a || typeof a !== 'object') return null; const n = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round((Number(v) || 0) * 10) / 10));
   const x = n(a.x, 0, 98), y = n(a.y, 0, 98); const w = n(a.w, 2, 100 - x), h = n(a.h, 2, 100 - y);
@@ -11142,6 +11228,8 @@ function stAreaPrompt(inp) {
   const tail = ' Return the whole image at the same framing, aspect and resolution. Add no text, lettering, logos or watermarks.';
   if (kind === 'background') return 'EDIT THE CURRENT IMAGE: keep the main subject exactly as it is - its shape, pose, colours, the light falling on it and its position and size in the frame. Replace only what is behind it: ' + ins + '. Match the new background\'s light direction and colour temperature to the subject so it sits naturally; do not move, crop or resize the subject.' + tail;
   if (kind === 'restyle') return 'EDIT THE CURRENT IMAGE: keep every element, its position, the composition and the framing. Change only the treatment - palette, light, rendering style: ' + ins + '. Nothing is added or removed.' + tail;
+  if (kind === 'relight') return 'EDIT THE CURRENT IMAGE: keep every element, its shape, position and size, the composition and the framing exactly. Change only the lighting: ' + (ins || 'soft, even daylight') + '. Shadows and highlights follow the new light; colours stay true; nothing is added or removed.' + tail;
+  if (kind === 'remove') { const r0 = stEditArea(inp.area) || { x: 0, y: 0, w: 100, h: 100 }; return 'EDIT ONLY ONE AREA OF THE CURRENT IMAGE: ' + stAreaWords(r0) + '. Remove ' + (ins || 'the object in that area') + ' and fill the space with what would naturally be behind it, matching the surrounding texture, light, grain and perspective. Everything outside the area must stay exactly as it is.' + tail; }
   const r = stEditArea(inp.area) || { x: 0, y: 0, w: 100, h: 100 };
   return 'EDIT ONLY ONE AREA OF THE CURRENT IMAGE: ' + stAreaWords(r) + '. In that area: ' + ins + '. Everything outside it - subject, edges, colours, light, grain, perspective - must stay exactly as it is, as close to pixel for pixel as you can.' + tail;
 }
@@ -11233,7 +11321,7 @@ async function stRenderJob(env, job, pair, done, fail) {
     // the current image is read in either case: it stands in when the history cannot be replayed (another model answers)
     if (cur.image.key) { const im = await stVersionImage(env, cur); if (im) { currentImage = { data: im.b64, mime: im.mime }; editOf = editOf || cur.id; if (!history.length) references.unshift({ data: im.b64, mime: im.mime, role: 'the current image to edit; change only what the instruction says' }); } }
   }
-  const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
+  const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' || inp.editKind === 'remove' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
   if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
   if (job.lease) await job.lease(300000);
@@ -12003,6 +12091,12 @@ async function nanoRender(env, opts) {
   const genCfg = { responseModalities: ['TEXT', 'IMAGE'] };
   const imgCfg = {};
   if (ASPECTS.indexOf(opts.aspect) !== -1) imgCfg.aspectRatio = opts.aspect;
+  else if (/^\d+(\.\d+)?:\d+(\.\d+)?$/.test(String(opts.aspect || ''))) {
+    // a format the image model has no ratio for (a 1.91:1 link image, a 6:5 display unit) asks for the nearest it has; the
+    // composition then crops the image into its own box as it does for every image
+    const r = (a => { const [x, y] = a.split(':').map(Number); return x / y; }); const want = r(opts.aspect);
+    imgCfg.aspectRatio = ASPECTS.reduce((b, a) => Math.abs(Math.log(r(a) / want)) < Math.abs(Math.log(r(b) / want)) ? a : b, '1:1');
+  }
   // the size the team chose wins; the var IMAGE_SIZE is only the default when a request names none (2K, the operator's choice,
   // September 2026). IMAGE_SIZE_MAX optionally caps spend: a request above it is made at the cap and the answer says so (capped).
   const asked = SIZES.indexOf(opts.size) !== -1 ? opts.size : (SIZES.indexOf(env.IMAGE_SIZE) !== -1 ? env.IMAGE_SIZE : '2K');
@@ -13735,6 +13829,12 @@ const AXIOM_WORKER = {
           }
           if (path === '/studio/job') { const j = await stJob(env, qf('id')); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
           if (path === '/studio/jobs') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all()).results || []; return jsonResp({ ok: true, jobs: rows.map(stJobRow) }); }
+          if (path === '/studio/draft') {
+            const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+            const row = await env.MIND_DB.prepare('SELECT * FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, stStr(auth.name || 'operator', 60)).first();
+            if (!row) return jsonResp({ ok: true, draft: null });
+            return jsonResp({ ok: true, draft: { version: row.version, current: row.version === pair.asset.current, layout: pjs(row.layout, null), copy: pjs(row.copy, {}), at: row.at } });
+          }
           if (path === '/studio/file') {
             const key = String(qf('key') || '');
             if (!/^studio\/[a-z0-9]+\/[a-z0-9]+\/[a-z0-9-]+\.(png|jpg|jpeg|webp|txt|json)$/i.test(key)) return jsonResp({ error: 'bad_key' }, 400);
@@ -13939,6 +14039,38 @@ const AXIOM_WORKER = {
           return jsonResp(r);
         }
         if (path === '/studio/campaign/create') { const r = await stCampaignCreate(env, sb, who); return jsonResp(Object.assign({ ok: !r.error }, r), r.status || 200); }
+        // S17: the editor - resize to platform formats (no model call, no render), an image placed on the canvas, the autosaved draft
+        if (path === '/studio/resize') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const r = await stResize(env, pair.project, pair.asset, sb, who); if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
+          await stBump(env, pair.project.id); return jsonResp(Object.assign({}, r, await stGet(env, pair.project.id)));
+        }
+        if (path === '/studio/image/upload') {
+          const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured', detail: 'R2 (MIND_DOCS) is not bound: images cannot be stored.' }, 501);
+          const mime = String(sb.mime || ''); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP.' }, 400);
+          let buf; try { buf = bufFromB64(sb.imageB64); } catch (e) { return jsonResp({ error: 'bad_file', detail: 'The image did not decode.' }, 400); }
+          if (!buf || !buf.byteLength) return jsonResp({ error: 'bad_file', detail: 'The image is empty.' }, 400);
+          if (buf.byteLength > 8 * 1024 * 1024) return jsonResp({ error: 'too_large', detail: 'An image placed on the canvas is at most 8 MB.' }, 413);
+          // the bytes must be what the type says (PNG, JPEG or WebP signatures), whatever the name or the claimed type
+          const sig = Array.from(new Uint8Array(buf).slice(0, 12)); const isPng = sig[0] === 0x89 && sig[1] === 0x50 && sig[2] === 0x4E && sig[3] === 0x47; const isJpg = sig[0] === 0xFF && sig[1] === 0xD8 && sig[2] === 0xFF; const isWebp = sig[0] === 0x52 && sig[1] === 0x49 && sig[2] === 0x46 && sig[3] === 0x46 && sig[8] === 0x57 && sig[9] === 0x45 && sig[10] === 0x42 && sig[11] === 0x50;
+          if (!((mime === 'image/png' && isPng) || (mime === 'image/jpeg' && isJpg) || (mime === 'image/webp' && isWebp))) return jsonResp({ error: 'bad_file', detail: 'The file is not the image type it claims to be.' }, 400);
+          const id = stId('u'); const key = 'studio/' + p.id + '/uploads/' + id + '.' + (mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'webp');
+          await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+          await stEvent(env, p.id, 'upload', { text: 'Image placed for the canvas: ' + stStr(sb.name || 'image', 80) + ' (' + Math.round(buf.byteLength / 1024) + ' KB).', key }, who);
+          return jsonResp({ ok: true, key, url: '/studio/file?key=' + encodeURIComponent(key), bytes: buf.byteLength, name: stStr(sb.name || 'image', 80) });
+        }
+        if (path === '/studio/draft' || path === '/studio/draft/discard') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const me = stStr(who, 60);
+          if (path === '/studio/draft/discard') { await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, me).run(); return jsonResp({ ok: true, discarded: true }); }
+          const v = sb.version ? await stVersion(env, stClean(sb.version, 24)) : null;
+          if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'bad_version', detail: 'A draft names the version of this asset it was made on.' }, 400);
+          if (!sb.layout || typeof sb.layout !== 'object' || !Array.isArray(sb.layout.layers)) return jsonResp({ error: 'bad_layout', detail: 'A draft carries the working layout.' }, 400);
+          { const lim = jsonLimitProblem({ layout: sb.layout, copy: sb.copy || {} }, 300000, 250000, 'the draft'); if (lim) return jsonResp({ error: 'draft_too_large', detail: 'The draft was not saved: ' + lim + '.' }, 413); }
+          await env.MIND_DB.prepare('INSERT OR REPLACE INTO studio_drafts(asset, who, project, version, layout, copy, at) VALUES(?,?,?,?,?,?,?)').bind(pair.asset.id, me, pair.project.id, v.id, JSON.stringify(sb.layout), JSON.stringify(sb.copy && typeof sb.copy === 'object' ? stCopy(sb.copy) : {}), now).run();
+          return jsonResp({ ok: true, at: now, version: v.id });
+        }
         if (path === '/studio/direction/choose') {
           const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
           { const pr0 = await stProject(env, d.project); if (pr0 && stWfOn(pr0)) { const g = await stWfGate(env, pr0, 'choose'); if (g) return jsonResp({ ok: false, error: g.error, detail: g.detail, step: g.step, need: g.need }, g.status); const dd0 = pjs(d.data, {}); if (dd0.basis && !stWfItemCurrent(pr0, { id: d.id }, dd0.basis)) return jsonResp({ ok: false, error: 'direction_earlier', detail: 'This direction was built on an earlier objective, message or strategy. Keep the existing directions under the current choice, or choose one built on it.' }, 409); } }

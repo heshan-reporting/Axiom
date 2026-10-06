@@ -31,7 +31,13 @@
   const GENERIC = { display: 'sans-serif', body: 'sans-serif', mono: 'monospace' };
   const roleKind = l => (l.font === 'body' ? 'body' : l.font === 'mono' ? 'mono' : 'display');
   function kitFamily(layout, l) { const kit = (layout && layout.fonts) || {}; const k = roleKind(l); return k === 'body' ? kit.body : k === 'mono' ? '' : kit.display; }
-  function fontFor(layout, l) { const want = kitFamily(layout, l); return (want ? '"' + String(want).replace(/"/g, '') + '", ' : '') + (FAMILIES[roleKind(l)] || FAMILIES.display); }
+  /* A layer may name its own family (the editor's font picker): a plain family name, nothing that could be read as CSS. The
+     chain is the layer's family, then the kit's family for its role, then the app's family, then the generic one. */
+  const SAFE_FAMILY = /^[A-Za-z0-9][A-Za-z0-9 \-']{0,48}$/;
+  const layerFamily = l => (l && l.family && SAFE_FAMILY.test(String(l.family)) ? String(l.family) : '');
+  function fontFor(layout, l) { const own = layerFamily(l); const want = kitFamily(layout, l); return (own ? '"' + own.replace(/"/g, '') + '", ' : '') + (want && want !== own ? '"' + String(want).replace(/"/g, '') + '", ' : '') + (FAMILIES[roleKind(l)] || FAMILIES.display); }
+  /** The case a layer sets on its words (presentation only: the copy itself is never changed). caps emphasis is upper case. */
+  function applyCase(t, l) { const c = l.case || (l.emphasis === 'caps' ? 'upper' : ''); if (c === 'upper') return t.toUpperCase(); if (c === 'lower') return t.toLowerCase(); if (c === 'title') return t.toLowerCase().replace(/(^|[\s\-"(\u2018\u201c])([a-z])/g, (m, a, b) => a + b.toUpperCase()); return t; }
   /** The words a text layer shows: its role's copy, or its own text; nothing when hidden or when the words are baked into a full artwork. */
   function displayedText(layout, l, copy) {
     if (!l || l.type !== 'text' || l.hidden) return '';
@@ -57,32 +63,36 @@
   }
   /** Greedy word wrap with the context's own measurements; explicit line breaks are kept, an unbreakable word is broken and reported. */
   function wrapText(ctx, text, maxW) {
-    const lines = []; let broken = false;
+    // paras[i] is the paragraph line i belongs to, so paragraph spacing can open a gap between paragraphs and nowhere else
+    const lines = [], paras = []; let broken = false, at = 0;
     String(text || '').replace(/\r/g, '').split('\n').forEach(par => {
       const words = par.split(/[ \t]+/).filter(Boolean); let cur = '';
-      if (!words.length) { lines.push(''); return; }
+      if (!words.length) { lines.push(''); paras.push(at++); return; }
       words.forEach(w0 => {
         const parts = ctx.measureText(w0).width > maxW ? (broken = true, breakWord(ctx, w0, maxW)) : [w0];
-        parts.forEach((w, pi) => { const t = cur ? cur + (pi ? '' : ' ') + w : w; if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = w; } else cur = t; });
+        parts.forEach((w, pi) => { const t = cur ? cur + (pi ? '' : ' ') + w : w; if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); paras.push(at); cur = w; } else cur = t; });
       });
-      lines.push(cur);
+      lines.push(cur); paras.push(at++);
     });
-    while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
-    return { lines, broken };
+    while (lines.length > 1 && lines[lines.length - 1] === '') { lines.pop(); paras.pop(); }
+    return { lines, broken, paras };
   }
   function wrap(ctx, text, maxW) { return wrapText(ctx, text, maxW).lines; }
   /** Lay out one text layer at W x H: the lines, the box, and the space it really occupies (padding, emphasis and rotation included). */
   function layoutText(ctx, layout, l, copy, W, H) {
     let text = displayedText(layout, l, copy); if (!text) return null;
-    if (l.emphasis === 'caps') text = text.toUpperCase();
+    text = applyCase(text, l);
     const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
-    const px = l.size / 100 * W; const font = (l.weight || 600) + ' ' + px + 'px ' + fontFor(layout, l);
+    const px = l.size / 100 * W; const font = (l.italic ? 'italic ' : '') + (l.weight || 600) + ' ' + px + 'px ' + fontFor(layout, l);
     ctx.font = font; if ('letterSpacing' in ctx) ctx.letterSpacing = l.letterSpacing ? (l.letterSpacing * px) + 'px' : '0px';
     const padX = l.bg ? px * 0.8 : 0, padY = l.bg ? px * 0.45 : 0;
     const avail = Math.max(10, w - padX * 2);
     const wr = wrapText(ctx, text, avail); const lines = wr.lines; const lh = px * (l.lineHeight || 1.12);
     const widths = lines.map(s => ctx.measureText(s).width); const maxLineW = widths.length ? Math.max.apply(null, widths) : 0;
-    const contentH = lines.length * lh + padY * 2;
+    // where each line sits inside the box: one line height apart, plus the paragraph gap before each new paragraph
+    const gap = l.paraSpacing ? Math.max(0, Math.min(3, +l.paraSpacing || 0)) * px : 0;
+    const lineY = lines.map((s0, i) => i * lh + (wr.paras[i] || 0) * gap);
+    const contentH = (lines.length ? lineY[lines.length - 1] + lh : 0) + padY * 2;
     const align = l.align || 'left';
     const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - padX : x + padX;
     const bw = l.bg ? (align === 'center' || lines.length > 1 ? w : Math.min(w, maxLineW + padX * 2)) : 0;
@@ -91,8 +101,11 @@
     widths.forEach(lw => { const lx = align === 'center' ? tx - lw / 2 : align === 'right' ? tx - lw : tx; minX = Math.min(minX, lx); maxX = Math.max(maxX, lx + lw); });
     if (l.bg) { minX = Math.min(minX, bx); maxX = Math.max(maxX, bx + bw); }
     if (l.emphasis === 'highlight') { minX -= px * 0.15; maxX += px * 0.15; }
-    if (l.emphasis === 'underline' && lines.length) bottom = Math.max(bottom, y + padY + (lines.length - 1) * lh + px * 1.02 + Math.max(1.5, px * 0.08));
-    let top = y - (l.emphasis === 'highlight' ? px * 0.05 : 0);
+    if (l.emphasis === 'underline' && lines.length) bottom = Math.max(bottom, y + padY + lineY[lines.length - 1] + px * 1.02 + Math.max(1.5, px * 0.08));
+    // an outline is ink: the words occupy their stroke too
+    const sk = l.stroke && typeof l.stroke === 'object' && +l.stroke.width > 0 ? Math.min(px * 0.3, +l.stroke.width / 100 * W) : 0;
+    if (sk) { minX -= sk; maxX += sk; bottom += sk; }
+    let top = y - (l.emphasis === 'highlight' ? px * 0.05 : 0) - sk;
     if (l.emphasis === 'box') { const sw = Math.max(1.5, px * 0.08) / 2; const x0 = l.bg ? bx : x, x1 = l.bg ? bx + bw : x + w; minX = Math.min(minX, x0 - sw); maxX = Math.max(maxX, x1 + sw); top = Math.min(top, y - sw); bottom = Math.max(bottom, y + contentH + sw); }
     if (!isFinite(minX)) { minX = x; maxX = x; }
     let occ = { x: minX, y: top, w: maxX - minX, h: bottom - top };
@@ -102,7 +115,7 @@
       const pts = [[occ.x, occ.y], [occ.x + occ.w, occ.y], [occ.x, occ.y + occ.h], [occ.x + occ.w, occ.y + occ.h]].map(([px0, py0]) => [cx + (px0 - cx) * cs - (py0 - cy) * sn, cy + (px0 - cx) * sn + (py0 - cy) * cs]);
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); occ = { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), w: Math.max.apply(null, xs) - Math.min.apply(null, xs), h: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
     }
-    return { text, lines, widths, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
+    return { text, lines, widths, lineY, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
   }
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
   /** Cover the box with the image. focus {x, y} (per cent of the image) is the point kept in view as the crop moves toward it,
@@ -141,6 +154,121 @@
     const s = Math.min(w / img.naturalWidth, h / img.naturalHeight); const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
     ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   }
+  /* ---------------------------------------------------------------- effects, image treatment and icons (the editor's vocabulary)
+   * Every effect is a property of the layer and is drawn here, so the preview, the validation and the export agree. A mark (a
+   * logo or a wordmark) is drawn exactly as its file: none of these ever reaches it. */
+  const BLENDS = { multiply: 1, screen: 1, overlay: 1, darken: 1, lighten: 1, 'color-dodge': 1, 'color-burn': 1, 'hard-light': 1, 'soft-light': 1, difference: 1, exclusion: 1, hue: 1, saturation: 1, color: 1, luminosity: 1 };
+  /** A drop shadow in per cent of the stage width: {x, y, blur, color}. */
+  function shadowOn(ctx, sh, W) {
+    if (!sh || typeof sh !== 'object') return; const b = Math.max(0, Math.min(20, +sh.blur || 0)), ox = Math.max(-10, Math.min(10, +sh.x || 0)), oy = Math.max(-10, Math.min(10, +sh.y || 0));
+    if (!b && !ox && !oy) return; ctx.shadowColor = sh.color || 'rgba(0,0,0,.45)'; ctx.shadowBlur = b / 100 * W; ctx.shadowOffsetX = ox / 100 * W; ctx.shadowOffsetY = oy / 100 * W;
+  }
+  function shadowOff(ctx) { ctx.shadowColor = 'rgba(0,0,0,0)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; }
+  /** A shape's fill: its colour, or a linear gradient from fill to fill2 along dir (down, up, left, right). */
+  function shapeFill(ctx, l, x, y, w, h) {
+    if (!l.fill2) return l.fill || 'rgba(0,0,0,.5)';
+    const d = l.dir || 'down'; const g = d === 'up' ? ctx.createLinearGradient(0, y + h, 0, y) : d === 'right' ? ctx.createLinearGradient(x, 0, x + w, 0) : d === 'left' ? ctx.createLinearGradient(x + w, 0, x, 0) : ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, l.fill || '#000000'); g.addColorStop(1, l.fill2); return g;
+  }
+  /* Icons: line drawings on a 24-unit grid (paths, rectangles, circles, lines), stroked in the layer's colour. Drawn from the
+     same markup the editor shows in its icon picker, so what is picked is what is drawn. */
+  const ICONS = {
+    'arrow-right': '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+    'arrow-up-right': '<path d="M7 17L17 7"/><path d="M8 7h9v9"/>',
+    'arrow-down': '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/>',
+    cross: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
+    alert: '<path d="M12 3.5l9 16H3z"/><path d="M12 10v4"/><path d="M12 17.2v.3"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 7.5v.3"/>',
+    star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 17l-5.2 2.7 1-5.9-4.3-4.1 5.9-.8z"/>',
+    heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
+    pin: '<path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.8 12 21 12 21z"/><circle cx="12" cy="9.8" r="2.4"/>',
+    phone: '<path d="M6.5 3.5h3l1.5 4.5-2 1.5a11 11 0 0 0 5.5 5.5l1.5-2 4.5 1.5v3a2 2 0 0 1-2 2A16.5 16.5 0 0 1 4.5 5.5a2 2 0 0 1 2-2z"/>',
+    mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>',
+    calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17"/><path d="M8 3v4"/><path d="M16 3v4"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    dollar: '<path d="M12 3v18"/><path d="M16.5 7.5c-.8-1.4-2.5-2-4.5-2-2.5 0-4.5 1.2-4.5 3.2 0 4.6 9 2.4 9 7 0 2-2 3.3-4.5 3.3-2.1 0-3.9-.8-4.7-2.3"/>',
+    percent: '<path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.4"/><circle cx="17" cy="17" r="2.4"/>',
+    chart: '<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="7"/><rect x="10.5" y="7" width="3" height="11"/><rect x="15.5" y="4" width="3" height="14"/>',
+    'trend-up': '<path d="M3.5 17l6-6 4 4 7-7.5"/><path d="M15 7.5h5.5V13"/>',
+    'trend-down': '<path d="M3.5 7l6 6 4-4 7 7.5"/><path d="M15 16.5h5.5V11"/>',
+    users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.5"/><path d="M16.5 14.6c2.3.2 4 1.6 4.5 4.4"/>',
+    user: '<circle cx="12" cy="8" r="3.8"/><path d="M4.5 20.5c.8-4 3.7-6 7.5-6s6.7 2 7.5 6"/>',
+    home: '<path d="M3.5 11L12 4l8.5 7"/><path d="M5.5 9.5v11h13v-11"/><path d="M10 20.5v-6h4v6"/>',
+    building: '<rect x="5" y="3.5" width="14" height="17" rx="1"/><path d="M9 8h2"/><path d="M13 8h2"/><path d="M9 12h2"/><path d="M13 12h2"/><path d="M10.5 20.5v-4h3v4"/>',
+    truck: '<rect x="2.5" y="6.5" width="11" height="9"/><path d="M13.5 9.5h4l3 3.5v2.5h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/>',
+    fuel: '<rect x="4.5" y="3.5" width="9" height="17" rx="1.5"/><path d="M4.5 9.5h9"/><path d="M13.5 8.5l3 2v6.5a1.5 1.5 0 0 0 3 0V8l-2.5-2.5"/>',
+    leaf: '<path d="M5 19c0-8 5.5-13.5 14.5-14-.5 9-6 14.5-14 14.5z"/><path d="M5 19c3-4 6-6.5 9.5-8.5"/>',
+    bolt: '<path d="M13 3L5 13.5h6l-1 7.5 8-10.5h-6z"/>',
+    flame: '<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.1 0-3.5 2.7-5.6 3.7-8.9 1.3 1.6 2 3 2 4.6 1.2-1.1 2-2.9 2-4.9 2.8 2.1 5.3 5.4 5.3 9.2 0 3.5-2.6 6.1-6.5 6.1z"/>',
+    shield: '<path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6z"/>',
+    flag: '<path d="M5.5 21V4"/><path d="M5.5 4.5h11l-2 3.8 2 3.7h-11"/>',
+    megaphone: '<path d="M3.5 10v4h3l9 5V5l-9 5z"/><path d="M6.5 14l1.5 5.5h2.5L9 14"/><path d="M18.5 9.5a3 3 0 0 1 0 5"/>',
+    quote: '<path d="M10 7.5c-3 .8-4.5 3-4.5 6v3h4.5v-4.5H7.5"/><path d="M18.5 7.5c-3 .8-4.5 3-4.5 6v3h4.5v-4.5H16"/>',
+    play: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5.5 3.5-5.5 3.5z"/>',
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
+    'map': '<path d="M3.5 6.5l5.5-2 6 2 5.5-2v13l-5.5 2-6-2-5.5 2z"/><path d="M9 4.5v13"/><path d="M15 6.5v13"/>',
+    hardhat: '<path d="M3.5 17.5h17"/><path d="M5 17.5c0-4.4 3.1-8 7-8s7 3.6 7 8"/><path d="M10 9.7V6.5h4v3.2"/>',
+    pickaxe: '<path d="M4 8.5C7.5 5 12.5 3.8 17 5"/><path d="M15.5 3.5l5 5"/><path d="M17 7L5 19"/>',
+  };
+  const iconPaths = {};
+  /** The icon as one Path2D in its 24-unit box. */
+  function iconPath(name) {
+    if (iconPaths[name]) return iconPaths[name]; const src = ICONS[name]; if (!src || typeof Path2D === 'undefined') return null;
+    const p = new Path2D(); const num = (el, k) => { const m = el.match(new RegExp('\\b' + k + '="([-\\d.]+)"')); return m ? +m[1] : 0; };
+    (src.match(/<(path|rect|circle|line)\b[^>]*>/g) || []).forEach(el => {
+      if (/^<path/.test(el)) { const d = (el.match(/\bd="([^"]+)"/) || [])[1]; if (d) p.addPath(new Path2D(d)); }
+      else if (/^<rect/.test(el)) { const x = num(el, 'x'), y = num(el, 'y'), w = num(el, 'width'), h = num(el, 'height'), r = num(el, 'rx'); p.moveTo(x + r, y); if (p.roundRect) p.roundRect(x, y, w, h, r); else p.rect(x, y, w, h); }
+      else if (/^<circle/.test(el)) { const cx = num(el, 'cx'), cy = num(el, 'cy'), r = num(el, 'r'); p.moveTo(cx + r, cy); p.arc(cx, cy, r, 0, Math.PI * 2); }
+      else if (/^<line/.test(el)) { p.moveTo(num(el, 'x1'), num(el, 'y1')); p.lineTo(num(el, 'x2'), num(el, 'y2')); }
+    });
+    iconPaths[name] = p; return p;
+  }
+  function drawIcon(ctx, l, x, y, w, h, W) {
+    const p = iconPath(l.icon); if (!p) return; const s = Math.min(w, h) / 24;
+    ctx.save(); ctx.translate(x + (w - 24 * s) / 2, y + (h - 24 * s) / 2); ctx.scale(s, s);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(0.5, Math.min(4, +l.strokeWidth || 2));
+    if (l.iconFill) { ctx.fillStyle = l.iconFill; ctx.fill(p); }
+    ctx.strokeStyle = l.fill || '#ffffff'; ctx.stroke(p); ctx.restore();
+  }
+  /* Image treatment: adjustments (brightness, contrast, saturation, warmth, tint, sharpness, blur), flip, corner radius and a
+     circle mask are applied to the image in its own box before it is placed, so a shadow falls from the shape that is really
+     drawn. Results are kept in a small cache, since the validation draws the same tile several times. */
+  const ADJ = ['brightness', 'contrast', 'saturation', 'warmth', 'tint', 'sharpness'];
+  function imageTreated(l) { const a = l.adjust || {}; return !!(ADJ.some(k => +a[k]) || l.flipX || l.flipY || l.mask === 'circle' || +l.radius > 0 || (l.shadow && typeof l.shadow === 'object') || (l.stroke && +l.stroke.width > 0)); }
+  const treatCache = new Map(); const imgIds = new WeakMap(); let imgN = 0;
+  function treatedImage(img, l, w, h, W) {
+    if (!imgIds.has(img)) imgIds.set(img, ++imgN);
+    const a = l.adjust || {}; const key = [imgIds.get(img), w, h, l.fit || 'contain', JSON.stringify(l.focus || null), JSON.stringify(a), l.flipX ? 1 : 0, l.flipY ? 1 : 0, l.mask || '', +l.radius || 0, W].join('|');
+    if (treatCache.has(key)) return treatCache.get(key);
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d');
+    if (l.mask === 'circle') { x.beginPath(); x.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); x.clip(); }
+    else if (+l.radius > 0) { roundRect(x, 0, 0, w, h, Math.min(Math.min(w, h) / 2, +l.radius / 100 * W)); x.clip(); }
+    if (l.flipX || l.flipY) { x.translate(l.flipX ? w : 0, l.flipY ? h : 0); x.scale(l.flipX ? -1 : 1, l.flipY ? -1 : 1); }
+    const pct = (k, lo, hi) => Math.max(lo, Math.min(hi, +a[k] || 0));
+    const f = []; const br = pct('brightness', -100, 100), ct = pct('contrast', -100, 100), sa = pct('saturation', -100, 100), ti = pct('tint', -100, 100);
+    if (br) f.push('brightness(' + (1 + br / 100) + ')'); if (ct) f.push('contrast(' + (1 + ct / 100) + ')'); if (sa) f.push('saturate(' + (1 + sa / 100) + ')'); if (ti) f.push('hue-rotate(' + Math.round(ti * 0.6) + 'deg)');
+    if (f.length) x.filter = f.join(' ');
+    if (l.fit === 'cover') cover(x, img, w, h, { x: 0, y: 0, w, h }, l.focus); else contain(x, img, 0, 0, w, h);
+    x.filter = 'none';
+    // warmth: an orange or blue light laid over the image's own pixels only (source-atop keeps transparent areas clear)
+    const wa = pct('warmth', -100, 100); if (wa) { x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-atop'; x.globalAlpha = Math.abs(wa) / 100 * 0.32; x.fillStyle = wa > 0 ? '#ff8a2a' : '#2a7dff'; x.fillRect(0, 0, w, h); x.restore(); }
+    // sharpness: an unsharp mask (a 3x3 kernel) over the pixels; negative values soften
+    const sh = pct('sharpness', -100, 100);
+    if (sh) {
+      try {
+        const id = x.getImageData(0, 0, w, h), d = id.data, o = new Uint8ClampedArray(d.length); const k = sh / 100 * (sh > 0 ? 0.9 : 0.2);
+        for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const i = (yy * w + xx) * 4; const up = yy > 0 ? i - w * 4 : i, dn = yy < h - 1 ? i + w * 4 : i, lf = xx > 0 ? i - 4 : i, rt = xx < w - 1 ? i + 4 : i;
+          for (let ch = 0; ch < 3; ch++) { const lap = 4 * d[i + ch] - d[up + ch] - d[dn + ch] - d[lf + ch] - d[rt + ch]; o[i + ch] = d[i + ch] + k * lap; } o[i + 3] = d[i + 3]; }
+        id.data.set(o); x.putImageData(id, 0, 0);
+      } catch (e) { /* pixels not readable here: the image is drawn without sharpening */ }
+    }
+    if (treatCache.size > 16) treatCache.delete(treatCache.keys().next().value);
+    treatCache.set(key, c); return c;
+  }
   const isMark = l => l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark');
   const markImage = (images, l) => images[l.id] || (l.role === 'logo' ? images.logo : null);
   /** Draw layout + copy at W x H. images: {bg, logo, <layer id>} as loaded Image elements or null.
@@ -174,19 +302,37 @@
       const glyphs = !(ground && l.type === 'text');
       const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
       ctx.save(); ctx.globalAlpha = l.opacity == null ? 1 : l.opacity;
+      // the layer's blend with what is below it (the same in every pass: the ground under a word is what it blends into)
+      if (l.blend && BLENDS[l.blend]) ctx.globalCompositeOperation = l.blend;
       if (l.rotate) { ctx.translate(x + w / 2, y + h / 2); ctx.rotate(l.rotate * Math.PI / 180); ctx.translate(-(x + w / 2), -(y + h / 2)); }
       if (l.type === 'shape') {
+        if (l.blur > 0) ctx.filter = 'blur(' + (Math.min(20, +l.blur) / 100 * W) + 'px)';
+        shadowOn(ctx, l.shadow, W);
         if (l.gradient) {
           const d = l.dir || 'up'; const g = d === 'down' ? ctx.createLinearGradient(0, y + h, 0, y) : d === 'left' ? ctx.createLinearGradient(x + w, 0, x, 0) : d === 'right' ? ctx.createLinearGradient(x, 0, x + w, 0) : ctx.createLinearGradient(0, y, 0, y + h);
           g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, l.fill || 'rgba(0,0,0,.7)'); g.addColorStop(1, l.fill || 'rgba(0,0,0,.7)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
         }
-        else if (l.shape === 'circle') { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill(); }
-        else if (l.shape === 'rule') { ctx.fillStyle = l.fill || '#fff'; ctx.fillRect(x, y, w, Math.max(1, h || W * 0.004)); }
-        else { ctx.fillStyle = l.fill || 'rgba(0,0,0,.5)'; roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.radius ? l.radius / 100 * W : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004)); ctx.fill(); }
+        else if (l.shape === 'icon') drawIcon(ctx, l, x, y, w, h, W);
+        else {
+          ctx.fillStyle = shapeFill(ctx, l, x, y, w, h);
+          if (l.shape === 'rule') { ctx.beginPath(); ctx.rect(x, y, w, Math.max(1, h || W * 0.004)); }
+          else if (l.shape === 'circle') { ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); }
+          else if (l.shape === 'triangle') { ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.closePath(); }
+          else roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.radius ? l.radius / 100 * W : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004));
+          ctx.fill();
+          if (l.stroke && +l.stroke.width > 0) { shadowOff(ctx); ctx.filter = 'none'; ctx.strokeStyle = l.stroke.color || '#ffffff'; ctx.lineWidth = Math.max(0.5, +l.stroke.width / 100 * W); ctx.stroke(); }
+        }
       }
       else if (l.type === 'img') {
         const img = isMark(l) ? markImage(images, l) : images[l.id];
-        if (img) { if (l.fit === 'cover') cover(ctx, img, W, H, { x, y, w, h }, l.focus); else contain(ctx, img, x, y, w, h); }
+        // a mark is drawn exactly as its file: no adjustment, flip, mask or effect ever reaches it
+        if (img && !isMark(l) && imageTreated(l)) {
+          const off = treatedImage(img, l, Math.max(1, Math.round(w)), Math.max(1, Math.round(h)), W);
+          if (l.blur > 0) ctx.filter = 'blur(' + (Math.min(20, +l.blur) / 100 * W) + 'px)';
+          shadowOn(ctx, l.shadow, W); ctx.drawImage(off, x, y, w, h); shadowOff(ctx); ctx.filter = 'none';
+          if (l.stroke && +l.stroke.width > 0) { ctx.strokeStyle = l.stroke.color || '#ffffff'; ctx.lineWidth = Math.max(0.5, +l.stroke.width / 100 * W); if (l.mask === 'circle') { ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); } else roundRect(ctx, x, y, w, h, l.radius ? l.radius / 100 * W : 0); ctx.stroke(); }
+        }
+        else if (img) { if (l.fit === 'cover') cover(ctx, img, W, H, { x, y, w, h }, l.focus); else contain(ctx, img, x, y, w, h); }
         else if (isMark(l)) { ctx.fillStyle = 'rgba(255,255,255,.9)'; roundRect(ctx, x, y, w, h, 2); ctx.fill(); ctx.fillStyle = '#333'; ctx.font = '600 ' + Math.max(10, h * 0.32) + 'px ' + FAMILIES.mono; ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.fillText(l.role === 'wordmark' ? 'WORDMARK MISSING' : 'LOGO MISSING', x + w / 2, y + h / 2); }
         else sketch({ x, y, w, h, label: (l.name || l.id || 'image') + ' - sketch' });
       } else if (l.type === 'text') {
@@ -194,14 +340,21 @@
         if (!t) { ctx.restore(); return; }
         ctx.textBaseline = 'top'; ctx.textAlign = t.align;
         if (t.overflowH) overflow.push(l.role || l.id);
-        if (l.bg) { ctx.fillStyle = l.bg; roundRect(ctx, t.bx, y, t.bw, t.contentH, t.px * 0.35); ctx.fill(); }
-        if (l.emphasis === 'highlight') { ctx.fillStyle = l.emphasisColor || 'rgba(255,214,0,.85)'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx - t.px * 0.15, y + t.padY + i * t.lh - t.px * 0.05, lw + t.px * 0.3, t.lh); }); }
+        const ly = i => y + t.padY + t.lineY[i];
+        if (l.blur > 0) ctx.filter = 'blur(' + (Math.min(20, +l.blur) / 100 * W) + 'px)';
+        // a drop shadow falls from the plate when the words have one, otherwise from the words themselves
+        if (l.bg) { shadowOn(ctx, l.shadow, W); ctx.fillStyle = l.bg; roundRect(ctx, t.bx, y, t.bw, t.contentH, t.px * 0.35); ctx.fill(); shadowOff(ctx); }
+        if (l.emphasis === 'highlight') { ctx.fillStyle = l.emphasisColor || 'rgba(255,214,0,.85)'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx - t.px * 0.15, ly(i) - t.px * 0.05, lw + t.px * 0.3, t.lh); }); }
         if (glyphs) {
-          if (l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || l.color || '#fff'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx, y + t.padY + i * t.lh + t.px * 1.02, lw, Math.max(1.5, t.px * 0.08)); }); }
+          if (l.emphasis === 'underline') { ctx.fillStyle = l.emphasisColor || l.color || '#fff'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx, ly(i) + t.px * 1.02, lw, Math.max(1.5, t.px * 0.08)); }); }
           // a box outline follows the plate when there is one, so a chip never sits inside a wider second rectangle
           if (l.emphasis === 'box') { ctx.strokeStyle = l.emphasisColor || l.color || '#fff'; ctx.lineWidth = Math.max(1.5, t.px * 0.08); if (l.bg) ctx.strokeRect(t.bx, y, t.bw, t.contentH); else ctx.strokeRect(x, y, w, t.contentH); }
-          ctx.fillStyle = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
-          t.lines.forEach((s, i) => ctx.fillText(s, t.tx, y + t.padY + i * t.lh));
+          const ink = l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff');
+          // a glow is the words drawn twice in a soft light of their own; an outline is stroked beneath the fill, so it sits outside the letters
+          if (l.glow && +l.glow.blur > 0) { ctx.save(); ctx.fillStyle = ink; ctx.shadowColor = l.glow.color || 'rgba(255,255,255,.85)'; ctx.shadowBlur = Math.min(40, +l.glow.blur) / 100 * W; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; t.lines.forEach((s, i) => ctx.fillText(s, t.tx, ly(i))); t.lines.forEach((s, i) => ctx.fillText(s, t.tx, ly(i))); ctx.restore(); }
+          if (l.stroke && +l.stroke.width > 0) { ctx.save(); ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeStyle = l.stroke.color || '#000000'; ctx.lineWidth = Math.min(t.px * 0.3, +l.stroke.width / 100 * W) * 2; if (!l.bg) shadowOn(ctx, l.shadow, W); t.lines.forEach((s, i) => ctx.strokeText(s, t.tx, ly(i))); ctx.restore(); }
+          ctx.fillStyle = ink; if (!l.bg && !(l.stroke && +l.stroke.width > 0)) shadowOn(ctx, l.shadow, W);
+          t.lines.forEach((s, i) => ctx.fillText(s, t.tx, ly(i)));
         }
       }
       ctx.restore();
@@ -239,15 +392,62 @@
     // measured at the weight the words use: a family whose bold face has loaded but whose regular has not is available for the bold words only
     return ['monospace', 'serif', 'sans-serif'].some(base => { c.font = wt + '72px ' + base; const w0 = c.measureText(s).width; c.font = wt + '72px "' + String(name).replace(/"/g, '') + '", ' + base; return Math.abs(c.measureText(s).width - w0) > 0.5; });
   }
+  /* The font catalogue the editor offers (Google Fonts; the weights each family really has) and the loader. A face is fetched
+     as one stylesheet per family, weight and style, so a weight a family does not have fails alone and is reported as a
+     fallback by the validation instead of breaking every other face in the same request. Brand fonts not on Google Fonts are
+     not fetched: they render only where installed, and the validation says so. */
+  const FONT_CATALOGUE = [
+    ['Inter', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Manrope', 'sans', [400, 500, 600, 700, 800], 0], ['DM Sans', 'sans', [400, 500, 600, 700, 800, 900], 1],
+    ['Work Sans', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Archivo', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Barlow', 'sans', [400, 500, 600, 700, 800, 900], 1],
+    ['Montserrat', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Poppins', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Raleway', 'sans', [400, 500, 600, 700, 800, 900], 1],
+    ['Outfit', 'sans', [400, 500, 600, 700, 800, 900], 0], ['Sora', 'sans', [400, 500, 600, 700, 800], 0], ['Space Grotesk', 'sans', [400, 500, 600, 700], 0],
+    ['IBM Plex Sans', 'sans', [400, 500, 600, 700], 1], ['Public Sans', 'sans', [400, 500, 600, 700, 800, 900], 1], ['Source Sans 3', 'sans', [400, 500, 600, 700, 800, 900], 1],
+    ['Bricolage Grotesque', 'sans', [400, 500, 600, 700, 800], 0], ['Instrument Sans', 'sans', [400, 500, 600, 700], 1], ['Figtree', 'sans', [400, 500, 600, 700, 800, 900], 1],
+    ['Barlow Condensed', 'display', [400, 500, 600, 700, 800, 900], 1], ['Oswald', 'display', [400, 500, 600, 700], 0], ['Bebas Neue', 'display', [400], 0],
+    ['Anton', 'display', [400], 0], ['Archivo Black', 'display', [400], 0], ['League Spartan', 'display', [400, 500, 600, 700, 800, 900], 0], ['Big Shoulders Display', 'display', [400, 500, 600, 700, 800, 900], 0],
+    ['Playfair Display', 'serif', [400, 500, 600, 700, 800, 900], 1], ['Fraunces', 'serif', [400, 500, 600, 700, 800, 900], 1], ['Libre Baskerville', 'serif', [400, 700], 0],
+    ['Merriweather', 'serif', [400, 700, 900], 1], ['Lora', 'serif', [400, 500, 600, 700], 1], ['Source Serif 4', 'serif', [400, 500, 600, 700, 800, 900], 1],
+    ['DM Serif Display', 'serif', [400], 1], ['Roboto Slab', 'serif', [400, 500, 600, 700, 800, 900], 0], ['IBM Plex Serif', 'serif', [400, 500, 600, 700], 1], ['Instrument Serif', 'serif', [400], 1],
+    ['Spline Sans Mono', 'mono', [400, 500, 600, 700], 1], ['IBM Plex Mono', 'mono', [400, 500, 600, 700], 1], ['JetBrains Mono', 'mono', [400, 500, 600, 700, 800], 1],
+    ['Caveat', 'script', [400, 500, 600, 700], 0], ['Permanent Marker', 'script', [400], 0],
+  ].map(([name, kind, weights, italic]) => ({ name, kind, weights, italic: !!italic }));
+  const fontEntry = name => FONT_CATALOGUE.find(f => f.name.toLowerCase() === String(name || '').toLowerCase()) || null;
+  /** The nearest weight a family has (a family with only 400 draws every weight at 400 rather than faking a bold). */
+  function fontWeight(name, want) { const f = fontEntry(name); if (!f) return want; return f.weights.reduce((b, w) => Math.abs(w - want) < Math.abs(b - want) ? w : b, f.weights[0]); }
+  const faceLinks = {};
+  /** Fetch one face of a family from Google Fonts (a stylesheet link, once); resolves true when the stylesheet arrived. */
+  function loadFace(name, weight, italic) {
+    if (typeof document === 'undefined' || !SAFE_FAMILY.test(String(name || ''))) return Promise.resolve(false);
+    if (APP_FAMILY.display === name || APP_FAMILY.body === name || APP_FAMILY.mono === name) return Promise.resolve(true);
+    const f = fontEntry(name); const wt = f ? fontWeight(name, weight || 400) : (weight || 400); const it = !!italic && (!f || f.italic);
+    const key = name + '|' + wt + '|' + (it ? 1 : 0); if (faceLinks[key]) return faceLinks[key];
+    faceLinks[key] = new Promise(res => {
+      const link = document.createElement('link'); link.rel = 'stylesheet';
+      link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(name).replace(/%20/g, '+') + (it ? ':ital,wght@1,' + wt : ':wght@' + wt) + '&display=swap';
+      const t = setTimeout(() => res(false), 6000); link.onload = () => { clearTimeout(t); res(true); }; link.onerror = () => { clearTimeout(t); res(false); };
+      document.head.appendChild(link);
+    });
+    return faceLinks[key];
+  }
   /** Load every face the layout's words need and wait (bounded); report, per role, the family asked for and the family used. */
   async function ensureFonts(layout, copy, opts) {
     opts = opts || {}; const timeout = opts.timeout || 4000;
     const wait = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
     const layers = ((layout && layout.layers) || []).filter(l => l.type === 'text' && displayedText(layout, l, copy || {}));
-    const faces = new Set(); layers.forEach(l => { [kitFamily(layout, l), APP_FAMILY[roleKind(l)]].filter(Boolean).forEach(f => faces.add((l.weight || 600) + ' 40px "' + f + '"')); });
+    const faces = new Set(); layers.forEach(l => { [layerFamily(l), kitFamily(layout, l), APP_FAMILY[roleKind(l)]].filter(Boolean).forEach(f => faces.add((l.italic ? 'italic ' : '') + (l.weight || 600) + ' 40px "' + f + '"')); });
+    // the faces a layer or the kit names are fetched first (their @font-face rules must exist before the browser can load them)
+    const fetches = []; layers.forEach(l => { [layerFamily(l), kitFamily(layout, l)].filter(Boolean).forEach(f => fetches.push(loadFace(f, l.weight || 600, l.italic))); });
+    if (fetches.length) await wait(Promise.all(fetches), timeout);
     if (typeof document !== 'undefined' && document.fonts && document.fonts.load) { await wait(Promise.all(Array.from(faces).map(f => document.fonts.load(f).catch(() => []))), timeout); if (document.fonts.ready) await wait(document.fonts.ready, timeout); }
     const roles = {}; const fallback = [];
-    const kinds = {}; layers.forEach(l => { const k = roleKind(l); (kinds[k] = kinds[k] || { l, weights: new Set() }).weights.add(l.weight || 600); });
+    // a layer with its own family is reported on its own: the family it asked for, and the one that drew it
+    layers.filter(l => layerFamily(l)).forEach(l => {
+      const k = roleKind(l); const asked = layerFamily(l); const wt = l.weight || 600;
+      const used = [asked, kitFamily(layout, l), APP_FAMILY[k]].filter(Boolean).find(f => familyAvailable(f, wt)) || GENERIC[k];
+      roles['layer:' + (l.id || l.role)] = { requested: asked, used, fallback: used !== asked, weights: [wt] };
+      if (used !== asked) fallback.push((l.role || l.id) + ': asked "' + asked + '", rendered in ' + (used === GENERIC[k] ? 'the browser\'s generic ' + used : '"' + used + '"'));
+    });
+    const kinds = {}; layers.filter(l => !layerFamily(l)).forEach(l => { const k = roleKind(l); (kinds[k] = kinds[k] || { l, weights: new Set() }).weights.add(l.weight || 600); });
     Object.keys(kinds).forEach(k => {
       const l = kinds[k].l; const weights = Array.from(kinds[k].weights);
       const asked = kitFamily(layout, l) || APP_FAMILY[k]; const chain = [kitFamily(layout, l), APP_FAMILY[k]].filter(Boolean);
@@ -551,6 +751,9 @@
         b.contrast = Math.round(ratio(fl, g.lum) * 100) / 100; b.alpha = Math.round(a * 100) / 100;
         // the worst local contrast: against the brightest and the darkest tenth of the ground, whichever the words lose to
         b.contrastMin = Math.round(Math.min(ratio(fl, g.p10), ratio(fl, g.p90)) * 100) / 100;
+        // an outline is part of the letters: words outlined thickly enough in a colour that stands off their fill read against
+        // the outline whatever the ground does, so the better of the two is the words' contrast (and the record says why)
+        if (l.stroke && +l.stroke.width > 0 && b.px) { const swPx = Math.min(b.px * 0.3, +l.stroke.width / 100 * W); if (swPx >= Math.max(1.5, b.px * 0.05)) { const sc = colourRGBA(l.stroke.color || '#000000'); const r = Math.round(ratio(fl, lum(sc[0], sc[1], sc[2])) * 100) / 100; if (r > b.contrastMin) { b.contrastVia = 'outline'; b.contrastMin = r; b.contrast = Math.max(b.contrast, r); } } }
         b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.p10 * 1000) / 1000, Math.round(g.p90 * 1000) / 1000];
       } else if (b.mark && b.asset === 'loaded') {
         // marks are read per pixel by markReadability(); only the ground's mean is noted here for the record
@@ -1074,6 +1277,79 @@
     });
     return out.sort((a, b) => (b.ok - a.ok));
   }
+  /* ---------------------------------------------------------------- style variations: the same words, marks and imagery, in a named style
+   * A style is a deterministic transform of the typefaces, weights, sizes, case, tracking, plates and panel colours - never the
+   * words, never a mark, never the photograph, never a locked layer - measured afterwards like any layout, and repaired where
+   * geometry or colour can fix what the style broke. Free: no model call, no render. */
+  const STYLES = [
+    ['minimal', 'Minimal', 'Lighter type, no decoration, quiet panels'],
+    ['bold', 'Bold', 'Heavy type, a larger headline, a solid client panel'],
+    ['editorial', 'Editorial', 'A serif headline over a light page, an italic reading line'],
+    ['data', 'Data-led', 'A technical face, the figures picked out, a dark data panel'],
+    ['social', 'Social-first', 'Big centred words and a button call to action'],
+    ['corporate', 'Corporate', 'A plain sans in the client colour, left aligned'],
+    ['premium', 'Premium', 'A dark ground, light weights, wide tracking and a gold accent'],
+    ['impact', 'High-impact', 'Condensed capitals on a highlight band, strong colour'],
+    ['clean', 'Clean', 'A white panel, dark type, nothing extra'],
+    ['campaign', 'Campaign-style', 'The campaign colours and the kit typeface'],
+  ];
+  const STYLE_FAMILIES = { editorial: ['Playfair Display', 'Source Serif 4', 'IBM Plex Mono'], data: ['IBM Plex Sans', 'IBM Plex Mono'], corporate: ['Inter'], premium: ['Fraunces', 'Manrope'], impact: ['Anton'], clean: ['Inter'] };
+  const hexLum = hex => { const c = colourRGBA(hex); return lum(c[0], c[1], c[2]); };
+  const inkOn = hex => (hexLum(hex) > 0.45 ? '#111418' : '#ffffff');
+  function styleLayout(layout0, name, copy) {
+    const L = JSON.parse(JSON.stringify(layout0 || {})); const pal = L.palette || {}; const kitF = L.fonts || {}; copy = copy || {};
+    const okHex = h => /^#[0-9a-f]{6}$/i.test(h || '');
+    const prim = okHex(pal.primary) ? pal.primary : '#0E6A6E'; const sec = okHex(pal.secondary) ? pal.secondary : '#F2B705';
+    const all = L.layers || [];
+    const T = roles => all.filter(l => l.type === 'text' && !l.locked && !l.hidden && (roles ? roles.indexOf(l.role) >= 0 : true));
+    const area = l => (l.w || 0) * (l.h || 0);
+    const panels = all.filter(l => l.type === 'shape' && !l.locked && !l.gradient && l.role !== 'overlay' && ['icon', 'rule', 'circle', 'triangle'].indexOf(l.shape) < 0 && area(l) >= 600);
+    const deco = all.filter(l => l.type === 'shape' && !l.locked && !l.gradient && (['icon', 'rule', 'circle', 'triangle'].indexOf(l.shape) >= 0 || area(l) < 600));
+    const Hd = T(['headline']), Sp = T(['support']), Ct = T(['cta']), Kk = T(['kicker', 'label', 'myth', 'fact', 'caption', 'free']), Tx = T();
+    const set = (ls, patch) => ls.forEach(l => { Object.keys(patch).forEach(k => { if (patch[k] === undefined) delete l[k]; else l[k] = patch[k]; }); if (l.family && l.weight) l.weight = fontWeight(l.family, l.weight); });
+    const scale = (ls, k) => ls.forEach(l => { l.size = Math.round(Math.max(1.6, (l.size || 4) * k) * 10) / 10; });
+    const plain = ls => set(ls, { emphasis: undefined, emphasisColor: undefined });
+    const fill = (ls, f, op) => ls.forEach(l => { l.fill = f; delete l.fill2; if (op != null) l.opacity = op; });
+    const words = l => displayedText(L, l, copy);
+    switch (name) {
+      case 'minimal': plain(Tx); set(Hd, { weight: 600, letterSpacing: -0.01 }); scale(Hd, 0.9); set(Sp, { weight: 400, bg: undefined }); set(Kk, { bg: undefined, weight: 500 }); set(Ct, { bg: undefined, weight: 600, emphasis: 'underline' }); fill(panels, 'rgba(10,14,22,0.55)'); deco.forEach(l => { l.hidden = true; }); break;
+      case 'bold': plain(Hd); set(Hd, { weight: 900 }); scale(Hd, 1.12); set(Sp, { weight: 600 }); set(Kk, { case: 'upper', letterSpacing: 0.08, weight: 800 }); set(Ct, { bg: sec, color: inkOn(sec), weight: 800 }); fill(panels, prim, 1); set(T(['headline', 'support', 'kicker', 'label']), { color: inkOn(prim) }); break;
+      case 'editorial': plain(T(['headline', 'support'])); set(Hd, { family: 'Playfair Display', weight: 700, letterSpacing: -0.01, case: undefined, color: '#14171a' }); set(Sp, { family: 'Source Serif 4', weight: 400, italic: true, color: '#2b3036', bg: undefined }); set(Kk, { family: 'IBM Plex Mono', weight: 500, case: 'upper', letterSpacing: 0.14, color: prim, bg: undefined }); set(Ct, { bg: undefined, color: '#14171a', emphasis: 'underline', emphasisColor: prim, weight: 600 }); fill(panels, '#f4f1ea', 0.97); fill(deco.filter(l => l.shape === 'rule'), prim); break;
+      case 'data': set(Hd, { family: 'IBM Plex Sans', weight: 700, letterSpacing: -0.01 }); Hd.forEach(l => { if (/\d/.test(words(l))) { l.emphasis = 'highlight'; l.emphasisColor = sec; l.color = inkOn(sec); } }); set(Sp, { family: 'IBM Plex Sans', weight: 400 }); set(Kk, { family: 'IBM Plex Mono', weight: 500, case: 'upper', letterSpacing: 0.08 }); set(Ct, { family: 'IBM Plex Mono', weight: 600, case: 'upper' }); fill(panels, '#101820', 0.94); set(T(['support', 'kicker', 'label']), { color: '#e8eef2' }); break;
+      case 'social': plain(Hd); set(Hd, { weight: 800, align: 'center' }); scale(Hd, 1.18); set(Sp, { weight: 500, align: 'center' }); set(Kk, { align: 'center' }); set(Ct, { align: 'center', bg: sec, color: inkOn(sec), weight: 800, emphasis: undefined }); break;
+      case 'corporate': plain(Tx); set(Hd, { family: 'Inter', weight: 700, letterSpacing: -0.01, align: 'left' }); scale(Hd, 0.95); set(Sp, { family: 'Inter', weight: 400, align: 'left' }); set(Kk, { family: 'Inter', weight: 600, case: 'upper', letterSpacing: 0.06, align: 'left' }); set(Ct, { family: 'Inter', weight: 600, bg: '#ffffff', color: prim, align: 'left' }); fill(panels, prim, 0.95); set(T(['headline', 'support', 'kicker', 'label']), { color: inkOn(prim) }); break;
+      case 'premium': plain(Tx); set(Hd, { family: 'Fraunces', weight: 400, letterSpacing: 0, color: '#f4f1ea' }); set(Sp, { family: 'Manrope', weight: 400, letterSpacing: 0.04, color: '#d8d2c4', bg: undefined }); set(Kk, { family: 'Manrope', weight: 500, case: 'upper', letterSpacing: 0.2, color: '#C9A45C', bg: undefined }); set(Ct, { family: 'Manrope', weight: 600, case: 'upper', letterSpacing: 0.12, color: '#C9A45C', bg: undefined, emphasis: 'underline', emphasisColor: '#C9A45C' }); fill(panels, 'rgba(13,15,18,0.88)'); fill(deco.filter(l => l.shape !== 'icon'), '#C9A45C'); break;
+      case 'impact': set(Hd, { family: 'Anton', weight: 400, case: 'upper', letterSpacing: 0.01, emphasis: 'highlight', emphasisColor: sec, color: inkOn(sec) }); scale(Hd, 1.2); set(Sp, { weight: 700 }); set(Ct, { bg: sec, color: inkOn(sec), case: 'upper', weight: 800 }); fill(panels, prim, 1); set(T(['support', 'kicker', 'label']), { color: inkOn(prim) }); break;
+      case 'clean': plain(Tx); set(Hd, { family: 'Inter', weight: 700, color: '#111418' }); set(Sp, { family: 'Inter', weight: 400, color: '#3a4046', bg: undefined }); set(Kk, { color: prim, bg: undefined }); set(Ct, { color: prim, bg: undefined, emphasis: 'underline', weight: 600 }); fill(panels, '#ffffff', 0.96); deco.forEach(l => { l.hidden = true; }); break;
+      case 'campaign': plain(Hd); set(Hd, Object.assign({ weight: 800, color: inkOn(prim) }, kitF.display ? { family: undefined } : {})); set(T(['support', 'kicker', 'label']), { color: inkOn(prim) }); set(Ct, { bg: sec, color: inkOn(sec), weight: 800 }); fill(panels, prim, 1); fill(deco.filter(l => l.shape !== 'icon'), sec); break;
+      default: return null;
+    }
+    L.styleName = name; return L;
+  }
+  /** Fetch the faces the named styles use, so their measurement is of the real type (bounded wait). */
+  async function preloadStyles(timeout) {
+    const fs = []; Object.keys(STYLE_FAMILIES).forEach(k => STYLE_FAMILIES[k].forEach(f => { const e = fontEntry(f); (e ? e.weights : [400]).filter(w => w === 400 || w === 500 || w === 600 || w === 700 || w === 800).forEach(w => { fs.push(loadFace(f, w, false)); }); }));
+    fs.push(loadFace('Source Serif 4', 400, true));
+    const wait = (pr, ms) => Promise.race([pr, new Promise(r => setTimeout(r, ms))]); await wait(Promise.all(fs), timeout || 5000);
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.load) { const faces = []; Object.keys(STYLE_FAMILIES).forEach(k => STYLE_FAMILIES[k].forEach(f => { faces.push('400 40px "' + f + '"', '700 40px "' + f + '"'); })); faces.push('italic 400 40px "Source Serif 4"'); await wait(Promise.all(faces.map(f => document.fonts.load(f).catch(() => []))), timeout || 5000); }
+  }
+  /** Every named style for this composition, measured (and repaired where geometry or colour can), best first. */
+  function styles(layout0, copy, images, opts) {
+    opts = opts || {}; copy = copy || {}; images = images || {}; const L0 = layout0 || {};
+    if (opts.locks && opts.locks.layout) return [];
+    if (!(L0.layers || []).some(l => l.type === 'text' && !l.hidden && displayedText(L0, l, copy))) return [];
+    const vopts = { width: opts.width, format: opts.format || L0.format, channel: opts.channel, fonts: opts.fonts, production: opts.production };
+    const pendingCodes = { imagery_missing: 1, mark_unloaded: 1, imagery_sketch: 1 };
+    const blockers = x => x.issues.filter(i => i.severity === 'blocking' && !pendingCodes[i.code]);
+    const out = [];
+    STYLES.forEach(([id, name, note]) => {
+      const L = styleLayout(L0, id, copy); if (!L) return;
+      let v = validate(L, copy, images, vopts); let final = L; let steps = [];
+      if (blockers(v).length || v.issues.some(i => i.code === 'low_contrast')) { const rp = repair(L, copy, images, Object.assign({}, opts, { fixContrast: true })); if (rp.changed) { final = Object.assign(rp.layout, { styleName: id }); steps = rp.steps; v = validate(final, copy, images, vopts); } }
+      out.push({ id, name, note, layout: final, ok: !blockers(v).length, blocking: blockers(v).map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')), pending: v.issues.filter(i => pendingCodes[i.code]).map(i => i.code), warnings: v.issues.filter(i => i.severity !== 'blocking').map(i => i.code), steps, families: STYLE_FAMILIES[id] || [] });
+    });
+    return out;
+  }
   /* a store-only zip: enough for images and text, no compression, readable everywhere */
   const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
   function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -1095,5 +1371,5 @@
   function report(v, val) {
     return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
+  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, styles, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

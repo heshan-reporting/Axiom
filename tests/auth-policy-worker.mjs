@@ -28,6 +28,11 @@ const ACTS = [
   ['POST', '/studio/production', { project: 'none', mode: 'editable' }],
   ['POST', '/studio/campaign/create', { ns: 'aep', name: 'Policy test campaign' }],
   ['POST', '/studio/direction/update', { id: 'none', patch: { saved: true } }],
+  // S17 editor: resize (writes assets), an image placed on the canvas (writes R2), the autosaved draft and its discard
+  ['POST', '/studio/resize', { asset: 'none', presets: ['story'] }],
+  ['POST', '/studio/image/upload', { project: 'none', imageB64: 'aGk=', mime: 'image/png' }],
+  ['POST', '/studio/draft', { asset: 'none', version: 'none', layout: { layers: [] } }],
+  ['POST', '/studio/draft/discard', { asset: 'none' }],
   ['POST', '/nano', { prompt: 'x' }],
   ['POST', '/chat', { messages: [] }],
 ];
