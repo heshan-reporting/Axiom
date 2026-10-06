@@ -337,5 +337,32 @@
     </section>`;
   }
 
-  window.STEditor = { StyleVariations, ResizePanel, QualitySummary, FontPicker, Swatches, ContextToolbar, TextEditor, AddMenu, newLayer, cloneLayers, snapMove, resizeLocal, angleTo, TypeExtras, EffectsPanel, ImagePanel, uploadImage, recentFonts, pushRecent, COPY_ROLES, isMark };
+  /* ------------------------------------------------------------ the keyboard, written down */
+  // Cmd on a Mac, Ctrl elsewhere: the editor's key handler takes either, the sheet names the one this machine has
+  const MOD = (typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '')) ? 'Cmd' : 'Ctrl';
+  /** Every key the canvas answers to, in one list: what is written here is what the editor does (the S17 editor harness presses
+      the ones it can and reads this list). */
+  const SHORTCUTS = [
+    ['Selection', [['Click', 'select a layer'], ['Shift+click', 'add to the selection, or take a layer out of it'], ['Drag on the empty stage', 'select every layer the box touches'], [MOD + '+A', 'select every unlocked layer'], ['Escape', 'clear the selection']]],
+    ['Layers', [['Delete or Backspace', 'remove (the approved words are hidden, never deleted)'], [MOD + '+D', 'duplicate'], [MOD + '+C, ' + MOD + '+V', 'copy and paste'], [MOD + '+G, ' + MOD + '+Shift+G', 'group, ungroup'], [MOD + '+], ' + MOD + '+[', 'bring forward, send backward'], [MOD + '+Shift+], ' + MOD + '+Shift+[', 'to the front, to the back'], ['Arrow keys', 'nudge 0.5% (2% with Shift)']]],
+    ['Words', [['Enter or double-click', 'edit the words where they sit'], [MOD + '+Enter', 'keep them (leaving the field keeps them too)'], ['Escape', 'put them back']]],
+    ['Gestures', [['Shift with a corner', 'keep the proportions'], ['Alt with a handle', 'resize from the centre'], ['Alt while dragging', 'move without snapping'], ['Shift while rotating', '15 degree steps']]],
+    ['History', [[MOD + '+Z', 'undo'], [MOD + '+Shift+Z or ' + MOD + '+Y', 'redo']]],
+    ['View', [['Shift+1', 'fit'], ['Shift+0', 'actual size'], ['Shift+2', '200%'], [MOD + ' with the wheel', 'zoom'], ['Space and drag', 'pan']]],
+    ['Studio', [['Alt+1 to Alt+7', 'go to a step'], ['?', 'this list']]],
+  ];
+  /** The shortcuts as a dialog: Escape or ? closes it, and while it is open the canvas takes no key (a Delete pressed here must
+      not remove the selection behind it). */
+  function ShortcutsSheet({ onClose }) {
+    const ref = useRef(null);
+    useEffect(() => { const el = ref.current; if (el) el.focus(); }, []);
+    return html`<div class="st-dialog st-keys" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onPointerDown=${e => { e.stopPropagation(); if (e.target === e.currentTarget) onClose(); }} onKeyDown=${e => { e.stopPropagation(); if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); onClose(); } }}>
+      <div class="st-dialog-box st-keys-box" tabIndex="-1" ref=${ref}>
+        <div class="st-keys-h"><span class="ov-title">Keyboard shortcuts</span><button class="btn sm ghost" onClick=${onClose}>Close</button></div>
+        <div class="st-keys-grid">${SHORTCUTS.map(([g, rows]) => html`<section key=${g} class="st-keys-group" aria-label=${g}><h4>${g}</h4><dl>${rows.map(([k, d]) => html`<div key=${k}><dt><kbd>${k}</kbd></dt><dd>${d}</dd></div>`)}</dl></section>`)}</div>
+        <div class="ov-dim">The canvas takes these wherever the focus is not in a field; a field keeps its own keys.</div>
+      </div></div>`;
+  }
+
+  window.STEditor = { StyleVariations, ResizePanel, QualitySummary, FontPicker, Swatches, ContextToolbar, TextEditor, AddMenu, ShortcutsSheet, SHORTCUTS, newLayer, cloneLayers, snapMove, resizeLocal, angleTo, TypeExtras, EffectsPanel, ImagePanel, uploadImage, recentFonts, pushRecent, COPY_ROLES, isMark };
 })();

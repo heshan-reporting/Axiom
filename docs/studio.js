@@ -2180,7 +2180,7 @@
     const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
     const layout = hist.now;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides0, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
-    const [grid, setGrid] = useState(false); const [snapLines, setSnapLines] = useState([]); const [marquee, setMarquee] = useState(null);
+    const [grid, setGrid] = useState(false); const [snapLines, setSnapLines] = useState([]); const [marquee, setMarquee] = useState(null); const [keysOpen, setKeysOpen] = useState(false);
     const [editing, setEditing] = useState(null); const [fontOpen, setFontOpen] = useState(false); const [fontPreview, setFontPreview] = useState(null);
     const guides = guidesOn == null ? guides0 : (guidesOn && guides0);
     useEffect(() => { if (onSel) onSel(sel); }, [sel.join(',')]);
@@ -2307,7 +2307,10 @@
       if (mod && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); paste(); return; }
       if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); return; }
       if (mod && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); if (e.shiftKey) ungroup(); else group(); return; }
-      if (mod && (e.key === ']' || e.key === '[')) { e.preventDefault(); reorder(e.key === ']' ? (e.shiftKey ? 'front' : 'forward') : (e.shiftKey ? 'back' : 'backward')); return; }
+      // read by the key's place, not its character: with Shift held the bracket arrives as a brace on most layouts
+      const br = e.code === 'BracketRight' || e.key === ']' || e.key === '}' ? ']' : e.code === 'BracketLeft' || e.key === '[' || e.key === '{' ? '[' : '';
+      if (mod && br) { e.preventDefault(); reorder(br === ']' ? (e.shiftKey ? 'front' : 'forward') : (e.shiftKey ? 'back' : 'backward')); return; }
+      if (e.key === '?' && !mod) { e.preventDefault(); setKeysOpen(true); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { if (sel.length) { e.preventDefault(); remove(); } return; }
       if (e.key === 'Enter' && sel.length === 1 && byId(sel[0]) && byId(sel[0]).type === 'text') { e.preventDefault(); startEdit(byId(sel[0])); return; }
       if (e.key === 'Escape') { setSelIds([]); setFontOpen(false); return; }
@@ -2425,7 +2428,9 @@
         <label class="st-check"><input type="checkbox" checked=${guides0} onChange=${e => setGuides(e.target.checked)} /> safe-area guides</label>
         <label class="st-check" title="Snap to a 10% grid as well as the stage, the safe area and the other layers"><input type="checkbox" checked=${grid} onChange=${e => setGrid(e.target.checked)} aria-label="Grid" /> grid</label>
         <label class="st-check" title="Off: the corner changes the text box and the words rewrap at the same size. On: the type scales with the box width."><input type="checkbox" checked=${scaleType} onChange=${e => setScaleType(e.target.checked)} aria-label="Resize scales type" /> resize scales type</label>
+        <span class="st-le-sep"></span>${tb('Shortcuts', () => setKeysOpen(true), false, 'Keyboard shortcuts (?)')}
       </div>` : null}
+      ${keysOpen && E.ShortcutsSheet ? html`<${E.ShortcutsSheet} onClose=${() => { setKeysOpen(false); try { if (box.current) box.current.focus({ preventScroll: true }); } catch (x) {} }} />` : null}
       ${restore && !preview ? html`<div class="st-le-restore" role="status"><b>${restore.current ? 'You have unsaved layout changes from ' + ago(restore.at) + ' ago.' : 'A draft from an earlier version is kept (' + ago(restore.at) + ' ago).'}</b> <span class="ov-dim">${restore.current ? 'Autosaved for you only; nothing was saved as a version.' : 'The asset was saved since; restoring it would lay an older arrangement over the newer one.'}</span>${restore.current ? html`<button class="btn sm" onClick=${doRestore}>Restore my changes</button>` : null}<button class="btn sm ghost" onClick=${() => { setRestore(null); discardDraft(); draftOn.current = true; }}>Discard the draft</button></div>` : null}
       <div class=${'st-le' + (preview ? ' preview' : '') + (marquee && marquee.on ? ' marqueeing' : '')} ref=${box} tabIndex="-1" onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${marqueeDown} onDoubleClick=${e => { const el = e.target.closest && e.target.closest('.st-le-layer'); if (!el) return; const l = byId(el.getAttribute('data-id')); if (l && l.type === 'text') startEdit(l); }}>
         <${Composition} v=${Object.assign({}, v, { layout: drawn, copy: wcopy })} a=${a} ns=${ns} tagOut=${true} />
@@ -3106,8 +3111,9 @@
     };
     goStageRef.current = goStage;
     const openAsset = id => { setSelAsset(id); setSelField(null); setView('asset'); };
-    /* Alt+1..7 jumps to a step from anywhere in the Studio, except while typing */
-    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const n = +e.key; if (n >= 1 && n <= STAGES.length && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(STAGES[n - 1].id); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
+    /* Alt+1..7 jumps to a step from anywhere in the Studio, except while typing; the digit is read by its key (e.code), since
+       Option with a digit types a symbol on a Mac */
+    useEffect(() => { const h = e => { if (!pRef.current || !e.altKey || e.ctrlKey || e.metaKey) return; const dm = /^(?:Digit|Numpad)([1-9])$/.exec(e.code || ''); const n = dm ? +dm[1] : +e.key; if (n >= 1 && n <= STAGES.length && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); goStage(STAGES[n - 1].id); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
 
     const inRefine = !!(p && view === 'asset' && a && !cmp);
     const liveJobs = p ? (p.jobs || []).filter(j => j.state === 'queued' || j.state === 'running') : [];

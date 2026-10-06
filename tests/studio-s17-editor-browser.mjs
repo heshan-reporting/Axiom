@@ -7,7 +7,8 @@
  *   - adding and styling: a heading, an icon from the set, a Google font from the picker, a shadow; Ctrl+D duplicates,
  *     Delete removes, and Delete on a copy-role layer hides it instead of losing the approved words;
  *   - an unsaved layout is a draft for this person only, offered back after a reload - never a version on its own;
- *   - zoom shortcuts; style variations, resize to platform formats and the Creative quality summary, all free;
+ *   - zoom shortcuts; the shortcuts sheet (?), Ctrl+Shift+] read by the key, Alt with a digit by the key (a Mac's Option);
+ *   - style variations, resize to platform formats and the Creative quality summary, all free;
  *   - the Art Director hears which layers are selected; imagery edits by description (remove, relight).
  * Run: node --experimental-sqlite tests/studio-s17-editor-browser.mjs   (SHOT=1 writes tests/shots/s17-ed-*.png) */
 import fs from 'node:fs';
@@ -146,6 +147,33 @@ await T.t('zoom by keyboard: Shift+2 doubles, Shift+0 is actual size, Shift+1 fi
   await page.keyboard.press('Shift+Digit2'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), '200');
   await page.keyboard.press('Shift+Digit0'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), 'actual');
   await page.keyboard.press('Shift+Digit1'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), 'fit');
+});
+
+await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pressed there never reaches the canvas), Ctrl+Shift+] brings a layer to the front, and Alt with a digit moves between steps by the key it is (Option+1 on a Mac types a symbol)', async () => {
+  await editLayout(); const rows = () => page.$$eval(R + '.st-le-list button.st-layer-pick', x => x.map(e => (e.getAttribute('title') || '').split(' ')[0]));
+  const r0 = await rows(); ok(r0[0] !== 'cta', 'the call to action is not in front to begin with: ' + r0.join(', '));
+  await page.click(R + '.st-le-list button.st-layer-pick[title^="cta "]');
+  await page.keyboard.press('Control+Shift+BracketRight'); await sleep(150);
+  eq((await rows())[0], 'cta', 'Ctrl+Shift+] put it in front (the brace the key types with Shift is read as the bracket)');
+  await page.keyboard.press('Control+z'); await sleep(150); eq(await rows(), r0, 'and one undo puts it back');
+  await page.keyboard.press('Shift+Slash'); await page.waitForSelector(R + '.st-keys', { timeout: 5000 });
+  const groups = await page.$$eval(R + '.st-keys .st-keys-group h4', x => x.map(e => e.textContent));
+  eq(groups, ['Selection', 'Layers', 'Words', 'Gestures', 'History', 'View', 'Studio'], 'the sheet groups every shortcut');
+  ok(/Ctrl\+Shift\+\]/.test(await page.textContent(R + '.st-keys')), 'it names the keys this machine has');
+  await page.keyboard.press('Delete'); await sleep(150);
+  eq((await page.$$(R + L('cta'))).length, 1, 'Delete pressed in the sheet did not remove the selected layer behind it');
+  await page.keyboard.press('Escape'); await page.waitForSelector(R + '.st-keys', { state: 'detached', timeout: 5000 });
+  ok(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('#studio-root .st-le'))), 'the keyboard is back on the canvas');
+  await page.click(R + '.st-le-tools button:has-text("Shortcuts")'); await page.waitForSelector(R + '.st-keys');
+  await page.click(R + '.st-keys button:has-text("Close")'); await page.waitForSelector(R + '.st-keys', { state: 'detached', timeout: 5000 });
+  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")'); await sleep(300);
+  // Option+1 on a Mac: the key is Digit1, the character a symbol
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a1', code: 'Digit1', altKey: true, bubbles: true })));
+  await page.waitForFunction(() => /Brief/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00aa', code: 'Digit6', altKey: true, bubbles: true })));
+  await page.waitForFunction(() => /Design/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
+  await page.click(R + '.st-railbtn.asset:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
+  await shot('keys');
 });
 
 await T.t('style variations: ten named treatments of the same words and marks, each measured; Use this style is a layout version with no model call', async () => {
