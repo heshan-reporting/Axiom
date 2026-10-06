@@ -1,0 +1,173 @@
+/* ==========================================================================================================
+   AXIOM Creative Studio - the canvas editor (S17)
+   Handles and rotation, the marquee, snapping guides and the grid, words typed in place, the floating toolbar over the
+   selection, the font picker, the Add menu, colour swatches, the effects and image panels, the draft state and the
+   restore banner. On the skin's tokens (studio-skin.css); scoped to #studio-root. No motion that is not a state change.
+   ========================================================================================================== */
+
+/* ------------------------------------------------------------------ handles, rotation, selection */
+#studio-root .st .st-le-layer.sel{border:1.5px solid var(--sk-accent);box-shadow:0 0 0 1px rgba(0,0,0,.35)}
+#studio-root .st .st-le-layer.turned{transform-origin:50% 50%}
+#studio-root .st .st-le-layer.editing{border-color:transparent;box-shadow:none}
+#studio-root .st .st-le-layer .st-le-h{right:-6px;bottom:-6px;width:11px;height:11px;border-radius:2px;background:#fff;border:1.5px solid var(--sk-accent);cursor:nwse-resize;z-index:3}
+#studio-root .st .st-le-hh{position:absolute;width:11px;height:11px;border-radius:2px;background:#fff;border:1.5px solid var(--sk-accent);z-index:3;touch-action:none}
+#studio-root .st .st-le-hh.h-nw{left:-6px;top:-6px;cursor:nwse-resize}
+#studio-root .st .st-le-hh.h-ne{right:-6px;top:-6px;cursor:nesw-resize}
+#studio-root .st .st-le-hh.h-sw{left:-6px;bottom:-6px;cursor:nesw-resize}
+#studio-root .st .st-le-hh.h-n{left:calc(50% - 6px);top:-6px;cursor:ns-resize}
+#studio-root .st .st-le-hh.h-s{left:calc(50% - 6px);bottom:-6px;cursor:ns-resize}
+#studio-root .st .st-le-hh.h-e{right:-6px;top:calc(50% - 6px);cursor:ew-resize}
+#studio-root .st .st-le-hh.h-w{left:-6px;top:calc(50% - 6px);cursor:ew-resize}
+#studio-root .st .st-le-rot{position:absolute;left:calc(50% - 7px);top:-30px;width:14px;height:14px;border-radius:50%;background:#fff;border:1.5px solid var(--sk-accent);cursor:grab;z-index:3;touch-action:none}
+#studio-root .st .st-le-rot::after{content:'';position:absolute;left:50%;top:100%;width:1px;height:16px;background:var(--sk-accent)}
+#studio-root .st .st-le-rot:active{cursor:grabbing}
+#studio-root .st .st-le.marqueeing{cursor:crosshair}
+#studio-root .st .st-le-marquee{position:absolute;border:1px solid var(--sk-accent);background:color-mix(in srgb,var(--sk-accent) 14%,transparent);pointer-events:none;z-index:6}
+#studio-root .st .st-le-snap{position:absolute;pointer-events:none;z-index:7;background:#ff3d8b}
+#studio-root .st .st-le-snap.x{top:0;bottom:0;width:1px}
+#studio-root .st .st-le-snap.y{left:0;right:0;height:1px}
+#studio-root .st .st-le-grid{position:absolute;inset:0;pointer-events:none;z-index:1;background-image:linear-gradient(to right,rgba(255,255,255,.14) 1px,transparent 1px),linear-gradient(to bottom,rgba(255,255,255,.14) 1px,transparent 1px);background-size:10% 10%}
+
+/* ------------------------------------------------------------------ words typed in place */
+#studio-root .st .st-le-textedit{position:absolute;z-index:8;box-sizing:border-box;margin:0;padding:0;border:1.5px solid var(--sk-accent);border-radius:2px;background:rgba(10,14,22,.35);outline:none;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;caret-color:var(--sk-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--sk-accent) 22%,transparent)}
+
+/* ------------------------------------------------------------------ the floating toolbar over the selection */
+#studio-root .st .st-fbar{position:absolute;z-index:9;display:flex;align-items:center;gap:2px;flex-wrap:nowrap;max-width:min(96%,720px);padding:4px;border-radius:10px;border:1px solid var(--sk-line-2);background:var(--sk-raised);box-shadow:0 10px 30px rgba(0,0,0,.45);white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+#studio-root .st .st-fbar::-webkit-scrollbar{display:none}
+#studio-root .st .st-fbar-btn{display:inline-grid;place-items:center;min-width:28px;height:28px;padding:0 6px;border-radius:7px;border:0;background:transparent;color:var(--sk-ink-2);font:650 12px/1 var(--sk-font);cursor:pointer}
+#studio-root .st .st-fbar-btn:hover:not(:disabled){background:var(--sk-panel);color:var(--sk-ink)}
+#studio-root .st .st-fbar-btn.on{background:var(--sk-soft);color:var(--sk-accent)}
+#studio-root .st .st-fbar-btn:disabled{opacity:.4;cursor:not-allowed}
+#studio-root .st .st-fbar-font{max-width:150px;overflow:hidden;text-overflow:ellipsis;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--sk-line);background:var(--sk-panel);color:var(--sk-ink);font:600 12px/1 var(--sk-font);cursor:pointer}
+#studio-root .st .st-fbar-val{min-width:30px;text-align:center;font:600 12px/1 var(--sk-mono, monospace);color:var(--sk-ink)}
+#studio-root .st .st-fbar-swatch{width:22px;height:22px;margin:0 4px;border-radius:50%;border:2px solid var(--sk-line-2);cursor:pointer}
+#studio-root .st .st-fbar-sep{width:1px;height:18px;margin:0 4px;background:var(--sk-line)}
+#studio-root .st .st-fbar-note{padding:0 8px;font-size:11.5px;color:var(--sk-sub)}
+#studio-root .st .st-fbar-range{display:inline-flex;align-items:center;gap:4px;padding:0 6px;font-size:11px;color:var(--sk-sub)}
+#studio-root .st .st-fbar-range input{width:70px}
+#studio-root .st .st-fbar-pop{position:absolute;top:calc(100% + 6px);left:0;padding:8px;border-radius:10px;border:1px solid var(--sk-line-2);background:var(--sk-raised);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+
+/* ------------------------------------------------------------------ colour swatches */
+#studio-root .st .st-swatches{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}
+#studio-root .st .st-swatch{width:20px;height:20px;border-radius:50%;border:2px solid var(--sk-line-2);cursor:pointer;padding:0}
+#studio-root .st .st-swatch.on{border-color:var(--sk-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--sk-accent) 35%,transparent)}
+#studio-root .st .st-hex{width:84px;padding:4px 6px;font:500 11.5px/1.2 var(--sk-mono, monospace)}
+
+/* ------------------------------------------------------------------ the font picker */
+#studio-root .st .st-le-fontwrap{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10}
+#studio-root .st .st-fontpick{width:300px;max-width:86vw;border-radius:12px;border:1px solid var(--sk-line-2);background:var(--sk-raised);box-shadow:0 18px 50px rgba(0,0,0,.55);overflow:hidden}
+#studio-root .st .st-fontpick-search{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--sk-line);color:var(--sk-quiet)}
+#studio-root .st .st-fontpick-search .st-in{flex:1;border:0;background:transparent;box-shadow:none;padding:4px 0}
+#studio-root .st .st-fontpick-kinds{display:flex;gap:4px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid var(--sk-line)}
+#studio-root .st .st-fontpick-kinds .st-chipbtn{padding:4px 9px;font-size:11px}
+#studio-root .st .st-fontpick-list{max-height:320px;overflow:auto;padding:4px 0}
+#studio-root .st .st-fontpick-h{padding:8px 12px 4px;font:650 10px/1 var(--sk-font);letter-spacing:.12em;text-transform:uppercase;color:var(--sk-quiet)}
+#studio-root .st .st-font-row{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:7px 12px;border:0;background:transparent;color:var(--sk-ink);font:500 13px/1.2 var(--sk-font);text-align:left;cursor:pointer}
+#studio-root .st .st-font-row:hover, #studio-root .st .st-font-row:focus-visible{background:var(--sk-panel);outline:none}
+#studio-root .st .st-font-row.on{color:var(--sk-accent)}
+#studio-root .st .st-font-row.reset{color:var(--sk-sub);font-size:12px}
+#studio-root .st .st-font-note{font-size:10.5px;color:var(--sk-quiet)}
+#studio-root .st .st-font-btn{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+
+/* ------------------------------------------------------------------ the Add menu */
+#studio-root .st .st-addmenu{position:relative;display:inline-flex}
+#studio-root .st .st-addmenu-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:12;width:240px;padding:6px;border-radius:12px;border:1px solid var(--sk-line-2);background:var(--sk-raised);box-shadow:0 18px 50px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:2px}
+#studio-root .st .st-addmenu-pop > button{padding:7px 10px;border:0;border-radius:7px;background:transparent;color:var(--sk-ink);font:550 12.5px/1.2 var(--sk-font);text-align:left;cursor:pointer}
+#studio-root .st .st-addmenu-pop > button:hover{background:var(--sk-panel)}
+#studio-root .st .st-addmenu-h{padding:8px 10px 2px;font:650 10px/1 var(--sk-font);letter-spacing:.12em;text-transform:uppercase;color:var(--sk-quiet)}
+#studio-root .st .st-addmenu-shapes{display:flex;gap:6px;padding:4px 8px}
+#studio-root .st .st-shape-btn{width:36px;height:36px;display:grid;place-items:center;border-radius:8px;border:1px solid var(--sk-line);background:var(--sk-panel);cursor:pointer}
+#studio-root .st .st-shape-btn:hover{border-color:var(--sk-accent)}
+#studio-root .st .st-shape-btn span{display:block;background:var(--sk-ink-2)}
+#studio-root .st .st-shape-btn.rect span{width:18px;height:14px;border-radius:2px}
+#studio-root .st .st-shape-btn.pill span{width:20px;height:10px;border-radius:5px}
+#studio-root .st .st-shape-btn.circle span{width:16px;height:16px;border-radius:50%}
+#studio-root .st .st-shape-btn.triangle span{width:0;height:0;background:transparent;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:15px solid var(--sk-ink-2)}
+#studio-root .st .st-shape-btn.rule span{width:20px;height:2px}
+#studio-root .st .st-addmenu-pop.icons{flex-direction:row;flex-wrap:wrap;width:300px;max-height:280px;overflow:auto}
+#studio-root .st .st-icon-btn{width:40px;height:40px;display:grid;place-items:center;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--sk-ink-2);cursor:pointer}
+#studio-root .st .st-icon-btn:hover{border-color:var(--sk-line-2);background:var(--sk-panel);color:var(--sk-ink)}
+
+/* ------------------------------------------------------------------ properties: effects, image, sliders */
+#studio-root .st .st-le-fx{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;padding:4px 0;border-top:1px dashed var(--sk-line)}
+#studio-root .st .st-le-slider{display:grid;grid-template-columns:86px minmax(0,1fr) 34px;align-items:center;gap:8px;font-size:12px}
+#studio-root .st .st-le-slider input[type=range]{width:100%}
+#studio-root .st .st-le-slider span{font:500 11px/1 var(--sk-mono, monospace);color:var(--sk-sub);text-align:right}
+
+/* ------------------------------------------------------------------ the layer list while editing */
+#studio-root .st .st-le-item[draggable=true]{cursor:grab}
+#studio-root .st .st-le-item.over{box-shadow:inset 0 2px 0 var(--sk-accent)}
+#studio-root .st .st-layer-grip{color:var(--sk-quiet);font:700 11px/1 var(--sk-mono, monospace);letter-spacing:-1px;padding-right:4px;user-select:none}
+
+/* ------------------------------------------------------------------ the draft and its restore */
+#studio-root .st .st-le-draft{font-size:11.5px;color:var(--sk-quiet)}
+#studio-root .st .st-le-draft.saved{color:var(--sk-good)}
+#studio-root .st .st-le-draft.error{color:var(--sk-bad)}
+#studio-root .st .st-le-restore{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:var(--sk-r);border:1px solid color-mix(in srgb,var(--sk-accent) 40%,var(--sk-line));background:var(--sk-soft)}
+#studio-root .st .st-le-restore > b{font-size:12.5px}
+
+@media (prefers-reduced-motion:reduce){#studio-root .st .st-fbar, #studio-root .st .st-fontpick, #studio-root .st .st-addmenu-pop{animation:none!important;transition:none!important}}
+
+/* the app's global .sel (a select box style) must not reach a selected layer: the selection is an outline, never a fill */
+#studio-root .st .st-le-layer.sel{background:transparent;padding:0;border-radius:0;font-size:inherit;color:inherit;transition:none;min-width:0;border:1.5px solid var(--sk-accent)}
+#studio-root .st .st-le-layer.sel:focus{border-color:var(--sk-accent)}
+
+/* ------------------------------------------------------------------ the layers panel: one row per layer, front to back */
+#studio-root .st .st-layers .st-le-list{display:flex;flex-direction:column;flex-wrap:nowrap;gap:1px;margin-top:6px}
+#studio-root .st .st-layers .st-le-item{display:flex;align-items:center;gap:3px;min-width:0;padding:3px 4px;border-radius:6px}
+#studio-root .st .st-layers .st-le-item:hover, #studio-root .st .st-layers .st-le-item:focus-within{background:var(--sk-raised)}
+#studio-root .st .st-layers .st-le-item.on{background:var(--sk-soft)}
+#studio-root .st .st-layers .st-layer-pick{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+#studio-root .st .st-layers .st-lock{flex:0 0 auto;padding:1px 4px;font-size:10px}
+#studio-root .st .st-layers .st-lord{display:none}
+#studio-root .st .st-layers .st-le-item:hover .st-lord, #studio-root .st .st-layers .st-le-item:focus-within .st-lord{display:inline-block}
+#studio-root .st .st-stage.panning{cursor:grab}
+#studio-root .st .st-stage.panning *{cursor:grab!important}
+
+/* ------------------------------------------------------------------ style variations: the same cards as layout variations */
+#studio-root .st .st-styles .st-var .st-var-name{font:700 12.5px/1.3 var(--sk-display)}
+
+/* ------------------------------------------------------------------ resize to platform formats */
+#studio-root .st .st-resize{margin-top:12px;padding:16px 18px;border:1px solid var(--sk-line);border-radius:var(--sk-r-lg);background:var(--sk-panel)}
+#studio-root .st .st-resize .st-vars-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:12.5px;margin-bottom:10px}
+#studio-root .st .st-resize .st-vars-head .ov-link{margin-left:auto}
+#studio-root .st .st-resize-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-bottom:10px}
+#studio-root .st .st-resize-opt{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--sk-line);border-radius:var(--sk-r);background:var(--sk-bg);cursor:pointer;font-size:12px;line-height:1.3;transition:border-color .15s}
+#studio-root .st .st-resize-opt:hover{border-color:var(--sk-line-2)}
+#studio-root .st .st-resize-opt.on{border-color:color-mix(in srgb,var(--sk-accent) 60%,transparent);background:var(--sk-soft)}
+#studio-root .st .st-resize-opt.same{opacity:.55}
+#studio-root .st .st-resize-opt input{position:absolute;opacity:0;pointer-events:none}
+#studio-root .st .st-resize-opt:focus-within{outline:2px solid var(--sk-accent);outline-offset:1px}
+#studio-root .st .st-resize-opt > span:last-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+#studio-root .st .st-resize-ar{flex:0 0 auto;width:26px;max-height:30px;border:1.5px solid var(--sk-sub);border-radius:3px;background:var(--sk-raised)}
+#studio-root .st .st-resize-opt.on .st-resize-ar{border-color:var(--sk-accent);background:color-mix(in srgb,var(--sk-accent) 18%,transparent)}
+#studio-root .st .st-resize-made{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}
+#studio-root .st .st-resize-made .st-lbl{margin:0 4px 0 0}
+
+/* ------------------------------------------------------------------ the creative quality summary */
+#studio-root .st .st-qsum{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;padding:12px 14px;border:1px solid var(--sk-line);border-radius:var(--sk-r-lg);background:var(--sk-panel)}
+#studio-root .st .st-qsum-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px}
+#studio-root .st .st-qsum-h .st-lbl{margin:0;color:var(--sk-ink)}
+#studio-root .st .st-qsum-h .btn{margin-left:auto}
+#studio-root .st .st-qsum-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+#studio-root .st .st-qsum-row{display:grid;grid-template-columns:10px 104px 44px 1fr;align-items:baseline;gap:8px;padding:5px 2px;font-size:12px;border-top:1px solid var(--sk-line)}
+#studio-root .st .st-qsum-row:first-child{border-top:0}
+#studio-root .st .st-qsum-row > b{font-weight:600;color:var(--sk-ink)}
+#studio-root .st .st-qsum-row > .ov-dim{overflow-wrap:anywhere}
+#studio-root .st .st-qsum-dot{width:8px;height:8px;border-radius:50%;background:var(--sk-quiet);align-self:center}
+#studio-root .st .st-qsum-row.good .st-qsum-dot{background:var(--sk-good)}
+#studio-root .st .st-qsum-row.fair .st-qsum-dot{background:var(--sk-warn)}
+#studio-root .st .st-qsum-row.poor .st-qsum-dot{background:var(--sk-bad)}
+#studio-root .st .st-qsum-rate{font:700 11px/1 var(--sk-font);letter-spacing:.02em}
+#studio-root .st .st-qsum-rate.good{color:var(--sk-good)}
+#studio-root .st .st-qsum-rate.fair{color:var(--sk-warn)}
+#studio-root .st .st-qsum-rate.poor{color:var(--sk-bad)}
+
+/* ------------------------------------------------------------------ the partner speaks about the selection */
+#studio-root .st .st-sel-about{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0;padding:6px 8px;border-radius:var(--sk-r);border:1px dashed color-mix(in srgb,var(--sk-accent) 45%,var(--sk-line));background:var(--sk-soft);font-size:11.5px}
+#studio-root .st .st-sel-about .st-lbl{margin:0;color:var(--sk-accent)}
+#studio-root .st .st-sel-about .st-mini-chip{padding:2px 8px;border-radius:999px;background:var(--sk-raised);border:1px solid var(--sk-line);font:600 11px/1.3 var(--sk-font)}
+#studio-root .st .st-qsum-note{padding:6px 8px;border-radius:var(--sk-r);background:color-mix(in srgb,var(--sk-warn) 8%,transparent);border:1px solid color-mix(in srgb,var(--sk-warn) 30%,var(--sk-line))}
+/* a typeface list on a style card wraps inside the card */
+#studio-root .st .st-var-state > *{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+#studio-root .st .st-qsum-fixed{font-size:12px;font-weight:600;color:var(--sk-ink)}

@@ -179,7 +179,7 @@
     const layout = layoutOverride || (v && v.layout) || {};
     const bgUrl = v && v.image && v.image.url;
     const srcs = (Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'img' && l.src).map(l => l.id + '=' + l.src).join('|');
-    const words = JSON.stringify((Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'text').map(l => [l.font, l.weight])) + JSON.stringify(layout.fonts || {});
+    const words = JSON.stringify((Array.isArray(layout.layers) ? layout.layers : []).filter(l => l.type === 'text').map(l => [l.font, l.weight, l.family || '', l.italic ? 1 : 0])) + JSON.stringify(layout.fonts || {});
     // what this composition needs, as one key: the state answered for another key (the version before, a layout just edited)
     // is never handed out as ready, so nothing measures the new version against the old version's images in the render between
     const want = (bgUrl || '') + '|' + srcs + '|' + words + '|' + (ns || '') + '|' + (nonce || 0);
@@ -205,6 +205,15 @@
   /* the Studio's own line icons (24-unit grid, drawn here, no icon CDN): one stroke weight, round caps, currentColor */
   const ICON = {
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    minus: '<path d="M5 12h14"/>',
+    align: '<path d="M4 6h16"/><path d="M7 10h10"/><path d="M4 14h16"/><path d="M7 18h10"/>',
+    flip: '<path d="M12 3v18"/><path d="M8 7L3.5 12 8 17z"/><path d="M16 7l4.5 5-4.5 5z"/>',
+    up: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+    down: '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
+    trash: '<path d="M4.5 7h15"/><path d="M9.5 7V4.5h5V7"/><path d="M6.5 7l1 13h9l1-13"/>',
+    undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+    redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+    zoom: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5.5 5.5"/><path d="M8 10.5h5"/><path d="M10.5 8v5"/>',
     arrow: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
     back: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
     design: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 9.5h17"/><path d="M9.5 9.5v11"/>',
@@ -1557,7 +1566,10 @@
   /* Edit the imagery by area (P17): mark a rectangle (drag on the image, or type it), or choose a background swap or a
      restyle, and say what to change. Gemini edits by described area, not a pixel mask, so nothing outside the area is
      promised: the result is measured against the version it came from and the difference is shown before approval. */
-  const EDIT_KINDS = [['area', 'Change a marked area'], ['background', 'New background, keep the subject'], ['restyle', 'Restyle, keep the content']];
+  const EDIT_KINDS = [['area', 'Change a marked area'], ['remove', 'Remove an object'], ['background', 'New background, keep the subject'], ['relight', 'Change the light'], ['restyle', 'Restyle, keep the content']];
+  const EDIT_BOXED = { area: 1, remove: 1 };
+  const EDIT_NOTE = { area: 'area edit: ', remove: 'removal: ', background: 'background swap: ', relight: 'relight: ', restyle: 'restyle: ' };
+  const EDIT_DOING = { area: 'Editing the marked area of ', remove: 'Removing an object from ', background: 'Changing the background of ', relight: 'Relighting ', restyle: 'Restyling ' };
   function AreaEdit({ a, v, busy, onEdit }) {
     const [open, setOpen] = useState(false); const [kind, setKind] = useState('area'); const [box, setBox] = useState(null); const [ins, setIns] = useState('');
     const [size, setSize] = useState((v.image && v.image.size) || '2K'); const [src, setSrc] = useState(null); const drag = useRef(null); const ref = useRef(null);
@@ -1566,23 +1578,25 @@
     if (!open) return html`<div class="st-ad-quick"><button class="ov-link" onClick=${() => setOpen(true)}>Edit an area of the imagery</button> <span class="ov-dim">(one image call; the rest of the photograph is measured afterwards)</span></div>`;
     const r1 = n => Math.round(n * 10) / 10;
     const pt = e => { const r = ref.current.getBoundingClientRect(); return { x: Math.max(0, Math.min(100, (e.clientX - r.left) / r.width * 100)), y: Math.max(0, Math.min(100, (e.clientY - r.top) / r.height * 100)) }; };
-    const down = e => { if (kind !== 'area') return; e.preventDefault(); const p0 = pt(e); drag.current = p0; setBox({ x: r1(p0.x), y: r1(p0.y), w: 0, h: 0 }); };
+    const boxed = !!EDIT_BOXED[kind];
+    const down = e => { if (!boxed) return; e.preventDefault(); const p0 = pt(e); drag.current = p0; setBox({ x: r1(p0.x), y: r1(p0.y), w: 0, h: 0 }); };
     const move = e => { if (!drag.current) return; const p1 = pt(e), p0 = drag.current; setBox({ x: r1(Math.min(p0.x, p1.x)), y: r1(Math.min(p0.y, p1.y)), w: r1(Math.abs(p1.x - p0.x)), h: r1(Math.abs(p1.y - p0.y)) }); };
     const up = () => { drag.current = null; };
     const setNum = (k, val) => setBox(Object.assign({ x: 0, y: 0, w: 0, h: 0 }, box || {}, { [k]: Math.max(0, Math.min(100, +val || 0)) }));
-    const ready = !!ins.trim() && (kind !== 'area' || (box && box.w >= 2 && box.h >= 2));
+    const marked = !!(box && box.w >= 2 && box.h >= 2);
+    const ready = (kind === 'remove' || !!ins.trim()) && (!boxed || marked);
     return html`<div class="st-areaedit" aria-label="Edit an area">
       <div class="st-lbl">Edit the imagery</div>
       <div class="st-seg" role="group" aria-label="What kind of edit">${EDIT_KINDS.map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (kind === k ? ' on' : '')} aria-pressed=${kind === k} onClick=${() => setKind(k)}>${l}</button>`)}</div>
       <div class="st-area-stage" ref=${ref} style=${{ aspectRatio: String(a.format || '1:1').replace(':', ' / ') }} onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerLeave=${up}>
         ${src ? html`<img src=${src} alt="The current imagery" draggable="false" />` : html`<div class="ov-dim">Loading the imagery...</div>`}
-        ${kind === 'area' && box && box.w > 0 ? html`<div class="st-area-box" style=${{ left: box.x + '%', top: box.y + '%', width: box.w + '%', height: box.h + '%' }}></div>` : null}
+        ${boxed && box && box.w > 0 ? html`<div class="st-area-box" style=${{ left: box.x + '%', top: box.y + '%', width: box.w + '%', height: box.h + '%' }}></div>` : null}
       </div>
-      ${kind === 'area' ? html`<div class="st-nd-row st-area-nums">${[['x', 'from left'], ['y', 'from top'], ['w', 'width'], ['h', 'height']].map(([k, l]) => html`<label key=${k} class="ov-dim">${l} <input class="st-in st-le-num" type="number" min="0" max="100" step="1" value=${box ? box[k] : ''} onInput=${e => setNum(k, e.target.value)} aria-label=${'Area ' + l + ', per cent'} />%</label>`)}</div><div class="ov-dim">${box && box.w >= 2 && box.h >= 2 ? 'Marked: ' + box.w + '% x ' + box.h + '% of the frame.' : 'Drag on the image, or type the area in per cent.'}</div>`
-        : html`<div class="ov-dim">${kind === 'background' ? 'The subject should stay as it is; what is behind it changes.' : 'Everything stays where it is; only the treatment (palette, light, style) changes.'}</div>`}
-      <textarea class="st-ta" rows="2" value=${ins} onInput=${e => setIns(e.target.value)} placeholder=${kind === 'area' ? 'What to change in the area, e.g. "remove the sign"' : kind === 'background' ? 'The new background, e.g. "a regional town street at dusk"' : 'The new treatment, e.g. "warmer, late afternoon light"'} aria-label="What to change"></textarea>
+      ${boxed ? html`<div class="st-nd-row st-area-nums">${[['x', 'from left'], ['y', 'from top'], ['w', 'width'], ['h', 'height']].map(([k, l]) => html`<label key=${k} class="ov-dim">${l} <input class="st-in st-le-num" type="number" min="0" max="100" step="1" value=${box ? box[k] : ''} onInput=${e => setNum(k, e.target.value)} aria-label=${'Area ' + l + ', per cent'} />%</label>`)}</div><div class="ov-dim">${marked ? 'Marked: ' + box.w + '% x ' + box.h + '% of the frame.' + (kind === 'remove' ? ' What is inside is removed and the space filled with what would be behind it.' : '') : kind === 'remove' ? 'Drag a box around what to remove, or type the area in per cent.' : 'Drag on the image, or type the area in per cent.'}</div>`
+        : html`<div class="ov-dim">${kind === 'background' ? 'The subject should stay as it is; what is behind it changes.' : kind === 'relight' ? 'Every element stays where it is; only the light and its shadows change.' : 'Everything stays where it is; only the treatment (palette, light, style) changes.'}</div>`}
+      <textarea class="st-ta" rows="2" value=${ins} onInput=${e => setIns(e.target.value)} placeholder=${kind === 'area' ? 'What to change in the area, e.g. "replace the sign with a blank wall"' : kind === 'remove' ? 'Optional: what to remove, e.g. "the parked car" (the marked area is enough)' : kind === 'background' ? 'The new background, e.g. "a regional town street at dusk"' : kind === 'relight' ? 'The new light, e.g. "low golden light from the left, long shadows"' : 'The new treatment, e.g. "warmer, muted palette, film grain"'} aria-label="What to change"></textarea>
       <div class="st-nd-row"><select class="st-sel" value=${size} onChange=${e => setSize(e.target.value)} aria-label="Edit resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option></select>
-        <button class="btn sm" disabled=${!!busy || !ready} onClick=${() => { onEdit(a, { kind, area: kind === 'area' ? box : undefined, instruction: ins.trim(), size }); setOpen(false); setIns(''); setBox(null); }}>Edit (1 image at ${size})</button>
+        <button class="btn sm" disabled=${!!busy || !ready} onClick=${() => { onEdit(a, { kind, area: boxed ? box : undefined, instruction: ins.trim(), size }); setOpen(false); setIns(''); setBox(null); }}>Edit (1 image at ${size})</button>
         <button class="btn sm ghost" onClick=${() => setOpen(false)}>Cancel</button></div>
       <div class="ov-dim">The image model edits by described area, not a pixel mask: it is asked to leave everything else alone and cannot promise to. The words and marks are layers and are not touched. The result is a new version, measured against this one.</div>
     </div>`;
@@ -1593,7 +1607,7 @@
     const [A, B] = await Promise.all([keyedImage(base.image.url), keyedImage(v.image.url)]); if (!A || !B) return null;
     const W = 160, H = Math.max(16, Math.round(160 * (B.naturalHeight || B.height) / Math.max(1, B.naturalWidth || B.width)));
     const px = img => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.drawImage(img, 0, 0, W, H); return g.getImageData(0, 0, W, H).data; };
-    const P = px(A), Q = px(B); const ar = ed.kind === 'area' ? ed.area : null; let so = 0, no = 0, si = 0, ni = 0, mv = 0;
+    const P = px(A), Q = px(B); const ar = EDIT_BOXED[ed.kind] ? ed.area : null; let so = 0, no = 0, si = 0, ni = 0, mv = 0;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 4; const d = (Math.abs(P[i] - Q[i]) + Math.abs(P[i + 1] - Q[i + 1]) + Math.abs(P[i + 2] - Q[i + 2])) / 765;
       const inA = ar && (x + 0.5) / W * 100 >= ar.x && (x + 0.5) / W * 100 <= ar.x + ar.w && (y + 0.5) / H * 100 >= ar.y && (y + 0.5) / H * 100 <= ar.y + ar.h;
@@ -1608,7 +1622,7 @@
     if (!ed) return null;
     const from = a.versions.findIndex(x => x.id === ed.of) + 1;
     return html`<div class=${'st-preserve ' + (ev ? ev.verdict : 'pending')} aria-label="Preservation">
-      <b>${ed.kind === 'area' ? 'Area edit' : ed.kind === 'background' ? 'Background swap' : 'Restyle'}</b> of v${from}: "${ed.instruction}".
+      <b>${({ area: 'Area edit', remove: 'Removal', background: 'Background swap', relight: 'Relight', restyle: 'Restyle' })[ed.kind] || 'Edit'}</b> of v${from}${ed.instruction ? html`: "${ed.instruction}"` : ' (the marked area)'}.
       ${ev ? html` <${Chip} kind=${ev.verdict === 'held' ? 'ok' : ev.verdict === 'changed' ? 'bad' : 'warn'}>${ev.verdict === 'measured' ? 'measured' : ev.verdict}</${Chip}> <span>${ev.text}</span>` : html` <span class="ov-dim">${ro ? 'Not measured yet.' : 'Measuring what changed outside the area...'}</span>`}
       <button class="ov-link" onClick=${() => onCompare(ed.of, v.id)}>compare v${from} and this version</button>
       <div class="ov-dim">${ed.limits || ''}</div></div>`;
@@ -1859,13 +1873,15 @@
       </div>
     </div>`;
   }
-  function AssetView({ p, a, kit, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, railSlot, tab, setTab, conflict, onConflict, neighbours, preview, setPreview, onBrand }) {
+  function AssetView({ p, a, kit, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, railSlot, tab, setTab, conflict, onConflict, neighbours, preview, setPreview, onBrand, onSelection, onResize, resized }) {
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [le, setLe] = useState(false);
     useEffect(() => { setLe(false); }, [a.current]);
     // S11: the canvas controls - overlays (guides, outlines, subject marks), the optional checkerboard, full screen - and the layer selection
     const [overlays, setOverlays] = useState(true); const [checker, setChecker] = useState(false); const [full, setFull] = useState(false);
     const [layerSel, setLayerSel] = useState([]); useEffect(() => { setLayerSel([]); }, [a.id]);
+    useEffect(() => { if (onSelection) onSelection(layerSel); }, [layerSel.join(',')]);
+    useEffect(() => () => { if (onSelection) onSelection([]); }, []);
     const [propsSlot, setPropsSlot] = useState(null); const [layersSlot, setLayersSlot] = useState(null);
     useEffect(() => { if (!full) return; const h = e => { if (e.key === 'Escape') setFull(false); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [full]);
     // opening the editor, or selecting a layer, opens the Properties tab: that is where the selection's controls are
@@ -1906,6 +1922,8 @@
       return () => { live = false; clearTimeout(t); };
     }, [v && v.id, comp.key, comp.ready, !!(a.locks || {}).layout]);
     const useVariant = async x => { setUsing(x.id); try { await onVariant(a, x.layout, v.id, x.name); } finally { setUsing(''); } };
+    const useStyle = async x => { setUsing(x.id); try { await onVariant(a, x.layout, v.id, x.name, 'style'); } finally { setUsing(''); } };
+    const ED = window.STEditor || {};
     const [val, setVal] = useState(null); const [measuring, setMeasuring] = useState(false); const [repairing, setRepairing] = useState(false); const [repairNote, setRepairNote] = useState(null);
     const filed = useRef('');
     const measure = useCallback(async (force) => {
@@ -1937,11 +1955,26 @@
     const hasLayout = !copyOnly && !flat && !finished && v.layout && v.layout.layers;
     const stageW = v.layout && v.layout.stage ? v.layout.stage.w : 1080;
     const zoomStyle = zoom === 'fit' ? null : { width: Math.round(stageW * (zoom === 'actual' ? 1 : (+zoom || 100) / 100)) + 'px', maxWidth: 'none' };
-    const ZOOMS = [['fit', 'Fit'], ['50', '50%'], ['75', '75%'], ['actual', '100% (actual)'], ['150', '150%'], ['200', '200%']];
+    const ZOOMS0 = [['fit', 'Fit'], ['50', '50%'], ['75', '75%'], ['actual', '100% (actual)'], ['150', '150%'], ['200', '200%']];
+    const ZOOMS = ZOOMS0.some(z => z[0] === zoom) ? ZOOMS0 : ZOOMS0.concat([[zoom, zoom + '%']]);
+    /* zoom and pan: Ctrl or Cmd with the wheel zooms about the stage (25-400%), Space held while dragging pans a zoomed stage,
+       Shift+1 fits, Shift+0 is actual size, Shift+2 is 200%; a key typed into a field is the field's */
+    const stageRef = useRef(null); const panRef = useRef(null); const [spaceDown, setSpaceDown] = useState(false);
+    const zoomPct = () => { if (zoom === 'actual') return 100; if (zoom !== 'fit') return +zoom || 100; const inner = stageRef.current && stageRef.current.querySelector('.st-stage-inner'); return inner ? Math.round(inner.getBoundingClientRect().width / stageW * 100) : 100; };
+    useEffect(() => { const el = stageRef.current; if (!el) return; const h = e => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); const next = Math.max(25, Math.min(400, Math.round(zoomPct() * (e.deltaY < 0 ? 1.12 : 0.89)))); setZoom(next === 100 ? 'actual' : String(next)); }; el.addEventListener('wheel', h, { passive: false }); return () => el.removeEventListener('wheel', h); });
+    useEffect(() => {
+      const typing = t => t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '') || t.isContentEditable);
+      const kd = e => { if (typing(e.target)) return; if (e.code === 'Space' && zoom !== 'fit' && !e.repeat) { setSpaceDown(true); e.preventDefault(); } if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) { if (e.code === 'Digit1') { e.preventDefault(); setZoom('fit'); } else if (e.code === 'Digit0') { e.preventDefault(); setZoom('actual'); } else if (e.code === 'Digit2') { e.preventDefault(); setZoom('200'); } } };
+      const ku = e => { if (e.code === 'Space') setSpaceDown(false); };
+      window.addEventListener('keydown', kd); window.addEventListener('keyup', ku); return () => { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); };
+    }, [zoom]);
+    const panDown = e => { if (!spaceDown || zoom === 'fit') return; e.preventDefault(); e.stopPropagation(); const el = stageRef.current; panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop }; try { el.setPointerCapture(e.pointerId); } catch (x) {} };
+    const panMove = e => { const c = panRef.current; if (!c) return; e.preventDefault(); e.stopPropagation(); const el = stageRef.current; el.scrollLeft = c.sl - (e.clientX - c.x); el.scrollTop = c.st - (e.clientY - c.y); };
+    const panUp = e => { if (panRef.current) { panRef.current = null; e.stopPropagation(); } };
     const tagText = compTag(v, v.layout && v.layout.layers ? v.layout : null, comp);
     const stageTools = !copyOnly ? html`<div class="st-stage-tools" role="toolbar" aria-label="Canvas">
       ${!preview ? html`<label class="st-zoom"><span class="st-vh">Zoom</span><select class="st-sel" value=${zoom} onChange=${e => setZoom(e.target.value)} aria-label="Zoom">${ZOOMS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select></label>
-        <button class="btn sm ghost" onClick=${() => setZoom(zoom === 'fit' ? 'actual' : 'fit')} title="Fit to the workspace or actual size">${zoom === 'fit' ? 'Actual size' : 'Fit'}</button>
+        <button class="btn sm ghost" onClick=${() => setZoom(zoom === 'fit' ? 'actual' : 'fit')} title="Fit to the workspace (Shift+1) or actual size (Shift+0); Ctrl or Cmd with the wheel zooms, Space and drag pans">${zoom === 'fit' ? 'Actual size' : 'Fit'}</button>
         <button class=${'btn sm ghost' + (overlays ? ' on' : '')} aria-pressed=${overlays} onClick=${() => { setOverlays(!overlays); if (overlays) setHlIds([]); }} title="Guides, issue outlines and subject marks on the artwork">Overlays</button>
         <button class=${'btn sm ghost' + (checker ? ' on' : '')} aria-pressed=${checker} onClick=${() => setChecker(!checker)} title="A checkerboard behind the stage shows transparent areas">Checkerboard</button>` : null}
       <button class=${'btn sm' + (preview ? ' on' : ' ghost')} aria-pressed=${!!preview} onClick=${() => setPreview(!preview)} title="Preview: the artwork alone - no handles, outlines, labels or diagnostics on it">${preview ? 'Exit preview' : 'Preview'}</button>
@@ -1964,9 +1997,9 @@
           else if (k === 'layers') { if (!le) setLe(true); setTab('properties'); }
           else if (k === 'design') go('#st-tool-design'); else if (k === 'images') go(finished ? '.st-finished' : '#st-tool-images'); }}
         onEditable=${() => { if (window.confirm('Make an editable copy of ' + a.title + '? A new asset in the family "Editable from finished": the words become live type and the mark is placed from its file; this finished creative stays as it is. Free, no render.')) onDerive(a, {}); }} />` : null}
-      <div class=${'st-stage ' + (zoom === 'fit' ? 'fit' : 'zoomed') + (checker ? ' checker' : ' plain') + (preview ? ' preview' : '') + (full ? ' full' : '')} style=${{ '--ar': ratio }} data-zoom=${zoom}>
+      <div ref=${stageRef} class=${'st-stage ' + (zoom === 'fit' ? 'fit' : 'zoomed') + (checker ? ' checker' : ' plain') + (preview ? ' preview' : '') + (full ? ' full' : '') + (spaceDown && zoom !== 'fit' ? ' panning' : '')} style=${{ '--ar': ratio }} data-zoom=${zoom} onPointerDownCapture=${panDown} onPointerMoveCapture=${panMove} onPointerUpCapture=${panUp}>
         ${stageTools}
-        <div class="st-stage-inner" style=${zoomStyle}>${le && !preview ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} onDirty=${onLayoutDirty} propsSlot=${propsSlot} layersSlot=${layersSlot} onSel=${ids => { setLayerSel(ids); if (ids.length) setTab('properties'); }} guides=${overlays} onDone=${layout => { setLe(false); if (layout) onLayoutSave(a, layout, v.id); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${overlays && !preview ? hlIds : []} tagOut=${true} />`}</div>
+        <div class="st-stage-inner" style=${zoomStyle}>${le && !preview ? html`<${LayoutEditor} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} p=${p} kit=${kit} onMore=${() => setTab('properties')} onDirty=${onLayoutDirty} propsSlot=${propsSlot} layersSlot=${layersSlot} onSel=${ids => { setLayerSel(ids); if (ids.length) setTab('properties'); }} guides=${overlays} onDone=${(layout, cp) => { setLe(false); if (layout) onLayoutSave(a, layout, v.id, null, cp); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${overlays && !preview ? hlIds : []} tagOut=${true} />`}</div>
         ${hlIds.length && overlays && !preview ? html`<div class="st-hl-note" role="status">Outlined on the tile: ${hlIds.join(', ')}. <button class="ov-link" onClick=${() => setHlIds([])}>clear</button></div>` : null}
         ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The art director is inspecting this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
       ${!preview ? html`${flat ? html`<div class="st-flatnote">This is a flattened legacy tile: the text on the image is not editable. Editing the caption does not change the image.</div>` : null}
@@ -1984,6 +2017,8 @@
         ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
         <div id="st-tool-design" class="st-tool-anchor"></div>
         ${canVary ? html`<${LayoutVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} list=${vars} using=${using} onUse=${useVariant} />` : null}
+        ${canVary && ED.StyleVariations ? html`<${ED.StyleVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} using=${using} onUse=${useStyle} />` : null}
+        ${!copyOnly && !flat && ED.ResizePanel && onResize ? html`<${ED.ResizePanel} a=${a} v=${v} ro=${ro} busy=${busy} made=${resized} onResize=${presets => onResize(a, presets)} onOpen=${onOpen} />` : null}
         <${Preservation} p=${p} a=${a} v=${v} ro=${ro} onCompare=${onCompare} onFile=${onPreservation} />
         <div id="st-tool-images" class="st-tool-anchor"></div>
         ${!copyOnly && !flat && !finished ? html`<${ArtDirection} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} onPropose=${onPropose} onApply=${onApplyConcept} onRender=${onRender} rr=${rr} setRr=${setRr} sugg=${sugg} onSuggRefresh=${onSuggRefresh} />` : null}
@@ -2021,7 +2056,7 @@
           </ul>
         </div>
       </div>`)}
-      ${panel('quality', html`${hasLayout || finished ? html`<${Readiness} p=${p} a=${a} v=${v} val=${val} highlight=${hlIds} onHighlight=${toggleHl} />` : html`<div class="ov-dim">${copyOnly ? 'Copy only: nothing to measure; the checks on the words are in the Copy tab.' : 'A flattened tile cannot be measured.'}</div>`}
+      ${panel('quality', html`${hasLayout && ED.QualitySummary ? html`<${ED.QualitySummary} v=${v} val=${val} copy=${copy} ro=${ro} fixing=${repairing} onFix=${repair} fixable=${fixableOf(val)} fixNote=${repairNote ? (REPAIR_WORD[repairNote.state] || 'Fix layout') + '.' + (repairCounts(repairNote) ? ' ' + repairCounts(repairNote) + '.' : '') : ''} />` : null}${hasLayout || finished ? html`<${Readiness} p=${p} a=${a} v=${v} val=${val} highlight=${hlIds} onHighlight=${toggleHl} />` : html`<div class="ov-dim">${copyOnly ? 'Copy only: nothing to measure; the checks on the words are in the Copy tab.' : 'A flattened tile cannot be measured.'}</div>`}
         <div class="st-approve" aria-label="Approvals">
           ${['copy', 'design'].filter(part => part === 'copy' || !copyOnly).map(part => html`<div key=${part} class="st-appr"><span><b>${part}</b> ${ap[part] ? html`<${Chip} kind="ok">approved</${Chip}> <span class="ov-dim">on v${a.versions.findIndex(x => x.id === ap[part].version) + 1} by ${ap[part].by}, ${ap[part].reason}${ap[part].carried ? ' (unchanged since, so it stands)' : ''}</span>` : html`<span class="ov-dim">draft</span>`}</span>
             ${!ro ? html`<span>${ap[part] ? html`<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'withdraw')}>Withdraw</button>` : html`<button class="btn sm ghost" disabled=${part === 'design' && ((v.layout && (v.layout.incomplete || []).length > 0) || !a.readiness || (a.readiness.technical !== 'passed' && a.readiness.technical !== 'not_applicable'))} title=${part === 'design' && v.layout && (v.layout.incomplete || []).length ? 'The campaign mark is not on file: the design cannot be approved until it is' : part === 'design' && a.readiness && a.readiness.technical !== 'passed' ? 'Design approval waits for a passing technical validation of this composition' : ''} onClick=${() => onApprove(a, part, 'approve')}>Approve ${part}</button>`}<button class="btn sm ghost" onClick=${() => onApprove(a, part, 'reject')}>Reject</button></span>` : null}
@@ -2066,7 +2101,7 @@
       </div>` : last && last.verdict === 'stop' ? html`<div class="ov-dim">${last.text}</div>` : html`<div class="ov-dim">Not reviewed yet. A review runs after each render, or now on request; it reads the tile as it exports.</div>`}
     </div>`;
   }
-  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, onReview, busy, sugg, onSuggRefresh, prefill }) {
+  function Partner({ p, a, target, setTarget, onDirect, onNote, onPick, onDecide, onRemember, onApplyInspection, onReview, busy, sugg, onSuggRefresh, prefill, selLayers }) {
     const [text, setText] = useState(''); const [offerOpen, setOfferOpen] = useState(null); const box = useRef(null); const [sk, setSk] = useState('design');
     useEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [p.thread.length, busy]);
     // a chosen suggestion lands in the composer as an editable instruction, never sent on its own
@@ -2110,6 +2145,7 @@
       ${!ro && a && sugg ? html`<div class="st-sugg-tabs" role="tablist">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy} onUse=${t => { setText(t); setTarget('asset'); }} onRefresh=${onSuggRefresh} />` : null}
       ${!ro ? html`<div class="st-composer">
         <select class="st-sel" value=${target} onChange=${e => setTarget(e.target.value)} aria-label="Target of the direction">${targets.map(([k, l]) => html`<option key=${k} value=${k} disabled=${k !== 'set' && !a}>${l}</option>`)}</select>
+        ${a && target === 'asset' && selLayers && selLayers.length ? html`<div class="st-sel-about" role="status"><span class="st-lbl">About the selection</span> ${selLayers.map(id => { const cv = current(a); const l = cv && cv.layout && (cv.layout.layers || []).find(x => x.id === id); const nm = l ? (l.name || (l.role && l.role !== 'free' ? l.role : '') || (l.type === 'text' ? String(l.text || '').slice(0, 24) : l.shape || l.type) || id) : id; return html`<span key=${id} class="st-mini-chip" title=${id}>${nm}</span>`; })} <span class="ov-dim">the direction is about these layers; the rest stays as it is</span></div>` : null}
         <textarea class="st-ta" rows="2" value=${text} placeholder=${'Tell the Art Director. e.g. "Keep the layout, sharpen the headline", "three alternative opening lines", "adapt this for Instagram", "more restrained visual"'} onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} aria-label="Direction"></textarea>
         <div class="st-composer-acts"><button class="btn sm" disabled=${!text.trim() || !!busy || (target !== 'set' && !a)} onClick=${send}>Send</button><button class="ov-link" disabled=${!text.trim() || !!busy} onClick=${() => { onNote(text.trim(), target === 'set' ? 'the whole set' : (a || {}).title || ''); setText(''); }}>record as a note instead</button></div>
       </div>` : html`<div class="ov-dim st-pad">A read-only key can review, compare and export; directing the team needs a full key.</div>`}
@@ -2137,11 +2173,15 @@
   /* S11: the editor draws on the canvas; its panels (type, box, framing, held mark) render into the Properties tab and its
      layer list into the left panel when those slots are given (portals), so the canvas carries the artwork and its handles only.
      onSel reports the selection (ids) so the Properties tab and the layer list follow it; guides is the overlays switch. */
-  function LayoutEditor({ v, a, ns, onDone, onDirty, propsSlot, layersSlot, onSel, guides: guidesOn, preview }) {
-    // the working layout with its history: every finished gesture or command is one step that undo and redo walk
+  function LayoutEditor({ v, a, ns, p, kit, onDone, onDirty, propsSlot, layersSlot, onSel, guides: guidesOn, preview, onMore }) {
+    const E = window.STEditor || {};
+    // the working layout with its history: every finished gesture or command is one step that undo and redo walk. Words typed on
+    // the canvas for the approved copy ride in the working layout as _copy, so undo walks them too; they are saved as copy.
     const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
     const layout = hist.now;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides0, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
+    const [grid, setGrid] = useState(false); const [snapLines, setSnapLines] = useState([]); const [marquee, setMarquee] = useState(null);
+    const [editing, setEditing] = useState(null); const [fontOpen, setFontOpen] = useState(false); const [fontPreview, setFontPreview] = useState(null);
     const guides = guidesOn == null ? guides0 : (guidesOn && guides0);
     useEffect(() => { if (onSel) onSel(sel); }, [sel.join(',')]);
     const clickFocus = useRef(null);   // the layer being focused by a click (the click already chose the selection; keyboard focus selects)
@@ -2150,44 +2190,76 @@
     const undo = () => setHist(h => h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now].concat(h.future) } : h);
     const redo = () => setHist(h => h.future.length ? { past: h.past.concat([h.now]), now: h.future[0], future: h.future.slice(1) } : h);
     const layers = layout.layers;
+    const wcopy = Object.assign({}, v.copy || {}, layout._copy || {});
     const byId = id => layers.find(l => l.id === id);
     const groupOf = id => { const l = byId(id); return l && l.group ? layers.filter(x => x.group === l.group).map(x => x.id) : [id]; };
     const selected = () => Array.from(new Set(sel.reduce((acc, id) => acc.concat(groupOf(id)), []))).map(byId).filter(Boolean);
     // a mark held by a mandatory campaign rule is not the editor's to move; a locked layer is not the editor's to touch at all
     const heldMark = l => !!(l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && l.rule && l.rule.mandatory);
+    const isMarkL = l => !!(l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark'));
+    const exactImg = l => !!(l && l.type === 'img' && (l.exact || l.role === 'logo' || l.role === 'wordmark'));
     const movable = l => l && !l.locked && !heldMark(l);
-    const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => (patches[l.id] ? Object.assign({}, l, patches[l.id]) : l)) });
+    const patchMany = (L, patches) => Object.assign({}, L, { layers: L.layers.map(l => { if (!patches[l.id]) return l; const n = Object.assign({}, l, patches[l.id]); Object.keys(n).forEach(k => { if (n[k] === undefined) delete n[k]; }); return n; }) });
     const r1 = x => Math.round(x * 10) / 10;
     const pick = (e, l) => { setFocus(l.id); setSelIds(s => e.shiftKey ? (s.indexOf(l.id) >= 0 ? s.filter(x => x !== l.id) : s.concat([l.id])) : (s.indexOf(l.id) >= 0 && s.length > 1 ? s : [l.id])); };
-    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); pick(e, l);
+    /* every gesture goes through one pointer path, throttled to the display's frames: move, resize from eight handles, rotate */
+    const raf = useRef(0); const pend = useRef(null);
+    const down = (e, l, mode) => { e.preventDefault(); e.stopPropagation(); if (editing) return; pick(e, l);
       // preventDefault keeps the browser from focusing the layer, so focus it by hand: the arrow keys then nudge what was clicked
-      try { const el = mode === 'move' ? e.currentTarget : e.currentTarget.parentElement; if (el && el.focus) { clickFocus.current = l.id; el.focus({ preventScroll: true }); clickFocus.current = null; } } catch (x) {}
+      try { const el = mode === 'move' ? e.currentTarget : e.currentTarget.closest('.st-le-layer'); if (el && el.focus) { clickFocus.current = l.id; el.focus({ preventScroll: true }); clickFocus.current = null; } } catch (x) {}
       if (!movable(l)) return; const r = box.current.getBoundingClientRect();
-      const ids = mode === 'move' ? Array.from(new Set((sel.indexOf(l.id) >= 0 ? sel : [l.id]).reduce((acc, id) => acc.concat(groupOf(id)), []))) : [l.id];
-      act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
-    const move = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
-      if (c.mode === 'move') { c.ids.forEach(id => { const o = c.start.layers.find(x => x.id === id); if (movable(o)) patches[id] = { x: r1(Math.max(-o.w + 2, Math.min(98, o.x + dx))), y: r1(Math.max(-2, Math.min(98, o.y + dy))) }; });
-        // snapping (one layer): the measured ink edges settle on the safe-area edges when within 0.8% - the same insets align and the rules use
-        if (c.ids.length === 1 && patches[c.id] && !e.altKey) { const o = c.start.layers.find(x => x.id === c.id); const b = ink[o.id]; const off = b ? { l: b.x - o.x, t: b.y - o.y, r: (b.x + b.w) - (o.x + o.w), btm: (b.y + b.h) - (o.y + (o.h || 0)) } : { l: 0, t: 0, r: 0, btm: 0 }; const p = patches[c.id]; const E = edges(); const snapTo = (cur, size, lo, hi, offLo, offHi) => { const a0 = cur + offLo, a1 = cur + size + offHi; if (Math.abs(a0 - lo) < 0.8) return cur + (lo - a0); if (Math.abs(a1 - hi) < 0.8) return cur + (hi - a1); return cur; }; p.x = r1(snapTo(p.x, o.w, E.left, E.right, off.l, off.r)); p.y = r1(snapTo(p.y, o.h || 0, E.top, E.bottom, off.t, off.btm)); } }
-      // the corner resizes the box; the type keeps its size unless "resize scales type" is on (then it scales with the width, as before);
-      // an exact image (a logo or wordmark) keeps its proportions whatever the corner does: a mark is never distorted
-      else { const o = c.start.layers.find(x => x.id === c.id); if (o.type === 'text' && scaleType) { const w = Math.max(10, o.w + dx); patches[o.id] = { w: r1(w), size: r1(Math.max(2.4, o.size * (w / o.w))), h: r1((o.h || 0) * (w / o.w)) }; } else if (o.type === 'img' && (o.exact || o.role === 'logo' || o.role === 'wordmark')) { const w = Math.max(4, o.w + dx); patches[o.id] = { w: r1(w), h: r1(Math.max(1, (o.h || 0) * (w / o.w))) }; } else patches[o.id] = { w: r1(Math.max(o.type === 'text' ? 6 : 4, o.w + dx)), h: r1(Math.max(2, (o.h || 0) + dy)) }; }
+      const ids = mode === 'move' ? Array.from(new Set((sel.indexOf(l.id) >= 0 && !e.shiftKey ? sel : [l.id]).reduce((acc, id) => acc.concat(groupOf(id)), []))).filter(id => movable(byId(id))) : [l.id];
+      // the measured boxes as they stand when the gesture starts: the moving ones (their ink, offset by the drag) and every other
+      // visible layer (the guides they offer) - taken once, since the live layout moves the measurement with it
+      const boxes = mode === 'move' ? ids.map(id => inkOf(byId(id))) : null;
+      const others = mode === 'move' ? layers.filter(o => !o.hidden && ids.indexOf(o.id) < 0 && o.role !== 'overlay').map(inkOf).filter(b => b.w > 0 && b.w < 99) : null;
+      act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height, rl: r.left, rt: r.top, boxes, others }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
+    const apply = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
+      if (c.mode === 'move') {
+        c.ids.forEach(id => { const o = c.start.layers.find(x => x.id === id); if (movable(o)) patches[id] = { x: r1(Math.max(-o.w + 2, Math.min(98, o.x + dx))), y: r1(Math.max(-2, Math.min(98, o.y + dy))) }; });
+        // snapping: the moving selection's measured edges and centre settle on the stage, the safe area, a grid and the other layers'
+        // edges and centres within 0.8% (Alt to pass), and the guide they settled on is drawn while the gesture lasts
+        let lines = [];
+        if (!e.altKey && c.ids.length) {
+          const bx = c.boxes.map(b => ({ x: b.x + dx, y: b.y + dy, w: b.w, h: b.h }));
+          const u = { x: Math.min.apply(null, bx.map(b => b.x)), y: Math.min.apply(null, bx.map(b => b.y)) }; u.w = Math.max.apply(null, bx.map(b => b.x + b.w)) - u.x; u.h = Math.max.apply(null, bx.map(b => b.y + b.h)) - u.y;
+          const sn = E.snapMove ? E.snapMove(u, c.others, edges(), { grid: grid ? 10 : 0 }) : { dx: 0, dy: 0, guides: [] };
+          if (sn.dx || sn.dy) Object.keys(patches).forEach(id => { patches[id].x = r1(patches[id].x + sn.dx); patches[id].y = r1(patches[id].y + sn.dy); });
+          lines = sn.guides;
+        }
+        setSnapLines(lines);
+      }
+      else if (c.mode === 'rotate') { const o = c.start.layers.find(x => x.id === c.id); const cx = c.rl + (o.x + o.w / 2) / 100 * c.rw, cy = c.rt + (o.y + (o.h || 0) / 2) / 100 * c.rh; const ang = E.angleTo ? E.angleTo(cx, cy, e.clientX, e.clientY, e.shiftKey) : 0; patches[o.id] = { rotate: ang || undefined }; }
+      // the corner and the sides resize the box in the layer's own frame; the type keeps its size unless "resize scales type" is on;
+      // an exact image (a logo or wordmark) keeps its proportions whatever the handle does: a mark is never distorted
+      else { const o = c.start.layers.find(x => x.id === c.id); const hnd = c.mode === 'resize' ? 'se' : c.mode.slice(7);
+        const keep = exactImg(o) || (e.shiftKey && hnd.length === 2) || (o.type === 'text' && scaleType && hnd.length === 2);
+        const rz = E.resizeLocal ? E.resizeLocal(o, hnd, e.clientX - c.sx, e.clientY - c.sy, c.rw, c.rh, { keep, centre: e.altKey, minW: o.type === 'text' ? 6 : exactImg(o) ? 4 : 2, minH: o.type === 'text' ? 2 : 1 }) : null;
+        if (rz) { const pt = { x: rz.x, y: rz.y, w: rz.w, h: rz.h }; if (o.type === 'text' && scaleType) pt.size = r1(Math.max(1.2, o.size * rz.k)); patches[o.id] = pt; } }
       live(patchMany(c.start, patches)); };
-    const up = () => { const c = act.current; act.current = null; if (c && JSON.stringify(c.start) !== JSON.stringify(layout)) setHist(h => ({ past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] })); };
+    const move = e => { if (marquee && marquee.on) { marqueeMove(e); return; } if (!act.current) return; pend.current = { clientX: e.clientX, clientY: e.clientY, altKey: e.altKey, shiftKey: e.shiftKey }; if (!raf.current) raf.current = requestAnimationFrame(() => { raf.current = 0; const q = pend.current; pend.current = null; if (q) apply(q); }); };
+    const up = () => { if (marquee && marquee.on) { marqueeUp(); return; } if (raf.current) { cancelAnimationFrame(raf.current); raf.current = 0; } if (pend.current) { const q = pend.current; pend.current = null; apply(q); } const c = act.current; act.current = null; setSnapLines([]); if (c) setHist(h => (JSON.stringify(c.start) !== JSON.stringify(h.now) ? { past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] } : h)); };
+    /* a marquee from the empty stage selects every visible, unlocked layer it touches (Shift adds to the selection); a click selects nothing */
+    const marqueeDown = e => { if (editing || preview) return; if (e.target.closest && (e.target.closest('.st-le-layer') || e.target.closest('.st-fbar') || e.target.closest('.st-le-frame') || e.target.closest('.st-le-fontwrap') || e.target.closest('.st-le-textedit'))) return; const r = box.current.getBoundingClientRect(); const x0 = (e.clientX - r.left) / r.width * 100, y0 = (e.clientY - r.top) / r.height * 100; setMarquee({ on: true, x0, y0, x1: x0, y1: y0, add: e.shiftKey, base: e.shiftKey ? sel : [] }); try { box.current.setPointerCapture(e.pointerId); } catch (x) {} };
+    const marqueeMove = e => { const r = box.current.getBoundingClientRect(); setMarquee(m => m ? Object.assign({}, m, { x1: (e.clientX - r.left) / r.width * 100, y1: (e.clientY - r.top) / r.height * 100 }) : m); };
+    const marqueeUp = () => { const m = marquee; setMarquee(null); if (!m) return; const x = Math.min(m.x0, m.x1), y = Math.min(m.y0, m.y1), w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
+      if (w < 0.6 && h < 0.6) { if (!m.add) setSelIds([]); return; }
+      const hit = layers.filter(l => !l.hidden && !l.locked).filter(l => { const b = inkOf(l); return b.x < x + w && b.x + b.w > x && b.y < y + h && b.y + b.h > y; }).map(l => l.id);
+      setSelIds(Array.from(new Set(m.base.concat(hit)))); };
     const nudge = (dx, dy) => { const s = selected().filter(movable); if (!s.length) return; const patches = {}; s.forEach(l => { patches[l.id] = { x: r1(l.x + dx), y: r1(l.y + dy) }; }); commit(patchMany(layout, patches)); };
     /* alignment: to the selection's bounds when two or more are chosen; to the format's safe area when one is - each edge its own
        inset (a 9:16 story's top is 14% and its bottom 20%, the sides 6%; a feed tile 3% all round), the same table the rules,
        the guides, repair() and the export judge by - and on the layer's measured ink (the words, a mark's visible pixels), not
        its box, so what lines up is what the eye sees */
     const edges = () => { const sa0 = R.safeArea ? R.safeArea(a.format, a.channel) : { side: 0.03, top: 0.03, bottom: 0.03 }; return { left: sa0.side * 100, right: 100 - sa0.side * 100, top: sa0.top * 100, bottom: 100 - sa0.bottom * 100 }; };
-    const inkOf = l => { const b = ink[l.id]; return b && b.w > 0 && b.h > 0 ? b : { x: l.x, y: l.y, w: l.w, h: l.h || 0 }; };
-    const align = how => { const s = selected().filter(movable); if (!s.length) return; const one = s.length === 1; const E = edges();
+    const inkOf = l => { const b = ink[l.id]; return b && b.w > 0 && b.h > 0 && !l.rotate ? b : { x: l.x, y: l.y, w: l.w, h: l.h || 0 }; };
+    const align = how => { const s = selected().filter(movable); if (!s.length) return; const one = s.length === 1; const E2 = edges();
       const bx = s.map(inkOf);
-      const L0 = one ? E.left : Math.min.apply(null, bx.map(b => b.x)), R0 = one ? E.right : Math.max.apply(null, bx.map(b => b.x + b.w)), T0 = one ? E.top : Math.min.apply(null, bx.map(b => b.y)), B0 = one ? E.bottom : Math.max.apply(null, bx.map(b => b.y + b.h));
+      const L0 = one ? E2.left : Math.min.apply(null, bx.map(b => b.x)), R0 = one ? E2.right : Math.max.apply(null, bx.map(b => b.x + b.w)), T0 = one ? E2.top : Math.min.apply(null, bx.map(b => b.y)), B0 = one ? E2.bottom : Math.max.apply(null, bx.map(b => b.y + b.h));
       const patches = {}; s.forEach((l, i) => { const b = bx[i]; const dl = b.x - l.x, dt = b.y - l.y;   // where the ink sits inside the box
         patches[l.id] = how === 'left' ? { x: r1(L0 - dl) } : how === 'right' ? { x: r1(R0 - b.w - dl) } : how === 'centre' ? { x: r1((L0 + R0) / 2 - b.w / 2 - dl) } : how === 'top' ? { y: r1(T0 - dt) } : how === 'bottom' ? { y: r1(B0 - b.h - dt) } : { y: r1((T0 + B0) / 2 - b.h / 2 - dt) }; });
       commit(patchMany(layout, patches)); };
-    const distribute = axis => { const s = selected().filter(movable).slice().sort((p, q) => axis === 'v' ? p.y - q.y : p.x - q.x); if (s.length < 3) return;
+    const distribute = axis => { const s = selected().filter(movable).slice().sort((p0, q) => axis === 'v' ? p0.y - q.y : p0.x - q.x); if (s.length < 3) return;
       const size = l => axis === 'v' ? (l.h || 0) : l.w; const pos = l => axis === 'v' ? l.y : l.x; const first = s[0], last = s[s.length - 1];
       const gap = (pos(last) + size(last) - pos(first) - s.reduce((n, l) => n + size(l), 0)) / (s.length - 1); let at = pos(first); const patches = {};
       s.forEach(l => { patches[l.id] = axis === 'v' ? { y: r1(at) } : { x: r1(at) }; at += size(l) + gap; }); commit(patchMany(layout, patches)); };
@@ -2196,25 +2268,60 @@
       let at; const firstI = layers.findIndex(l => set.has(l.id)); const before = layers.slice(0, firstI).filter(l => !set.has(l.id)).length;
       at = how === 'front' ? rest.length : how === 'back' ? 0 : how === 'forward' ? Math.min(rest.length, before + 1) : Math.max(0, before - 1);
       commit(Object.assign({}, layout, { layers: rest.slice(0, at).concat(block, rest.slice(at)) })); };
+    // the layer list drags a layer to a new place in the paint order (one step)
+    const moveTo = (id, toIndex) => { const l = byId(id); if (!l || !movable(l)) return; const rest = layers.filter(x => x.id !== id); const at = Math.max(0, Math.min(rest.length, toIndex)); commit(Object.assign({}, layout, { layers: rest.slice(0, at).concat([l], rest.slice(at)) })); };
     const group = () => { const s = selected().filter(movable); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
     const ungroup = () => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
     const setOne = (id, patch) => commit(patchMany(layout, { [id]: patch }));
+    const setEach = fn => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = fn(l); }); if (Object.keys(patches).length) commit(patchMany(layout, patches)); };
+    /* add, duplicate, delete, copy and paste. The approved words are hidden rather than deleted (they stay in the copy), and a
+       mark is never duplicated or deleted here: it is placed from its file by the campaign policy */
+    const add = (kind, o) => { const n = E.newLayer ? E.newLayer(kind, o, layout) : null; if (!n) return; commit(Object.assign({}, layout, { layers: layers.concat([n]) })); setSelIds([n.id]); setFocus(n.id); };
+    const addImage = async f => { if (!p) return; try { toastMsg('Placing ' + f.name + '...'); const r = await E.uploadImage(p.id, f); add('image', r); } catch (e) { toastMsg('The image was not placed: ' + e.message, true); } };
+    const replaceImage = l => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp'; inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; try { const r = await E.uploadImage(p.id, f); setOne(l.id, { key: r.key, src: r.url, name: r.name }); } catch (e) { toastMsg('The image was not replaced: ' + e.message, true); } }; inp.click(); };
+    const duplicate = () => { const s = selected().filter(l => !l.locked); if (!s.length || !E.cloneLayers) return; const n = E.cloneLayers(s, wcopy, layout); if (!n.length) { toastMsg('A mark is placed from its file and is not duplicated', true); return; } commit(Object.assign({}, layout, { layers: layers.concat(n) })); setSelIds(n.map(x => x.id)); };
+    const removeLayers = s => { if (!s.length) return; const out = [], hide = [], keep = [];
+      s.forEach(l => { if (l.locked || heldMark(l)) keep.push(l); else if (isMarkL(l)) keep.push(l); else if (l.type === 'text' && (E.COPY_ROLES || []).indexOf(l.role) >= 0) hide.push(l); else out.push(l.id); });
+      if (!out.length && !hide.length) { toastMsg('Not removed: ' + keep.map(l => (l.role || l.type) + (l.locked ? ' is locked' : ' is placed by the campaign policy')).join('; '), true); return; }
+      const patches = {}; hide.forEach(l => { patches[l.id] = { hidden: true }; });
+      commit(Object.assign({}, patchMany(layout, patches), { layers: patchMany(layout, patches).layers.filter(l => out.indexOf(l.id) < 0) })); setSelIds([]);
+      if (hide.length) toastMsg('Hidden, not deleted: the ' + hide.map(l => l.role).join(' and ') + (hide.length === 1 ? ' stays' : ' stay') + ' in the approved copy' + (keep.length ? '; kept: ' + keep.map(l => l.role || l.type).join(', ') : ''));
+      else if (keep.length) toastMsg('Kept: ' + keep.map(l => (l.role || l.type) + (l.locked ? ' (locked)' : ' (placed by the campaign policy)')).join(', ')); };
+    const remove = () => removeLayers(selected());
+    const clipKey = 'ax_studio_clip';
+    const copySel = () => { const s = selected().filter(l => !isMarkL(l)); if (!s.length) return; try { localStorage.setItem(clipKey, JSON.stringify({ layers: E.cloneLayers ? E.cloneLayers(s, wcopy, layout, 0) : [], at: Date.now() })); toastMsg('Copied ' + s.length + ' layer' + (s.length === 1 ? '' : 's')); } catch (e) {} };
+    const paste = () => { let c = null; try { c = JSON.parse(localStorage.getItem(clipKey) || 'null'); } catch (e) {} if (!c || !Array.isArray(c.layers) || !c.layers.length) return; const n = E.cloneLayers(c.layers, wcopy, layout, 2).filter(l => l.type !== 'img' || (l.key && p && l.key.indexOf('studio/' + p.id + '/') === 0)); if (!n.length) { toastMsg('Nothing to paste here (an image from another project is not carried)', true); return; } commit(Object.assign({}, layout, { layers: layers.concat(n) })); setSelIds(n.map(x => x.id)); };
+    /* the words typed on the canvas: the approved copy for its roles (the same words as the Copy tab, saved with the layout), the
+       layer's own text otherwise; a locked field is not opened */
+    const startEdit = l => { if (!l || l.type !== 'text' || l.locked || preview) return; const copyRole = (E.COPY_ROLES || []).indexOf(l.role) >= 0; if (copyRole && a.locks && a.locks[l.role]) { toastMsg('The ' + l.role + ' is locked on this asset: unlock it in the Copy tab to change its words', true); return; } if (l.part != null) { toastMsg('These words are part of the approved ' + l.role + ': edit the ' + l.role + ' in the Copy tab', true); return; } setSelIds([l.id]); setEditing(l.id); };
+    const commitEdit = (l, t) => { setEditing(null); const copyRole = (E.COPY_ROLES || []).indexOf(l.role) >= 0; if (copyRole) commit(Object.assign({}, layout, { _copy: Object.assign({}, layout._copy || {}, { [l.role]: t }) })); else setOne(l.id, { text: t }); };
     const keyAll = e => { const mod = e.metaKey || e.ctrlKey;
       // a key typed into a field edits the field: the canvas shortcuts (nudge, undo, redo, escape) never take it
       const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '') || t.isContentEditable)) return;
       if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
-      if (e.key === 'Escape') { setSelIds([]); return; }
+      if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); setSelIds(layers.filter(l => !l.hidden && !l.locked).map(l => l.id)); return; }
+      if (mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); copySel(); return; }
+      if (mod && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); paste(); return; }
+      if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); return; }
+      if (mod && (e.key === 'g' || e.key === 'G')) { e.preventDefault(); if (e.shiftKey) ungroup(); else group(); return; }
+      if (mod && (e.key === ']' || e.key === '[')) { e.preventDefault(); reorder(e.key === ']' ? (e.shiftKey ? 'front' : 'forward') : (e.shiftKey ? 'back' : 'backward')); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { if (sel.length) { e.preventDefault(); remove(); } return; }
+      if (e.key === 'Enter' && sel.length === 1 && byId(sel[0]) && byId(sel[0]).type === 'text') { e.preventDefault(); startEdit(byId(sel[0])); return; }
+      if (e.key === 'Escape') { setSelIds([]); setFontOpen(false); return; }
       const step = e.shiftKey ? 2 : 0.5; const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key]; if (d) { e.preventDefault(); nudge(d[0], d[1]); } };
+    // what is drawn: the working layout, a family being previewed from the font picker, and the words being typed hidden underneath
+    const drawn = useMemo(() => { let L = layout; if (fontPreview && fontPreview.ids.length) L = patchMany(L, fontPreview.ids.reduce((o, id) => { o[id] = { family: fontPreview.family || undefined }; return o; }, {})); if (editing) L = patchMany(L, { [editing]: { hidden: true } }); return L; }, [layout, fontPreview, editing]);
     // the same validation the readiness uses, at the output size, on the working layout (debounced)
-    const comp = useComposition(Object.assign({}, v, { layout }), ns, layout, v.copy);
+    const comp = useComposition(Object.assign({}, v, { layout: drawn, copy: wcopy }), ns, drawn, wcopy);
     const [val, setVal] = useState(null);
-    useEffect(() => { if (!comp.ready) return; const t = setTimeout(() => { try { setVal(R.validate(layout, v.copy, comp.imgs, { fonts: comp.fonts, channel: a.channel, format: a.format })); } catch (e) { setVal(null); } }, 250); return () => clearTimeout(t); }, [layout, comp.key, comp.ready]);
+    useEffect(() => { if (!comp.ready) return; const t = setTimeout(() => { try { setVal(R.validate(layout, wcopy, comp.imgs, { fonts: comp.fonts, channel: a.channel, format: a.format })); } catch (e) { setVal(null); } }, 250); return () => clearTimeout(t); }, [layout, comp.key, comp.ready]);
     const bad = new Set(); (val ? val.issues : []).filter(i => i.severity === 'blocking').forEach(i => i.layers.forEach(id => bad.add(id)));
     // the handles sit on what the renderer measured - the words' ink, a mark's visible pixels - not on the layer box, so what you
-    // grab is what you see; the layer box is drawn faintly behind when it differs (the same scene the rules judge)
-    const ink = useMemo(() => { const o = {}; if (!comp.ready || !layout.stage) return o; try { const W = layout.stage.w, H = layout.stage.h; R.measure(layout, v.copy, comp.imgs, W, H).forEach(b => { if (b.hidden || b.empty || b.valid === false) return; if (b.type === 'text' || (b.mark && b.asset === 'loaded')) o[b.id] = { x: b.x / W * 100, y: b.y / H * 100, w: b.w / W * 100, h: b.h / H * 100 }; }); } catch (e) {} return o; }, [layout, comp.key, comp.ready]);
-    const geo = l => { const b = ink[l.id]; const box = { x: l.x, y: l.y, w: l.w, h: l.h || 4 }; if (!b || b.w <= 0 || b.h <= 0) return { on: box, box: null }; const same = Math.abs(b.x - box.x) < 0.3 && Math.abs(b.y - box.y) < 0.3 && Math.abs(b.w - box.w) < 0.3 && Math.abs(b.h - box.h) < 0.3; return { on: b, box: same ? null : box }; };
+    // grab is what you see; the layer box is drawn faintly behind when it differs (the same scene the rules judge). A turned layer
+    // is framed by its own box, turned with it, so its handles resize along its own sides.
+    const ink = useMemo(() => { const o = {}; if (!comp.ready || !layout.stage) return o; try { const W = layout.stage.w, H = layout.stage.h; R.measure(layout, wcopy, comp.imgs, W, H).forEach(b => { if (b.hidden || b.empty || b.valid === false) return; if (b.type === 'text' || (b.mark && b.asset === 'loaded')) o[b.id] = { x: b.x / W * 100, y: b.y / H * 100, w: b.w / W * 100, h: b.h / H * 100 }; }); } catch (e) {} return o; }, [layout, comp.key, comp.ready]);
+    const geo = l => { const bx0 = { x: l.x, y: l.y, w: l.w, h: l.h || 4 }; if (l.rotate) return { on: bx0, box: null, turned: true }; const b = ink[l.id]; if (!b || b.w <= 0 || b.h <= 0) return { on: bx0, box: null }; const same = Math.abs(b.x - bx0.x) < 0.3 && Math.abs(b.y - bx0.y) < 0.3 && Math.abs(b.w - bx0.w) < 0.3 && Math.abs(b.h - bx0.h) < 0.3; return { on: b, box: same ? null : bx0 }; };
     const sa = R.safeArea ? R.safeArea(a.format, a.channel) : { top: 0.03, bottom: 0.03, side: 0.03, hard: false }; const story = sa.hard;
     /* framing by dragging: the photograph (or the selected region's image) is panned inside its box through the renderer's own
        transform (panFocus inverts coverTransform), the wheel zooms about the same focus, and one drag or one zoom gesture is one
@@ -2222,45 +2329,60 @@
        applies the measured framing the renderer suggests, as a layout change that renders nothing. */
     const [frame, setFrame] = useState(false); const pan = useRef(null); const wheelT = useRef(null);
     const subj = useMemo(() => { if (!comp.ready || !comp.imgs.bg || layout.noImagery || !R.subjects) return null; try { return R.subjects(comp.imgs.bg); } catch (e) { return null; } }, [comp.key, comp.ready]);
-    const subjOn = useMemo(() => { if (!subj || !subj.regions.length || !layout.stage) return []; try { const W = layout.stage.w, H = layout.stage.h; return R.subjectCoverage(layout, comp.imgs, R.measure(layout, v.copy, comp.imgs, W, H), W, H, subj).map(s => ({ id: s.id, x: s.x / W * 100, y: s.y / H * 100, w: s.w / W * 100, h: s.h / H * 100, covered: s.covered, confidence: s.confidence })); } catch (e) { return []; } }, [layout, comp.key, comp.ready, subj]);
-    const suggestion = useMemo(() => { if (!subj || !subj.regions.length || !comp.ready || !R.frameSuggest) return null; try { return R.frameSuggest(layout, v.copy, comp.imgs, { format: a.format }); } catch (e) { return null; } }, [layout, comp.key, comp.ready, subj]);
+    const subjOn = useMemo(() => { if (!subj || !subj.regions.length || !layout.stage) return []; try { const W = layout.stage.w, H = layout.stage.h; return R.subjectCoverage(layout, comp.imgs, R.measure(layout, wcopy, comp.imgs, W, H), W, H, subj).map(s => ({ id: s.id, x: s.x / W * 100, y: s.y / H * 100, w: s.w / W * 100, h: s.h / H * 100, covered: s.covered, confidence: s.confidence })); } catch (e) { return []; } }, [layout, comp.key, comp.ready, subj]);
+    const suggestion = useMemo(() => { if (!subj || !subj.regions.length || !comp.ready || !R.frameSuggest) return null; try { return R.frameSuggest(layout, wcopy, comp.imgs, { format: a.format }); } catch (e) { return null; } }, [layout, comp.key, comp.ready, subj]);
     const frameTarget = () => { const s = selected(); const reg = s.length === 1 && s[0].type === 'img' && s[0].role === 'region' && !s[0].locked ? s[0] : null; if (reg) { const im = comp.imgs[reg.id]; if (!im) return null; return { reg, img: im, box: { x: reg.x, y: reg.y, w: reg.w, h: reg.h || 0 }, focus: reg.focus }; } if (!comp.imgs.bg) return null; const ib = layout.image && layout.image.w > 0 ? layout.image : { x: 0, y: 0, w: 100, h: 100 }; return { reg: null, img: comp.imgs.bg, box: ib, focus: layout.imageFocus }; };
-    const applyFocus = (L0, t, nf) => { const plain = nf.x === 50 && nf.y === 50 && nf.zoom === 1; const val = plain ? undefined : nf; return t.reg ? patchMany(L0, { [t.reg.id]: { focus: val } }) : Object.assign({}, L0, { imageFocus: val }); };
+    const applyFocus = (L0, t, nf) => { const plain = nf.x === 50 && nf.y === 50 && nf.zoom === 1; const val2 = plain ? undefined : nf; return t.reg ? patchMany(L0, { [t.reg.id]: { focus: val2 } }) : Object.assign({}, L0, { imageFocus: val2 }); };
     const frameDown = e => { const t = frameTarget(); if (!t || !layout.stage) return; e.preventDefault(); e.stopPropagation(); const r = box.current.getBoundingClientRect(); pan.current = { t, sx: e.clientX, sy: e.clientY, start: layout, k: layout.stage.w / r.width }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const frameMove = e => { const c = pan.current; if (!c) return; const W = c.start.stage.w, H = c.start.stage.h; const bx = { x: c.t.box.x / 100 * W, y: c.t.box.y / 100 * H, w: c.t.box.w / 100 * W, h: c.t.box.h / 100 * H }; const nf = R.panFocus(c.t.img.naturalWidth, c.t.img.naturalHeight, bx, c.t.focus, (e.clientX - c.sx) * c.k, (e.clientY - c.sy) * c.k); live(applyFocus(c.start, c.t, nf)); };
     const frameUp = () => { const c = pan.current; pan.current = null; if (c && JSON.stringify(c.start) !== JSON.stringify(layout)) setHist(h => ({ past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] })); };
-    const frameWheel = e => { const t = frameTarget(); if (!t) return; e.preventDefault(); const f = t.focus || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 }; const nf = Object.assign({}, cur, { zoom: Math.round(Math.max(1, Math.min(3, cur.zoom - Math.sign(e.deltaY) * 0.05)) * 100) / 100 }); if (nf.zoom === cur.zoom) return; if (!wheelT.current) wheelT.current = { start: layout }; live(applyFocus(layout, t, nf)); clearTimeout(wheelT.current.timer); wheelT.current.timer = setTimeout(() => { const s = wheelT.current && wheelT.current.start; wheelT.current = null; if (s) setHist(h => (JSON.stringify(s) !== JSON.stringify(h.now) ? { past: h.past.concat([s]).slice(-80), now: h.now, future: [] } : h)); }, 500); };
+    const frameWheel = e => { const t = frameTarget(); if (!t) return; e.preventDefault(); const f = t.focus || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 }; const nf = Object.assign({}, cur, { zoom: Math.round(Math.max(1, Math.min(3, cur.zoom - Math.sign(e.deltaY) * 0.05)) * 100) / 100 }); if (nf.zoom === cur.zoom) return; if (!wheelT.current) wheelT.current = { start: layout }; live(applyFocus(layout, t, nf)); clearTimeout(wheelT.current.timer); wheelT.current.timer = setTimeout(() => { const s0 = wheelT.current && wheelT.current.start; wheelT.current = null; if (s0) setHist(h => (JSON.stringify(s0) !== JSON.stringify(h.now) ? { past: h.past.concat([s0]).slice(-80), now: h.now, future: [] } : h)); }, 500); };
     // the wheel is bound natively and non-passively on the overlay, so zooming the photograph never scrolls the page under it
     const frameRef = useRef(null); const wheelFn = useRef(null); wheelFn.current = frameWheel;
     useEffect(() => { const el = frameRef.current; if (!frame || !el) return; const h = e => { if (wheelFn.current) wheelFn.current(e); }; el.addEventListener('wheel', h, { passive: false }); return () => el.removeEventListener('wheel', h); }, [frame]);
-    const changed = JSON.stringify(layout) !== JSON.stringify(v.layout);
+    const strip = L => { const o = Object.assign({}, L); delete o._copy; return o; };
+    const copyPatch = () => { const c = layout._copy || {}; const out = {}; Object.keys(c).forEach(k => { if (c[k] !== ((v.copy || {})[k] || '')) out[k] = c[k]; }); return Object.keys(out).length ? out : null; };
+    const changed = JSON.stringify(strip(layout)) !== JSON.stringify(v.layout) || !!copyPatch();
     // unsaved edits are a state the whole page knows about (the header names them, leaving the page asks), never a silent loss
     useEffect(() => { if (onDirty) onDirty(changed); return () => { if (onDirty) onDirty(false); }; }, [changed]);
-    const cancel = () => { if (changed && !window.confirm('Discard the unsaved layout changes? The saved version stays as it is.')) return; onDone(null); };
+    /* the draft: the working layout autosaved for this person a moment after each change (never a version), restored on return */
+    const [draftSt, setDraftSt] = useState(null); const [restore, setRestore] = useState(null); const draftT = useRef(null); const draftOn = useRef(true);
+    useEffect(() => { let live2 = true; call('/studio/draft?asset=' + encodeURIComponent(a.id)).then(d => { if (!live2 || !d || !d.draft || !d.draft.layout) return; const same = JSON.stringify(d.draft.layout) === JSON.stringify(v.layout) && !Object.keys(d.draft.copy || {}).some(k => d.draft.copy[k] !== ((v.copy || {})[k] || '')); if (!same) setRestore(d.draft); }).catch(() => {}); return () => { live2 = false; }; }, []);
+    useEffect(() => { if (!changed || !draftOn.current || restore) return; clearTimeout(draftT.current); setDraftSt({ state: 'pending' }); draftT.current = setTimeout(async () => { setDraftSt({ state: 'saving' }); try { const r = await call('/studio/draft', { asset: a.id, version: v.id, layout: strip(layout), copy: layout._copy || {} }); setDraftSt({ state: 'saved', at: r.at || Date.now() }); } catch (e) { setDraftSt({ state: 'error', msg: e.message }); } }, 1200); return () => clearTimeout(draftT.current); }, [layout]);
+    const discardDraft = () => { draftOn.current = false; clearTimeout(draftT.current); call('/studio/draft/discard', { asset: a.id }).catch(() => {}); };
+    const doRestore = () => { const d = restore; setRestore(null); if (!d) return; const L = JSON.parse(JSON.stringify(d.layout)); const c = d.copy || {}; if (Object.keys(c).length) L._copy = c; commit(L); toastMsg('Your unsaved layout is back'); };
+    const save = () => { discardDraft(); onDone(strip(layout), copyPatch()); };
+    const cancel = () => { if (changed && !window.confirm('Discard the unsaved layout changes? The saved version stays as it is.')) return; discardDraft(); onDone(null); };
     const one = selected().length === 1 ? selected()[0] : null;
     // the type panel follows the layer last clicked, even inside a group (type is set per layer)
     const typed = focusId && sel.length && byId(focusId) && byId(focusId).type === 'text' ? byId(focusId) : one;
     const tb = (label, fn, dis, title) => html`<button class="btn sm ghost" disabled=${dis} title=${title || label} onClick=${fn}>${label}</button>`;
-    // the panels: type for the layer last clicked, the held-mark note, the box, the framing - rendered into the Properties tab when a slot is given
+    const fontTargets = () => selected().filter(l => l.type === 'text' && movable(l)).map(l => l.id);
+    const pickFont = f => { const ids = fontTargets(); setFontOpen(false); setFontPreview(null); if (!ids.length) return; const patches = {}; ids.forEach(id => { const l = byId(id); patches[id] = { family: f || undefined, weight: f && R.fontWeight ? R.fontWeight(f, l.weight || 600) : l.weight }; }); commit(patchMany(layout, patches)); };
+    // the panels: type for the layer last clicked, the held-mark note, the box, effects, the image, the framing - rendered into the Properties tab when a slot is given
     const panels = html`<div class="st-le-panels">
-      ${typed && typed.type === 'text' && !typed.locked ? (one => html`<div class="st-le-type" aria-label="Typography">
-        <span class="st-lbl">Type: ${one.role}</span>
-        <label>Size <input class="st-in" type="number" step="0.1" min="1" max="20" value=${one.size} onChange=${e => setOne(one.id, { size: r1(Math.max(1, +e.target.value || one.size)) })} aria-label="Type size, per cent of the width" /></label>
-        <label>Weight <select class="st-sel" value=${String(one.weight || 600)} onChange=${e => setOne(one.id, { weight: +e.target.value })} aria-label="Weight">${[400, 500, 600, 700, 800, 900].map(w => html`<option key=${w} value=${String(w)}>${w}</option>`)}</select></label>
-        <label>Align <select class="st-sel" value=${one.align || 'left'} onChange=${e => setOne(one.id, { align: e.target.value })} aria-label="Text alignment"><option value="left">left</option><option value="center">centre</option><option value="right">right</option></select></label>
-        <label>Line height <input class="st-in" type="number" step="0.02" min="0.8" max="2" value=${one.lineHeight || 1.12} onChange=${e => setOne(one.id, { lineHeight: Math.round(Math.max(0.8, Math.min(2, +e.target.value || 1.12)) * 100) / 100 })} aria-label="Line height, times the type size" /></label>
-        <label>Tracking <input class="st-in" type="number" step="0.01" min="-0.05" max="0.3" value=${one.letterSpacing || 0} onChange=${e => setOne(one.id, { letterSpacing: Math.round((+e.target.value || 0) * 100) / 100 })} aria-label="Letter spacing, em" /></label>
-        <label>Colour <input class="st-in" value=${one.color || '#ffffff'} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value)) setOne(one.id, { color: e.target.value }); }} aria-label="Colour" /></label>
-        <label>Emphasis <select class="st-sel" value=${one.emphasis || ''} onChange=${e => setOne(one.id, { emphasis: e.target.value || undefined })} aria-label="Emphasis"><option value="">none</option><option value="caps">caps</option><option value="highlight">highlight</option><option value="underline">underline</option><option value="box">box</option></select></label>
-        ${one.bg && one.emphasis === 'box' ? html`<span class="ov-dim">a filled plate and a box outline together: one device is enough</span>` : null}
-      </div>`)(typed) : null}
+      ${typed && typed.type === 'text' && !typed.locked ? (one2 => html`<div class="st-le-type" aria-label="Typography">
+        <span class="st-lbl">Type: ${one2.role}</span>
+        <label>Size <input class="st-in" type="number" step="0.1" min="1" max="20" value=${one2.size} onChange=${e => setOne(one2.id, { size: r1(Math.max(1, +e.target.value || one2.size)) })} aria-label="Type size, per cent of the width" /></label>
+        <label>Weight <select class="st-sel" value=${String(one2.weight || 600)} onChange=${e => setOne(one2.id, { weight: +e.target.value })} aria-label="Weight">${Array.from(new Set((one2.family && R.fontEntry && R.fontEntry(one2.family) ? R.fontEntry(one2.family).weights : [400, 500, 600, 700, 800, 900]).concat([one2.weight || 600]))).sort((p0, q) => p0 - q).map(w => html`<option key=${w} value=${String(w)}>${w}</option>`)}</select></label>
+        <label>Align <select class="st-sel" value=${one2.align || 'left'} onChange=${e => setOne(one2.id, { align: e.target.value })} aria-label="Text alignment"><option value="left">left</option><option value="center">centre</option><option value="right">right</option></select></label>
+        <label>Line height <input class="st-in" type="number" step="0.02" min="0.8" max="2" value=${one2.lineHeight || 1.12} onChange=${e => setOne(one2.id, { lineHeight: Math.round(Math.max(0.8, Math.min(2, +e.target.value || 1.12)) * 100) / 100 })} aria-label="Line height, times the type size" /></label>
+        <label>Tracking <input class="st-in" type="number" step="0.01" min="-0.05" max="0.3" value=${one2.letterSpacing || 0} onChange=${e => setOne(one2.id, { letterSpacing: Math.round((+e.target.value || 0) * 100) / 100 })} aria-label="Letter spacing, em" /></label>
+        <label>Colour <input class="st-in" value=${one2.color || '#ffffff'} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value)) setOne(one2.id, { color: e.target.value }); }} aria-label="Colour" /></label>
+        <label>Emphasis <select class="st-sel" value=${one2.emphasis || ''} onChange=${e => setOne(one2.id, { emphasis: e.target.value || undefined })} aria-label="Emphasis"><option value="">none</option><option value="caps">caps</option><option value="highlight">highlight</option><option value="underline">underline</option><option value="box">box</option></select></label>
+        ${one2.bg && one2.emphasis === 'box' ? html`<span class="ov-dim">a filled plate and a box outline together: one device is enough</span>` : null}
+      </div>${E.TypeExtras ? html`<${E.TypeExtras} l=${one2} onPatch=${pt => setOne(one2.id, pt)} onFont=${() => setFontOpen(true)} />` : null}`)(typed) : null}
       ${one && heldMark(one) ? html`<div class="st-le-type" aria-label="Held mark"><span class="st-lbl">${one.role}</span><span class="ov-dim">held where the campaign rule puts it (${one.rule.corner || 'its corner'}${one.rule.note ? ': ' + one.rule.note : ''}); the words move, the mark stays</span></div>` : null}
       ${one && movable(one) ? html`<div class="st-le-type" aria-label="Position and size">
-        <span class="st-lbl">Box: ${one.role || one.type}</span>
-        ${[['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].map(([k, lb]) => html`<label key=${k}>${lb} <input class="st-in" type="number" step="0.5" min=${k === 'w' || k === 'h' ? 1 : -50} max=${150} value=${one[k] == null ? 0 : one[k]} onChange=${e => { const n = +e.target.value; if (isFinite(n)) { const keep = one.type === 'img' && (one.exact || one.role === 'logo' || one.role === 'wordmark') && (k === 'w' || k === 'h'); const patch = { [k]: r1(k === 'w' || k === 'h' ? Math.max(1, n) : n) }; if (keep && one.w && one.h) { if (k === 'w') patch.h = r1(Math.max(1, one.h * (patch.w / one.w))); else patch.w = r1(Math.max(1, one.w * (patch.h / one.h))); } setOne(one.id, patch); } }} aria-label=${lb + ', per cent of the stage'} /></label>`)}
-        ${one.type === 'img' && (one.exact || one.role === 'logo' || one.role === 'wordmark') ? html`<span class="ov-dim" title="An exact image keeps its proportions: width and height move together">aspect locked</span>` : null}
+        <span class="st-lbl">Box: ${one.name || one.role || one.type}</span>
+        ${[['x', 'X'], ['y', 'Y'], ['w', 'Width'], ['h', 'Height']].map(([k, lb]) => html`<label key=${k}>${lb} <input class="st-in" type="number" step="0.5" min=${k === 'w' || k === 'h' ? 1 : -50} max=${150} value=${one[k] == null ? 0 : one[k]} onChange=${e => { const n = +e.target.value; if (isFinite(n)) { const keep = exactImg(one) && (k === 'w' || k === 'h'); const patch = { [k]: r1(k === 'w' || k === 'h' ? Math.max(1, n) : n) }; if (keep && one.w && one.h) { if (k === 'w') patch.h = r1(Math.max(1, one.h * (patch.w / one.w))); else patch.w = r1(Math.max(1, one.w * (patch.h / one.h))); } setOne(one.id, patch); } }} aria-label=${lb + ', per cent of the stage'} /></label>`)}
+        ${!isMarkL(one) ? html`<label>Rotate <input class="st-in" type="number" step="1" min="-180" max="180" value=${one.rotate || 0} onChange=${e => { const n = +e.target.value; if (isFinite(n)) setOne(one.id, { rotate: Math.max(-180, Math.min(180, Math.round(n * 10) / 10)) || undefined }); }} aria-label="Rotation, degrees" /></label>` : null}
+        ${exactImg(one) ? html`<span class="ov-dim" title="An exact image keeps its proportions: width and height move together">aspect locked</span>` : null}
         ${one.type === 'shape' ? html`<label>Opacity <input class="st-in" type="number" step="0.05" min="0" max="1" value=${one.opacity == null ? 1 : one.opacity} onChange=${e => setOne(one.id, { opacity: Math.round(Math.max(0, Math.min(1, +e.target.value)) * 100) / 100 })} aria-label="Panel opacity" /></label><label>Fill <input class="st-in" value=${one.fill || ''} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value) || /^rgba?\(/.test(e.target.value)) setOne(one.id, { fill: e.target.value }); }} aria-label="Panel fill" /></label>` : null}
+        ${one.type === 'shape' && one.shape === 'icon' ? html`<label>Line <input class="st-in" type="number" step="0.25" min="0.5" max="4" value=${one.strokeWidth || 2} onChange=${e => setOne(one.id, { strokeWidth: Math.max(0.5, Math.min(4, +e.target.value || 2)) })} aria-label="Icon line weight" /></label>` : null}
       </div>` : null}
+      ${one && movable(one) && !isMarkL(one) && E.EffectsPanel ? html`<${E.EffectsPanel} l=${one} palette=${layout.palette} onPatch=${pt => setOne(one.id, pt)} />` : null}
+      ${one && movable(one) && one.type === 'img' && !isMarkL(one) && E.ImagePanel ? html`<${E.ImagePanel} l=${one} onPatch=${pt => setOne(one.id, pt)} onReplace=${one.role === 'image' ? replaceImage : null} />` : null}
       ${(() => { // image framing: the background photograph, or the image region selected
         const reg = one && one.type === 'img' && one.role === 'region' && !one.locked ? one : null; if (!reg && !(v.image && v.image.url)) return null;
         const f = (reg ? reg.focus : layout.imageFocus) || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 };
@@ -2274,38 +2396,61 @@
           <button class="ov-link" onClick=${() => { if (reg) setOne(reg.id, { focus: undefined }); else commit(Object.assign({}, layout, { imageFocus: undefined })); }} title="Back to the plain centred crop at zoom 1">centre and reset</button>
           ${!reg && suggestion && suggestion.focus ? html`<button class="btn sm" onClick=${() => commit(Object.assign({}, layout, { imageFocus: suggestion.focus }))} title=${suggestion.note}>Keep the subject clear (measured)</button>` : null}
           <span class="ov-dim">${subj && subj.regions && subj.regions.length ? 'likely subject' + (subj.regions.length === 1 ? '' : 's') + ' marked on the stage (confidence ' + Math.round(subj.confidence * 100) + '%: a colour-and-edge estimate, not detection); ' : ''}reframes the same image: no render. The focus is the image point that sits at the same place in the box, so it holds in every format.</span></div>`; })()}
-      ${!one && !sel.length ? html`<div class="ov-dim st-le-hint">Select a layer on the canvas or in the Layers list to edit its type, box or framing. Changes save as one layout version; no render.</div>` : null}
+      ${!one && !sel.length ? html`<div class="ov-dim st-le-hint">Select a layer on the canvas or in the Layers list (drag across the empty stage to select several) to edit its type, box, effects or framing. Double-click words to type them in place. Changes save as one layout version; no render.</div>` : null}
+      ${sel.length > 1 ? html`<div class="ov-dim st-le-hint">${sel.length} layers selected: the floating toolbar sets type for all the words among them; align, distribute, order and group are in the tools above.</div>` : null}
     </div>`;
-    const list = html`<${LayersList} layers=${layers} sel=${sel} onPick=${(e, l) => pick(e, l)} onHide=${l => setOne(l.id, { hidden: !l.hidden })} onLock=${l => setOne(l.id, { locked: !l.locked })} bad=${bad} heldMark=${heldMark} />`;
+    const list = html`<${LayersList} layers=${layers} sel=${sel} onPick=${(e, l) => pick(e, l)} onHide=${l => setOne(l.id, { hidden: !l.hidden })} onLock=${l => setOne(l.id, { locked: !l.locked })} bad=${bad} heldMark=${heldMark} onMove=${moveTo} onDuplicate=${l => { setSelIds([l.id]); const n = E.cloneLayers ? E.cloneLayers([l], wcopy, layout) : []; if (n.length) { commit(Object.assign({}, layout, { layers: layers.concat(n) })); setSelIds(n.map(x => x.id)); } }} onDelete=${l => removeLayers([l])} editing=${true} />`;
+    // the floating toolbar sits over the selection's measured bounds
+    const selBox = (() => { const s = selected(); if (!s.length) return null; const bx = s.map(l => l.rotate ? { x: l.x, y: l.y, w: l.w, h: l.h || 0 } : inkOf(l)); const x = Math.min.apply(null, bx.map(b => b.x)), y = Math.min.apply(null, bx.map(b => b.y)); return { x, y, w: Math.max.apply(null, bx.map(b => b.x + b.w)) - x, h: Math.max.apply(null, bx.map(b => b.y + b.h)) - y }; })();
+    const HANDLES = ['nw', 'n', 'ne', 'e', 'sw', 's', 'w'];
+    const editingL = editing ? byId(editing) : null;
+    const brandFonts = [((kit && kit.fonts) || layout.fonts || {}).display, ((kit && kit.fonts) || layout.fonts || {}).body].filter(Boolean);
     return html`<div class="st-le-wrap" onKeyDown=${keyAll}>
       ${!preview ? html`<div class="st-le-tools" role="toolbar" aria-label="Canvas tools">
         ${tb('Undo', undo, !hist.past.length, 'Undo (Ctrl or Cmd+Z)')}${tb('Redo', redo, !hist.future.length, 'Redo (Ctrl or Cmd+Shift+Z)')}
+        <span class="st-le-sep"></span>${E.AddMenu ? html`<${E.AddMenu} palette=${layout.palette} onAdd=${add} onImage=${addImage} />` : null}
         <span class="st-le-sep"></span>${['left', 'centre', 'right', 'top', 'middle', 'bottom'].map(h => tb('Align ' + h, () => align(h), !selected().length, 'Align ' + h + (selected().length > 1 ? ' to the selection' : ' to the safe area of this format (' + (story ? 'story: top ' + Math.round(sa.top * 100) + '%, bottom ' + Math.round(sa.bottom * 100) + '%, sides ' + Math.round(sa.side * 100) + '%' : Math.round(sa.side * 100) + '% margin') + '), on the measured ink')))}
         ${tb('Distribute across', () => distribute('h'), selected().length < 3)}${tb('Distribute down', () => distribute('v'), selected().length < 3)}
         <span class="st-le-sep"></span>${tb('To front', () => reorder('front'), !selected().length)}${tb('Forward', () => reorder('forward'), !selected().length)}${tb('Backward', () => reorder('backward'), !selected().length)}${tb('To back', () => reorder('back'), !selected().length)}
         <span class="st-le-sep"></span>${tb('Group', group, selected().length < 2)}${tb('Ungroup', ungroup, !selected().some(l => l.group))}
         <label class="st-check"><input type="checkbox" checked=${guides0} onChange=${e => setGuides(e.target.checked)} /> safe-area guides</label>
+        <label class="st-check" title="Snap to a 10% grid as well as the stage, the safe area and the other layers"><input type="checkbox" checked=${grid} onChange=${e => setGrid(e.target.checked)} aria-label="Grid" /> grid</label>
         <label class="st-check" title="Off: the corner changes the text box and the words rewrap at the same size. On: the type scales with the box width."><input type="checkbox" checked=${scaleType} onChange=${e => setScaleType(e.target.checked)} aria-label="Resize scales type" /> resize scales type</label>
       </div>` : null}
-      <div class=${'st-le' + (preview ? ' preview' : '')} ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${e => { if (e.target === box.current) setSelIds([]); }}>
-        <${Composition} v=${Object.assign({}, v, { layout })} a=${a} ns=${ns} tagOut=${true} />
+      ${restore && !preview ? html`<div class="st-le-restore" role="status"><b>${restore.current ? 'You have unsaved layout changes from ' + ago(restore.at) + ' ago.' : 'A draft from an earlier version is kept (' + ago(restore.at) + ' ago).'}</b> <span class="ov-dim">${restore.current ? 'Autosaved for you only; nothing was saved as a version.' : 'The asset was saved since; restoring it would lay an older arrangement over the newer one.'}</span>${restore.current ? html`<button class="btn sm" onClick=${doRestore}>Restore my changes</button>` : null}<button class="btn sm ghost" onClick=${() => { setRestore(null); discardDraft(); draftOn.current = true; }}>Discard the draft</button></div>` : null}
+      <div class=${'st-le' + (preview ? ' preview' : '') + (marquee && marquee.on ? ' marqueeing' : '')} ref=${box} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onPointerDown=${marqueeDown} onDoubleClick=${e => { const el = e.target.closest && e.target.closest('.st-le-layer'); if (!el) return; const l = byId(el.getAttribute('data-id')); if (l && l.type === 'text') startEdit(l); }}>
+        <${Composition} v=${Object.assign({}, v, { layout: drawn, copy: wcopy })} a=${a} ns=${ns} tagOut=${true} />
         ${guides && !preview ? html`<div class="st-le-guide" style=${{ left: (story ? sa.side * 100 : 3) + '%', top: (story ? sa.top * 100 : 3) + '%', right: (story ? sa.side * 100 : 3) + '%', bottom: (story ? sa.bottom * 100 : 3) + '%' }} title=${story ? 'safe area inside the story interface' : '3% margin'}></div>${story ? html`<div class="st-le-zone" style=${{ left: 0, right: 0, top: 0, height: (sa.top * 100) + '%' }} title=${'Instagram story interface (top ' + Math.round(sa.top * 100) + '%)'}></div><div class="st-le-zone" style=${{ left: 0, right: 0, bottom: 0, height: (sa.bottom * 100) + '%' }} title=${'Instagram story interface (bottom ' + Math.round(sa.bottom * 100) + '%)'}></div>` : null}` : null}
+        ${grid && !preview ? html`<div class="st-le-grid" aria-hidden="true"></div>` : null}
         ${guides && !preview && subjOn.length ? subjOn.map(s => html`<div key=${'subj-' + s.id} class=${'st-le-subject' + (s.covered >= 0.35 ? ' covered' : '')} aria-hidden="true" style=${{ left: s.x + '%', top: s.y + '%', width: s.w + '%', height: s.h + '%' }} title=${'likely subject ' + s.id + ', confidence ' + Math.round(s.confidence * 100) + '% (an estimate, not detection)' + (s.covered ? '; ' + Math.round(s.covered * 100) + '% covered' : '')}><span>subject? ${Math.round(s.confidence * 100)}%</span></div>`) : null}
         ${frame && !preview ? html`<div class="st-le-frame" role="application" aria-label="Frame the photograph: drag to reposition, wheel to zoom" data-ready=${frameTarget() ? '1' : '0'} ref=${frameRef} onPointerDown=${frameDown} onPointerMove=${frameMove} onPointerUp=${frameUp} onPointerCancel=${frameUp}><span class="st-le-frame-hint">drag to reposition the ${frameTarget() && frameTarget().reg ? 'region image' : 'photograph'}; wheel to zoom</span></div>` : null}
-        ${!preview ? layers.filter(l => !l.hidden).map(l => { const g = geo(l); return html`${g.box ? html`<div key=${l.id + ':box'} class="st-le-box" aria-hidden="true" style=${{ left: g.box.x + '%', top: g.box.y + '%', width: g.box.w + '%', height: g.box.h + '%' }}></div>` : null}<div key=${l.id} class=${'st-le-layer' + (sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)) ? ' sel' : '') + (l.locked ? ' locked' : '') + (heldMark(l) ? ' held' : '') + (bad.has(l.id) ? ' bad' : '') + (g.box ? ' ink' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} data-ink=${g.box ? '1' : '0'} style=${{ left: g.on.x + '%', top: g.on.y + '%', width: g.on.w + '%', height: g.on.h + '%' }} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (clickFocus.current !== l.id && sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
-          <span class="st-le-lbl">${l.role || l.type}${l.locked ? ' (locked)' : ''}${heldMark(l) ? ' (held by the campaign rule)' : ''}${l.group ? ' (grouped)' : ''}</span>${movable(l) ? html`<span class="st-le-h" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
+        ${!preview ? layers.filter(l => !l.hidden).map(l => { const g = geo(l); const isSel = sel.indexOf(l.id) >= 0 || (l.group && sel.some(id => (byId(id) || {}).group === l.group)); const single = sel.length === 1 && sel[0] === l.id && movable(l);
+          return html`${g.box ? html`<div key=${l.id + ':box'} class="st-le-box" aria-hidden="true" style=${{ left: g.box.x + '%', top: g.box.y + '%', width: g.box.w + '%', height: g.box.h + '%' }}></div>` : null}<div key=${l.id} data-id=${l.id} class=${'st-le-layer' + (isSel ? ' sel' : '') + (l.locked ? ' locked' : '') + (heldMark(l) ? ' held' : '') + (bad.has(l.id) ? ' bad' : '') + (g.box ? ' ink' : '') + (g.turned ? ' turned' : '') + (editing === l.id ? ' editing' : '')} tabIndex="0" role="button" aria-label=${'Layer ' + (l.role || l.id)} aria-pressed=${sel.indexOf(l.id) >= 0} data-ink=${g.box ? '1' : '0'} style=${Object.assign({ left: g.on.x + '%', top: g.on.y + '%', width: g.on.w + '%', height: g.on.h + '%' }, g.turned ? { transform: 'rotate(' + l.rotate + 'deg)' } : {})} onPointerDown=${e => down(e, l, 'move')} onFocus=${() => { if (clickFocus.current !== l.id && sel.indexOf(l.id) < 0) setSelIds([l.id]); }}>
+          <span class="st-le-lbl">${l.name && l.role === 'free' ? l.name : l.role || l.type}${l.locked ? ' (locked)' : ''}${heldMark(l) ? ' (held by the campaign rule)' : ''}${l.group ? ' (grouped)' : ''}</span>${movable(l) ? html`<span class="st-le-h" data-h="se" title="Resize (Shift keeps the proportions, Alt from the centre)" onPointerDown=${e => down(e, l, 'resize')}></span>` : null}
+          ${single && !editing ? html`${HANDLES.map(h => html`<span key=${h} class=${'st-le-hh h-' + h} data-h=${h} onPointerDown=${e => down(e, l, 'resize:' + h)}></span>`)}${!isMarkL(l) ? html`<span class="st-le-rot" title="Rotate (Shift: 15 degree steps)" aria-label="Rotate" onPointerDown=${e => down(e, l, 'rotate')}></span>` : null}` : null}
         </div>`; }) : null}
+        ${snapLines.map((g, i) => html`<div key=${'snap' + i} class=${'st-le-snap ' + g.axis} aria-hidden="true" style=${g.axis === 'x' ? { left: g.at + '%' } : { top: g.at + '%' }}></div>`)}
+        ${marquee && marquee.on ? html`<div class="st-le-marquee" aria-hidden="true" style=${{ left: Math.min(marquee.x0, marquee.x1) + '%', top: Math.min(marquee.y0, marquee.y1) + '%', width: Math.abs(marquee.x1 - marquee.x0) + '%', height: Math.abs(marquee.y1 - marquee.y0) + '%' }}></div>` : null}
+        ${editingL && E.TextEditor && layout.stage ? html`<${E.TextEditor} key=${'te-' + editingL.id} layer=${editingL} value=${R.displayedText(Object.assign({}, layout, { baked: [] }), Object.assign({}, editingL, { hidden: false }), wcopy)} layout=${layout} stageW=${box.current ? box.current.getBoundingClientRect().width : layout.stage.w} onCommit=${t => commitEdit(editingL, t)} onCancel=${() => setEditing(null)} />` : null}
+        ${!preview && !editing && !(act.current) && E.ContextToolbar ? html`<${E.ContextToolbar} sel=${selected()} bbox=${selBox} layout=${layout} ro=${false} locks=${a.locks || {}} onPatch=${pt => { const s = selected().filter(movable); if (s.length === 1) setOne(s[0].id, pt); }} onPatchEach=${fn => setEach(l => (l.type === 'text' ? fn(l) : {}))} onDuplicate=${duplicate} onDelete=${remove} onLock=${() => { const s = selected(); const lockIt = !s.some(l => l.locked); const patches = {}; s.forEach(l => { patches[l.id] = { locked: lockIt || undefined }; }); commit(patchMany(layout, patches)); }} onOrder=${reorder} onMore=${() => { if (onMore) onMore(); }} onEditText=${startEdit} onReplace=${replaceImage} onFontOpen=${() => setFontOpen(true)} />` : null}
+        ${fontOpen && E.FontPicker ? html`<div class="st-le-fontwrap" onPointerDown=${e => e.stopPropagation()}><${E.FontPicker} value=${(byId(fontTargets()[0]) || {}).family || ''} brand=${brandFonts} onPick=${pickFont} onPreview=${f => setFontPreview(f == null ? null : { family: f, ids: fontTargets() })} onClose=${() => { setFontOpen(false); setFontPreview(null); }} /></div>` : null}
       </div>
       ${val && !preview ? html`<div class=${'st-le-val' + (val.ok ? '' : ' bad')} role="status">${val.ok ? 'Measured at ' + val.W + 'x' + val.H + ': no blocking issue' + (val.issues.length ? ' (' + val.issues.map(i => i.code.replace(/_/g, ' ')).join(', ') + ')' : '') : 'Measured at ' + val.W + 'x' + val.H + ': ' + val.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')}</div>` : null}
       ${propsSlot ? ReactDOM.createPortal(panels, propsSlot) : panels}
       ${layersSlot ? ReactDOM.createPortal(list, layersSlot) : list}
-      <div class="st-msg-foot st-le-foot"><span class="ov-dim">Drag to move (Shift-click to select several; grouped layers move together; edges snap to the safe area, Alt to pass), the corner to resize the box (the type keeps its size unless "resize scales type" is on), arrow keys nudge (Shift for 2%), Ctrl or Cmd+Z undoes. Type, box and framing are in the Properties tab; the layers in the left panel.</span>${changed ? html`<span class="st-le-dirty" role="status"><${Chip} kind="warn">unsaved layout changes</${Chip}></span>` : null}<button class="btn sm" disabled=${!changed} onClick=${() => onDone(layout)}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${cancel}>Cancel</button></div>
+      <div class="st-msg-foot st-le-foot"><span class="ov-dim">Drag to move (drag across the empty stage to select several; Shift-click adds; edges snap to the stage, the safe area, the grid and the other layers, with a guide drawn; Alt to pass), the handles resize (Shift keeps the proportions, Alt from the centre), the round handle turns, double-click words to type them, arrow keys nudge (Shift for 2%), Ctrl or Cmd+Z undoes, +C/+V copy and paste, +D duplicates, Delete removes. Type, box, effects and framing are in the Properties tab; the layers in the left panel.</span>
+        <span class=${'st-le-draft ' + ((draftSt && draftSt.state) || '')} role="status" aria-live="polite">${!changed ? 'No changes' : !draftSt || draftSt.state === 'pending' ? 'Unsaved' : draftSt.state === 'saving' ? 'Saving draft...' : draftSt.state === 'saved' ? 'Draft saved ' + new Date(draftSt.at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) : 'Draft not saved'}</span>
+        ${changed ? html`<span class="st-le-dirty" role="status"><${Chip} kind="warn">unsaved layout changes</${Chip}></span>` : null}<button class="btn sm" disabled=${!changed} onClick=${save}>Save layout${changed ? '' : ' (unchanged)'}</button><button class="btn sm ghost" onClick=${cancel}>Cancel</button></div>
     </div>`;
   }
   /** The layer list, front to back: select, hide or show, lock or unlock. Used by the editor (working layout) and, when the editor is
       closed, on the current version (each toggle then saves a layout version). */
-  function LayersList({ layers, sel, onPick, onHide, onLock, bad, heldMark, ro }) {
-    return html`<div class="st-le-list" role="list" aria-label="Layers, front to back">${layers.slice().reverse().map(l => html`<span key=${l.id} role="listitem" class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '') + (l.hidden ? ' hidden' : '') + (bad && bad.has(l.id) ? ' bad' : '')}><button class="ov-link st-layer-pick" aria-pressed=${sel.indexOf(l.id) >= 0} title=${(l.role || l.type) + ' ' + l.id + (heldMark && heldMark(l) ? ' - held by the campaign rule' : '')} onClick=${e => onPick(e, l)}>${l.role || l.type}${heldMark && heldMark(l) ? html`<span class="st-layer-held" aria-label="held by the campaign rule">rule</span>` : null}${bad && bad.has(l.id) ? html`<span class="st-dot bad" aria-label="blocking issue"></span>` : null}</button> ${!ro ? html`<button class="st-lock" onClick=${() => onHide(l)} title="Hide or show this element" aria-pressed=${!!l.hidden}>${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => onLock(l)} title="A locked element keeps its place through directions and hand edits" aria-pressed=${!!l.locked}>${l.locked ? 'locked' : 'lock'}</button>` : null}</span>`)}</div>`;
+  function LayersList({ layers, sel, onPick, onHide, onLock, bad, heldMark, ro, onMove, onDuplicate, onDelete, editing }) {
+    // front to back: the first row is the layer painted last. Dragging a row (in the editor) moves it in the paint order.
+    const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
+    const rows = layers.slice().reverse(); const N = layers.length;
+    const dropAt = (target) => { if (!drag || !onMove || drag === target) return; const ti = layers.findIndex(l => l.id === target); onMove(drag, ti); };
+    return html`<div class="st-le-list" role="list" aria-label="Layers, front to back">${rows.map(l => html`<span key=${l.id} role="listitem" class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '') + (l.hidden ? ' hidden' : '') + (bad && bad.has(l.id) ? ' bad' : '') + (over === l.id ? ' over' : '')} draggable=${!!(editing && onMove && !ro && !l.locked)} onDragStart=${e => { setDrag(l.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); } catch (x) {} }} onDragOver=${e => { if (drag) { e.preventDefault(); setOver(l.id); } }} onDragLeave=${() => setOver(o => (o === l.id ? null : o))} onDrop=${e => { e.preventDefault(); dropAt(l.id); setDrag(null); setOver(null); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>${editing && onMove && !ro ? html`<span class="st-layer-grip" aria-hidden="true" title="Drag to change the paint order">::</span>` : null}<button class="ov-link st-layer-pick" aria-pressed=${sel.indexOf(l.id) >= 0} title=${(l.role || l.type) + ' ' + l.id + (heldMark && heldMark(l) ? ' - held by the campaign rule' : '')} onClick=${e => onPick(e, l)}>${l.name && (l.role === 'free' || l.role === 'device' || l.role === 'image') ? l.name : l.role || l.type}${heldMark && heldMark(l) ? html`<span class="st-layer-held" aria-label="held by the campaign rule">rule</span>` : null}${bad && bad.has(l.id) ? html`<span class="st-dot bad" aria-label="blocking issue"></span>` : null}</button> ${!ro ? html`<button class="st-lock" onClick=${() => onHide(l)} title="Hide or show this element" aria-pressed=${!!l.hidden}>${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => onLock(l)} title="A locked element keeps its place through directions and hand edits" aria-pressed=${!!l.locked}>${l.locked ? 'locked' : 'lock'}</button>${editing && onDuplicate && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord" onClick=${() => onDuplicate(l)} title="Duplicate this layer" aria-label=${'Duplicate ' + (l.role || l.type)}>dup</button>` : null}${editing && onDelete && !l.locked && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord" onClick=${() => onDelete(l)} title="Delete (the approved words are hidden instead)" aria-label=${'Delete ' + (l.role || l.type)}>del</button>` : null}${N > 1 && editing && onMove && !ro && !l.locked ? html` <button class="st-lock st-lord" onClick=${() => onMove(l.id, Math.min(N - 1, layers.findIndex(x => x.id === l.id) + 1))} title="Bring forward" aria-label=${'Bring ' + (l.role || l.type) + ' forward'}>up</button><button class="st-lock st-lord" onClick=${() => onMove(l.id, Math.max(0, layers.findIndex(x => x.id === l.id) - 1))} title="Send backward" aria-label=${'Send ' + (l.role || l.type) + ' backward'}>dn</button>` : null}` : null}</span>`)}</div>`;
   }
 
   /* ------------------------------------------------------------ dialogs */
@@ -2370,6 +2515,8 @@
     const [conflict, setConflict] = useState(null);
     // S17: the question a change to an earlier choice asks before anything is written (update the work built on it, keep it, cancel)
     const [impactQ, setImpactQ] = useState(null);
+    // S17: the layers selected on the canvas (an Art Director direction about the asset is about them) and the assets resize made
+    const [selLayers, setSelLayers] = useState([]); const [resized, setResized] = useState({});
     const viewRef = useRef('brief');
     const stepping = useRef(new Set()); const pidRef = useRef(null); pidRef.current = pid;
     // the activity panel: a clock for elapsed times while anything runs or just finished, and a poll of the jobs this browser
@@ -2768,9 +2915,11 @@
       } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message + (e.requestId ? ' (request ' + e.requestId + ')' : '') + '. Measure again to retry.', true); return false; }
     };
     /* layout versions go on the latest revision; if the asset moved on, the layout is re-sent only when the newer version did not change the layout too */
-    const putLayout = async (as, layout, baseVid, note) => {
+    const putLayout = async (as, layout, baseVid, note, copyPatch) => {
       const fresh = (((pRef.current || {}).assets || []).find(x => x.id === as.id)) || as;
-      try { await call('/studio/version', { asset: as.id, revision: fresh.revision, layout, kind: 'layout', note }); await reload(); return true; }
+      // words typed on the canvas for the approved copy travel with the layout as one version (the copy approval drops, as for any edit)
+      const withCopy = copyPatch && Object.keys(copyPatch).length ? { copy: Object.assign({}, (current(fresh) || {}).copy || {}, copyPatch) } : {};
+      try { await call('/studio/version', Object.assign({ asset: as.id, revision: fresh.revision, layout, kind: 'layout', note }, withCopy)); await reload(); return true; }
       catch (e) {
         if (e.status !== 409 || e.code !== 'conflict') throw e;
         const d = await reload(); const as2 = d && d.assets.find(x => x.id === as.id); if (!as2) throw e;
@@ -2825,7 +2974,9 @@
       } catch (e) { toastMsg('Mark variant not changed: ' + e.message, true); return false; }
     };
     /* a measured arrangement from the variations: a layout version named after it, no render */
-    const layoutVariant = (as, layout, baseVid, name) => guard('variant:' + as.id, async () => { try { const ok = await putLayout(as, layout, baseVid, 'layout variation: ' + name + ' (no render)'); if (ok) toastMsg('Layout changed to "' + name + '" - a new version, no render; the words are unchanged'); } catch (e) { fail(e, 'The layout was not saved', () => layoutVariant(as, layout, baseVid, name)); } });
+    const layoutVariant = (as, layout, baseVid, name, kind) => guard('variant:' + as.id, async () => { try { const ok = await putLayout(as, layout, baseVid, (kind === 'style' ? 'style variation: ' : 'layout variation: ') + name + ' (no render)'); if (ok) toastMsg((kind === 'style' ? 'Style changed to "' : 'Layout changed to "') + name + '" - a new version, no render; the words are unchanged'); } catch (e) { fail(e, 'The layout was not saved', () => layoutVariant(as, layout, baseVid, name, kind)); } });
+    /** resize to platform formats: one new asset per format, from the composition as it stands; nothing generated */
+    const resizeAsset = (as, presets) => guard('resize:' + as.id, async () => { try { setBusy('Resizing ' + as.title); const r = await call('/studio/resize', { asset: as.id, presets }); await reload(); setResized(m => Object.assign({}, m, { [as.id]: (r.made || []) })); toastMsg((r.made || []).length + ' resized version' + ((r.made || []).length === 1 ? '' : 's') + ' made in ' + as.family + ': nothing generated' + ((r.skipped || []).length ? '; not made: ' + r.skipped.map(x => x.format + ' (' + x.why + ')').join(', ') : '')); } catch (e) { fail(e, 'The resize did not run'); } finally { setBusy(''); } });
     /* the Art Director reviews the version on request: the tile is composed exactly as it exports, then one model call reads it */
     const reviewNow = (as) => guard('inspect:' + as.id, async () => {
       try {
@@ -2836,7 +2987,7 @@
         if (j && j.state === 'done') toastMsg('Review in: an opinion, it approves nothing');
       } catch (e) { fail(e, 'The review did not start', () => reviewNow(as)); }
     });
-    const saveLayout = async (as, layout, baseVid, note) => { try { await putLayout(as, layout, baseVid || as.current, note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : 'layout edited by hand'); } catch (e) { fail(e, 'The layout was not saved', () => saveLayout(as, layout, baseVid, note)); } };
+    const saveLayout = async (as, layout, baseVid, note, copyPatch) => { const words = copyPatch && Object.keys(copyPatch).length; try { await putLayout(as, layout, baseVid || as.current, note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : words ? 'layout and words (' + Object.keys(copyPatch).join(', ') + ') edited on the canvas' : 'layout edited by hand', copyPatch); } catch (e) { fail(e, 'The layout was not saved', () => saveLayout(as, layout, baseVid, note, copyPatch)); } };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
     const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)) }); };
@@ -2866,10 +3017,10 @@
     /* the two creation modes: a finished creative is revised by regenerating the whole piece, and leaves the mode only as a derived editable asset */
     const regenerateFinished = (as, o) => guard('render:' + as.id, async () => { try { const r = await call('/studio/finished/regenerate', { asset: as.id, copy: o.copy, instruction: o.instruction, size: o.size }); const d = await reload(); if (r.job) pump(d); } catch (e) { fail(e, 'The regeneration did not start'); } });
     const deriveEditable = (as, o) => guard('derive:' + as.id, async () => { try { const r = await call('/studio/derive', { asset: as.id, to: 'editable', regenerate: !!(o && o.regenerate) }); const d = await reload(); if (r.jobs && r.jobs.length) pump(d); setNotice({ kind: 'info', title: 'Derived an editable asset.', text: r.note || 'The words and the mark are live layers again; the finished original is untouched.', actions: r.asset ? [{ label: 'Open the editable copy', fn: () => { setSelAsset(r.asset); setTab('copy'); setView('asset', true); } }] : [] }); } catch (e) { fail(e, 'The editable asset was not derived'); } });
-    const areaEdit = (as, o) => guard('render:' + as.id, async () => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (o.kind === 'area' ? 'area edit: ' : o.kind === 'background' ? 'background swap: ' : 'restyle: ') + o.instruction.slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (o.kind === 'area' ? 'Editing the marked area of ' : o.kind === 'background' ? 'Changing the background of ' : 'Restyling ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e, 'The edit did not start'); } });
+    const areaEdit = (as, o) => guard('render:' + as.id, async () => { try { const v = current(as); await job('render', { edit: true, editKind: o.kind, area: o.area, instruction: o.instruction, aspect: as.format, size: o.size, note: (EDIT_NOTE[o.kind] || 'edit: ') + (o.instruction || 'the marked area').slice(0, 60) }, as.id, 'area:' + as.id + ':' + v.id + ':' + Date.now(), (EDIT_DOING[o.kind] || 'Editing ') + as.title + ' at ' + o.size); pump(await reload()); } catch (e) { fail(e, 'The edit did not start'); } });
     const filePreservation = async (m) => { try { await call('/studio/preservation', m); await reload(); } catch (e) { toastMsg('Preservation not filed: ' + e.message, true); } };
     const note = async (text, tgt) => { try { await call('/studio/note', { project: pRef.current.id, text, target: tgt }); await reload(); } catch (e) { fail(e, 'The note was not recorded'); } };
-    const directTeam = (text, tgt) => guard('revise:' + pidRef.current, async () => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text }, null, 'revise:' + pRef.current.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { const first = j.result.changed[0]; setNotice({ kind: 'success', title: j.result.changed.length + ' adaptation' + (j.result.changed.length === 1 ? '' : 's') + ' made', text: 'New assets in the family, the words kept.', actions: [{ label: 'Open the first', fn: () => { setSelAsset(first); setTab('copy'); setView('asset', true); } }] }); } } catch (e) { fail(e, 'The direction was not sent'); } });
+    const directTeam = (text, tgt) => guard('revise:' + pidRef.current, async () => { try { const j = await job('revise', { target: tgt, asset: tgt !== 'set' && a ? a.id : undefined, instruction: text, layers: tgt === 'asset' && selLayers.length ? selLayers : undefined }, null, 'revise:' + pRef.current.id + ':' + Date.now(), 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' && a ? 'the ' + a.family : (a || {}).title || 'the asset')); const d = await reload(); if (j && j.result && j.result.kind === 'adapt' && j.result.changed && j.result.changed.length && d) { const first = j.result.changed[0]; setNotice({ kind: 'success', title: j.result.changed.length + ' adaptation' + (j.result.changed.length === 1 ? '' : 's') + ' made', text: 'New assets in the family, the words kept.', actions: [{ label: 'Open the first', fn: () => { setSelAsset(first); setTab('copy'); setView('asset', true); } }] }); } } catch (e) { fail(e, 'The direction was not sent'); } });
     /* the paid remedies of the impact list: one revise call on that asset, locked fields kept by the stage itself */
     const reviseFromImpact = async (x, r) => { const ins = r.remedy === 'readapt' ? 'The master this was adapted from has changed. Bring this asset\'s words in line with the master\'s current version, fitted to this channel and format. Keep the locked fields.' : 'The creative strategy was confirmed after this asset was made. Bring the words in line with the confirmed strategy (proposition, audience, tone). Keep the locked fields.'; await job('revise', { target: 'asset', asset: x.asset, instruction: ins }, null, 'revise:' + x.asset + ':' + r.code + ':' + x.version, (r.remedy === 'readapt' ? 'Re-adapting ' : 'Revising ') + x.title); await reload(); };
     const pickAlternative = async (assetId, field, option) => { try { const as = pRef.current.assets.find(x => x.id === assetId); if (!as) return; await call('/studio/version', { asset: as.id, revision: as.revision, copy: { [field]: option }, note: 'chose an alternative ' + field }); await reload(); setSelAsset(as.id); } catch (e) { if (e.status === 409) await reload(); fail(e, 'The alternative was not applied'); } };
@@ -3003,7 +3154,7 @@
     else if (view === 'export') centre = html`<${ExportView} p=${p} head=${headOf('review', tabsFor('review'))} flow=${flow} state=${exportState} onGo=${goStage} onExport=${doExport} onClickup=${ready => setDialog({ kind: 'clickup', ready })} />`;
     else if (view === 'brand') centre = html`<div class="st-centre-pad"><${BrandView} p=${p} tick=${ctxTick} /></div>`;
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
-    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('design', Object.assign({ compact: true }, tabsFor('design')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} kit=${kit} slot=${slot} railSlot=${railSlot} preview=${preview} setPreview=${setPreview} onBrand=${() => setView('brand', true)} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} busy=${busy} /></div>`; }
+    else if (a) { const i = p.assets.indexOf(a); centre = html`<div class="st-centre-pad st-refine"><${StageHead} ...${headOf('design', Object.assign({ compact: true }, tabsFor('design')))}>${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>` : null}</${StageHead}>${jobsLine}<${AssetView} key=${a.id} p=${p} a=${a} kit=${kit} slot=${slot} railSlot=${railSlot} preview=${preview} setPreview=${setPreview} onBrand=${() => setView('brand', true)} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} onSelection=${setSelLayers} onResize=${resizeAsset} resized=${resized[a.id]} busy=${busy} /></div>`; }
     else centre = Staged('design', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to design yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, then write the copy.' : 'Write the copy first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length && !p.directions.some(d => d.chosen) ? 'directions' : 'copy')}>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Go to Direction' : 'Go to Copy'}</button>` : null}</div>`);
 
     const insTabs = [['properties', 'Properties'], ['copy', 'Copy'], ['quality', 'Quality'], ['partner', 'Art Director'], ['brand', 'Brand'], ['versions', 'Versions']];
@@ -3012,7 +3163,7 @@
     const early = !!p && !inRefine && view !== 'brand' && view !== 'context' && (['brief', 'objectives', 'strategy', 'directions'].indexOf(stage) >= 0 || (guided && stage === 'copy' && !p.assets.length && (view === 'copywrite' || view === 'copy')));
     const showCtx = early && !!F;
     const showAside = !!p && (inRefine || showCtx || (stage !== 'copy' && !early && partnerOpen));
-    const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${inRefine ? reviewNow : null} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} />` : null;
+    const partnerEl = p ? html`<${Partner} p=${p} a=${a} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${inRefine ? reviewNow : null} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} selLayers=${inRefine ? selLayers : []} />` : null;
     const accent = kit && kit.palette && /^#[0-9a-fA-F]{6}$/.test(kit.palette.primary || '') ? kit.palette.primary : null;
     const rootRef = useRef(null); const [headH, setHeadH] = useState(0);
     useEffect(() => { const root = rootRef.current; const head = root && root.querySelector('.st-head'); if (!head || typeof ResizeObserver === 'undefined') return; const ro = new ResizeObserver(() => { const h = Math.round(head.getBoundingClientRect().height); setHeadH(cur => (h && h !== cur ? h : cur)); }); ro.observe(head); return () => ro.disconnect(); }, [!!p, inRefine]);

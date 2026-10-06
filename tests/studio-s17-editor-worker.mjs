@@ -113,6 +113,19 @@ await T.t('remove and relight are imagery edits by description: the area said in
   ok(/Change only the lighting: late afternoon sun from the left/.test(pr2), pr2.slice(0, 200));
 });
 
+await T.t('a removal is said by its marked area alone; without an area it is refused before any image call, and an area edit still needs words', async () => {
+  const g0 = gem.length;
+  const j = (await call('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { edit: true, editKind: 'remove', area: { x: 5, y: 5, w: 20, h: 20 }, aspect: '1:1', size: '1K' }, idem: 'rm2' })).body.job;
+  eq((await step(j.id)).state, 'done'); const pr = gem[gem.length - 1].contents.slice(-1)[0].parts.filter(x => x.text).map(x => x.text).join(' ');
+  ok(/Remove the object in that area and fill the space/.test(pr), pr.slice(0, 300));
+  const n = gem.length;
+  const j2 = (await call('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { edit: true, editKind: 'remove', aspect: '1:1', size: '1K' }, idem: 'rm3' })).body.job;
+  const r2 = await step(j2.id); eq(r2.state, 'failed'); ok(/^area_required/.test(r2.error || ''), r2.error);
+  const j3 = (await call('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { edit: true, editKind: 'area', area: { x: 5, y: 5, w: 20, h: 20 }, aspect: '1:1', size: '1K' }, idem: 'ar3' })).body.job;
+  const r3 = await step(j3.id); eq(r3.state, 'failed'); ok(/^instruction_required/.test(r3.error || ''), r3.error);
+  eq(gem.length, n, 'neither refused edit reached the image model'); ok(n === g0 + 1, 'one image call in all');
+});
+
 await T.t('an image for a format the image model has no ratio for asks for the nearest one it has', async () => {
   const g = await get(P); const link = g.assets.find(a => a.format === '1.91:1');
   const j = (await call('POST', '/studio/job', { project: P, asset: link.id, stage: 'render', input: { prompt: 'a regional road at dusk', aspect: '1.91:1', size: '1K' }, idem: 'asp1' })).body.job;

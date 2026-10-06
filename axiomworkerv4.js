@@ -11323,7 +11323,9 @@ async function stRenderJob(env, job, pair, done, fail) {
   }
   const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' || inp.editKind === 'remove' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
-  if (areaEdit && !areaEdit.instruction.trim()) return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
+  // a removal is said by the marked area alone ("the object in that area"); every other edit needs the words of the change
+  if (areaEdit && !areaEdit.instruction.trim() && areaEdit.kind !== 'remove') return done('failed', { error: 'instruction_required: say what to change in the area (not retried)' });
+  if (areaEdit && areaEdit.kind === 'remove' && !areaEdit.area) return done('failed', { error: 'area_required: mark the area that holds what to remove (not retried)' });
   if (job.lease) await job.lease(300000);
   const what = areaEdit ? 'the ' + areaEdit.kind + ' edit' : finished ? 'the finished creative (words and mark painted)' : inp.approach === 'artwork' ? 'the hybrid artwork' : inp.region && inp.region !== 'bg' ? 'the ' + (inp.regionRole || 'region') + ' image' : 'the background image';
   if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' attached' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: references.length });
