@@ -1479,3 +1479,34 @@ editable layout or a finished Gemini creative.
   with its reason. Uploads are text (.txt, .md, .html); PDFs and Word files go through `tools/engine-ingest.py` or are
   pasted. The first 80 paragraphs are read; later ones are listed as not placed.
 
+## 39. S16 - the Brief Intelligence and Creative Response Engine (build studio-p32, page r10)
+
+Asked for: an engine that understands any input - a written brief, today's brief, a situation, breaking news, a competitor
+or political statement, an article, a social post, a screenshot, documents, a URL, and what Axiom already knows - converts
+it into a strategic brief, and never jumps from raw material to copy; with situation intelligence (what happened, why it
+matters to this client, should they respond), generated and ranked objectives, key messages, topic and issue relevance,
+brief cleaning, relevance-based retrieval, a comparison with existing knowledge, response strategies including not
+responding, genuinely different creative directions with visual narratives, two production modes, multi-version
+production, an Understanding panel before generation, a learning loop, and traceability from source to output.
+
+The pipeline as built: **input** (paste, link, file or screenshot, From Axiom) -> **understand** (input type, every brief
+field with its basis) -> **situation** (what, why it matters to this client, respond yes / no / monitor) -> **clean**
+(paragraphs kept or set aside with a class) -> **retrieve** (Mind, live narratives, alerts, decisions, earlier choices,
+sentiment, facts - by relevance, each with an id) -> **topics and issues** (high / potential / not) -> **compare**
+(new, known, supporting, contradicting, gaps, a Creative Intelligence Summary) -> **objectives** (ranked) -> **key
+messages** -> **response strategy** (one recommended) -> **directions** (approach, visual narrative, route) -> the team
+chooses -> **production** (copy and layouts, or a finished painting, or several narratives as variants; the message kit for
+the words that are not tiles) -> approval -> learning (every choice, rejection, edit and verdict logged and read by the
+next analysis for the client).
+
+Traceability: every direction carries `trace {source, kept paragraphs, evidence, objective, message, strategy}`; every
+version produced from it carries the same in `context.trace` with the direction; every kit piece carries it with its own
+checked evidence ids. The page shows it as a **Traceable to** line.
+
+Limits, stated. The reading is one model's: the panel shows every decision with its basis and the kept / set-aside table so
+a person can disagree, and nothing is produced until a person chooses. Performance data (CTR, conversions, engagement) is
+not yet read into the comparison - the archive holds campaign rows per client but their fields differ by platform; it is
+the next slice. Video scripts and motion ideas are text: no video is produced. A paywalled page that the full-text reader
+cannot reach is refused with the attempts, never guessed. Uploads are images and PDFs up to 8 MB; Word files are pasted or
+go through `tools/engine-ingest.py`.
+

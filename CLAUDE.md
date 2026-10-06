@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13, `?v=r8` since S14, `?v=r9` since S15).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13, `?v=r8` since S14, `?v=r9` since S15, `?v=r10` since S16).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -2141,6 +2141,101 @@ narratives with Produce as an editable layout / as a finished creative,
 claims, knowledge, risks and gaps, and the kept / set-aside table); the
 Direction cards show each route. Harnesses: `tests/studio-s15-worker.mjs`
 (5), `tests/studio-s15-browser.mjs` (4).
+
+**The Brief Intelligence and Creative Response Engine (S16; build
+`2026-10-06.studio-p32`, page `?v=r10`; `CREATIVE-STUDIO.md` s.39).** A brief
+rarely arrives as a brief, so the engine never goes from material to copy: it
+reads, then the team chooses, then production follows, and every output is
+traceable back. **Material in** (the Analyse box's four routes): paste (a
+brief, today's daily brief, an article, a statement, a social post, a
+situation), a link (`POST /studio/source/url {project, url}` - `axUrlProblem`,
+then `fullText` light; 422 `unreadable` with the attempts when a page cannot be
+read), a file or screenshot (`POST /studio/source {fileB64, mime}` - PNG / JPEG
+/ WebP / GIF / PDF up to 8 MB, kept as it came in R2 `studio/<p>/sources/`,
+column `studio_sources.file`; the analyse stage first has the extraction model
+read it into paragraphs - `stTranscribeSource`, the image attached or the PDF
+as a `document` block, which `stClaude` now takes as `docs` - and then analyses
+with the image in view), or **From Axiom** (`GET /studio/intake/feed?ns=`, read:
+the client's Sentinel alerts, its live narratives, today's news rows on its
+issues, the daily brief; `POST /studio/source/item {project, type news|alert|
+narrative|brief, id}`). A URL pasted at intake goes the link route. **The
+reading** (`stAnalyseStage`, the creative model at high effort, one call): input
+type (`ST_INPUT_TYPES`); understanding - every brief field (client, campaign,
+situation, objective, topic, issue, audience, platforms, deliverable, key
+message, CTA, tone, timing, urgency, mandatory, restrictions, compliance,
+sources, evidence, stakeholders), each `stated` / `inferred` / `knowledge`; the
+situation (what happened, why it matters to THIS client, opportunity kinds
+`ST_OPPORTUNITY`, respond yes / no / monitor - not responding is a legitimate
+recommendation); paragraphs kept or set aside with a class (`ST_PARA_CLASSES`);
+topics and issues judged high / potential / not against the client's issue
+lexicon (`CLIENT_ISSUES` ids only); a comparison with what Axiom knows - new,
+known, supports, contradicts, campaign affected, narrative emerging / existing,
+already said, public discussion, gaps, missing context, conflicts, brief
+improvements - and a Creative Intelligence Summary; three to five ranked
+objectives (`ST_OBJ_KINDS`) each with key messages (primary, supporting,
+evidence, proof, takeaway, emotion, reaction, CTA; ids `O1`, `M1.1`); response
+strategies (`ST_STRATEGIES`: direct, indirect, evidence, values, rapid,
+education, campaign, none) with exactly one recommended; three or four creative
+directions, each an approach (`ST_APPROACHES`, seventeen), core narrative,
+relevance, audience, objective / message / strategy ids, desired response,
+hook, visual idea, platforms, risks, evidence, three headlines, two captions, a
+visual format (`ST_VISUAL_FORMATS`), a medium, a full visual narrative
+(`ST_VISUAL_FIELDS`: scene, art direction, composition, subject, environment,
+camera, lighting, typography, hierarchy, colour, brand, data visualisation,
+emotion, motion, dimensions, text and CTA placement) and its route (editable or
+finished); a recommendation; the next step (copy / directions / brief /
+`decide` when it recommends not responding). **Knowledge is retrieved by
+relevance** (`stIntelKnowledge`), each item with an id the model may cite: K
+Mind passages (creative shelf), N live narratives on the client's issues, A
+Sentinel alerts (14 days), D recorded decisions (approvals and rejections with
+reasons, engine outcomes), H the team's earlier choices in this engine, S
+sentiment toward the client's own entities, F approved facts. Every cited id,
+paragraph, issue, objective, message and strategy is checked against what was
+given; the whole record is D1 `studio_intel` (`GET /studio/intel?project=`,
+and `intel` on `/studio/get` with the knowledge items as labels), the brief
+carries a compact `analysis` (v 2) and `intel {id, selected, decisions,
+noResponse}`, the kept paragraphs are the source's focus as in S15, and each
+direction is a `studio_directions` row with `approach`, `format`,
+`visualNarrative`, `headlines`, `captions`, `route` and a `trace {intel,
+source, sources, evidence, objective, message, strategy}`. **Choosing**: `POST
+/studio/intel/select {project, objective, message, strategy}` (full) writes the
+brief's objective, message and action (and an empty audience) from the choice
+and records it; a message under another objective is 400. `POST
+/studio/intel/decision {project, kind no_response|respond_anyway|
+reject_objective|reject_message|reject_strategy|reject_direction, ref, reason}`
+needs a reason. Choices, decisions, direction choices, approvals and rejections
+with reasons, kit verdicts and kit edits go to D1 `studio_intel_log` (the
+learning loop: the next analysis for the client reads them as H, and the
+engine outcomes as D). **Production**: the copy stage reads the chosen
+objective, message and strategy (`stAnalysisText`) and the whole direction
+(`stDirectionText`: approach, format, hook, audience, response, headlines,
+risks, visual narrative, route), and every version it writes carries
+`context.trace`; `variant:true` puts a direction's assets in the family
+`Narrative: <title>` and `creationMode` lets a variant keep its own route, so
+several narratives are produced side by side and compared on the Board. **The
+message kit**: stage `kit {direction, kinds}` (`stKitStage`, `ST_TEXT_KINDS`:
+talking points, media response, statement, video script, voiceover, email,
+landing page, Google ads, carousel, quote cards, LinkedIn, Meta, X, TikTok,
+long and short captions, hooks, on-screen text) writes D1 `studio_texts`, each
+piece traced (evidence ids checked) and checked (figures not in the facts, brief
+or kept source `unsupported`; banned terms); `GET /studio/texts?project=`,
+`POST /studio/text/update {id, body, revision}` (re-checked, 409 on a stale
+revision), `POST /studio/text/verdict {id, verdict approve|reject, reason}`
+(an engine outcome, surface `studio_kit`). **In-app**: the Analyse box (Paste /
+Link / File or screenshot / From Axiom); **Axiom Understanding** inside the
+Brief analysis panel - the chips (input type, urgency, respond), What happened /
+Why it matters / Should they respond (Record: no response, Respond after all),
+the Creative Intelligence Summary, Understanding with each field's basis,
+Topics in three columns, Compared with what Axiom knows (with the knowledge
+retrieved and what was cited), Objectives ranked / Key messages / Response
+strategy as three columns of choices with **Use these choices in the brief**
+and **Accept Axiom's recommendation**, the recommendation, Creative directions
+(chips, hook, headlines, the visual narrative on demand, compare, produce,
+set aside), a comparison table and **Produce N as variants**, the message-kit
+picker, and Information ignored; the Copy step's **Message kit** tab (edit,
+copy, approve and reject with a reason) and a **Traceable to** line on every
+produced piece. Harnesses: `tests/studio-s16-worker.mjs` (8),
+`tests/studio-s16-browser.mjs` (4).
 
 Phase 1, the ground:
 
