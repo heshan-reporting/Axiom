@@ -6883,9 +6883,9 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
-const AXIOM_BUILD = '2026-10-06.studio-p30';
+const AXIOM_BUILD = '2026-10-06.studio-p31';
 let STUDIO_READY = false;
-const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence'];   // render and echo run in stJobRun; the production stages in stStageRun
+const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
 const ST_MAX_ATTEMPTS = 3;
 const ST_PARTS = ['copy', 'design'];
@@ -7904,10 +7904,18 @@ async function stExtractStage(env, job, p, log) {
   return { source: src.id, claims: claims.length, figures: extract.figures, quotes: extract.quotes, unverified: extract.unverified, proposed, model };
 }
 async function stLedger(env, project) {
-  const rows = (await env.MIND_DB.prepare('SELECT id,name,claims,passages,text FROM studio_sources WHERE project=? ORDER BY created').bind(project).all()).results || [];
-  const claims = []; let allText = '';
-  rows.forEach((r, i) => { const pre = rows.length > 1 ? 's' + (i + 1) + '.' : ''; pjs(r.claims, []).forEach(c => claims.push(Object.assign({}, c, { id: pre + c.id, source: r.id, sourceName: r.name }))); allText += ' ' + (r.text || ''); });
-  return { claims, sources: rows.length, text: allText.trim(), passages: rows.reduce((acc, r) => Object.assign(acc, pjs(r.passages, {})), {}) };
+  const rows = (await env.MIND_DB.prepare('SELECT id,name,claims,passages,text,extract FROM studio_sources WHERE project=? ORDER BY created').bind(project).all()).results || [];
+  const claims = []; let allText = ''; const passages = {};
+  // a source the brief analysis has read carries its focus: only the paragraphs that concern the client reach the later
+  // stages (a pasted daily brief covers every client; the rest of it is set aside, never written from)
+  rows.forEach((r, i) => {
+    const pre = rows.length > 1 ? 's' + (i + 1) + '.' : ''; const ps = pjs(r.passages, {}); const ex = pjs(r.extract, {}) || {};
+    const focus = Array.isArray(ex.focus) ? ex.focus.filter(k => ps[k] != null) : null;
+    pjs(r.claims, []).forEach(c => { if (!focus || !c.passage || focus.indexOf(c.passage) >= 0) claims.push(Object.assign({}, c, { id: pre + c.id, source: r.id, sourceName: r.name })); });
+    if (focus) { focus.forEach(k => { passages[k] = ps[k]; }); allText += ' ' + focus.map(k => ps[k]).join('\n\n'); }
+    else { Object.assign(passages, ps); allText += ' ' + (r.text || ''); }
+  });
+  return { claims, sources: rows.length, text: allText.trim(), passages };
 }
 // -- checks: figures, units, quotations, banned terms, limits and fit - deterministic, advisory, never "verified" --
 function stWrapLines(text, charsPerLine) {
@@ -8390,6 +8398,103 @@ async function stSequenceStage(env, job, p, log) {
   await log('out', 'sequence "' + name + '": ' + items.length + ' assets, no renders spent');
   return { sequence: seqId, assets: items.map(x => x.asset), model: r.model };
 }
+// -- S15: the brief intake engine -------------------------------------------------------------------------------
+// Whatever arrives - a written brief, a news article, an uploaded document, or the whole of today's intelligence brief
+// pasted in - is read paragraph by paragraph against what the agency knows about THIS client: its campaigns, its approved
+// facts, its banned terms, its voice, and what the Mind holds for it. The answer separates what concerns the client from
+// what does not (each paragraph kept or set aside with the reason), matches a campaign with a confidence, checks every claim
+// against the approved facts (matches / conflicts / new and unverified), proposes the brief, copy angles and visual
+// narratives - each narrative naming whether it is an editable composition or a finished Gemini artwork - and names the
+// next step. Nothing is approved or produced here: the narratives become directions to choose from, the proposed brief
+// fills only empty fields (marked as the Studio's proposal), and the claims enter the ledger through the source's passages.
+const ST_ANALYSE_KINDS = ['brief', 'article', 'daily', 'release', 'upload', 'other'];
+async function stAnalyseStage(env, job, p, log) {
+  const inp = job.input || {};
+  const src = inp.source ? await env.MIND_DB.prepare('SELECT * FROM studio_sources WHERE id=? AND project=?').bind(stClean(inp.source, 24), p.id).first() : null;
+  if (!src) throw new Error('no_source: analyse needs a source added to this project (not retried)');
+  const passages = pjs(src.passages, {}); const keys = Object.keys(passages);
+  if (!keys.length) throw new Error('empty_source: the source has no text to read (not retried)');
+  if (job.lease) await job.lease(240000);
+  if (log.phase) await log.phase('reading', 'reading ' + keys.length + ' paragraph' + (keys.length === 1 ? '' : 's') + ' of "' + stStr(src.name, 60) + '" against the client');
+  const cc = await stCompileContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'analyse', refs: null, art: 0 });
+  const ctx = cc.ctx; const kit = ctx.kit || {};
+  const camps = (kit.campaigns || []).filter(c => c && c.id && c.active !== false);
+  const facts = (kit.facts || []).filter(f => f && f.text && f.status !== 'pending').slice(0, 60).map((f, i) => ({ id: 'F' + (i + 1), text: stStr(f.text, 300), campaign: f.campaign || '', source: stStr(f.source, 120) }));
+  const bannedRows = (kit.banned || []).map(b => typeof b === 'string' ? { term: b } : b).filter(b => b && b.term).slice(0, 40);
+  const banned = bannedRows.map(b => b.term + (b.allowNegated ? ' (fine when negated)' : ''));
+  // what the Mind holds for this client (and the agency's shared knowledge), retrieved on the text itself
+  let know = [];
+  try { const q = keys.slice(0, 6).map(k => passages[k]).join(' ').slice(0, 1500); const hits = await mindRetrieve(env, p.ns, q, 6, { creative: true }); know = hits.filter(h => h && h.meta).slice(0, 8).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || h.meta.kind || 'knowledge', 120), kind: stStr(h.meta.kind, 30), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || '', 600) })); } catch (e) {}
+  await log('info', 'client context: ' + ctx.client + ', ' + camps.length + ' campaign' + (camps.length === 1 ? '' : 's') + ', ' + facts.length + ' approved facts, ' + banned.length + ' banned terms, ' + know.length + ' knowledge passage' + (know.length === 1 ? '' : 's') + ' retrieved');
+  const sys = 'You are the strategy lead of an Australian political communications agency, working for ' + ctx.client + ' only. You receive material - a client brief, a news article, an uploaded document, or a whole daily intelligence brief that covers many clients - and you decide what in it concerns ' + ctx.client + ', what does not, and what the agency should make from it. Read paragraph by paragraph (ids P1..Pn): keep a paragraph when it bears on this client\'s issues, campaigns, people or opponents; set it aside otherwise and say why in a few words (another client, unrelated news, boilerplate). Match the material to one of the client\'s campaigns by id when it fits (with a confidence 0-1), else null. Check every factual claim you would use against the APPROVED FACTS by id: matches_fact, conflicts_fact (name the fact) or new_unverified; never present an unverified figure as fact. Use the KNOWLEDGE passages by id where they inform the angle. Respect the banned terms and the voice. Propose the brief (objective, audience, message, action, channels from linkedin/facebook/instagram/x, deliverable copy|visual|set), three copy angles (each a headline and one supporting line in the client voice, and why), and two to four visual narratives that differ in medium - each says route "editable" (generated imagery with the words and the exact mark composed as live, editable layers: best when the words may change, when figures must be exact, or when several formats are needed) or route "finished" (the image model paints the whole piece, words and mark included: best for a single striking hero image whose words are settled), and why that route. Then name the next step: "copy" when the brief is clear enough to write, "directions" when the idea is still open, "brief" when something essential is missing (say what). Return strict JSON only: {"summary":"","kind":"brief|article|daily|release|other","relevant":[{"p":"P1","why":""}],"filtered":[{"p":"P2","why":""}],"campaign":{"id":null,"confidence":0,"why":""},"brief":{"objective":"","audience":"","message":"","action":"","channels":[],"deliverable":"set","tone":""},"claims":[{"text":"","p":"P1","status":"matches_fact|conflicts_fact|new_unverified","fact":"F1"}],"knowledge":[{"k":"K1","use":""}],"angles":[{"headline":"","line":"","why":""}],"narratives":[{"name":"","idea":"","medium":"photo-documentary|photo-cinematic|editorial|typographic|illustration|composite|infographic|carousel","route":"editable|finished","composition":"","imagery":"","headline":"","why":""}],"risks":[""],"gaps":[""],"next":{"stage":"copy|directions|brief","why":""}}' + AX_UNTRUSTED_RULE;
+  const user = 'CLIENT CONTEXT (voice, rules, wording, facts in force):\n' + stStr(ctx.text, 9000)
+    + '\n\nCAMPAIGNS (' + camps.length + '):\n' + (camps.map(c => '- ' + c.id + ': ' + stStr(c.name, 80) + (c.tone ? ' | tone: ' + stStr(c.tone, 160) : '') + (c.notes ? ' | ' + stStr(c.notes, 240) : '') + (c.identity ? ' | identity: ' + stStr(c.identity, 160) : '')).join('\n') || '(none recorded)')
+    + '\n\nAPPROVED FACTS (' + facts.length + '):\n' + (facts.map(f => '[' + f.id + '] ' + f.text + (f.campaign ? ' (campaign ' + f.campaign + ')' : '') + (f.source ? ' - ' + f.source : '')).join('\n') || '(none)')
+    + '\n\nBANNED TERMS: ' + (banned.join(', ') || '(none)')
+    + '\n\nKNOWLEDGE (' + know.length + '):\n' + (know.map(k => '[' + k.id + '] ' + k.title + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text).join('\n') || '(nothing retrieved)')
+    + '\n\nCURRENT BRIEF: ' + ['objective', 'audience', 'message', 'action'].map(k => k + '=' + ((p.brief || {})[k] || '-')).join('; ') + '; channels=' + (((p.brief || {}).channels || []).join(',') || '-') + '; campaign=' + (p.campaign || '-')
+    + (inp.instruction ? '\n\nTEAM NOTE: ' + stStr(inp.instruction, 800) : '')
+    + '\n\nMATERIAL "' + stStr(src.name, 120) + '" (' + (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'unknown kind') + '), ' + keys.length + ' paragraphs:\n' + keys.slice(0, 80).map((k, i) => '[P' + (i + 1) + '] ' + stStr(passages[k], 1600)).join('\n\n');
+  await log('cmd', 'claude ' + stModel(env, 'creative') + ': read ' + keys.length + ' paragraphs against ' + ctx.client + ' (' + camps.length + ' campaigns, ' + facts.length + ' facts, ' + know.length + ' knowledge passages)');
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 8000, timeoutMs: 170000, log });
+  const j = relJson(r.text);
+  if (!j || typeof j !== 'object' || (!Array.isArray(j.relevant) && !j.brief)) throw new Error('analysis_unparseable: the model did not return the analysis as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
+  // normalise against what is real: paragraph ids that exist, a campaign the kit has, fact and knowledge ids that were given
+  const pid = x => { const m = String(x || '').match(/^P?(\d{1,3})$/i); const n = m ? parseInt(m[1], 10) : 0; return n >= 1 && n <= keys.length ? 'P' + n : ''; };
+  const para = id => passages[keys[parseInt(id.slice(1), 10) - 1]] || '';
+  const seen = new Set();
+  const relevant = (Array.isArray(j.relevant) ? j.relevant : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200) })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 240) }));
+  const filtered = (Array.isArray(j.filtered) ? j.filtered : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200) })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 140) }));
+  // a paragraph the model did not place is shown as unplaced rather than silently counted as either
+  const unplaced = keys.map((k, i) => 'P' + (i + 1)).filter(id => !seen.has(id));
+  const cid = j.campaign && j.campaign.id && camps.some(c => c.id === j.campaign.id) ? j.campaign.id : null;
+  const campaign = { id: cid, name: cid ? stStr((camps.find(c => c.id === cid) || {}).name, 80) : '', confidence: cid ? Math.max(0, Math.min(1, Number(j.campaign.confidence) || 0)) : 0, why: stStr(j.campaign && j.campaign.why, 240), current: p.campaign || '' };
+  const factIds = new Set(facts.map(f => f.id)); const STAT = ['matches_fact', 'conflicts_fact', 'new_unverified'];
+  const claims = (Array.isArray(j.claims) ? j.claims : []).slice(0, 24).map(c => { const st = STAT.indexOf(c && c.status) >= 0 ? c.status : 'new_unverified'; const f = c && factIds.has(c.fact) ? c.fact : ''; return { text: stStr(c && c.text, 300), p: pid(c && c.p), status: st === 'new_unverified' || f ? st : 'new_unverified', fact: f, factText: f ? (facts.find(x => x.id === f) || {}).text : undefined }; }).filter(c => c.text);
+  const kIds = new Set(know.map(k => k.id));
+  const knowledge = (Array.isArray(j.knowledge) ? j.knowledge : []).filter(k => k && kIds.has(k.k)).slice(0, 8).map(k => { const kk = know.find(x => x.id === k.k); return { k: k.k, use: stStr(k.use, 200), title: kk.title, kind: kk.kind, ns: kk.ns }; });
+  const CH = ['linkedin', 'facebook', 'instagram', 'x'];
+  const bj = j.brief && typeof j.brief === 'object' ? j.brief : {};
+  const brief = { objective: stStr(bj.objective, 400), audience: stStr(bj.audience, 300), message: stStr(bj.message, 400), action: stStr(bj.action, 200), channels: (Array.isArray(bj.channels) ? bj.channels : []).map(c => String(c).toLowerCase()).filter(c => CH.indexOf(c) >= 0).slice(0, 4), deliverable: ['copy', 'visual', 'set'].indexOf(bj.deliverable) >= 0 ? bj.deliverable : 'set', tone: stStr(bj.tone, 200) };
+  const angles = (Array.isArray(j.angles) ? j.angles : []).slice(0, 4).map(a => ({ headline: stStr(a && a.headline, 140), line: stStr(a && a.line, 260), why: stStr(a && a.why, 200) })).filter(a => a.headline);
+  const MEDIA = ['photo-cinematic', 'photo-documentary', 'editorial', 'composite', 'cutout', 'collage', 'illustration', 'diagram', 'infographic', 'typographic', 'carousel'];
+  const narratives = (Array.isArray(j.narratives) ? j.narratives : []).slice(0, 4).map(n => ({ name: stStr(n && n.name, 80), idea: stStr(n && n.idea, 300), medium: MEDIA.indexOf(n && n.medium) >= 0 ? n.medium : '', route: n && n.route === 'finished' ? 'finished' : 'editable', composition: stStr(n && n.composition, 240), imagery: stStr(n && n.imagery, 240), headline: stStr(n && n.headline, 140), why: stStr(n && n.why, 240) })).filter(n => n.name || n.idea);
+  const next = { stage: ['copy', 'directions', 'brief'].indexOf(j.next && j.next.stage) >= 0 ? j.next.stage : (narratives.length ? 'directions' : 'brief'), why: stStr(j.next && j.next.why, 300) };
+  // the banned terms: a proposal that uses one is flagged here, not rewritten in silence
+  angles.forEach(a => { const h = contentBannedCheck(a.headline + ' ' + a.line, bannedRows); if (h.length) a.banned = String((h[0] && (h[0].term || h[0])) || ''); });
+  const analysis = { v: 1, at: Date.now(), job: job.id, source: src.id, sourceName: stStr(src.name, 120), kind: ST_ANALYSE_KINDS.indexOf(j.kind) >= 0 ? j.kind : (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'other'),
+    summary: stStr(j.summary, 600), paragraphs: keys.length, relevant, filtered, unplaced, campaign, claims, knowledge, retrieved: know.length, brief, angles, narratives,
+    risks: (Array.isArray(j.risks) ? j.risks : []).map(x => stStr(x, 240)).filter(Boolean).slice(0, 6), gaps: (Array.isArray(j.gaps) ? j.gaps : []).map(x => stStr(x, 240)).filter(Boolean).slice(0, 6), next, model: r.model,
+    counts: { facts: facts.length, campaigns: camps.length, banned: banned.length, corrections: ((cc.manifest || {}).corrections || []).length } };
+  // the narratives become directions to choose from (the Direction step), each carrying its route
+  const ids = []; const rows = [];
+  for (const n of narratives) {
+    const d = { title: n.name || 'Narrative', headline: n.headline || (angles[0] || {}).headline || '', message: brief.message, insight: n.idea, opening: n.headline, visual: [n.composition, n.imagery].filter(Boolean).join('; '), rationale: n.why, idea: n.idea, medium: n.medium, composition: n.composition, route: n.route, claims: [], uncertainty: claims.some(c => c.status !== 'matches_fact') ? 'some claims are not approved facts yet' : '', model: r.model, fromAnalysis: job.id, renders: n.route === 'finished' ? 1 : (n.medium === 'typographic' ? 0 : 1) };
+    const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 8000), 0, 'studio', Date.now()));
+  }
+  if (rows.length) await env.MIND_DB.batch(rows);
+  if (rows.length) await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
+  analysis.directions = ids;
+  // the ledger: figures and quotations from the kept paragraphs only (the rule pass, no further model call), and the
+  // source's focus, so every later stage reads what concerns the client and nothing set aside; a model extraction that
+  // already ran on this source is kept and narrowed to the focus by stLedger
+  const focus = relevant.map(x => keys[parseInt(x.p.slice(1), 10) - 1]).filter(Boolean);
+  const kept = {}; focus.forEach(k => { kept[k] = passages[k]; });
+  const had = pjs(src.claims, []); const ruleClaims = had.length ? had : stExtractLocal(kept);
+  const ex0 = pjs(src.extract, {}) || {};
+  await env.MIND_DB.prepare('UPDATE studio_sources SET claims=?, extract=? WHERE id=?').bind(jsonFit(ruleClaims, 120000), JSON.stringify(Object.assign({}, ex0, { focus, analysis: job.id, at: Date.now(), model: ex0.model || 'rules', figures: ruleClaims.filter(c => c.value != null).length, quotes: ruleClaims.filter(c => c.quote).length })), src.id).run();
+  analysis.ledger = { claims: ruleClaims.length, focus: focus.length };
+  // the brief: the analysis is recorded; empty fields take the proposal, marked as the Studio's; a field the team wrote is never replaced
+  const filled = [];
+  await stBriefPatch(env, p.id, b => {
+    b.analysis = analysis;
+    ['objective', 'audience', 'message', 'action'].forEach(k => { if (!String(b[k] || '').trim() && brief[k]) { b[k] = brief[k]; b[k + 'Source'] = 'ai'; filled.push(k); } });
+    if (!(b.channels || []).length && brief.channels.length) { b.channels = brief.channels; filled.push('channels'); }
+  });
+  await log('out', 'kept ' + relevant.length + ' of ' + keys.length + ' paragraphs, set aside ' + filtered.length + (unplaced.length ? ', ' + unplaced.length + ' unplaced' : '') + '; campaign ' + (cid ? campaign.name + ' (' + Math.round(campaign.confidence * 100) + '%)' : 'none matched') + '; ' + claims.length + ' claims (' + claims.filter(c => c.status === 'matches_fact').length + ' match approved facts, ' + claims.filter(c => c.status === 'conflicts_fact').length + ' conflict, ' + claims.filter(c => c.status === 'new_unverified').length + ' unverified); ' + angles.length + ' copy angles; ' + narratives.length + ' visual narratives as directions; next: ' + next.stage + (filled.length ? '; brief fields proposed: ' + filled.join(', ') : ''));
+  await stEvent(env, p.id, 'analysis', { text: 'Analysed "' + stStr(src.name, 80) + '": ' + relevant.length + ' of ' + keys.length + ' paragraphs concern ' + ctx.client + (filtered.length ? ', ' + filtered.length + ' set aside' : '') + '. ' + (cid ? 'Campaign: ' + campaign.name + '. ' : 'No campaign matched. ') + narratives.length + ' visual narrative' + (narratives.length === 1 ? '' : 's') + ' proposed as directions. Next: ' + next.stage + '.', source: src.id, next: next.stage, model: r.model }, 'studio');
+  return { analysis: { relevant: relevant.length, filtered: filtered.length, paragraphs: keys.length, campaign: cid, claims: claims.length, narratives: narratives.length, next: next.stage }, directions: ids, filled, model: r.model };
+}
 async function stDirectStage(env, job, p, log) {
   const n = Math.min(Math.max(parseInt(job.input.n, 10) || 3, 1), 5);   // the exploration budget: three by default, one to five
   const cc = await stCompileContext(env, p, { channels: (job.input.channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'direct', refs: { images: 0 }, art: 4 }); const ctx = cc.ctx;
@@ -8466,11 +8571,25 @@ function stBriefNorm(b) {
   out.imageryTiming = b.imageryTiming === 'after_copy' ? 'after_copy' : 'with_copy';
   return out;
 }
+// The brief analysis, as later stages read it: what the material was, the angles proposed, the claims that may and may not be
+// used. The paragraphs set aside never travel; the kept ones reach the stages through the ledger's focus.
+function stAnalysisText(p) {
+  const a = ((p && p.brief) || {}).analysis; if (!a || typeof a !== 'object') return '';
+  const L = ['\n\nBRIEF ANALYSIS of "' + stStr(a.sourceName, 80) + '" (' + stStr(a.kind, 20) + '): ' + stStr(a.summary, 500)];
+  if (a.campaign && a.campaign.id) L.push('matched campaign: ' + stStr(a.campaign.name || a.campaign.id, 80) + ' (' + Math.round((Number(a.campaign.confidence) || 0) * 100) + '%)');
+  (Array.isArray(a.angles) ? a.angles : []).slice(0, 4).forEach((x, i) => { if (x && x.headline && !x.banned) L.push('angle ' + (i + 1) + ': ' + stStr(x.headline, 140) + ' - ' + stStr(x.line, 220)); });
+  const cl = Array.isArray(a.claims) ? a.claims : [];
+  const bad = cl.filter(c => c && c.status === 'conflicts_fact'); const unv = cl.filter(c => c && c.status === 'new_unverified');
+  if (bad.length) L.push('do NOT use (conflicts with an approved fact): ' + bad.slice(0, 6).map(c => stStr(c.text, 160)).join(' | '));
+  if (unv.length) L.push('not verified (attribute to the source or leave out): ' + unv.slice(0, 6).map(c => stStr(c.text, 160)).join(' | '));
+  (Array.isArray(a.risks) ? a.risks : []).slice(0, 3).forEach(r => L.push('risk: ' + stStr(r, 200)));
+  return L.join('\n');
+}
 function stBriefText(p) {
   const b = p.brief || {}; const L = ST_BRIEF_FIELDS.map(k => k + ': ' + (b[k] || '(not given)'));
   const rq = b.requirements || {};
   ['mandatory', 'preferred', 'open'].forEach(band => { const items = stReqItems(rq[band]); if (items.length) L.push('design requirements, ' + band + ': ' + items.map(it => it.text + ' [' + it.source + (it.from ? ': ' + it.from : '') + ']').join('; ')); });
-  return L.join('\n') + stStrategyText(p);
+  return L.join('\n') + stStrategyText(p) + stAnalysisText(p);
 }
 /** What the brief settles and what it leaves open, against the kit: campaign, marks, the fields, the requirements. */
 async function stBriefCheck(env, p, kit, opts) {
@@ -10960,6 +11079,7 @@ async function stStageRun(env, job, done, fail) {
     let result;
     if (job.stage === 'extract') result = await stExtractStage(env, job, p, log);
     else if (job.stage === 'direct') result = await stDirectStage(env, job, p, log);
+    else if (job.stage === 'analyse') result = await stAnalyseStage(env, job, p, log);
     else if (job.stage === 'strategy') result = await stStrategyStage(env, job, p, log);
     else if (job.stage === 'sequence') result = await stSequenceStage(env, job, p, log);
     else if (job.stage === 'copy') result = await stCopyStage(env, job, p, log);
@@ -13043,7 +13163,7 @@ const AXIOM_WORKER = {
             // Phase 1 stores the text and its passages; the claim ledger is extracted in Phase 2
             const paras = text.split(/\n\s*\n/).map(x => x.trim()).filter(Boolean); const passages = {}; paras.forEach((t, i) => { passages['p' + (i + 1)] = t.slice(0, 2000); });
             await env.MIND_DB.prepare('INSERT INTO studio_sources(id,project,kind,name,text,passages,claims,provenance,who,created) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'text', 20), stStr(sb.name || 'Pasted text', 120), text, jsonFit(passages, 60000), '[]', stStr(sb.provenance || 'pasted', 200), who, now).run();
-            await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. Claim extraction runs as a job (stage extract).', source: id }, who);
+            await stBump(env, p.id); await stEvent(env, p.id, 'source', { text: 'Source added: ' + stStr(sb.name || 'Pasted text', 120) + ', ' + paras.length + ' passages. ' + (/^analyse/.test(String(sb.kind || '')) ? 'It is read against the client as a job (stage analyse).' : 'Claim extraction runs as a job (stage extract).'), source: id }, who);
             return jsonResp({ ok: true, id, passages: paras.length });
           }
           if (path === '/studio/reference') {

@@ -480,6 +480,7 @@ await t('the layout editor moves a layer by drag and saves a layout version with
   const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
   await page.click(R + '.st-asset-acts button:has-text("Edit layout")');
   await page.waitForSelector(R + '.st-le-layer');
+  await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
   const hl = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const bb = await hl.boundingBox();
   await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 60, bb.y + bb.height / 2 - 40, { steps: 6 }); await page.mouse.up();
   await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
@@ -615,6 +616,7 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-tools');
   ok(!(await page.isChecked(R + '.st-le-tools input[aria-label="Resize scales type"]')), 'resizing the box leaves the type alone by default');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
+  await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
   const hb = await page.$(R + '.st-le-layer[aria-label="Layer headline"] .st-le-h'); const bb = await hb.boundingBox();
   await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x - 60, bb.y + 30, { steps: 4 }); await page.mouse.up();
   await page.waitForSelector(R + '.st-le-type[aria-label="Position and size"]');

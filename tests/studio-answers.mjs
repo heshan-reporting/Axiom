@@ -27,8 +27,24 @@ const CONCEPTS = { critique: 'The words sit low; the sky is unused.', options: [
 const INSPECT = { fidelity: 4, hierarchy: 3, readability: 4, relevance: 4, identity: 4, reasons: { fidelity: 'The road carries the regional idea', hierarchy: 'The support line competes with the headline', readability: 'White on teal reads', relevance: 'Regional fuel use is the subject', identity: 'Teal and the mark are the campaign' }, words: { present: [], wrong: [] }, issues: [{ text: 'The support line sits close to the headline', severity: 'minor' }], verdict: 'fix', fix: { kind: 'design', instruction: 'Add a line of space between the headline and the support line; keep everything else.' }, note: 'Close; one spacing fix.' };
 const SUGGEST = { design: [{ text: 'Move the panel to the right third and let the road lead.', why: 'The subject is covered', refs: [] }], image: [{ text: 'The same road a little later, the sky quieter.', why: 'Room for the words' }] };
 const STRATEGY = { problem: 'Voters hear subsidy and assume a handout.', audience: { who: 'Regional voters', now: 'It is a handout', wanted: 'It is a road tax never meant for off-road fuel', insight: 'Farmers claim the same credit' }, idea: 'It is your tractor too', proposition: 'Not a subsidy: a road tax returned', proof: [], tone: 'plain, regional', avoid: [], risks: [], measures: [], questions: [] };
+/* the brief engine (S15): paragraphs about fuel, mining or the regions are kept, the rest set aside as another client's */
+const analysis = user => {
+  const paras = Array.from(user.matchAll(/^\[P(\d+)\] (.*)$/gm)).map(m => ({ p: 'P' + m[1], text: m[2] }));
+  const mine = x => /fuel|mining|minerals|tractor|regional|royalt/i.test(x.text);
+  const camp = (user.match(/^CAMPAIGNS \(\d+\):\n- ([a-z0-9_-]+): /m) || [])[1] || null; const f1 = /^\[F1\]/m.test(user);
+  return { summary: 'The fuel tax credit is back in the news; the rest of the material concerns other clients.', kind: 'daily',
+    relevant: paras.filter(mine).map(x => ({ p: x.p, why: 'the fuel tax credit, a client issue' })), filtered: paras.filter(x => !mine(x)).slice(0, -1).map(x => ({ p: x.p, why: 'another client\'s issue' })),
+    campaign: { id: camp, confidence: 0.82, why: 'the credit is the national campaign\'s core argument' },
+    brief: { objective: 'Answer the subsidy framing while the credit is in the news', audience: 'Regional voters and MPs', message: 'The credit is not a subsidy', action: 'Read the facts', channels: ['linkedin', 'instagram'], deliverable: 'set', tone: 'plain' },
+    claims: [{ text: 'mining paid $74 billion in company tax and royalties', p: (paras.find(mine) || {}).p || 'P1', status: f1 ? 'matches_fact' : 'new_unverified', fact: f1 ? 'F1' : '' }, { text: 'the credit costs $10 billion a year', p: 'P1', status: 'conflicts_fact', fact: 'F9' }],
+    knowledge: [{ k: 'K1', use: 'the approved line on off-road fuel' }],
+    angles: [{ headline: 'Not a subsidy. A tax that never applied.', line: 'Off-road fuel never used the roads it was taxed for.', why: 'answers the frame head on' }, { headline: 'The subsidy myth', line: 'It is a subsidy, they say.', why: 'names the myth' }],
+    narratives: [{ name: 'The quiet road', idea: 'A road nobody drove, taxed anyway', medium: 'photo-documentary', route: 'editable', composition: 'words in the sky third', imagery: 'an empty regional road at dawn', headline: 'A tax for roads it never used', why: 'figures must be exact' },
+      { name: 'One striking poster', idea: 'The myth crossed out in paint', medium: 'editorial', route: 'finished', composition: 'a single hero image', imagery: 'a painted poster', headline: 'Not a subsidy', why: 'one settled line, one hero image' }],
+    risks: ['opponents call any defence of the credit a defence of a handout'], gaps: [], next: { stage: 'copy', why: 'the brief is clear and a campaign matched' } };
+};
 export function answerFor(sys, user) {
-  return /creative strategist/.test(sys) ? STRATEGY : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
+  return /strategy lead of an Australian political communications agency/.test(sys) ? analysis(user) : /creative strategist/.test(sys) ? STRATEGY : /build a claim ledger/.test(sys) ? LEDGER : /genuinely different directions/.test(sys) ? DIRS : /producing a coordinated set/.test(sys) ? pieces(user) : /decide what the instruction asks/.test(sys) ? decide(user) : /suggesting the next things the team might ask for/.test(sys) ? SUGGEST : /art director inspecting a rendered social tile/.test(sys) ? INSPECT : /art director of an Australian political communications agency/.test(sys) ? CONCEPTS : {};
 }
 
 export { LEDGER, DIRS, PHOTO_PLAN, TYPE_PLAN, CONCEPTS, INSPECT, SUGGEST, STRATEGY };

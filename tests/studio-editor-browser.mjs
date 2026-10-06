@@ -78,8 +78,10 @@ await T.t('the editor\'s handles sit on what the renderer measured (the words\' 
   ok(Math.abs(on.x - hl.x) < 1.5, 'left-aligned, it starts where the box starts (' + on.x.toFixed(1) + '% vs ' + hl.x + '%)');
   ok(await page.$(R + '.st-le-box'), 'the layer box is drawn faintly behind the ink');
   // a drag still moves the layer by the same distance, whatever the handle covers
-  const box = await page.$eval(R + '.st-le', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  // the canvas sits lower in the S14 desk: bring the handle to the middle of the view first, as a person would scroll to it
+  await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
   const h = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const hb = await h.boundingBox();
+  const box = await page.$eval(R + '.st-le', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + box.w * 0.1, hb.y + hb.height / 2, { steps: 4 }); await page.mouse.up(); await page.waitForTimeout(200);
   const xField = await page.inputValue(R + 'input[aria-label="X, per cent of the stage"]');
   ok(Math.abs(parseFloat(xField) - (hl.x + 10)) < 1.5, 'dragging the ink moved the layer 10% (x ' + hl.x + ' -> ' + xField + ')');

@@ -1454,3 +1454,28 @@ rather than rebuilt, so every wired behaviour (jobs, versions, measurement, appr
   live; the direction tiles are honest text previews; motion is tied to state (arrival, progress, completion, attention) and
   switched off under reduced motion; touch targets reach 44px on coarse pointers; the layout reflows at 1180, 900 and 640px.
 - **Not copied:** the mockup's simulated percentages, sample scores, the lucide CDN (icons are drawn inline), its footer.
+
+## 38. S15 - the Creative Studio tab, Back, and the brief engine (build studio-p31, page r9)
+
+Asked for: a Creative Studio tab of its own; the browser's Back to go to the previous page, not to Google; an engine that
+understands a written brief, an upload or a news article, analyses it and comes up with the next stage; today's brief pasted
+in to be filtered for the client, run against its knowledge and campaigns, then copy and visual narratives - each for an
+editable layout or a finished Gemini creative.
+
+- **Tab and history.** A Create group with the Creative Studio tab. Each view is a history entry (`#v=<view>`); the Studio
+  pushes its project and stage, so Back walks back through stages, to the library, to the view before the Studio.
+- **The process, in order.** (1) The material becomes a source. (2) One model call reads it paragraph by paragraph against
+  the client's compiled context (campaigns, approved facts, banned terms, voice, corrections, Mind passages). (3) The answer
+  is normalised against what is real: paragraph ids that exist, a campaign the kit has, fact and knowledge ids that were
+  given; a paragraph is never both kept and set aside; one not placed is named. (4) The proposal fills only empty brief
+  fields and says so; the narratives become directions with their route; the kept paragraphs become the source's focus and
+  ledger. (5) The next step is named, with the button for it. Nothing is produced until a person chooses.
+- **Filtering holds downstream.** The copy stage reads the analysis (clean angles; claims that conflict with a fact listed as
+  not to use; unverified ones to attribute or leave out) and only the kept paragraphs: in the harness, nothing from the gas
+  and housing paragraphs of a multi-client daily brief reaches the writer.
+- **Routes.** An editable narrative produces live layers over generated imagery; a finished one sets the project to
+  Finished creative before production (every S2 safeguard - marks attached as files, words read back - applies).
+- **Limits, stated.** The analysis is one model's reading: a kept paragraph can be wrong and the table shows every decision
+  with its reason. Uploads are text (.txt, .md, .html); PDFs and Word files go through `tools/engine-ingest.py` or are
+  pasted. The first 80 paragraphs are read; later ones are listed as not placed.
+

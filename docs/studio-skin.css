@@ -111,7 +111,7 @@
 #studio-root .st .st-head{min-height:68px;padding:14px 20px;gap:18px;background:color-mix(in srgb,var(--sk-panel) 92%,transparent);
   backdrop-filter:saturate(1.3) blur(10px);-webkit-backdrop-filter:saturate(1.3) blur(10px);border-bottom:1px solid var(--sk-line);flex-wrap:nowrap}
 #studio-root .st .st-head-l{gap:18px;flex-wrap:nowrap;min-width:0;flex:1}
-#studio-root .st .st-brand{display:flex;align-items:center;gap:9px;flex-shrink:0;padding-right:18px;border-right:1px solid var(--sk-line);height:32px}
+#studio-root .st .st-hbrand{display:flex;align-items:center;gap:9px;flex-shrink:0;padding-right:18px;border-right:1px solid var(--sk-line);height:32px}
 #studio-root .st .st-brandmark{width:27px;height:27px;display:grid;place-items:center;border:1px solid var(--sk-sub);border-radius:7px;font:500 16px/1 var(--sk-display);color:var(--sk-ink);
   background:linear-gradient(160deg,color-mix(in srgb,var(--sk-accent) 18%,transparent),transparent 60%)}
 #studio-root .st .st-brandname{font:750 14px/1 var(--sk-display);letter-spacing:.16em;color:var(--sk-ink)}
@@ -412,7 +412,7 @@
 @media (max-width:900px){
   #studio-root .st{border-radius:12px}
   #studio-root .st .st-head{flex-wrap:wrap;padding:12px 14px}
-  #studio-root .st .st-brand{border-right:0;padding-right:0}
+  #studio-root .st .st-hbrand{border-right:0;padding-right:0}
   #studio-root .st .st-appname{display:none}
   #studio-root .st .st-centre-pad{padding:18px 16px 24px}
   #studio-root .st .st-asset{grid-template-columns:minmax(0,1fr)}
@@ -440,3 +440,55 @@
 #studio-root .st .st-stage-title{scroll-margin-top:calc(var(--st-head-h,68px) + 104px)}
 #studio-root .st .st-asset, #studio-root .st .st-centre-pad{scroll-margin-top:calc(var(--st-head-h,68px) + 76px)}
 #studio-root .st .st-dir-title{text-transform:none;letter-spacing:-.01em}
+
+/* the step bar is taller in this skin (numbered steps with a sub-line): every sticky column starts below it, so the
+   inspector's tabs, the rail and its handle are never under the navigator (a click there used to land on a step) */
+#studio-root .st{--sk-steps-h:64px}
+#studio-root .st .st-steps{min-height:var(--sk-steps-h)}
+#studio-root .st .st-inspector{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));max-height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h))}
+#studio-root .st .st-rail{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));max-height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h));overflow-y:auto}
+#studio-root .st .st-rail-handle{top:calc(var(--st-head-h,68px) + var(--sk-steps-h));height:calc(100vh - var(--st-head-h,68px) - var(--sk-steps-h))}
+#studio-root .st .st-rail-open{top:calc(var(--st-head-h,68px) + var(--sk-steps-h) + 8px)}
+#studio-root .st .st-asset > .st-dock{top:calc(var(--st-head-h,68px) + var(--sk-steps-h) + 12px)}
+/* the inspector is a fixed-height column: its tab bar never shrinks (it collapsed to a 1px strip under flexbox when the
+   column got shorter), and the column scrolls rather than squeezing its children */
+#studio-root .st .st-inspector{overflow-y:auto;overscroll-behavior:contain}
+#studio-root .st .st-inspector > *{flex-shrink:0}
+/* preview is the artwork alone: the step bar steps aside (the skin's grid outranks the shell's rule) */
+#studio-root .st.previewing .st-steps{display:none}
+#studio-root .st.previewing{--sk-steps-h:0px}
+
+/* ---- S15: the brief engine - material in, read against the client */
+#studio-root .st .st-analyse,#studio-root .st .st-analysis{background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;animation:sk-rise .32s cubic-bezier(.2,.7,.2,1) both}
+#studio-root .st .st-analysis{border-color:color-mix(in srgb,var(--sk-accent) 34%,var(--sk-line));background:linear-gradient(180deg,color-mix(in srgb,var(--sk-accent) 6%,var(--sk-panel)),var(--sk-panel) 140px)}
+#studio-root .st .st-field-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#studio-root .st .st-field-head .ov-link{margin-left:auto}
+#studio-root .st .st-analyse-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#studio-root .st .st-analyse-row .st-in{flex:1;min-width:200px}
+#studio-root .st .st-drop.sm{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border:1px dashed var(--sk-line);border-radius:10px;font-size:12px;color:var(--sk-sub);cursor:pointer;transition:border-color .2s,color .2s}
+#studio-root .st .st-drop.sm:hover{border-color:var(--sk-accent);color:var(--sk-ink)}
+#studio-root .st .st-drop.sm input{max-width:190px;font-size:11px}
+#studio-root .st .st-an-sum{margin:0;font-size:15px;line-height:1.55;color:var(--sk-ink);max-width:78ch}
+#studio-root .st .st-an-strip{display:flex;flex-wrap:wrap;gap:6px 18px;padding:10px 0;border-top:1px solid var(--sk-line);border-bottom:1px solid var(--sk-line);font-size:12px;color:var(--sk-sub)}
+#studio-root .st .st-an-strip b{font-family:var(--fm,monospace);font-variant-numeric:tabular-nums;color:var(--sk-ink);font-size:14px;margin-right:4px}
+#studio-root .st .st-an-strip .bad b{color:var(--st-bad)}
+#studio-root .st .st-an-next{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--sk-accent) 10%,var(--sk-raised));border:1px solid color-mix(in srgb,var(--sk-accent) 40%,transparent)}
+#studio-root .st .st-an-next > div:first-child{flex:1;min-width:240px;font-size:13px;line-height:1.5}
+#studio-root .st .st-an-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+#studio-root .st .st-an-card{background:var(--sk-raised);border:1px solid var(--sk-line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+#studio-root .st .st-an-card h3,#studio-root .st .st-an-sec h3{margin:0 0 4px;font:600 11px/1.2 var(--fm,monospace);letter-spacing:.1em;text-transform:uppercase;color:var(--sk-sub)}
+#studio-root .st .st-an-bf .st-lbl{display:inline-block;min-width:74px;color:var(--sk-sub)}
+#studio-root .st .st-an-sec{display:flex;flex-direction:column;gap:6px}
+#studio-root .st .st-an-angles{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+#studio-root .st .st-an-angles b{font-family:'Manrope',var(--fd,sans-serif);font-size:15px;color:var(--sk-ink)}
+#studio-root .st .st-an-narrs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+#studio-root .st .st-an-narr{border:1px solid var(--sk-line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:13px;background:var(--sk-raised);transition:transform .2s,border-color .2s,box-shadow .2s}
+#studio-root .st .st-an-narr:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--sk-accent) 50%,var(--sk-line));box-shadow:0 10px 24px -16px rgba(0,0,0,.6)}
+#studio-root .st .st-an-narr.chosen{border-color:var(--st-ok)}
+#studio-root .st .st-an-narr .btn{align-self:flex-start;margin-top:auto}
+#studio-root .st .st-an-paras td{font-size:12px;vertical-align:top}
+#studio-root .st .st-an-paras tr.aside td:first-child{color:var(--sk-sub)}
+#studio-root .st .st-intake-an{display:flex;flex-direction:column;gap:8px;margin:6px 0 10px}
+#studio-root .st .st-anchor{display:block;scroll-margin-top:calc(var(--st-head-h,68px) + var(--sk-steps-h,64px) + 12px)}
+#studio-root .st .st-dir-route{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+@media (prefers-reduced-motion:reduce){#studio-root .st .st-analyse,#studio-root .st .st-analysis{animation:none}#studio-root .st .st-an-narr:hover{transform:none}}

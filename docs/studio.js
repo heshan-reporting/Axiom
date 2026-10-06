@@ -264,7 +264,7 @@
      a bar that is determinate only where the work is countable (the copy stage's channels, the run's finished steps) and
      indeterminate otherwise - a model call shows no share until it answers; nothing is estimated from the clock. The job
      model is STProgress (docs/studio-progress.js); this is its one consumer in the Studio. */
-  const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
+  const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', analyse: 'one model call: the brief read against the client, its campaigns and knowledge', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
   function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset }) {
     const S = window.STProgress; if (!S || !p) return null;
     const all = p.jobs || []; const jobs = S.jobsForDisplay(all);
@@ -354,7 +354,7 @@
       <div class="st-lib-head"><h2 class="st-stage-title">Projects for ${client.name}</h2><span class="ov-why">${mine.length} project${mine.length === 1 ? '' : 's'}${legacy.length ? ', ' + legacy.length + ' legacy item' + (legacy.length === 1 ? '' : 's') : ''}</span>${canWrite() ? html`<button class="btn sm" onClick=${onNew}>New project</button>` : null}</div>
       ${last ? html`<div class="st-resume" aria-label="Continue where you left off"><div><span class="st-lbl">Continue where you left off</span><div><b>${last.title}</b> <span class="ov-dim">${last.campaign || 'no campaign'}, ${last.assets} asset${last.assets === 1 ? '' : 's'}, last activity ${ago(last.updated)} ago; next: ${NEXT_WORD[last.status] || last.status}</span></div></div><button class="btn sm" onClick=${() => onOpen(last.id)}>Continue</button></div>` : null}
       ${!mine.length && !legacy.length ? html`<div class="st-empty-state st-first"><b>No projects yet for ${client.name}.</b><span>A project holds one piece of work from brief to export: its sources, directions, every version of every asset, the approvals and the exports. Start from what you have:</span>
-        ${canWrite() ? html`<div class="st-first-acts">${[['release', 'A media release', 'paste it; claims and figures are read first'], ['brief', 'A brief or one line', 'a clear instruction goes straight to production'], ['reference', 'Existing creative', 'adapt or build on artwork you already have']].map(([k, l, t]) => html`<button key=${k} class="st-first-btn" onClick=${() => onStart(k)}><b>${l}</b><span>${t}</span></button>`)}</div>` : html`<span class="ov-dim">This key can read only; a full key is needed to start a project.</span>`}</div>` : null}
+        ${canWrite() ? html`<div class="st-first-acts">${[['analyse', 'A brief or article', 'today\'s brief, an article or a file: read against the client first'], ['release', 'A media release', 'paste it; claims and figures are read first'], ['brief', 'A brief or one line', 'a clear instruction goes straight to production'], ['reference', 'Existing creative', 'adapt or build on artwork you already have']].map(([k, l, t]) => html`<button key=${k} class="st-first-btn" onClick=${() => onStart(k)}><b>${l}</b><span>${t}</span></button>`)}</div>` : html`<span class="ov-dim">This key can read only; a full key is needed to start a project.</span>`}</div>` : null}
       ${mine.length || legacy.length ? html`<table class="ov-table"><thead><tr><th>Project</th><th>Campaign</th><th>Stage</th><th>Owner</th><th>Last activity</th><th></th></tr></thead><tbody>
         ${mine.map(p => html`<tr key=${p.id}><td><button class="st-lib-open" onClick=${() => onOpen(p.id)}>${p.title}</button><div class="ov-dim">${p.assets} asset${p.assets === 1 ? '' : 's'}, ${p.sources} source${p.sources === 1 ? '' : 's'}${p.legacy ? ', imported from ' + p.legacy.id : ''}</div></td><td>${p.campaign || '-'}</td><td><span class=${'st-status ' + p.status}>${p.status}</span><div class="ov-dim">next: ${NEXT_WORD[p.status] || '-'}</div></td><td>${p.owner}</td><td class="ov-dim">${ago(p.updated)} ago</td><td class="ov-go"><button class="ov-link" onClick=${() => onOpen(p.id)} aria-label=${'Open ' + p.title}>open</button></td></tr>`)}
         ${legacy.map(l => html`<tr key=${l.id} class="st-legacy"><td><b>${l.title}</b><div class="ov-dim">legacy ${l.kind === 'legacy_release' ? 'release pack' : 'content set'}, read-only; ${l.assets} ${l.kind === 'legacy_release' ? 'flattened tiles' : 'pieces'}${l.imported ? '; imported' : ''}</div></td><td>${l.campaign || '-'}</td><td><span class="st-status legacy">${l.status}</span></td><td>${l.owner || '-'}</td><td class="ov-dim">${ago(l.updated)} ago</td><td class="ov-go">${l.imported ? html`<button class="ov-link" onClick=${() => onOpen(l.imported)}>open import</button>` : html`<button class="ov-link" onClick=${() => onOpen(l.id)}>view</button>`}${canWrite() && !l.imported ? html` <button class="ov-link" onClick=${() => onImport(l)}>import to Studio</button>` : null}</td></tr>`)}
@@ -401,7 +401,8 @@
   }
   function Intake({ client, kit, onCreate, onCancel, preset }) {
     const pr = preset || {};
-    const [start, setStart] = useState(['release', 'brief', 'reference'].indexOf(pr.start) >= 0 ? pr.start : 'release');
+    const [start, setStart] = useState(['analyse', 'release', 'brief', 'reference'].indexOf(pr.start) >= 0 ? pr.start : 'release');
+    const [akind, setAkind] = useState(pr.kind || 'brief');
     const [deliverable, setDeliverable] = useState(['copy', 'visual', 'set'].indexOf(pr.deliverable) >= 0 ? pr.deliverable : 'set');
     const camps = (kit && kit.campaigns || []).filter(c => c.active !== false);
     // the campaign is the team's choice: with one campaign in the kit it is shown chosen and named as such; with several nothing is chosen until someone chooses
@@ -416,18 +417,20 @@
     const [timing, setTiming] = useState(pr.imageryTiming === 'after_copy' ? 'after_copy' : 'with_copy');
     const camp = camps.find(c => c.id === campaign) || null; const policy = camp ? camp.logoPolicy || 'logo' : 'logo';
     const markOnFile = camp ? (policy === 'wordmark' ? !!camp.hasWordmark : policy === 'both' ? !!(camp.hasWordmark && kit && kit.hasLogo) : policy === 'none' ? true : !!(kit && kit.hasLogo)) : !!(kit && kit.hasLogo);
-    const clear = start === 'brief' ? isClear(text) : start === 'release' ? !!instruction.trim() : true;
+    const clear = start === 'analyse' ? false : start === 'brief' ? isClear(text) : start === 'release' ? !!instruction.trim() : true;
     const pick = e => { const f = e.target.files && e.target.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setFile({ name: f.name, mime: f.type || 'image/png', b64: String(rd.result).split(',')[1] }); rd.readAsDataURL(f); };
     return html`<div class="st-intake">
       <div class="ov-title">New project for ${client.name}</div>
       ${pr.from ? html`<div class="ov-dim">${pr.from === 'release' ? 'The Release Desk is this intake now: paste the release, the ledger is read, tiles and copy come out of the same project.' : pr.from === 'content' ? 'The Content Desk is this intake now: a brief in, copy per channel out, with the same checks and the same voice.' : pr.from === 'sentinel' ? 'Drafted from a Sentinel alert: the alert is the brief; edit it, pick the channels and create the project.' : ''}</div>` : null}
       <div class="st-intake-row">
         <div><${Lbl}>Route</${Lbl}><div class="st-seg" role="radiogroup" aria-label="Route">${[['quick', 'Quick production', 'a clear, approved brief: straight to production'], ['guided', 'Guided campaign development', 'strategy first, then three directions, then a sequence']].map(([k, l, t]) => html`<button key=${k} class=${'st-segbtn' + (route === k ? ' on' : '')} title=${t} role="radio" aria-checked=${route === k} onClick=${() => setRoute(k)}>${l}</button>`)}</div></div>
-        <div><${Lbl}>Start from</${Lbl}><div class="st-seg">${[['release', 'A release or source document'], ['brief', 'A brief or one line'], ['reference', 'Existing creative or references']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (start === k ? ' on' : '')} onClick=${() => setStart(k)}>${l}</button>`)}</div></div>
+        <div><${Lbl}>Start from</${Lbl}><div class="st-seg">${[['analyse', 'A brief or article to analyse'], ['release', 'A release or source document'], ['brief', 'A brief or one line'], ['reference', 'Existing creative or references']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (start === k ? ' on' : '')} onClick=${() => setStart(k)}>${l}</button>`)}</div></div>
         <div><${Lbl}>Deliverable</${Lbl}><div class="st-seg">${[['copy', 'Copy only'], ['visual', 'Visual creative'], ['set', 'Coordinated campaign set']].map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (deliverable === k ? ' on' : '')} onClick=${() => setDeliverable(k)}>${l}</button>`)}</div></div>
         <div><${Lbl}>Campaign</${Lbl}><select class="st-sel" value=${campChosen ? campaign : '__'} onChange=${e => { if (e.target.value === '__') { setCampChosen(false); return; } setCampaign(e.target.value); setCampChosen(true); }} aria-label="Campaign">${!campChosen ? html`<option value="__">Choose the campaign...</option>` : null}<option value="">No campaign</option>${camps.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select><div class="ov-dim">${!camps.length ? 'No campaigns in this client\'s brand kit yet.' : !campChosen ? 'The kit has ' + camps.length + ' campaigns; the first is not assumed. The campaign decides the mark, the colours and the facts in play.' : camps.length === 1 && campaign ? 'The kit\'s only campaign is shown chosen; pick "No campaign" if this work is not part of it.' : 'From the brand kit. Choosing a campaign never changes the client or its approved facts.'}</div></div>
       </div>
-      <${Lbl}>${start === 'release' ? 'Paste the release or source text' : start === 'brief' ? 'The brief, or one line' : 'What to do with the reference'}</${Lbl}>
+      ${start === 'analyse' ? html`<div class="st-intake-an"><div class="st-seg" role="radiogroup" aria-label="What the material is">${ANALYSE_KINDS.map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (akind === k ? ' on' : '')} role="radio" aria-checked=${akind === k} onClick=${() => setAkind(k)}>${l}</button>`)}</div>
+        <div class="ov-dim">The material is read against ${client.name} first: what concerns them is kept, the rest set aside with the reason; it is matched to a campaign, checked against the approved facts and the knowledge, and you get a proposed brief, copy angles and visual narratives (editable layout or finished Gemini creative). Nothing is produced until you choose.</div></div>` : null}
+      <${Lbl}>${start === 'analyse' ? 'Paste the brief, the article or today\'s brief' : start === 'release' ? 'Paste the release or source text' : start === 'brief' ? 'The brief, or one line' : 'What to do with the reference'}</${Lbl}>
       <textarea class="st-ta" rows="7" value=${text} onInput=${e => setText(e.target.value)} placeholder=${start === 'release' ? 'Paste the release text. Claims, figures and quotations are extracted with their passages before anything is written.' : start === 'brief' ? 'e.g. "Write three LinkedIn posts on the $74 billion figure in the HOOF voice" (a clear instruction goes straight to production) or "Something for Victoria about regional jobs" (an open brief gets two directions first)' : 'e.g. "Adapt the approved harvester tile for Instagram 4:5 and a 9:16 story; keep the headline"'}></textarea>
       ${start === 'release' ? html`<div><${Lbl}>Instruction (optional: a clear instruction skips the direction step)</${Lbl}><input class="st-in" value=${instruction} onInput=${e => setInstruction(e.target.value)} placeholder='e.g. "Three posts on the $74 billion figure" - leave empty to get two directions first' /></div>` : null}
       ${start === 'reference' ? html`<div class="st-drop"><input type="file" accept="image/png,image/jpeg,image/webp" onChange=${pick} aria-label="Reference image" /> ${file ? html`<span>${file.name} attached as a composition reference.</span>` : html`<span>Attach artwork or a reference image (PNG, JPEG, WebP). Competitor work is inspiration only.</span>`}</div>` : null}
@@ -437,9 +440,9 @@
         <div class="ov-dim">${timing === 'after_copy' ? 'The copy and layouts are made first; no render is spent until the words are ready and you generate the imagery in Design.' + (mode === 'finished' ? ' Recommended for a finished creative, whose words are painted into the image.' : '') : 'The renders are queued as soon as the copy is written, and run while you check the words.' + (mode === 'finished' ? ' A finished creative paints the words: changing them later means generating it again.' : '')}</div></div></div>` : null}
       ${deliverable !== 'visual' ? html`<div><${Lbl}>Channels (edit freely)</${Lbl}><div class="st-seg">${Object.keys(CHANNELS).map(k => html`<button key=${k} class=${'st-segbtn' + (chs[k] ? ' on' : '')} onClick=${() => setChs(Object.assign({}, chs, { [k]: !chs[k] }))}>${CHANNELS[k].label} ${CHANNELS[k].format}</button>`)}</div></div>` : html`<div class="ov-dim">Visual creative: an Instagram 4:5 composition; adapt to other formats afterwards.</div>`}
       <div class="st-intake-foot">
-        <span class="ov-dim">${route === 'guided' ? 'Guided: ' + (start === 'release' ? 'the source is read first, then ' : '') + 'a creative strategy to confirm, then three directions to choose from; nothing is produced until you choose.' : start === 'release' ? (clear ? 'Extraction first, then production from your instruction; no direction step.' : 'Extraction first, then two directions to choose from.') : start === 'brief' ? (clear && text ? 'Reads as a clear instruction: production starts without a direction step.' : 'Reads as an open brief: two directions first.') : 'Production from the reference and your instruction; no direction step.'}</span>
+        <span class="ov-dim">${start === 'analyse' ? 'One model call reads the material against the client; then you choose the next step.' : route === 'guided' ? 'Guided: ' + (start === 'release' ? 'the source is read first, then ' : '') + 'a creative strategy to confirm, then three directions to choose from; nothing is produced until you choose.' : start === 'release' ? (clear ? 'Extraction first, then production from your instruction; no direction step.' : 'Extraction first, then two directions to choose from.') : start === 'brief' ? (clear && text ? 'Reads as a clear instruction: production starts without a direction step.' : 'Reads as an open brief: two directions first.') : 'Production from the reference and your instruction; no direction step.'}</span>
         <button class="btn sm ghost" onClick=${onCancel}>Cancel</button>
-        <button class="btn sm" disabled=${!text.trim() || !campChosen} title=${!campChosen ? 'Choose the campaign first' : ''} onClick=${() => onCreate({ route, start, deliverable, campaign, campaignConfirmed: campChosen, creationMode: deliverable === 'copy' ? 'editable' : mode, imageryTiming: deliverable === 'copy' ? undefined : timing, text: text.trim(), instruction: instruction.trim(), channels: deliverable === 'visual' ? ['instagram'] : Object.keys(chs).filter(k => chs[k]), clear, file })}>Create project</button>
+        <button class="btn sm" disabled=${!text.trim() || !campChosen} title=${!campChosen ? 'Choose the campaign first' : ''} onClick=${() => onCreate({ route, start, kind: akind, deliverable, campaign, campaignConfirmed: campChosen, creationMode: deliverable === 'copy' ? 'editable' : mode, imageryTiming: deliverable === 'copy' ? undefined : timing, text: text.trim(), instruction: instruction.trim(), channels: deliverable === 'visual' ? ['instagram'] : Object.keys(chs).filter(k => chs[k]), clear, file })}>Create project</button>
       </div>
     </div>`;
   }
@@ -481,7 +484,81 @@
       ${!disabled && list.length ? html`<div class="st-combo-list" role="listbox" aria-label=${'Suggestions for ' + id}>${list.map((it, i) => html`<button key=${i} class="st-combo-opt" role="option" title=${it.from || ''} onClick=${() => { onChange(it.text, it.source, it); setOpen(false); }}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}</button>`)}${(items || []).length > list.length && !open ? html`<button class="ov-link" onClick=${() => setOpen(true)}>more (${items.length})</button>` : null}</div>` : null}
     </div>`;
   }
-  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, onStrategy, busy, head, prov, onGo }) {
+  /* ------------------------------------------------------------ the brief engine: material in, read against the client */
+  const ANALYSE_KINDS = [['brief', 'A written brief'], ['daily', 'Today\'s daily brief'], ['article', 'A news article'], ['release', 'A media release'], ['upload', 'An uploaded document'], ['other', 'Something else']];
+  const CLAIM_WORD = { matches_fact: ['ok', 'matches an approved fact'], conflicts_fact: ['bad', 'conflicts with an approved fact'], new_unverified: ['warn', 'new, not verified'] };
+  /** Paste or upload the material; the engine sorts what concerns this client from what does not, then proposes. */
+  function AnalyseBox({ client, onAnalyse, busy, open0, onClose }) {
+    const [kind, setKind] = useState('brief'); const [text, setText] = useState(''); const [name, setName] = useState(''); const [file, setFile] = useState('');
+    const [ins, setIns] = useState(''); const [note, setNote] = useState('');
+    const pick = e => { const f = e.target.files && e.target.files[0]; if (!f) return; if (f.size > 2000000) { setNote('That file is over 2 MB; paste the part that matters.'); return; }
+      const rd = new FileReader(); rd.onload = () => { let t = String(rd.result || ''); if (/html?$/i.test(f.name) || /<\/(p|div|h\d)>/i.test(t)) { const d = new DOMParser().parseFromString(t, 'text/html'); d.querySelectorAll('script,style,nav,header,footer').forEach(x => x.remove()); t = Array.from(d.body.querySelectorAll('h1,h2,h3,h4,p,li,blockquote')).map(x => x.textContent.trim()).filter(Boolean).join('\n\n') || d.body.textContent; }
+        setText(t.trim()); setFile(f.name); setName(n => n || f.name.replace(/\.[a-z0-9]+$/i, '')); if (kind === 'brief') setKind('upload'); setNote(''); }; rd.readAsText(f); };
+    const today = async () => { setNote('Fetching today\'s brief...'); try { const d = await call('/brief/daily'); const md = d.md || [d.brief && d.brief.headline, d.brief && d.brief.summary].filter(Boolean).join('\n\n'); if (!md) throw new Error('the brief has no text'); setText(md); setKind('daily'); setName('Daily brief ' + (d.day || '')); setNote(d.isToday ? 'Today\'s brief (' + d.day + ') is in; it covers every client - the analysis keeps what concerns ' + client.name + '.' : 'No brief for today yet: this is the latest, ' + d.day + '.'); } catch (e) { setNote('No daily brief to fetch: ' + (e.message || e)); } };
+    const ok = text.trim().length >= 20;
+    return html`<div class="st-field st-analyse" aria-label="Analyse a brief">
+      <div class="st-field-head"><${Lbl}>Analyse a brief, article or upload</${Lbl}>${onClose ? html`<button class="ov-link" onClick=${onClose}>Close</button>` : null}</div>
+      <div class="ov-dim">Paste a written brief, a news article or the day's intelligence brief, or upload a file. One model call reads it paragraph by paragraph against ${client.name}: what concerns them is kept and what does not is set aside with the reason; it is matched to a campaign, every claim is checked against the approved facts, the Mind's knowledge is consulted, and you get a proposed brief, copy angles and visual narratives, each naming whether it is an editable composition or a finished Gemini creative. Nothing is produced until you choose.</div>
+      <div class="st-seg" role="radiogroup" aria-label="What the material is">${ANALYSE_KINDS.map(([k, l]) => html`<button key=${k} class=${'st-segbtn' + (kind === k ? ' on' : '')} role="radio" aria-checked=${kind === k} onClick=${() => setKind(k)}>${l}</button>`)}</div>
+      <textarea class="st-ta" rows="8" value=${text} onInput=${e => setText(e.target.value)} aria-label="The material to analyse" placeholder=${kind === 'daily' ? 'Paste today\'s brief from the front page (Copy), or fetch it below.' : kind === 'article' ? 'Paste the article text (headline and body).' : 'Paste the brief or the document.'}></textarea>
+      <div class="st-analyse-row">
+        <label class="st-drop sm"><input type="file" accept=".txt,.md,.markdown,.html,.htm,.csv,.json,text/plain,text/markdown,text/html" onChange=${pick} aria-label="Upload a document" /> ${file ? html`<span>${file}</span>` : html`<span>Upload .txt, .md or .html</span>`}</label>
+        <button class="btn sm ghost" onClick=${today}>Use today's daily brief</button>
+        <input class="st-in" value=${name} onInput=${e => setName(e.target.value)} placeholder="Name (e.g. ATO ruling coverage, 6 Oct)" aria-label="Name of the material" />
+      </div>
+      <input class="st-in" value=${ins} onInput=${e => setIns(e.target.value)} placeholder='Optional note for the analysis, e.g. "only the regional angle"' aria-label="Note for the analysis" />
+      ${note ? html`<div class="ov-dim" role="status">${note}</div>` : null}
+      <div class="st-nd-row"><button class="btn sm" disabled=${!!busy || !ok} title=${!ok ? 'Paste or upload the material first' : ''} onClick=${() => onAnalyse({ kind, text: text.trim(), name: name.trim() || (ANALYSE_KINDS.find(x => x[0] === kind) || [])[1], instruction: ins.trim(), file })}>Analyse against ${client.name} (1 model call)</button><span class="ov-dim">${text.trim() ? text.trim().split(/\n\s*\n/).filter(Boolean).length + ' paragraphs' : ''}</span></div>
+    </div>`;
+  }
+  /** What the analysis found, in the order a strategist reads it, ending with the next step. */
+  function AnalysisPanel({ p, a, kit, ro, busy, onCampaign, onGo, onDirect, onProduce, onChoose, onAgain }) {
+    const [showSet, setShowSet] = useState(false);
+    const camps = (kit && kit.campaigns) || []; const c = a.campaign || {};
+    const dirs = (a.directions || []).map(id => p.directions.find(d => d.id === id)).filter(Boolean);
+    const nextLabel = a.next.stage === 'copy' ? 'Write the copy' : a.next.stage === 'directions' ? 'Choose a visual narrative' : 'Complete the brief';
+    const cl = a.claims || []; const nOk = cl.filter(x => x.status === 'matches_fact').length, nBad = cl.filter(x => x.status === 'conflicts_fact').length, nNew = cl.filter(x => x.status === 'new_unverified').length;
+    return html`<section class="st-field st-analysis" aria-label="Brief analysis">
+      <div class="st-field-head"><${Lbl}>Brief analysis</${Lbl}><span class="ov-dim">${a.sourceName} - ${(ANALYSE_KINDS.find(x => x[0] === a.kind) || [0, a.kind])[1]}, ${a.paragraphs} paragraphs, ${a.model || ''}</span>${!ro && onAgain ? html`<button class="ov-link" onClick=${onAgain}>Analyse something else</button>` : null}</div>
+      ${a.summary ? html`<p class="st-an-sum">${a.summary}</p>` : null}
+      <div class="st-an-strip" role="list">
+        <span role="listitem"><b>${a.relevant.length}</b> kept</span><span role="listitem"><b>${a.filtered.length}</b> set aside</span>${(a.unplaced || []).length ? html`<span role="listitem"><b>${a.unplaced.length}</b> not placed</span>` : null}
+        <span role="listitem"><b>${nOk}</b> claims match facts</span>${nBad ? html`<span role="listitem" class="bad"><b>${nBad}</b> conflict</span>` : null}<span role="listitem"><b>${nNew}</b> unverified</span>
+        <span role="listitem"><b>${(a.knowledge || []).length}</b> of ${a.retrieved} knowledge passages used</span>
+      </div>
+      <div class="st-an-next" role="status"><div><b>Next: ${nextLabel}.</b> <span>${a.next.why}</span></div>
+        ${!ro ? html`<div class="st-nd-row">${a.next.stage === 'copy' ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onProduce()}>Write the copy</button>` : a.next.stage === 'directions' && dirs.length ? html`<button class="btn sm" onClick=${() => onGo('directions')}>See the ${dirs.length} narratives</button>` : html`<a class="btn sm ghost" href="#st-brief-fields" onClick=${e => { e.preventDefault(); const el = document.getElementById('st-brief-fields'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>Complete the brief</a>`}
+          ${a.next.stage !== 'directions' && dirs.length ? html`<button class="btn sm ghost" onClick=${() => onGo('directions')}>Narratives (${dirs.length})</button>` : null}
+          ${a.next.stage !== 'copy' ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => onProduce()}>Write the copy now</button>` : null}</div>` : null}
+      </div>
+      <div class="st-an-grid">
+        <div class="st-an-card"><h3>Campaign</h3>
+          ${c.id ? html`<div><b>${c.name}</b> <${Chip} kind=${c.confidence >= 0.7 ? 'ok' : 'warn'}>${Math.round(c.confidence * 100)}% match</${Chip}></div><div class="ov-dim">${c.why}</div>
+            ${p.campaign === c.id ? html`<div><${Chip} kind="ok">the project's campaign</${Chip}></div>` : !ro ? html`<button class="btn sm" onClick=${() => onCampaign(c.id)}>Use ${c.name}</button>${p.campaign ? html` <span class="ov-dim">now: ${(camps.find(x => x.id === p.campaign) || {}).name || p.campaign}</span>` : null}` : null}`
+          : html`<div class="ov-dim">No campaign of ${camps.length} matched${c.why ? ': ' + c.why : '.'}</div>`}
+        </div>
+        <div class="st-an-card"><h3>Proposed brief</h3>
+          ${['objective', 'audience', 'message', 'action'].map(k => a.brief[k] ? html`<div key=${k} class="st-an-bf"><span class="st-lbl">${k}</span> ${a.brief[k]}${(p.brief || {})[k] === a.brief[k] ? html` <${Chip}>in the brief</${Chip}>` : null}</div>` : null)}
+          ${a.brief.channels && a.brief.channels.length ? html`<div class="st-an-bf"><span class="st-lbl">channels</span> ${a.brief.channels.map(chanLabel).join(', ')}</div>` : null}
+          <div class="ov-dim">Empty fields took the proposal, marked as the Studio's; a field the team wrote is never replaced.</div>
+        </div>
+      </div>
+      ${(a.angles || []).length ? html`<div class="st-an-sec"><h3>Copy angles</h3><ol class="st-an-angles">${a.angles.map((x, i) => html`<li key=${i}><b>${x.headline}</b>${x.banned ? html` <${Chip} kind="bad">uses "${x.banned}"</${Chip}>` : null}<div>${x.line}</div><div class="ov-dim">${x.why}</div></li>`)}</ol></div>` : null}
+      ${dirs.length ? html`<div class="st-an-sec"><h3>Visual narratives</h3><div class="st-an-narrs">${dirs.map((d, i) => html`<div key=${d.id} class=${'st-an-narr' + (d.chosen ? ' chosen' : '')}><div class="st-an-narr-h"><b>${d.title}</b> <${Chip} kind=${d.route === 'finished' ? 'warn' : 'ok'}>${d.route === 'finished' ? 'Gemini finished' : 'editable layout'}</${Chip}>${d.medium ? html` <${Chip}>${d.medium}</${Chip}>` : null}</div><div>${d.idea}</div><div class="ov-dim">${d.visual}</div><div class="ov-dim">${d.rationale}</div>
+        ${!ro && !d.chosen ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => onChoose(d.id)}>${d.route === 'finished' ? 'Produce as a finished creative' : 'Produce as an editable layout'}</button>` : d.chosen ? html`<${Chip} kind="ok">chosen</${Chip}>` : null}</div>`)}</div></div>` : null}
+      ${cl.length ? html`<div class="st-an-sec"><h3>Claims against the approved facts</h3><ul class="st-ul">${cl.map((x, i) => { const w = CLAIM_WORD[x.status] || ['', x.status]; return html`<li key=${i}><${Chip} kind=${w[0]}>${w[1]}</${Chip}> ${x.text}${x.p ? html` <span class="ov-dim">(${x.p}${x.fact ? ', ' + x.fact : ''})</span>` : null}${x.factText ? html`<div class="ov-dim">fact: ${x.factText}</div>` : null}</li>`; })}</ul></div>` : null}
+      ${(a.knowledge || []).length ? html`<div class="st-an-sec"><h3>Knowledge used</h3><ul class="st-ul">${a.knowledge.map(k => html`<li key=${k.k}><b>${k.title}</b> <span class="ov-dim">${k.kind || ''}${k.ns ? ', ' + k.ns : ''}</span> - ${k.use}</li>`)}</ul></div>` : null}
+      ${(a.risks || []).length || (a.gaps || []).length ? html`<div class="st-an-grid">${(a.risks || []).length ? html`<div class="st-an-card"><h3>Risks</h3><ul class="st-ul">${a.risks.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null}${(a.gaps || []).length ? html`<div class="st-an-card"><h3>Gaps</h3><ul class="st-ul">${a.gaps.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null}</div>` : null}
+      <div class="st-an-sec"><button class="st-tools-toggle" aria-expanded=${showSet} onClick=${() => setShowSet(!showSet)}><span class="st-lbl">What was kept and what was set aside (${a.relevant.length} / ${a.filtered.length})</span><span aria-hidden="true">${showSet ? '−' : '+'}</span></button>
+        ${showSet ? html`<table class="ov-table st-an-paras"><thead><tr><th>Paragraph</th><th>Read as</th><th>Why</th></tr></thead><tbody>
+          ${a.relevant.map(x => html`<tr key=${'k' + x.p} class="kept"><td><span class="ov-dim">${x.p}</span> ${x.text}</td><td><${Chip} kind="ok">kept</${Chip}></td><td>${x.why}</td></tr>`)}
+          ${a.filtered.map(x => html`<tr key=${'f' + x.p} class="aside"><td><span class="ov-dim">${x.p}</span> ${x.text}</td><td><${Chip}>set aside</${Chip}></td><td>${x.why}</td></tr>`)}
+          ${(a.unplaced || []).map(id => html`<tr key=${'u' + id}><td><span class="ov-dim">${id}</span></td><td><${Chip} kind="warn">not placed</${Chip}></td><td class="ov-dim">the model did not say; treated as set aside</td></tr>`)}
+        </tbody></table><div class="ov-dim">Only the kept paragraphs reach the copy and the directions; the ledger holds ${(a.ledger || {}).claims != null ? a.ledger.claims + ' entr' + (a.ledger.claims === 1 ? 'y' : 'ies') + ' (figures and quotations) from them' : 'what they carry'}.</div>` : null}
+      </div>
+    </section>`;
+  }
+  function BriefView({ p, onSave, onDirect, onProduce, onCampaign, onStrategy, busy, head, prov, onGo, onAnalyse, onChoose, kit, client }) {
     // the working copy: the brief as the server last held it (base) and the team's edits on top; edits survive a reload in
     // this browser and a newer version saved elsewhere, and are merged field by field when saved, never silently dropped
     const saved0 = store.draft(p.id);
@@ -516,6 +593,7 @@
     const chosen = p.directions.find(d => d.chosen);
     const noClaude = prov && prov.claude === false;
     const go = async (fn) => { if (dirty && !(await save())) return; fn(); };
+    const [anOpen, setAnOpen] = useState(false);
     const produceArgs = () => ({ acknowledge: !!(blocking.length && ack), size: imagery === 'none' ? undefined : imagery, imagery: imagery === 'none' ? 'none' : undefined });
     return html`<div class="st-centre-pad st-brief">
       <${StageHead} ...${head}>
@@ -525,6 +603,8 @@
       ${restored ? html`<div class="st-notice info" role="status"><div class="st-notice-body"><b>Unsaved brief edits restored.</b> <span>These edits were made in this browser and never saved. Save them, or discard them to see the brief as saved.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save()}>Save them</button><button class="btn sm ghost" onClick=${discard}>Discard</button></div></div>` : null}
       ${elsewhere && !clash ? html`<div class="st-notice warn" role="status"><div class="st-notice-body"><b>The brief changed elsewhere.</b> <span>A job or a teammate saved a newer brief while you were editing. Your edits are kept here; saving merges them field by field.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save()}>Save and merge</button><button class="btn sm ghost" onClick=${discard}>Use the saved brief</button></div></div>` : null}
       ${clash ? html`<div class="st-notice warn" role="alert"><div class="st-notice-body"><b>Both versions changed the same field${clash.clash.length === 1 ? '' : 's'}: ${clash.clash.join(', ')}.</b> <span>Nothing was overwritten. Keep yours to save over the newer version, or take theirs for ${clash.clash.length === 1 ? 'that field' : 'those fields'} and keep the rest of your edits.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => save(clash.merged, true)}>Keep mine</button><button class="btn sm ghost" onClick=${() => { const next = Object.assign({}, clash.merged); clash.clash.forEach(k => { next[k] = clash.theirs[k]; }); baseRef.current = clash.theirs; setB(next); setClash(null); }}>Take theirs</button></div></div>` : null}
+      ${(p.brief || {}).analysis && !anOpen ? html`<${AnalysisPanel} p=${p} a=${p.brief.analysis} kit=${kit} ro=${ro} busy=${busy} onCampaign=${onCampaign} onGo=${onGo} onDirect=${onDirect} onChoose=${onChoose} onProduce=${() => go(() => onProduce(produceArgs()))} onAgain=${() => setAnOpen(true)} />` : null}
+      ${!ro && onAnalyse && client && (anOpen || !(p.brief || {}).analysis) ? html`<${AnalyseBox} client=${client} busy=${busy} onAnalyse=${o => { setAnOpen(false); go(() => onAnalyse(o)); }} onClose=${(p.brief || {}).analysis ? () => setAnOpen(false) : null} />` : null}
       ${!ro && !p.assets.length ? html`<div class="st-produce st-actionbar" aria-label="Write the copy">
         <div class="st-actionbar-text"><b>${chosen ? 'Write the copy from "' + chosen.title + '"' : 'When the brief is ready'}</b><span class="ov-dim">${chosen ? 'The chosen direction decides the idea; the brief decides channels and claims.' : 'A clear, approved brief can go straight to the copy; an open one is better explored as directions first.'} ${chans ? 'Channels: ' + chans + '.' : 'No channels set.'}</span></div>
         ${imagery !== 'none' && b.deliverable !== 'copy' ? html`<div class="st-seg st-timing" role="group" aria-label="When the imagery is made"><span class="ov-dim">Imagery</span><button class=${'st-segbtn' + (b.imageryTiming !== 'after_copy' ? ' on' : '')} aria-pressed=${b.imageryTiming !== 'after_copy'} title="The renders are queued as soon as the copy is written" onClick=${() => setB(Object.assign({}, b, { imageryTiming: 'with_copy' }))}>With the copy</button><button class=${'st-segbtn' + (b.imageryTiming === 'after_copy' ? ' on' : '')} aria-pressed=${b.imageryTiming === 'after_copy'} title="The copy and layouts are made first; the imagery is generated in Design once the words are ready (no render is spent on words that change)" onClick=${() => setB(Object.assign({}, b, { imageryTiming: 'after_copy' }))}>After the copy is ready</button></div>` : null}
@@ -546,6 +626,7 @@
         </div>`}
       </div>
       ${sugg && !sugg.error ? html`<div class="ov-dim st-brief-src">Suggestions come from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet'}. Approved items are the kit's own records; an AI suggestion is only a suggestion.${!ro ? html` <button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => loadSugg(true)}>${sugg.aiModel ? 'ask the model again' : 'ask the model for suggestions (one call)'}</button>` : null}${sugg.aiError ? ' The model did not answer: ' + sugg.aiError : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.error}</div>` : null}
+      <span id="st-brief-fields" class="st-anchor"></span>
       ${['objective', 'audience', 'message', 'action', 'deliverables'].map(k => html`<div key=${k} class="st-field"><${Lbl}>${k}${(b.proposed || []).indexOf(k) >= 0 ? html` <${Chip} kind="warn">proposed by the Studio</${Chip}>` : null}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}</${Lbl}><${Combo} id=${'brief-' + k} label=${'Brief ' + k} value=${b[k] || ''} items=${fields[k] || []} disabled=${ro} onChange=${(v, src) => set(k, v, src)} placeholder=${k === 'action' ? 'What the audience should do' : ''} /></div>`)}
       <div class="st-field st-reqs"><${Lbl}>Design requirements</${Lbl}><div class="ov-dim">Mandatory items are constraints on every concept; preferred ones are followed unless the message needs otherwise; open ones are the art director's call. Each says where it came from.</div>
         ${['mandatory', 'preferred', 'open'].map(band => html`<div key=${band} class=${'st-req-band ' + band}><div class="st-req-head"><b>${band}</b> <span class="ov-dim">${(req[band] || []).length}</span></div>
@@ -760,6 +841,7 @@
         <div class="st-dir-line"><b>Why</b> ${d.rationale}</div>
         ${d.idea ? html`<div class="st-dir-line"><b>Idea</b> ${d.idea}</div>` : null}${d.copyApproach ? html`<div class="st-dir-line"><b>Copy</b> ${d.copyApproach}</div>` : null}
         ${d.medium || d.composition ? html`<div class="st-dir-line"><b>Medium</b> ${d.medium ? html`<${Chip}>${d.medium}</${Chip}> ` : null}${d.composition}${d.typography ? '; type: ' + d.typography : ''}${d.colour ? '; colour: ' + d.colour : ''}</div>` : null}
+        ${d.route ? html`<div class="st-dir-line st-dir-route"><b>Route</b> <${Chip} kind=${d.route === 'finished' ? 'warn' : 'ok'}>${d.route === 'finished' ? 'Gemini finished creative' : 'editable composition'}</${Chip}> <span class="ov-dim">${d.route === 'finished' ? 'Gemini paints the whole piece, words and mark included; choosing this sets the project to Finished creative.' : 'generated imagery with the words and the exact mark as live, editable layers.'}</span>${d.fromAnalysis ? html` <${Chip}>from the brief analysis</${Chip}>` : null}</div>` : null}
         ${(d.references || []).length ? html`<div class="st-dir-line"><b>Draws on</b> ${d.references.join(', ')}</div>` : null}
         ${(d.plan || []).length ? html`<div class="st-dir-line"><b>Plan</b> ${d.plan.join(' / ')} <${Chip} kind=${d.renders ? 'warn' : 'ok'}>${d.renders ? d.renders + ' render' + (d.renders === 1 ? '' : 's') + ' per asset' : 'no render'}</${Chip}></div>` : null}
         <div class="st-dir-line"><b>Claims</b> ${(d.claims || []).join(', ') || 'none'} <span class="ov-dim">${d.uncertainty}</span></div>
@@ -2144,7 +2226,11 @@
     const setToolsOpen = v => { setToolsOpen0(v); store.set({ tools: v }); };
     const setPartnerOpen = v => { setPartnerOpen0(v); store.set({ partner: v }); };
     /* a view change from a deliberate navigation moves focus to the stage's heading, so a keyboard or screen-reader user lands on it */
-    const setView = useCallback((v, focus) => { setView0(v); setCmp(null); if (focus) focusNext.current = true; }, []);
+    /* browser history: a deliberate move (a step, a project opened or closed) is an entry, so the browser's Back returns to
+       the previous step or project inside AXIOM; a move made by Back itself is not pushed again (histRestoring) */
+    const histRestoring = useRef(false);
+    const pushHist = useCallback((pidV, viewV) => { if (histRestoring.current) return; try { const cur = history.state && history.state.studio; if (cur && cur.pid === (pidV || null) && cur.view === (viewV || null)) return; history.pushState({ ax: 1, v: 'studio', studio: { pid: pidV || null, view: viewV || null } }, '', location.pathname + location.search + '#v=studio'); } catch (e) {} }, []);
+    const setView = useCallback((v, focus) => { setView0(v); setCmp(null); if (focus) { focusNext.current = true; pushHist(pidRef.current, v); } }, []);
     // the heading is brought to just under the sticky context bar and navigator (its scroll-margin), so a new stage starts at its top
     useEffect(() => { if (focusNext.current && titleRef.current) { focusNext.current = false; try { titleRef.current.focus({ preventScroll: true }); titleRef.current.scrollIntoView({ block: 'start' }); } catch (e) {} } }, [view, p && p.id]);
     /* suggested next directions for the selected composition: one small, cached model call per version, made only when the team asks for it */
@@ -2172,6 +2258,8 @@
       } catch (e) { if (seq === libSeq.current) setLibErr(e.code || e.message); }
     }, [clientId]);
     useEffect(() => { loadLib(); }, [loadLib]);
+    // coming back to the Studio tab with no project open re-reads the library: work made elsewhere meanwhile is listed
+    useEffect(() => { const h = () => { if (!pidRef.current && !intakeRef.current) loadLib(); }; window.addEventListener('ax:studio-shown', h); return () => window.removeEventListener('ax:studio-shown', h); }, [loadLib]);
     useEffect(() => { store.set({ client: clientId }); }, [clientId]);
     useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
@@ -2244,7 +2332,20 @@
       if (!d.readOnly) pump(d);
       return d;
     };
-    const closeProject = () => { const pl = store.place(clientRef.current); if (pl) store.setPlace(clientRef.current, Object.assign({}, pl, { open: false })); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setSugg(null); loadLib(); };
+    const closeProject = () => { pushHist(null, null); const pl = store.place(clientRef.current); if (pl) store.setPlace(clientRef.current, Object.assign({}, pl, { open: false })); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setSugg(null); loadLib(); };
+    const histFns = useRef({}); histFns.current = { openProject, closeProject };
+    useEffect(() => {
+      const h = e => {
+        const d = e.detail || null; histRestoring.current = true;
+        const done = () => { setTimeout(() => { histRestoring.current = false; }, 0); };
+        try {
+          if (!d || !d.pid) { if (pidRef.current) histFns.current.closeProject(); done(); }
+          else if (d.pid !== pidRef.current) Promise.resolve(histFns.current.openProject(d.pid, { view: d.view, open: true })).finally(done);
+          else { if (d.view) { setView0(d.view); setCmp(null); } done(); }
+        } catch (err) { done(); }
+      };
+      window.addEventListener('ax:studio-history', h); return () => window.removeEventListener('ax:studio-history', h);
+    }, []);
     /* switching client leaves nothing of the other client on screen: project, kit, suggestions, notices, export, dialogs */
     const switchClient = id => { if (id === clientId) return; resumed.current = true; setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setDialog(null); setPanel(null); setPreset(null); setIntake(false); setSelAsset(null); setSelField(null); setSugg(null); setKit(null); setLib(null); setTab('copy'); setClientId(id); };
 
@@ -2270,9 +2371,10 @@
         setBusy('Creating the project'); setIntake(false);
         const formats = {}; o.channels.forEach(c => { formats[c] = (CHANNELS[c] || {}).format || '1:1'; }); if (o.deliverable === 'visual') formats.instagram = '4:5';
         const brief = { objective: o.start === 'brief' ? o.text : o.start === 'reference' ? 'Adapt the reference: ' + o.text : '', audience: '', message: '', deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'Visual creative for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), channels: o.channels, deliverable: o.deliverable, formats, creationMode: o.creationMode === 'finished' ? 'finished' : 'editable', imageryTiming: o.imageryTiming === 'after_copy' ? 'after_copy' : 'with_copy', campaignConfirmed: !!o.campaignConfirmed, assumptions: ['Organic, not paid (assumed; edit if wrong)'].concat(o.campaign ? [] : ['No campaign chosen: campaign identity and campaign facts will not apply']) };
-        const pr = await call('/studio/project', { ns: client.id, campaign: o.campaign, title: (o.start === 'release' ? (o.text.split('\n').map(s => s.trim()).filter(s => s && !/^media release/i.test(s))[0] || 'Release') : o.text).slice(0, 80), brief, idem: 'p:' + client.id + ':' + Date.now() });
+        const pr = await call('/studio/project', { ns: client.id, campaign: o.campaign, title: (o.start === 'release' || o.start === 'analyse' ? (o.text.split('\n').map(s => s.replace(/^#+\s*/, '').trim()).filter(s => s && !/^media release/i.test(s))[0] || 'Release') : o.text).slice(0, 80), brief, idem: 'p:' + client.id + ':' + Date.now() });
         setPid(pr.id); pidRef.current = pr.id; setSelAsset(null); setView('brief', true);
         if (o.start === 'release') { const s = await call('/studio/source', { project: pr.id, kind: 'release', name: 'Pasted release', text: o.text }); await reload(pr.id); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading the source: claims, figures and quotations with their passages'); }
+        if (o.start === 'analyse') { await reload(pr.id); await analyse({ kind: o.kind || 'brief', text: o.text, name: (ANALYSE_KINDS.find(x => x[0] === o.kind) || [0, 'Brief'])[1] + ': ' + (o.text.split('\n').map(x => x.replace(/^#+\s*/, '').trim()).filter(Boolean)[0] || '').slice(0, 60) }); return; }
         if (o.start === 'reference' && o.file) { await call('/studio/reference', { project: pr.id, kind: 'image', name: o.file.name, purpose: 'composition', imageB64: o.file.b64, mime: o.file.mime, note: 'from intake' }); }
         await reload(pr.id);
         if (o.route === 'guided') { await job('strategy', {}, null, 'strategy:' + pr.id, 'Drafting the creative strategy'); await direct(3); }
@@ -2301,7 +2403,24 @@
     const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e, 'The reference was not added'); } finally { setBusy(''); } };
     const saveRecipe = async (id, recipe) => { try { setBusy('Saving the recipe'); const d = await call('/studio/reference/recipe', Object.assign({ id, project: p.id }, recipe)); await reload(); toastMsg(d.recipe && d.recipe.conflict ? 'Saved, with a note: ' + d.recipe.conflict : 'Recipe saved', !!(d.recipe && d.recipe.conflict)); } catch (e) { fail(e, 'The recipe was not saved'); } finally { setBusy(''); } };
     const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e, 'The reference was not read'); } finally { setBusy(''); } };
-    const chooseDirection = async (did) => { try { await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e, 'The direction was not chosen'); } };
+    const chooseDirection = async (did) => { try {
+      // a narrative from the brief analysis names its route: a finished one sets the project to Finished creative before
+      // production, an editable one back to Editable (copy-only projects have no route to follow)
+      const pr0 = pRef.current || {}; const d0 = (pr0.directions || []).find(x => x.id === did); const b0 = pr0.brief || {};
+      if (d0 && d0.route && b0.deliverable !== 'copy' && (b0.creationMode || 'editable') !== d0.route) await call('/studio/project/update', { id: pr0.id, revision: pr0.revision, patch: { brief: { creationMode: d0.route } } });
+      await call('/studio/direction/choose', { id: did }); await reload(); await produce({}); } catch (e) { fail(e, 'The direction was not chosen'); } };
+    /* the brief engine: the material (a brief, an article, today's daily brief, a file) becomes a source, and one model call
+       reads it against the client - what concerns them, which campaign, which facts, which knowledge - and proposes the brief,
+       copy angles and visual narratives (each with its route), then names the next step */
+    const analyse = (o) => guard('analyse:' + pidRef.current, async () => {
+      try {
+        setBusy('Adding the material');
+        const s0 = await call('/studio/source', { project: pidRef.current, kind: 'analyse:' + (o.kind || 'brief'), name: o.name || 'Pasted brief', text: o.text, provenance: o.kind === 'daily' ? 'daily brief' : o.file ? 'upload: ' + o.file : 'pasted' });
+        await reload(); setBusy('');
+        await job('analyse', { source: s0.id, kind: o.kind || 'brief', instruction: o.instruction || undefined }, null, 'analyse:' + s0.id, 'Reading "' + (o.name || 'the brief') + '" against ' + ((client && client.name) || 'the client') + ', its campaigns and knowledge');
+        await reload(); setView('brief', true);
+      } catch (e) { fail(e, 'The analysis did not run', () => analyse(o)); } finally { setBusy(''); }
+    });
 
     /* text edits: one queue per asset, sent one at a time on the latest revision, so a fast second edit waits for the first
        instead of racing it; a revision taken by someone else is retried only when they did not touch the same words */
@@ -2544,7 +2663,7 @@
     const campName = p && p.campaign ? ((kit && kit.campaigns || []).find(c => c.id === p.campaign) || {}).name || p.campaign : '';
     const saveWord = saveSt.err ? 'Not saved' : saveSt.pending || typing ? 'Saving...' : saveSt.at ? 'All changes saved' : 'Saved';
     const header = html`<div class="st-head">
-      <div class="st-head-l"><span class="st-brand"><span class="st-brandmark" aria-hidden="true">A</span><span class="st-brandname">AXIOM</span><span class="st-appname">/ Creative Studio</span></span>
+      <div class="st-head-l"><span class="st-hbrand"><span class="st-brandmark" aria-hidden="true">A</span><span class="st-brandname">AXIOM</span><span class="st-appname">/ Creative Studio</span></span>
         ${p ? html`<span class="st-ptitle-block"><span class="st-ptitle-row"><button class="ov-link st-allp" onClick=${closeProject} title="Back to every project for this client">All projects</button><span class="st-sep" aria-hidden="true">/</span><b class="st-ptitle" title=${p.title}>${p.title}</b></span><span class="st-psub">${campName ? html`<${Chip} title="campaign">${campName}</${Chip}>` : html`<span class="ov-dim">no campaign</span>`}${(p.brief || {}).deliverable !== 'copy' ? html`<${Chip} kind=${(p.brief || {}).creationMode === 'finished' ? 'warn' : ''} title=${(p.brief || {}).creationMode === 'finished' ? 'Gemini Finished Creative: the image model paints the whole piece, words and mark included; one bitmap, nothing composed over it' : 'Editable Studio: imagery generated, words and the exact mark composed as live layers'}>${(p.brief || {}).creationMode === 'finished' ? 'Finished creative' : 'Editable'}</${Chip}>` : null}<${Chip} title=${'Content type: ' + ((p.brief || {}).deliverable === 'copy' ? 'copy only, no tiles' : (p.brief || {}).deliverable === 'visual' ? 'visual creative' : 'a coordinated set') + (((p.brief || {}).channels || []).length ? ' for ' + (p.brief || {}).channels.map(chanLabel).join(', ') : '')}>${(p.brief || {}).deliverable === 'copy' ? 'Copy only' : (p.brief || {}).deliverable === 'visual' ? 'Visual' : 'Set'}${((p.brief || {}).channels || []).length ? ' - ' + (p.brief || {}).channels.map(chanLabel).join(', ') : ''}</${Chip}>${p.readOnly ? html`<${Chip}>legacy, read-only</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}${a && view === 'asset' ? html`<span class="st-sep" aria-hidden="true">/</span><span class="st-curasset">${a.title} <span class="ov-dim">v${vnum(a, current(a))} of ${vtotal(a)}</span></span><${Chip} title="format">${(FORMATS[a.format] || {}).label || a.format}</${Chip}>` : null}</span></span>` : html`<span class="ov-dim st-libword">Project library</span>`}
         <select class="st-sel st-client" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select>
       </div>
@@ -2570,7 +2689,7 @@
     if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
     else if (!p) centre = html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
-    else if (view === 'brief') centre = html`<${BriefView} key=${p.id} p=${p} head=${headOf('brief', tabsFor('brief'))} prov=${prov} onGo=${goStage} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} busy=${busy} />`;
+    else if (view === 'brief') centre = html`<${BriefView} key=${p.id} p=${p} head=${headOf('brief', tabsFor('brief'))} prov=${prov} onGo=${goStage} onSave=${saveBrief} onDirect=${direct} onProduce=${o => produce(o || {})} onCampaign=${setCampaign} onStrategy=${draftStrategy} onAnalyse=${analyse} onChoose=${chooseDirection} kit=${kit} client=${client} busy=${busy} />`;
     else if (view === 'sources') centre = Staged('brief', null, html`<${SourcesView} p=${p} onAdd=${addSource} busy=${busy} />`);
     else if (view === 'references') centre = Staged('brief', null, html`<${ReferencesView} p=${p} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} busy=${busy} />`);
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} head=${headOf('directions')} prov=${prov} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
@@ -2620,5 +2739,6 @@
     const root = document.getElementById('studio-root');
     if (!root) return;
     if (!mounted) { mounted = true; ReactDOM.createRoot(root).render(html`<${StudioApp} />`); }
+    else { try { window.dispatchEvent(new CustomEvent('ax:studio-shown')); } catch (e) {} }
   };
 })();

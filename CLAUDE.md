@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13, `?v=r8` since S14).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13, `?v=r8` since S14, `?v=r9` since S15).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -2098,6 +2098,49 @@ drawn tick on "ready for design", shimmer while a project opens, lift on cards;
 all of it off under `prefers-reduced-motion`. Harness changes: journey 8's
 focus check reads the headline; `tests/studio-shots.mjs` captures Copy and the
 Board too.
+
+**The Creative Studio tab, Back, and the brief engine (S15; build
+`2026-10-06.studio-p31`, page `?v=r9`; `CREATIVE-STUDIO.md` s.38).** The
+Studio has its own tab in a **Create** group of the navigation
+(`.rbtn-studio`). Every view change is a browser history entry: `go(v)`
+pushes `{ax:1, v}` with `#v=<view>`, a `popstate` handler calls `go(v, true)`
+and hands the Studio its part (`ax:studio-history`), and inside the Studio
+opening a project or moving between stages pushes `{studio:{pid, view}}`, so
+Back returns to the previous view, from a project to the library, and never
+off to the page before the app. Coming back to the tab with no project open
+re-reads the library (`ax:studio-shown`). **The brief engine:** stage
+`analyse {source, kind brief|daily|article|release|upload|other,
+instruction}` (`stAnalyseStage`, the creative model, one call) reads material
+pasted, uploaded or fetched (**Use today's daily brief** reads `GET
+/brief/daily`) paragraph by paragraph against THIS client through
+`stCompileContext`: its campaigns, approved facts (pending ones never),
+banned terms with their negation rule, voice and corrections, and the Mind
+(`mindRetrieve(ns, creative)`). It answers which paragraphs concern the client
+(kept) and which do not (set aside, with the reason; one the model did not
+place is listed as not placed), the campaign it matches (only one the kit
+has, with a confidence), each claim against the facts (matches / conflicts /
+new and unverified; a fact id never given is not trusted), the knowledge it
+used, a proposed brief (written into empty fields only, `<field>Source:
+'ai'`), three copy angles (a banned term flagged by `contentBannedCheck`,
+negation allowed), two to four **visual narratives** that differ in medium,
+each with its route - `editable` (generated imagery, words and the exact mark
+as live layers) or `finished` (Gemini paints the whole piece) - and the next
+step (copy / directions / brief). The record is `brief.analysis`; the
+narratives become directions carrying `route` and `fromAnalysis` (status moves
+to directions); the source keeps the kept paragraphs as its **focus**
+(`studio_sources.extract.focus`) with a rule-pass ledger from them, and
+`stLedger` reads only the focus, so the copy stage never sees what was set
+aside; `stBriefText` carries the analysis (`stAnalysisText`: summary,
+campaign, the clean angles, claims not to use or to attribute, risks) into
+every later stage. Choosing a narrative sets `creationMode` to its route
+before production. In-app: **A brief or article to analyse** at intake and on
+the empty library, the **Analyse** box on the Brief (paste, upload .txt / .md
+/ .html, today's brief, a note), and the **Brief analysis** panel (summary,
+counts, Next with its button, campaign with Use, proposed brief, angles,
+narratives with Produce as an editable layout / as a finished creative,
+claims, knowledge, risks and gaps, and the kept / set-aside table); the
+Direction cards show each route. Harnesses: `tests/studio-s15-worker.mjs`
+(5), `tests/studio-s15-browser.mjs` (4).
 
 Phase 1, the ground:
 
