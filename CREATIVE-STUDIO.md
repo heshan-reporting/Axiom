@@ -1649,3 +1649,14 @@ selection, so the older suites now reach a covered layer through the Layers list
 - A draft is one per person per asset: two tabs of the same person on one asset keep the later autosave.
 - Projects made before the guided workflow are not moved into it; they keep their free order.
 
+### 40.7 Suite figures
+
+`npm test` on the final code: **108 of 108** - the 21 checks (worker syntax and ASCII, the RULES block byte-identical in
+worker and renderer, every page script parses, nothing private in `docs/`), 53 backend harnesses and 34 browser harnesses,
+1,064 cases in all, every provider mocked and nothing spent. S17's own: `studio-s17-worker.mjs` 13, `studio-s17-editor-worker.mjs`
+8, `studio-s17-render-browser.mjs` 28, `studio-s17-browser.mjs` 8, `studio-s17-editor-browser.mjs` 12. The suites moved onto
+the wizard and the seven steps: `studio-browser` 26, `studio-journey` 9, `studio-guided` 6, `studio-modes` 4, `studio-brand` 4,
+`studio-s9` 5, `studio-s10` 3, `studio-s11` 11, `studio-s15` 4, `studio-s16` 4, `studio-layout` 211, `studio-editor` 6. The new
+keyboard case was run against the old key handling first and failed on each half (the bracket with Shift, Option with a
+digit), as a new defect's test must.
+
