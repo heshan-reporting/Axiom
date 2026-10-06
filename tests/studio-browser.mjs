@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
-import { pngSolid } from './studio-fixture.mjs';
+import { pngSolid, place, tool } from './studio-fixture.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 const PORT = 8776, W = 'https://newsaus.heshan-998.workers.dev';
@@ -114,18 +114,21 @@ async function open(role) {
 const R = '#studio-root ';
 /* the Studio's navigation: six stages in the navigator, views inside a stage as tabs, the inspector's tabs beside the artwork */
 /* S13: the guided steps - Brief, Direction, Copy, Design, Review, Export */
-const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Review' };
-const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:text-is("' + name + '"))');
+const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Review', Delivery: 'Review' };
+const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + name + '")') + ')');
 const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
-const itab = (pg, name) => pg.click(R + '.st-instab:has-text("' + name + '")');
+const itab = (pg, name) => place(pg, name);
 /* an asset on the canvas: the assets rail belongs to Copy, Design and Review (S17 keeps it out of the early steps), and a
    rail click inside Copy opens the words, so the canvas is reached through Design */
 const openAsset = async (pg, title) => {
   if (!(await pg.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) { await goStep(pg, 'Design'); await pg.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))'); }
-  await pg.click(R + '.st-railbtn.asset:has-text("' + title + '")');
+  await pg.click(R + '.st-assetpick:has-text("' + title + '")');
 };
 /* the project tools: in the rail once there is work, in the context panel's links during the early steps */
-const openTool = async (pg, name) => { const loc = pg.locator(R + '.st-railbtn:not(.st-subtab):has-text("' + name + '")').or(pg.locator(R + '.st-ctx-links button:has-text("' + name + '")')); await loc.first().click(); };
+const openTool = async (pg, name) => { const loc = pg.locator(R + '.st-railbtn:not(.st-subtab):has-text("' + name + '")').or(pg.locator(R + '.st-ctx-links button:has-text("' + name + '")')); if (await loc.count()) return loc.first().click();
+  // S18: in Design the project tools are the header's Jobs and the Brand tool's links
+  if (name === 'Jobs') { await pg.click(R + '.st-subtab:has-text("Jobs")'); return; }
+  await tool(pg, 'Brand'); await pg.click(R + '.st-library button:has-text("' + (name === 'Brand' ? 'Open the Brand workspace' : name) + '")'); };
 /* a job run to its end through the route, as the page's pump would */
 const stepJob = async id => { let j; for (let i = 0; i < 8; i++) { j = (await api('POST', '/studio/job/step', { id })).job; if (['done', 'failed', 'cancelled'].indexOf(j.state) >= 0) return j; } return j; };
 /* the library is read when the Studio opens and on a client switch: a project made through the routes shows after one */
@@ -154,15 +157,15 @@ await t('a project made before the guided workflow (the calls of the retired rel
   eq((await stepJob((await api('POST', '/studio/job', { project: pr.id, stage: 'copy', input: { channels: CH4, deliverable: 'set', formats: FMT4, instruction: 'Three posts on the $74 billion figure', quick: true }, idem: 'copy:' + pr.id })).job.id)).state, 'done');
   await reloadLibrary(page);
   await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link');
-  await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-railbtn.asset').length === 4, null, { timeout: 30000 });
-  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-thread');
-  const th = await page.textContent(R + '.st-thread');
+  await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-pagechip').length === 4, null, { timeout: 30000 });
+  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-cd-conv');
+  const th = await page.textContent(R + '.st-cd-conv');
   ok(/Read Pasted release: 3 figures, 1 quotations/.test(th) && /marked unverified/.test(th) && /brief was proposed/.test(th), th.slice(0, 600));
   ok(/Produced 4 assets: LinkedIn 1:1, Instagram 4:5, Facebook 1:1, X 16:9/.test(th) && /editable teal fact panels with the kit logo placed exactly; 4 background renders queued/.test(th), th);
   ok(await page.$(R + '.st-step.skipped'), 'directions marked skipped');
-  await page.waitForFunction(() => (document.querySelector('#studio-root .st-thread').textContent.match(/Render finished/g) || []).length === 4, null, { timeout: 60000 });
+  await page.waitForFunction(() => (document.querySelector('#studio-root .st-cd-conv').textContent.match(/Render finished/g) || []).length === 4, null, { timeout: 60000 });
   eq(calls.gemini - g0, 4, 'four renders spent, one per asset, run by the open tab');
-  ok(/render spent/.test(await page.textContent(R + '.st-thread')));
+  ok(/render spent/.test(await page.textContent(R + '.st-cd-conv')));
   await shot(page, 'studio-produced');
   await itab(page, 'Copy');
 });
@@ -180,18 +183,18 @@ await t('the sources view shows the ledger tied to passages, with what the sourc
   eq(await page.inputValue(R + '.st-field textarea'), 'Answer the subsidy framing while the credit is in the news');
 });
 await t('the asset preview is drawn by the one renderer; the checks read the ledger; a headline edit makes a text version that changes the preview with no image-model call and keeps the image', async () => {
-  await openAsset(page, 'Facebook post');
+  await openAsset(page, 'Facebook post'); await tool(page, 'Text');
   await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => /gemini-3-pro-image/.test(document.querySelector('#studio-root .st-comp-tag').textContent));
   ok(/editable composition, teal fact panel/.test(await page.textContent(R + '.st-comp-tag')));
-  ok(/kit logo placed exactly/.test(await page.textContent(R + '.st-copy')), 'the layout line names the exact logo');
+  ok(/kit logo placed exactly/.test(await page.textContent(R + '#st-tab-properties')), 'the layout line names the exact logo');
   const checks = (await page.textContent(R + '.st-checks')).replace(/\s+/g, ' '); ok(/matches source \$74 billion matches the source, p3, 2023-24/.test(checks), checks);
   await new Promise(r => setTimeout(r, 400));
   const before = await canvasPng(page); const g0 = calls.gemini; const head0 = await page.textContent(R + '.st-asset-head');
   ok(/v2 of 2/.test(head0), head0);
   await page.fill(R + '.st-field:nth-of-type(1) input', 'Fuel tax credits are not a subsidy.');
   await page.waitForFunction(() => /v3 of 3/.test(document.querySelector('#studio-root .st-asset-head').textContent), null, { timeout: 15000 });
-  await page.waitForFunction(() => /Text change on Facebook post: hand edit: headline \(no render\)/.test(document.querySelector('#studio-root .st-thread').textContent));
+  await page.waitForFunction(() => /Text change on Facebook post: hand edit: headline \(no render\)/.test(document.querySelector('#studio-root .st-cd-conv').textContent));
   await new Promise(r => setTimeout(r, 400));
   const after = await canvasPng(page);
   ok(before && after && before !== after, 'the preview changed with the headline');
@@ -202,7 +205,7 @@ await t('the asset preview is drawn by the one renderer; the checks read the led
 });
 await t('a layout change (headline smaller) is a layout version, no render; a long headline is flagged as overflow at 4:5 on the Instagram portrait', async () => {
   const g0 = calls.gemini;
-  await page.click(R + '.ov-link:has-text("headline smaller")');
+  await place(page, 'Properties'); await page.click(R + '.ov-link:has-text("headline smaller")');
   await page.waitForFunction(() => /v4 of 4/.test(document.querySelector('#studio-root .st-asset-head').textContent), null, { timeout: 15000 });
   ok(/headline smaller/.test(await page.textContent(R + '.st-asset-head'))); eq(calls.gemini, g0);
   await openAsset(page, 'Instagram portrait');
@@ -234,12 +237,12 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
     await page.click(R + '.st-appr button:has-text("Approve ' + part + '")'); await page.fill(R + '.st-dialog textarea', why); await page.click(R + '.st-dialog button:has-text("Record")');
     await page.waitForFunction(p => new RegExp(p + '\\s*approved').test(document.querySelector('#studio-root .st-approve').textContent), part);
   }
-  await goView(page, 'Export');
+  await goView(page, 'Delivery');
   await page.waitForSelector(R + '.st-exportstage');
   const rows = await texts(page, R + '.st-exportstage tbody tr'); eq(rows.filter(r => /included/.test(r)).length, 1); ok(/Facebook post/.test(rows.find(r => /included/.test(r))));
-  ok(/Export sends nothing anywhere; a hand-off is its own step/.test(await page.textContent(R + '.st-exportstage')));
+  ok(/Preparing the package sends nothing anywhere; a hand-off is its own, confirmed step/.test(await page.textContent(R + '.st-exportstage')));
   await shot(page, 'studio-export');
-  await page.click(R + '.st-exportstage button:has-text("Prepare bundle")');
+  await page.click(R + '.st-exportstage button:has-text("Prepare the package")');
   await page.waitForFunction(() => window.__studioLastExport, null, { timeout: 30000 });
   const ex = await page.evaluate(() => window.__studioLastExport);
   ok(ex.files.some(f => /Facebook_post-v\d\.png/.test(f)) && ex.files.indexOf('copy-sheet.txt') >= 0 && ex.files.indexOf('manifest.json') >= 0, JSON.stringify(ex.files));
@@ -258,10 +261,10 @@ await t('directing the team: a text direction lands as a version with no render;
   await itab(page, 'Art Director');
   const g0 = calls.gemini;
   await page.fill(R + '.st-composer textarea', 'Keep this layout but make the headline sharper'); await page.press(R + '.st-composer textarea', 'Enter');
-  await page.waitForFunction(() => /Text change only: 1 asset at a new version, image kept, no render spent/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
+  await page.waitForFunction(() => /Text change only: 1 asset at a new version, image kept, no render spent/.test(document.querySelector('#studio-root .st-cd-conv').textContent), null, { timeout: 30000 });
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v0, { timeout: 15000 });
   eq(await page.inputValue(R + '.st-field:nth-of-type(1) input'), 'Not a subsidy. Never was.'); eq(calls.gemini, g0);
-  ok(/Direction: Keep this layout/.test(await page.textContent(R + '.st-thread')), 'the direction is quoted');
+  ok(/Direction: Keep this layout/.test(await page.textContent(R + '.st-cd-conv')), 'the direction is quoted');
   await page.fill(R + '.st-composer textarea', 'Give me three alternative opening lines'); await page.press(R + '.st-composer textarea', 'Enter');
   await page.waitForSelector(R + '.st-alts', { timeout: 30000 });
   eq((await texts(page, R + '.st-alt')).length, 3);
@@ -269,21 +272,21 @@ await t('directing the team: a text direction lands as a version with no render;
   await page.waitForFunction(() => /^Who uses the fuel tax credit\?/.test(document.querySelector('#studio-root .st-field:nth-of-type(4) textarea').value), null, { timeout: 15000 });
   await page.fill(R + '.st-composer textarea', 'Make the visual more restrained, no trucks'); await page.press(R + '.st-composer textarea', 'Enter');
   await page.waitForSelector(R + '.st-proposal', { timeout: 30000 });
-  ok(/needs a new image, not a text change/.test(await page.textContent(R + '.st-thread')) && /Simplify the background/.test(await page.textContent(R + '.st-proposal')));
+  ok(/needs a new image, not a text change/.test(await page.textContent(R + '.st-cd-conv')) && /Simplify the background/.test(await page.textContent(R + '.st-proposal')));
   eq(calls.gemini, g0, 'nothing spent before confirmation');
   await page.click(R + '.st-offer .ov-link:has-text("show wording")');
   await page.waitForSelector(R + '.st-offer-box'); eq(await page.inputValue(R + 'textarea[id^="offer-"]'), 'No haul trucks in Hands Off Our Fuel imagery.');
   await page.click(R + '.st-offer-box button:has-text("Campaign preference (hoof)")');
-  await page.waitForFunction(() => /Saved as a campaign preference for hoof/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 15000 });
+  await page.waitForFunction(() => /Saved as a campaign preference for hoof/.test(document.querySelector('#studio-root .st-cd-conv').textContent), null, { timeout: 15000 });
   eq(env.MIND_DB.db.prepare("SELECT source FROM engine_fixes WHERE rule LIKE '%haul trucks%'").get().source.split(':campaign:')[1], 'hoof');
   await page.click(R + '.st-proposal button:has-text("Do this")');
-  await page.waitForFunction(() => /Render finished/.test(document.querySelector('#studio-root .st-thread').textContent.split('Confirmed: 1 render queued')[1] || ''), null, { timeout: 60000 });
+  await page.waitForFunction(() => /Render finished/.test(document.querySelector('#studio-root .st-cd-conv').textContent.split('Confirmed: 1 render queued')[1] || ''), null, { timeout: 60000 });
   eq(calls.gemini, g0 + 1, 'one render, after confirmation');
   ok(/confirmed, 1 render/.test(await page.textContent(R + '.st-proposal')));
   await shot(page, 'studio-partner');
 });
 await t('art direction: "Come up with a better creative" proposes distinct cards previewed on the current photograph with basis and cost; applying a layout-only card makes a layout version with no render; the render card shows its cost', async () => {
-  await openAsset(page, 'Facebook post'); await page.waitForSelector(R + '.st-ad');
+  await openAsset(page, 'Facebook post'); await tool(page, 'Images'); await page.waitForSelector(R + '.st-ad');
   const g0 = calls.gemini; const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1];
   eq(await page.inputValue(R + '.st-ad-ask input'), '', 'the feedback line is optional');
   ok(await page.$(R + '.st-ad-actions button:has-text("Refine this design")') && await page.$(R + '.st-ad-actions button:has-text("Create a new design")'), 'the three actions are visible');
@@ -304,12 +307,11 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   await page.waitForFunction(() => /applied/.test(document.querySelectorAll('#studio-root .st-ad-card')[1].textContent));
   ok(/applied as version/.test((await texts(page, R + '.st-ad-card'))[1]));
   ok(/proposed against an earlier version/.test(await page.textContent(R + '.st-ad-crit')), 'the cards say they were proposed against the version before');
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-list');
-  const items = await texts(page, R + '.st-le-item'); ok(items.some(x => /panel/.test(x)) && items.some(x => /headline/.test(x)) && items.every(x => /hide|show/.test(x) && /lock/.test(x)), JSON.stringify(items));
-  await page.click(R + '.st-asset-acts button:has-text("Close layout editor")');
+  await tool(page, 'Layers'); await page.waitForSelector(R + '.st-le-list');
+  await tool(page, 'Layers'); const items = await texts(page, R + '.st-le-item'); ok(items.some(x => /panel/.test(x)) && items.some(x => /headline/.test(x)) && items.every(x => /hide|show/.test(x) && /lock/.test(x)), JSON.stringify(items));
   await shot(page, 'studio-artdirection');
   // the resolution select governs what is paid for: the card costs follow it, and a re-render is queued at it
-  await page.selectOption(R + '.st-size select', '4K'); await page.waitForFunction(() => /1 render at 4K/.test(document.querySelector('#studio-root .st-ad-card:nth-child(3) .st-ad-cost').textContent));
+  await tool(page, 'Images'); await page.selectOption(R + '.st-size select', '4K'); await page.waitForFunction(() => /1 render at 4K/.test(document.querySelector('#studio-root .st-ad-card:nth-child(3) .st-ad-cost').textContent));
   await page.click(R + '.st-ad-quick .ov-link'); await page.click(R + '.st-ad-quick button:has-text("Do this (one render at 4K)")');
   await page.waitForFunction(() => /Rendering new imagery/.test(document.querySelector('#studio-root').textContent) || true);
   let rj = null; for (let i = 0; i < 40 && !rj; i++) { await new Promise(r => setTimeout(r, 250)); const pid = (await api('GET', '/studio/list?ns=mca')).projects.map(x => x.id); for (const id of pid) { const js = (await api('GET', '/studio/jobs?project=' + id)).jobs || []; rj = js.find(j => j.stage === 'render' && /imagery as directed/.test(JSON.stringify(j.input))) || rj; } }
@@ -317,14 +319,14 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   await page.selectOption(R + '.st-size select', '2K');
 });
 await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
-  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
+  await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Ideas")'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
   ok(!(await page.$(R + '.st-partner .st-sugg.design .st-sugg-item')), 'nothing is suggested, and nothing spent, until the team asks');
   await page.click(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")'); await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
   const items = await texts(page, R + '.st-partner .st-sugg.design .st-sugg-item'); eq(items.length, 3); ok(/compact translucent panel in the upper left/.test(items[0]), items[0]); ok(/the artwork seen/.test(await page.textContent(R + '.st-partner .st-sugg-head')), 'the head says the model saw the artwork');
-  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link'); await useBtns[1].click();
+  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link:has-text("use as instruction")'); await useBtns[1].click();
   eq(await page.inputValue(R + '.st-composer textarea'), SUGGEST.design[1].text, 'the suggestion is in the composer, editable, not sent');
   await page.fill(R + '.st-composer textarea', '');
-  ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
+  await tool(page, 'Images'); ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
   await page.click(R + '.st-ad-quick > .ov-link'); await page.waitForSelector(R + '.st-ad-quick .st-sugg.image .st-sugg-item');
   const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item .ov-link'); eq(img.length, 2); await img[0].click();
   eq(await page.inputValue(R + '[aria-label="Photograph description"]'), SUGGEST.image[0].text);
@@ -340,8 +342,8 @@ await t('suggested next directions: design suggestions sit beside the creative p
   await shot(page, 'studio-suggestions');
 });
 await t('three visible actions: Create a new design opens a form that names what is retained and the references, proposes, and creates a new asset that inherits no panel; the art director\'s inspection of a render sits on the thread with an editable, bounded correction that applies once', async () => {
-  await openAsset(page, 'Facebook post'); await page.waitForSelector(R + '.st-ad-actions');
-  const n0 = (await page.$$(R + '.st-railbtn.asset')).length;
+  await openAsset(page, 'Facebook post'); await tool(page, 'Images'); await page.waitForSelector(R + '.st-ad-actions');
+  const n0 = (await page.$$(R + '.st-pagechip')).length;
   await page.click(R + '.st-ad-actions button:has-text("Create a new design")'); await page.waitForSelector(R + '.st-newdesign');
   ok(/Mandatory campaign requirements/.test(await page.textContent(R + '.st-newdesign')), 'the form says what always carries forward');
   const checks = await texts(page, R + '.st-newdesign .st-check'); ok(checks.some(c => /the current imagery/.test(c)) && checks.some(c => /the current copy/.test(c)) && checks.some(c => /the current composition/.test(c)), JSON.stringify(checks));
@@ -350,22 +352,23 @@ await t('three visible actions: Create a new design opens a form that names what
   await page.waitForFunction(() => /New design/.test((document.querySelector('#studio-root .st-ad-crit') || {}).textContent || ''), null, { timeout: 30000 });
   const cards = await texts(page, R + '.st-ad-card'); ok(cards.length >= 1); ok(/Create \(layout only\)|Create as a sketch/.test(cards[0]), 'a fresh concept creates rather than applies: ' + cards[0].slice(0, 200));
   await page.click(R + '.st-ad-card:nth-child(1) button:has-text("Create")');
-  await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-railbtn.asset').length === n + 1, n0, { timeout: 15000 });
-  ok(/New designs/.test(await page.textContent(R + '.st-rail')), 'the new asset sits in its own family');
-  ok(/Created ".+" as a new design/.test(await page.textContent(R + '.st-thread')));
-  // the inspection a render queued earlier reached the thread with its scores and one correction
-  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-insp', { timeout: 20000 });
-  const insp = await page.textContent(R + '.st-insp'); ok(/fidelity/.test(insp) && /readability/.test(insp) && /round 1 of 2/.test(insp), insp.slice(0, 200));
-  ok(/verdict: fix/.test(insp) && /identity not scored/.test(insp) && /hierarchy 3 Support sits too close and competes with the headline/.test(insp) && /of v\d+/.test(insp) && /(composed tile|imagery only)/.test(insp), 'each score with its reason, the unscored one said, the verdict, the version and what was seen: ' + insp.slice(0, 500));
-  ok(/support line sits too close/.test(await page.textContent(R + '.st-insp')), 'the issue is named');
-  const fixBox = await page.$(R + 'textarea[id^="fix-"]'); ok(fixBox, 'the correction is editable before it is applied'); eq(await fixBox.inputValue(), 'Add a line of space between the headline and the support line; keep everything else.');
-  // the inspection judged the render's version; the asset has moved on since (a concept was applied), so the card says so and applying is a confirmed choice
-  // (waited for, not read once: the marking follows the project reload that carries the newer current version)
-  ok(await page.waitForFunction(() => /inspected an earlier version/.test((document.querySelector('#studio-root .st-insp') || {}).textContent || ''), null, { timeout: 15000 }).then(() => true, () => false), 'a stale inspection is marked');
-  page.once('dialog', d => d.accept());
-  await page.click(R + '.st-insp button:has-text("Apply the correction")');
-  await page.waitForFunction(() => /correction applied/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
-  ok((await page.$$(R + '.st-insp button:has-text("Apply the correction")')).length < (await page.$$(R + '.st-insp')).length, 'an applied correction offers no second button');
+  await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-pagechip').length === n + 1, n0, { timeout: 15000 });
+  ok(await page.$(R + '.st-pagefam[aria-label="New designs"]'), 'the new asset sits in its own family');
+  await place(page, 'Art Director'); ok(/Created ".+" as a new design/.test(await page.textContent(R + '.st-cd-conv')));
+  // the inspection a render queued earlier: the one current review of that asset holds its scores and one correction (S18)
+  await openAsset(page, 'Facebook post'); await page.click(R + '#st-tabbtn-director'); await page.click(R + '.st-cd-tab:has-text("Review")'); await page.waitForSelector(R + '.st-cd-review .st-cd-scores', { timeout: 20000 });
+  const insp = (await page.textContent(R + '.st-cd-review')).replace(/\s+/g, ' '); ok(/fidelity/.test(insp) && /readability/.test(insp) && /round 1 of 2/.test(insp), insp.slice(0, 200));
+  ok(/verdict: fix/.test(insp) && /identity not scored/.test(insp) && /hierarchy 3 \/ 5 Support sits too close and competes with the headline/.test(insp) && /judged v\d+/.test(insp) && /(composed tile|imagery only)/.test(insp), 'each score with its reason, the unscored one said, the verdict, the version: ' + insp.slice(0, 400));
+  ok(/support line sits too close/.test(insp), 'the issue is named');
+  const fixBox = await page.$(R + '.st-cd-review textarea[id^="fix-"]'); ok(fixBox, 'the correction is editable before it is applied'); eq(await fixBox.inputValue(), 'Add a line of space between the headline and the support line; keep everything else.');
+  eq((await page.$$(R + 'textarea[id^="fix-"]')).length, 1, 'one correction editor on the page');
+  // the version state agrees with the record: outdated when the asset moved past the inspected version, current otherwise (s18 test 7 drives the outdated case)
+  const rec = await (async () => { const d = await api('GET', '/studio/list?ns=mca'); const pr = d.projects.find(x => /Fuel tax credits keep regional Australia moving/.test(x.title)); const full = await api('GET', '/studio/get?id=' + pr.id); const a = full.assets.find(x => x.channel === 'facebook' && !/New design/.test(x.family || '')); const ins = (full.thread || []).filter(e => e.kind === 'inspection' && e.asset === a.id).pop(); return { stale: !!(ins && ins.version && ins.version !== a.current) }; })();
+  ok(rec.stale ? /outdated: judged v/.test(insp) : /the current version/.test(insp), 'the review states its version against the current one: ' + JSON.stringify(rec));
+  if (rec.stale) page.once('dialog', d => d.accept()); // the confirm asks only when the review judged an earlier version
+  await page.click(R + '.st-cd-review button:has-text("Apply the correction")');
+  await page.waitForFunction(() => /correction applied/.test(document.querySelector('#studio-root .st-cd-review').textContent), null, { timeout: 30000 });
+  eq(await page.$(R + '.st-cd-review button:has-text("Apply the correction")'), null, 'an applied correction offers no second button');
   await shot(page, 'studio-newdesign');
 });
 await t('the jobs view lists every job with its log; the client context lists the kit, the facts, the banned terms and the learned rule', async () => {
@@ -415,18 +418,18 @@ await t('a project made before the guided workflow from an open brief, copy only
   await reloadLibrary(page);
   await page.click(R + '.st-lib tbody tr:has-text("Something for Victoria") .ov-link');
   await page.waitForSelector(R + '.st-dir', { timeout: 30000 });
-  eq((await texts(page, R + '.st-dir')).length, 2); ok(!(await page.$(R + '.st-railbtn.asset')), 'no assets before a choice');
+  eq((await texts(page, R + '.st-dir')).length, 2); ok(!(await page.$(R + '.st-assetpick')), 'no assets before a choice');
   await shot(page, 'studio-directions');
   await page.click(R + '.st-dir:first-child button:has-text("Choose this direction")');
   let d = null; for (let i = 0; i < 160; i++) { d = await api('GET', '/studio/get?id=' + pr.id); if (d.assets.length === 3 && !(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }
   eq(d.assets.length, 3, 'one copy-only piece per channel');
   ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Directions"))'), 'the page stays where the team is: production does not move it');
-  await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-railbtn.asset').length === 3, null, { timeout: 30000 });
+  await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-assetpick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
-  await goStep(page, 'Review'); await page.waitForSelector(R + '.st-thread');
-  const th = await page.textContent(R + '.st-thread');
+  await goStep(page, 'Review'); await page.waitForSelector(R + '.st-cd-conv');
+  const th = await page.textContent(R + '.st-cd-conv');
   ok(/nothing is produced until you do/.test(th) && /Copy only: no render spent/.test(th), th.slice(0, 400)); eq(calls.gemini, g0, 'no render for copy-only work');
-  eq(await texts(page, R + '.st-railbtn.asset'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);
+  eq(await texts(page, R + '.st-assetpick'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);
   await goStep(page, 'Copy'); await page.waitForSelector(R + '.st-copy-title');
   ok(/from "The plain ask"/.test(await page.textContent(R + '.st-copy-title')));
   ok(await page.$(R + '.st-step.skipped:has(.st-step-l:text-is("Design"))'), 'copy only: nothing to design, the step says so');
@@ -470,8 +473,8 @@ await t('a legacy pack imports once into a project whose tile is flattened and m
   await page.locator(R + 'tr.st-legacy').first().locator('.ov-link:has-text("import to Studio")').click();
   await page.waitForSelector(R + '.st-flatnote', { timeout: 15000 });
   ok(/flattened legacy tile: the text on the image is not editable/.test(await page.textContent(R + '.st-flatnote')));
-  ok(/original is untouched/.test(await page.textContent(R + '.st-thread')));
-  ok(await page.$(R + '.st-field:nth-of-type(1) input:disabled'), 'headline disabled on a flattened tile');
+  await place(page, 'Art Director'); ok(/original is untouched/.test(await page.textContent(R + '.st-cd-conv')));
+  await tool(page, 'Text'); ok(await page.$(R + '.st-field:nth-of-type(1) input:disabled'), 'headline disabled on a flattened tile');
   ok(/imported from rp:rp1/.test(await page.textContent(R + '.st-head')));
 });
 await t('the Release Desk and Content Desk entry points open the project wizard with the right preset; the Sentinel hook does too; their nav buttons are gone and the mobile tab bar scrolls', async () => {
@@ -496,12 +499,11 @@ await t('the layout editor moves a layer by drag and saves a layout version with
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await openAsset(page, 'LinkedIn post'); await page.waitForSelector(R + '.st-stage canvas');
   const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")');
   await page.waitForSelector(R + '.st-le-layer');
   await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
   const hl = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const bb = await hl.boundingBox();
   await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2); await page.mouse.down(); await page.mouse.move(bb.x + bb.width / 2 + 60, bb.y + bb.height / 2 - 40, { steps: 6 }); await page.mouse.up();
-  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
   ok(/layout edited by hand/.test(await page.textContent(R + '.st-asset-head'))); eq(calls.gemini, g0, 'no render for a layout edit');
   const proj = await page.evaluate(() => document.querySelector('#studio-root .st-head b').textContent);
@@ -526,7 +528,7 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await openAsset(page, 'LinkedIn post'); await page.waitForSelector(R + '.st-stage canvas');
   const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-tools');
+  await page.waitForSelector(R + '.st-le-tools');
   const layerOf = async role => (await page.$eval(R + '.st-le-layer[aria-label="Layer ' + role + '"]', el => ({ left: el.style.left, top: el.style.top })));
   const h0 = await layerOf('headline');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
@@ -543,7 +545,7 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   const s1 = await layerOf('support'), hB = await layerOf('headline');
   ok(parseFloat(s1.top) === Math.round((parseFloat(s0.top) - 2) * 10) / 10 && parseFloat(hB.top) === Math.round((parseFloat(hA.top) - 2) * 10) / 10, 'the grouped layers moved together: ' + JSON.stringify([s0, s1, hA, hB]));
   // reorder: the list runs front to back
-  const order0 = await texts(page, R + '.st-le-item'); await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-tools button:has-text("To back")');
+  await tool(page, 'Layers'); const order0 = await texts(page, R + '.st-le-item'); await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-tools button:has-text("To back")');
   const order1 = await texts(page, R + '.st-le-item'); ok(/headline|support/.test(order1[order1.length - 1]) && /headline|support/.test(order1[order1.length - 2]) && JSON.stringify(order0) !== JSON.stringify(order1), 'the headline and its group are now at the back: ' + order1.join(' | '));
   await page.click(R + '.st-le-tools button:has-text("To front")');
   // typography of one text layer
@@ -552,7 +554,7 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   await page.selectOption(R + '.st-le-type select[aria-label="Text alignment"]', 'center');
   ok(await page.$(R + '.st-le-guide'), 'the 3% guide is drawn');
   await page.waitForSelector(R + '.st-le-val'); ok(/Measured at 1080x1080/.test(await page.textContent(R + '.st-le-val')), 'measured at the output size while editing');
-  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
   eq(calls.gemini, g0, 'no render for any of it');
   const row = env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='LinkedIn post' ORDER BY v.created DESC LIMIT 1").get();
@@ -589,7 +591,7 @@ await t('P14: Production lists what a kit change made stale with a free re-check
   eq(jobs.map(j => j.stage + ':' + j.state), ['strategy:done', 'sequence:done']); eq(jobs[1].after, jobs[0].id, 'the sequence waited for the strategy'); eq(calls.gemini, g1, 'no image for this recipe');
   await page.waitForFunction(() => /model calls?/.test((document.querySelector('#studio-root .st-prod-use') || {}).textContent || ''));
   const use = await page.textContent(R + '.st-prod-use'); ok(/\d+ model calls?/.test(use) && /free versions/.test(use), use);
-  ok(/Recipe "Strategy, then a four-asset sequence/.test(await page.textContent(R + '.st-thread')), 'the run is on the thread');
+  ok(/Recipe "Strategy, then a four-asset sequence/.test(await page.textContent(R + '.st-cd-conv')), 'the run is on the thread');
   await shot(page, 'studio-production');
 });
 await t('P15: the library shows outcome metrics for the client against the previous window and the desks, with the isolation audit, at no model cost', async () => {
@@ -607,7 +609,7 @@ await t('P17: an area of the imagery is marked by typing it, edited with one ima
   await page.click(R + '.st-lib tbody tr:has-text("Fuel tax credits keep regional Australia moving") .ov-link'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await openAsset(page, 'Facebook post'); await page.waitForSelector(R + '.st-stage canvas');
   const vBefore = +((await page.textContent(R + '.st-asset-head')).match(/v(\d+) of/) || [])[1]; const g0 = calls.gemini;
-  await page.click(R + '.st-ad-quick .ov-link:has-text("Edit an area of the imagery")'); await page.waitForSelector(R + '.st-areaedit');
+  await tool(page, 'Images'); await page.click(R + '.st-ad-quick .ov-link:has-text("Edit an area of the imagery")'); await page.waitForSelector(R + '.st-areaedit');
   ok(/not a pixel mask/.test(await page.textContent(R + '.st-areaedit')), 'the limit is said before anything is spent');
   ok(await page.isDisabled(R + '.st-areaedit .btn:has-text("Edit (1 image")'), 'nothing to edit until the area and the instruction are given');
   for (const [k, val] of [['from left', '55'], ['from top', '5'], ['width', '40'], ['height', '30']]) await page.fill(R + '.st-areaedit input[aria-label="Area ' + k + ', per cent"]', val);
@@ -631,7 +633,7 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   const v0 = await head(); const g0 = calls.gemini;
   const latest = () => JSON.parse(env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 1").get().layout);
   const L0 = latest(); const hl0 = L0.layers.find(l => l.role === 'headline');
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-tools');
+  await page.waitForSelector(R + '.st-le-tools');
   ok(!(await page.isChecked(R + '.st-le-tools input[aria-label="Resize scales type"]')), 'resizing the box leaves the type alone by default');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
   await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
@@ -643,18 +645,18 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   await page.fill(R + '.st-le-type input[aria-label="Line height, times the type size"]', '1.3'); await page.press(R + '.st-le-type input[aria-label="Line height, times the type size"]', 'Enter');
   await page.fill(R + '.st-le-type input[aria-label="X, per cent of the stage"]', '9'); await page.press(R + '.st-le-type input[aria-label="X, per cent of the stage"]', 'Enter');
   const shapeRole = (L0.layers.find(l => l.type === 'shape' && !l.locked && !l.hidden) || {}).role;
-  if (shapeRole) { await page.click(R + '.st-le-item .ov-link:text-is("' + shapeRole + '")'); await page.fill(R + '.st-le-type input[aria-label="Panel opacity"]', '0.6'); await page.press(R + '.st-le-type input[aria-label="Panel opacity"]', 'Enter'); }
+  if (shapeRole) { await tool(page, 'Layers'); await page.click(R + '.st-le-item .ov-link:text-is("' + shapeRole + '")'); await page.fill(R + '.st-le-type input[aria-label="Panel opacity"]', '0.6'); await page.press(R + '.st-le-type input[aria-label="Panel opacity"]', 'Enter'); }
   await page.waitForSelector(R + '.st-le-type[aria-label="Image framing"]');
   await page.fill(R + '.st-le-type input[aria-label="Image zoom"]', '1.5'); await page.press(R + '.st-le-type input[aria-label="Image zoom"]', 'Enter');
   ok(/no render/.test(await page.textContent(R + '.st-le-type[aria-label="Image framing"]')), 'reframing says it spends nothing');
-  await page.click(R + '.st-le-wrap .btn:has-text("Save layout")');
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), v0, { timeout: 15000 });
   const L1 = latest(); const hl1 = L1.layers.find(l => l.role === 'headline');
   eq([hl1.size, hl1.lineHeight, hl1.x, L1.imageFocus && L1.imageFocus.zoom], [hl0.size, 1.3, 9, 1.5]); ok(hl1.w < hl0.w, 'the narrower box saved');
   if (shapeRole) eq(L1.layers.find(l => l.role === shapeRole).opacity, 0.6);
   // Explore layouts: the same photograph and words, three arrangements, layout only
   const v1 = await head();
-  await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
+  await tool(page, 'Images'); await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
   await page.waitForFunction(() => /Layouts/.test((document.querySelector('#studio-root .st-ad-crit') || {}).textContent || ''), null, { timeout: 20000 });
   ok(/Same photograph and approved words in each/.test(await page.textContent(R + '.st-ad-crit')), 'the card set says what is held');
   const cards = await texts(page, R + '.st-ad-card'); eq(cards.length, 3); ok(cards.every(c => /layout only, no render/.test(c) && /% from current/.test(c)), cards.join(' || '));
@@ -683,7 +685,7 @@ await t('P21: a reference recipe is set in the References view and reaches the c
   await page.click(R + '.st-recipe .btn:has-text("Save recipe")');
   await page.waitForFunction(() => /borrow typography; do not take colour/.test((document.querySelector('#studio-root .st-ref-recipe') ? [...document.querySelectorAll('#studio-root .st-ref')].map(x => x.textContent).join(' ') : '')), null, { timeout: 15000 });
   await openAsset(page, 'Facebook post'); await page.waitForSelector(R + '.st-stage canvas');
-  await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
+  await tool(page, 'Images'); await page.click(R + '.st-ad-actions button:has-text("Explore layouts")');
   await page.waitForSelector(R + '.st-influence', { timeout: 20000 });
   const inf = await page.textContent(R + '.st-influence'); ok(/typography from Editorial grid/.test(inf) && /colour from Editorial grid \(outside the recipe\)/.test(inf), inf);
   const cj = env.MIND_DB.db.prepare("SELECT id FROM studio_jobs WHERE stage='concepts' ORDER BY created DESC LIMIT 1").get().id;
@@ -708,7 +710,7 @@ await t('a read-only key reviews everything and changes nothing: no composer, lo
   await p2.waitForSelector(R + '.st-asset', { timeout: 15000 });
   ok(!(await p2.$(R + '.st-composer')), 'no composer'); ok(/needs a full key/.test(await p2.textContent(R + '.st-partner')));
   ok(!(await p2.$(R + '.st-lock')), 'no locks'); ok(!(await p2.$(R + '.st-appr .btn')), 'no approve buttons');
-  await goStep(p2, 'Review'); await p2.waitForSelector(R + '.st-subtab:has-text("Export")'); ok(true, 'export available inside Review');
+  await goStep(p2, 'Review'); await p2.waitForSelector(R + '.st-subtab:has-text("Delivery")'); ok(true, 'export available inside Review');
   await p2.close();
 });
 await t('P8: with two campaigns the wizard assumes none until the team chooses; the brief editor (a project made before the guided workflow) offers sourced suggestions in editable fields, design requirements in three bands and the check before anything is spent; the art director inspected the composed tile, not the imagery alone', async () => {

@@ -1697,3 +1697,109 @@ Five reported defects reproduced first in `tests/studio-s18-browser.mjs` (all fi
 cleared before the request succeeded; Enter submitted past the Send button's checks (and cleared the words while a request
 was in flight); the composer outside the window; the accent variable mismatch; the correction shown twice.
 
+
+### 41.2 What changed in the structure
+
+- **One frame, owned by one stylesheet.** `docs/studio-shell.css` is now the only place the Studio's frame is laid out
+  (header, navigator, body grid, the Design workspace, the inspector, the drawers). The frame rules that had accumulated in
+  `studio-skin.css` (155 lines), `studio-guided.css`, `studio-flow.css` and the Studio block of `index.html` (70 lines) were
+  removed rather than overridden; the skin keeps colour and type only. `go()` in `index.html` sets `body.in-studio` while the
+  Studio is open, and only then are the AXIOM masthead, the news navigation and the scope bar folded away. Every other AXIOM
+  view is untouched; **Back to AXIOM** in the Studio header returns to the front page (asking first over an unsaved layout).
+- **One header.** Back to AXIOM, the Studio's name, the project (title; client, campaign, content type and creation mode on
+  one line beneath), then the save state, the jobs, whether the models are configured and a help button. In the library the
+  header carries the client select and the build.
+- **Stage heads that answer the five questions.** Eyebrow, one headline, one sentence of purpose, and two facts - *Needs*
+  (what this step requires; when it is blocked, what blocks it) and *Main action* (what the primary button does and whether it
+  spends a model call or a render). "What happens next" folds behind the step's help button. Review is now **Review &
+  Delivery** with Delivery as its own tab: what is in the package, what is left out and why, and one button that names the
+  count.
+- **Design is a workspace, not a page.** Tool dock (Design, Text, Images, Brand, Layers) | a contextual library that opens
+  beside the canvas for the tool chosen and closes again | the artboard | the inspector. The artboard is fitted to the space it
+  has with container queries (`cqw`/`cqh`), so it is in the window at every size; zoom, Fit, guides, checkerboard, Preview and
+  full screen sit in one bar above it, the page strip of the family under it. **The canvas is the editor**: there is no "Edit
+  layout" mode; a layer is selected on the artboard directly, with every S17 capability (handles, rotation, snapping, marquee,
+  inline text, undo, drafts, framing) and the editor's panels shown in Properties. A finished bitmap or a locked layout shows
+  the artwork without handles. Guides and outlines draw only on hover and selection, never in Preview or the export.
+- **The save state is one vocabulary.** *Unsaved changes* (the canvas differs from the version), *Saving...*, *Draft saved*
+  (kept for this person only, offered back after a reload), *Version saved*, *Not saved* (a failure, with a retry) - in the
+  header and on the canvas foot, never contradicting each other.
+- **The theme contract.** `studioTheme(kit, campaign)` picks the accent from the campaign (`accent`, a new optional field in
+  the kit's campaigns), else the client's palette primary, else the neutral Studio accent, and computes an ink that reads on it
+  (`--st-client-accent`, `--st-client-ink`). It colours the interface only: selection, the current step, the primary button.
+  The artboard's surround stays neutral and nothing recolours the creative. Tested with MCA (teal), HOOF (its campaign accent)
+  and a client with no kit (neutral).
+
+### 41.3 The right panel
+
+Two modes and two controls, in one tab row: **Properties** (the selection: a text layer's type and box, a mark's variant,
+placement rule and readability, the photograph's framing, or the composition's facts when nothing is selected) and
+**Creative Director**; **Checks** (the quality summary, the measurement, the readiness strip, and the human approval of the
+version, kept apart) and **History** (the versions and what the Studio used). Brand moved into the Brand tool of the dock.
+"Partner", "Art Director" and "creative partner" are all **Creative Director** now, in the island, the progress panel and the
+worker's own messages.
+
+The Creative Director has three views and one scroll region with the composer anchored under it:
+
+- **Review** - the one current review of the asset: the version it judged and whether that is still the current one
+  (*outdated: judged vN* when not, and the correction then asks before applying), what the model saw (the composed tile or the
+  imagery only), the round, the top issue first, each score with its reason, what it did not score, the words it read, the
+  verdict, and the correction - editable, applied once. "Ship" is stated as an opinion; approval stays with a person in Review
+  & Delivery. **Review vN (1 model call)** asks for a new one.
+- **Ideas** - the suggestions for this version, each with what changes, what stays, its basis and its cost; *use as
+  instruction* fills the composer, *apply* runs it (one model call, confirmed). New directions link to the Images and Design
+  tools rather than repeating their controls.
+- **Conversation** - the team's instructions and the answers about this asset by default, or the whole project; the scope is
+  named above it. The Studio's own log (jobs queued, sources added, workflow events, render chips) is folded into a separate
+  "Studio log", so the conversation reads as one.
+
+Below 1180 px the inspector and the library are drawers (Escape closes them); at phone width the step navigator, the stage
+head and the canvas stack, and the inspector opens over the work.
+
+### 41.4 The five reported defects, fixed and tested (`tests/studio-s18-browser.mjs`)
+
+1. **Send cleared the words before success.** `directTeam` now answers whether the worker accepted the job; the composer keeps
+   the text until then, and a refusal gives it back with the reason, Retry and Edit.
+2. **Enter bypassed the checks.** Enter goes through the same `why()` as the Send button: not while a request is in flight
+   (the words stay), not during an IME composition (`isComposing`, the composition events and keyCode 229 are all read), not
+   empty, never twice (a once-key guards the request).
+3. **The composer was outside the window.** At 1440 x 900 the composer, the artboard and the step navigator are all inside
+   the window without scrolling the page; also asserted at 1920 x 1080, 1024 x 768 (drawer) and 390 x 844 (drawer).
+4. **The accent never reached the interface.** One token name from end to end, a readable ink, and the artwork untouched;
+   asserted for two clients and for the neutral fallback.
+5. **The correction appeared twice.** One current review holds it; the conversation no longer repeats the inspection's
+   controls; one `textarea[id^=fix-]` on the page.
+
+The investigations, each now a test in the same file: switching assets while an instruction is in flight (it goes to the
+asset it was written about, and the composer then names the new one); a review of an earlier version marked outdated once the
+words change; the conversation following new messages only while the reader is at its foot; a double click on Apply sending one
+request; the save state moving through unsaved, draft and version; a read-only key seeing the canvas without handles, composer,
+save line or review controls. The canvas editor is keyed by the version, so a selection never survives onto another version; a
+failed save says *Not saved* with a retry, and the words stay on the page.
+
+### 41.5 Activity
+
+Unchanged in substance from S12 and still the rule: phases are the worker's, a share is shown only where there is a count
+(channels written, renders queued, the steps of a run), and an image call is indeterminate with its elapsed time and the
+typical duration. In Design the live jobs sit in one line above the canvas rather than a block of cards.
+
+### 41.6 Limits and what is not verified
+
+- Every capture and every test runs against the worker module in-process with **every provider mocked**; no paid generation
+  was run. The imagery in the captures is synthetic.
+- The comparison with the mockup is of proportions and hierarchy; the mockup's simulated scores, progress and approvals were
+  not adopted - every figure in the Studio comes from the record.
+- The legacy views inside the island (Sources, Sequence, Recipes and usage, the Brand workspace's long tables) inherit the new
+  frame but were not redesigned.
+- The Studio's frame was rebuilt; AXIOM's other screens were not touched, but `index.html`'s Studio block lost its frame
+  rules, so a page served with an older `studio-shell.css` cached would look wrong until reloaded (the page scripts and
+  styles carry `?v=r12`).
+
+### 41.7 Compatibility and deployment
+
+- The page (`docs/`, `?v=r12`) works with the deployed p33 worker: every route it calls exists there. Two things need the
+  p34 worker: the campaign `accent` field is kept by `kitStructured()` only from p34 (an older worker drops it, and the
+  accent then falls back to the client's primary), and the worker's own messages say "Art Director" until p34 is deployed.
+- Deploy the worker with `tools/deploy-worker.sh` (never `wrangler deploy` from the repository root); the deploy script proves
+  `2026-10-07.studio-p34` on `/engine/status`. No D1 migration, no new secret, no new binding.
+- Nothing was deployed and no live model or image call was made in S18.

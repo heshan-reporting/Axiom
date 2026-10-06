@@ -3,7 +3,7 @@
  * at 1K"), the card's bar is indeterminate (no share invented from the clock), the header chip says 1 running; when it
  * finishes the card is done at 100; a render the provider refuses shows as failed with the explanation and a Retry; the
  * run counter counts finished steps. Run: node --experimental-sqlite tests/studio-activity-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8830, inspect: false });
 const { api } = fx; const R = '#studio-root ';
 const T = runner('studio-activity-browser (every running process visible: phase while a call is in flight, counts not clocks, failures with a Retry)');
@@ -11,7 +11,7 @@ const P = (await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', t
 const L = { v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial', approach: 'editable', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'a road', refs: [] }], palette: { primary: '#0E6A6E' }, fonts: { display: 'Bricolage Grotesque', body: 'Instrument Sans' },
   layers: [{ id: 'headline', type: 'text', role: 'headline', x: 6, y: 60, w: 88, h: 14, size: 6, weight: 800, color: '#FFFFFF', align: 'left', font: 'display' }] };
 const A = (await api('POST', '/studio/asset', { project: P, family: 'Set', channel: 'instagram', format: '4:5', title: 'Tile', copy: { headline: 'Not a subsidy' }, layout: L, mode: 'composition' })).asset.id;
-const openProject = async (page) => { await page.waitForSelector(R + '.st-lib tbody tr:has-text("Activity")', { timeout: 20000 }); await page.click(R + '.st-lib tbody tr:has-text("Activity") button.st-lib-open'); await page.waitForSelector(R + '.st-railbtn.asset:has-text("Tile")', { timeout: 20000 }); await page.click(R + '.st-railbtn.asset:has-text("Tile")'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 20000 }); };
+const openProject = async (page) => { await page.waitForSelector(R + '.st-lib tbody tr:has-text("Activity")', { timeout: 20000 }); await page.click(R + '.st-lib tbody tr:has-text("Activity") button.st-lib-open'); await page.waitForSelector(R + '.st-assetpick:has-text("Tile")', { timeout: 20000 }); await page.click(R + '.st-assetpick:has-text("Tile")'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 20000 }); };
 let page;
 
 await T.t('a slow image generation is visible while it runs: the panel is live, the summary carries the worker\'s phase, the card\'s bar is indeterminate with the elapsed time and the note that a model call shows no share, and the header chip says 1 running', async () => {

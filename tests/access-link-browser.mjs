@@ -3,7 +3,7 @@
  * history, nothing sent to the server); #v= opens that view; a read key signs in as read; a link without a key leaves
  * the stored key alone; a malformed key is ignored. Providers MOCKED.
  * Run: node --experimental-sqlite tests/access-link-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8801 });
 const T = runner('access-link-browser (a link that signs a browser in: the key stored, struck from the address, the view opened; providers MOCKED)');
 const base = 'http://127.0.0.1:' + fx.PORT + '/index.html';

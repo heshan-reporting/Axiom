@@ -36,7 +36,7 @@ const shown = S.jobsForDisplay(jobs); eq(shown.map(j => j.id), ['f1r', 'f2', 'd1
 // the run: one burst of jobs around what is live now, counted by finished steps; old history is not part of it
 const burst = [{ id: 'a', stage: 'copy', state: 'done', created: now - 100000, updated: now - 80000 }, { id: 'b', stage: 'render', state: 'done', created: now - 79000, updated: now - 40000 }, { id: 'c', stage: 'render', state: 'running', created: now - 79000 }, { id: 'd', stage: 'inspect', state: 'queued', created: now - 39000, after: 'b' }, { id: 'old', stage: 'copy', state: 'done', created: now - 3600000, updated: now - 3500000 }];
 const run = S.run(burst, now); eq([run.total, run.done, run.active, run.percent], [4, 2, 2, 50], 'four steps in the burst, two finished: 50%; the hour-old job is not counted');
-ok(/2 of 4 steps finished \(1 words and composition, 2 image generation, 1 art director review\)/.test(run.text), 'the run text names the stages: ' + run.text);
+ok(/2 of 4 steps finished \(1 words and composition, 2 image generation, 1 creative director review\)/.test(run.text), 'the run text names the stages: ' + run.text);
 eq(S.run([{ id: 'old', stage: 'copy', state: 'done', created: now - 3600000, updated: now - 3500000 }], now), null, 'nothing live and nothing recent: no run');
 eq(S.typical({ n: 1, median: 5000 }), '', 'one sample is not a typical duration');
 eq(S.typical({ n: 3, median: 125000, p80: 130000 }), 'about 2 min 5 s', 'minutes and seconds, no tail when it is short');

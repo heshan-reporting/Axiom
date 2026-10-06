@@ -9,7 +9,7 @@
  * (1920 x 1080) size go to tests/shots/s11-after-*.png (ignored by git).
  * Run: node --experimental-sqlite tests/studio-s11-browser.mjs */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok, pngGradient, pngSolid } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, pngGradient, pngSolid, place, tool } from './studio-fixture.mjs';
 import { HOOF_STRADDLE, HOOF_STRADDLE_COPY } from './fixtures/studio-layouts.mjs';
 const fx = await makeStudio({ port: 8819, inspect: false });
 const { api, r2 } = fx;
@@ -44,7 +44,7 @@ await T.t('the reported tile opens Blocked: the top issue (mark unreadable, the 
   page = await fx.open({ viewport: { width: 1366, height: 768 } });
   await page.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 });
   await page.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
-  await page.waitForSelector(R + '.st-railbtn.asset:has-text("Fact tile")', { timeout: 20000 }); await page.click(R + '.st-railbtn.asset:has-text("Fact tile")');
+  await page.waitForSelector(R + '.st-assetpick:has-text("Fact tile")', { timeout: 20000 }); await page.click(R + '.st-assetpick:has-text("Fact tile")');
   await page.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
   await page.waitForFunction(() => { const q = document.querySelector('#studio-root .st-qstate'); return q && q.dataset.state && q.dataset.state !== 'unknown' && !/Measuring/.test(q.textContent); }, null, { timeout: 30000 });
   const state = await page.$eval(R + '.st-qstate', el => el.dataset.state); eq(state, 'blocked');
@@ -55,7 +55,7 @@ await T.t('the reported tile opens Blocked: the top issue (mark unreadable, the 
   const info = await page.textContent(R + '.st-comp-info .st-comp-tag'); ok(/editable composition/.test(info), 'the composition facts sit under the stage: ' + info);
   await page.waitForFunction(() => /Technical validation\s*failed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
   const { a } = await cur(A); eq(a.readiness.technical, 'failed'); ok(a.readiness.reasons[0].includes('mark_unreadable (wordmark)'), a.readiness.reasons[0]);
-  ok(await page.$(R + '.st-stage-tools .st-sel[aria-label="Zoom"]'), 'the canvas toolbar'); ok(await page.$(R + '.st-layers .st-layer-pick:has-text("wordmark")'), 'the layers list in the left panel');
+  await tool(page, 'Layers'); ok(await page.$(R + '.st-stage-tools .st-sel[aria-label="Zoom"]'), 'the canvas toolbar'); ok(await page.$(R + '.st-layers .st-layer-pick:has-text("wordmark")'), 'the layers list in the left panel');
   await shot(page, 'blocked-1366');
 });
 
@@ -68,8 +68,9 @@ await T.t('selecting the wordmark in Layers opens Properties: the per-pixel figu
   eq(await page.$$eval(R + '#st-prop-variant option', o => o.length), 3, 'the approved variants');
   const rule = await page.textContent(R + '.st-prop-rule'); ok(/House default/.test(rule) && /No campaign rule/.test(rule), rule);
   eq(await page.$eval(R + '.st-prop-rule', el => el.dataset.basis), 'default');
-  ok(await page.$(R + '.st-stage .st-hl[data-layer="wordmark"]'), 'the wordmark is outlined on the tile');
-  ok(await page.$(R + '.st-props-one .st-le-type[aria-label="Position and size"] input[aria-label="Width, per cent of the stage"]'), 'position and size'); ok(/aspect locked/.test(await page.textContent(R + '.st-props-one')), 'the aspect is locked');
+  ok(await page.$(R + '.st-stage .st-hl[data-layer="wordmark"], ' + R + '.st-stage .st-le-layer.sel[data-id="wordmark"]'), 'the wordmark is outlined on the tile (S18: the canvas is the editor, so the selection outline)');
+  // S18: with the canvas as the editor, the box fields are the editor's own (in Properties); one set, never two
+  eq((await page.$$(R + '#st-inspector .st-le-type[aria-label="Position and size"] input[aria-label="Width, per cent of the stage"]')).length, 1, 'position and size, once'); ok(/aspect locked/.test(await page.textContent(R + '#st-inspector')), 'the aspect is locked');
   await shot(page, 'properties-1366');
 });
 
@@ -90,40 +91,39 @@ await T.t('Fix layout moves the wordmark down into the footer (same file, same w
   const a2 = (await cur(A)).a; eq(a2.readiness.technical, 'passed');
   await shot(page, 'fixed-1366');
   await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => typeof go === 'function' && window.STRender && typeof studioInit === 'function'); await page.evaluate(() => go('studio'));
-  await page.waitForSelector(R + '.st-railbtn.asset.on:has-text("Fact tile")', { timeout: 30000 });
+  await page.waitForSelector(R + '.st-assetpick.on:has-text("Fact tile")', { timeout: 30000 });
   await page.waitForFunction(() => { const q = document.querySelector('#studio-root .st-qstate'); return q && q.dataset.state && q.dataset.state !== 'unknown' && !/Measuring/.test(q.textContent); }, null, { timeout: 30000 });
   const st2 = await page.$eval(R + '.st-qstate', el => el.dataset.state); ok(st2 === 'review' || st2 === 'passed', 'the same state after a reload: ' + st2);
 });
 
 await T.t('Preview is the artwork alone: no toolbar controls, no outline, no label, no workflow strip; Exit preview brings the chrome back', async () => {
-  await page.click(R + '.st-head-acts button:has-text("Preview")');
+  await page.click(R + '.st-canvasbar button:has-text("Preview")');
   await page.waitForSelector(R + '.st-stage.preview', { timeout: 5000 });
   eq(await page.$(R + '.st-comp-info'), null, 'no composition label'); eq(await page.$(R + '.st-stage .st-hl'), null, 'no outlines'); eq(await page.$(R + '.st-stage-tools .st-sel'), null, 'no zoom control');
   ok(!(await page.isVisible(R + '.st-flow')), 'the workflow strip is out of the way');
   ok(await page.$(R + '.st-stage canvas'), 'the artwork is there');
   await shot(page, 'preview-1366');
-  await page.click(R + '.st-head-acts button:has-text("Exit preview")');
+  await page.click(R + '.st-canvasbar button:has-text("Exit preview")');
   await page.waitForSelector(R + '.st-stage-tools .st-sel[aria-label="Zoom"]', { timeout: 5000 }); ok(await page.$(R + '.st-comp-info'), 'the label is back'); ok(await page.isVisible(R + '.st-flow'), 'the workflow is back');
 });
 
 await T.t('the Brand tab names the campaign policy (wordmark, never the client logo), the marks on file with their variants, and the placement provenance', async () => {
-  await page.click(R + '.st-instab:has-text("Brand")'); await page.waitForSelector(R + '.st-brandtab', { timeout: 5000 });
+  await tool(page, 'Brand'); await page.waitForSelector(R + '.st-brandtab', { timeout: 5000 });
   const t = await page.textContent(R + '.st-brandtab');
   ok(/Mark policy: ?wordmark/.test(t.replace(/\s+/g, ' ')) && /never the client logo/.test(t), t.slice(0, 200));
   ok(/must not appear here/.test(t), 'the client logo is named as excluded'); ok(/Wordmark white/.test(t.replace(/\s+/g, ' ')) && /Wordmark black/.test(t.replace(/\s+/g, ' ')), 'the variants on file');
   ok(/House default/.test(t), 'the provenance');
 });
 
-await T.t('the left panel collapses and reopens; its width is a drag away', async () => {
-  await page.click(R + '.st-rail-collapse'); await page.waitForSelector(R + '.st-body.norail', { timeout: 5000 }); eq(await page.$(R + '.st-rail'), null, 'collapsed');
-  await page.click(R + '.st-rail-open'); await page.waitForSelector(R + '.st-rail', { timeout: 5000 }); ok(!(await page.$(R + '.st-body.norail')), 'open again');
-  ok(await page.$(R + '.st-rail-handle'), 'a resize handle');
+await T.t('S18: the tool panel opens beside the canvas from the dock and closes, the canvas staying in view (it replaced the S11 left panel)', async () => {
+  await tool(page, 'Layers'); ok(await page.isVisible(R + '.st-library[data-tool="layers"]'), 'open beside the canvas');
+  const art = await page.$eval(R + '.st-stage canvas', el => { const r = el.getBoundingClientRect(); return r.bottom <= innerHeight + 1 && r.top >= 0; }); ok(art, 'the artboard is still in the window');
+  await page.click(R + '.st-library-head button[aria-label^="Close"]'); await page.waitForSelector(R + '.st-library', { state: 'detached', timeout: 5000 });
 });
 
 await T.t('a 9:16 story aligns a single layer to its own insets - top 14%, bottom 80%, sides 6% - on the measured ink, not to a 3% margin', async () => {
   page.on('dialog', d => d.accept());
-  await page.click(R + '.st-railbtn.asset:has-text("Story")'); await page.waitForSelector(R + '.st-asset-title:has-text("Story")', { timeout: 20000 });
-  await page.waitForSelector(R + '.st-asset-acts button:has-text("Edit layout")', { timeout: 20000 }); await page.click(R + '.st-asset-acts button:has-text("Edit layout")');
+  await page.click(R + '.st-assetpick:has-text("Story")'); await page.waitForSelector(R + '.st-asset-title:has-text("Story")', { timeout: 20000 });
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"][data-ink]', { timeout: 20000 }); await wait(400);
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
   const geom = async () => page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => ({ top: parseFloat(el.style.top), left: parseFloat(el.style.left), h: parseFloat(el.style.height), w: parseFloat(el.style.width) }));
@@ -134,7 +134,7 @@ await T.t('a 9:16 story aligns a single layer to its own insets - top 14%, botto
   await page.click(R + '.st-le-tools button:has-text("Align left")'); await wait(300); const g3 = await geom();
   ok(Math.abs(g3.left - 6) < 0.9, 'the ink left sits on the side inset (6%): ' + g3.left.toFixed(1));
   ok(await page.$(R + '#st-tab-properties .st-le-type[aria-label="Typography"]'), 'the type panel is in Properties while editing');
-  await page.click(R + '.st-le-foot button:has-text("Cancel")'); await page.waitForSelector(R + '.st-le-layer', { state: 'detached', timeout: 5000 });
+  { const dz = await page.$(R + '.st-le-foot .btn:has-text("Discard changes")'); if (dz) { await dz.click(); await wait(300); } }
 });
 
 await T.t('export takes exactly the corrected version: design approval stands on the passing measurement and the export manifest names that version with the wordmark in the footer', async () => {
@@ -146,7 +146,7 @@ await T.t('export takes exactly the corrected version: design approval stands on
   const man = JSON.parse(String(r2.get(key).v)); const row = (man.assets || man.items || []).find(x => x.asset === A || x.id === A) || (man.assets || man.items || [])[0];
   ok(row && row.version === v.id, 'the exported version is the corrected one: ' + JSON.stringify(row && { version: row.version, want: v.id }));
   const wmx = row.layout ? row.layout.layers.find(l => l.id === 'wordmark') : null; ok(!row.layout || (wmx && wmx.y > 81.5 && wmx.y === v.layout.layers.find(l => l.id === 'wordmark').y), 'the manifest layout carries the moved mark: ' + JSON.stringify(wmx && { y: wmx.y }));
-  await page.click(R + '.st-head-acts button:has-text("Export")'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))', { timeout: 10000 }); await page.waitForSelector(R + '.st-subtab.on:has-text("Export")', { timeout: 10000 });
+  await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review"))'); await page.click(R + '.st-subtab:has-text("Delivery")'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))', { timeout: 10000 }); await page.waitForSelector(R + '.st-subtab.on:has-text("Delivery")', { timeout: 10000 });
   ok(/Fact tile/.test(await page.textContent(R + '.st-centre')), 'the Export stage lists the asset');
   await shot(page, 'export-1366');
 });
@@ -158,12 +158,12 @@ await T.t('a render filed on the type-only Story (the ground that hides it still
   const { v: s1 } = await cur(S); eq(s1.layout.noImagery, true, 'the fixture reproduces the state: image on the version, type-only ground still on the layout');
   const p3 = await fx.open({ viewport: { width: 1366, height: 768 }, quiet: true });
   await p3.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p3.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
-  await p3.waitForSelector(R + '.st-railbtn.asset:has-text("Story")', { timeout: 20000 }); await p3.click(R + '.st-railbtn.asset:has-text("Story")');
+  await p3.waitForSelector(R + '.st-assetpick:has-text("Story")', { timeout: 20000 }); await p3.click(R + '.st-assetpick:has-text("Story")');
   await p3.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
   await p3.waitForSelector(R + '.st-remedy-hidden', { timeout: 30000 });
   const rem = await p3.textContent(R + '.st-remedy-hidden'); ok(/Imagery on file but not shown/.test(rem) && /type-only/.test(rem) && /gemini-3-pro-image/.test(rem), rem.replace(/\s+/g, ' ').slice(0, 240));
   ok(/IMAGERY HIDDEN/.test(await p3.textContent(R + '.st-comp-info .st-comp-tag')), 'the composition facts under the stage say the imagery is hidden');
-  ok(await p3.$(R + '.st-stage .st-hidden-imagery'), 'the note on the stage');
+  ok(await p3.$(R + '.st-canvas-foot .st-hidden-imagery'), 'the note under the stage (S18: nothing is written over the artwork)');
   // before: the canvas shows the green ground at the top-left (the photograph is cream)
   const px = async () => p3.$eval(R + '.st-stage canvas', c => { const d = c.getContext('2d').getImageData(Math.round(c.width * 0.05), Math.round(c.height * 0.05), 1, 1).data; return [d[0], d[1], d[2]]; });
   const before = await px(); ok(before[1] > before[0] + 20 && before[0] < 80, 'the ground is green before: ' + before.join(','));
@@ -185,7 +185,7 @@ await T.t('a fix that cannot clear what blocks says so once: the outcome, a comp
   const lv = await api('POST', '/studio/version', { asset: S, revision: s0.revision, layout: L2, kind: 'layout', note: 'words locked for the blocked-fix case' }); eq(lv._status, 200, JSON.stringify(lv));
   const p4 = await fx.open({ viewport: { width: 1366, height: 768 }, quiet: true });
   await p4.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p4.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
-  await p4.waitForSelector(R + '.st-railbtn.asset:has-text("Story")', { timeout: 20000 }); await p4.click(R + '.st-railbtn.asset:has-text("Story")');
+  await p4.waitForSelector(R + '.st-assetpick:has-text("Story")', { timeout: 20000 }); await p4.click(R + '.st-assetpick:has-text("Story")');
   await p4.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
   await p4.waitForFunction(() => { const q = document.querySelector('#studio-root .st-qstate'); return q && q.dataset.state === 'blocked' && !/Measuring/.test(q.textContent); }, null, { timeout: 30000 });
   await p4.waitForSelector(R + '.st-readystrip button:has-text("Fix layout")', { timeout: 30000 });
@@ -204,12 +204,12 @@ await T.t('a fix that cannot clear what blocks says so once: the outcome, a comp
   ok(await p4.$(R + '.st-repair-acts button:has-text("Move it by hand")'), 'the next step is a button');
   // the variations button tells the measured truth: once the arrangements are measured it carries the pass count, and when the
   // renderer can offer none (every word locked) it is not offered at all
-  await p4.waitForFunction(() => /\d+ arrangements/.test((document.querySelector('#studio-root .st-vars-head') || {}).textContent || ''), null, { timeout: 30000 });
+  await tool(p4, 'Design'); await p4.waitForFunction(() => /\d+ arrangements/.test((document.querySelector('#studio-root .st-vars-head') || {}).textContent || ''), null, { timeout: 30000 });
   const nVars = await p4.$$eval(R + '.st-vars .st-var', x => x.length); const varTxt = await p4.textContent(R + '.st-repair-acts');
   if (nVars) ok(/Layout variations \(\d+ of \d+ pass\)/.test(varTxt), 'with its pass count: ' + varTxt);
   else ok(!/Layout variations/.test(varTxt), 'no variations to offer, so no button: ' + varTxt);
   await p4.click(R + '.st-repair-acts button:has-text("Move it by hand")'); await p4.waitForSelector(R + '.st-le-layer', { timeout: 10000 });
-  await p4.click(R + '.st-le-foot button:has-text("Cancel")'); await p4.waitForSelector(R + '.st-le-layer', { state: 'detached', timeout: 5000 });
+  { const dz = await p4.$(R + '.st-le-foot .btn:has-text("Discard changes")'); if (dz) { await dz.click(); await wait(300); } }
   const props = await p4.textContent(R + '.st-props-none'); eq((props.match(/gemini-3-pro-image/g) || []).length, 1, 'Properties states the imagery once, in the composition line, not again in the facts: ' + props.replace(/\s+/g, ' ').slice(0, 200));
   ok(!p4.errors.length, 'no page errors: ' + p4.errors.join(' | ')); await shot(p4, 'blocked-fix-1366'); await p4.ctxB.close();
 });
@@ -217,11 +217,11 @@ await T.t('a fix that cannot clear what blocks says so once: the outcome, a comp
 await T.t('the same workspace at a desktop size (1920 x 1080): the artwork, Properties and Quality', async () => {
   const p2 = await fx.open({ viewport: { width: 1920, height: 1080 }, quiet: true });
   await p2.waitForSelector(R + '.st-lib tbody tr:has-text("S11 straddle")', { timeout: 20000 }); await p2.click(R + '.st-lib tbody tr:has-text("S11 straddle") button.st-lib-open');
-  await p2.waitForSelector(R + '.st-railbtn.asset:has-text("Fact tile")', { timeout: 20000 }); await p2.click(R + '.st-railbtn.asset:has-text("Fact tile")');
+  await p2.waitForSelector(R + '.st-assetpick:has-text("Fact tile")', { timeout: 20000 }); await p2.click(R + '.st-assetpick:has-text("Fact tile")');
   await p2.waitForSelector(R + '.st-stage canvas', { timeout: 20000 }); await p2.waitForFunction(() => { const q = document.querySelector('#studio-root .st-qstate'); return q && q.dataset.state && !/Measuring/.test(q.textContent); }, null, { timeout: 30000 }); await wait(500);
   await shot(p2, 'asset-1920');
-  await p2.click(R + '.st-layers .st-layer-pick:has-text("wordmark")'); await p2.waitForSelector(R + '.st-props-one', { timeout: 10000 }); await shot(p2, 'properties-1920');
-  await p2.click(R + '.st-instab:has-text("Quality")'); await wait(300); await shot(p2, 'quality-1920');
+  await tool(p2, 'Layers'); await p2.click(R + '.st-layers .st-layer-pick:has-text("wordmark")'); await p2.waitForSelector(R + '.st-props-one', { timeout: 10000 }); await shot(p2, 'properties-1920');
+  await p2.click(R + '#st-tabbtn-checks'); await wait(300); await shot(p2, 'quality-1920');
   ok(!p2.errors.length, 'no page errors: ' + p2.errors.join(' | ')); await p2.ctxB.close();
 });
 

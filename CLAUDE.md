@@ -2367,6 +2367,83 @@ edits by description gained **remove** (the marked area is enough) and
 (28), `tests/studio-s17-browser.mjs` (8), `tests/studio-s17-editor-browser.mjs`
 (12); the shared guided steps for the other suites are in `tests/studio-flow.mjs`.
 
+**The focused studio and the Creative Director (S18; build
+`2026-10-07.studio-p34`, page `?v=r12`; `CREATIVE-STUDIO.md` s.41).** Opening the
+Studio sets `body.in-studio`: AXIOM's masthead, navigation, scope bar and mobile
+tab bar step aside and the Studio takes the whole window as one flex column with
+its own scroll regions (header, step navigator, notice, then the body grid whose
+columns each scroll). **`docs/studio-shell.css` is the one authority for the
+frame** (header, navigator, stage heads, body grid, Design workspace, inspector,
+Creative Director, drawers); the old frame rules in `index.html`,
+`studio-skin.css`, `studio-guided.css` and `studio-flow.css` were removed, not
+overridden - add frame rules there and nowhere else. **The header** is one line:
+Back to AXIOM (`go('command')`, asks first over unsaved layout changes), the
+project with client, campaign, content type and mode, one save state (`Version
+saved`, `Saving...`, `Draft saved` - a layout draft kept for this person only -
+`Unsaved changes`, `Not saved` with retry), Jobs, the models line and Help (the
+seven steps, what costs a call, the keys). **The theme contract:**
+`studioTheme(kit, campaign)` sets `--st-client-accent` and `--st-client-ink` on
+the root - the campaign's `accent` (a new optional kit campaign field, `#rrggbb`,
+kept by `kitStructured`), else the palette primary, else the neutral `#5dd4e5`,
+lightened until it reads at 4.5:1 on the panel, with a black or white ink at
+4.5:1 on it; `data-theme` names the source. Only the interface reads them; the
+renderer never sees a CSS variable. **Stage heads** answer the same questions in
+the same places: the step's purpose, `Needs` and `Main action` (`STAGES[].need`,
+`.act`), what blocks it, the main action on the right, the longer "What happens
+next" behind the help toggle; Design's head is one compact row. Review is
+**Review & Delivery**: its Delivery tab (formerly Export) states the package
+before anything is drawn - what is in it (each version's file and pixels, the copy
+sheet, the manifest) and what is left out with the reason (copy or design not
+approved, validation failing or missing, painted words not read back).
+**Design** is dock | library | canvas | inspector: the dock's five tools (Design:
+layout variations, styles, other formats; Text: the words and their checks;
+Images: art direction, area edits, preservation; Brand: the identity, the Brand
+workspace and Client context; Layers) open their panel beside the canvas
+(`tool`, remembered per browser) and never scroll the page; the stage takes the
+height left and the artboard fits it (`container-type: size`, Fit by default,
+zoom - / select / +); **the canvas is the editor** for an editable composition
+(no Edit layout mode; read-only keys, locked layouts, bitmaps and flattened tiles
+show the composition as it stands), its tools above and its save line below the
+stage (portals `toolsSlot` / `footSlot`): the working layout measured, the draft
+state, Save layout as a version, Discard changes; layer outlines and names show
+on hover and selection only, never in Preview. Under the canvas: the page strip
+(every visual piece, `.st-pagechip`, the same `.st-assetpick` class as the rail's
+asset buttons), the compact readiness strip, the remedies, and a finished
+creative's Regenerate / Switch to Editable panel. **The inspector** has two modes,
+Properties (the editor's panels; for a mark, its variant, placement provenance,
+per-pixel readability and the band found in the pixels - disabled while the
+canvas has unsaved changes) and **Creative Director**, and two controls, Checks
+(the quality summary, readiness and the human approval of this version) and
+History (versions and what the Studio used). The Creative Director
+(`CreativeDirector`) states its scope (client, campaign, asset and version,
+selected layers) and has three parts: **Review** (`CDReview`, the one current
+review - the exact version judged or `outdated`, composed tile or imagery only,
+round, top issue first, scores with reasons, words read back, the correction
+editable and applied once; ship is never approval), **Ideas** (suggestions asked
+for per version, each with what changes and stays, its basis and whether it needs
+a render; use as instruction, or apply as it stands after a confirm; new
+directions through art direction and free layout variations), and
+**Conversation** (the selected asset's dialogue plus project-level messages,
+Whole project on request; the Studio's system and job events in a separate
+collapsed log; inspections summarised with a link to the current review). The
+composer is anchored at the foot: **an instruction stays until the worker accepts
+it** (`directTeam` answers `{accepted}` when the job exists, `{error}` or
+`{busy}` otherwise; a refusal shows "Not sent" with Retry and Edit), and Enter and
+Send go through one check (empty, in flight, IME composition by
+`nativeEvent.isComposing` and composition events, never twice); the copy
+partner's Ask keeps its words the same way. The conversation follows new
+messages only while the reader is at its foot. Below 1180 px the inspector is a
+drawer (`.st-insp-toggle`, Escape closes) and the library an overlay; at phone
+width the dock runs across the top. Test helpers: `place(page, name)` and
+`tool(page, name)` in `tests/studio-fixture.mjs` open the S18 home of each S17
+place (Copy -> Text tool, Quality -> Checks, Versions -> History, Art Director ->
+the Conversation, whole project). Harnesses: `tests/studio-s18-browser.mjs`
+(the five reported defects and the investigations: switching asset mid-request,
+outdated review, scroll position, double apply, save states, read-only, three
+more window sizes), `tests/studio-s18-shots.mjs` (matched screenshots of every
+step at four sizes into the ignored `tests/shots/s18/`), seeded by
+`tests/studio-s18-seed.mjs`.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

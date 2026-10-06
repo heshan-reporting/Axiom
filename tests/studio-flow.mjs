@@ -10,6 +10,12 @@ const R = '#studio-root ';
     links while the brief and the strategy are being written. */
 export async function openTool(page, name) {
   const loc = page.locator(R + '.st-railbtn:has-text("' + name + '")').or(page.locator(R + '.st-ctx-links button:has-text("' + name + '")'));
+  // S18: in Design the project tools are the stage's Jobs tab and the Brand tool's links
+  if (!(await loc.count()) && await page.$(R + '.st-dock')) {
+    if (name === 'Jobs') return page.click(R + '.st-subtab:has-text("Jobs")');
+    const b = page.locator(R + '.st-dock-btn:has-text("Brand")').first(); if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
+    return page.click(R + '.st-library button:has-text("' + (name === 'Brand' ? 'Open the Brand workspace' : name) + '")');
+  }
   await loc.first().waitFor({ state: 'visible', timeout: 15000 });
   await loc.first().click();
 }
@@ -29,7 +35,7 @@ export async function goStep(page, label) {
   await page.waitForSelector(step(label, true), { timeout: 15000 });
 }
 /** A navigator step by its exact label (":has-text" would also match the Copy step's "ready for design"). */
-export function step(label, on) { return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:text-is("' + label + '"))'; }
+export function step(label, on) { const t = label === 'Review' ? 'text-matches("^Review")' : 'text-is("' + label + '")'; return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:' + t + ')'; }  // S18: Review is "Review & Delivery"
 
 /** The wizard, start to finish. o: { type (the card's words, default "Response Creative"), client (default "Minerals
     Council"), campaign ('standalone' | 'new' | a campaign name, default the first existing one), newCampaign, title,

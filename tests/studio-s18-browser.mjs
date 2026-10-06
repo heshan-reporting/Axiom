@@ -10,7 +10,7 @@
  *   5. one current review: the correction offered by the latest inspection is shown once, not again in the conversation
  * Run: node --experimental-sqlite tests/studio-s18-browser.mjs   (SHOT=1 writes tests/shots/s18/t-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
 const fx = await makeStudio({ port: 8862, inspect: true });
 const { api } = fx;
@@ -30,11 +30,11 @@ async function openDesign(viewport) {
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
   await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
-  const asset = page.locator(R + '.st-railbtn.asset, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
+  const asset = page.locator(R + '.st-assetpick').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-stage canvas, ' + R + '.st-artboard canvas', { timeout: 15000 }); await sleep(600);
 }
 async function openDirector(sub) {
-  const b = page.locator(R + '.st-insp-mode:has-text("Creative Director"), ' + R + '.st-instab:has-text("Creative Director"), ' + R + '.st-instab:has-text("Art Director")');
+  const b = page.locator(R + '.st-insp-mode:has-text("Creative Director"), ' + R + '#st-tabbtn-director, ' + R + '#st-tabbtn-director');
   await b.first().click(); await page.waitForSelector(R + '.st-composer textarea', { timeout: 10000 });
   if (sub) { const s = page.locator(R + '.st-cd-tab:has-text("' + sub + '")'); if (await s.count()) await s.first().click(); }
   await sleep(300);
@@ -117,5 +117,94 @@ await T.t('5. one current review: the correction offered by the latest inspectio
   eq(fixes, 1, 'one correction editor');
   eq(applies, 1, 'one Apply the correction');
 });
+
+await T.t('6. switching to another asset while an instruction is in flight: the instruction goes to the asset it was written about, and the composer then names the new asset', async () => {
+  await page.ctxB.close(); await openDesign(); await openDirector('Conversation');
+  const chips = await page.$$(R + '.st-pagechip'); ok(chips.length >= 2, 'two pieces to switch between');
+  const first = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim();
+  const release = fx.hold(/^\/studio\/job$/);
+  await page.fill(R + '.st-composer textarea', 'Tighten the support line'); await page.click(R + '.st-composer button:has-text("Send")'); await sleep(300);
+  await page.click(R + '.st-pagechip:not(.on)'); await sleep(500);
+  const second = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim(); ok(second !== first, 'switched: ' + first + ' -> ' + second);
+  release(); await page.waitForFunction(() => { const t = document.querySelector('#studio-root .st-composer textarea'); return t && t.value === ''; }, null, { timeout: 20000 });
+  const g = await api('GET', '/studio/get?id=' + P.design); const sent = fx.seen.filter(x => x.path === '/studio/job' && /"stage":"revise"/.test(x.body || '')).pop();
+  const aFirst = g.assets.find(x => x.title === first); ok(aFirst && JSON.parse(sent.body).input.asset === aFirst.id, 'the instruction went to the asset it was written about (' + first + ')');
+  ok(new RegExp(second).test(await page.textContent(R + '.st-cd-scope')), 'the scope line now names ' + second);
+  ok(!page.errors.length, page.errors.join(' | '));
+});
+
+await T.t('7. a review of an earlier version is marked outdated once the words change; its correction asks before applying to the newer version', async () => {
+  await page.ctxB.close(); await openDesign(); await openDirector('Review');
+  await tool(page, 'Text'); await page.fill(R + '#st-f-headline', 'Hands off our fuel, again'); await page.press(R + '#st-f-headline', 'Tab');
+  await page.waitForFunction(() => /outdated: judged v/.test((document.querySelector('#studio-root .st-cd-review') || {}).textContent || ''), null, { timeout: 15000 });
+  ok(await page.$(R + '.st-cd-review button:has-text("anyway")'), 'the correction is offered for the current version only as a deliberate choice');
+  ok(/Review v\d+ \(1 model call\)/.test(await page.textContent(R + '.st-cd-review .st-adreview-head')), 'and a fresh review of the new version is one click');
+});
+
+await T.t('8. the conversation follows new messages only while the reader is at its foot: reading older messages is not interrupted', async () => {
+  for (let i = 0; i < 14; i++) await api('POST', '/studio/note', { project: P.design, text: 'Earlier note number ' + i + ' about the regional angle and the claim we answer.', target: 'the whole set' });
+  await page.ctxB.close(); await openDesign(); await openDirector('Conversation');
+  const body = R + '.st-cd-body';
+  const m0 = await page.$eval(body, el => ({ h: el.scrollHeight, c: el.clientHeight, t: el.scrollTop })); ok(m0.h > m0.c + 100, 'the thread scrolls: ' + JSON.stringify(m0));
+  ok(m0.h - m0.t - m0.c < 60, 'it opens at the newest message');
+  await page.$eval(body, el => { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); }); await sleep(200);
+  await page.fill(R + '.st-composer textarea', 'A note recorded while reading the top'); await page.click(R + '.st-composer .ov-link:has-text("record as a note instead")');
+  await page.waitForFunction(() => /A note recorded while reading the top/.test(document.querySelector('#studio-root .st-cd-body').textContent), null, { timeout: 15000 }); await sleep(300);
+  eq(await page.$eval(body, el => el.scrollTop), 0, 'the reader stayed where they were');
+  await page.$eval(body, el => { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll')); }); await sleep(200);
+  await page.fill(R + '.st-composer textarea', 'A note recorded at the foot'); await page.click(R + '.st-composer .ov-link:has-text("record as a note instead")');
+  await page.waitForFunction(() => /A note recorded at the foot/.test(document.querySelector('#studio-root .st-cd-body').textContent), null, { timeout: 15000 }); await sleep(300);
+  const m1 = await page.$eval(body, el => ({ h: el.scrollHeight, c: el.clientHeight, t: el.scrollTop })); ok(m1.h - m1.t - m1.c < 60, 'at the foot it follows the new message: ' + JSON.stringify(m1));
+});
+
+await T.t('9. one correction applied once: a double click sends one request', async () => {
+  await page.ctxB.close(); await openDesign(); await openDirector('Review');
+  const n0 = fx.seen.filter(x => x.path === '/studio/inspection/apply').length;
+  const btn = page.locator(R + '.st-cd-review button:has-text("Apply the correction")'); ok(await btn.count(), 'the correction is offered');
+  await btn.dblclick(); await sleep(1500);
+  eq(fx.seen.filter(x => x.path === '/studio/inspection/apply').length - n0, 1, 'one apply request');
+});
+
+await T.t('10. the save state names what is true: unsaved changes, then a draft kept for this person, then a version', async () => {
+  await page.ctxB.close(); await openDesign();
+  const save = () => page.textContent(R + '.st-head .st-save');
+  ok(/Version saved/.test(await save()), 'nothing pending: ' + await save());
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('ArrowDown'); await sleep(150);
+  ok(/Unsaved changes|Draft saved/.test(await save()), 'after a nudge: ' + await save());
+  await page.waitForFunction(() => /Draft saved/.test(document.querySelector('#studio-root .st-head .st-save').textContent), null, { timeout: 10000 });
+  ok(/Draft saved/.test(await page.textContent(R + '.st-le-foot')), 'the canvas foot says the same');
+  const n0 = (await api('GET', '/studio/get?id=' + P.design)).assets.reduce((x, a) => x + a.versions.length, 0);
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
+  await page.waitForFunction(() => /Version saved/.test(document.querySelector('#studio-root .st-head .st-save').textContent), null, { timeout: 15000 });
+  const n1 = (await api('GET', '/studio/get?id=' + P.design)).assets.reduce((x, a) => x + a.versions.length, 0); eq(n1, n0 + 1, 'one new version');
+});
+
+await T.t('11. a read-only key sees the canvas as it stands: no editing handles, no composer, no save line, the review without its controls', async () => {
+  page = await fx.open({ viewport: { width: 1440, height: 900 }, quiet: true, role: 'read' });
+  const row = R + '.st-lib tbody tr:has-text("S18 at design"), ' + R + '.st-libcard:has-text("S18 at design")';
+  await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 15000 }); await sleep(500);
+  eq(await page.$(R + '.st-le-layer'), null, 'no editing handles');
+  eq(await page.$(R + '.st-head .st-save'), null, 'no save state to report');
+  await page.click(R + '#st-tabbtn-director');
+  eq(await page.$(R + '.st-composer'), null, 'no composer'); ok(/full key/.test(await page.textContent(R + '.st-cd')), 'it says why');
+  eq(await page.$(R + '.st-cd-review button:has-text("Apply")'), null, 'no correction to apply');
+  ok(/read-only key/.test(await page.textContent(R + '.st-head')), 'the header names the read-only key');
+});
+
+for (const vp of [{ width: 1920, height: 1080 }, { width: 1024, height: 768 }, { width: 390, height: 844 }]) {
+  await T.t('12. at ' + vp.width + ' x ' + vp.height + ' the artboard fits, nothing scrolls sideways, and the composer is reachable' + (vp.width < 1200 ? ' in the inspector drawer' : ''), async () => {
+    await page.ctxB.close(); await openDesign(vp);
+    const m = await page.evaluate(() => { const b = s => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, w: r.width }; }; return { art: b('#studio-root .st-stage canvas'), sx: document.scrollingElement.scrollWidth, vw: innerWidth, vh: innerHeight, sy: window.scrollY }; });
+    ok(m.art && m.art.top >= 0 && m.art.bottom <= m.vh + 1 && m.art.left >= 0 && m.art.right <= m.vw + 1, 'artboard inside the window: ' + JSON.stringify(m.art));
+    ok(m.sx <= m.vw + 1, 'no sideways scroll (' + m.sx + ' of ' + m.vw + ')'); eq(m.sy, 0, 'the page did not scroll');
+    if (vp.width < 1200) { ok(await page.isVisible(R + '.st-insp-toggle'), 'the inspector is behind a button'); await page.click(R + '.st-insp-toggle'); await sleep(450); }
+    await page.click(R + '#st-tabbtn-director'); await page.waitForSelector(R + '.st-composer textarea');
+    const c = await page.$eval(R + '.st-composer textarea', el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; });
+    ok(c.top >= 0 && c.bottom <= m.vh && c.left >= 0 && c.right <= m.vw + 1, 'composer in view: ' + JSON.stringify(c));
+    await shot('12-' + vp.width);
+    if (vp.width < 1200) { await page.keyboard.press('Escape'); await sleep(400); ok(!(await page.$(R + '.st-inspector.open')), 'Escape closes the drawer'); }
+  });
+}
 
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

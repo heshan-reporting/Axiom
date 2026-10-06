@@ -6,7 +6,7 @@
  *   kept and set aside, the campaign with Use, the claims, the copy angles and the visual narratives with their route;
  *   producing a finished narrative sets the project to Finished creative first.
  * Run: node --experimental-sqlite tests/studio-s15-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8802 });
 const { api } = fx;
 const R = '#studio-root ';

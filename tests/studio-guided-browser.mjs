@@ -7,7 +7,7 @@
  * Review preflight is read from the measurement and the checks.
  * Run: node --experimental-sqlite tests/studio-guided-browser.mjs  (SHOT=1 writes shots) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 import { wizardCreate, toDirections, selectDirection, generateCopy, step } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8840, inspect: false });
 const { api, calls, env } = fx;
@@ -26,14 +26,15 @@ await T.t('seven steps in order: the wizard makes a guided project, the understa
   page = await fx.open({ viewport: { width: 1440, height: 900 } });
   const g0 = calls.gemini;
   await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', text: 'Write one Instagram tile on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
-  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review'], 'the seven steps');
+  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review & Delivery'], 'the seven steps');
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page);
   pid = (await latest('mca')).id; const d = await settle(pid);
   eq(d.brief.workflow, 2, 'a guided project');
   ok(await page.$(step('Copy', true)), 'the copy lands on Copy');
   eq(calls.gemini, g0, 'no image call'); eq(d.jobs.filter(j => j.stage === 'render').length, 0, 'no render queued');
   ok(/locked|blocked/.test(await page.getAttribute(step('Design'), 'data-state') || '') || /Locked/.test(await page.textContent(step('Design'))), 'Design waits for the words: ' + await page.textContent(step('Design')));
-  ok(/What happens next/.test(await page.textContent(R + '.st-stagehead')), 'the step states what its actions run');
+  ok(/Needs/.test(await page.textContent(R + '.st-stagehead')) && /Main action/.test(await page.textContent(R + '.st-stagehead')), 'the step states what it needs and what its main action does');
+  await page.click(R + '.st-stagehead button[aria-label^="About the"]'); ok(/What happens next/.test(await page.textContent(R + '.st-stagehead')), 'and, on asking, what happens next');
   await shot(page, 'copy');
 });
 
@@ -89,14 +90,15 @@ await T.t('Design: the production mode is chosen once the words are ready, its c
   eq((d.brief.production || {}).mode, 'editable', 'the mode is recorded on the project');
   // the canvas and its dock
   await goStep(page, 'Design'); await page.waitForSelector(R + '.st-dock', { timeout: 15000 });
-  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Design', 'Text', 'Images', 'Brand', 'Layers', 'Partner'], 'the six tools');
-  await page.click(R + '.st-dock-btn:has-text("Brand")'); await page.waitForSelector(R + '#st-tabbtn-brand[aria-selected="true"]');
-  await page.click(R + '.st-dock-btn:has-text("Text")'); await page.waitForSelector(R + '#st-tabbtn-copy[aria-selected="true"]');
-  await page.click(R + '.st-dock-btn:has-text("Partner")'); await page.waitForSelector(R + '#st-tabbtn-partner[aria-selected="true"]');
-  await page.click(R + '.st-dock-btn:has-text("Layers")'); await page.waitForSelector(R + '.st-asset-acts .btn.on:has-text("Close layout editor")');
-  await page.click(R + '.st-asset-acts .btn:has-text("Close layout editor")');
-  ok(await page.$(R + '.st-modeseg .st-segbtn.on:has-text("Editable")'), 'Editable is the mode');
-  ok(await page.isDisabled(R + '.st-modeseg .st-segbtn:has-text("AI finished")'), 'a finished creative is not made from an editable one');
+  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Design', 'Text', 'Images', 'Brand', 'Layers'], 'the five tools (the Creative Director is the right panel)');
+  // S18: each tool opens its panel beside the canvas (the page does not scroll), and the canvas stays in view
+  const y0 = await page.evaluate(() => document.querySelector('#studio-root .st-centre').scrollTop);
+  for (const t of ['Brand', 'Text', 'Layers', 'Design', 'Images']) { await tool(page, t); ok(await page.isVisible(R + '.st-library[data-tool="' + t.toLowerCase() + '"]'), t + ' panel open'); }
+  eq(await page.evaluate(() => document.querySelector('#studio-root .st-centre').scrollTop), y0, 'opening a tool never scrolled the workspace');
+  await page.click(R + '.st-library-head button[aria-label^="Close"]'); await page.waitForSelector(R + '.st-library', { state: 'detached' });
+  ok(await page.$(R + '.st-le-layer'), 'the canvas is the editor: layers are selectable without an edit mode');
+  ok(/Editable/.test(await page.textContent(R + '.st-dock-mode')), 'Editable is the mode');
+  eq(await page.$(R + '.st-dock-mode button'), null, 'a finished creative is not made from an editable one (no switch offered)');
   await page.click(R + '.st-subtab:has-text("Board")'); await page.waitForSelector(R + '.st-board-card, ' + R + '.st-board');
   eq(await page.$(R + '.st-imagery-wait'), null, 'nothing waits for imagery any more');
   await shot(page, 'design');

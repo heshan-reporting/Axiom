@@ -2,7 +2,7 @@
  * The Art direction panel states, before anything is pressed, what each action changes, keeps and costs, and which cannot
  * run now with the reason; the action buttons carry the same statement and are disabled when the worker says not now.
  * Run: node --experimental-sqlite tests/studio-actions-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8797 });
 const { api } = fx;
 const R = '#studio-root ';
@@ -21,7 +21,7 @@ let page;
 await T.t('the Art direction panel shows the six actions with what each changes, keeps and costs; a locked layout closes refine, explore and layouts with the reason, and the buttons follow', async () => {
   page = await fx.open(); page.on('dialog', d => d.accept());
   await page.waitForSelector(R + '.st-lib tbody tr:has-text("Actions")'); await page.click(R + '.st-lib tbody tr:has-text("Actions") .ov-link');
-  await page.waitForSelector(R + '.st-railbtn.asset'); await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-ad-actions');
+  await page.waitForSelector(R + '.st-assetpick'); await page.click(R + '.st-assetpick'); await tool(page, 'Images'); await page.waitForSelector(R + '.st-ad-actions');
   await page.waitForSelector(R + '.st-actions button', { timeout: 15000 });
   await page.click(R + '.st-actions button:has-text("Show what each action")'); await page.waitForSelector(R + '.st-actions-table');
   const rows = await page.$$eval(R + '.st-actions-table tbody tr', trs => trs.map(tr => tr.textContent.replace(/\s+/g, ' ')));
@@ -41,7 +41,7 @@ await T.t('unlocking the layout reopens the actions once the project is reopened
   await api('POST', '/studio/lock', { asset: A, element: 'layout', locked: false });
   // reopen the project: the island re-reads the asset and the statements follow its locks
   await page.click(R + '.st-head .ov-link:has-text("projects")'); await page.waitForSelector(R + '.st-lib tbody tr:has-text("Actions")'); await page.click(R + '.st-lib tbody tr:has-text("Actions") .ov-link');
-  await page.waitForSelector(R + '.st-railbtn.asset'); await page.click(R + '.st-railbtn.asset'); await page.waitForFunction(() => { const b = document.querySelector('#studio-root .st-ad-actions button'); return b && !b.disabled; }, null, { timeout: 20000 });
+  await page.waitForSelector(R + '.st-assetpick'); await page.click(R + '.st-assetpick'); await tool(page, 'Images'); await page.waitForFunction(() => { const b = document.querySelector('#studio-root .st-ad-actions button'); return b && !b.disabled; }, null, { timeout: 20000 });
   ok(!(await page.isDisabled(R + '.st-ad-actions button:has-text("Refine this design")')), 'refine is open again');
   eq(page.errors.length, 0, 'no page errors: ' + page.errors.join(' | '));
 });

@@ -7,14 +7,14 @@
  * finds no unlabeled control, no image without a name and a sane heading order; Alt+1..7 moves between stages, and
  * live status is announced (aria-live).
  * Run: node --experimental-sqlite tests/studio-s9-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 import { openTool } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8799 });
 const { api, env } = fx;
 const R = '#studio-root ';
 const T = runner('studio-s9-browser (mode / campaign / content type visible, issue-to-element highlighting, an honest Art Director, accessibility; providers MOCKED)');
 const step = async id => { let j; for (let i = 0; i < 5; i++) { j = (await api('POST', '/studio/job/step', { id })).job; if (!j || j.state === 'done' || j.state === 'failed') return j; } return j; };
-const itab = (pg, name) => pg.click(R + '.st-instab:has-text("' + name + '")');
+const itab = (pg, name) => place(pg, name);
 const audit = page => page.evaluate(() => {
   const root = document.querySelector('#studio-root'); const out = { unlabeled: [], images: [], headings: [] };
   const name = el => (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || el.getAttribute('title') || (el.id && root.querySelector('label[for="' + el.id + '"]') && root.querySelector('label[for="' + el.id + '"]').textContent) || (el.closest('label') && el.closest('label').textContent) || el.textContent || el.getAttribute('placeholder') || '').trim();
@@ -41,13 +41,13 @@ env.MIND_DB.db.prepare('INSERT INTO studio_events(project,kind,data,who,created)
 let page;
 await T.t('the context bar names the creation mode, the campaign and the content type with its channels on every project', async () => {
   page = await fx.open(); page.on('dialog', d => d.accept());
-  await page.waitForSelector(R + '.st-lib tbody tr:has-text("S9")'); await page.click(R + '.st-lib tbody tr:has-text("S9") .ov-link'); await page.waitForSelector(R + '.st-railbtn.asset');
+  await page.waitForSelector(R + '.st-lib tbody tr:has-text("S9")'); await page.click(R + '.st-lib tbody tr:has-text("S9") .ov-link'); await page.waitForSelector(R + '.st-assetpick');
   const head = (await page.textContent(R + '.st-head')).replace(/\s+/g, ' ');
   ok(/Hands Off Our Fuel/.test(head), 'campaign: ' + head); ok(/Editable/.test(head), 'mode: ' + head); ok(/Set - Instagram, Facebook/.test(head), 'content type and channels: ' + head);
-  const title = await page.getAttribute(R + '.st-head .st-chip:has-text("Set - Instagram")', 'title'); ok(/Content type: a coordinated set for Instagram, Facebook/.test(title || ''), title);
+  const title = await page.getAttribute(R + '.st-head .st-psub span:has-text("Set - Instagram")', 'title'); ok(/Content type: a coordinated set for Instagram, Facebook/.test(title || ''), title);
 });
 await T.t('an issue in the Quality tab outlines the layers it names on the tile; the outline toggles off, and a new version clears it', async () => {
-  await page.click(R + '.st-railbtn.asset'); await itab(page, 'Quality');
+  await page.click(R + '.st-assetpick'); await itab(page, 'Quality');
   await page.waitForSelector(R + '.st-val li .st-val-show', { timeout: 20000 });
   const items = await page.$$eval(R + '.st-val li', lis => lis.map(li => li.textContent.replace(/\s+/g, ' ')));
   ok(items.some(t => /off stage|overflow|safe/.test(t) && /show on the tile/.test(t)), 'an issue names its layers and offers to show them: ' + JSON.stringify(items));
@@ -66,7 +66,7 @@ await T.t('an issue in the Quality tab outlines the layers it names on the tile;
   await page.waitForFunction(() => !document.querySelector('#studio-root .st-stage .st-hl'), null, { timeout: 20000 });
 });
 await T.t('the Art Director panel is honest about what it saw, what it read and what it did not score, and that a review is one read and never an approval', async () => {
-  await itab(page, 'Art Director'); await page.waitForSelector(R + '.st-adreview');
+  await page.click(R + '#st-tabbtn-director'); await page.click(R + '.st-cd-tab:has-text("Review")'); await page.waitForSelector(R + '.st-adreview');
   const t = (await page.textContent(R + '.st-adreview')).replace(/\s+/g, ' ');
   ok(/readability not scored/.test(t), 'the missing score is said, never assumed: ' + t);
   ok(/Not scored: readability \(the model gave no score; nothing was assumed\)/.test(t), t);
@@ -84,8 +84,8 @@ await T.t('accessibility: every control is named, every image has a name, headin
   await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand'); await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); }); await check('Brand');
   await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))'); await check('Brief');
   // seven steps since S17: Brief, Objectives, Strategy, Directions, Copy, Design, Review; Export is a view inside Review
-  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))'); await check('Review');
-  await page.click(R + '.st-subtab:has-text("Export")'); await page.waitForSelector(R + '.st-subtab.on:has-text("Export")'); await check('Export');
+  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))'); await check('Review');
+  await page.click(R + '.st-subtab:has-text("Delivery")'); await page.waitForSelector(R + '.st-subtab.on:has-text("Delivery")'); await check('Export');
   await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
   await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
   // keyboard: from a stage button, Tab moves on to the next focusable control without a trap
@@ -96,7 +96,7 @@ await T.t('accessibility: every control is named, every image has a name, headin
 });
 await T.t('a read-only key: the same views audit clean and show no mutating controls on the tile', async () => {
   const p2 = await fx.open({ role: 'read' });
-  await p2.waitForSelector(R + '.st-lib tbody tr:has-text("S9")'); await p2.click(R + '.st-lib tbody tr:has-text("S9") .ov-link'); await p2.waitForSelector(R + '.st-railbtn.asset'); await p2.click(R + '.st-railbtn.asset');
+  await p2.waitForSelector(R + '.st-lib tbody tr:has-text("S9")'); await p2.click(R + '.st-lib tbody tr:has-text("S9") .ov-link'); await p2.waitForSelector(R + '.st-assetpick'); await p2.click(R + '.st-assetpick');
   await p2.waitForSelector(R + '.st-stage'); clean(await audit(p2), 'read-only Refine');
   eq(await p2.$(R + '.st-ad-actions'), null, 'no art-direction actions for a read key');
   await p2.close();

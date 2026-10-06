@@ -7,7 +7,7 @@
  * - Creative directions with visual narratives: compare two, produce both as variants (each in its own family by its own
  *   route), write the message kit from one, approve a piece with a reason; the trace follows the work into Copy.
  * Run: node --experimental-sqlite tests/studio-s16-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8806 });
 const { api } = fx;
 const R = '#studio-root ';

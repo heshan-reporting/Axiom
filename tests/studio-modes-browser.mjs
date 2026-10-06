@@ -5,7 +5,7 @@
  * editable, and the Review stage says design approval waits for the words and the mark to be read back. Switching to
  * Editable derives a new asset with live layers and leaves the finished original as it is.
  * Run: node --experimental-sqlite tests/studio-modes-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 import { wizardCreate, toDirections, selectDirection, generateCopy, markCopyReady } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8795 });
 const { api, env } = fx;
@@ -33,13 +33,13 @@ await T.t('the production mode is chosen in Design once the words are ready: bot
   const rj = d.jobs.find(j => j.stage === 'render'); eq(rj.input.finished, true); eq(rj.input.marks.map(m => m.role), ['logo']);
 });
 await T.t('the asset view shows one bitmap labelled as such: no layout editor, no draggable layers, painted words read-only, caption editable, Regenerate and Switch to Editable offered', async () => {
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.click(R + '.st-railbtn.asset'); await page.waitForSelector(R + '.st-finnote');
-  const note = await page.textContent(R + '.st-finnote'); ok(/Gemini Finished Creative/.test(note) && /one bitmap/.test(note) && /Nothing is composed over it/.test(note), note);
-  eq(await page.$(R + '.st-asset-acts .btn:has-text("Edit layout")'), null, 'no layout editor on a bitmap');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); { const a0 = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await a0.count()) await a0.click(); } await page.waitForSelector(R + '.st-finnote');
+  const note = await page.textContent(R + '.st-finnote'); ok(/Finished creative/.test(note) && /One bitmap/.test(note) && /nothing on it can be dragged or retyped/.test(note), note);
+  eq(await page.$(R + '.st-le-layer'), null, 'no editable layers on a bitmap'); ok(await page.isDisabled(R + '.st-dock-btn:has-text("Layers")'), 'and no Layers tool');
   const tag = await page.textContent(R + '.st-comp-tag'); ok(/finished creative: one bitmap/.test(tag) && /nothing composed over it/.test(tag), tag);
   eq(await page.$(R + '.st-readystrip'), null, 'no technical validation strip: there is nothing to measure');
   eq(await page.$(R + '.st-ad'), null, 'no art direction concepts on a bitmap (they would propose layouts)');
-  ok(await page.isDisabled(R + '#st-f-headline'), 'the headline field is read-only'); ok(await page.$(R + '.st-field:has(#st-f-headline) .st-chip:has-text("in the artwork")'), 'and says why');
+  await tool(page, 'Text'); ok(await page.isDisabled(R + '#st-f-headline'), 'the headline field is read-only'); ok(await page.$(R + '.st-field:has(#st-f-headline) .st-chip:has-text("in the artwork")'), 'and says why');
   ok(!(await page.isDisabled(R + '#st-f-caption')), 'the caption stays editable');
   const fin = await page.textContent(R + '.st-finished'); ok(/Finished creative/.test(fin) && /not read back yet/.test(fin) && /Technical validation does not apply/.test(fin), fin);
   ok(await page.$(R + '.st-finished .btn:has-text("Regenerate (1 render)")'), 'Regenerate offered'); ok(await page.$(R + '.st-finished .btn:has-text("Switch to Editable (free)")'), 'Switch to Editable offered');
@@ -51,15 +51,15 @@ await T.t('the asset view shows one bitmap labelled as such: no layout editor, n
   eq([a.versions.length, v.mode, v.copy.caption], [before + 1, 'finished', 'A caption written beside the finished tile.']); eq(v.image.key, a.versions[before - 1].image.key, 'the same bitmap');
 });
 await T.t('Review waits for the painted words and the mark to be read back, and says so; the worker refuses the design approval until then; Quality says the technical validation does not apply', async () => {
-  await page.click(R + '.st-instab:has-text("Quality")');
-  const q = await page.textContent(R + '#st-tab-quality'); ok(/technical validation does not apply/.test(q) && /not applicable/.test(q) && /not verified/.test(q), q.slice(0, 400));
+  await page.click(R + '#st-tabbtn-checks');
+  const q = await page.textContent(R + '#st-tab-checks'); ok(/technical validation does not apply/.test(q) && /not applicable/.test(q) && /not verified/.test(q), q.slice(0, 400));
   // the caption edit was a copy change: mark the words ready again
   await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await page.waitForSelector(R + '.st-ready-check input:not([disabled])');
   if (!(await page.isChecked(R + '.st-ready-check input'))) { await page.click(R + '.st-ready-check input'); await page.waitForFunction(() => /Ready for design/.test(document.querySelector('#studio-root .st-copy-badge').textContent), null, { timeout: 15000 }); }
   const d = await api('GET', '/studio/get?id=' + pid);
   ok(d.assets[0].readiness && d.assets[0].readiness.baked && !d.assets[0].readiness.baked.verified, 'the painted words have not been read back');
   eq(d.workflow.steps.review.state, 'locked'); ok(/read the painted words and the mark back/.test(d.workflow.steps.review.need || ''), 'the lock names the read-back: ' + d.workflow.steps.review.need);
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Review"))'); await page.waitForSelector(R + '.st-locked, ' + R + '.st-lockedstage, ' + R + '[data-locked]', { timeout: 15000 }).catch(() => null);
+  await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review"))'); await page.waitForSelector(R + '.st-locked, ' + R + '.st-lockedstage, ' + R + '[data-locked]', { timeout: 15000 }).catch(() => null);
   ok(/read the painted words and the mark back/.test(await page.textContent(R + '.st-centre')), 'the page says what unlocks Review');
   const ap = await api('POST', '/studio/approve', { asset: aid, part: 'design', decision: 'approve', reason: 'looks right to us' });
   eq(ap._status, 409); ok(/baked_text_unverified/.test(ap.error || ''), 'the worker refuses the design approval: ' + JSON.stringify(ap).slice(0, 200));
@@ -83,7 +83,7 @@ await T.t('Regenerate opens a form for the painted words and a direction, states
   await page.waitForSelector(R + '.st-notice button:has-text("Open the editable copy")', { timeout: 20000 });
   const notice = await page.textContent(R + '.st-notice'); ok(/Derived an editable asset/.test(notice) && /not reused as the ground/.test(notice), notice);
   await page.click(R + '.st-notice button:has-text("Open the editable copy")');
-  await page.waitForSelector(R + '.st-asset-acts .btn:has-text("Edit layout")', { timeout: 20000 });
+  await page.waitForSelector(R + '.st-le-layer', { timeout: 20000 });
   const d2 = await api('GET', '/studio/get?id=' + pid); eq(d2.assets.length, n0 + 1);
   const der = d2.assets.find(x => x.family === 'Editable from finished'); ok(der, 'the derived asset is in its own family'); const dv = der.versions[der.versions.length - 1];
   eq(dv.mode, 'composition'); ok(dv.layout.layers.some(l => l.type === 'text' && l.role === 'headline'), 'live type again'); ok(dv.layout.layers.some(l => l.role === 'logo'), 'the mark placed from its file'); eq(dv.image, null);

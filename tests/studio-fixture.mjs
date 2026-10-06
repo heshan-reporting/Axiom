@@ -145,3 +145,25 @@ export function runner(title) {
 }
 export const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((m || 'expected') + ': ' + JSON.stringify(a) + ' !== ' + JSON.stringify(b)); };
 export const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
+
+/* ------------------------------------------------------------ S18: the Design workspace's places, by name
+   The inspector has two modes (Properties, Creative Director) and two controls (Checks, History); the words and the brand are
+   tools in the dock (Text, Brand), as are Design, Images and Layers. place(page, name) opens the place an older harness called
+   by its S17 name: Copy -> the Text tool, Quality -> Checks, Versions -> History, Art Director / Partner -> Creative Director. */
+const RT = '#studio-root ';
+const PLACE = { copy: ['tool', 'Text'], text: ['tool', 'Text'], brand: ['tool', 'Brand'], design: ['tool', 'Design'], images: ['tool', 'Images'], layers: ['tool', 'Layers'],
+  quality: ['tab', 'checks'], checks: ['tab', 'checks'], versions: ['tab', 'history'], history: ['tab', 'history'], properties: ['tab', 'properties'],
+  'art director': ['tab', 'director'], partner: ['tab', 'director'], 'creative director': ['tab', 'director'] };
+export async function tool(page, name) {
+  const b = page.locator(RT + '.st-dock-btn:has-text("' + name + '")').first();
+  if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click();
+  await page.waitForSelector(RT + '.st-library[data-tool="' + name.toLowerCase() + '"]');
+}
+export async function place(page, name) {
+  const p = PLACE[String(name).toLowerCase()]; if (!p) throw new Error('no Studio place called ' + name);
+  if (p[0] === 'tool') return tool(page, p[1]);
+  const tab = await page.$(RT + '#st-tabbtn-' + p[1]);
+  if (tab) { await tab.click(); await page.waitForSelector(RT + '#st-tabbtn-' + p[1] + '[aria-selected="true"]'); }
+  // the S17 Art Director tab showed the thread: its S18 place is the Creative Director's Conversation
+  if (/^(art director|partner)$/i.test(name)) { const c = await page.$(RT + '.st-cd-tab:has-text("Conversation")'); if (c) await c.click(); await page.waitForSelector(RT + '.st-cd-conv'); const w = await page.$(RT + '.st-cd-convhead button:has-text("Whole project")'); if (w) await w.click(); }
+}

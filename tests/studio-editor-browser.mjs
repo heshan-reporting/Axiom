@@ -3,7 +3,7 @@
  * layout editor's canvas shortcuts (arrow keys, Ctrl+Z) never take a key typed into one of its fields. Each case was
  * written to fail on build studio-p24-r2 and pass after the fix. Providers MOCKED.
  * Run: node --experimental-sqlite tests/studio-editor-browser.mjs */
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8795, inspect: false });
 const T = runner('studio-editor-browser (Measure again retries a failed filing; fields keep their keys from the canvas shortcuts)');
 const R = '#studio-root ';
@@ -45,7 +45,7 @@ await T.t('a key typed into a layout-editor field edits the field: arrow keys do
   await api('POST', '/studio/asset', { project: pr.id, family: 'Set', channel: 'instagram', format: '1:1', title: 'Key tile', copy: { headline: 'Hands off our fuel', support: 'Not a subsidy.', cta: 'Sign' }, mode: 'composition' });
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Keys") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer');
+  await page.waitForSelector(R + '.st-le-layer');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
   const posOf = async () => page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.style.top);
   const top0 = await posOf();
@@ -72,7 +72,7 @@ await T.t('the editor\'s handles sit on what the renderer measured (the words\' 
   const L = a0.asset.versions[0].layout; const hl = L.layers.find(l => l.role === 'headline');
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Ink") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"][data-ink="1"]', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"][data-ink="1"]', { timeout: 15000 });
   const on = await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => ({ w: parseFloat(el.style.width), x: parseFloat(el.style.left) }));
   ok(on.w < hl.w * 0.8, 'a one-word headline\'s handle is the width of the word (' + on.w.toFixed(1) + '% of a ' + hl.w + '% box), not the box');
   ok(Math.abs(on.x - hl.x) < 1.5, 'left-aligned, it starts where the box starts (' + on.x.toFixed(1) + '% vs ' + hl.x + '%)');
@@ -97,7 +97,7 @@ await T.t('framing by dragging: the photograph is panned through the renderer\'s
   ok(a0.asset, 'asset made');
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Frame") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-framing', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-le-framing', { timeout: 15000 });
   await page.click(R + '.st-le-framing button:has-text("Frame by dragging")'); await page.waitForSelector(R + '.st-le-frame[data-ready="1"]', { timeout: 15000 });
   const across = () => page.inputValue(R + 'input[aria-label="Focal point across, per cent"]');
   eq(await across(), '50', 'the plain crop starts at focus 50');
@@ -129,7 +129,7 @@ await T.t('locks hold in every canvas command: a locked layer is not reordered o
   await api('POST', '/studio/version', { asset: a0.asset.id, layout: L, kind: 'layout', note: 'lock the support, hold the mark' });
   const page = await fx.open({ viewport: { width: 1440, height: 900 } }); page.on('dialog', d => d.dismiss());
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Locks") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer[aria-label="Layer support"]');
+  await page.waitForSelector(R + '.st-le-layer[aria-label="Layer support"]'); await tool(page, 'Layers');
   const order = () => page.$$eval(R + '.st-le-list .st-le-item', els => els.map(e => e.textContent.trim().split(' ')[0]));
   const o0 = await order();
   await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await page.click(R + '.st-le-tools button:has-text("To front")'); await page.waitForTimeout(100);
@@ -150,9 +150,9 @@ await T.t('locks hold in every canvas command: a locked layer is not reordered o
   // unsaved edits: nudge the headline, the header names the unsaved layout, Cancel asks
   await page.click(row('headline')); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
   ok(await page.$(R + '.st-le-dirty'), 'the editor says the layout has unsaved changes');
-  const headTxt = await page.textContent(R + '.st-head'); ok(/Unsaved layout/.test(headTxt), 'the header says so too: ' + headTxt.replace(/\s+/g, ' ').slice(0, 120));
-  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")'); await page.waitForTimeout(150);
-  ok(await page.$(R + '.st-le-wrap'), 'Cancel with unsaved changes asked, and the dismissed dialog kept the editor open');
+  const headTxt = await page.textContent(R + '.st-head'); ok(/Unsaved changes|Draft saved/.test(headTxt) && !/Version saved/.test(headTxt), 'the header says so too: ' + headTxt.replace(/\s+/g, ' ').slice(0, 120));
+  await page.click(R + '.st-le-foot .btn:has-text("Discard changes")'); await page.waitForTimeout(150);
+  ok(await page.$(R + '.st-le-dirty'), 'Discard with unsaved changes asked, and the dismissed dialog kept the changes');
   ok(!page.errors.length, page.errors.join(' | '));
   await page.ctxB.close();
 });

@@ -13,7 +13,7 @@
  *   9. imagery remedies, measured layout variations, and an Art Director review on request
  * Run: node --experimental-sqlite tests/studio-journey-browser.mjs     (SHOT=1 writes tests/shots/journey-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok, pngSize, unzipStored } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, pngSize, unzipStored, place, tool } from './studio-fixture.mjs';
 import { wizardCreate, toDirections, selectDirection, generateCopy, markCopyReady, produce, step } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8792 });
 const { api, calls, env } = fx;
@@ -23,19 +23,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SHOTS = new URL('./shots/', import.meta.url).pathname; fs.mkdirSync(SHOTS, { recursive: true });
 const shot = async (page, name) => { if (process.env.SHOT) await page.screenshot({ path: SHOTS + 'journey-' + name + '.png' }); };
 const goStep = (pg, name) => pg.click(step(name));
-const goExport = async pg => { await goStep(pg, 'Review'); await pg.click(R + '.st-subtab:has-text("Export")'); };
+const goExport = async pg => { await goStep(pg, 'Review'); await pg.click(R + '.st-subtab:has-text("Delivery")'); };
 /* the library is read on opening and on a client switch: a project made through the routes shows after one */
 const reloadLibrary = async pg => { await pg.selectOption(R + '.st-head select', 'aep'); await pg.waitForFunction(() => /Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib-head') || {}).textContent || '')); await pg.selectOption(R + '.st-head select', 'mca'); await pg.waitForSelector(R + '.st-lib tbody tr'); };
 const stepTo = async id => { for (let i = 0; i < 20; i++) { const j = (await api('POST', '/studio/job/step', { id })).job; if (!j || /done|failed|cancelled/.test(j.state)) return j; } };
 const BRIEF = 'Something for regional voters about fuel tax credits: a crossbencher called the credit a subsidy for miners on regional radio, and we need an answer on social this week.';
-const itab = (pg, name) => pg.click(R + '.st-instab:has-text("' + name + '")');
+const itab = (pg, name) => place(pg, name);
 const latest = async ns => env.MIND_DB.db.prepare('SELECT id, title FROM studio_projects WHERE ns=? ORDER BY created DESC, rowid DESC LIMIT 1').get(ns);
 /* wait until the project has nothing queued or running (the page steps its jobs while it is open) */
 async function settle(pid, ms = 90000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle: ' + JSON.stringify((d.jobs || []).map(j => j.stage + ':' + j.state))); await sleep(300); } }
 /* open one asset in Design and wait for its measurement to be filed and passing */
 async function validated(page, title) {
   if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) await goStep(page, 'Design');   // the canvas lives in Design (S13)
-  await page.click(R + '.st-railbtn.asset:has-text("' + title + '")');
+  await page.click(R + '.st-assetpick:has-text("' + title + '")');
   await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
 }
@@ -62,7 +62,7 @@ await T.t('1. the wizard, the understanding, the objective, the strategy and a d
   await wizardCreate(page, { type: 'Campaign Creative', campaign: 'Hands Off Our Fuel', title: 'Something for regional voters', text: BRIEF });
   ok(/Something for regional voters/.test(await page.textContent(R + '.st-head .st-ptitle')) && /Hands Off Our Fuel/.test(await page.textContent(R + '.st-head')), 'project and campaign in the context bar');
   ok(await page.$(step('Brief', true)), 'the navigator is on the Brief, with the understanding to review');
-  eq(await page.$$eval(R + '.st-railbtn.asset', x => x.length), 0, 'nothing produced before a direction');
+  eq(await page.$$eval(R + '.st-assetpick', x => x.length), 0, 'nothing produced before a direction');
   const pr = await latest('mca'); J1 = pr.id;
   await shot(page, 'understanding');
   await toDirections(page);
@@ -78,7 +78,7 @@ await T.t('1. the wizard, the understanding, the objective, the strategy and a d
   const first = d.assets[0]; await page.click(R + '.st-copy-pick:has-text("' + first.title + '")'); await page.waitForSelector(R + '#st-cf-headline');
   const n0 = d.assets.map(a => a.versions.length);
   await page.fill(R + '#st-cf-headline', 'Not a subsidy. Your tractor uses it too.'); await page.press(R + '#st-cf-headline', 'Tab');
-  await page.waitForFunction(() => /All changes saved/.test(document.querySelector('#studio-root .st-save').textContent), null, { timeout: 15000 });
+  await page.waitForFunction(() => /Version saved/.test(document.querySelector('#studio-root .st-save').textContent), null, { timeout: 15000 });
   for (let i = 0; i < 40; i++) { d = await api('GET', '/studio/get?id=' + pr.id); if (d.assets[0].versions.length > n0[0]) break; await sleep(150); }
   eq(d.assets.map(a => a.versions.length), n0.map((n, i) => i === 0 ? n + 1 : n), 'one new version, on the selected asset only');
   const cur0 = d.assets[0].versions.find(v => v.id === d.assets[0].current);
@@ -105,11 +105,11 @@ await T.t('1. the wizard, the understanding, the objective, the strategy and a d
   // the words were approved before the imagery: that approval names the version it was given on and stands on the rendered
   // one by its unchanged signature (carried); the design approval names the current version
   ok(d.assets.every(a => a.approvals.copy && a.approvals.design && (a.approvals.copy.version === a.current || a.approvals.copy.carried) && a.approvals.design.version === a.current), 'both approvals stand on each current version: ' + JSON.stringify(d.assets.map(a => a.approvals)));
-  await page.waitForSelector(R + '.st-step.done:has(.st-step-l:text-is("Review"))', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-step.done:has(.st-step-l:text-matches("^Review"))', { timeout: 15000 });
   await shot(page, 'review');
   // export: the download is unpacked and every PNG checked against its version's stage size
   await goExport(page); await page.waitForSelector(R + '.st-exportstage');
-  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click(R + '.st-exportstage .st-stagehead button:has-text("Prepare bundle")')]);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click(R + '.st-exportstage .st-stagehead button:has-text("Prepare the package")')]);
   const zip = fs.readFileSync(await dl.path()); const files = unzipStored(zip);
   const pngs = files.filter(f => /\.png$/.test(f.name)); eq(pngs.length, 3, 'one PNG per approved asset');
   ok(files.every(f => f.method === 0) && files.some(f => f.name === 'manifest.json') && files.some(f => f.name === 'copy-sheet.txt'), 'manifest and copy sheet in the bundle');
@@ -135,12 +135,12 @@ await T.t('2. save, reload and resume: the project reopens at the same stage and
   await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const d = await api('GET', '/studio/get?id=' + J1);
-  const second = d.assets[1]; await page.click(R + '.st-railbtn.asset:has-text("' + second.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
+  const second = d.assets[1]; await page.click(R + '.st-assetpick:has-text("' + second.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-notice.info', { timeout: 15000 });
   ok(/Resumed where you left off/.test(await page.textContent(R + '.st-notice')), 'the resume is said');
   ok(/Design/.test(await page.textContent(R + '.st-notice')) && new RegExp(second.title).test(await page.textContent(R + '.st-notice')), await page.textContent(R + '.st-notice'));
-  ok(await page.$(R + '.st-railbtn.asset.on:has-text("' + second.title + '")'), 'the same asset is open');
+  ok(await page.$(R + '.st-assetpick.on:has-text("' + second.title + '")'), 'the same asset is open');
   // an unsaved brief edit survives a reload in this browser, and is offered back, not silently applied: the brief editor of a
   // project made before the guided workflow (a guided project's brief is set by its Objectives and Strategy steps)
   const OLD = (await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'An earlier brief', brief: { objective: 'Answer the subsidy framing', channels: ['facebook'], deliverable: 'set', campaignConfirmed: true }, idem: 'j2old' })).id;
@@ -173,6 +173,7 @@ await T.t('3. switching clients leaves nothing of the other client on screen, an
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const mcaTitle = await page.textContent(R + '.st-head .st-ptitle');
+  await page.click(R + '.st-head .st-allp'); await page.waitForSelector(R + '.st-head select');   // S18: the client is chosen in the library header
   await page.selectOption(R + '.st-head select', 'aep');
   await page.waitForFunction(() => /No projects yet for Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib') || {}).textContent || ''));
   const all = await page.textContent('#studio-root');
@@ -215,7 +216,7 @@ await T.t('4. no imagery (a project made before the guided workflow, written fro
     eq((v.context || {}).imagery, 'none'); ok(!(v.layout.regions || []).length && !v.layout.layers.some(l => l.type === 'img' && !/logo|wordmark/.test(l.role)), 'no image region in ' + a.title);
     ok(v.layout.layers.filter(l => l.type === 'text').length >= 3, 'the words are all there');
     await validated(page, a.title);
-    ok(/No imagery by choice/.test(await page.textContent(R + '.st-stage')) && !/No imagery yet/.test(await page.textContent(R + '.st-stage')), 'said as a choice, not a gap');
+    ok(/No imagery by choice/.test(await page.textContent(R + '.st-canvas-col')) && !/No imagery yet/.test(await page.textContent(R + '.st-canvas-col')), 'said as a choice, not a gap');
     const blank = await page.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas'); const g = c.getContext('2d'); const px = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < px.length; i += 400) if (px[i + 3] === 0) n++; return n; });
     eq(blank, 0, 'no transparent hole where an image would have been');
   }
@@ -229,10 +230,10 @@ await T.t('5. adapting a master to another format keeps its words and image, and
   await page.waitForSelector(R + '.st-lib tbody tr');
   await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const d0 = await api('GET', '/studio/get?id=' + J1); const master = d0.assets.find(a => a.channel === 'facebook');
-  await page.click(R + '.st-railbtn.asset:has-text("' + master.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-assetpick:has-text("' + master.title + '")'); await page.waitForSelector(R + '.st-stage canvas');
   await itab(page, 'Art Director');
   await page.fill(R + '.st-composer textarea', 'Adapt this for an Instagram story 9:16'); await page.click(R + '.st-composer .btn:has-text("Send")');
-  await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-railbtn.asset').length === n + 1, d0.assets.length, { timeout: 30000 });
+  await page.waitForFunction(n => document.querySelectorAll('#studio-root .st-assetpick').length === n + 1, d0.assets.length, { timeout: 30000 });
   const d = await api('GET', '/studio/get?id=' + J1); const story = d.assets.find(a => a.format === '9:16'); ok(story, 'a 9:16 asset');
   const sv = story.versions.find(v => v.id === story.current); const mv = master.versions.find(v => v.id === master.current);
   eq([sv.copy.headline, sv.copy.support, (sv.image || {}).key], [mv.copy.headline, mv.copy.support, (mv.image || {}).key], 'same words on the tile and the same photograph');
@@ -288,9 +289,9 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
 /* ---------------------------------------------------------------------------------------------------- 7 */
 await T.t('7. a second edit while the first save is still in flight waits its turn: two versions in order, no conflict, nothing lost', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
-  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '#st-f-headline', { timeout: 15000 });
+  await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await page.waitForSelector(R + '.st-asset', { timeout: 15000 }); await tool(page, 'Text'); await page.waitForSelector(R + '#st-f-headline', { timeout: 15000 });
   const d0 = await api('GET', '/studio/get?id=' + J1); const a = d0.assets[0];
-  ok(await page.$(R + '.st-railbtn.asset.on:has-text("' + a.title + '")'), 'the first asset is open');
+  ok(await page.$(R + '.st-assetpick.on:has-text("' + a.title + '")'), 'the first asset is open');
   const vBefore = a.versions.length; const seen0 = fx.seen.length;
   const release = fx.hold(/^\/studio\/version$/);
   await page.fill(R + '#st-f-headline', 'First edit while the network is slow');
@@ -301,7 +302,7 @@ await T.t('7. a second edit while the first save is still in flight waits its tu
   ok(/Saving/.test(await page.textContent(R + '.st-save')), 'the context bar says it is saving');
   eq(await page.inputValue(R + '#st-f-headline'), 'Second edit, typed before the first came back', 'the field keeps what was typed');
   release();
-  await page.waitForFunction(() => /All changes saved/.test(document.querySelector('#studio-root .st-save').textContent), null, { timeout: 15000 });
+  await page.waitForFunction(() => /Version saved/.test(document.querySelector('#studio-root .st-save').textContent), null, { timeout: 15000 });
   const d = await api('GET', '/studio/get?id=' + J1); const a2 = d.assets.find(x => x.id === a.id);
   eq(a2.versions.length, vBefore + 2, 'two versions, one per save');
   eq(a2.versions.find(v => v.id === a2.current).copy.headline, 'Second edit, typed before the first came back', 'the last words typed are the current version');
@@ -320,7 +321,7 @@ await T.t('7. a second edit while the first save is still in flight waits its tu
   eq(a4.versions.find(v => v.id === a4.current).copy.headline, 'Theirs, saved elsewhere', 'the teammate\'s words were not overwritten');
   eq(await page.inputValue(R + '#st-f-headline'), 'Mine, typed here', 'and mine are still in the field');
   await page.click(R + '.st-copy .st-notice button:has-text("Keep mine")'); await page.waitForFunction(() => !document.querySelector('#studio-root .st-copy .st-notice'));
-  await page.waitForFunction(() => /All changes saved|Saved/.test(document.querySelector('#studio-root .st-save').textContent));
+  await page.waitForFunction(() => /Version saved|Saved/.test(document.querySelector('#studio-root .st-save').textContent));
   await sleep(500); const d3 = await api('GET', '/studio/get?id=' + J1); const a5 = d3.assets.find(x => x.id === a.id); eq(a5.versions.find(v => v.id === a5.current).copy.headline, 'Mine, typed here', 'kept on purpose');
   await page.ctxB.close();
 });
@@ -351,17 +352,17 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
   // stages by keyboard: Alt+1 to Alt+7, focus lands on the stage heading (its editorial headline)
-  await page.focus('#studio-root .st-head select'); await page.keyboard.press('Escape');
+  await page.focus('#studio-root .st-head .st-back'); await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /Start with what happened/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
-  await page.keyboard.press('Alt+7'); await page.waitForFunction(() => /^One final check, before it leaves the studio\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
+  await page.keyboard.press('Alt+7'); await page.waitForFunction(() => /^One final check, then deliver\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
   // the navigator itself by Tab and Enter
   const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Design/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-instabs');
   // inspector tabs with the arrow keys
-  await page.focus(R + '#st-tabbtn-copy'); await page.keyboard.press('ArrowRight');
-  await page.waitForFunction(() => document.activeElement.id === 'st-tabbtn-quality' && document.activeElement.getAttribute('aria-selected') === 'true');
-  ok(await page.isVisible(R + '#st-tab-quality') && !(await page.isVisible(R + '#st-tab-copy')), 'the panel follows the tab');
+  await page.focus(R + '#st-tabbtn-properties'); await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.activeElement.id === 'st-tabbtn-director' && document.activeElement.getAttribute('aria-selected') === 'true');
+  ok(await page.isVisible(R + '#st-tab-director') && !(await page.isVisible(R + '#st-tab-properties')), 'the panel follows the tab');
   // approve the design with a reason, by keyboard only (the copy was marked ready in Copy)
   await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-approvals');
   await tabTo(f => /Approve design/.test(f.label || f.text)); await page.keyboard.press('Enter');
@@ -390,7 +391,7 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   const rem = await page.textContent(R + '.st-remedy');
   ok(/No imagery yet/.test(rem) && /Moving the words does not change that/.test(rem) && /last render failed/.test(rem), 'the gap is named, with the failed render: ' + rem);
   ok(await page.$(R + '.st-remedy button:has-text("Retry the render (1 render)")') && await page.$(R + '.st-remedy button:has-text("Use a solid ground instead (no render)")'), 'the two remedies, each with its cost');
-  await page.waitForSelector(R + '.st-vars .st-var', { timeout: 30000 });
+  await tool(page, 'Design'); await page.waitForSelector(R + '.st-vars .st-var', { timeout: 30000 });
   ok(await page.$(R + '.st-var[data-variant="col-left"] .st-chip:has-text("needs imagery")') && /8 of them still need the imagery made/.test(await page.textContent(R + '.st-vars-head')), 'variations that still need the photograph say so, card by card and in the count');
   await page.$eval(R + '.st-remedy', e => e.scrollIntoView({ block: 'center' })); await shot(page, 'remedy');
   const g0 = calls.gemini, a0 = calls.anthropic, n0 = a.versions.length;
@@ -409,8 +410,8 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   const p2 = await fx.open({ viewport: { width: 1440, height: 900 } });
   await p2.waitForSelector(R + '.st-lib tbody tr'); await p2.click(R + '.st-lib tbody tr:has-text("Something for regional voters") button.st-lib-open'); await p2.waitForSelector(R + '.st-asset', { timeout: 15000 });
   const dj = await api('GET', '/studio/get?id=' + J1); const as = dj.assets.find(x => x.channel === 'instagram') || dj.assets[0]; const before = as.versions.find(v => v.id === as.current);
-  await p2.click(R + '.st-railbtn.asset:has-text("' + as.title + '")'); await p2.waitForSelector(R + '.st-stage canvas');
-  await p2.waitForFunction(() => document.querySelectorAll('#studio-root .st-vars .st-var').length >= 8, null, { timeout: 30000 });
+  await p2.click(R + '.st-assetpick:has-text("' + as.title + '")'); await p2.waitForSelector(R + '.st-stage canvas');
+  await tool(p2, 'Design'); await p2.waitForFunction(() => document.querySelectorAll('#studio-root .st-vars .st-var').length >= 8, null, { timeout: 30000 });
   const cards = await p2.$$eval(R + '.st-vars .st-var', els => els.map(e => ({ id: e.dataset.variant, bad: e.classList.contains('bad'), text: e.textContent })));
   ok(cards.length >= 8 && cards.every(c => !c.bad && /passes/.test(c.text)), 'every arrangement offered passes the measurement: ' + cards.map(c => c.id + (c.bad ? ' BAD' : '')).join(', '));
   ok(cards.some(c => c.id === 'type-only' && /no photograph/.test(c.text)), 'the type-only arrangement is labelled');
@@ -418,7 +419,7 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   await p2.$eval(R + '.st-vars', e => e.scrollIntoView({ block: 'start' })); await shot(p2, 'variations');
   const pick = cards.find(c => c.id !== 'type-only'); const g1 = calls.gemini, a1c = calls.anthropic;
   await p2.click(R + '.st-var[data-variant="' + pick.id + '"] button:has-text("Use this layout")');
-  await p2.waitForFunction(n => /v(\d+) of (\d+)/.test(document.querySelector('#studio-root .st-asset-title').textContent) && +document.querySelector('#studio-root .st-asset-title').textContent.match(/of (\d+)/)[1] === n, as.versions.length + 1, { timeout: 15000 });
+  await p2.waitForFunction(n => /v(\d+) of (\d+)/.test(document.querySelector('#studio-root .st-asset-head').textContent) && +document.querySelector('#studio-root .st-asset-head').textContent.match(/of (\d+)/)[1] === n, as.versions.length + 1, { timeout: 15000 });
   await p2.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
   const dj2 = await api('GET', '/studio/get?id=' + J1); const as2 = dj2.assets.find(x => x.id === as.id); const after = as2.versions.find(v => v.id === as2.current);
   ok(/^layout variation: .+ \(no render\)$/.test(after.note) && after.kind === 'layout', after.note);
@@ -427,17 +428,17 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   eq([calls.gemini, calls.anthropic], [g1, a1c], 'no model or image call'); eq(as2.readiness.technical, 'passed');
 
   // the Art Director: a review on request reads the composed tile of this version with one call, and approves nothing
-  await itab(p2, 'Art Director'); await p2.waitForSelector(R + '.st-adreview');
+  await p2.click(R + '#st-tabbtn-director'); await p2.click(R + '.st-cd-tab:has-text("Review")'); await p2.waitForSelector(R + '.st-adreview');
   const appr0 = JSON.stringify(as2.approvals || {}); const a2 = calls.anthropic, g2 = calls.gemini;
   await p2.click(R + '.st-adreview button:has-text("1 model call")');
-  await p2.waitForFunction(v => { const t = (document.querySelector('#studio-root .st-adreview') || {}).textContent || ''; return /verdict: fix/.test(t) && new RegExp('on v' + v + ', the current version').test(t); }, as2.versions.length, { timeout: 30000 });
+  await p2.waitForFunction(v => { const t = (document.querySelector('#studio-root .st-adreview') || {}).textContent || ''; return /verdict: fix/.test(t) && new RegExp('judged v' + v + ', the current version').test(t); }, as2.versions.length, { timeout: 30000 });
   const rv = await p2.textContent(R + '.st-adreview');
   ok(/hierarchy\s*3/.test(rv) && /the composed tile/.test(rv) && /spacing|support line/i.test(rv) && /Advice, not approval/.test(rv), rv);
   eq([calls.anthropic - a2, calls.gemini - g2], [1, 0], 'one model call, no image call');
   const dj3 = await api('GET', '/studio/get?id=' + J1); const ins = dj3.thread.filter(e => e.kind === 'inspection' && e.asset === as.id).pop();
   eq([ins.version, ins.composed], [as2.current, true], 'the review judged this version as it exports');
   eq(JSON.stringify(dj3.assets.find(x => x.id === as.id).approvals || {}), appr0, 'no approval changed');
-  ok(await p2.$(R + '.st-instab.on:has-text("Art Director")'), 'the tab is named for the role');
+  ok(await p2.$(R + '.st-instab.on:has-text("Creative Director")'), 'the tab is named for the role');
   await shot(p2, 'art-director');
   ok(!p2.errors.length, p2.errors.join(' | '));
   await p2.ctxB.close();

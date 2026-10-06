@@ -13,7 +13,7 @@
  *     request, nothing regenerated.
  * Run: node --experimental-sqlite tests/studio-s17-browser.mjs   (SHOT=1 writes tests/shots/s17-flow-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 import { wizardCreate, step } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8807, inspect: false });
 const { api, calls, env } = fx;

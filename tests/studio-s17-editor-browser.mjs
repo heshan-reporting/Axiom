@@ -12,7 +12,7 @@
  *   - the Art Director hears which layers are selected; imagery edits by description (remove, relight).
  * Run: node --experimental-sqlite tests/studio-s17-editor-browser.mjs   (SHOT=1 writes tests/shots/s17-ed-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8808, inspect: false });
 const { api, calls, env } = fx;
 const R = '#studio-root ';
@@ -33,13 +33,14 @@ const L = id => '.st-le-layer[aria-label="Layer ' + id + '"]';
 async function openAsset(title) {
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Editor check") button.st-lib-open');
   await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
-  await page.click(R + '.st-railbtn.asset:has-text("' + title + '")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-assetpick:has-text("' + title + '")'); await page.waitForSelector(R + '.st-stage canvas');
 }
 // every test starts from a closed editor (a failed test may have left it open) and works on a stage in view: the mouse can only
 // reach what the viewport shows
 async function editLayout() {
-  if (await page.$(R + '.st-le-wrap')) { await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {}); await page.waitForSelector(R + '.st-le-wrap', { state: 'detached', timeout: 5000 }).catch(() => {}); }
-  await page.click(R + '.st-asset-acts button:has-text("Edit layout")'); await page.waitForSelector(R + '.st-le-layer'); await sleep(500);
+  // S18: the canvas is the editor; a fresh start discards any working changes (the dialog is accepted), and the Layers tool is open
+  const d = page.locator(R + '.st-le-foot .btn:has-text("Discard changes")'); if (await d.count()) { await d.first().click({ timeout: 3000 }).catch(() => {}); await sleep(300); }
+  await page.waitForSelector(R + '.st-le-layer'); await sleep(500);
   await page.$eval(R + '.st-le', el => el.scrollIntoView({ block: 'center' })); await sleep(150);
 }
 
@@ -78,7 +79,7 @@ await T.t('a drag snaps to the stage centre and draws the guide; a marquee acros
   await page.mouse.move(stage.x + 4, stage.y + stage.height * 0.4); await page.mouse.down(); await page.mouse.move(stage.x + stage.width - 4, stage.y + stage.height - 4, { steps: 8 }); await page.mouse.up(); await sleep(200);
   ok((await page.$$(R + '.st-le-layer[aria-pressed="true"]')).length >= 3, 'the marquee selected the layers it crossed');
   await page.keyboard.press('Escape');
-  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")'); await sleep(300);
+  { const dz = page.locator(R + '.st-le-foot .btn:has-text("Discard changes")'); if (await dz.count()) { await dz.first().click({ timeout: 3000 }).catch(() => {}); await sleep(300); } }
 });
 
 await T.t('words typed on the canvas go to the copy field the layer shows and save with the layout as one version', async () => {
@@ -132,13 +133,13 @@ await T.t('an unsaved layout is autosaved as a draft for this person only and of
   const rd = await api('GET', '/studio/draft?asset=' + A, null, 'read-key'); ok(!rd.draft, 'another person does not see it');
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
-  await page.waitForSelector(R + '.st-railbtn.asset:has-text("Square tile")'); await page.click(R + '.st-railbtn.asset:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.waitForSelector(R + '.st-assetpick:has-text("Square tile")'); await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   await editLayout(); await page.waitForSelector(R + '.st-le-restore', { timeout: 15000 });
   ok(/unsaved layout changes/.test(await page.textContent(R + '.st-le-restore')), await page.textContent(R + '.st-le-restore'));
   await page.click(R + '.st-le-restore button:has-text("Restore my changes")'); await sleep(300);
   eq((await box(L('cta'))).top, moved.top, 'the CTA is back where it was moved');
   eq((await get()).assets.find(x => x.id === A).versions.length, n0, 'nothing became a version');
-  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")');
+  { const dz = page.locator(R + '.st-le-foot .btn:has-text("Discard changes")'); if (await dz.count()) { await dz.first().click({ timeout: 3000 }).catch(() => {}); await sleep(300); } }
   await shot('draft');
 });
 
@@ -150,7 +151,7 @@ await T.t('zoom by keyboard: Shift+2 doubles, Shift+0 is actual size, Shift+1 fi
 });
 
 await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pressed there never reaches the canvas), Ctrl+Shift+] brings a layer to the front, and Alt with a digit moves between steps by the key it is (Option+1 on a Mac types a symbol)', async () => {
-  await editLayout(); const rows = () => page.$$eval(R + '.st-le-list button.st-layer-pick', x => x.map(e => (e.getAttribute('title') || '').split(' ')[0]));
+  await editLayout(); await tool(page, 'Layers'); const rows = () => page.$$eval(R + '.st-le-list button.st-layer-pick', x => x.map(e => (e.getAttribute('title') || '').split(' ')[0]));
   const r0 = await rows(); ok(r0[0] !== 'cta', 'the call to action is not in front to begin with: ' + r0.join(', '));
   await page.click(R + '.st-le-list button.st-layer-pick[title^="cta "]');
   await page.keyboard.press('Control+Shift+BracketRight'); await sleep(150);
@@ -166,19 +167,19 @@ await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pre
   ok(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('#studio-root .st-le'))), 'the keyboard is back on the canvas');
   await page.click(R + '.st-le-tools button:has-text("Shortcuts")'); await page.waitForSelector(R + '.st-keys');
   await page.click(R + '.st-keys button:has-text("Close")'); await page.waitForSelector(R + '.st-keys', { state: 'detached', timeout: 5000 });
-  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")'); await sleep(300);
+  { const dz = page.locator(R + '.st-le-foot .btn:has-text("Discard changes")'); if (await dz.count()) { await dz.first().click({ timeout: 3000 }).catch(() => {}); await sleep(300); } }
   // Option+1 on a Mac: the key is Digit1, the character a symbol
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a1', code: 'Digit1', altKey: true, bubbles: true })));
   await page.waitForFunction(() => /Brief/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00aa', code: 'Digit6', altKey: true, bubbles: true })));
   await page.waitForFunction(() => /Design/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
-  await page.click(R + '.st-railbtn.asset:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   await shot('keys');
 });
 
 await T.t('style variations: ten named treatments of the same words and marks, each measured; Use this style is a layout version with no model call', async () => {
   const a0 = calls.anthropic, g0 = calls.gemini; const n0 = (await get()).assets.find(x => x.id === A).versions.length;
-  await page.click(R + '.st-styles .st-vars-head button'); await page.waitForSelector(R + '.st-styles .st-var', { timeout: 20000 });
+  await tool(page, 'Design'); await page.click(R + '.st-styles .st-vars-head button'); await page.waitForSelector(R + '.st-styles .st-var', { timeout: 20000 });
   const names = await page.$$eval(R + '.st-styles .st-var .st-var-name', x => x.map(e => e.textContent));
   eq(names, ['Minimal', 'Bold', 'Editorial', 'Data-led', 'Social-first', 'Corporate', 'Premium', 'High-impact', 'Clean', 'Campaign-style'], 'the ten styles');
   ok((await page.$$(R + '.st-styles .st-var .st-chip')).length >= 10, 'each says whether it passes the measurement');
@@ -192,7 +193,7 @@ await T.t('style variations: ten named treatments of the same words and marks, e
 
 await T.t('resize to platform formats: the chosen presets become new assets in the same family, measured, with the words and styling kept; the current format is marked', async () => {
   const n0 = (await get()).assets.length;
-  await page.click(R + '.st-resize .st-vars-head button'); await page.waitForSelector(R + '.st-resize-opt');
+  await tool(page, 'Design'); await page.click(R + '.st-resize .st-vars-head button'); await page.waitForSelector(R + '.st-resize-opt');
   ok(/this format/.test(await page.textContent(R + '.st-resize-opt:has-text("Meta square")')), 'the current format is marked');
   await page.click(R + '.st-resize-opt:has-text("Story or reel")'); await page.click(R + '.st-resize-opt:has-text("LinkedIn link")');
   await page.click(R + '.st-resize button:has-text("Make 2 resized versions")');
@@ -206,7 +207,7 @@ await T.t('resize to platform formats: the chosen presets become new assets in t
 });
 
 await T.t('the Creative quality summary rates five areas from the measurement, offers Fix automatically only for a layout matter, and names what no layout can fix', async () => {
-  await page.click(R + '.st-instab:has-text("Quality")'); await page.waitForSelector(R + '.st-qsum-row');
+  await page.click(R + '#st-tabbtn-checks'); await page.waitForSelector(R + '.st-qsum-row');
   const rows = await page.$$eval(R + '.st-qsum-row', x => x.map(e => e.getAttribute('data-area') + ':' + e.querySelector('.st-qsum-rate').textContent));
   ok(['readability', 'layout', 'imagery', 'brand', 'accessibility', 'platform'].every(k => rows.some(r => r.indexOf(k + ':') === 0)), JSON.stringify(rows));
   ok(rows.some(r => /^imagery:Poor/.test(r)), 'no imagery yet is a blocking finding in its own area: ' + JSON.stringify(rows));
@@ -217,17 +218,17 @@ await T.t('the Creative quality summary rates five areas from the measurement, o
 
 await T.t('the Art Director hears which layers are selected: the composer names them and the direction it sends carries them', async () => {
   await editLayout(); await page.click(R + L('headline')); await sleep(200);
-  await page.click(R + '.st-instab:has-text("Art Director")'); await page.waitForSelector(R + '.st-sel-about');
+  await page.click(R + '#st-tabbtn-director'); await page.waitForSelector(R + '.st-sel-about');
   ok(/About the selection/.test(await page.textContent(R + '.st-sel-about')) && /headline/.test(await page.textContent(R + '.st-sel-about')), await page.textContent(R + '.st-sel-about'));
   await page.fill(R + '.st-composer textarea', 'Make it bolder'); await page.click(R + '.st-composer .btn:has-text("Send")');
   let row = null; for (let i = 0; i < 40 && !row; i++) { row = env.MIND_DB.db.prepare("SELECT input FROM studio_jobs WHERE stage='revise' ORDER BY created DESC LIMIT 1").get(); if (!row) await sleep(150); }
   ok(row && JSON.parse(row.input).layers && JSON.parse(row.input).layers.indexOf('headline') >= 0, 'the revise job carries the selection: ' + (row && row.input));
-  await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {});
+  { const dz = page.locator(R + '.st-le-foot .btn:has-text("Discard changes")'); if (await dz.count()) { await dz.first().click({ timeout: 3000 }).catch(() => {}); await sleep(300); } }
 });
 
 await T.t('imagery edits by description: a removal needs only its marked area, a relight needs the words of the change; each is one image edit stated before anything is spent', async () => {
-  await page.click(R + '.st-railbtn.asset:has-text("Photo tile")'); await page.waitForSelector(R + '.st-stage canvas');
-  const link = page.locator(R + 'button:has-text("Edit an area of the imagery")'); await link.first().scrollIntoViewIfNeeded(); await link.first().click();
+  await page.click(R + '.st-assetpick:has-text("Photo tile")'); await page.waitForSelector(R + '.st-stage canvas');
+  await tool(page, 'Images'); const link = page.locator(R + 'button:has-text("Edit an area of the imagery")'); await link.first().scrollIntoViewIfNeeded(); await link.first().click();
   eq(await page.$$eval(R + '.st-areaedit .st-segbtn', x => x.map(b => b.textContent)), ['Change a marked area', 'Remove an object', 'New background, keep the subject', 'Change the light', 'Restyle, keep the content']);
   ok(/not a pixel mask/.test(await page.textContent(R + '.st-areaedit')), 'the limit is said first');
   await page.click(R + '.st-areaedit .st-segbtn:has-text("Remove an object")');
@@ -241,7 +242,7 @@ await T.t('imagery edits by description: a removal needs only its marked area, a
   ok(rj, 'a removal job'); const inp = JSON.parse(rj.input); eq([inp.editKind, inp.area.w > 0, inp.instruction], ['remove', true, '']);
   for (let i = 0; i < 60 && calls.gemini === g0; i++) await sleep(150); eq(calls.gemini - g0, 1, 'one image edit');
   await page.waitForSelector(R + '.st-preserve', { timeout: 15000 }); ok(/Removal of v\d+ \(the marked area\)/.test(await page.textContent(R + '.st-preserve')), await page.textContent(R + '.st-preserve'));
-  const link2 = page.locator(R + 'button:has-text("Edit an area of the imagery")'); await link2.first().scrollIntoViewIfNeeded(); await link2.first().click();
+  await tool(page, 'Images'); const link2 = page.locator(R + 'button:has-text("Edit an area of the imagery")'); await link2.first().scrollIntoViewIfNeeded(); await link2.first().click();
   await page.click(R + '.st-areaedit .st-segbtn:has-text("Change the light")');
   ok(await page.isDisabled(go), 'a relight needs the words of the change'); await page.fill(R + '.st-areaedit textarea', 'low golden light from the left'); ok(!(await page.isDisabled(go)));
   await page.click(R + '.st-areaedit button:has-text("Cancel")');

@@ -4,7 +4,7 @@
  * brand: a placement is previewed (nothing written), confirmed with a reason, and the view then shows the approved rule,
  * the kit history names it, and a read-only key sees no Teach controls.
  * Run: node --experimental-sqlite tests/studio-brand-browser.mjs */
-import { makeStudio, runner, eq, ok, PHOTO } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, PHOTO, place, tool } from './studio-fixture.mjs';
 import { openTool } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8796 });
 const { api } = fx;
