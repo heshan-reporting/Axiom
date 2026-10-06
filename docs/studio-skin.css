@@ -492,3 +492,4 @@
 #studio-root .st .st-anchor{display:block;scroll-margin-top:calc(var(--st-head-h,68px) + var(--sk-steps-h,64px) + 12px)}
 #studio-root .st .st-dir-route{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
 @media (prefers-reduced-motion:reduce){#studio-root .st .st-analyse,#studio-root .st .st-analysis{animation:none}#studio-root .st .st-an-narr:hover{transform:none}}
+#studio-root .st .st-analyse-open{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 8px}
