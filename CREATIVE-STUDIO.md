@@ -1660,3 +1660,40 @@ the wizard and the seven steps: `studio-browser` 26, `studio-journey` 9, `studio
 keyboard case was run against the old key handling first and failed on each half (the bracket with Shift, Option with a
 digit), as a new defect's test must.
 
+## 41. S18 - the focused studio (build studio-p34, page r12)
+
+### 41.1 The baseline, before anything was changed (S17, build studio-p33, commit 54ac0cc)
+
+Measured with `tests/studio-s18-shots.mjs before` (one guided project parked at each step, mocked providers) and the
+reference mockup `creative-studio-guided-mock.html` (dock 54 px | library 166 px | canvas | inspector 255 px under one header
+and one navigator, everything inside the window). Concrete failures, each seen in the captures:
+
+1. **Three shells stacked.** Inside the Studio the AXIOM masthead, the full news navigation (two rows), the scope bar and its
+   note take 225 px at 1440 x 900 before the Studio's own header (another 70-95 px), its navigator (65 px) and the stage
+   head. A third of the window is chrome that has nothing to do with the work.
+2. **The artwork is not in the window.** At 1440 x 900 the Design artboard occupies y 679-1139; at 1920 x 1080 y 621-1261.
+   Nowhere does it fit by default.
+3. **The Creative Director's composer is a page away.** y 1348 at 1440 x 900, y 1238 at 1920 x 1080: under an explanatory
+   paragraph, the review card and the whole project thread.
+4. **Four names for one assistant.** Partner (dock), Art Director (tab, panel head, thread), creative partner (stage note),
+   Creative Director (nowhere).
+5. **Duplicated controls.** Edit layout twice on the asset bar, Review / Export both in the header and as a stage, Fix layout
+   beside the top issue and in the Quality tab, the inspection's correction twice (review card and thread).
+6. **Conversation mixed with logs.** "Job queued: analyse", "Source added", "workflow" events sit between the team's
+   directions and the answers, on every step.
+7. **Editing hides behind a mode.** The canvas shows the artwork; selecting a layer needs "Edit layout" first, and the editor's
+   panels then appear in other places (Properties tab, left panel).
+8. **Every stage repeats itself.** Eyebrow, headline, purpose paragraph, a "What happens next" box and a status strip before
+   the first input; the brief step's composer starts below y 760.
+9. **Export is a hidden sub-tab** of Review ("Preflight and approvals | Export") with no summary of what the package holds.
+10. **Save state contradicts itself.** "Saved" in the header beside "Unsaved layout" in the editor, no distinction between a
+    draft, a pending save and a version.
+11. **The client accent never reached the interface**: `studio.js` set `--st-client`, `studio-skin.css` read
+    `--st-client-accent`; every client was cyan.
+12. **Narrow screens**: at 390 px the scope bar fills the first screen and the step navigator scrolls sideways over the work;
+    the assistant is thousands of pixels down.
+
+Five reported defects reproduced first in `tests/studio-s18-browser.mjs` (all five failed on the baseline): the composer
+cleared before the request succeeded; Enter submitted past the Send button's checks (and cleared the words while a request
+was in flight); the composer outside the window; the accent variable mismatch; the correction shown twice.
+
