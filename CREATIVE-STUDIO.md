@@ -1435,3 +1435,22 @@ journey (9), modes (4), S9 accessibility (5, now auditing the Copy step), S10 (3
 browser harnesses on the new steps. Not verified: anything a live model answers, and the deployed worker (the Mac's
 `tools/deploy-worker.sh` ships build `studio-p30`; until then `POST /studio/imagery` is an unknown route and production ignores
 the imagery timing, while the page's Copy step and preflight work against p29).
+
+## 37. S14 - the product skin from the mockup (page r8)
+
+Asked for: "The UI must be exactly same as this or even better ... like it was designed by a senior UI designer ... advanced
+CSS and animations ... development grade." The mockup's design system was read from its stylesheet (palette, type, radii,
+spacing) and rendered step by step in Chromium to compare against; the Studio's own markup was then given that language
+rather than rebuilt, so every wired behaviour (jobs, versions, measurement, approvals, the activity panel) is untouched.
+
+- **One palette, one place.** `docs/studio-skin.css` defines the mockup palette as `--sk-*` and remaps the Studio's tokens and
+  the app tokens its older rules read onto it, inside `#studio-root` only. Fonts: Manrope (display), DM Sans (text).
+- **Structure from the mockup:** framed workspace; header with brand mark, project title over campaign / mode / content
+  chips, client select; six numbered steps with sub-labels and live notes; editorial stage headlines with an eyebrow; a
+  segmented sub-navigation; a Canva-like desk (vertical dock, canvas on a dotted ground with a deep artboard shadow, canvas
+  bar, page strip, inspector tabs with an accent underline); copy list with format icons and state pills; direction cards
+  with art tiles; preflight rows with thumbnails.
+- **Better than the mockup, where the mockup was a picture:** every number on screen is the worker's; the step notes are
+  live; the direction tiles are honest text previews; motion is tied to state (arrival, progress, completion, attention) and
+  switched off under reduced motion; touch targets reach 44px on coarse pointers; the layout reflows at 1180, 900 and 640px.
+- **Not copied:** the mockup's simulated percentages, sample scores, the lucide CDN (icons are drawn inline), its footer.

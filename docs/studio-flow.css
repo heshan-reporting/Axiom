@@ -3,9 +3,9 @@
 
 /* ---- Copy: list of the set, one channel's words, the copy partner */
 .st .st-copystage{container-type:inline-size;container-name:stcopy}
-.st .st-copy3{display:grid;grid-template-columns:minmax(150px,200px) minmax(0,1fr);gap:var(--st-s3,16px);align-items:start;margin-top:var(--st-s2,12px)}
+.st .st-copy3{display:grid;grid-template-columns:minmax(190px,232px) minmax(0,1fr);gap:var(--st-s3,16px);align-items:start;margin-top:var(--st-s2,12px)}
 .st .st-copy3 > .st-copy-partner{grid-column:1 / -1}
-@container stcopy (min-width:1060px){.st .st-copy3{grid-template-columns:minmax(170px,210px) minmax(0,1fr) minmax(240px,300px)}.st .st-copy3 > .st-copy-partner{grid-column:auto}}
+@container stcopy (min-width:1060px){.st .st-copy3{grid-template-columns:minmax(200px,236px) minmax(0,1fr) minmax(250px,300px)}.st .st-copy3 > .st-copy-partner{grid-column:auto}}
 @container stcopy (max-width:560px){.st .st-copy3{grid-template-columns:1fr}.st .st-copy-list{position:static}}
 .st .st-copy-list,.st .st-copy-edit,.st .st-copy-partner{background:var(--st-surface);border:1px solid var(--st-line);border-radius:8px;padding:var(--st-s2,12px)}
 .st .st-copy-list{display:flex;flex-direction:column;gap:10px;position:sticky;top:calc(var(--st-head-h,46px) + 64px)}

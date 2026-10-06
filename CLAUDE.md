@@ -1566,7 +1566,7 @@ version. Studio scripts load with a release query (`?v=r1` now) so a browser can
 renderer: bump it on each page release. Harnesses: section 11 of `tests/studio-layout-browser.mjs`, journey 9 of
 `tests/studio-journey-browser.mjs`.
 
-**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13).** The brief carries `creationMode`
+**Two creation modes (S2; page `?v=r2`, `?v=r3` since S10, `?v=r4` since S11, `?v=r5` since the hidden-render fix, `?v=r6` since S12, `?v=r7` since S13, `?v=r8` since S14).** The brief carries `creationMode`
 (`stBriefNorm`: `editable` by default, `finished` only when chosen; anything
 else falls to editable), chosen at intake before anything is generated and
 shown as a header chip. **Editable Studio** is everything above: Gemini makes
@@ -2073,6 +2073,31 @@ preflight blocks or a bitmap does not download. Its milestone percentages were
 not taken. Styles: `docs/studio-flow.css`. Harnesses: `studio-s13-worker.mjs`
 (7), `studio-guided-browser.mjs` (6, Chromium); the studio, journey, modes, S9
 and S10 browser harnesses follow the new steps.
+
+**The product skin (S14; page `?v=r8`; `CREATIVE-STUDIO.md` s.37).** The
+Studio now wears the reviewed mockup's visual language, at the owner's
+request, scoped to `#studio-root` so the rest of the app keeps the Phase 5
+shell: `docs/studio-skin.css` remaps the Studio's `--st-*` tokens and the app
+tokens its older rules read (`--x-*`, `--t0..3`, `--sur*`, `--line*`) onto one
+palette (ground #101318, panel #191d24, raised #232831, line #303741, ink
+#edf0f5, accent #5dd4e5 on #062e39), sets Manrope for display and DM Sans for
+text (both added to the page's Google Fonts link), and frames the Studio as one
+16px-radius workspace. Markup changes in `docs/studio.js`: a brand mark and a
+two-line project title in the header; the navigator's numbered steps (01-06,
+a drawn check when done, a live dot while running) with each step's sub-label
+and live note; each stage head an eyebrow ("03 Copy") over an editorial
+headline (`STAGES[].headline`: "Get the words right first." and so on) with the
+purpose and What happens next under it; an inline line-icon set (`ICON`,
+`Icon`; no icon CDN) used by the dock, the copy list and the steps; the dock a
+vertical tool column beside the canvas (sticky; the creation mode under it);
+direction cards with an art tile (the headline set on a ground chosen by the
+medium; a text preview, never imagery); review rows with the composition's
+thumbnail. Motion explains state: stage content rises in, the step underline
+grows, notices drop in, a sweep under the busy bar, a ring on running steps, a
+drawn tick on "ready for design", shimmer while a project opens, lift on cards;
+all of it off under `prefers-reduced-motion`. Harness changes: journey 8's
+focus check reads the headline; `tests/studio-shots.mjs` captures Copy and the
+Board too.
 
 Phase 1, the ground:
 

@@ -32,8 +32,12 @@ for (const [sz, viewport] of SIZES) {
   if (sz !== '390') { await page.click(R + '.st-instab:has-text("Quality")').catch(() => {}); await wait(300); await page.screenshot({ path: OUT + label + '-quality-' + sz + '.png' }); }
   await page.click(R + '.st-step:has-text("Brief"), ' + R + 'button:has-text("Brief")').catch(() => {}); await wait(700);
   await page.screenshot({ path: OUT + label + '-brief-' + sz + '.png' });
-  await page.click(R + '.st-step:has-text("Directions"), ' + R + 'button:has-text("Directions")').catch(() => {}); await wait(700);
+  await page.click(R + '.st-step:has-text("Direction")').catch(() => {}); await wait(700);
   await page.screenshot({ path: OUT + label + '-directions-' + sz + '.png' });
+  await page.click(R + '.st-step:has-text("Copy")').catch(() => {}); await wait(700);
+  await page.screenshot({ path: OUT + label + '-copy-' + sz + '.png' });
+  await page.click(R + '.st-step:has-text("Design")').catch(() => {}); await wait(400); await page.click(R + '.st-subtab:has-text("Board")').catch(() => {}); await wait(900);
+  await page.screenshot({ path: OUT + label + '-board-' + sz + '.png' });
   if (sz !== '390' || label !== 'before') { await page.click(R + '.st-step:has-text("Review")').catch(() => {}); await wait(700); await page.screenshot({ path: OUT + label + '-review-' + sz + '.png' });
     await page.click(R + '.st-step:has-text("Export")').catch(() => {}); await wait(700); await page.screenshot({ path: OUT + label + '-export-' + sz + '.png' }); }
   if (page.errors.length) console.log('page errors at ' + sz + ': ' + page.errors.join(' | '));

@@ -347,8 +347,9 @@ await T.t('8. the essential workflow by keyboard: start a project, move between 
   // stages by keyboard: Alt+1 to Alt+6, focus lands on the stage heading
   await page.focus('#studio-root .st-head select'); await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());
-  await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /Brief/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
-  await page.keyboard.press('Alt+5'); await page.waitForFunction(() => /^Review$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
+  // each stage's heading is its editorial headline (S14); focus lands on it
+  await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /clear brief/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
+  await page.keyboard.press('Alt+5'); await page.waitForFunction(() => /^One final check, before it leaves the studio\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
   // the navigator itself by Tab and Enter
   const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Design/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-instabs');
