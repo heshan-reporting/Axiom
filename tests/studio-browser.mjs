@@ -346,7 +346,8 @@ await t('three visible actions: Create a new design opens a form that names what
   ok(/support line sits too close/.test(await page.textContent(R + '.st-insp')), 'the issue is named');
   const fixBox = await page.$(R + 'textarea[id^="fix-"]'); ok(fixBox, 'the correction is editable before it is applied'); eq(await fixBox.inputValue(), 'Add a line of space between the headline and the support line; keep everything else.');
   // the inspection judged the render's version; the asset has moved on since (a concept was applied), so the card says so and applying is a confirmed choice
-  ok(/inspected an earlier version/.test(await page.textContent(R + '.st-insp')), 'a stale inspection is marked');
+  // (waited for, not read once: the marking follows the project reload that carries the newer current version)
+  ok(await page.waitForFunction(() => /inspected an earlier version/.test((document.querySelector('#studio-root .st-insp') || {}).textContent || ''), null, { timeout: 15000 }).then(() => true, () => false), 'a stale inspection is marked');
   page.once('dialog', d => d.accept());
   await page.click(R + '.st-insp button:has-text("Apply the correction")');
   await page.waitForFunction(() => /correction applied/.test(document.querySelector('#studio-root .st-thread').textContent), null, { timeout: 30000 });
