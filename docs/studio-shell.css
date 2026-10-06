@@ -201,7 +201,11 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-le-foot .st-le-val.bad{color:var(--sk-bad)}
 #studio-root .st .st-le-draft{color:var(--sk-sub);white-space:nowrap}
 #studio-root .st .st-canvas-foot{flex-shrink:0;max-height:34%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-bottom:10px}
-#studio-root .st .st-pagestrip{display:flex;gap:10px;overflow-x:auto;padding:2px 0;scrollbar-width:thin}
+#studio-root .st .st-pagestrip{display:flex;gap:10px;overflow-x:auto;padding:2px 0;scrollbar-width:thin;min-width:0;flex:0 1 auto}
+#studio-root .st .st-canvas-sub{display:flex;align-items:center;gap:12px;min-width:0}
+#studio-root .st .st-canvas-sub .st-comp-info{flex:1;min-width:0;text-align:right;margin:0;padding:0;border:0;background:none}
+#studio-root .st .st-canvas-sub .st-comp-tag{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
+#studio-root .st .st-readystrip.compact .st-qrow .ov-dim{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 #studio-root .st .st-pagefam{display:flex;gap:6px;flex-shrink:0;padding-right:10px;border-right:1px solid var(--sk-line)}
 #studio-root .st .st-pagefam:last-child{border-right:0}
 #studio-root .st .st-pagechip{display:flex;align-items:center;gap:6px;padding:3px 8px 3px 3px;border:1px solid var(--sk-line);border-radius:8px;background:var(--sk-panel);color:var(--sk-ink-2);font:550 11px/1 var(--sk-font);cursor:pointer;flex-shrink:0}

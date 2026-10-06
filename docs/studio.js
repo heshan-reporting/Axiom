@@ -1938,7 +1938,8 @@
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [edKey, setEdKey] = useState(0);
     // S11: the canvas controls - overlays (guides, outlines, subject marks), the optional checkerboard, full screen - and the layer selection
-    const [overlays, setOverlays] = useState(true); const [checker, setChecker] = useState(false); const [full, setFull] = useState(false);
+    const [overlays, setOverlaysRaw] = useState(() => { try { return localStorage.getItem('ax_studio_guides') === '1'; } catch (e) { return false; } }); // S18: guides off by default; the choice is remembered per browser
+    const setOverlays = x => setOverlaysRaw(o => { const n = typeof x === 'function' ? x(o) : x; try { localStorage.setItem('ax_studio_guides', n ? '1' : '0'); } catch (e) {} return n; }); const [checker, setChecker] = useState(false); const [full, setFull] = useState(false);
     const [layerSel, setLayerSel] = useState([]); useEffect(() => { setLayerSel([]); }, [a.id]);
     useEffect(() => { if (onSelection) onSelection(layerSel); }, [layerSel.join(',')]);
     useEffect(() => () => { if (onSelection) onSelection([]); }, []);
@@ -2117,12 +2118,11 @@
         ${stage}
         ${le && !preview ? html`<div class="st-edfoot" ref=${setEdFoot}></div>` : null}
         ${!preview ? html`<div class="st-canvas-foot">
-          <${PageStrip} p=${p} a=${a} onOpen=${onOpen} />
+          <div class="st-canvas-sub"><${PageStrip} p=${p} a=${a} onOpen=${onOpen} /><div class="st-comp-info ov-dim" aria-label="About this composition"><span class="st-comp-tag" title=${tagText}>${tagText}</span></div></div>
           ${hasLayout ? html`<${ReadyStrip} compact=${true} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onUndoRepair=${undoRepair} onMeasure=${measureAgain} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('checks')} highlight=${hlIds} onHighlight=${ids => { toggleHl(ids); if (!overlays) setOverlays(true); if (preview) setPreview(false); }} onAction=${k => { if (k === 'imagery') genImagery(); }} onEditLayout=${le ? () => { try { stageRef.current.querySelector('.st-le').focus(); } catch (e) {} } : null} onVariations=${canVary ? () => setTool('design') : null} varsOk=${vars ? vars.filter(x => x.ok).length : null} varsN=${vars ? vars.length : 0} />` : null}
           ${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} hidden=${hiddenImagery(v)} onShow=${() => onLayoutSave(a, showImagery(v.layout), v.id, 'show the imagery: the ground that hid it is lifted')} onGenerate=${genImagery} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
           ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
           ${notes}
-          <div class="st-comp-info ov-dim" aria-label="About this composition"><span class="st-comp-tag">${tagText}</span></div>
         </div>` : null}
       </section>
     </div>`;
