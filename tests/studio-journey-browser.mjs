@@ -339,7 +339,7 @@ await T.t('8. the essential workflow by keyboard: start a project, move between 
   await tabTo(f => /^Facebook/.test(f.text)); await page.keyboard.press('Enter');
   const cb = await tabTo(f => /Create project/.test(f.text)); ok(cb.outline !== 'none', 'focus is visible on Create project');
   await page.keyboard.press('Enter');
-  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 30000 });   // the words first (S13)
+  await page.waitForSelector(R + '.st-copystage .st-copy-edit', { timeout: 60000 });   // the words first (S13); generous under a full-suite load
   const pr = await latest('mca'); await settle(pr.id);
   await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+4');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });

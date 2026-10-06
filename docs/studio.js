@@ -1684,7 +1684,7 @@
           ${(() => { const vi = a.versions.findIndex(x => x.id === v.id); return vi > 0 ? html`<button class="btn sm ghost" onClick=${() => onCompare(a.versions[vi - 1].id, v.id)}>Compare</button>` : null; })()}
         </div>
       </div>
-      ${!preview && !copyOnly ? html`<${DesignDock} a=${a} v=${v} tab=${tab} le=${le} ro=${ro} canVary=${canVary} canEdit=${!flat && !finished && !ro && v.layout && v.layout.layers && !a.locks.layout} finished=${finished} flat=${flat} busy=${busy}
+      ${!preview && !copyOnly && !le ? html`<${DesignDock} a=${a} v=${v} tab=${tab} le=${le} ro=${ro} canVary=${canVary} canEdit=${!flat && !finished && !ro && v.layout && v.layout.layers && !a.locks.layout} finished=${finished} flat=${flat} busy=${busy}
         onTool=${k => { const go = sel => { const el = document.querySelector('#studio-root ' + sel); if (el) { try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) {} const f = el.querySelector('button, select, textarea, input'); if (f) try { f.focus({ preventScroll: true }); } catch (e) {} } };
           if (k === 'text') setTab('copy'); else if (k === 'brand') setTab('brand'); else if (k === 'partner') setTab('partner');
           else if (k === 'layers') { if (!le) setLe(true); setTab('properties'); }

@@ -82,8 +82,8 @@ await T.t('Design: the dock reaches the words, the brand, the layers and the Art
   await page.click(R + '.st-dock-btn:has-text("Brand")'); await page.waitForSelector(R + '#st-tabbtn-brand[aria-selected="true"]');
   await page.click(R + '.st-dock-btn:has-text("Text")'); await page.waitForSelector(R + '#st-tabbtn-copy[aria-selected="true"]');
   await page.click(R + '.st-dock-btn:has-text("Partner")'); await page.waitForSelector(R + '#st-tabbtn-partner[aria-selected="true"]');
-  await page.click(R + '.st-dock-btn:has-text("Layers")'); await page.waitForSelector(R + '.st-dock-btn.on:has-text("Layers")');
-  ok(await page.$(R + '.st-asset-acts .btn.on:has-text("Close layout editor")'), 'the layout editor is open');
+  await page.click(R + '.st-dock-btn:has-text("Layers")'); await page.waitForSelector(R + '.st-asset-acts .btn.on:has-text("Close layout editor")');
+  eq(await page.$(R + '.st-dock'), null, 'while the layout editor is open its own toolbar replaces the dock (the canvas keeps the height)');
   await page.click(R + '.st-asset-acts .btn:has-text("Close layout editor")');
   await shot(page, 'design-dock');
   ok(await page.$(R + '.st-modeseg .st-segbtn.on:has-text("Editable")'), 'Editable is the mode');
