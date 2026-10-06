@@ -1,0 +1,252 @@
+<style>
+#studio-concept{--s-bg:light-dark(#f6f5f2,#191c1b);--s-panel:light-dark(#fff,#222625);--s-ink:light-dark(#232a27,#edf0ec);--s-muted:light-dark(#6b746d,#a9b3ab);--s-line:light-dark(#e3e6df,#373e39);--s-soft:light-dark(#edf0e9,#2b322d);--s-accent:light-dark(#315b45,#a3c6ac);--s-on:light-dark(#fff,#19291e);--s-warm:light-dark(#e9e7e1,#30352f);--s-canvas:#ecd5c0;--s-artink:#293e36;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--s-ink);background:var(--s-bg);border:1px solid var(--s-line);border-radius:12px;overflow:clip;position:relative;isolation:isolate}
+#studio-concept *{box-sizing:border-box}
+#studio-concept button,#studio-concept select,#studio-concept input,#studio-concept textarea{font:inherit;color:inherit}
+#studio-concept button{border:0;background:none;text-align:left;cursor:default}
+#studio-concept button:focus-visible,#studio-concept input:focus-visible,#studio-concept select:focus-visible,#studio-concept textarea:focus-visible{outline:2px solid var(--s-accent);outline-offset:3px}
+#studio-concept button:disabled{opacity:.48}
+#studio-concept h2,#studio-concept h3,#studio-concept p{margin:0}
+#studio-concept svg{width:16px;height:16px;flex-shrink:0}
+#studio-concept .st-top{padding:16px 21px;display:flex;gap:16px;align-items:center;background:var(--s-panel);border-bottom:1px solid var(--s-line);flex-wrap:wrap}
+#studio-concept .st-logo{font-weight:650;font-size:15px;letter-spacing:2.5px;padding-right:17px;border-right:1px solid var(--s-line)}
+#studio-concept .st-title{font-size:15px;font-weight:600}
+#studio-concept .st-concept{font-size:10px;letter-spacing:1.2px;padding:3px 6px;color:var(--s-muted);border:1px solid var(--s-line);border-radius:3px}
+#studio-concept .st-topright{margin-left:auto;display:flex;align-items:center;gap:14px}
+#studio-concept .st-avatars{display:flex;padding-left:7px}
+#studio-concept .st-avatar{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:10px;background:var(--s-soft);border:2px solid var(--s-panel);margin-left:-7px}
+#studio-concept .st-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--s-line);background:var(--s-panel);border-radius:6px;padding:7px 10px;font-size:12px;white-space:nowrap}
+#studio-concept .st-primary{background:var(--s-accent);color:var(--s-on);border-color:var(--s-accent)}
+#studio-concept .st-subtop{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;padding:17px 21px 14px}
+#studio-concept .st-projectline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#studio-concept .st-client{display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--s-panel);border:1px solid var(--s-line);border-radius:6px}
+#studio-concept select{background:transparent;border:0;max-width:175px;outline-offset:3px}
+#studio-concept option{color:var(--s-ink);background:var(--s-panel)}
+#studio-concept .st-client-mark{width:22px;height:22px;display:grid;place-items:center;background:var(--s-artink);color:var(--s-canvas);border-radius:3px;font-weight:600;font-size:12px}
+#studio-concept .st-breadcrumb{font-size:12px;color:var(--s-muted)}
+#studio-concept .st-projectname{font-weight:550;font-size:14px}
+#studio-concept .st-saved{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--s-muted)}
+#studio-concept .st-steps{display:flex;gap:22px;align-items:center;padding:0 21px 0;border-bottom:1px solid var(--s-line)}
+#studio-concept .st-step{padding:10px 0 13px;color:var(--s-muted);font-size:12px;display:flex;gap:7px;align-items:center;border-bottom:2px solid transparent}
+#studio-concept .st-step.is-active{border-color:var(--s-accent);color:var(--s-ink)}
+#studio-concept .st-stepnum{font-size:10px;color:var(--s-muted);width:16px;height:16px;border:1px solid var(--s-line);border-radius:50%;display:grid;place-items:center}
+#studio-concept .st-step.is-active .st-stepnum{background:var(--s-accent);color:var(--s-on);border-color:var(--s-accent)}
+#studio-concept .st-layout{display:grid;grid-template-columns:177px minmax(0,1fr) 267px;align-items:stretch;min-height:665px}
+#studio-concept .st-left{border-right:1px solid var(--s-line);padding:19px 12px;background:var(--s-panel)}
+#studio-concept .st-label{font-size:10px;font-weight:600;letter-spacing:1.3px;color:var(--s-muted);text-transform:uppercase}
+#studio-concept .st-sectionlabel{margin:0 7px 11px;display:flex;justify-content:space-between;align-items:center}
+#studio-concept .st-navrow{display:flex;align-items:center;gap:8px;width:100%;padding:8px;font-size:12px;border-radius:5px;color:var(--s-muted)}
+#studio-concept .st-navrow:hover{background:var(--s-soft)}
+#studio-concept .st-navcount{margin-left:auto;font-size:10px}
+#studio-concept .st-assets{margin-top:27px}
+#studio-concept .st-asset{width:100%;display:flex;align-items:center;gap:9px;padding:9px 7px;margin-bottom:4px;border-radius:6px;border:1px solid transparent}
+#studio-concept .st-asset.is-active{background:var(--s-soft);border-color:var(--s-line)}
+#studio-concept .st-thumb{width:32px;height:37px;flex-shrink:0;background:var(--s-canvas);border-radius:2px;position:relative;overflow:hidden;color:var(--s-artink)}
+#studio-concept .st-thumb:after{content:"";position:absolute;inset:12px 5px -4px 15px;background:var(--s-artink);border-radius:11px 11px 0 0;opacity:.85}
+#studio-concept .st-thumb.copy{display:grid;place-items:center;background:var(--s-bg)}
+#studio-concept .st-thumb.copy:after{display:none}
+#studio-concept .st-assetname{font-size:12px;font-weight:550}
+#studio-concept .st-assetmeta{font-size:10px;color:var(--s-muted);margin-top:2px}
+#studio-concept .st-miniapproved{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--s-accent);margin-right:4px}
+#studio-concept .st-clientcontext{margin-top:33px;border-top:1px solid var(--s-line);padding:17px 7px 0}
+#studio-concept .st-contextline{display:flex;align-items:center;gap:6px;margin-top:9px;color:var(--s-muted);font-size:11px}
+#studio-concept .st-contextline svg{width:13px;height:13px}
+#studio-concept .st-middle{min-width:0}
+#studio-concept .st-workhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:15px 19px;background:var(--s-panel);border-bottom:1px solid var(--s-line)}
+#studio-concept .st-workname{font-size:13px;font-weight:550}
+#studio-concept .st-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#studio-concept .st-small{font-size:11px;color:var(--s-muted)}
+#studio-concept .st-pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 6px;background:var(--s-soft);border:1px solid var(--s-line);border-radius:4px;color:var(--s-muted)}
+#studio-concept .st-iconbutton{display:grid;place-items:center;padding:5px;border:1px solid var(--s-line);border-radius:4px}
+#studio-concept .st-previewbar{padding:12px 19px 0;display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
+#studio-concept .st-localtabs{display:inline-flex;gap:3px}
+#studio-concept .st-localtab{font-size:11px;padding:5px 8px;border-radius:4px;color:var(--s-muted)}
+#studio-concept .st-localtab.is-active{background:var(--s-panel);color:var(--s-ink);box-shadow:0 1px 3px #00000010}
+#studio-concept .st-stage{padding:20px 24px 17px;display:flex;align-items:center;justify-content:center;gap:15px;min-height:371px}
+#studio-concept .st-art{width:100%;max-width:337px;aspect-ratio:1;position:relative;overflow:hidden;background:var(--s-canvas);color:var(--s-artink);box-shadow:0 6px 20px #00000010;border-radius:1px;isolation:isolate;text-align:left;padding:21px}
+#studio-concept .st-art.portrait{aspect-ratio:4/5;max-width:290px}
+#studio-concept .st-art.landscape{aspect-ratio:1.55;max-width:100%}
+#studio-concept .st-artbrand{display:flex;gap:6px;align-items:center;font-size:10px;letter-spacing:2px;font-weight:650;position:relative;z-index:3}
+#studio-concept .st-brandglyph{width:11px;height:15px;background:currentColor;clip-path:polygon(0 0,100% 0,100% 30%,30% 30%,30% 48%,85% 48%,85% 72%,30% 72%,30% 100%,0 100%)}
+#studio-concept .st-artheadline{font:400 clamp(30px,3.65vw,47px)/1.04 Georgia,"Times New Roman",serif;letter-spacing:-1.6px;max-width:230px;position:relative;z-index:3;margin-top:27px;white-space:pre-line;overflow-wrap:anywhere}
+#studio-concept .st-artsub{font-size:10px;max-width:125px;margin-top:12px;position:relative;z-index:3}
+#studio-concept .st-artfooter{position:absolute;bottom:20px;left:21px;right:21px;display:flex;align-items:center;justify-content:space-between;font-size:9px;letter-spacing:.2px;z-index:4}
+#studio-concept .st-building{position:absolute;background:#83917e;width:36%;height:69%;bottom:0;right:-4%;border-radius:90px 90px 0 0;transform:rotate(-8deg);box-shadow:-18px 6px 0 #c8b9a3;z-index:1}
+#studio-concept .st-building:before{content:"";position:absolute;inset:14px 16px 0 20px;border-left:1px solid #d8dfce;opacity:.6;border-radius:80px 70px 0 0;background:repeating-linear-gradient(0deg,transparent 0 25px,#d8dfce 26px 27px)}
+#studio-concept .st-building:after{content:"";position:absolute;width:90%;height:46%;background:#41584c;bottom:0;right:58%;border-radius:70px 70px 0 0;box-shadow:-8px 0 0 #b3bba8}
+#studio-concept .st-stamp{position:absolute;right:15px;top:18px;writing-mode:vertical-rl;letter-spacing:1.2px;font-size:8px;opacity:.7}
+#studio-concept .st-captionbox{margin:0 19px 17px;padding:12px 14px;background:var(--s-panel);border:1px solid var(--s-line);border-radius:6px}
+#studio-concept .st-captionhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+#studio-concept .st-captiontext{font-size:12px;color:var(--s-ink);line-height:1.65;white-space:pre-line}
+#studio-concept .st-reviewbar{padding:12px 19px;background:var(--s-panel);border-top:1px solid var(--s-line);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+#studio-concept .st-right{background:var(--s-panel);border-left:1px solid var(--s-line);display:flex;flex-direction:column;min-width:0}
+#studio-concept .st-righttabs{display:flex;gap:11px;padding:0 16px;border-bottom:1px solid var(--s-line)}
+#studio-concept .st-righttab{font-size:11px;padding:17px 0 15px;color:var(--s-muted);border-bottom:2px solid transparent}
+#studio-concept .st-righttab.is-active{color:var(--s-ink);border-color:var(--s-ink)}
+#studio-concept .st-panel{padding:18px 16px;flex:1}
+#studio-concept .st-partnerhead{display:flex;align-items:center;gap:7px;font-weight:550;font-size:12px;margin-bottom:10px}
+#studio-concept .st-partnerhead svg{color:var(--s-accent)}
+#studio-concept .st-paragraph{font-size:12px;color:var(--s-muted);line-height:1.75;margin:0 0 14px}
+#studio-concept .st-contexttag{display:inline-block;font-size:10px;padding:3px 5px;border:1px solid var(--s-line);border-radius:4px;margin:0 3px 4px 0;color:var(--s-muted)}
+#studio-concept .st-chatuser{padding:11px 12px;background:var(--s-soft);border-radius:7px 7px 2px 7px;font-size:12px;margin:19px 0}
+#studio-concept .st-applied{margin-top:14px;padding:10px 0 12px;border-top:1px solid var(--s-line);border-bottom:1px solid var(--s-line);font-size:11px;color:var(--s-muted)}
+#studio-concept .st-applied div{display:flex;align-items:center;gap:6px;margin-top:5px}
+#studio-concept .st-applied svg{width:12px;height:12px}
+#studio-concept .st-suggestions{display:flex;gap:6px;flex-wrap:wrap;margin-top:17px}
+#studio-concept .st-suggestion{padding:5px 7px;border:1px solid var(--s-line);border-radius:5px;font-size:11px}
+#studio-concept .st-composer{border-top:1px solid var(--s-line);padding:13px 13px 14px}
+#studio-concept .st-composewrap{background:var(--s-bg);border:1px solid var(--s-line);border-radius:7px;padding:10px}
+#studio-concept .st-composetarget{font-size:10px;color:var(--s-muted);display:flex;align-items:center;gap:5px}
+#studio-concept .st-composer textarea{resize:vertical;width:100%;min-height:64px;background:transparent;border:0;padding:8px 0;color:var(--s-ink);font-size:12px}
+#studio-concept .st-composer textarea::placeholder{color:var(--s-muted)}
+#studio-concept .st-composebottom{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--s-muted);gap:8px}
+#studio-concept .st-send{width:27px;height:27px;background:var(--s-accent);color:var(--s-on);border-radius:5px;display:grid;place-items:center}
+#studio-concept .st-formlabel{display:block;font-size:11px;color:var(--s-muted);margin:15px 0 6px}
+#studio-concept .st-field{width:100%;background:var(--s-bg);border:1px solid var(--s-line);border-radius:5px;padding:9px;font-size:12px;resize:vertical}
+#studio-concept .st-fieldrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#studio-concept .st-lockrow{display:flex;justify-content:space-between;align-items:center;font-size:11px;margin:17px 0}
+#studio-concept .st-check{border-bottom:1px solid var(--s-line);padding:12px 0}
+#studio-concept .st-checktitle{font-size:12px;display:flex;align-items:center;gap:7px}
+#studio-concept .st-checkdetail{font-size:11px;color:var(--s-muted);margin:5px 0 0 23px}
+#studio-concept .st-textview{background:var(--s-panel);border:1px solid var(--s-line);border-radius:6px;padding:24px;width:100%;min-height:320px}
+#studio-concept .st-textview h3{font-size:24px;line-height:1.3;margin:20px 0 15px;font-weight:550;letter-spacing:-.5px}
+#studio-concept .st-textview p{font-size:13px;white-space:pre-line;line-height:1.8}
+#studio-concept .st-compare{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+#studio-concept .st-compare .st-art{padding:14px;aspect-ratio:4/5}
+#studio-concept .st-compare .st-artheadline{font-size:28px;letter-spacing:-1px;max-width:140px;margin-top:22px}
+#studio-concept .st-compare .st-artsub{max-width:80px;font-size:8px}
+#studio-concept .st-compare .st-artfooter{bottom:14px;left:14px;font-size:8px}
+#studio-concept .st-versionlabel{font-size:11px;color:var(--s-muted);margin:0 0 8px;display:flex;align-items:center;justify-content:space-between}
+#studio-concept .st-bottom{padding:9px 20px;border-top:1px solid var(--s-line);display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px;color:var(--s-muted);background:var(--s-panel);flex-wrap:wrap}
+#studio-concept .st-notice{min-height:15px}
+#studio-concept .st-overlay{position:absolute;inset:0;background:#10181360;z-index:20;display:flex;align-items:flex-start;justify-content:center;padding:100px 22px 22px;backdrop-filter:blur(3px)}
+#studio-concept .st-dialog{width:100%;max-width:450px;background:var(--s-panel);color:var(--s-ink);border:1px solid var(--s-line);border-radius:12px;padding:24px;box-shadow:0 20px 80px #00000020}
+#studio-concept .st-dialoghead{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:10px}
+#studio-concept .st-dialog h3{font-size:19px;font-weight:550}
+#studio-concept .st-dialog p{font-size:13px;color:var(--s-muted);line-height:1.7}
+#studio-concept .st-dialoglist{margin:17px 0;display:grid;gap:10px}
+#studio-concept .st-dialogrow{padding:11px;background:var(--s-bg);border:1px solid var(--s-line);border-radius:5px;display:flex;align-items:center;gap:10px;font-size:12px}
+#studio-concept .st-dialogfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+#studio-concept .st-briefcontent{width:100%;align-self:flex-start;padding:7px 0}
+#studio-concept .st-briefcontent h3{font-size:22px;font-weight:550;margin-bottom:17px;letter-spacing:-.5px}
+#studio-concept .st-briefcontent dl{margin:0}
+#studio-concept .st-briefcontent dt{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--s-muted);margin-top:18px}
+#studio-concept .st-briefcontent dd{margin:5px 0 0;font-size:13px;line-height:1.7}
+#studio-concept .st-direction{border:1px solid var(--s-line);background:var(--s-panel);border-radius:7px;padding:17px;margin:10px 0}
+#studio-concept .st-direction.is-chosen{border-color:var(--s-accent)}
+#studio-concept .st-direction h3{font:400 25px/1.2 Georgia,serif;margin:10px 0}
+#studio-concept .st-direction p{font-size:12px;color:var(--s-muted);margin-bottom:12px}
+#studio-concept[data-density="compact"] .st-panel{padding:13px}
+#studio-concept[data-density="compact"] .st-stage{padding:14px 20px}
+#studio-concept[data-focus="true"] .st-layout{grid-template-columns: minmax(0,1fr) 280px}
+#studio-concept[data-focus="true"] .st-left{display:none}
+#studio-concept [hidden]{display:none!important}
+@media(max-width:880px){#studio-concept .st-layout{grid-template-columns:145px minmax(0,1fr) 225px}#studio-concept .st-left{padding:17px 7px}#studio-concept .st-stage{padding:20px 17px}#studio-concept .st-top{gap:10px}#studio-concept .st-avatars{display:none}#studio-concept .st-artheadline{font-size:34px}#studio-concept .st-art{padding:17px}#studio-concept .st-artheadline{max-width:190px}#studio-concept .st-righttabs{gap:10px;padding:0 12px}#studio-concept .st-panel{padding:16px 12px}}
+@media(max-width:700px){#studio-concept .st-layout,#studio-concept[data-focus="true"] .st-layout{grid-template-columns:142px minmax(0,1fr)}#studio-concept .st-right{grid-column:1/-1;border-left:0;border-top:1px solid var(--s-line)}#studio-concept .st-panel{min-height:0}#studio-concept .st-righttabs{padding:0 20px}#studio-concept .st-panel{padding:18px 20px}#studio-concept .st-chatuser{margin:12px 0}#studio-concept .st-artheadline{font-size:43px}#studio-concept[data-focus="true"] .st-middle{grid-column:1/-1}#studio-concept .st-steps{gap:15px}#studio-concept .st-topright{gap:8px}#studio-concept .st-logo{padding-right:10px}}
+@media(max-width:440px){#studio-concept .st-top{padding:13px}#studio-concept .st-title{font-size:14px}#studio-concept .st-topright{width:100%;justify-content:flex-end}#studio-concept .st-subtop{padding:14px}#studio-concept .st-projectline{gap:7px}#studio-concept .st-steps{gap:12px;padding:0 13px;flex-wrap:wrap}#studio-concept .st-step{font-size:11px;padding-bottom:9px}#studio-concept .st-stepnum{display:none}#studio-concept .st-layout{display:block}#studio-concept .st-left{border:0;border-bottom:1px solid var(--s-line);padding:10px 12px}#studio-concept .st-left>.st-sectionlabel,#studio-concept .st-left>.st-navrow,#studio-concept .st-clientcontext{display:none}#studio-concept .st-assets{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:4px}#studio-concept .st-assets>.st-sectionlabel{grid-column:1/-1;margin:4px 5px}#studio-concept .st-thumb{width:25px;height:28px}#studio-concept .st-asset{padding:6px;margin:0}#studio-concept .st-stage{padding:18px;min-height:300px}#studio-concept .st-artheadline{font-size:40px}#studio-concept .st-reviewbar{padding:12px}#studio-concept .st-compare{gap:9px}#studio-concept .st-compare .st-artheadline{font-size:24px;max-width:100px}#studio-concept .st-overlay{padding:35px 12px 12px}#studio-concept .st-dialog{padding:18px}#studio-concept .st-dialogrow{flex-wrap:wrap}}
+@media(pointer:coarse){#studio-concept button{min-height:40px}#studio-concept .st-field,#studio-concept .st-composer textarea{font-size:16px}}
+</style>
+
+<div id="studio-concept" aria-label="Creative Studio production workspace concept">
+  <header class="st-top">
+    <div class="st-logo">AXIOM</div><div class="st-title">Creative Studio</div><span class="st-concept">CONCEPT</span>
+    <div class="st-topright"><div class="st-avatars" aria-label="Two sample collaborators"><span class="st-avatar">HK</span><span class="st-avatar">BL</span></div><button class="st-action cursor-interaction" data-action="history"><i data-lucide="history" aria-hidden="true"></i>History</button><button class="st-action st-primary cursor-interaction" data-action="export"><i data-lucide="arrow-up-right" aria-hidden="true"></i>Export set</button></div>
+  </header>
+  <div class="st-subtop"><div class="st-projectline"><label class="st-client"><span class="st-client-mark" id="st-mark">F</span><select id="st-client" aria-label="Sample client"><option value="forma">Forma Property</option><option value="fieldwork">Fieldwork Energy</option></select></label><span class="st-breadcrumb">/</span><span class="st-projectname" id="st-project">Places for living</span></div><span class="st-saved"><i data-lucide="check" aria-hidden="true"></i>Local preview</span></div>
+  <nav class="st-steps" aria-label="Creative workflow"><button class="st-step cursor-interaction" data-step="brief"><span class="st-stepnum">1</span>Brief</button><button class="st-step cursor-interaction" data-step="directions"><span class="st-stepnum">2</span>Directions</button><button class="st-step is-active cursor-interaction" data-step="production"><span class="st-stepnum">3</span>Production</button><button class="st-step cursor-interaction" data-step="review"><span class="st-stepnum">4</span>Review</button></nav>
+  <div class="st-layout">
+    <aside class="st-left" aria-label="Project navigation">
+      <div class="st-sectionlabel st-label">Project</div>
+      <button class="st-navrow cursor-interaction" data-step="brief"><i data-lucide="file-text" aria-hidden="true"></i>Creative brief<span class="st-navcount">01</span></button>
+      <button class="st-navrow cursor-interaction" data-action="sources"><i data-lucide="book-open" aria-hidden="true"></i>Sources<span class="st-navcount">02</span></button>
+      <button class="st-navrow cursor-interaction" data-action="references"><i data-lucide="images" aria-hidden="true"></i>References<span class="st-navcount">03</span></button>
+      <div class="st-assets"><div class="st-sectionlabel st-label">Deliverables <span>04</span></div><div id="st-assetlist" style="display:contents"></div></div>
+      <div class="st-clientcontext"><div class="st-label">Client context</div><div class="st-contextline"><i data-lucide="check" aria-hidden="true"></i>Brand kit applied</div><div class="st-contextline"><i data-lucide="check" aria-hidden="true"></i>Campaign preferences</div><div class="st-contextline"><i data-lucide="lock-keyhole" aria-hidden="true"></i>Client-only references</div><button class="st-navrow cursor-interaction" data-action="context" style="padding:12px 0 0;color:var(--s-ink)">View context<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div>
+    </aside>
+    <main class="st-middle">
+      <div class="st-workhead"><div><div class="st-workname" id="st-workname">LinkedIn · Lead creative</div><div class="st-small" id="st-workmeta">Square · 1080 × 1080 · Editable composition</div></div><div class="st-inline"><span class="st-pill" id="st-version">v3</span><span class="st-pill" id="st-status">Draft</span></div></div>
+      <div class="st-previewbar" id="st-previewbar"><div class="st-localtabs" aria-label="Preview mode"><button class="st-localtab is-active cursor-interaction" data-view="artwork" aria-pressed="true">Artwork</button><button class="st-localtab cursor-interaction" data-view="copy" aria-pressed="false">Copy</button><button class="st-localtab cursor-interaction" data-view="compare" aria-pressed="false">Compare</button></div><button class="st-small cursor-interaction" data-action="properties"><i data-lucide="sliders-horizontal" aria-hidden="true" style="vertical-align:middle;margin-right:3px"></i>Edit layers</button></div>
+      <div class="st-stage" id="st-stage"></div>
+      <section class="st-captionbox" id="st-captionbox"><div class="st-captionhead"><span class="st-label">Caption</span><button class="st-small cursor-interaction" data-action="edit-copy">Edit copy <i data-lucide="pencil" aria-hidden="true" style="width:12px;height:12px;vertical-align:middle;margin-left:4px"></i></button></div><div class="st-captiontext" id="st-captiontext"></div></section>
+      <div class="st-reviewbar"><button class="st-small cursor-interaction" data-action="checks"><i data-lucide="shield-check" aria-hidden="true" style="vertical-align:middle;margin-right:4px"></i>Checks & evidence</button><div class="st-inline"><button class="st-action cursor-interaction" data-action="compare"><i data-lucide="columns-2" aria-hidden="true"></i>Compare</button><button class="st-action st-primary cursor-interaction" data-action="approve"><i data-lucide="check" aria-hidden="true"></i><span id="st-approve-label">Approve asset</span></button></div></div>
+    </main>
+    <aside class="st-right" aria-label="Creative direction and editing">
+      <div class="st-righttabs" aria-label="Editing panels"><button class="st-righttab is-active cursor-interaction" data-panel="partner" aria-pressed="true">Creative partner</button><button class="st-righttab cursor-interaction" data-panel="properties" aria-pressed="false">Properties</button><button class="st-righttab cursor-interaction" data-panel="checks" aria-pressed="false">Checks</button></div>
+      <section class="st-panel" id="st-panel"></section>
+      <div class="st-composer"><div class="st-composewrap"><div class="st-composetarget"><i data-lucide="mouse-pointer-2" aria-hidden="true" style="width:12px;height:12px"></i>Target: <span id="st-target">selected asset</span></div><textarea id="st-prompt" aria-label="Creative feedback" placeholder="Try: make the headline shorter…"></textarea><div class="st-composebottom"><span>Sample revisions · no AI calls</span><button class="st-send cursor-interaction" data-action="send" aria-label="Apply sample feedback"><i data-lucide="arrow-up" aria-hidden="true"></i></button></div></div></div>
+    </aside>
+  </div>
+  <footer class="st-bottom"><span class="st-notice" id="st-notice" aria-live="polite">Fictional client · editable demonstration</span><span>Copy, design & direction. One project.</span></footer>
+  <div class="st-overlay" id="st-overlay" hidden><section class="st-dialog" role="dialog" aria-modal="true" aria-labelledby="st-dialogtitle"><div class="st-dialoghead"><h3 id="st-dialogtitle"></h3><button class="st-iconbutton cursor-interaction" data-action="close" aria-label="Close dialog"><i data-lucide="x" aria-hidden="true"></i></button></div><div id="st-dialogbody"></div><div class="st-dialogfoot"><button class="st-action cursor-interaction" data-action="close">Back to Studio</button></div></section></div>
+</div>
+
+<script>
+(()=>{
+ const root=document.getElementById('studio-concept');
+ const $=s=>root.querySelector(s);
+ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const clients={forma:{name:'Forma Property',brand:'FORMA',project:'Places for living',headline:'A little more\nroom for life.',short:'Room\nfor life.',old:'Good places.\nBetter living.',sub:'Thoughtfully designed.\nMade for the everyday.',caption:'A place to pause. A place to gather. A place that feels like yours.\n\nDiscover a different way to live with Forma.',cta:'Explore the collection',domain:'forma.example',palette:'#ecd5c0',ink:'#293e36',objective:'Introduce the new residential collection through the feeling of everyday life, rather than a list of features.',voice:'Warm, considered, human. Confident without sales language.',direction:'Space to belong'},fieldwork:{name:'Fieldwork Energy',brand:'FIELDWORK',project:'A brighter everyday',headline:'Good energy.\nEvery day.',short:'Good energy.\nMade simple.',old:'Make room for\nbrighter days.',sub:'A clearer conversation\nabout your energy.',caption:'Good questions deserve clear answers. Get to know your energy options with Fieldwork.\n\nStart the conversation.',cta:'Meet Fieldwork',domain:'fieldwork.example',palette:'#dce6bc',ink:'#30442a',objective:'Introduce the brand through a straightforward, approachable conversation about energy.',voice:'Clear, practical and optimistic. Avoid unsupported savings claims.',direction:'Everyday clarity'}};
+ const assetDefs=[{name:'LinkedIn creative',label:'LinkedIn · Lead creative',format:'Square · 1080 × 1080',platform:'LinkedIn',shape:'square'},{name:'Instagram creative',label:'Instagram · Portrait creative',format:'Portrait · 1080 × 1350',platform:'Instagram',shape:'portrait'},{name:'Facebook creative',label:'Facebook · Landscape creative',format:'Landscape · 1200 × 800',platform:'Facebook',shape:'landscape'},{name:'Caption collection',label:'Campaign · Caption collection',format:'LinkedIn · Instagram · Facebook',platform:'Campaign',shape:'copy'}];
+ const initAsset=c=>({headline:c.headline,caption:c.caption,version:3,approved:false,locked:true,previous:c.old});
+ let state={client:'forma',selected:0,view:'artwork',panel:'partner',step:'production',projects:{forma:assetDefs.map(()=>initAsset(clients.forma)),fieldwork:assetDefs.map(()=>initAsset(clients.fieldwork))},lastFeedback:'Keep the visual. Make the message feel more human.',lastReply:'I’ve brought the headline back to the everyday experience. The architectural treatment and brand elements stay in place.'};
+ const design={density:'Comfortable',focus:false};
+ const c=()=>clients[state.client], a=()=>state.projects[state.client][state.selected];
+ const icons=()=>{if(globalThis.lucide)lucide.createIcons({attrs:{width:16,height:16}})};
+ function notice(s){$('#st-notice').textContent=s}
+ function save(){if(window.openai&&window.openai.setWidgetState)window.openai.setWidgetState({modelContent:{sampleClient:c().name,selectedAsset:assetDefs[state.selected].name,headline:a().headline,view:state.view,approved:a().approved},privateContent:{state}}).catch(()=>{});}
+ function restore(raw){const s=raw&&raw.privateContent&&raw.privateContent.state;if(!s||!clients[s.client]||!Number.isInteger(s.selected)||s.selected<0||s.selected>3)return;for(const k of Object.keys(clients)){if(!s.projects||!Array.isArray(s.projects[k])||s.projects[k].length!==4||s.projects[k].some(v=>typeof v.headline!=='string'||typeof v.caption!=='string'))return;}state={...state,...s};if(!['artwork','copy','compare'].includes(state.view))state.view='artwork';if(!['partner','properties','checks'].includes(state.panel))state.panel='partner';if(!['brief','directions','production','review'].includes(state.step))state.step='production';}
+ function art(headline,shape='square'){return `<div class="st-art ${shape}" role="img" aria-label="Sample ${esc(c().brand)} creative: ${esc(headline.replace(/\n/g,' '))}"><div class="st-artbrand"><span class="st-brandglyph"></span>${esc(c().brand)}</div><div class="st-stamp">EVERYDAY, CONSIDERED</div><div class="st-artheadline">${esc(headline)}</div><div class="st-artsub">${esc(c().sub).replace(/\n/g,'<br>')}</div><div class="st-building"></div><div class="st-artfooter"><span>${esc(c().domain)}</span><span>↗</span></div></div>`}
+ function renderStage(){const item=a(),def=assetDefs[state.selected];let markup='';
+  if(state.step==='brief')markup=`<div class="st-briefcontent"><span class="st-label">Creative brief / sample</span><h3>${esc(c().project)}</h3><dl><dt>Objective</dt><dd>${esc(c().objective)}</dd><dt>Message</dt><dd>${esc(c().headline.replace(/\n/g,' '))}</dd><dt>Voice</dt><dd>${esc(c().voice)}</dd><dt>Deliverables</dt><dd>LinkedIn square · Instagram portrait · Facebook landscape · Platform captions</dd><dt>Source policy</dt><dd>No statistics, prices or product guarantees are included in this sample.</dd></dl><button class="st-action st-primary cursor-interaction" data-step="directions" style="margin-top:22px">Explore directions <i data-lucide="arrow-right" aria-hidden="true"></i></button></div>`;
+  else if(state.step==='directions')markup=`<div style="width:100%"><span class="st-label">Choose the campaign idea</span><div class="st-direction is-chosen"><span class="st-small">01 / Editorial</span><h3>${esc(c().direction)}</h3><p>Human language, generous space and a restrained architectural composition.</p><button class="st-action st-primary cursor-interaction" data-action="direction-editorial">Use this direction</button></div><div class="st-direction"><span class="st-small">02 / Type-led</span><h3>${esc(c().short.replace(/\n/g,' '))}</h3><p>A shorter message leads. Simple typography makes the campaign direct and memorable.</p><button class="st-action cursor-interaction" data-action="direction-bold">Use this direction</button></div></div>`;
+  else if(state.step==='review')markup=`<div class="st-briefcontent"><span class="st-label">Campaign review</span><h3>Ready when you are.</h3>${assetDefs.map((d,i)=>`<div class="st-dialogrow"><i data-lucide="${state.projects[state.client][i].approved?'circle-check':'circle'}" aria-hidden="true"></i><span style="flex:1">${esc(d.name)}<br><span class="st-small">v${state.projects[state.client][i].version} · ${state.projects[state.client][i].approved?'Approved in preview':'Awaiting review'}</span></span><button class="st-action cursor-interaction" data-select="${i}">Open</button></div>`).join('')}<p class="st-small" style="margin-top:16px">Approvals here are demonstration states, not real client approvals.</p></div>`;
+  else if(state.view==='copy'||state.selected===3)markup=`<div class="st-textview"><div class="st-inline"><span class="st-client-mark">${esc(c().brand[0])}</span><span>${esc(c().name)}</span><span class="st-pill">${esc(def.platform)}</span></div><h3>${esc(item.headline.replace(/\n/g,' '))}</h3><p>${esc(item.caption)}</p><div style="margin-top:20px;border-top:1px solid var(--s-line);padding-top:14px" class="st-small">CTA: ${esc(c().cta)}</div><button class="st-action cursor-interaction" data-action="edit-copy" style="margin-top:18px"><i data-lucide="pencil" aria-hidden="true"></i>Edit this copy</button></div>`;
+  else if(state.view==='compare')markup=`<div class="st-compare"><div><div class="st-versionlabel"><span>Previous version</span><span>v${item.version-1}</span></div>${art(item.previous,'portrait')}<button class="st-small cursor-interaction" data-action="restore" style="padding-top:10px">Restore this direction</button></div><div><div class="st-versionlabel"><span>Current</span><span>v${item.version}</span></div>${art(item.headline,'portrait')}<div class="st-small" style="margin-top:10px">${item.approved?'Approved in preview':'Copy revised · image kept'}</div></div></div>`;
+  else markup=art(item.headline,def.shape);
+  $('#st-stage').innerHTML=markup;$('#st-captionbox').hidden=state.step!=='production'||state.selected===3;$('#st-previewbar').hidden=state.step!=='production';
+ }
+ function renderPanel(){const item=a();
+  if(state.panel==='partner')$('#st-panel').innerHTML=`<div class="st-partnerhead"><i data-lucide="sparkles" aria-hidden="true"></i>Creative direction</div><p class="st-paragraph">Working from the ${esc(c().brand)} brand kit and the “${esc(c().project)}” brief.</p><span class="st-contexttag">${esc(c().direction)}</span><span class="st-contexttag">${item.locked?'Layout locked':'Layout editable'}</span><div class="st-chatuser">${esc(state.lastFeedback)}</div><div class="st-partnerhead"><i data-lucide="sparkles" aria-hidden="true"></i>Studio</div><p class="st-paragraph">${esc(state.lastReply)}</p><div class="st-applied"><div><i data-lucide="type" aria-hidden="true"></i>Editable headline & caption</div><div><i data-lucide="lock-keyhole" aria-hidden="true"></i>Brand mark preserved</div><div><i data-lucide="image" aria-hidden="true"></i>No image generation used</div></div><div class="st-suggestions"><button class="st-suggestion cursor-interaction" data-action="shorten">Shorter headline</button><button class="st-suggestion cursor-interaction" data-action="warm">Warmer caption</button><button class="st-suggestion cursor-interaction" data-action="properties">Edit by hand</button></div>`;
+  else if(state.panel==='properties')$('#st-panel').innerHTML=`<div class="st-partnerhead"><i data-lucide="layers" aria-hidden="true"></i>Composition</div><p class="st-paragraph">Changes update the preview. Save a revision when the copy is ready.</p><label class="st-formlabel" for="st-headline">Headline</label><textarea class="st-field" id="st-headline" rows="3" maxlength="90">${esc(item.headline)}</textarea><label class="st-formlabel" for="st-caption">Caption</label><textarea class="st-field" id="st-caption" rows="5" maxlength="1000">${esc(item.caption)}</textarea><div class="st-lockrow"><span>Preserve layout & image</span><input type="checkbox" id="st-lock" aria-label="Preserve layout and image" ${item.locked?'checked':''}></div><button class="st-action st-primary cursor-interaction" data-action="save-version"><i data-lucide="check" aria-hidden="true"></i>Save revision</button><div class="st-applied"><div><i data-lucide="lock-keyhole" aria-hidden="true"></i>Logo is a separate fixed element</div></div>`;
+  else $('#st-panel').innerHTML=`<div class="st-partnerhead"><i data-lucide="shield-check" aria-hidden="true"></i>Review checks</div><p class="st-paragraph">Illustrative review states. This preview does not verify facts or measure artwork.</p><div class="st-check"><div class="st-checktitle"><i data-lucide="check" aria-hidden="true"></i>Client context</div><div class="st-checkdetail">${esc(c().name)} · selected client only</div></div><div class="st-check"><div class="st-checktitle"><i data-lucide="check" aria-hidden="true"></i>Editable text & logo</div><div class="st-checkdetail">Headline can change without a new image.</div></div><div class="st-check"><div class="st-checktitle"><i data-lucide="minus" aria-hidden="true"></i>Figures & quotations</div><div class="st-checkdetail">No source-backed claims supplied in this sample.</div></div><div class="st-check"><div class="st-checktitle"><i data-lucide="eye" aria-hidden="true"></i>Human review</div><div class="st-checkdetail">Check message, suitability and final composition.</div></div><button class="st-action cursor-interaction" data-step="review" style="margin-top:20px">Review the campaign <i data-lucide="arrow-right" aria-hidden="true"></i></button>`;
+ }
+ function render(){root.style.setProperty('--s-canvas',c().palette);root.style.setProperty('--s-artink',c().ink);root.dataset.density=design.density.toLowerCase();root.dataset.focus=String(design.focus);$('#st-client').value=state.client;$('#st-mark').textContent=c().brand[0];$('#st-project').textContent=c().project;
+  $('#st-assetlist').innerHTML=assetDefs.map((d,i)=>`<button class="st-asset cursor-interaction ${i===state.selected?'is-active':''}" data-select="${i}" aria-pressed="${i===state.selected}"><span class="st-thumb ${d.shape==='copy'?'copy':''}">${d.shape==='copy'?'<i data-lucide="align-left" aria-hidden="true"></i>':''}</span><span><span class="st-assetname">${esc(d.name)}</span><span class="st-assetmeta" style="display:block">${state.projects[state.client][i].approved?'<span class="st-miniapproved"></span>Approved':d.shape==='copy'?'3 platforms':d.shape==='portrait'?'4:5 · Portrait':d.shape==='landscape'?'3:2 · Landscape':'1:1 · Square'}</span></span></button>`).join('');
+  $('#st-workname').textContent=assetDefs[state.selected].label;$('#st-workmeta').textContent=assetDefs[state.selected].format+(state.selected===3?'':' · Editable composition');$('#st-version').textContent='v'+a().version;$('#st-status').textContent=a().approved?'Approved':'Draft';$('#st-captiontext').textContent=a().caption;$('#st-approve-label').textContent=a().approved?'Reopen draft':'Approve asset';
+  root.querySelectorAll('[data-step]').forEach(b=>b.classList.toggle('is-active',b.dataset.step===state.step));root.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('is-active',b.dataset.view===state.view);b.setAttribute('aria-pressed',String(b.dataset.view===state.view))});root.querySelectorAll('[data-panel]').forEach(b=>{b.classList.toggle('is-active',b.dataset.panel===state.panel);b.setAttribute('aria-pressed',String(b.dataset.panel===state.panel))});renderStage();renderPanel();icons();
+ }
+ let returnFocus=null;
+ function dialog(title,body){returnFocus=document.activeElement;$('#st-dialogtitle').textContent=title;$('#st-dialogbody').innerHTML=body;$('#st-overlay').hidden=false;icons();$('#st-overlay [data-action="close"]').focus()}
+ function closeDialog(){$('#st-overlay').hidden=true;if(returnFocus&&returnFocus.isConnected)returnFocus.focus()}
+ function revise(kind,prompt){const item=a();item.previous=item.headline;item.version++;item.approved=false;state.lastFeedback=prompt||(kind==='shorten'?'Shorten the headline. Keep the visual.':'Make the caption warmer, without making new claims.');
+  if(kind==='shorten'){item.headline=c().short;state.lastReply='Sample revision: a shorter headline with the same visual treatment. The logo, image and layout remain unchanged.'}
+  else {item.caption=state.client==='forma'?'Some places just feel right.\n\nRoom to slow down. Space to come together. Discover your next chapter with Forma.':'Let’s make energy a little easier to talk about.\n\nBring your questions. We’ll start with a conversation.';state.lastReply='Sample revision: a more conversational caption. The artwork and headline remain unchanged.'}
+  state.panel='partner';state.step='production';render();save();notice('Sample revision saved locally · no AI call or charge.');
+ }
+ root.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.select!==undefined){state.selected=Number(b.dataset.select);state.step='production';state.view=state.selected===3?'copy':'artwork';render();save();return;}
+  if(b.dataset.step){state.step=b.dataset.step;render();save();return;}
+  if(b.dataset.view){state.view=b.dataset.view;render();save();return;}
+  if(b.dataset.panel){state.panel=b.dataset.panel;render();save();return;}
+  const action=b.dataset.action;
+  if(action==='close'){closeDialog();return;}
+  if(action==='shorten'||action==='warm'){revise(action);return;}
+  if(action==='send'){const text=$('#st-prompt').value.trim();if(!text){notice('Add feedback, or try one of the sample revision buttons.');return;}$('#st-prompt').value='';if(/caption|warm|conversational/i.test(text))revise('warm',text);else if(/headline|short|sharper/i.test(text))revise('shorten',text);else {state.lastFeedback=text;state.lastReply='Feedback captured for this demonstration. Try “shorter headline” or “warmer caption” to preview a local revision. Real generation is not connected.';state.panel='partner';render();save();notice('Feedback captured in preview only.');}return;}
+  if(action==='properties'||action==='edit-copy'||action==='checks'){state.panel=action==='checks'?'checks':'properties';render();save();return;}
+  if(action==='compare'||action==='history'){state.step='production';state.view='compare';render();save();return;}
+  if(action==='approve'){a().approved=!a().approved;render();save();notice(a().approved?'Asset marked approved in this preview.':'Approval removed in this preview.');return;}
+  if(action==='save-version'){a().version++;a().approved=false;state.lastFeedback='Save my copy edits.';state.lastReply='Your edited headline and caption are saved as a new sample version. No image generation was required.';state.panel='partner';render();save();notice('Sample version saved · approval reset after editing.');return;}
+  if(action==='restore'){const old=a().previous;a().previous=a().headline;a().headline=old;a().version++;a().approved=false;render();save();notice('Previous headline restored as a new sample version.');return;}
+  if(action==='direction-editorial'||action==='direction-bold'){const item=a();item.previous=item.headline;item.headline=action==='direction-bold'?c().short:c().headline;item.version++;item.approved=false;state.step='production';state.view='artwork';render();save();notice('Direction selected for this sample asset.');return;}
+  if(action==='export'){const approved=state.projects[state.client].filter(x=>x.approved).length;dialog('Review export set',`<p>${approved?approved+' of 4 assets approved in this preview.':'No assets are approved yet. Review the creative before preparing a delivery.'}</p><div class="st-dialoglist">${assetDefs.map((d,i)=>`<div class="st-dialogrow"><i data-lucide="${state.projects[state.client][i].approved?'circle-check':'circle'}" aria-hidden="true"></i><span style="flex:1">${esc(d.name)}</span><span class="st-small">v${state.projects[state.client][i].version} · ${state.projects[state.client][i].approved?'Approved':'Draft'}</span></div>`).join('')}</div><p>In the finished product: approved images, matching captions and an asset manifest. This sample does not generate downloads or send work.</p>`);return;}
+  if(action==='sources')dialog('Project sources','<p>Sample source ledger</p><div class="st-dialoglist"><div class="st-dialogrow"><i data-lucide="file-text" aria-hidden="true"></i>Campaign brief · Fictional sample</div><div class="st-dialogrow"><i data-lucide="file-check" aria-hidden="true"></i>Brand voice guide · Fictional sample</div></div><p>A production project would show the exact source passage behind each claim. No real documents are loaded here.</p>');
+  if(action==='references')dialog('Creative references','<p>Three reference roles, kept distinct.</p><div class="st-dialoglist"><div class="st-dialogrow">01 · Composition: simple architectural forms</div><div class="st-dialogrow">02 · Palette: warm earth and muted green</div><div class="st-dialogrow">03 · Typography: expressive editorial headline</div></div><p>References guide the treatment. They do not become approved claims or permanent client rules.</p>');
+  if(action==='context')dialog(c().name+' · Client context',`<p>Fictional context for this concept.</p><div class="st-dialoglist"><div class="st-dialogrow">Voice · ${esc(c().voice)}</div><div class="st-dialogrow">Brand rule · Preserve the logo and use approved colours.</div><div class="st-dialogrow">Campaign preference · Restrained visual treatment.</div></div><p>In production, each item would link to its source, owner and revision.</p>`);
+ });
+ root.addEventListener('input',e=>{if(e.target.id==='st-headline'){a().headline=e.target.value;a().approved=false;renderStage();$('#st-status').textContent='Unsaved edit';$('#st-approve-label').textContent='Approve asset';icons();}if(e.target.id==='st-caption'){a().caption=e.target.value;a().approved=false;$('#st-captiontext').textContent=a().caption;renderStage();$('#st-status').textContent='Unsaved edit';$('#st-approve-label').textContent='Approve asset';icons();}});
+ root.addEventListener('change',e=>{if(e.target.id==='st-client'){state.client=e.target.value;state.selected=0;state.step='production';state.view='artwork';state.lastFeedback='Use this client’s brand and campaign direction.';state.lastReply='This sample client has a separate asset set, palette and voice. Your other client’s preview edits are preserved.';render();save();notice('Switched sample client. Each client keeps its own preview work.');}if(e.target.id==='st-lock'){a().locked=e.target.checked;save();}});
+ root.addEventListener('keydown',e=>{if($('#st-overlay').hidden)return;if(e.key==='Escape'){e.preventDefault();closeDialog();}if(e.key==='Tab'){const els=[...$('#st-overlay').querySelectorAll('button')];const first=els[0],last=els[els.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
+ restore(window.openai&&window.openai.widgetState);render();
+ window.addEventListener('openai:set_globals',e=>{const raw=e.detail&&e.detail.globals&&e.detail.globals.widgetState;if(raw){restore(raw);render();}});
+ if(globalThis.Tweak){const t=new Tweak({container:root,onChange:render});t.addSelect(design,'density',{label:'Panel density',options:['Comfortable','Compact']});t.addToggle(design,'focus',{label:'Focus layout — hide project rail'});}
+})();
+</script>
