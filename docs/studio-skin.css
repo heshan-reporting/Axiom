@@ -225,7 +225,6 @@
 #studio-root .st .st-stage{border-radius:var(--sk-r-lg);border:1px solid var(--sk-line);background-color:var(--sk-canvas);
   background-image:radial-gradient(color-mix(in srgb,var(--sk-sub) 16%,transparent) .8px,transparent .8px);background-size:15px 15px;padding:0 0 26px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 #studio-root .st .st-stage.checker{background-image:linear-gradient(45deg,#1a1f27 25%,transparent 25%),linear-gradient(-45deg,#1a1f27 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#1a1f27 75%),linear-gradient(-45deg,transparent 75%,#1a1f27 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
-#studio-root .st .st-comp-info{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:var(--sk-sub);padding:8px 12px;background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:var(--sk-r-sm)}
 #studio-root .st .st-comp-tag{font-family:var(--sk-font);letter-spacing:.06em;text-transform:uppercase;font-size:10px}
 /* the page strip under the canvas */
 #studio-root .st .st-family{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:var(--sk-r-sm)}
@@ -240,8 +239,6 @@
 #studio-root .st .st-var, #studio-root .st .st-ad-card{border:1px solid var(--sk-line);border-radius:var(--sk-r);background:var(--sk-bg);transition:border-color .2s,transform .22s var(--sk-ease),box-shadow .25s}
 #studio-root .st .st-var:hover, #studio-root .st .st-ad-card:hover{border-color:var(--sk-line-2);transform:translateY(-2px);box-shadow:var(--sk-sh-2)}
 /* the layout editor on the dark desk */
-#studio-root .st .st-le-tools{background:var(--sk-panel);border:1px solid var(--sk-line);border-radius:var(--sk-r-sm);padding:6px}
-#studio-root .st .st-le-tools .btn.sm{min-height:28px;padding:4px 9px;font-size:11.5px}
 #studio-root .st .st-le-layer{transition:box-shadow .15s}
 /* the inspector's sections */
 #studio-root .st .st-props-head, #studio-root .st .st-props h3{font:700 13px/1.3 var(--sk-display)}
