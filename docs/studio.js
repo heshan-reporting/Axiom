@@ -366,12 +366,12 @@
      indeterminate otherwise - a model call shows no share until it answers; nothing is estimated from the clock. The job
      model is STProgress (docs/studio-progress.js); this is its one consumer in the Studio. */
   const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', analyse: 'one model call: the material read against the client, its campaigns and knowledge (plus one to read an image or PDF)', kit: 'one model call for the whole kit', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
-  function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset, liveOnly }) {
+  function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset, liveOnly, compact, busy }) {
     const S = window.STProgress; if (!S || !p) return null;
     const all = p.jobs || []; const jobs = S.jobsForDisplay(all);
     const live = jobs.filter(S.active); const failed = jobs.filter(j => j.state === 'failed');
     const recent = jobs.filter(j => j.state === 'done' && now - (j.updated || 0) < 90000);
-    if (!live.length && !failed.length && (liveOnly || !recent.length)) return null;
+    if (!live.length && !failed.length && (liveOnly || !recent.length)) return compact && busy ? html`<section class="st-workspace-activity compact live" aria-label="Activity"><div class="st-work-line" role="status" aria-live="polite"><span class="st-work-beacon live" aria-hidden="true"></span><b>${busy}</b></div></section>` : null;
     const dur = (status && status.durations) || {}; const run = S.run(all, now);
     const title = id => (p.assets.find(x => x.id === id) || {}).title || '';
     const top = live.find(j => j.state === 'running') || live[0] || failed[0] || recent[0];
@@ -379,6 +379,17 @@
     const cards = (open ? live.concat(failed).concat(recent) : live.concat(failed)).slice(0, 12);
     const beacon = live.some(j => j.state === 'running') ? 'live' : live.length ? 'queued' : failed.length ? 'failed' : 'done';
     const running = live.filter(j => j.state === 'running').length, queued = live.length - running;
+    /* S19: in Design the activity is one line over the work - the job, the asset, the phase, the time against the typical time,
+       and Cancel or Retry - so a running job never pushes the canvas down; details open the full panel */
+    if (compact && !open && topJ) return html`<section class=${'st-workspace-activity compact ' + beacon} aria-label="Activity"><div class="st-work-line" role="status" aria-live="polite">
+      <span class=${'st-work-beacon ' + beacon} aria-hidden="true"></span>
+      <b>${topJ.title}${top.asset && title(top.asset) ? ' - ' + title(top.asset) : ''}</b>
+      <span class="ov-dim st-work-line-phase">${topJ.phaseText}</span>
+      <span class="ov-dim">${topJ.time}${topJ.typical ? ' (typically ' + topJ.typical + ')' : ''}${topJ.percent != null ? ' - ' + topJ.completed + ' of ' + topJ.total : ''}</span>
+      ${live.length + failed.length > 1 ? html`<span class="ov-dim">${running ? running + ' running' : ''}${queued ? (running ? ', ' : '') + queued + ' queued' : ''}${failed.length ? ', ' + failed.length + ' failed' : ''}</span>` : null}
+      ${!ro && top.state === 'failed' ? html`<button class="btn sm" onClick=${() => onRetry(top)}>Retry</button>` : null}${!ro && S.active(top) ? html`<button class="btn sm ghost" onClick=${() => onCancel(top.id)}>Cancel</button>` : null}
+      <button class="ov-link" onClick=${onToggle} aria-expanded="false">details</button>
+    </div></section>`;
     return html`<section class=${'st-workspace-activity ' + beacon} aria-label="Activity">
       <div class="st-work-summary">
         <button class="st-work-toggle" onClick=${onToggle} aria-expanded=${open ? 'true' : 'false'} aria-controls="st-work-detail">
@@ -1955,6 +1966,7 @@
     return html`<nav class="st-pagestrip" aria-label="Pages in this project">${fams.map(f => html`<div key=${f} class="st-pagefam" role="group" aria-label=${f}>${list.filter(x => x.family === f).sort((x, y) => (frameOf(x) || 99) - (frameOf(y) || 99) || x.created - y.created).map(x => { const m = (current(x) || {}).context || {}; const master = m.master ? p.assets.find(y => y.id === m.master) : null; return html`<button key=${x.id} class=${'st-pagechip st-assetpick' + (x.id === a.id ? ' on' : '')} aria-current=${x.id === a.id ? 'page' : undefined} onClick=${() => onOpen && onOpen(x.id)} title=${x.title + ' - ' + f + (master ? ', adapted from ' + master.title : '') + (frameOf(x) ? ', frame ' + frameOf(x) : '')}><${Composition} v=${current(x)} a=${x} ns=${p.ns} size="mini" /><span class="st-pagechip-l"><span class="st-pagechip-t">${frameOf(x) ? frameOf(x) + '. ' : ''}${x.title}</span><span class="st-pagechip-f">${(FORMATS[x.format] || {}).label || x.format}</span></span>${validOf(x) ? html`<span class="st-dot ok" aria-label="passes its checks"></span>` : null}</button>`; })}</div>`)}</nav>`;
   }
   function AssetView({ p, a, kit, sel, setSel, onEdit, onDraftState, onLayoutDirty, onUndoRepair, onLayout, onLayoutSave, onLock, onApprove, onCompare, onRestore, onRender, onPropose, onApplyConcept, sugg, onSuggRefresh, busy, onOpen, onValidate, onRepair, onMarkVariant, onAreaEdit, onRegenerate, onDerive, onPreservation, onVariant, onRetryJob, slot, tab, setTab, tool, setTool, conflict, onConflict, neighbours, preview, setPreview, onBrand, onContext, onSelection, onResize, resized }) {
+    const [libW, libHandle] = usePanelWidth('lib', 300, 220, 560, 'right');
     const v = current(a);
     const [zoom, setZoom] = useState('fit'); const [rr, setRr] = useState(null); const [edKey, setEdKey] = useState(0);
     // S11: the canvas controls - overlays (guides, outlines, subject marks), the optional checkerboard, full screen - and the layer selection
@@ -2096,6 +2108,7 @@
     const openTool = k => { setTool(tool === k ? '' : k); };
     // the contextual library: the tool chosen in the dock opens its panel beside the canvas; the page never scrolls to find it
     const library = tool && !preview ? html`<aside class="st-library" id="st-library" aria-label=${(toolName[tool] || tool) + ' tool'} data-tool=${tool}>
+      <div class="st-panel-handle right" ...${libHandle} aria-label="Resize the tool panel (arrow keys; double-click resets)" title="Drag to resize; double-click resets"></div>
       <div class="st-library-head"><b>${toolName[tool] || tool}</b><button class="st-iconbtn sm" onClick=${() => setTool('')} aria-label=${'Close the ' + (toolName[tool] || tool) + ' panel'} title="Close"><${Icon} n="x" size=${14} /></button></div>
       <div class="st-library-body">
       ${tool === 'design' ? html`<div id="st-tool-design">${canVary ? html`<${LayoutVariations} a=${a} v=${v} ns=${p.ns} comp=${comp} ro=${ro} list=${vars} using=${using} onUse=${useVariant} />` : html`<div class="ov-dim">${finished ? 'A finished creative is one bitmap: its layout cannot be varied. Switch to Editable makes an editable copy (free).' : 'No layout variations for this version.'}</div>`}
@@ -2129,7 +2142,7 @@
         ${hasLayout && a.locks.layout ? html`<div class="ov-dim">The layout is locked: unlock it in the Text tool's Layout line to edit on the canvas.</div>` : null}</div>` : null}
       </div>
     </aside>` : null;
-    const work = html`<div class=${'st-design' + (preview ? ' preview' : '') + (library ? ' has-library' : '')}>
+    const work = html`<div class=${'st-design' + (preview ? ' preview' : '') + (library ? ' has-library' : '')} style=${{ '--st-lib-w': libW + 'px' }}>
       ${!preview && !copyOnly ? html`<${DesignDock} tool=${tool} ro=${ro} canVary=${canVary} canEdit=${!!le} hasLayout=${!!hasLayout} finished=${finished} flat=${flat} onTool=${openTool} onEditable=${() => { if (window.confirm('Make an editable copy of ' + a.title + '? A new asset in the family "Editable from finished": the words become live type and the mark is placed from its file; this finished creative stays as it is. Free, no render.')) onDerive(a, {}); }} />` : null}
       ${library}
       <section class=${'st-canvas-col st-asset' + (preview ? ' preview' : '')} aria-label="Canvas">
@@ -2469,6 +2482,8 @@
       if (e.key === '?' && !mod) { e.preventDefault(); setKeysOpen(true); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { if (sel.length) { e.preventDefault(); remove(); } return; }
       if (e.key === 'Enter' && sel.length === 1 && byId(sel[0]) && byId(sel[0]).type === 'text') { e.preventDefault(); startEdit(byId(sel[0])); return; }
+      if (frame && e.key === 'Escape') { e.preventDefault(); cancelFrame(); return; }
+      if (frame && e.key === 'Enter') { e.preventDefault(); applyFrame(); return; }
       if (e.key === 'Escape') { setSelIds([]); setFontOpen(false); return; }
       const step = e.shiftKey ? 2 : 0.5; const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key]; if (d) { e.preventDefault(); nudge(d[0], d[1]); } };
     // a key pressed while nothing has focus (the layer it was on was hidden or deleted, a click landed on the empty page) still
@@ -2496,6 +2511,12 @@
        undo step. The likely subjects of the photograph are marked as an estimate with their confidence; "Keep the subject clear"
        applies the measured framing the renderer suggests, as a layout change that renders nothing. */
     const [frame, setFrame] = useState(false); const pan = useRef(null); const wheelT = useRef(null);
+    // S19: reframing is a mode with an explicit end: Apply keeps the new crop (each drag was already one undo step), Cancel puts the
+    // crop back as it was when the mode began and drops those steps; Enter applies, Escape cancels
+    const frameStart = useRef(null);
+    const startFrame = () => { frameStart.current = { now: layout, past: hist.past.length }; setFrame(true); };
+    const applyFrame = () => { frameStart.current = null; setFrame(false); };
+    const cancelFrame = () => { const s0 = frameStart.current; frameStart.current = null; setFrame(false); if (s0) setHist(h => ({ past: h.past.slice(0, s0.past), now: s0.now, future: [] })); };
     const subj = useMemo(() => { if (!comp.ready || !comp.imgs.bg || layout.noImagery || !R.subjects) return null; try { return R.subjects(comp.imgs.bg); } catch (e) { return null; } }, [comp.key, comp.ready]);
     const subjOn = useMemo(() => { if (!subj || !subj.regions.length || !layout.stage) return []; try { const W = layout.stage.w, H = layout.stage.h; return R.subjectCoverage(layout, comp.imgs, R.measure(layout, wcopy, comp.imgs, W, H), W, H, subj).map(s => ({ id: s.id, x: s.x / W * 100, y: s.y / H * 100, w: s.w / W * 100, h: s.h / H * 100, covered: s.covered, confidence: s.confidence })); } catch (e) { return []; } }, [layout, comp.key, comp.ready, subj]);
     const suggestion = useMemo(() => { if (!subj || !subj.regions.length || !comp.ready || !R.frameSuggest) return null; try { return R.frameSuggest(layout, wcopy, comp.imgs, { format: a.format }); } catch (e) { return null; } }, [layout, comp.key, comp.ready, subj]);
@@ -2570,6 +2591,8 @@
     // the type panel follows the layer last clicked, even inside a group (type is set per layer)
     const typed = focusId && sel.length && byId(focusId) && byId(focusId).type === 'text' ? byId(focusId) : one;
     const tb = (label, fn, dis, title) => html`<button class="btn sm ghost" disabled=${dis} title=${title || label} onClick=${fn}>${label}</button>`;
+    // a short visible label inside a named group; the full name stays in the button's text for screen readers and for search
+    const tbs = (pre, short, fn, dis, title) => html`<button class="btn sm ghost" disabled=${dis} title=${title || (pre + short)} onClick=${fn}><span class="st-vh">${pre}</span>${short}</button>`;
     const fontTargets = () => selected().filter(l => l.type === 'text' && movable(l)).map(l => l.id);
     const pickFont = f => { const ids = fontTargets(); setFontOpen(false); setFontPreview(null); if (!ids.length) return; const patches = {}; ids.forEach(id => { const l = byId(id); patches[id] = { family: f || undefined, weight: f && R.fontWeight ? R.fontWeight(f, l.weight || 600) : l.weight }; }); commit(patchMany(layout, patches)); };
     // the panels: type for the layer last clicked, the held-mark note, the box, effects, the image, the framing - rendered into the Properties tab when a slot is given
@@ -2584,7 +2607,7 @@
         <label>Colour <input class="st-in" value=${one2.color || '#ffffff'} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value)) setOne(one2.id, { color: e.target.value }); }} aria-label="Colour" /></label>
         <label>Emphasis <select class="st-sel" value=${one2.emphasis || ''} onChange=${e => setOne(one2.id, { emphasis: e.target.value || undefined })} aria-label="Emphasis"><option value="">none</option><option value="caps">caps</option><option value="highlight">highlight</option><option value="underline">underline</option><option value="box">box</option></select></label>
         ${one2.bg && one2.emphasis === 'box' ? html`<span class="ov-dim">a filled plate and a box outline together: one device is enough</span>` : null}
-      </div>${E.TypeExtras ? html`<${E.TypeExtras} l=${one2} onPatch=${pt => setOne(one2.id, pt)} onFont=${() => setFontOpen(true)} />` : null}`)(typed) : null}
+      </div>${E.TypeExtras ? html`<${Sec} id="typeface" title="Typeface and paragraph" hint=${one2.family || 'brand font'}><${E.TypeExtras} l=${one2} onPatch=${pt => setOne(one2.id, pt)} onFont=${() => setFontOpen(true)} /></${Sec}>` : null}`)(typed) : null}
       ${one && heldMark(one) ? html`<div class="st-le-type" aria-label="Held mark"><span class="st-lbl">${one.role}</span><span class="ov-dim">held where the campaign rule puts it (${one.rule.corner || 'its corner'}${one.rule.note ? ': ' + one.rule.note : ''}); the words move, the mark stays</span></div>` : null}
       ${one && movable(one) ? html`<div class="st-le-type" aria-label="Position and size">
         <span class="st-lbl">Box: ${one.name || one.role || one.type}</span>
@@ -2594,15 +2617,16 @@
         ${one.type === 'shape' ? html`<label>Opacity <input class="st-in" type="number" step="0.05" min="0" max="1" value=${one.opacity == null ? 1 : one.opacity} onChange=${e => setOne(one.id, { opacity: Math.round(Math.max(0, Math.min(1, +e.target.value)) * 100) / 100 })} aria-label="Panel opacity" /></label><label>Fill <input class="st-in" value=${one.fill || ''} onChange=${e => { if (/^#[0-9a-fA-F]{3,8}$/.test(e.target.value) || /^rgba?\(/.test(e.target.value)) setOne(one.id, { fill: e.target.value }); }} aria-label="Panel fill" /></label>` : null}
         ${one.type === 'shape' && one.shape === 'icon' ? html`<label>Line <input class="st-in" type="number" step="0.25" min="0.5" max="4" value=${one.strokeWidth || 2} onChange=${e => setOne(one.id, { strokeWidth: Math.max(0.5, Math.min(4, +e.target.value || 2)) })} aria-label="Icon line weight" /></label>` : null}
       </div>` : null}
-      ${one && movable(one) && !isMarkL(one) && E.EffectsPanel ? html`<${E.EffectsPanel} l=${one} palette=${layout.palette} onPatch=${pt => setOne(one.id, pt)} />` : null}
-      ${one && movable(one) && one.type === 'img' && !isMarkL(one) && E.ImagePanel ? html`<${E.ImagePanel} l=${one} onPatch=${pt => setOne(one.id, pt)} onReplace=${one.role === 'image' ? replaceImage : null} />` : null}
+      ${one && movable(one) && !isMarkL(one) && E.EffectsPanel ? html`<${Sec} id="effects" title="Effects" hint=${[one.shadow ? 'shadow' : '', one.stroke ? 'outline' : '', one.glow ? 'glow' : '', one.blend && one.blend !== 'normal' ? one.blend : '', one.opacity != null && one.opacity < 1 ? Math.round(one.opacity * 100) + '%' : ''].filter(Boolean).join(', ') || 'none'}><${E.EffectsPanel} l=${one} palette=${layout.palette} onPatch=${pt => setOne(one.id, pt)} /></${Sec}>` : null}
+      ${one && movable(one) && one.type === 'img' && !isMarkL(one) && E.ImagePanel ? html`<${Sec} id="imageadj" title="Image adjustments"><${E.ImagePanel} l=${one} onPatch=${pt => setOne(one.id, pt)} onReplace=${one.role === 'image' ? replaceImage : null} /></${Sec}>` : null}
       ${(() => { // image framing: the background photograph, or the image region selected
         const reg = one && one.type === 'img' && one.role === 'region' && !one.locked ? one : null; if (!reg && !(v.image && v.image.url)) return null;
+        if (!reg && sel.length && !frame) return null;   // S19: a text or shape selected shows its own properties; the photograph's framing returns when nothing is selected
         const f = (reg ? reg.focus : layout.imageFocus) || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 };
         const set = (k, n) => { const nf = Object.assign({}, cur, { [k]: n }); const plain = nf.x === 50 && nf.y === 50 && nf.zoom === 1; if (reg) setOne(reg.id, { focus: plain ? undefined : nf }); else commit(Object.assign({}, layout, { imageFocus: plain ? undefined : nf })); };
         const zoomBy = d => set('zoom', Math.round(Math.max(1, Math.min(3, cur.zoom + d)) * 100) / 100);
         return html`<div class="st-le-type st-le-framing" aria-label="Image framing"><span class="st-lbl">Framing: ${reg ? 'image region ' + (reg.region || reg.id) : 'the photograph'}</span>
-          <button class=${'btn sm ghost' + (frame ? ' on' : '')} aria-pressed=${frame} onClick=${() => setFrame(!frame)} title="Drag the photograph to reposition it inside its box; the wheel zooms; nothing else moves">${frame ? 'Done framing' : 'Frame by dragging'}</button>
+          <button class=${'btn sm ghost' + (frame ? ' on' : '')} aria-pressed=${frame} onClick=${() => (frame ? applyFrame() : startFrame())} title="Drag the photograph to reposition it inside its box; the wheel zooms; nothing else moves">${frame ? 'Done framing' : 'Frame by dragging'}</button>
           <label>Across <input type="range" min="0" max="100" step="1" value=${cur.x} onChange=${e => set('x', +e.target.value)} aria-label="Focal point across, per cent" /></label>
           <label>Down <input type="range" min="0" max="100" step="1" value=${cur.y} onChange=${e => set('y', +e.target.value)} aria-label="Focal point down, per cent" /></label>
           <label>Zoom <button class="btn sm ghost" onClick=${() => zoomBy(-0.1)} disabled=${cur.zoom <= 1} aria-label="Zoom out">-</button><input class="st-in" type="number" step="0.05" min="1" max="3" value=${cur.zoom} onChange=${e => set('zoom', Math.round(Math.max(1, Math.min(3, +e.target.value || 1)) * 100) / 100)} aria-label="Image zoom" /><button class="btn sm ghost" onClick=${() => zoomBy(0.1)} disabled=${cur.zoom >= 3} aria-label="Zoom in">+</button></label>
@@ -2612,24 +2636,33 @@
       ${!one && !sel.length ? html`<div class="ov-dim st-le-hint">Select a layer on the canvas or in the Layers list (drag across the empty stage to select several) to edit its type, box, effects or framing. Double-click words to type them in place. Changes save as one layout version; no render.</div>` : null}
       ${sel.length > 1 ? html`<div class="ov-dim st-le-hint">${sel.length} layers selected: the floating toolbar sets type for all the words among them; align, distribute, order and group are in the tools above.</div>` : null}
     </div>`;
-    const list = html`<${LayersList} layers=${layers} sel=${sel} onPick=${(e, l) => pick(e, l)} onHide=${l => setOne(l.id, { hidden: !l.hidden })} onLock=${l => setOne(l.id, { locked: !l.locked })} bad=${bad} heldMark=${heldMark} onMove=${moveTo} onDuplicate=${l => { setSelIds([l.id]); const n = E.cloneLayers ? E.cloneLayers([l], wcopy, layout) : []; if (n.length) { commit(Object.assign({}, layout, { layers: layers.concat(n) })); setSelIds(n.map(x => x.id)); } }} onDelete=${l => removeLayers([l])} editing=${true} />`;
+    const list = html`<${LayersList} layers=${layers} sel=${sel} onPick=${(e, l) => pick(e, l)} onRename=${(l, nm) => setOne(l.id, { name: nm, renamed: true })} onHide=${l => setOne(l.id, { hidden: !l.hidden })} onLock=${l => setOne(l.id, { locked: !l.locked })} bad=${bad} heldMark=${heldMark} onMove=${moveTo} onDuplicate=${l => { setSelIds([l.id]); const n = E.cloneLayers ? E.cloneLayers([l], wcopy, layout) : []; if (n.length) { commit(Object.assign({}, layout, { layers: layers.concat(n) })); setSelIds(n.map(x => x.id)); } }} onDelete=${l => removeLayers([l])} editing=${true} />`;
     // the floating toolbar sits over the selection's measured bounds
     const selBox = (() => { const s = selected(); if (!s.length) return null; const bx = s.map(l => l.rotate ? { x: l.x, y: l.y, w: l.w, h: l.h || 0 } : inkOf(l)); const x = Math.min.apply(null, bx.map(b => b.x)), y = Math.min.apply(null, bx.map(b => b.y)); return { x, y, w: Math.max.apply(null, bx.map(b => b.x + b.w)) - x, h: Math.max.apply(null, bx.map(b => b.y + b.h)) - y }; })();
     const HANDLES = ['nw', 'n', 'ne', 'e', 'sw', 's', 'w'];
     const editingL = editing ? byId(editing) : null;
     const brandFonts = [((kit && kit.fonts) || layout.fonts || {}).display, ((kit && kit.fonts) || layout.fonts || {}).body].filter(Boolean);
+    /* S19: one compact, contextual tool row. Undo, Redo and Add are always there; arrangement appears only when something is
+       selected (distribute needs three layers, group two); view options (guides, grid, how a resize treats type) sit in one
+       menu; nothing is shown disabled for a selection that does not exist */
+    const nSel = selected().length;
     const toolsEl = html`<div class="st-le-toolbar">
       ${!preview ? html`<div class="st-le-tools" role="toolbar" aria-label="Canvas tools">
         ${tb('Undo', undo, !hist.past.length, 'Undo (Ctrl or Cmd+Z)')}${tb('Redo', redo, !hist.future.length, 'Redo (Ctrl or Cmd+Shift+Z)')}
-        <span class="st-le-sep"></span>${E.AddMenu ? html`<${E.AddMenu} palette=${layout.palette} onAdd=${add} onImage=${addImage} />` : null}
-        <span class="st-le-sep"></span>${['left', 'centre', 'right', 'top', 'middle', 'bottom'].map(h => tb('Align ' + h, () => align(h), !selected().length, 'Align ' + h + (selected().length > 1 ? ' to the selection' : ' to the safe area of this format (' + (story ? 'story: top ' + Math.round(sa.top * 100) + '%, bottom ' + Math.round(sa.bottom * 100) + '%, sides ' + Math.round(sa.side * 100) + '%' : Math.round(sa.side * 100) + '% margin') + '), on the measured ink')))}
-        ${tb('Distribute across', () => distribute('h'), selected().length < 3)}${tb('Distribute down', () => distribute('v'), selected().length < 3)}
-        <span class="st-le-sep"></span>${tb('To front', () => reorder('front'), !selected().length)}${tb('Forward', () => reorder('forward'), !selected().length)}${tb('Backward', () => reorder('backward'), !selected().length)}${tb('To back', () => reorder('back'), !selected().length)}
-        <span class="st-le-sep"></span>${tb('Group', group, selected().length < 2)}${tb('Ungroup', ungroup, !selected().some(l => l.group))}
-        <label class="st-check"><input type="checkbox" checked=${guides0} onChange=${e => setGuides(e.target.checked)} /> safe-area guides</label>
-        <label class="st-check" title="Snap to a 10% grid as well as the stage, the safe area and the other layers"><input type="checkbox" checked=${grid} onChange=${e => setGrid(e.target.checked)} aria-label="Grid" /> grid</label>
-        <label class="st-check" title="Off: the corner changes the text box and the words rewrap at the same size. On: the type scales with the box width."><input type="checkbox" checked=${scaleType} onChange=${e => setScaleType(e.target.checked)} aria-label="Resize scales type" /> resize scales type</label>
-        <span class="st-le-sep"></span>${tb('Shortcuts', () => setKeysOpen(true), false, 'Keyboard shortcuts (?)')}
+        ${frame ? html`<span class="st-le-sep"></span><span class="st-cropbar" role="group" aria-label="Reframing the photograph"><span class="st-cropbar-t"><b>Reframing the photograph</b> <span class="ov-dim">drag it inside its box, the wheel zooms the crop (the view zoom is separate); nothing else moves, no render. Enter applies, Escape cancels.</span></span><button class="btn sm" onClick=${applyFrame}>Apply framing</button><button class="btn sm ghost" onClick=${cancelFrame}>Cancel</button></span>` : html`<span class="st-le-sep"></span>${E.AddMenu ? html`<${E.AddMenu} palette=${layout.palette} onAdd=${add} onImage=${addImage} />` : null}`}
+        ${frame ? null : nSel ? html`<span class="st-le-sep"></span><span class="st-le-group" role="group" aria-label=${'Arrange ' + nSel + ' selected'}>
+          <span class="st-le-glbl" aria-hidden="true">Align</span>${['left', 'centre', 'right', 'top', 'middle', 'bottom'].map(h => tbs('Align ', h, () => align(h), false, 'Align ' + h + (nSel > 1 ? ' to the selection' : ' to the safe area of this format (' + (story ? 'story: top ' + Math.round(sa.top * 100) + '%, bottom ' + Math.round(sa.bottom * 100) + '%, sides ' + Math.round(sa.side * 100) + '%' : Math.round(sa.side * 100) + '% margin') + '), on the measured ink')))}
+          ${nSel >= 3 ? html`<span class="st-le-glbl" aria-hidden="true">Spread</span>${tbs('Distribute ', 'across', () => distribute('h'), false)}${tbs('Distribute ', 'down', () => distribute('v'), false)}` : null}
+          <span class="st-le-sep"></span>${tb('To front', () => reorder('front'), false)}${tb('Forward', () => reorder('forward'), false)}${tb('Backward', () => reorder('backward'), false)}${tb('To back', () => reorder('back'), false)}
+          <span class="st-le-sep"></span>${tb('Group', group, nSel < 2, nSel < 2 ? 'Select two or more layers to group them' : 'Group the selected layers (Ctrl or Cmd+G)')}${selected().some(l => l.group) ? tb('Ungroup', ungroup, false) : null}
+        </span>` : html`<span class="st-le-hint-inline ov-dim">Select a layer to arrange it - or drag across the empty canvas to select several</span>`}
+        <span class="st-le-spacer"></span>
+        <details class="st-le-viewopts"><summary class="btn sm ghost" title="Guides, grid and how resizing treats type">View</summary><div class="st-le-viewpop" role="group" aria-label="View options">
+          <label class="st-check"><input type="checkbox" checked=${guides0} onChange=${e => setGuides(e.target.checked)} /> safe-area guides</label>
+          <label class="st-check" title="Snap to a 10% grid as well as the stage, the safe area and the other layers"><input type="checkbox" checked=${grid} onChange=${e => setGrid(e.target.checked)} aria-label="Grid" /> grid</label>
+          <label class="st-check" title="Off: the corner changes the text box and the words rewrap at the same size. On: the type scales with the box width."><input type="checkbox" checked=${scaleType} onChange=${e => setScaleType(e.target.checked)} aria-label="Resize scales type" /> resize scales type</label>
+        </div></details>
+        ${tb('Shortcuts', () => setKeysOpen(true), false, 'Keyboard shortcuts (?)')}
       </div>` : null}
       </div>`;
     const sheetEl = html`${keysOpen && E.ShortcutsSheet ? html`<${E.ShortcutsSheet} onClose=${() => { setKeysOpen(false); try { if (box.current) box.current.focus({ preventScroll: true }); } catch (x) {} }} />` : null}`;
@@ -2665,12 +2698,46 @@
   }
   /** The layer list, front to back: select, hide or show, lock or unlock. Used by the editor (working layout) and, when the editor is
       closed, on the current version (each toggle then saves a layout version). */
-  function LayersList({ layers, sel, onPick, onHide, onLock, bad, heldMark, ro, onMove, onDuplicate, onDelete, editing }) {
+  /** S19: a Properties section that folds; whether it is open is remembered per browser, so the panel shows what a person uses */
+  /* S19: a panel width the person sets by dragging its edge (or with the arrow keys on the edge, Shift for 40px), kept per browser.
+     Returns [width, the separator's props]; `side` is the edge the handle sits on ('right' grows to the right, 'left' to the left). */
+  function usePanelWidth(key, def, min, max, side) {
+    const k = 'ax_studio_w_' + key;
+    const [w, setW] = useState(() => { try { const v = +localStorage.getItem(k); return v >= min && v <= max ? v : def; } catch (e) { return def; } });
+    const drag = useRef(null); const wRef = useRef(w); wRef.current = w;
+    const keep = x => { try { localStorage.setItem(k, String(x)); } catch (e) {} };
+    const clamp = x => Math.max(min, Math.min(max, Math.round(x)));
+    const sign = side === 'left' ? -1 : 1;
+    const props = {
+      role: 'separator', 'aria-orientation': 'vertical', tabIndex: 0, 'aria-valuemin': min, 'aria-valuemax': max, 'aria-valuenow': w,
+      onPointerDown: e => { e.preventDefault(); e.stopPropagation(); drag.current = { x: e.clientX, w: wRef.current }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} },
+      onPointerMove: e => { const d = drag.current; if (!d) return; setW(clamp(d.w + sign * (e.clientX - d.x))); },
+      onPointerUp: () => { if (!drag.current) return; drag.current = null; keep(wRef.current); },
+      onPointerCancel: () => { if (!drag.current) return; drag.current = null; keep(wRef.current); },
+      onDoubleClick: () => { setW(def); keep(def); },
+      onKeyDown: e => { const st = e.shiftKey ? 40 : 10; let n = null; if (e.key === 'ArrowLeft') n = wRef.current - sign * st; else if (e.key === 'ArrowRight') n = wRef.current + sign * st; else if (e.key === 'Home') n = min; else if (e.key === 'End') n = max; if (n == null) return; e.preventDefault(); e.stopPropagation(); const c = clamp(n); setW(c); keep(c); }
+    };
+    return [w, props];
+  }
+  function Sec({ id, title, open: open0, children, hint }) {
+    const key = 'ax_studio_sec_' + id;
+    const [open, setOpen] = useState(() => { try { const v = localStorage.getItem(key); return v == null ? !!open0 : v === '1'; } catch (e) { return !!open0; } });
+    return html`<details class=${'st-psec' + (open ? ' open' : '')} open=${open} data-sec=${id} onToggle=${e => { const o = e.currentTarget.open; if (o !== open) { setOpen(o); try { localStorage.setItem(key, o ? '1' : '0'); } catch (x) {} } }}>
+      <summary class="st-psec-h"><span>${title}</span>${hint ? html`<span class="st-psec-hint">${hint}</span>` : null}</summary>
+      <div class="st-psec-b">${open ? children : null}</div></details>`;
+  }
+  function LayersList({ layers, sel, onPick, onHide, onLock, bad, heldMark, ro, onMove, onDuplicate, onDelete, editing, onRename }) {
     // front to back: the first row is the layer painted last. Dragging a row (in the editor) moves it in the paint order.
     const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
-    const rows = layers.slice().reverse(); const N = layers.length;
+    // S19: a search over the layers (name, role, id, its words), a swatch per layer, and rename (double-click the name, or F2)
+    const [q, setQ] = useState(''); const [ren, setRen] = useState(null);
+    const label = l => (l.name && (l.renamed || l.role === 'free' || l.role === 'device' || l.role === 'image') ? l.name : l.role || l.type);
+    const hay = l => [l.name, l.role, l.type, l.id, l.text].filter(Boolean).join(' ').toLowerCase();
+    const N = layers.length; const rows = layers.slice().reverse().filter(l => !q.trim() || hay(l).indexOf(q.trim().toLowerCase()) >= 0);
+    const swatch = l => l.type === 'text' ? html`<span class="st-lsw t" style=${{ color: l.color || '#fff' }} aria-hidden="true">T</span>` : l.type === 'shape' ? html`<span class="st-lsw s" style=${{ background: l.fill || 'transparent', borderRadius: l.shape === 'circle' || l.shape === 'pill' ? '50%' : '2px' }} aria-hidden="true"></span>` : l.role === 'logo' || l.role === 'wordmark' ? html`<span class="st-lsw m" aria-hidden="true">M</span>` : html`<span class="st-lsw i" aria-hidden="true"><${Icon} n="image" size=${10} /></span>`;
+    const commitRen = (l, v) => { setRen(null); const nm = String(v || '').trim().slice(0, 40); if (onRename && nm && nm !== label(l)) onRename(l, nm); };
     const dropAt = (target) => { if (!drag || !onMove || drag === target) return; const ti = layers.findIndex(l => l.id === target); onMove(drag, ti); };
-    return html`<div class="st-le-list" role="list" aria-label="Layers, front to back">${rows.map(l => html`<span key=${l.id} role="listitem" class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '') + (l.hidden ? ' hidden' : '') + (bad && bad.has(l.id) ? ' bad' : '') + (over === l.id ? ' over' : '')} draggable=${!!(editing && onMove && !ro && !l.locked)} onDragStart=${e => { setDrag(l.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); } catch (x) {} }} onDragOver=${e => { if (drag) { e.preventDefault(); setOver(l.id); } }} onDragLeave=${() => setOver(o => (o === l.id ? null : o))} onDrop=${e => { e.preventDefault(); dropAt(l.id); setDrag(null); setOver(null); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>${editing && onMove && !ro ? html`<span class="st-layer-grip" aria-hidden="true" title="Drag to change the paint order">::</span>` : null}<button class="ov-link st-layer-pick" aria-pressed=${sel.indexOf(l.id) >= 0} title=${(l.role || l.type) + ' ' + l.id + (heldMark && heldMark(l) ? ' - held by the campaign rule' : '')} onClick=${e => onPick(e, l)}>${l.name && (l.role === 'free' || l.role === 'device' || l.role === 'image') ? l.name : l.role || l.type}${heldMark && heldMark(l) ? html`<span class="st-layer-held" aria-label="held by the campaign rule">rule</span>` : null}${bad && bad.has(l.id) ? html`<span class="st-dot bad" aria-label="blocking issue"></span>` : null}</button> ${!ro ? html`<button class="st-lock" onClick=${() => onHide(l)} title="Hide or show this element" aria-pressed=${!!l.hidden}>${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => onLock(l)} title="A locked element keeps its place through directions and hand edits" aria-pressed=${!!l.locked}>${l.locked ? 'locked' : 'lock'}</button>${editing && onDuplicate && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onDuplicate(l)} title="Duplicate this layer" aria-label=${'Duplicate ' + (l.role || l.type)}><${Icon} n="copy" size=${11} /></button>` : null}${editing && onDelete && !l.locked && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onDelete(l)} title="Delete (the approved words are hidden instead)" aria-label=${'Delete ' + (l.role || l.type)}><${Icon} n="trash" size=${11} /></button>` : null}${N > 1 && editing && onMove && !ro && !l.locked ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onMove(l.id, Math.min(N - 1, layers.findIndex(x => x.id === l.id) + 1))} title="Bring forward" aria-label=${'Bring ' + (l.role || l.type) + ' forward'}><${Icon} n="up" size=${11} /></button><button class="st-lock st-lord st-lord-ic" onClick=${() => onMove(l.id, Math.max(0, layers.findIndex(x => x.id === l.id) - 1))} title="Send backward" aria-label=${'Send ' + (l.role || l.type) + ' backward'}><${Icon} n="down" size=${11} /></button>` : null}` : null}</span>`)}</div>`;
+    return html`${N > 3 ? html`<input class="st-in st-le-search" type="search" value=${q} onInput=${e => setQ(e.target.value)} placeholder=${"Find a layer (" + N + ")"} aria-label="Find a layer by name, role or words" />` : null}<div class="st-le-list" role="list" aria-label="Layers, front to back">${!rows.length ? html`<span class="ov-dim">No layer matches "${q}".</span>` : null}${rows.map(l => html`<span key=${l.id} role="listitem" class=${'st-le-item' + (sel.indexOf(l.id) >= 0 ? ' on' : '') + (l.hidden ? ' hidden' : '') + (bad && bad.has(l.id) ? ' bad' : '') + (over === l.id ? ' over' : '')} draggable=${!!(editing && onMove && !ro && !l.locked)} onDragStart=${e => { setDrag(l.id); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', l.id); } catch (x) {} }} onDragOver=${e => { if (drag) { e.preventDefault(); setOver(l.id); } }} onDragLeave=${() => setOver(o => (o === l.id ? null : o))} onDrop=${e => { e.preventDefault(); dropAt(l.id); setDrag(null); setOver(null); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>${editing && onMove && !ro ? html`<span class="st-layer-grip" aria-hidden="true" title="Drag to change the paint order">::</span>` : null}${swatch(l)}${ren === l.id ? html`<input class="st-in st-le-rename" autoFocus defaultValue=${label(l)} aria-label=${'New name for the ' + (l.role || l.type) + ' layer'} onKeyDown=${e => { e.stopPropagation(); if (e.key === 'Enter') commitRen(l, e.target.value); if (e.key === 'Escape') setRen(null); }} onBlur=${e => commitRen(l, e.target.value)} />` : html`<button class="ov-link st-layer-pick" aria-pressed=${sel.indexOf(l.id) >= 0} title=${(l.role || l.type) + ' ' + l.id + (heldMark && heldMark(l) ? ' - held by the campaign rule' : '') + (onRename && !ro ? ' - double-click or F2 to rename' : '')} onClick=${e => onPick(e, l)} onDoubleClick=${() => { if (onRename && !ro) setRen(l.id); }} onKeyDown=${e => { if (e.key === 'F2' && onRename && !ro) { e.preventDefault(); setRen(l.id); } }}>${label(l)}${heldMark && heldMark(l) ? html`<span class="st-layer-held" aria-label="held by the campaign rule">rule</span>` : null}${bad && bad.has(l.id) ? html`<span class="st-dot bad" aria-label="blocking issue"></span>` : null}</button>`} ${!ro ? html`<button class="st-lock" onClick=${() => onHide(l)} title="Hide or show this element" aria-pressed=${!!l.hidden}>${l.hidden ? 'show' : 'hide'}</button> <button class=${'st-lock' + (l.locked ? ' on' : '')} onClick=${() => onLock(l)} title="A locked element keeps its place through directions and hand edits" aria-pressed=${!!l.locked}>${l.locked ? 'locked' : 'lock'}</button>${editing && onDuplicate && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onDuplicate(l)} title="Duplicate this layer" aria-label=${'Duplicate ' + (l.role || l.type)}><${Icon} n="copy" size=${11} /></button>` : null}${editing && onDelete && !l.locked && !(l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onDelete(l)} title="Delete (the approved words are hidden instead)" aria-label=${'Delete ' + (l.role || l.type)}><${Icon} n="trash" size=${11} /></button>` : null}${N > 1 && editing && onMove && !ro && !l.locked ? html` <button class="st-lock st-lord st-lord-ic" onClick=${() => onMove(l.id, Math.min(N - 1, layers.findIndex(x => x.id === l.id) + 1))} title="Bring forward" aria-label=${'Bring ' + (l.role || l.type) + ' forward'}><${Icon} n="up" size=${11} /></button><button class="st-lock st-lord st-lord-ic" onClick=${() => onMove(l.id, Math.max(0, layers.findIndex(x => x.id === l.id) - 1))} title="Send backward" aria-label=${'Send ' + (l.role || l.type) + ' backward'}><${Icon} n="down" size=${11} /></button>` : null}` : null}</span>`)}</div>`;
   }
 
   /* ------------------------------------------------------------ dialogs */
@@ -2747,6 +2814,8 @@
     const [slot, setSlot] = useState(null);
     // S11: preview (the artwork alone) is a page state, so the header can switch it; the left panel's width and whether it is open are this browser's
     const [preview, setPreview] = useState(false); useEffect(() => { setPreview(false); }, [selAsset]);
+    const [inspW, inspHandle] = usePanelWidth('insp', 360, 300, 640, 'left');
+    const [inspMin, setInspMin0] = useState(saved0.inspMin === true); const setInspMin = x => { setInspMin0(x); store.set({ inspMin: x }); };
     const [railOpen, setRailOpen] = useState(saved0.rail !== false); const [railW, setRailW] = useState(saved0.railW || 220); const railDrag = useRef(null);
     const railDown = e => { e.preventDefault(); railDrag.current = { x: e.clientX, w: railW }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const railMove = e => { const d = railDrag.current; if (!d) return; setRailW(Math.max(160, Math.min(420, Math.round(d.w + e.clientX - d.x)))); };
@@ -3446,7 +3515,7 @@
     const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
     // the activity panel replaces the old line of job chips: every running, queued, failed or just-finished job with its phase
     const jobsLine = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
-    const jobsLineLive = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} liveOnly=${!actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
+    const jobsLineLive = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} liveOnly=${!actOpen} compact=${true} busy=${busy} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
 
     const F = window.STFlow; const guided = !!(p && p.workflow && p.workflow.v === 2 && F);
     const lockedAt = id => guided && flow && flow[id] && flow[id].state === 'locked';
@@ -3487,12 +3556,16 @@
        and two controls, Checks (validation, quality, the human approval of this version) and History (versions, what the Studio used).
        Brand and the words are tools in the dock. Arrow keys move between the four. */
     const insTabs = [['properties', 'Properties'], ['director', 'Creative Director'], ['checks', 'Checks'], ['history', 'History']];
+    // a tab asked for (a "show on the tile", an issue, a review) opens the collapsed inspector; the first render does not
+    const tabSeen = useRef(tab); useEffect(() => { if (tabSeen.current !== tab) { tabSeen.current = tab; if (inspMin) setInspMin(false); } }, [tab]);
     const tabKey = e => { const i = insTabs.findIndex(t => t[0] === tab); if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const n = insTabs[(i + (e.key === 'ArrowRight' ? 1 : insTabs.length - 1)) % insTabs.length][0]; setTab(n); setTimeout(() => { const el = document.getElementById('st-tabbtn-' + n); if (el) el.focus(); }, 0); } };
     // before there is anything to design, the frame is the work and its context: no assets rail, no canvas tools
     const early = !!p && !inRefine && view !== 'brand' && view !== 'context' && (['brief', 'objectives', 'strategy', 'directions'].indexOf(stage) >= 0 || (guided && stage === 'copy' && !p.assets.length && (view === 'copywrite' || view === 'copy')));
     const showCtx = early && !!F;
     const showAside = !!p && (inRefine || showCtx || (stage !== 'copy' && !early && partnerOpen));
-    const showRail = !!p && !early && !inRefine && railOpen;
+    // S19: Copy lists its pieces by channel itself, so the assets rail would be a second list of the same pieces
+    const copyOwnList = view === 'copywrite';
+    const showRail = !!p && !early && !inRefine && railOpen && !copyOwnList;
     const partnerEl = p ? html`<${CreativeDirector} p=${p} a=${inRefine ? a : null} kit=${kit} target=${target} setTarget=${setTarget} onDirect=${directTeam} onNote=${note} onPick=${pickAlternative} onDecide=${decideProposal} onRemember=${remember} onApplyInspection=${applyInspection} onReview=${reviewNow} busy=${busy} sugg=${inRefine ? sugg : null} onSuggRefresh=${r => fetchSugg(r !== false)} selLayers=${inRefine ? selLayers : []} onTool=${inRefine ? k => setTool(k) : null} sub=${cdSub} setSub=${setCdSub} />` : null;
     /* S18: the theme contract. The interface takes one accent: the campaign's own colour when the kit names one, else the client's
        palette primary, else the Studio's neutral; it is lightened until it reads at 4.5:1 on the panel, and its ink (the text on an
@@ -3507,14 +3580,16 @@
       ${header}
       ${helpPanel}
       ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
-      ${busy && p ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
+      ${busy && p && !inRefine ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
       <${Notice} n=${notice} onClose=${() => setNotice(null)} />
-      <div class=${'st-body' + (p ? '' : ' lib') + (inRefine ? ' design' : '') + (p && !showAside ? ' noaside' : '') + (p && !showRail ? ' norail' : '') + (early ? ' early' : '')} style=${showRail ? { '--st-rail-w': railW + 'px' } : null}>
-        ${showRail ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${null} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p && !early && !inRefine ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the assets panel" title="Show the assets">›</button>` : null}
+      <div class=${'st-body' + (p ? '' : ' lib') + (inRefine ? ' design' : '') + (inRefine && inspMin ? ' inspmin' : '') + (p && !showAside ? ' noaside' : '') + (p && !showRail ? ' norail' : '') + (early ? ' early' : '')} style=${Object.assign({ '--st-insp-w': inspW + 'px' }, showRail ? { '--st-rail-w': railW + 'px' } : {})}>
+        ${showRail ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${null} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p && !early && !inRefine && !copyOwnList ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the assets panel" title="Show the assets">›</button>` : null}
         ${showRail ? html`<div class="st-rail-handle" role="separator" aria-orientation="vertical" aria-label="Resize the left panel" title="Drag to resize" onPointerDown=${railDown} onPointerMove=${railMove} onPointerUp=${railUp} onPointerCancel=${railUp}></div>` : null}
         <main class="st-centre" aria-label="Workspace">${centre}</main>
-        ${p && showCtx && !inRefine ? html`<aside class="st-inspector st-ctxaside" aria-label="Project context"><${F.ContextPanel} p=${p} client=${client} kit=${kit} wf=${p.workflow} /><div class="st-ctx-links"><button class="ov-link" onClick=${() => setView('brand', true)}>Brand</button><button class="ov-link" onClick=${() => setView('context', true)}>Client context</button><button class="ov-link" onClick=${() => setView('jobs', true)}>Jobs</button></div></aside>` : p ? (showAside ? html`<aside class=${'st-inspector' + (inspOpen ? ' open' : '')} id="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative Director'}>
-          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '') + (k === 'checks' || k === 'history' ? ' ctl' : ' mode')} title=${k === 'checks' ? 'Validation, quality and the human approval of this version' : k === 'history' ? 'Every version, and what the Studio used' : undefined} onClick=${() => setTab(k)}>${k === 'checks' ? html`<${Icon} n="shield" size=${14} />` : k === 'history' ? html`<${Icon} n="history" size=${14} />` : null}<span>${l}</span>${k === 'checks' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}<button class="st-iconbtn sm st-insp-close" onClick=${() => setInspOpen(false)} aria-label="Close the inspector"><${Icon} n="x" size=${14} /></button></div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Creative Director">hide</button></div>`}
+        ${p && showCtx && !inRefine ? html`<aside class="st-inspector st-ctxaside" aria-label="Project context"><${F.ContextPanel} p=${p} client=${client} kit=${kit} wf=${p.workflow} /><div class="st-ctx-links"><button class="ov-link" onClick=${() => setView('brand', true)}>Brand</button><button class="ov-link" onClick=${() => setView('context', true)}>Client context</button><button class="ov-link" onClick=${() => setView('jobs', true)}>Jobs</button></div></aside>` : p ? (showAside ? html`<aside class=${'st-inspector' + (inspOpen ? ' open' : '') + (inRefine && inspMin ? ' min' : '')} id="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative Director'}>
+          ${!(inRefine && inspMin) ? html`<div class="st-panel-handle left" ...${inspHandle} aria-label="Resize the inspector (arrow keys; double-click resets)" title="Drag to resize; double-click resets"></div>` : null}
+          ${inRefine && inspMin ? html`<div class="st-insp-rail" role="toolbar" aria-label="Inspector (collapsed)" aria-orientation="vertical"><button class="st-iconbtn st-insp-expand" onClick=${() => setInspMin(false)} aria-label="Expand the inspector" title="Expand the inspector"><${Icon} n="back" size=${15} /></button>${insTabs.map(([k, l]) => html`<button key=${k} class=${'st-iconbtn' + (tab === k ? ' on' : '')} aria-label=${'Open ' + l} title=${l} onClick=${() => { setTab(k); setInspMin(false); }}><${Icon} n=${k === 'properties' ? 'sliders' : k === 'director' ? 'partner' : k === 'checks' ? 'shield' : 'history'} size=${16} /></button>`)}</div>` : null}
+          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '') + (k === 'checks' || k === 'history' ? ' ctl' : ' mode')} title=${k === 'checks' ? 'Validation, quality and the human approval of this version' : k === 'history' ? 'Every version, and what the Studio used' : undefined} onClick=${() => setTab(k)}>${k === 'checks' ? html`<${Icon} n="shield" size=${14} />` : k === 'history' ? html`<${Icon} n="history" size=${14} />` : null}<span>${l}</span>${k === 'checks' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}<button class="st-iconbtn sm st-insp-collapse" onClick=${() => setInspMin(true)} aria-label="Collapse the inspector" title="Collapse the inspector: more room for the canvas"><${Icon} n="arrow" size=${14} /></button><button class="st-iconbtn sm st-insp-close" onClick=${() => setInspOpen(false)} aria-label="Close the inspector"><${Icon} n="x" size=${14} /></button></div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Creative Director">hide</button></div>`}
           <div class="st-slot" ref=${setSlot} hidden=${inRefine && tab === 'director'}></div>
           <div class="st-partner-wrap" id="st-tab-director" role=${inRefine ? 'tabpanel' : undefined} aria-labelledby=${inRefine ? 'st-tabbtn-director' : undefined} hidden=${inRefine && tab !== 'director'}>${partnerEl}</div>
         </aside>${inRefine ? html`<button class="st-insp-toggle btn sm" aria-expanded=${inspOpen ? 'true' : 'false'} aria-controls="st-inspector" onClick=${() => setInspOpen(!inspOpen)}>${inspOpen ? 'Close panel' : 'Properties and Creative Director'}</button>` : null}` : stage === 'copy' || early ? null : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the Creative Director">Creative Director</button>`) : null}

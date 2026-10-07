@@ -13,6 +13,7 @@ const L = { v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial
 const A = (await api('POST', '/studio/asset', { project: P, family: 'Set', channel: 'instagram', format: '4:5', title: 'Tile', copy: { headline: 'Not a subsidy' }, layout: L, mode: 'composition' })).asset.id;
 const openProject = async (page) => { await page.waitForSelector(R + '.st-lib tbody tr:has-text("Activity")', { timeout: 20000 }); await page.click(R + '.st-lib tbody tr:has-text("Activity") button.st-lib-open'); await page.waitForSelector(R + '.st-assetpick:has-text("Tile")', { timeout: 20000 }); await page.click(R + '.st-assetpick:has-text("Tile")'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 20000 }); };
 let page;
+const expand = async pg => { const d = await pg.$(R + '.st-work-line .ov-link'); if (d) await d.click(); else await pg.click(R + '.st-work-toggle'); };
 
 await T.t('a slow image generation is visible while it runs: the panel is live, the summary carries the worker\'s phase, the card\'s bar is indeterminate with the elapsed time and the note that a model call shows no share, and the header chip says 1 running', async () => {
   fx.setProvider('gemini', 'slow'); fx.providers.slowMs = 9000;
@@ -20,10 +21,13 @@ await T.t('a slow image generation is visible while it runs: the panel is live, 
   page = await fx.open({ viewport: { width: 1366, height: 768 } });
   await openProject(page);   // the island steps the queued render as it opens; the step takes nine seconds
   await page.waitForSelector(R + '.st-workspace-activity.live', { timeout: 20000 });
-  await page.waitForFunction(() => /image model is making the background image at 1K/.test((document.querySelector('#studio-root .st-work-now') || {}).textContent || ''), null, { timeout: 15000 });
-  const now = await page.textContent(R + '.st-work-now'); ok(/image model is making/.test(now) && /\d+ s/.test(now), 'the summary says what runs and for how long: ' + now);
+  // S19: in Design the activity is one line over the canvas (the phase, the time, Cancel); details open the panel
+  const NOW = '#studio-root .st-work-now, #studio-root .st-work-line';
+  await page.waitForFunction(sel => /image model is making the background image at 1K/.test((document.querySelector(sel) || {}).textContent || ''), NOW, { timeout: 15000 });
+  const now = await page.textContent(NOW); ok(/image model is making/.test(now) && /\d+ s/.test(now), 'the summary says what runs and for how long: ' + now);
+  const line = await page.$(R + '.st-work-line'); if (line) { const h = await line.evaluate(el => el.getBoundingClientRect().height); ok(h <= 40, 'the compact line is one thin line over the canvas: ' + h + 'px'); ok(await page.$(R + '.st-work-line button:has-text("Cancel")'), 'Cancel is on the line'); }
   ok(/1 running/.test(await page.textContent(R + '.st-activity.on')), 'the header chip counts it');
-  await page.click(R + '.st-work-toggle'); await page.waitForSelector(R + '.st-work-card[data-stage="render"]', { timeout: 5000 });
+  await expand(page); await page.waitForSelector(R + '.st-work-card[data-stage="render"]', { timeout: 5000 });
   eq(await page.$eval(R + '.st-work-card[data-stage="render"]', el => el.dataset.phase), 'generating', 'the card carries the worker\'s phase');
   ok(await page.$(R + '.st-work-card[data-stage="render"] .st-progress-track.indeterminate.active'), 'the bar is indeterminate: no share is invented for a model call');
   eq(await page.$eval(R + '.st-work-card[data-stage="render"] .st-progress-track', el => el.getAttribute('aria-valuenow')), null, 'and it claims no value');
@@ -44,7 +48,7 @@ await T.t('a render the provider refuses is failed in the panel with the explana
   await api('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'again', size: '1K' }, idem: 'act-r2' });
   const p2 = await fx.open({ viewport: { width: 1366, height: 768 }, quiet: true }); await openProject(p2);
   await p2.waitForSelector(R + '.st-workspace-activity.failed', { timeout: 60000 });
-  await p2.click(R + '.st-work-toggle'); await p2.waitForSelector(R + '.st-work-card.failed', { timeout: 5000 });
+  await expand(p2); await p2.waitForSelector(R + '.st-work-card.failed', { timeout: 5000 });
   const err = await p2.textContent(R + '.st-work-card.failed .st-work-error'); ok(err.trim().length > 8, 'the failure is explained: ' + err.slice(0, 120));
   ok(await p2.$(R + '.st-work-card.failed button:has-text("Retry")'), 'Retry is offered');
   ok(/needs attention/.test(await p2.textContent(R + '.st-activity.bad')), 'the header chip says needs attention');

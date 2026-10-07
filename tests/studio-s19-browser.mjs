@@ -17,6 +17,7 @@ const PA = (await seedStages(fx, { only: ['design'], prefix: 'S19 A' })).design;
 const PB = (await seedStages(fx, { only: ['design'], prefix: 'S19 B' })).design;
 const PC = (await seedStages(fx, { only: ['design'], prefix: 'S19 C' })).design;
 const PD = (await seedStages(fx, { only: ['design'], prefix: 'S19 D' })).design;
+const PE = await seedStages(fx, { only: ['design', 'copy'], prefix: 'S19 E' });
 let page;
 const shot = async n => { if (process.env.SHOT) await page.screenshot({ path: SHOTS + 't-' + n + '.png' }); };
 const assets = async P => (await api('GET', '/studio/get?id=' + P)).assets.filter(a => a.versions && a.versions.length);
@@ -162,6 +163,65 @@ await T.t('C3. moving to another stage and back, or reloading the page, brings t
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(800);
   ok(Math.abs(await headTop() - moved) < 0.2, 'back after a reload');
   eq(asked, 0, 'no dialog was needed: the work was recoverable all along');
+});
+
+await T.t('D. the tool row is contextual: with nothing selected it offers Undo, Redo, Add and View only; a selection brings Align and order, three bring Distribute; guides and grid sit in the View menu', async () => {
+  await page.ctxB.close(); await openDesign('S19 E at design');
+  await page.keyboard.press('Escape'); await page.click(R + '.st-le', { position: { x: 3, y: 3 } }).catch(() => {}); await sleep(200);
+  const has = async t => !!(await page.$(R + '.st-le-tools button:has-text("' + t + '")'));
+  ok(await has('Undo') && await has('Redo'), 'undo and redo are always there');
+  ok(!(await has('To front')) && !(await has('Align left')), 'no arrangement tools without a selection');
+  ok(await page.$(R + '.st-le-tools .st-le-hint-inline'), 'the row says how to select instead');
+  ok(!(await page.$(R + '.st-le-tools > label input[aria-label="Grid"]')), 'the grid is not a loose checkbox in the row');
+  await page.click(R + '.st-le-viewopts > summary'); ok(await page.isVisible(R + '.st-le-viewpop input[aria-label="Grid"]'), 'the grid lives in the View menu');
+  await page.click(R + '.st-le-viewopts > summary');
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await sleep(200);
+  ok(await has('Align left') && await has('To front'), 'a selection brings align and order');
+  ok(!(await has('Distribute across')), 'no distribute with one layer');
+  const n = await page.$$eval(R + '.st-le-layer', els => els.length);
+  if (n >= 3) { const ids = await page.$$eval(R + '.st-le-layer', els => els.slice(0, 3).map(e => e.getAttribute('aria-label'))); await page.click(R + '.st-le-layer[aria-label="' + ids[0] + '"]'); for (const id of ids.slice(1)) await page.click(R + '.st-le-layer[aria-label="' + id + '"]', { modifiers: ['Shift'], force: true }); await sleep(200);
+    ok(await has('Distribute across'), 'three selected bring Distribute'); }
+});
+
+await T.t('E. the inspector folds to a rail and opens again, its width and the tool panel\'s width are set from the keyboard on their edges and kept after a reload', async () => {
+  await page.click(R + '.st-insp-collapse'); await sleep(300);
+  ok(await page.$(R + '.st-inspector.min .st-insp-rail'), 'the inspector is a rail');
+  const art0 = await page.$eval(R + '.st-stage canvas, ' + R + '.st-artboard canvas', el => el.getBoundingClientRect().width);
+  await page.click(R + '.st-insp-rail button[aria-label="Open Checks"]'); await sleep(300);
+  ok(!(await page.$(R + '.st-inspector.min')), 'a tab on the rail opens the inspector at that tab');
+  ok(await page.$(R + '#st-tabbtn-checks[aria-selected="true"]'), 'on Checks');
+  const art1 = await page.$eval(R + '.st-stage canvas, ' + R + '.st-artboard canvas', el => el.getBoundingClientRect().width);
+  ok(art0 >= art1, 'the folded inspector gave the canvas room (' + Math.round(art0) + ' vs ' + Math.round(art1) + ')');
+  const w0 = await page.$eval(R + '#st-inspector', el => el.getBoundingClientRect().width);
+  await page.focus(R + '#st-inspector > .st-panel-handle'); for (let i = 0; i < 3; i++) await page.keyboard.press('Shift+ArrowLeft'); await sleep(200);
+  const w1 = await page.$eval(R + '#st-inspector', el => el.getBoundingClientRect().width);
+  ok(w1 >= w0 + 100, 'three Shift+Left on the edge widen the inspector by 120px (' + Math.round(w0) + ' -> ' + Math.round(w1) + ')');
+  await page.click(R + '.st-dock-btn:has-text("Layers")'); await page.waitForSelector(R + '#st-library', { timeout: 5000 });
+  const l0 = await page.$eval(R + '#st-library', el => el.getBoundingClientRect().width);
+  await page.focus(R + '#st-library > .st-panel-handle'); await page.keyboard.press('Shift+ArrowRight'); await sleep(200);
+  const l1 = await page.$eval(R + '#st-library', el => el.getBoundingClientRect().width); ok(l1 >= l0 + 30, 'the tool panel widens from its edge (' + Math.round(l0) + ' -> ' + Math.round(l1) + ')');
+  await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => typeof go === 'function' && typeof studioInit === 'function'); await page.evaluate(() => go('studio'));
+  await page.waitForSelector(R + '#st-inspector', { timeout: 15000 }); await sleep(600);
+  const w2 = await page.$eval(R + '#st-inspector', el => el.getBoundingClientRect().width); ok(Math.abs(w2 - w1) < 2, 'the inspector width is kept (' + Math.round(w2) + ')');
+});
+
+await T.t('F. the layers list finds a layer by name or words, and a layer renamed there keeps its name in the saved version', async () => {
+  if (!(await page.$(R + '#st-library[data-tool="layers"]'))) { await page.click(R + '.st-dock-btn:has-text("Layers")'); await page.waitForSelector(R + '#st-library', { timeout: 5000 }); }
+  const search = await page.$(R + '#st-library .st-le-search');
+  if (search) { await search.fill('headline'); await sleep(150); const rows = await page.$$eval(R + '#st-library .st-le-item', els => els.length); ok(rows >= 1, 'a search keeps the matching rows (' + rows + ')'); await search.fill(''); }
+  await page.dblclick(R + '#st-library .st-layer-pick:has-text("headline")');
+  await page.waitForSelector(R + '#st-library .st-le-rename', { timeout: 5000 }); await page.fill(R + '#st-library .st-le-rename', 'Main line'); await page.keyboard.press('Enter'); await sleep(300);
+  ok(await page.$(R + '#st-library .st-layer-pick:has-text("Main line")'), 'the row shows the new name');
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
+  await page.waitForFunction(() => /Version saved/.test(document.querySelector('#studio-root .st-head .st-save').textContent), null, { timeout: 10000 });
+  const A = (await assets(PE.design))[0]; const hl = cur(A).layout.layers.find(l => l.role === 'headline'); eq(hl.name, 'Main line', 'the name is in the version');
+});
+
+await T.t('G. Copy is one list of the pieces: the assets rail of the other steps is not shown beside it', async () => {
+  await page.ctxB.close(); page = await fx.open({ viewport: { width: 1440, height: 900 }, quiet: true });
+  const row = R + '.st-lib tbody tr:has-text("S19 E at copy")'; await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open').first().click();
+  await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await sleep(800);
+  ok(!(await page.$(R + 'nav.st-rail')), 'no assets rail in Copy'); ok(!(await page.$(R + '.st-rail-open')), 'nor a button to open one');
 });
 
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

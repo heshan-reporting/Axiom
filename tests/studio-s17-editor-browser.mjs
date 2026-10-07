@@ -106,6 +106,9 @@ await T.t('adding and styling on the canvas: a heading, an icon from the set, a 
   ok(/Brand|Recommended/.test(await page.textContent(R + '.st-fontpick')), 'the picker groups the brand and recommended faces');
   await page.fill(R + '.st-fontpick input', 'Playfair'); await page.click(R + '.st-fontpick .st-font-row:has-text("Playfair Display")'); await sleep(200);
   ok(/Playfair Display/.test(await page.textContent(R + '.st-fbar .st-fbar-font')), 'the support line is set in Playfair Display');
+  // S19: effects live in a collapsed section of Properties (secondary controls in menus); it opens and remembers that
+  ok(!(await page.$(R + '.st-le-effects')), 'the effects are folded until asked for');
+  await page.click(R + 'details[data-sec="effects"] > summary'); await page.waitForSelector(R + '.st-le-effects', { timeout: 5000 });
   await page.check(R + '.st-le-effects label:has-text("Shadow") input'); await sleep(150);
   const icon = await page.$$eval(R + '.st-le-layer', x => x.map(e => e.getAttribute('aria-label')).filter(a => /Layer (icon|device|l)/.test(a)).pop());
   await page.click(R + '.st-le-layer[aria-label="' + icon + '"]'); await page.keyboard.press('Control+d'); await sleep(150);

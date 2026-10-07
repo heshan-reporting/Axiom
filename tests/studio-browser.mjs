@@ -424,7 +424,8 @@ await t('a project made before the guided workflow from an open brief, copy only
   let d = null; for (let i = 0; i < 160; i++) { d = await api('GET', '/studio/get?id=' + pr.id); if (d.assets.length === 3 && !(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }
   eq(d.assets.length, 3, 'one copy-only piece per channel');
   ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Directions"))'), 'the page stays where the team is: production does not move it');
-  await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-assetpick').length === 3, null, { timeout: 30000 });
+  // S19: Copy lists the pieces itself (no second list in an assets rail)
+  await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-copy-pick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
   await goStep(page, 'Review'); await page.waitForSelector(R + '.st-cd-conv');
   const th = await page.textContent(R + '.st-cd-conv');
@@ -650,6 +651,8 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   await page.fill(R + '.st-le-type input[aria-label="X, per cent of the stage"]', '9'); await page.press(R + '.st-le-type input[aria-label="X, per cent of the stage"]', 'Enter');
   const shapeRole = (L0.layers.find(l => l.type === 'shape' && !l.locked && !l.hidden) || {}).role;
   if (shapeRole) { await tool(page, 'Layers'); await page.click(R + '.st-le-item .ov-link:text-is("' + shapeRole + '")'); await page.fill(R + '.st-le-type input[aria-label="Panel opacity"]', '0.6'); await page.press(R + '.st-le-type input[aria-label="Panel opacity"]', 'Enter'); }
+  // S19: the framing panel belongs to the photograph: it shows with nothing selected (or an image region), not beside a text or shape
+  await page.focus(R + '.st-le'); await page.keyboard.press('Escape');
   await page.waitForSelector(R + '.st-le-type[aria-label="Image framing"]');
   await page.fill(R + '.st-le-type input[aria-label="Image zoom"]', '1.5'); await page.press(R + '.st-le-type input[aria-label="Image zoom"]', 'Enter');
   ok(/no render/.test(await page.textContent(R + '.st-le-type[aria-label="Image framing"]')), 'reframing says it spends nothing');

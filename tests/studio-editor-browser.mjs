@@ -114,11 +114,23 @@ await T.t('framing by dragging: the photograph is panned through the renderer\'s
   eq(await page.evaluate(([x, y]) => (document.elementFromPoint(x, y) || {}).className, [cx, cy]), 'st-le-frame', 'the pointer starts on the framing overlay');
   await page.mouse.move(cx, cy); await page.mouse.down(); await page.mouse.move(cx - fb2.width * 0.2, cy, { steps: 5 }); await page.mouse.up(); await page.waitForTimeout(200);
   const x1 = +(await across()); ok(x1 > 50, 'dragging the photograph left moves the focus right (' + x1 + ')');
-  await page.keyboard.press('Escape'); await page.click(R + '.st-le-tools button:has-text("Undo")'); await page.waitForTimeout(150);
+  // S19: reframing is a mode with Apply and Cancel in the tool row, never a bar over the artwork
+  const cb = await page.$(R + '.st-le-tools .st-cropbar'); ok(cb, 'the crop bar sits in the tool row');
+  ok(!(await page.$(R + '.st-le .st-cropbar')), 'nothing of the crop bar is drawn over the artwork');
+  await page.click(R + '.st-cropbar button:has-text("Apply framing")'); await page.waitForTimeout(150);
+  ok(!(await page.$(R + '.st-le-frame')), 'Apply leaves the crop mode'); eq(+(await across()), x1, 'and keeps the framing');
+  await page.click(R + '.st-le-tools button:has-text("Undo")'); await page.waitForTimeout(150);
   eq(await across(), '50', 'one undo takes back the whole drag');
   await page.click(R + '.st-le-tools button:has-text("Redo")'); await page.waitForTimeout(150); ok(+(await across()) === x1, 'redo restores it');
   await page.click(R + '.st-le-framing button:has-text("centre and reset")'); await page.waitForTimeout(150);
   eq([await across(), await page.inputValue(R + 'input[aria-label="Image zoom"]')], ['50', '1'], 'centre and reset returns to the plain crop at zoom 1');
+  // Cancel puts the photograph back where the crop mode found it, zoom and pan alike
+  await page.click(R + '.st-le-framing button:has-text("Frame by dragging")'); await page.waitForSelector(R + '.st-le-frame[data-ready="1"]', { timeout: 15000 });
+  await page.dispatchEvent(R + '.st-le-frame', 'wheel', { deltaY: -100, bubbles: true, cancelable: true }); await page.waitForTimeout(500);
+  ok(+(await page.inputValue(R + 'input[aria-label="Image zoom"]')) > 1, 'zoomed inside the crop mode');
+  await page.click(R + '.st-cropbar button:has-text("Cancel")'); await page.waitForTimeout(200);
+  eq([await across(), await page.inputValue(R + 'input[aria-label="Image zoom"]')], ['50', '1'], 'Cancel restores the framing from before the crop mode');
+  ok(!(await page.$(R + '.st-le-frame')), 'and leaves it');
   ok(!page.errors.length, page.errors.join(' | '));
   await page.ctxB.close();
 });
