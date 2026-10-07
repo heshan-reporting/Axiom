@@ -5,7 +5,7 @@
  *   C  switching asset inside the draft debounce (or during an open text edit) lost the edits without a trace
  * Run: node --experimental-sqlite tests/studio-s19-browser.mjs   (SHOT=1 writes tests/shots/s19/t-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
 const fx = await makeStudio({ port: 8871, inspect: false });
 const { api } = fx;
@@ -222,6 +222,42 @@ await T.t('G. Copy is one list of the pieces: the assets rail of the other steps
   const row = R + '.st-lib tbody tr:has-text("S19 E at copy")'; await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await sleep(800);
   ok(!(await page.$(R + 'nav.st-rail')), 'no assets rail in Copy'); ok(!(await page.$(R + '.st-rail-open')), 'nor a button to open one');
+});
+
+await T.t('H. the Creative Director works in Copy on the piece on screen: its scope names the piece, the targets are only real ones, and with no asset chosen a direction waits rather than widening to the set', async () => {
+  // continues on the Copy step of G
+  await page.waitForSelector(R + '#st-inspector .st-cd', { timeout: 10000 });
+  const first = (await assets(PE.copy))[0];
+  eq(await page.inputValue(R + '.st-cd-asset'), first.id, 'the scope is the piece Copy shows');
+  const opts = await page.$$eval(R + '.st-composer select[aria-label="Target of the direction"] option', os => os.map(o => o.textContent));
+  ok(!opts.some(t => /^This asset/.test(t)), 'no generic "This asset" target: ' + opts.join(' | '));
+  ok(opts[0].indexOf(first.title) === 0 && / v\d+$/.test(opts[0]), 'the asset target names the piece and its version: ' + opts[0]);
+  ok(opts.some(t => /^The whole set \(\d+\)$/.test(t)), 'the set names its count');
+  ok(!(await page.$(R + '.st-cd-asset option[value=""]')), 'Copy always has a piece on screen: no "no asset" choice there');
+  const second = (await assets(PE.copy))[1];
+  if (second) { await page.selectOption(R + '.st-cd-asset', second.id); await sleep(300); ok(/ on/.test(' ' + await page.$eval(R + '.st-copy-pick:has-text("' + second.title + '")', el => el.className)), 'picking an asset in the Creative Director opens it in Copy'); }
+  // Review: the Creative Director can be set to no asset; a direction then waits for a target rather than widening
+  await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review", "i"))'); await page.waitForSelector(R + '#st-inspector .st-cd-asset', { timeout: 10000 });
+  await page.fill(R + '.st-composer textarea', 'Make the headline plainer');
+  await page.selectOption(R + '.st-cd-asset', ''); await sleep(200);
+  eq(await page.inputValue(R + '.st-composer select[aria-label="Target of the direction"]'), '', 'with no asset the target is shown as unchosen');
+  ok(await page.$eval(R + '.st-composer-acts .btn', b => b.disabled), 'and Send waits: nothing is widened to the set on its own');
+  ok(/no asset is selected/.test(await page.$eval(R + '.st-composer-acts .btn', b => b.title)), 'the button says why');
+  await page.selectOption(R + '.st-composer select[aria-label="Target of the direction"]', 'set'); await sleep(150);
+  ok(!(await page.$eval(R + '.st-composer-acts .btn', b => b.disabled)), 'choosing the whole set by hand is allowed');
+  await page.fill(R + '.st-composer textarea', '');
+});
+
+await T.t('I. a review\'s finding and its correction name the element; "select it" selects that layer on the canvas; the correction states what it changes, keeps and needs; an element the model invented is not shown', async () => {
+  await page.ctxB.close(); await openDesign('S19 E at design');
+  await place(page, 'creative director'); await page.click(R + '.st-cd-tab:has-text("Review")'); await page.waitForSelector(R + '.st-cd-review', { timeout: 10000 });
+  const txt = (await page.textContent(R + '.st-cd-review')).replace(/\s+/g, ' ');
+  if (!/verdict/.test(txt)) { ok(true, 'no review on this seed: skipped'); return; }
+  ok(/on support/.test(txt), 'the finding names its element: ' + txt.slice(0, 300));
+  ok(!/ghost-layer/.test(txt), 'an invented element is not shown');
+  ok(/Changes/.test(txt) && /Keeps the words, the photograph and the marks/.test(txt) && /Needs no render/.test(txt), 'the correction says what it changes, keeps and needs');
+  await page.click(R + '.st-cd-review button:has-text("select it")'); await sleep(300);
+  ok(await page.$(R + '.st-le-layer.sel[aria-label="Layer support"]'), 'the support layer is selected on the canvas');
 });
 
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

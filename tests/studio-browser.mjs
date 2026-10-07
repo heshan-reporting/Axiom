@@ -427,7 +427,8 @@ await t('a project made before the guided workflow from an open brief, copy only
   // S19: Copy lists the pieces itself (no second list in an assets rail)
   await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-copy-pick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
-  await goStep(page, 'Review'); await page.waitForSelector(R + '.st-cd-conv');
+  // S19: the Creative Director keeps the asset in scope outside Design too; its Conversation, whole project, holds the thread
+  await goStep(page, 'Review'); { const c = await page.$(R + '.st-cd-tab:has-text("Conversation")'); if (c) await c.click(); } await page.waitForSelector(R + '.st-cd-conv'); { const w = await page.$(R + '.st-cd-convhead button:has-text("Whole project")'); if (w) await w.click(); }
   const th = await page.textContent(R + '.st-cd-conv');
   ok(/nothing is produced until you do/.test(th) && /Copy only: no render spent/.test(th), th.slice(0, 400)); eq(calls.gemini, g0, 'no render for copy-only work');
   eq(await texts(page, R + '.st-assetpick'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);

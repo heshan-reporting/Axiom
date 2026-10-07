@@ -374,3 +374,10 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-body.design.inspmin{grid-template-columns:minmax(0,1fr)}
   #studio-root .st .st-library{width:min(var(--st-lib-w,320px),calc(100% - 84px))}
 }
+/* S19: a correction says what it changes, what it keeps, what it needs and how it lands, before anything is spent */
+#studio-root .st .st-cd-fixfacts{display:grid;grid-template-columns:72px minmax(0,1fr);gap:3px 10px;margin:0 0 8px;font-size:12px}
+#studio-root .st .st-cd-fixfacts dt{color:var(--sk-sub);font:600 10px/1.6 var(--sk-font);letter-spacing:.06em;text-transform:uppercase}
+#studio-root .st .st-cd-fixfacts dd{margin:0;min-width:0}
+#studio-root .st .st-cd-el{color:var(--sk-sub);font-size:11.5px}
+#studio-root .st .st-cd-asset{max-width:220px;height:26px;padding:0 6px;font-size:12px}
+#studio-root .st .st-sel.bad{border-color:var(--sk-bad)}

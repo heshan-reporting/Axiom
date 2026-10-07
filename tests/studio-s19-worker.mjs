@@ -3,9 +3,15 @@
  * when it is the draft that edit came from - a draft written later, or on another base, survives a late acknowledgement.
  * Providers MOCKED. Run: node --experimental-sqlite tests/studio-s19-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { answerFor } from './studio-answers.mjs';
+import { pngGradientB64 } from './worker-png.mjs';
 const T = suite('studio-s19-worker (idempotent version writes, the guarded draft discard)');
-const w = await workerEnv({ keys: { 'full-key': { n: 'Hesh', r: 'full' }, 'other-key': { n: 'Steve', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' } }, env: { STUDIO_INSPECT: '0' } });
+const w = await workerEnv({ keys: { 'full-key': { n: 'Hesh', r: 'full' }, 'other-key': { n: 'Steve', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' } }, env: { STUDIO_INSPECT: '0', ANTHROPIC_API_KEY: 'a', GEMINI_KEY: 'g' } });
 const call = (m, p, b, k) => w.call(m, p, b, k || 'full-key');
+w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
+  const body = JSON.parse(init.body); const sys = String(body.system || ''); const c0 = body.messages[0].content; const user = typeof c0 === 'string' ? c0 : c0.filter(x => x.type === 'text').map(x => x.text).join('');
+  return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answerFor(sys, user)) }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 10 } }), { status: 200 });
+});
 const get = async P => (await call('GET', '/studio/get?id=' + P)).body;
 await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'national', name: 'Australian mining', logoPolicy: 'none' }] });
 const P = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'national', title: 'S19', brief: { objective: 'o', message: 'm', channels: ['instagram'] } })).body.id;
@@ -57,5 +63,17 @@ await T.t('a read-only key can neither write a version nor discard a draft', asy
   const a = await fresh();
   eq((await call('POST', '/studio/version', { asset: A, revision: a.revision, layout: L(20), kind: 'layout', op: 'eRO' }, 'read-key')).status, 403);
   eq((await call('POST', '/studio/draft/discard', { asset: A }, 'read-key')).status, 403);
+});
+await T.t('S19d: a review names the element of each finding and of its correction only when this version has that layer; an invented element is dropped, and the correction says what it keeps', async () => {
+  const lay = { stage: { w: 1080, h: 1080 }, layers: [{ id: 'hl', role: 'headline', type: 'text', x: 8, y: 40, w: 80, h: 20, size: 7 }, { id: 'sp1', role: 'support', type: 'text', x: 8, y: 64, w: 80, h: 10, size: 3 }] };
+  await w.env.MIND_DOCS.put('studio/fx/s19.png', Buffer.from(pngGradientB64(32, 32), 'base64'), { httpMetadata: { contentType: 'image/png' } });
+  const b0 = (await call('POST', '/studio/asset', { project: P, channel: 'instagram', format: '1:1', title: 'Reviewed', copy: { headline: 'H', support: 'S' }, layout: lay, mode: 'composition', image: { key: 'studio/fx/s19.png', url: '/studio/file?key=studio/fx/s19.png', model: 'test', size: '1K' } })).body.asset;
+  const j = (await call('POST', '/studio/job', { project: P, asset: b0.id, stage: 'inspect', input: { version: b0.current }, idem: 'ins-s19' })).body.job;
+  let jj = j; for (let i = 0; i < 6 && !/done|failed/.test(jj.state); i++) jj = (await call('POST', '/studio/job/step', { id: j.id })).body.job;
+  eq(jj.state, 'done', JSON.stringify(jj.error || jj.progress || {}).slice(0, 300));
+  const ev = (await get(P)).thread.filter(e => e.kind === 'inspection' && e.asset === b0.id).pop(); ok(ev, 'the review is on the thread');
+  eq([ev.issues[0].element, ev.issues[0].layers], ['support', ['sp1']], 'the finding names the support layer by its id');
+  ok(!ev.issues[1].element && !ev.issues[1].layers, 'an element this version does not have is dropped: ' + JSON.stringify(ev.issues[1]));
+  eq([ev.fix.element, ev.fix.layers, ev.fix.keeps], ['support', ['sp1'], 'the words, the photograph and the marks'], 'the correction names its element and what it keeps');
 });
 const res = T.done(); process.exit(res.fail ? 1 : 0);
