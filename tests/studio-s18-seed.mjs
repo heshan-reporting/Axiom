@@ -34,11 +34,11 @@ export async function seedStages(fx, o) {
   };
   const out = {};
   const want = o.only || ['brief', 'objectives', 'strategy', 'directions', 'copy', 'design'];
-  if (want.includes('brief')) { out.brief = await make('S18 at the brief'); await addSource(out.brief); }
-  if (want.includes('objectives')) out.objectives = await reviewed(await make('S18 at objectives'));
-  if (want.includes('strategy')) out.strategy = await objectived(await make('S18 at strategy'));
-  if (want.includes('directions')) out.directions = await directed(await make('S18 at directions'));
-  if (want.includes('copy')) out.copy = await copied(await make('S18 at copy'));
-  if (want.includes('design')) out.design = await designed(await make('S18 at design'));
+  if (want.includes('brief')) { out.brief = await make((o.prefix || 'S18') + ' at the brief'); await addSource(out.brief); }
+  if (want.includes('objectives')) out.objectives = await reviewed(await make((o.prefix || 'S18') + ' at objectives'));
+  if (want.includes('strategy')) out.strategy = await objectived(await make((o.prefix || 'S18') + ' at strategy'));
+  if (want.includes('directions')) out.directions = await directed(await make((o.prefix || 'S18') + ' at directions'));
+  if (want.includes('copy')) out.copy = await copied(await make((o.prefix || 'S18') + ' at copy'));
+  if (want.includes('design')) out.design = await designed(await make((o.prefix || 'S18') + ' at design'));
   return out;
 }

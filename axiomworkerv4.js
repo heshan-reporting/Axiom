@@ -14068,7 +14068,16 @@ const AXIOM_WORKER = {
         if (path === '/studio/draft' || path === '/studio/draft/discard') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           const me = stStr(who, 60);
-          if (path === '/studio/draft/discard') { await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, me).run(); return jsonResp({ ok: true, discarded: true }); }
+          if (path === '/studio/draft/discard') {
+            // S19: after a version is saved the browser discards the draft that edit came from - only a draft made on the same base
+            // version and written no later than the saved version, so a late acknowledgement never deletes newer work
+            if (sb.savedVersion) {
+              const sv = await stVersion(env, stClean(sb.savedVersion, 24)); if (!sv || sv.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404);
+              const r = await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=? AND version=? AND at<=?').bind(pair.asset.id, me, stClean(sb.version || sv.parent || '', 24), sv.created).run();
+              return jsonResp({ ok: true, discarded: !!(r && r.meta && r.meta.changes), kept: !(r && r.meta && r.meta.changes) });
+            }
+            await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, me).run(); return jsonResp({ ok: true, discarded: true });
+          }
           const v = sb.version ? await stVersion(env, stClean(sb.version, 24)) : null;
           if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'bad_version', detail: 'A draft names the version of this asset it was made on.' }, 400);
           if (!sb.layout || typeof sb.layout !== 'object' || !Array.isArray(sb.layout.layers)) return jsonResp({ error: 'bad_layout', detail: 'A draft carries the working layout.' }, 400);
@@ -14097,6 +14106,13 @@ const AXIOM_WORKER = {
         if (path === '/studio/version' || path === '/studio/lock') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The asset belongs to another project; nothing was written.' }, 403);
+          // S19: a logical edit carries an op id (the browser keeps it across retries); a version already written for it is
+          // answered as it stands, so a save that committed on the server but timed out in the browser is never written twice
+          const opId = path === '/studio/version' && sb.op ? stClean(sb.op, 40) : '';
+          if (opId) {
+            const had = await env.MIND_DB.prepare("SELECT id FROM studio_versions WHERE asset=? AND json_extract(context,'$.op')=? ORDER BY created DESC LIMIT 1").bind(pair.asset.id, opId).first();
+            if (had) { const hv = await stVersion(env, had.id); return jsonResp({ ok: true, duplicate: true, version: hv, asset: await stAssetView(env, stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(pair.asset.id).first())) }); }
+          }
           if (sb.revision != null && Number(sb.revision) !== pair.asset.revision) return conflict(pair.asset, sb.revision);
           if (path === '/studio/lock') {
             const k = stStr(sb.element, 20); if (!k) return jsonResp({ error: 'missing_element' }, 400);
@@ -14149,7 +14165,7 @@ const AXIOM_WORKER = {
           }
           // a hand edit keeps what the composition was made from (its plan, medium, master), so an adaptation or an inspection later still knows it
           const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of', 'basis', 'trace', 'direction', 'creationMode', 'imagery'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
-          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved ? stStr((sb.note || 'layout edited') + ' (a rule-held mark moved against the campaign rule, deliberately)', 200) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: sb.context || carry };
+          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved ? stStr((sb.note || 'layout edited') + ' (a rule-held mark moved against the campaign rule, deliberately)', 200) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: opId ? Object.assign({}, sb.context || carry || {}, { op: opId }) : (sb.context || carry) };
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
           let v;

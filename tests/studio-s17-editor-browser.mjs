@@ -134,7 +134,15 @@ await T.t('an unsaved layout is autosaved as a draft for this person only and of
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
   await page.waitForSelector(R + '.st-assetpick:has-text("Square tile")'); await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
-  await editLayout(); await page.waitForSelector(R + '.st-le-restore', { timeout: 15000 });
+  // S19: in the same browser the working store brings the edit straight back - no question to answer
+  await page.waitForSelector(R + L('cta')); await sleep(600); eq((await box(L('cta'))).top, moved.top, 'the CTA is back on its own after a reload (the working store)');
+  ok(!(await page.$(R + '.st-le-restore')), 'no restore prompt when the work came back by itself');
+  // without the local copy (another browser or device) the server draft is offered back
+  await page.evaluate(() => window.STWork.clear());
+  await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
+  await page.waitForSelector(R + '.st-assetpick:has-text("Square tile")'); await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.waitForSelector(R + '.st-le-layer'); await page.waitForSelector(R + '.st-le-restore', { timeout: 15000 });
   ok(/unsaved layout changes/.test(await page.textContent(R + '.st-le-restore')), await page.textContent(R + '.st-le-restore'));
   await page.click(R + '.st-le-restore button:has-text("Restore my changes")'); await sleep(300);
   eq((await box(L('cta'))).top, moved.top, 'the CTA is back where it was moved');

@@ -150,7 +150,7 @@ await T.t('locks hold in every canvas command: a locked layer is not reordered o
   // unsaved edits: nudge the headline, the header names the unsaved layout, Cancel asks
   await page.click(row('headline')); await page.keyboard.press('ArrowDown'); await page.waitForTimeout(150);
   ok(await page.$(R + '.st-le-dirty'), 'the editor says the layout has unsaved changes');
-  const headTxt = await page.textContent(R + '.st-head'); ok(/Unsaved changes|Draft saved/.test(headTxt) && !/Version saved/.test(headTxt), 'the header says so too: ' + headTxt.replace(/\s+/g, ' ').slice(0, 120));
+  const headTxt = await page.textContent(R + '.st-head'); ok(/Unsaved|Saving recovery draft|Draft saved/.test(headTxt) && !/Version saved/.test(headTxt), 'the header says so too: ' + headTxt.replace(/\s+/g, ' ').slice(0, 120));
   await page.click(R + '.st-le-foot .btn:has-text("Discard changes")'); await page.waitForTimeout(150);
   ok(await page.$(R + '.st-le-dirty'), 'Discard with unsaved changes asked, and the dismissed dialog kept the changes');
   ok(!page.errors.length, page.errors.join(' | '));

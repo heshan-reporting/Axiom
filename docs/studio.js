@@ -38,6 +38,26 @@
   /* a version's number on its asset comes from the worker (insertion order), so a paged history numbers it right */
   const vnum = (a, v) => (a && v ? (v.n || (a.versions.findIndex(x => x.id === v.id) + 1)) : 0);
   const vtotal = a => (a ? a.versionsTotal || (a.versions || []).length : 0);
+  /* S19: the working state of a canvas edit lives here, outside the canvas component, so switching asset, stage or project
+     never takes it away. The editor writes on every change and reads when it mounts; a copy is kept in localStorage under a
+     fingerprint of the access key (never the key itself) so a reload brings it back too. A record names the client, project,
+     asset and the version it was made on (base): it is only ever laid back onto that same version. */
+  const MERGE = window.STMerge;
+  const WORK = (() => {
+    const fp = () => { try { const k = ((typeof axHeaders === 'function' ? axHeaders() : {}) || {})['X-Axiom-Key'] || ''; return MERGE ? MERGE.sig('k:' + k).split(':')[0] : 'anon'; } catch (e) { return 'anon'; } };
+    const mems = {}; let t = null;
+    const mem = () => { const f = fp(); if (!mems[f]) { let m = {}; try { m = JSON.parse(localStorage.getItem('ax_studio_work_' + f) || '{}') || {}; } catch (e) {} const old = Date.now() - 14 * 864e5; Object.keys(m).forEach(k => { if (!m[k] || (m[k].at || 0) < old) delete m[k]; }); mems[f] = m; } return { f, m: mems[f] }; };
+    const persist = now => { clearTimeout(t); const run = () => { const { f, m } = mem(); try { localStorage.setItem('ax_studio_work_' + f, JSON.stringify(m)); } catch (e) {} }; if (now) run(); else t = setTimeout(run, 250); };
+    try { window.addEventListener('pagehide', () => persist(true)); } catch (e) {}
+    return {
+      get: id => mem().m[id] || null,
+      set: (id, rec, now) => { mem().m[id] = Object.assign({ at: Date.now() }, rec); persist(now); },
+      del: (id, base) => { const { m } = mem(); if (m[id] && (!base || m[id].base === base)) { delete m[id]; persist(true); } },
+      any: () => Object.keys(mem().m).length,
+      clear: () => { const { m } = mem(); Object.keys(m).forEach(k => delete m[k]); persist(true); },
+    };
+  })();
+  window.STWork = WORK;
   const chanLabel = c => (CHANNELS[c] || { label: c || '-' }).label;
   const isClear = t => /^(adapt|write|make|produce|resize|shorten|draft|three|two|one|give me|turn|create)\b/i.test(String(t || '').trim());
   const FORMAT_RATIO = { '1:1': 1, '4:5': 0.8, '9:16': 0.5625, '16:9': 1.7778 };
@@ -2059,7 +2079,7 @@
     const [edTools, setEdTools] = useState(null); const [edFoot, setEdFoot] = useState(null); const [dirtyNow, setDirtyNow] = useState(false);
     const stage = html`<div ref=${stageRef} class=${'st-stage ' + (zoom === 'fit' ? 'fit' : 'zoomed') + (checker ? ' checker' : ' plain') + (preview ? ' preview' : '') + (full ? ' full' : '') + (spaceDown && zoom !== 'fit' ? ' panning' : '')} style=${{ '--ar': ratio }} data-zoom=${zoom} onPointerDownCapture=${panDown} onPointerMoveCapture=${panMove} onPointerUpCapture=${panUp}>
         ${full ? html`<div class="st-full-bar"><b>${a.title}</b><button class="btn sm ghost" onClick=${() => setFull(false)}>Leave full screen</button></div>` : null}
-        <div class="st-stage-inner st-artboard" style=${zoomStyle}>${le ? html`<${LayoutEditor} key=${v.id + ':' + edKey} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} p=${p} kit=${kit} preview=${preview} onMore=${() => setTab('properties')} onDirty=${d => { setDirtyNow(d); if (onLayoutDirty) onLayoutDirty(d); }} propsSlot=${propsSlot} layersSlot=${layersSlot} toolsSlot=${edTools} footSlot=${edFoot} onSel=${ids => { setLayerSel(ids); if (ids.length && tab !== 'director') setTab('properties'); }} guides=${overlays && !preview} highlight=${!preview ? hlIds : []} onDone=${(layout, cp) => { if (layout) onLayoutSave(a, layout, v.id, null, cp); else setEdKey(k => k + 1); }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${!preview ? hlIds : []} tagOut=${true} />`}</div>
+        <div class="st-stage-inner st-artboard" style=${zoomStyle}>${le ? html`<${LayoutEditor} key=${v.id + ':' + edKey} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} p=${p} kit=${kit} preview=${preview} onMore=${() => setTab('properties')} onDirty=${d => { setDirtyNow(d); if (onLayoutDirty) onLayoutDirty(d); }} propsSlot=${propsSlot} layersSlot=${layersSlot} toolsSlot=${edTools} footSlot=${edFoot} onSel=${ids => { setLayerSel(ids); if (ids.length && tab !== 'director') setTab('properties'); }} guides=${overlays && !preview} highlight=${!preview ? hlIds : []} onDone=${(layout, cp, o) => { if (layout) return onLayoutSave(a, layout, (o && o.base) || v.id, null, cp, o); setEdKey(k => k + 1); return null; }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${!preview ? hlIds : []} tagOut=${true} />`}</div>
         ${hlIds.length && !preview ? html`<div class="st-hl-note" role="status">Outlined on the tile: ${hlIds.join(', ')}. <button class="ov-link" onClick=${() => setHlIds([])}>clear</button></div>` : null}
         ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The Creative Director is reviewing this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
       </div>`;
@@ -2311,7 +2331,9 @@
     const E = window.STEditor || {};
     // the working layout with its history: every finished gesture or command is one step that undo and redo walk. Words typed on
     // the canvas for the approved copy ride in the working layout as _copy, so undo walks them too; they are saved as copy.
-    const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(v.layout)), future: [] }));
+    // S19: an edit left on this exact version comes back from the working store (a switch of asset, stage or project does not lose it)
+    const work0 = useMemo(() => { const w = WORK.get(a.id); return w && w.base === v.id && w.layout && Array.isArray(w.layout.layers) ? w : null; }, []);
+    const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(work0 ? work0.layout : v.layout)), future: [] }));
     const layout = hist.now;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides0, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
     const [grid, setGrid] = useState(false); const [snapLines, setSnapLines] = useState([]); const [marquee, setMarquee] = useState(null); const [keysOpen, setKeysOpen] = useState(false);
@@ -2487,19 +2509,62 @@
     const frameRef = useRef(null); const wheelFn = useRef(null); wheelFn.current = frameWheel;
     useEffect(() => { const el = frameRef.current; if (!frame || !el) return; const h = e => { if (wheelFn.current) wheelFn.current(e); }; el.addEventListener('wheel', h, { passive: false }); return () => el.removeEventListener('wheel', h); }, [frame]);
     const strip = L => { const o = Object.assign({}, L); delete o._copy; return o; };
-    const copyPatch = () => { const c = layout._copy || {}; const out = {}; Object.keys(c).forEach(k => { if (c[k] !== ((v.copy || {})[k] || '')) out[k] = c[k]; }); return Object.keys(out).length ? out : null; };
-    const changed = JSON.stringify(strip(layout)) !== JSON.stringify(v.layout) || !!copyPatch();
+    const patchOf = L => { const c = (L || layout)._copy || {}; const out = {}; Object.keys(c).forEach(k => { if (c[k] !== ((v.copy || {})[k] || '')) out[k] = c[k]; }); return Object.keys(out).length ? out : null; };
+    const copyPatch = () => patchOf(layout);
+    const isChanged = L => JSON.stringify(strip(L)) !== JSON.stringify(v.layout) || !!patchOf(L);
+    const changed = isChanged(layout);
+    // words being typed on the canvas, not yet committed: they belong to the working state too
+    const pendingText = useRef(null);
+    const foldText = (L, pt) => { if (!pt) return L; const l = (L.layers || []).find(x => x.id === pt.id); if (!l) return L; const copyRole = (E.COPY_ROLES || []).indexOf(l.role) >= 0; if (copyRole) return Object.assign({}, L, { _copy: Object.assign({}, L._copy || {}, { [l.role]: pt.t }) }); return Object.assign({}, L, { layers: L.layers.map(x => x.id === pt.id ? Object.assign({}, x, { text: pt.t }) : x) }); };
     // unsaved edits are a state the whole page knows about (the header names them, leaving the page asks), never a silent loss
-    /* the draft: the working layout autosaved for this person a moment after each change (never a version), restored on return */
-    const [draftSt, setDraftSt] = useState(null); const [restore, setRestore] = useState(null); const draftT = useRef(null); const draftOn = useRef(true);
-    useEffect(() => { let live2 = true; call('/studio/draft?asset=' + encodeURIComponent(a.id)).then(d => { if (!live2 || !d || !d.draft || !d.draft.layout) return; const same = JSON.stringify(d.draft.layout) === JSON.stringify(v.layout) && !Object.keys(d.draft.copy || {}).some(k => d.draft.copy[k] !== ((v.copy || {})[k] || '')); if (!same) setRestore(d.draft); }).catch(() => {}); return () => { live2 = false; }; }, []);
-    useEffect(() => { if (!changed || !draftOn.current || restore) return; clearTimeout(draftT.current); setDraftSt({ state: 'pending' }); draftT.current = setTimeout(async () => { setDraftSt({ state: 'saving' }); try { const r = await call('/studio/draft', { asset: a.id, version: v.id, layout: strip(layout), copy: layout._copy || {} }); setDraftSt({ state: 'saved', at: r.at || Date.now() }); } catch (e) { setDraftSt({ state: 'error', msg: e.message }); } }, 1200); return () => clearTimeout(draftT.current); }, [layout]);
-    // S18: the page's save state names the difference: 'draft' (kept for this person, recoverable) or 'unsaved' (nothing holds it yet)
-    useEffect(() => { if (onDirty) onDirty(changed ? (draftSt && draftSt.state === 'saved' ? 'draft' : 'unsaved') : false); }, [changed, draftSt && draftSt.state]);
+    /* the draft: the working layout autosaved for this person a moment after each change (never a version), restored on return.
+       S19: the draft is kept until a version holding the edit is acknowledged; a failed or conflicting save leaves it, and autosave
+       carries on. The save line names each state: Unsaved, Saving recovery draft, Draft saved, Saving version, Save failed. */
+    // back from the working store: when the recovery draft already holds exactly this, say so (Draft saved), not Unsaved
+    const [draftSt, setDraftSt] = useState(() => work0 && MERGE && work0.draftSig && work0.draftSig === MERGE.sig({ l: strip(work0.layout), c: work0.layout._copy || {} }) ? { state: 'saved', at: work0.at, sig: work0.draftSig } : null); const [restore, setRestore] = useState(null); const draftT = useRef(null); const draftOn = useRef(true);
+    const [saveSt, setSaveSt] = useState(null);           // {state: 'saving'|'failed'|'conflict', msg}
+    const draftSig = useRef(work0 && work0.draftSig || null);   // the content the server draft holds
+    const savedSig = useRef(null); const savedTo = useRef(null);   // the content a version now holds, and that version's id
+    const layoutRef = useRef(layout); layoutRef.current = layout;
+    const sigOf = L => (MERGE ? MERGE.sig({ l: strip(L), c: L._copy || {} }) : JSON.stringify(L).length + '');
+    const sendDraft = (L, now) => { const sg = sigOf(L); if (sg === draftSig.current) return Promise.resolve({ same: true }); if (!now) setDraftSt({ state: 'saving' }); return call('/studio/draft', { asset: a.id, version: v.id, layout: strip(L), copy: L._copy || {} }).then(r => { draftSig.current = sg; const w = WORK.get(a.id); if (w && w.base === v.id) WORK.set(a.id, Object.assign({}, w, { draftSig: sg })); if (!now) setDraftSt({ state: 'saved', at: r.at || Date.now(), sig: sg }); return r; }).catch(e => { if (!now) setDraftSt({ state: 'error', msg: e.message }); throw e; }); };
+    useEffect(() => { let live2 = true; if (work0) { toastMsg('Your unsaved changes to ' + a.title + ' are back'); return () => { live2 = false; }; } call('/studio/draft?asset=' + encodeURIComponent(a.id)).then(d => { if (!live2 || !d || !d.draft || !d.draft.layout) return; const same = JSON.stringify(d.draft.layout) === JSON.stringify(v.layout) && !Object.keys(d.draft.copy || {}).some(k => d.draft.copy[k] !== ((v.copy || {})[k] || '')); if (!same) setRestore(d.draft); }).catch(() => {}); return () => { live2 = false; }; }, []);
+    // the working store follows every change; the server draft follows a moment later
+    useEffect(() => { if (changed) WORK.set(a.id, { base: v.id, project: p && p.id, ns, layout, draftSig: draftSig.current }); else if (!savedTo.current) WORK.del(a.id, v.id); }, [layout]);
+    useEffect(() => { if (!changed || !draftOn.current || restore) return; if (draftSig.current && draftSig.current === sigOf(layout)) return; clearTimeout(draftT.current); setDraftSt(d => d && d.state === 'saved' ? Object.assign({}, d, { state: 'pending' }) : { state: 'pending' }); draftT.current = setTimeout(() => { sendDraft(layoutRef.current).catch(() => {}); }, 1200); return () => clearTimeout(draftT.current); }, [layout]);
+    /* leaving the canvas (another asset, stage or project, or the Studio itself) never drops the work: the open text edit is
+       folded in, the working store keeps it, and the draft is written at once instead of after the debounce */
+    useEffect(() => () => {
+      clearTimeout(draftT.current);
+      const L = foldText(layoutRef.current, pendingText.current); const sg = sigOf(L);
+      if (savedSig.current && sg === savedSig.current) { WORK.del(a.id); return; }   // exactly what the saved version holds
+      if (!isChanged(L)) return;
+      const base = savedTo.current || v.id;                                             // edits made while a save was answered ride on the saved version
+      WORK.set(a.id, { base, project: p && p.id, ns, layout: L, draftSig: draftSig.current }, true);
+      if (!savedTo.current && draftOn.current) sendDraft(L, true).catch(() => {});
+    }, []);
+    // S18/S19: the page's save state names the difference
+    const stateWord = !changed ? false : saveSt && saveSt.state === 'saving' ? 'saving' : saveSt && (saveSt.state === 'failed' || saveSt.state === 'conflict') ? 'failed' : draftSt && draftSt.state === 'saving' ? 'drafting' : draftSt && draftSt.state === 'saved' && draftSig.current === sigOf(layout) ? 'draft' : 'unsaved';
+    useEffect(() => { if (onDirty) onDirty(stateWord); }, [stateWord]);
     useEffect(() => () => { if (onDirty) onDirty(false); }, []);
-    const discardDraft = () => { draftOn.current = false; clearTimeout(draftT.current); call('/studio/draft/discard', { asset: a.id }).catch(() => {}); };
+    const discardDraft = () => { draftOn.current = false; clearTimeout(draftT.current); WORK.del(a.id); call('/studio/draft/discard', { asset: a.id }).catch(() => {}); };
     const doRestore = () => { const d = restore; setRestore(null); if (!d) return; const L = JSON.parse(JSON.stringify(d.layout)); const c = d.copy || {}; if (Object.keys(c).length) L._copy = c; commit(L); toastMsg('Your unsaved layout is back'); };
-    const save = () => { discardDraft(); onDone(strip(layout), copyPatch()); };
+    /* saving a version: the draft stays until the worker acknowledges a version that holds the edit; the op id makes a retry of the
+       same edit idempotent (a save that committed but timed out is answered, not written twice) */
+    const saving = useRef(false);
+    const save = async () => {
+      if (saving.current) return; saving.current = true;
+      const L = layoutRef.current; const sg = sigOf(L); const op = 'e' + (MERGE ? MERGE.sig(v.id + '|' + sg).replace(':', '') : Date.now().toString(36));
+      setSaveSt({ state: 'saving' });
+      let r = null;
+      try { r = await onDone(strip(L), patchOf(L), { op, base: v.id }); }
+      catch (e) { r = { status: 'failed', error: e }; }
+      finally { saving.current = false; }
+      if (r && r.status === 'saved') { savedSig.current = sg; savedTo.current = r.version || null; setSaveSt(null); WORK.del(a.id, v.id); return; }
+      if (r && r.status === 'cancelled') { setSaveSt(null); return; }
+      setSaveSt({ state: r && r.status === 'conflict' ? 'conflict' : 'failed', msg: r && r.error ? (r.error.message || String(r.error)) : 'the version was not saved' });
+      draftOn.current = true; if (draftSig.current !== sg) sendDraft(L).catch(() => {});   // keep a recovery copy of exactly what failed
+    };
     const cancel = () => { if (changed && !window.confirm('Discard the unsaved layout changes? The saved version stays as it is.')) return; discardDraft(); draftOn.current = true; onDone(null); };
     const one = selected().length === 1 ? selected()[0] : null;
     // the type panel follows the layer last clicked, even inside a group (type is set per layer)
@@ -2584,7 +2649,7 @@
         </div>`; }) : null}
         ${snapLines.map((g, i) => html`<div key=${'snap' + i} class=${'st-le-snap ' + g.axis} aria-hidden="true" style=${g.axis === 'x' ? { left: g.at + '%' } : { top: g.at + '%' }}></div>`)}
         ${marquee && marquee.on ? html`<div class="st-le-marquee" aria-hidden="true" style=${{ left: Math.min(marquee.x0, marquee.x1) + '%', top: Math.min(marquee.y0, marquee.y1) + '%', width: Math.abs(marquee.x1 - marquee.x0) + '%', height: Math.abs(marquee.y1 - marquee.y0) + '%' }}></div>` : null}
-        ${editingL && E.TextEditor && layout.stage ? html`<${E.TextEditor} key=${'te-' + editingL.id} layer=${editingL} value=${R.displayedText(Object.assign({}, layout, { baked: [] }), Object.assign({}, editingL, { hidden: false }), wcopy)} layout=${layout} stageW=${box.current ? box.current.getBoundingClientRect().width : layout.stage.w} onCommit=${t => commitEdit(editingL, t)} onCancel=${() => setEditing(null)} />` : null}
+        ${editingL && E.TextEditor && layout.stage ? html`<${E.TextEditor} key=${'te-' + editingL.id} layer=${editingL} value=${R.displayedText(Object.assign({}, layout, { baked: [] }), Object.assign({}, editingL, { hidden: false }), wcopy)} layout=${layout} stageW=${box.current ? box.current.getBoundingClientRect().width : layout.stage.w} onCommit=${t => { pendingText.current = null; commitEdit(editingL, t); }} onCancel=${() => { pendingText.current = null; setEditing(null); }} onChange=${t => { pendingText.current = { id: editingL.id, t }; WORK.set(a.id, { base: v.id, project: p && p.id, ns, layout: foldText(layout, pendingText.current), draftSig: draftSig.current }); }} />` : null}
         ${!preview && !editing && !(act.current) && E.ContextToolbar ? html`<${E.ContextToolbar} sel=${selected()} bbox=${selBox} layout=${layout} ro=${false} locks=${a.locks || {}} onPatch=${pt => { const s = selected().filter(movable); if (s.length === 1) setOne(s[0].id, pt); }} onPatchEach=${fn => setEach(l => (l.type === 'text' ? fn(l) : {}))} onDuplicate=${duplicate} onDelete=${remove} onLock=${() => { const s = selected(); const lockIt = !s.some(l => l.locked); const patches = {}; s.forEach(l => { patches[l.id] = { locked: lockIt || undefined }; }); commit(patchMany(layout, patches)); }} onOrder=${reorder} onMore=${() => { if (onMore) onMore(); }} onEditText=${startEdit} onReplace=${replaceImage} onFontOpen=${() => setFontOpen(true)} />` : null}
         ${fontOpen && E.FontPicker ? html`<div class="st-le-fontwrap" onPointerDown=${e => e.stopPropagation()}><${E.FontPicker} value=${(byId(fontTargets()[0]) || {}).family || ''} brand=${brandFonts} onPick=${pickFont} onPreview=${f => setFontPreview(f == null ? null : { family: f, ids: fontTargets() })} onClose=${() => { setFontOpen(false); setFontPreview(null); }} /></div>` : null}
       </div>
@@ -2592,8 +2657,8 @@
       ${layersSlot ? ReactDOM.createPortal(list, layersSlot) : null}
       ${(() => { const foot = html`<div class="st-msg-foot st-le-foot">
         ${val && !preview ? html`<span class=${'st-le-val' + (val.ok ? '' : ' bad')} role="status" title="The working layout, measured as you edit it at the output size">${val.ok ? 'Measured at ' + val.W + 'x' + val.H + ' as you edit: no blocking issue' : 'Measured at ' + val.W + 'x' + val.H + ' as you edit: ' + val.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ') + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')}</span>` : null}
-        <span class=${'st-le-draft ' + ((draftSt && draftSt.state) || '') + (changed ? ' st-le-dirty' : '')} role="status" aria-live="polite">${!changed ? 'No unsaved changes' : !draftSt || draftSt.state === 'pending' ? 'Unsaved changes' : draftSt.state === 'saving' ? 'Saving draft...' : draftSt.state === 'saved' ? 'Draft saved ' + new Date(draftSt.at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) + ' (for you only)' : 'Draft not saved'}</span>
-        ${changed ? html`<button class="btn sm" onClick=${save} title="Save the layout (and any words typed on the canvas) as a new version; no render">Save layout as a version</button><button class="btn sm ghost" onClick=${cancel} title="Put the canvas back to the saved version">Discard changes</button>` : null}
+        <span class=${'st-le-draft ' + (stateWord || 'clean') + (changed ? ' st-le-dirty' : '')} role="status" aria-live="polite" title=${saveSt && saveSt.msg ? saveSt.msg : ''}>${!changed ? 'No unsaved changes' : stateWord === 'saving' ? 'Saving version...' : stateWord === 'failed' ? (saveSt.state === 'conflict' ? 'Not saved: changed elsewhere - choose what to keep' : 'Save failed: ' + (saveSt.msg || 'not saved') + '. Your changes and the recovery draft are kept; Save again.') : stateWord === 'drafting' ? 'Saving recovery draft...' : stateWord === 'draft' ? 'Draft saved ' + new Date((draftSt && draftSt.at) || Date.now()).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) + ' (for you only)' : draftSt && draftSt.state === 'error' ? 'Unsaved: the recovery draft did not save (' + draftSt.msg + ')' : 'Unsaved changes'}</span>
+        ${changed ? html`<button class="btn sm" disabled=${stateWord === 'saving'} onClick=${save} title="Save the layout (and any words typed on the canvas) as a new version; no render">${stateWord === 'saving' ? 'Saving...' : stateWord === 'failed' ? 'Save layout again' : 'Save layout as a version'}</button><button class="btn sm ghost" onClick=${cancel} title="Put the canvas back to the saved version">Discard changes</button>` : null}
         <button class="st-iconbtn sm" onClick=${() => setKeysOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><${Icon} n="help" size=${14} /></button>
       </div>`; return footSlot ? ReactDOM.createPortal(foot, footSlot) : foot; })()}
     </div>`;
@@ -2634,6 +2699,25 @@
       <textarea class="st-ta" rows="2" value=${why} onInput=${e => setWhy(e.target.value)} placeholder="Reason (recorded with the decision; client taste, not performance)" autoFocus></textarea>
       <div class="st-dialog-acts"><button class="btn sm" disabled=${!why.trim()} onClick=${() => onDone(why.trim())}>Record</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
     </div></div>`;
+  }
+
+  /** S19: both people changed the same thing. Each conflicting field or layer is shown with what it was, what I made it and what
+      they made it; nothing is written until a person chooses: keep mine, keep theirs, or choose item by item. Cancel keeps my
+      edit on the canvas (and in the recovery draft) and writes nothing. */
+  function ConflictDialog({ c, onDone }) {
+    const [per, setPer] = useState(false); const [ch, setCh] = useState({});
+    const show = (x, kind) => x === undefined ? html`<i class="ov-dim">removed</i>` : kind === 'copy' ? (String(x) || html`<i class="ov-dim">empty</i>`) : kind === 'layer' ? html`<span class="ov-dim">${'x ' + x.x + ' y ' + x.y + ' w ' + x.w + (x.size ? ', size ' + x.size : '') + (x.hidden ? ', hidden' : '')}</span>` : html`<span class="ov-dim">${JSON.stringify(x).slice(0, 80)}</span>`;
+    const all = c.m.conflicts.every(x => ch[x.id]);
+    return html`<div class="st-dialog st-conflict" role="dialog" aria-modal="true" aria-labelledby="st-conflict-h"><div class="st-dialog-box">
+      <div class="ov-title" id="st-conflict-h">${c.as.title} changed while you edited</div>
+      <div class="st-pad ov-dim">v${c.theirsN} changed ${c.m.conflicts.length === 1 ? 'something you changed too' : c.m.conflicts.length + ' things you changed too'}. Everything else from both of you is kept. Nothing is saved until you choose.</div>
+      <table class="st-table st-conflict-t"><thead><tr><th>What</th><th>Before</th><th>Yours</th><th>Theirs</th>${per ? html`<th>Keep</th>` : null}</tr></thead><tbody>
+        ${c.m.conflicts.map(x => html`<tr key=${x.id}><td>${x.label}</td><td>${show(x.base, x.kind)}</td><td>${show(x.mine, x.kind)}</td><td>${show(x.theirs, x.kind)}</td>${per ? html`<td><span class="st-seg" role="group" aria-label=${'Keep for ' + x.label}><button class=${'btn sm' + (ch[x.id] === 'mine' ? ' on' : ' ghost')} aria-pressed=${ch[x.id] === 'mine'} onClick=${() => setCh(o => Object.assign({}, o, { [x.id]: 'mine' }))}>Mine</button><button class=${'btn sm' + (ch[x.id] === 'theirs' ? ' on' : ' ghost')} aria-pressed=${ch[x.id] === 'theirs'} onClick=${() => setCh(o => Object.assign({}, o, { [x.id]: 'theirs' }))}>Theirs</button></span></td>` : null}</tr>`)}
+      </tbody></table>
+      <div class="st-dialog-acts">
+        ${per ? html`<button class="btn sm" disabled=${!all} onClick=${() => onDone(ch)}>Save these choices</button>` : html`<button class="btn sm" onClick=${() => onDone('mine')}>Keep mine</button><button class="btn sm ghost" onClick=${() => onDone('theirs')}>Keep theirs</button>${c.m.conflicts.length > 1 ? html`<button class="btn sm ghost" onClick=${() => setPer(true)}>Choose item by item</button>` : null}`}
+        <button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel (keep editing)</button>
+      </div></div></div>`;
   }
 
   /* ------------------------------------------------------------ the app */
@@ -3066,7 +3150,7 @@
     const onDraftState = useCallback((id, on) => { if (on) typingSet.current.add(id); else typingSet.current.delete(id); setTyping(typingSet.current.size); }, []);
     // an open layout editor with unsaved changes: named in the header, and leaving the page asks first
     const [layoutDirty, setLayoutDirty] = useState(false); const layoutDirtyRef = useRef(false); layoutDirtyRef.current = layoutDirty;
-    useEffect(() => { const h = e => { if (typingSet.current.size || saveSt.pending || layoutDirtyRef.current) { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
+    useEffect(() => { const h = e => { /* S19: canvas edits survive a reload (the working store and the recovery draft); only a write in flight or a failed save needs a question */ if (typingSet.current.size || saveSt.pending || layoutDirtyRef.current === 'saving' || layoutDirtyRef.current === 'failed') { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
 
     const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The Creative Director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The Creative Director refines ' : 'The Creative Director explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The Creative Director did not start', () => propose(as, feedback, refine, opts)); } });
     const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the Creative Director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
@@ -3080,20 +3164,53 @@
         await reload(); return true;
       } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message + (e.requestId ? ' (request ' + e.requestId + ')' : '') + '. Measure again to retry.', true); return false; }
     };
-    /* layout versions go on the latest revision; if the asset moved on, the layout is re-sent only when the newer version did not change the layout too */
-    const putLayout = async (as, layout, baseVid, note, copyPatch) => {
-      const fresh = (((pRef.current || {}).assets || []).find(x => x.id === as.id)) || as;
-      // words typed on the canvas for the approved copy travel with the layout as one version (the copy approval drops, as for any edit)
-      const withCopy = copyPatch && Object.keys(copyPatch).length ? { copy: Object.assign({}, (current(fresh) || {}).copy || {}, copyPatch) } : {};
-      try { await call('/studio/version', Object.assign({ asset: as.id, revision: fresh.revision, layout, kind: 'layout', note }, withCopy)); await reload(); return true; }
-      catch (e) {
-        if (e.status !== 409 || e.code !== 'conflict') throw e;
-        const d = await reload(); const as2 = d && d.assets.find(x => x.id === as.id); if (!as2) throw e;
-        const base = as2.versions.find(x => x.id === baseVid); const cur = current(as2);
-        if (base && JSON.stringify(base.layout) === JSON.stringify(cur.layout)) { await call('/studio/version', { asset: as.id, revision: as2.revision, layout, kind: 'layout', note }); await reload(); return true; }
-        setNotice({ kind: 'warn', title: 'The layout changed elsewhere while you edited.', text: 'v' + vtotal(as2) + ' changed the layout too, so yours was not saved over it. Apply yours on top of v' + vtotal(as2) + ', or leave the newer layout.', actions: [{ label: 'Apply mine on top', fn: async () => { try { const as3 = (await reload()).assets.find(x => x.id === as.id); await call('/studio/version', { asset: as.id, revision: as3.revision, layout, kind: 'layout', note: note + ' (applied over a newer layout)' }); await reload(); } catch (e3) { fail(e3, 'The layout was not saved'); } } }] });
-        return false;
+    /* S19: one canvas edit - the layout and the words typed on the canvas - is saved as one version. When the asset moved on since
+       the edit began, the edit is merged three ways against the version it was made on (STMerge): independent changes combine,
+       and where both changed the same field or layer a person chooses (the conflict dialog) - nothing is overwritten or dropped in
+       silence. The op id makes a retry of the same edit idempotent: a save that committed but timed out is answered by the worker
+       with the version it already wrote. Success is reported only when the saved version holds the edit; the recovery draft of the
+       edit is discarded only then, and only that draft (made on the same base, written no later than the version). */
+    const [editConflict, setEditConflict] = useState(null);
+    const saveEdit = async (as, edit) => {
+      const { layout, baseVid, note } = edit; const patch = edit.copyPatch && Object.keys(edit.copyPatch).length ? edit.copyPatch : null;
+      const op = edit.op || ('l' + (MERGE ? MERGE.sig({ b: baseVid, l: layout, c: patch, n: note }).replace(':', '') : Date.now().toString(36)));
+      const find = d => ((d || pRef.current || {}).assets || []).find(x => x.id === as.id);
+      let fresh = find() || as;
+      const baseV = (fresh.versions || []).find(x => x.id === baseVid) || (as.versions || []).find(x => x.id === baseVid) || current(fresh);
+      let want = { layout, copy: patch ? Object.assign({}, (baseV && baseV.copy) || {}, patch) : null };
+      const intended = () => ({ layout: want.layout, copy: patch ? Object.keys(patch).reduce((o, k) => { o[k] = (want.copy || {})[k]; return o; }, {}) : {} });
+      let needMerge = !!(current(fresh) && current(fresh).id !== baseVid);
+      for (let round = 0; round < 4; round++) {
+        if (needMerge) {
+          const theirs = current(fresh); if (!theirs || !MERGE) return { status: 'failed', error: new Error('the asset changed and could not be merged') };
+          const m = MERGE.merge({ base: { layout: baseV.layout, copy: baseV.copy }, mine: { layout, copy: patch || {} }, theirs: { layout: theirs.layout, copy: theirs.copy } });
+          if (m.clean) want = { layout: m.layout, copy: m.copy };
+          else {
+            const choice = await new Promise(res => setEditConflict({ as, m, theirsN: vtotal(fresh), res }));
+            setEditConflict(null);
+            if (!choice) return { status: 'conflict', error: new Error('changed elsewhere; nothing was saved over it') };
+            const x = MERGE.resolve(m, null, null, null, choice); want = { layout: x.layout, copy: x.copy };
+          }
+          needMerge = false;
+        }
+        try {
+          const r = await call('/studio/version', Object.assign({ asset: as.id, revision: fresh.revision, layout: want.layout, kind: 'layout', note: note + (round ? ' (merged with a newer version)' : ''), op }, want.copy ? { copy: want.copy } : {}));
+          await reload();
+          if (MERGE && r.version && !MERGE.contains(r.version, intended())) return { status: 'failed', error: new Error('the version written does not hold the edit; nothing is lost - save again') };
+          call('/studio/draft/discard', { asset: as.id, version: baseVid, savedVersion: r.version && r.version.id }).catch(() => {});
+          return { status: 'saved', version: r.version && r.version.id, duplicate: !!r.duplicate };
+        } catch (e) {
+          if (e.status !== 409 || e.code !== 'conflict') return { status: 'failed', error: e };
+          const d = await reload(); fresh = find(d); if (!fresh) return { status: 'failed', error: e };
+          needMerge = !!(current(fresh) && current(fresh).id !== baseVid); if (!needMerge) continue;
+        }
       }
+      return { status: 'failed', error: new Error('the asset kept changing while saving; nothing was lost - save again') };
+    };
+    /* the other layout writers (fix, variations, variants, headline size) go through the same path */
+    const putLayout = async (as, layout, baseVid, note, copyPatch) => {
+      const r = await saveEdit(as, { layout, baseVid, note, copyPatch });
+      if (r.status === 'saved') return true; if (r.status === 'failed') throw r.error; return false;
     };
     /* the smallest geometric fix, measured with the real renderer, saved as a layout version: no image call is made. The outcome is one
        of four states - complete, partial, blocked, nothing - with the blocking count before and after, what changed, what still stands
@@ -3153,7 +3270,12 @@
         if (j && j.state === 'done') toastMsg('Review in: an opinion, it approves nothing');
       } catch (e) { fail(e, 'The review did not start', () => reviewNow(as)); }
     });
-    const saveLayout = async (as, layout, baseVid, note, copyPatch) => { const words = copyPatch && Object.keys(copyPatch).length; try { await putLayout(as, layout, baseVid || as.current, note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : words ? 'layout and words (' + Object.keys(copyPatch).join(', ') + ') edited on the canvas' : 'layout edited by hand', copyPatch); } catch (e) { fail(e, 'The layout was not saved', () => saveLayout(as, layout, baseVid, note, copyPatch)); } };
+    const saveLayout = async (as, layout, baseVid, note, copyPatch, o) => {
+      const words = copyPatch && Object.keys(copyPatch).length;
+      const r = await saveEdit(as, { layout, copyPatch, baseVid: baseVid || as.current, op: o && o.op, note: note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : words ? 'layout and words (' + Object.keys(copyPatch).join(', ') + ') edited on the canvas' : 'layout edited by hand' });
+      if (r.status === 'failed') fail(r.error, 'The layout was not saved (your changes and the recovery draft are kept)');
+      return r;
+    };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
     const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)) }); };
@@ -3286,12 +3408,13 @@
     const campName = p && p.campaign ? ((kit && kit.campaigns || []).find(c => c.id === p.campaign) || {}).name || p.campaign : '';
     /* S18: one save state for the whole page, in four words that mean four different things: a version is saved, a change is
        being written, a layout draft is kept for this person only (recoverable, not a version), or there are changes nothing holds */
-    const saveKind = saveSt.err ? 'bad' : saveSt.pending || typing ? 'busy' : layoutDirty === 'draft' ? 'draft' : layoutDirty ? 'warn' : 'ok';
-    const saveWord = { bad: 'Not saved', busy: 'Saving...', draft: 'Draft saved', warn: 'Unsaved changes', ok: 'Version saved' }[saveKind];
-    const saveTitle = { bad: 'The last change was refused or did not reach the worker; your words are still on the page', busy: 'A change is being written as a new version', draft: 'Your layout changes are kept as a draft for you only (they come back after a reload); Save version makes them a version', warn: 'Layout changes that nothing holds yet: they are autosaved as a draft in a moment, or Save version keeps them', ok: 'Every change is saved as a version' }[saveKind];
+    // S19: one vocabulary for the whole page: Unsaved, Saving recovery draft, Draft saved, Saving version, Version saved, Save failed
+    const saveKind = saveSt.err || layoutDirty === 'failed' ? 'bad' : layoutDirty === 'saving' ? 'busy' : saveSt.pending || typing ? 'busy' : layoutDirty === 'drafting' ? 'drafting' : layoutDirty === 'draft' ? 'draft' : layoutDirty ? 'warn' : 'ok';
+    const saveWord = { bad: 'Save failed', busy: layoutDirty === 'saving' ? 'Saving version...' : 'Saving...', drafting: 'Saving recovery draft...', draft: 'Draft saved', warn: 'Unsaved', ok: 'Version saved' }[saveKind];
+    const saveTitle = { bad: 'The last change was refused or did not reach the worker; your changes are still here (and the recovery draft is kept). Save again or retry.', busy: 'A change is being written as a new version', drafting: 'Your layout changes are being kept as a recovery draft for you only', draft: 'Your layout changes are kept as a draft for you only (they come back after a reload or when you return to this asset); Save layout makes them a version', warn: 'Layout changes that nothing holds yet: they are kept as a recovery draft in a moment, or Save layout keeps them as a version', ok: 'Every change is saved as a version' }[saveKind];
     const b0 = (p && p.brief) || {}; const g2h = b0.workflow === 2;
     const pmode = p && b0.deliverable !== 'copy' ? ((b0.production && b0.production.mode) || (g2h ? '' : b0.creationMode === 'finished' ? 'finished' : 'editable')) : null;
-    const backToAxiom = () => { if (layoutDirtyRef.current && layoutDirtyRef.current !== 'draft' && !window.confirm('Leave the Studio? Your layout changes are not saved as a version yet.')) return; try { if (typeof window.go === 'function') window.go('command'); } catch (e) {} };
+    const backToAxiom = () => { const st = layoutDirtyRef.current; if ((st === 'saving' && !window.confirm('A version is still being saved. Leave the Studio anyway? Your changes stay as a recovery draft.')) || (st === 'failed' && !window.confirm('The last save failed. Leave the Studio? Your changes stay as a recovery draft for you, and come back when you open this asset.'))) return; try { if (typeof window.go === 'function') window.go('command'); } catch (e) {} };
     const header = html`<header class="st-head">
       <button class="st-back" onClick=${backToAxiom} title="Back to AXIOM: the newsroom and every other view (the Studio keeps your place)" aria-label="Back to AXIOM"><${Icon} n="back" size=${15} /><span>AXIOM</span></button>
       <span class="st-hbrand" aria-hidden=${p ? 'true' : undefined}><span class="st-appname">Creative Studio</span></span>
@@ -3399,6 +3522,7 @@
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
       ${panel && p ? html`<${ClientPanel} p=${p} kind=${panel} onClose=${() => setPanel(null)} onChanged=${() => { setCtxTick(t => t + 1); loadLib(); }} />` : null}
       ${impactQ && F ? html`<${F.ImpactDialog} q=${impactQ} onAnswer=${answerImpact} />` : null}
+      ${editConflict ? html`<${ConflictDialog} c=${editConflict} onDone=${v => editConflict.res(v)} />` : null}
       ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.'} onDone=${recordDecision} />` : null}
     </div>`;
   }

@@ -108,7 +108,7 @@
   /** A text area over the layer, set in the layer's own face, size, weight, colour and alignment, so the words are edited where
       they sit. Ctrl or Cmd+Enter (or leaving it) keeps them; Escape puts them back. The approved words (headline, support, call
       to action) are edited as copy - the same as the Copy tab - and the rest as the layer's own text. */
-  function TextEditor({ layer, value, layout, stageW, onCommit, onCancel }) {
+  function TextEditor({ layer, value, layout, stageW, onCommit, onCancel, onChange }) {
     const [t, setT] = useState(value || ''); const ref = useRef(null); const done = useRef(false);
     useEffect(() => { const el = ref.current; if (el) { el.focus(); el.select(); } }, []);
     const px = (layer.size || 4) / 100 * stageW;
@@ -117,7 +117,7 @@
     const finish = keep => { if (done.current) return; done.current = true; if (keep && t !== value) onCommit(t); else onCancel(); };
     const style = { left: layer.x + '%', top: layer.y + '%', width: layer.w + '%', minHeight: Math.max(layer.h || 0, (layer.size || 4) * 1.4) + '%', fontFamily: fam, fontSize: px + 'px', fontWeight: layer.weight || 600, fontStyle: layer.italic ? 'italic' : 'normal', lineHeight: layer.lineHeight || 1.12, letterSpacing: (layer.letterSpacing || 0) + 'em', color: layer.color || '#fff', textAlign: layer.align === 'center' ? 'center' : layer.align === 'right' ? 'right' : 'left', textTransform: layer.case === 'upper' || layer.emphasis === 'caps' ? 'uppercase' : layer.case === 'lower' ? 'lowercase' : layer.case === 'title' ? 'capitalize' : 'none', transform: layer.rotate ? 'rotate(' + layer.rotate + 'deg)' : undefined };
     return html`<textarea ref=${ref} class="st-le-textedit" style=${style} value=${t} aria-label=${'Words of the ' + (layer.role || 'text') + ' layer'} spellCheck="true"
-      onInput=${e => setT(e.target.value)} onPointerDown=${e => e.stopPropagation()}
+      onInput=${e => { setT(e.target.value); if (onChange) onChange(e.target.value); }} onPointerDown=${e => e.stopPropagation()}
       onKeyDown=${e => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); finish(false); } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); finish(true); } }}
       onBlur=${() => finish(true)}></textarea>`;
   }

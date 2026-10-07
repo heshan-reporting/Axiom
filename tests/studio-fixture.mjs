@@ -117,7 +117,7 @@ export async function makeStudio(opts) {
       const path = u.slice(W.length); seen.push({ method: rq.method(), path, body: rq.postData() });
       for (const h of holds) if (h.re.test(path)) await h.wait;
       // a request made to fail on purpose (once): the page must cope and retry, never pretend it succeeded
-      const fi = fails.findIndex(f => f.re.test(path)); if (fi >= 0) { const f = fails.splice(fi, 1)[0]; f.hit++; return route.fulfill({ status: f.status || 500, headers: { 'content-type': 'application/json' }, body: JSON.stringify(f.body || { error: 'internal_error', detail: 'made to fail by the harness' }) }); }
+      const fi = fails.findIndex(f => f.re.test(path)); if (fi >= 0) { const f = fails.splice(fi, 1)[0]; f.hit++; if (f.after) { const b0 = rq.postDataBuffer(); const r0 = await handler.fetch(new Request(u, { method: rq.method(), headers: rq.headers(), body: b0 && rq.method() !== 'GET' ? b0 : undefined }), env, ctx); f.committed = await r0.text(); } return route.fulfill({ status: f.status || 500, headers: { 'content-type': 'application/json' }, body: JSON.stringify(f.body || { error: 'internal_error', detail: 'made to fail by the harness' }) }); }
       const headers = rq.headers(); const body = rq.postDataBuffer();
       const res = await handler.fetch(new Request(u, { method: rq.method(), headers, body: body && rq.method() !== 'GET' ? body : undefined }), env, ctx);
       const hh = {}; res.headers.forEach((v, k) => { hh[k] = v; });
@@ -128,7 +128,8 @@ export async function makeStudio(opts) {
     if (o.go !== false) { await page.evaluate(() => go('studio')); await page.waitForSelector('#studio-root .st-head'); }
     page.ctxB = ctxB; return page;
   }
-  function failNext(re, status, body) { const f = { re, status, body, hit: 0 }; fails.push(f); return f; }
+  /* fail the next matching request; with {after:true} the worker handles it first (it commits) and the browser still sees the failure, as a timeout after the server wrote */
+  function failNext(re, status, body, o2) { const f = { re, status, body, hit: 0, after: !!(o2 && o2.after) }; fails.push(f); return f; }
   function hold(re) { let release; const wait = new Promise(r => { release = r; }); const h = { re, wait }; holds.push(h); return () => { release(); holds.splice(holds.indexOf(h), 1); }; }
   async function close() { await browser.close(); server.kill(); globalThis.fetch = realFetch; }
   return { env, handler, api, calls, providers, setProvider, open, close, hold, failNext, seen, r2, kv, PORT };

@@ -170,7 +170,7 @@ await T.t('10. the save state names what is true: unsaved changes, then a draft 
   const save = () => page.textContent(R + '.st-head .st-save');
   ok(/Version saved/.test(await save()), 'nothing pending: ' + await save());
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('ArrowDown'); await sleep(150);
-  ok(/Unsaved changes|Draft saved/.test(await save()), 'after a nudge: ' + await save());
+  ok(/Unsaved|Saving recovery draft|Draft saved/.test(await save()), 'after a nudge: ' + await save());
   await page.waitForFunction(() => /Draft saved/.test(document.querySelector('#studio-root .st-head .st-save').textContent), null, { timeout: 10000 });
   ok(/Draft saved/.test(await page.textContent(R + '.st-le-foot')), 'the canvas foot says the same');
   const n0 = (await api('GET', '/studio/get?id=' + P.design)).assets.reduce((x, a) => x + a.versions.length, 0);
