@@ -89,7 +89,7 @@ await T.t('producing the finished narrative sets the project to Finished creativ
   eq(mode, 'finished', 'the route set the creation mode');
   let g; for (let i = 0; i < 40; i++) { g = await api('GET', '/studio/get?id=' + fx.P); if (g.directions.find(d => d.title === 'One striking poster').chosen) break; await new Promise(r => setTimeout(r, 250)); }
   ok(g.directions.find(d => d.title === 'One striking poster').chosen, 'the narrative is the chosen direction (after the mode was set)');
-  await page.evaluate(() => { const b = Array.from(document.querySelectorAll('#studio-root .st-step')).find(x => /Direction/.test(x.textContent)); if (b) b.click(); });
+  await page.evaluate(() => { const b = Array.from(document.querySelectorAll('#studio-root .st-step')).find(x => /Direction|Explore/.test(x.textContent)); if (b) b.click(); });
   await page.waitForSelector(R + '.st-dir-route', { timeout: 15000 });
   const routes = await page.$$eval(R + '.st-dir-route', ds => ds.map(d => d.textContent.replace(/\s+/g, ' ')));
   ok(routes.some(r => /Gemini finished creative/.test(r) && /from the brief analysis/.test(r)), routes.join(' | '));

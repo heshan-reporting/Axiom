@@ -71,4 +71,34 @@ await T.t('A: a revise job made for an earlier version fails stale_version (not 
   let jj = j; for (let i = 0; i < 4 && !/done|failed/.test(jj.state); i++) jj = (await call('POST', '/studio/job/step', { id: j.id })).body.job;
   eq(jj.state, 'failed'); ok(/stale_version/.test(jj.error || ''), jj.error); eq((await fresh()).versions.length, n0, 'no version written');
 });
+// S20 section 8: the campaign address is resolved explicitly, and another campaign's address on a piece is named
+await T.t('the campaign URL: a HOOF piece that shows the national campaign\'s address is flagged as another campaign\'s; its own address passes; a standalone piece with an address says it is unresolved', async () => {
+  await call('POST', '/brand/kit', { ns: 'pca', name: 'Test client', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', url: 'https://www.handsoffourfuel.com.au', logoPolicy: 'none' }, { id: 'national', name: 'Australian mining', url: 'https://minerals.org.au/facts', logoPolicy: 'none' }] });
+  const mk = async (campaign, caption) => { const P2 = (await call('POST', '/studio/project', { ns: 'pca', campaign, title: 'url ' + campaign + caption.length, brief: { objective: 'o', message: 'm', channels: ['instagram'] } })).body.id;
+    const a = (await call('POST', '/studio/asset', { project: P2, channel: 'instagram', format: '1:1', title: 'u', copy: { headline: 'H', support: 'S', caption }, layout: L(), mode: 'composition' })).body.asset; return a.versions[a.versions.length - 1].checks || []; };
+  const wrong = await mk('hoof', 'Read more at minerals.org.au/facts today.');
+  const w = wrong.find(c => c.state === 'url_mismatch'); ok(w && /another campaign \(national\)/.test(w.note) && /handsoffourfuel\.com\.au/.test(w.note), 'named as the other campaign\'s address: ' + JSON.stringify(wrong));
+  const right = await mk('hoof', 'Read more at www.handsoffourfuel.com.au');
+  ok(!right.some(c => /^url_/.test(c.state)), 'its own address passes: ' + JSON.stringify(right));
+  const alone = await mk('', 'Read more at example.com.au');
+  ok(alone.some(c => c.state === 'url_unresolved'), 'a standalone piece cannot borrow a campaign address: ' + JSON.stringify(alone));
+});
+// S20 section 7: diversity on what is drawn, not only on what is argued (the pure functions, read from the worker source)
+{
+  const src = (await import('node:fs')).readFileSync(new URL('../axiomworkerv4.js', import.meta.url), 'utf8');
+  const a = src.indexOf('const ST_COLOUR_WORDS'), b = src.indexOf('function stDiversity(dirs)');
+  const { stCompDescriptor, stCompositionDiversity } = new Function(src.slice(a, b) + '; return { stCompDescriptor, stCompositionDiversity };')();
+  await T.t('composition diversity: three directions that argue differently but draw the same full-bleed photograph with the words at the foot score as look-alikes; three that draw differently score apart', async () => {
+    const same = [1, 2, 3].map(i => ({ title: 'D' + i, medium: 'photo-documentary', composition: 'full-bleed photograph of a farmer, headline across the bottom', colour: 'teal and white' }));
+    const cs = stCompositionDiversity(same); ok(cs.score < 0.3, 'alike on the page: ' + cs.score); ok(cs.pairs.every(x => x.close), 'every pair named');
+    const diff = [
+      { title: 'Type', medium: 'typographic', composition: 'type only, oversized headline centred', typography: 'huge condensed sans', colour: 'gold on black' },
+      { title: 'Split', medium: 'photo-documentary', composition: 'split: photograph on the left, words on the right', colour: 'teal and white' },
+      { title: 'Chart', medium: 'infographic', composition: 'a bar chart of the figures, headline at the top', colour: 'navy and orange' },
+    ];
+    const cd = stCompositionDiversity(diff); ok(cd.score >= 0.6, 'apart on the page: ' + cd.score); ok(!cd.pairs.some(x => x.close), 'no look-alikes');
+    eq(diff.map(stCompDescriptor).map(d => [d.image, d.zone]), [['none', 'middle'], ['split', 'right'], ['chart', 'top']], 'what each would draw');
+    ok(/not of rendered images/.test(cd.method), 'it says what it measured');
+  });
+}
 const res = T.done(); process.exit(res.fail ? 1 : 0);

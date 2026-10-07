@@ -29,7 +29,10 @@
   ];
   const TYPE_CHANNELS = { campaign: ['facebook', 'instagram', 'linkedin'], response: ['facebook', 'x', 'linkedin'], social: ['facebook', 'instagram'], paid: ['facebook', 'instagram'], announcement: ['linkedin', 'facebook', 'x'], news_response: ['x', 'facebook', 'linkedin'], explainer: ['instagram', 'linkedin'], brand: ['instagram', 'linkedin'], reactive: ['x', 'facebook'], other: ['facebook', 'instagram'] };
   const STEP_WORD = { not_started: 'Not started', in_progress: 'In progress', processing: 'Processing', needs_review: 'Needs review', complete: 'Complete', locked: 'Locked', error: 'Error', skipped: 'Skipped' };
-  const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Directions', copy: 'Copy', design: 'Design', review: 'Review & Delivery' };
+  const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Explore', copy: 'Copy', design: 'Design', review: 'Review & Deliver' };
+  // S20: the five phases the person moves between, over the worker's seven steps
+  const PHASE_STEPS = [['Brief', ['brief', 'objectives', 'strategy']], ['Explore', ['directions']], ['Copy', ['copy']], ['Design', ['design']], ['Review & Deliver', ['review']]];
+  const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy' };
   const STARTS = [
     ['brief', 'Paste a Brief', 'pen'], ['situation', 'Describe a Situation', 'chat'], ['article', 'Paste an Article', 'news'], ['url', 'Add a URL', 'link'],
     ['file', 'Upload Files', 'upload'], ['screenshot', 'Upload Screenshot', 'image'], ['campaign', 'Use Existing Campaign', 'flag'], ['axiom', 'Start With Axiom', 'sparkle'],
@@ -340,29 +343,48 @@
   }
 
   /* ------------------------------------------------------------ the Creative Directions board */
-  /** A free preview of a direction: its hook and headline set in the client's palette by the one renderer. Type and colour
-      only - no image is generated here, and the card says so. */
+  /** S20: a free sketch of a direction, laid out from what it says it would draw (the worker's descriptor: medium, where the words
+      sit, how much is imagery, type scale, palette words) in the client's palette by the one renderer. Image areas are drawn as
+      dashed sketch boxes - nothing is generated here, and the card says so. Directions filed before S20 carry no descriptor and
+      are sketched from their medium alone. */
+  const SKETCH_HEX = { black: '#111418', white: '#f6f4ef', dark: '#141a20', light: '#f4f1ea', teal: '#0E6A6E', gold: '#C9A227', orange: '#E07A2E', blue: '#1F4E8C', green: '#2F6B3A', red: '#B03A2E', yellow: '#E8C547', navy: '#14213D', cream: '#F3EAD7', grey: '#5B6470', ochre: '#C08A2E', sand: '#D8C7A3', earth: '#6B4F3A', charcoal: '#2B2F33', pastel: '#E9DDEB', monochrome: '#2B2F33' };
+  function dirSketch(d) {
+    if (d.sketch && d.sketch.zone) return d.sketch;
+    const m = d.medium || ''; return { medium: m, zone: 'bottom', image: m === 'typographic' ? 'none' : m === 'infographic' || m === 'diagram' ? 'chart' : m === 'cutout' ? 'inset' : 'full', scale: 'standard', palette: [] };
+  }
   function dirPreview(d, kit, i) {
     const pal = (kit && kit.palette) || {}; const primary = /^#[0-9a-f]{6}$/i.test(pal.primary || '') ? pal.primary : '#0E6A6E';
-    const tones = { 'photo-cinematic': ['#1b2a33', primary], 'photo-documentary': ['#2a3640', primary], editorial: ['#f4f1ea', '#f4f1ea'], typographic: [primary, primary], infographic: ['#101820', '#101820'], illustration: ['#f6e7c8', '#f6e7c8'], collage: ['#2b2233', primary], diagram: ['#f4f1ea', '#f4f1ea'] };
-    const bg = tones[d.medium] || [i % 2 ? '#1d2630' : primary, primary]; const light = /^#f/i.test(bg[0]);
-    const ink = light ? '#111418' : '#ffffff'; const hl = d.headline || d.hook || d.title;
-    return { v: 5, stage: { w: 1080, h: 1350 }, bg: bg[0] === bg[1] ? bg[0] : { from: bg[0], to: bg[1], dir: 'down' }, palette: pal, fonts: (kit && kit.fonts) || {},
-      layers: [
-        { id: 'k', type: 'text', role: 'free', text: String(d.title || '').toUpperCase(), x: 8, y: 8, w: 70, h: 5, size: 2.4, weight: 700, letterSpacing: 0.12, color: light ? primary : 'rgba(255,255,255,0.78)', font: 'mono' },
-        { id: 'r', type: 'shape', shape: 'rule', role: 'rule', x: 8, y: 15, w: 14, h: 0.6, fill: light ? primary : '#ffffff' },
-        { id: 'h', type: 'text', role: 'free', text: hl, x: 8, y: 20, w: 84, h: 44, size: hl.length > 60 ? 6 : 7.6, weight: 800, lineHeight: 1.04, color: ink },
-        { id: 's', type: 'text', role: 'free', text: d.hook && d.hook !== hl ? d.hook : (d.message || ''), x: 8, y: 68, w: 76, h: 16, size: 3, weight: 500, lineHeight: 1.25, color: light ? '#3a4046' : 'rgba(255,255,255,0.86)', font: 'body' },
-      ] };
+    const sk = dirSketch(d); const hexes = (sk.palette || []).map(w => SKETCH_HEX[w]).filter(Boolean);
+    const lum = h => { const n = parseInt(h.slice(1), 16); return (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255; };
+    // a photograph's area is a neutral placeholder ground (never the palette, which belongs to the type and the panels)
+    const ground = sk.image === 'full' ? '#2a3038' : hexes[0] || (sk.image === 'none' ? primary : i % 2 ? '#1d2630' : '#18222b'); const light = lum(ground) > 0.6;
+    const ink = light ? '#111418' : '#ffffff'; const accent = hexes[1] || primary;
+    const hl = d.headline || d.hook || d.title; const big = sk.scale === 'large' ? 1.3 : sk.scale === 'small' ? 0.78 : 1;
+    const hs = Math.round((hl.length > 60 ? 6 : 7.6) * big * 10) / 10;
+    // where the words go, and what the image takes
+    const Z = { top: { x: 8, y: 8, w: 84 }, bottom: { x: 8, y: 56, w: 84 }, middle: { x: 10, y: 32, w: 80 }, left: { x: 6, y: 30, w: 44 }, right: { x: 50, y: 30, w: 44 } }[sk.zone] || { x: 8, y: 56, w: 84 };
+    const layers = [];
+    if (sk.image === 'full') layers.push({ id: 'image', name: 'photograph', type: 'img', role: 'region', x: 0, y: 0, w: 100, h: 100 }, { id: 'shade', type: 'shape', shape: 'rect', role: 'overlay', x: 0, y: sk.zone === 'top' ? 0 : sk.zone === 'middle' ? 25 : 45, w: 100, h: sk.zone === 'middle' ? 50 : 55, fill: '#000000', opacity: 0.45 });
+    else if (sk.image === 'split') layers.push({ id: 'image', name: 'photograph', type: 'img', role: 'region', x: sk.zone === 'left' ? 50 : 0, y: sk.zone === 'left' || sk.zone === 'right' ? 0 : sk.zone === 'top' ? 50 : 0, w: sk.zone === 'left' || sk.zone === 'right' ? 50 : 100, h: sk.zone === 'left' || sk.zone === 'right' ? 100 : 50 });
+    else if (sk.image === 'inset') layers.push({ id: 'image', name: 'inset', type: 'img', role: 'region', x: sk.zone === 'right' ? 8 : 56, y: sk.zone === 'top' ? 56 : 8, w: 36, h: 36 });
+    else if (sk.image === 'chart') [38, 62, 48, 80].forEach((h, k) => layers.push({ id: 'bar' + k, type: 'shape', shape: 'rect', role: 'free', x: 12 + k * 18, y: (sk.zone === 'top' ? 92 : 50) - h * 0.4, w: 12, h: h * 0.4, fill: k === 3 ? accent : (light ? '#9aa3ad' : 'rgba(255,255,255,0.5)') }));
+    const onImg = sk.image === 'full'; const textInk = onImg ? '#ffffff' : ink;
+    layers.push(
+      { id: 'k', type: 'text', role: 'free', text: String(d.title || '').toUpperCase(), x: Z.x, y: Z.y, w: Z.w, h: 5, size: 2.4, weight: 700, letterSpacing: 0.12, color: onImg ? 'rgba(255,255,255,0.8)' : light ? accent : 'rgba(255,255,255,0.78)', font: 'mono' },
+      { id: 'r', type: 'shape', shape: 'rule', role: 'rule', x: Z.x, y: Z.y + 6.5, w: 14, h: 0.6, fill: onImg ? '#ffffff' : light ? accent : '#ffffff' },
+      { id: 'h', type: 'text', role: 'free', text: hl, x: Z.x, y: Z.y + 10, w: Z.w, h: sk.zone === 'left' || sk.zone === 'right' ? 40 : 26, size: Math.min(hs, Z.w < 60 ? 6 : hs), weight: 800, lineHeight: 1.04, color: textInk }
+    );
+    return { v: 5, stage: { w: 1080, h: 1350 }, bg: ground, palette: pal, fonts: (kit && kit.fonts) || {}, layers, sketch: true };
   }
+  const SKETCH_WORD = { full: 'full-bleed image', split: 'split with an image', inset: 'inset image', chart: 'a chart', none: 'type only' };
   function DirCard({ d, i, p, kit, ro, busy, picked, earlier, onPick, onChoose, onRefine, onUpdate, onDuplicate, onArchive, onKeep }) {
     const [open, setOpen] = useState(false); const [ref, setRef] = useState(null);
-    const layout = useMemo(() => dirPreview(d, kit, i), [d.id, d.headline, d.hook, d.title, d.medium, kit]);
+    const layout = useMemo(() => dirPreview(d, kit, i), [d.id, d.headline, d.hook, d.title, d.medium, JSON.stringify(d.sketch || null), kit]);
     const v = { id: 'preview-' + d.id, layout, copy: {}, mode: 'composition' };
     const vn = d.visualNarrative || {};
     return html`<article class=${'st-dcard' + (d.chosen ? ' chosen' : '') + (picked ? ' picked' : '') + (earlier ? ' earlier' : '') + (d.saved ? ' saved' : '')} style=${{ '--i': i }} aria-label=${'Direction ' + d.title}>
-      <div class="st-dcard-art"><${Composition} v=${v} a=${{ id: d.id, format: '4:5', channel: 'instagram' }} ns=${p.ns} size="card" /><span class="st-dcard-note">preview: type and colour only, no image generated</span>
-        <span class="st-dcard-badges">${d.chosen ? html`<${Chip} kind="ok">selected</${Chip}>` : null}${d.saved ? html`<${Chip}>saved</${Chip}>` : null}${earlier ? html`<${Chip} kind="warn">earlier choice</${Chip}>` : null}${d.refinedFrom ? html`<${Chip}>refined</${Chip}>` : null}${d.mergedFrom ? html`<${Chip}>merged</${Chip}>` : null}${d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to another</${Chip}>` : null}</span></div>
+      <div class="st-dcard-art"><${Composition} v=${v} a=${{ id: d.id, format: '4:5', channel: 'instagram' }} ns=${p.ns} size="card" /><span class="st-dcard-note" title="Laid out from what the direction says it would draw; image areas are dashed boxes">sketch: ${SKETCH_WORD[dirSketch(d).image] || 'layout'}, words at the ${dirSketch(d).zone}${dirSketch(d).scale !== 'standard' ? ', ' + dirSketch(d).scale + ' type' : ''} - nothing generated</span>
+        <span class="st-dcard-badges">${d.chosen ? html`<${Chip} kind="ok">selected</${Chip}>` : null}${d.saved ? html`<${Chip}>saved</${Chip}>` : null}${earlier ? html`<${Chip} kind="warn">earlier choice</${Chip}>` : null}${d.refinedFrom ? html`<${Chip}>refined</${Chip}>` : null}${d.mergedFrom ? html`<${Chip}>merged</${Chip}>` : null}${d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to another</${Chip}>` : null}${d.lookalike ? html`<${Chip} kind="warn" title=${'would look like "' + d.lookalike + '" on the page'}>looks like another</${Chip}>` : null}</span></div>
       <div class="st-dcard-body">
         <div class="st-dcard-h"><h4>${d.title}</h4>${d.route ? html`<${Chip} kind=${d.route === 'finished' ? 'warn' : ''}>${d.route === 'finished' ? 'full AI' : 'editable'}</${Chip}>` : null}${d.medium ? html`<${Chip}>${String(d.medium).replace('photo-', '')}</${Chip}>` : null}</div>
         <p class="st-dcard-idea">${d.idea || d.message}</p>
@@ -409,6 +431,9 @@
     return html`<div class="st-dboard">
       ${live || (job && job.state === 'failed') ? html`<${ProcessingCard} job=${job} kind="direct" now=${now} durations=${durations} onRetry=${onRetry} />` : null}
       ${!all.length && !live ? html`<div class="st-empty-state st-dboard-empty"><span class="st-locked-ic" aria-hidden="true"><${Icon} n="compass" size=${26} /></span><b>No creative directions yet.</b><span>${st.state === 'error' ? 'The last attempt did not complete; nothing was lost.' : 'Directions are built on the objective, the message and the strategy you confirmed: genuinely different arguments and media, measured for how different they are.'}</span>${!ro ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onDirect({ n: 3 })}><${Icon} n="sparkle" size=${14} /> Generate creative directions <span class="ov-dim">(1 model call)</span></button>` : null}</div>` : null}
+      ${(() => { const ev = (p.thread || []).filter(e => e.kind === 'directions' && (e.composition != null || e.diversity != null)).pop(); if (!ev || !cur.length) return null;
+        return html`<div class="st-divline" role="note"><span><span class="st-lbl">Argument diversity</span> ${ev.argument != null ? ev.argument : ev.diversity}</span>${ev.composition != null ? html`<span><span class="st-lbl">Composition diversity</span> ${ev.composition}</span>` : html`<span class="ov-dim">composition not measured for this set (made before S20)</span>`}<span class="ov-dim">1 = nothing in common. Composition is read from what each direction says it would draw, not from rendered images.</span>${(ev.lookalikes || []).length ? html`<span class="st-divwarn">Would look alike on the page: ${ev.lookalikes.map(x => '"' + x.a + '" and "' + x.b + '" (' + (x.same || []).join(', ') + ')').join('; ')}</span>` : null}</div>`; })()}
+      ${cur.length > 1 ? html`<div class="st-dstrip" role="list" aria-label="The directions side by side">${cur.map((d, i) => html`<button key=${d.id} role="listitem" class=${'st-dstrip-it' + (d.chosen ? ' chosen' : '')} title=${'Go to ' + d.title} onClick=${() => { const el = document.querySelector('#studio-root [aria-label="Direction ' + d.title.replace(/"/g, '') + '"]'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }}><${Composition} v=${{ id: 'strip-' + d.id, layout: dirPreview(d, kit, i), copy: {}, mode: 'composition' }} a=${{ id: d.id, format: '4:5', channel: 'instagram' }} ns=${p.ns} size="card" /><span class="st-dstrip-t">${d.title}</span><span class="st-dstrip-m ov-dim">${SKETCH_WORD[dirSketch(d).image] || ''}${d.medium ? ' - ' + String(d.medium).replace('photo-', '') : ''}</span></button>`)}</div>` : null}
       ${cur.length ? html`<div class="st-dgrid" role="list" aria-label="Creative directions">${cur.map((d, i) => card(d, i, false))}</div>` : null}
       ${saved.length ? html`<div class="st-dgroup"><span class="st-lbl">Saved for later (${saved.length})</span><div class="st-dgrid">${saved.map((d, i) => card(d, i, false))}</div></div>` : null}
       ${old.length ? html`<div class="st-dgroup"><button class="st-tools-toggle" aria-expanded=${showOld} onClick=${() => setShowOld(!showOld)}><span class="st-lbl">Built on an earlier choice (${old.length})</span><span aria-hidden="true">${showOld ? '-' : '+'}</span></button>${showOld ? html`<div class="st-dgrid">${old.map((d, i) => card(d, i, true))}</div>` : null}</div>` : null}
@@ -488,7 +513,8 @@
       ${row('Strategy', sel.strategy && (STRAT_WORD[sel.strategy.kind] || sel.strategy.kind))}
       ${row('Direction', chosen && chosen.title)}
       ${row('Channels', (b.channels || []).map(chanLabel).join(', '))}
-      ${wf && wf.order ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${wf.order.map(k => html`<li key=${k} class=${wf.steps[k].state}><span>${STEP_LABEL[k]}</span><span class="ov-dim">${STEP_WORD[wf.steps[k].state] || wf.steps[k].state}</span></li>`)}</ol>` : null}
+      ${wf && wf.steps ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${PHASE_STEPS.map(([ph, ids]) => ids.length === 1 ? html`<li key=${ph} class=${(wf.steps[ids[0]] || {}).state}><span>${ph}</span><span class="ov-dim">${STEP_WORD[(wf.steps[ids[0]] || {}).state] || (wf.steps[ids[0]] || {}).state || ''}</span></li>`
+        : html`<li key=${ph} class="st-ctx-phase"><span>${ph}</span><ol class="st-ctx-sub">${ids.map(k => html`<li key=${k} class=${(wf.steps[k] || {}).state}><span>${SUB_LABEL[k]}</span><span class="ov-dim">${STEP_WORD[(wf.steps[k] || {}).state] || (wf.steps[k] || {}).state || ''}</span></li>`)}</ol></li>`)}</ol>` : null}
     </aside>`;
   }
 

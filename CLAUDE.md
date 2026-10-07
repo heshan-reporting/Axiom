@@ -2511,6 +2511,49 @@ input-to-paint; figures to `tests/shots/s19/perf-<label>.json`) and
 `tests/studio-s19-shots.mjs` (matched captures at 1440 x 900, 1920 x 1080,
 1024 x 768 and 390 x 844 into the ignored `tests/shots/s19/`).
 
+**An agency workspace (S20; build `2026-10-07.studio-p36`, page `?v=r14`;
+`CREATIVE-STUDIO.md` s.43).** Four defects, each reproduced by a failing test
+first: (A) a suggestion is sent with its own scope - asset, version, layers -
+never the composer's target, the server's current version is read before
+sending, and the worker refuses a revise job whose version moved
+(`stale_version`); (B) a save is bound to an immutable snapshot (`pending` in
+the working store) and newer edits are rebased onto the saved version; drafts
+carry a sequence (`seq`, a late older write never lands over a newer one) and
+after a save `POST /studio/draft/discard {upto}` removes only drafts written
+before the snapshot; a save cut off by a reload keeps its snapshot; (C) layer
+order is merged pairwise, an incompatible order is a conflict of kind `order`;
+(D) one lock contract, `ST_LOCK_FREE` (name, renamed, locked): every other
+property of a locked layer is protected on saves, the editor, AI layer edits,
+repair and resize (`stKeepLocked`), and an unlock is recorded in the note.
+**Five phases** over the worker's seven steps (`PHASES`, `phaseFlow`,
+`phaseTarget` in `docs/studio.js`): Brief (Understanding, Objectives, Strategy
+as steps in its head), Explore, Copy, Design, Review & Deliver; the navigator
+sits in the header; Alt+1..5; each head says what it is working on and what
+needs attention, with one main action, the long account behind help. Design
+has no head row: its views and main action ride in the canvas bar
+(Checkerboard, Compare, previous / next under More) and the readiness line is
+one line, so a fitted 4:5 artboard is 618px tall at 1440 x 900 with the
+inspector open (W1 in `tests/studio-s20-browser.mjs` asserts >= 560). The
+Creative Director is Review / Explore / Conversation; its scope line always
+names the selection; each suggestion states Changes, Keeps, Scope, Generation,
+Why and Basis, with Edit instruction (composer, nothing sent) and Apply (its
+own scope; Undo once it lands). Directions carry `sketch` (`stCompDescriptor`:
+medium, imagery, where the words sit, type scale, palette) and the set a
+composition diversity (`stCompositionDiversity`, a reading of descriptions,
+not pixels) beside the argument diversity; card previews are laid out from
+the sketch, and Explore shows them side by side first. Refine and Explore take
+an optional Keep. `stCampaignUrl` resolves the campaign's address explicitly
+and `stChecks` flags another campaign's address (`url_mismatch`) or one with
+none resolved (`url_unresolved`). Type size in px at the output size, tracking
+in thousandths of an em; Fix layout offers Compare before and after.
+Higgsfield was not built: its hosts are refused by this environment's egress
+and no credential exists. Harnesses: `tests/studio-s20-worker.mjs` (21),
+`tests/studio-s20-browser.mjs` (10), `tests/studio-merge-test.mjs` (15),
+`tests/studio-s20-perf-browser.mjs` (canvas, network and provider time),
+`tests/studio-s20-shots.mjs` and `tests/studio-s20-sheet.mjs` (matched before /
+after captures into the ignored `tests/shots/s20/`); the flow helper
+(`tests/studio-flow.mjs`) maps the S17 step names onto the phases.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

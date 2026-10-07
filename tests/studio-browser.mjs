@@ -114,8 +114,9 @@ async function open(role) {
 const R = '#studio-root ';
 /* the Studio's navigation: six stages in the navigator, views inside a stage as tabs, the inspector's tabs beside the artwork */
 /* S13: the guided steps - Brief, Direction, Copy, Design, Review, Export */
-const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Review', Delivery: 'Review' };
-const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + name + '")') + ')');
+const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', Recipes: 'Design', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Review', Delivery: 'Review' };
+// S20: five phases - Directions is Explore; Review matches "Review & Deliver"
+const goStep = (pg, name) => { const n = name === 'Directions' || name === 'Direction' ? 'Explore' : name; return pg.click(R + '.st-step:has(.st-step-l:' + (n === 'Review' ? 'text-matches("^Review")' : 'text-is("' + n + '")') + ')'); };
 const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
 const itab = (pg, name) => place(pg, name);
 /* an asset on the canvas: the assets rail belongs to Copy, Design and Review (S17 keeps it out of the early steps), and a
@@ -319,11 +320,11 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   await page.selectOption(R + '.st-size select', '2K');
 });
 await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
-  await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Ideas")'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
+  await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Explore")'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
   ok(!(await page.$(R + '.st-partner .st-sugg.design .st-sugg-item')), 'nothing is suggested, and nothing spent, until the team asks');
   await page.click(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")'); await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
   const items = await texts(page, R + '.st-partner .st-sugg.design .st-sugg-item'); eq(items.length, 3); ok(/compact translucent panel in the upper left/.test(items[0]), items[0]); ok(/the artwork seen/.test(await page.textContent(R + '.st-partner .st-sugg-head')), 'the head says the model saw the artwork');
-  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link:has-text("use as instruction")'); await useBtns[1].click();
+  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link:has-text("Edit instruction")'); await useBtns[1].click();
   eq(await page.inputValue(R + '.st-composer textarea'), SUGGEST.design[1].text, 'the suggestion is in the composer, editable, not sent');
   await page.fill(R + '.st-composer textarea', '');
   await tool(page, 'Images'); ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
@@ -423,7 +424,7 @@ await t('a project made before the guided workflow from an open brief, copy only
   await page.click(R + '.st-dir:first-child button:has-text("Choose this direction")');
   let d = null; for (let i = 0; i < 160; i++) { d = await api('GET', '/studio/get?id=' + pr.id); if (d.assets.length === 3 && !(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }
   eq(d.assets.length, 3, 'one copy-only piece per channel');
-  ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Directions"))'), 'the page stays where the team is: production does not move it');
+  ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Explore"))'), 'the page stays where the team is: production does not move it');
   // S19: Copy lists the pieces itself (no second list in an assets rail)
   await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-copy-pick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
@@ -576,7 +577,7 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
 });
 await t('P14: Production lists what a kit change made stale with a free re-check, estimates recipes before they run, asks before a recipe that renders, runs a chained recipe step after step and counts what the project actually spent', async () => {
   await api('POST', '/brand/kit', { ns: 'mca', banned: [{ term: 'subsidy', use: 'credit', why: 'it is not one', allowNegated: true }, { term: 'handout', use: 'credit', why: 'house style' }] });
-  await goView(page, 'Recipes and usage'); await page.waitForSelector(R + '.st-prod table[aria-label="Recipes"]');
+  await goView(page, 'Recipes'); await page.waitForSelector(R + '.st-prod table[aria-label="Recipes"]');
   const impact = await texts(page, R + '.st-prod table[aria-label="Impact"] tbody tr'); ok(impact.some(x => /kit changed since the words were written/.test(x) && /banned terms/.test(x) && /free/.test(x)), JSON.stringify(impact).slice(0, 400));
   const a0 = calls.anthropic, g0 = calls.gemini;
   await page.locator(R + '.st-prod table[aria-label="Impact"] tbody tr').filter({ hasText: 'kit changed' }).first().locator('button:has-text("Re-check")').click();
@@ -705,7 +706,7 @@ await t('P21: a reference recipe is set in the References view and reaches the c
   await page.click(R + '.st-compiled .ov-link:has-text("the concept")'); await page.waitForSelector(R + '.st-compiled-call');
   const one = await page.textContent(R + '.st-compiled-call'); ok(/Language model/.test(one) && /effort high/.test(one) && /system \(\d+ characters\)/.test(one), one);
   ok((await page.textContent(R + '.st-used')).includes('Reference influence'), 'the used panel names the influences');
-  await goView(page, 'Recipes and usage'); await page.waitForSelector(R + '.st-caps table', { timeout: 15000 });
+  await goView(page, 'Recipes'); await page.waitForSelector(R + '.st-caps table', { timeout: 15000 });
   const caps = await page.textContent(R + '.st-caps'); ok(/Pixel masks: not supported/.test(caps) && /render/.test(caps) && /real output not reviewed/.test(caps), caps.slice(0, 300));
   await shot(page, 'studio-p21');
 });

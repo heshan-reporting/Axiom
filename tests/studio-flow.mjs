@@ -29,13 +29,24 @@ export async function openProject(page, title) {
   await page.waitForSelector(R + '.st-steps, ' + R + '.st-step', { timeout: 15000 });
 }
 
-/** A stage of the navigator (Brief, Objectives, Strategy, Directions, Copy, Design, Review). */
+/** A step by its S17 name (Brief, Objectives, Strategy, Directions, Copy, Design, Review). S20: the navigator shows five phases -
+    Brief (with Understanding, Objectives and Strategy as its steps, shown in the stage head), Explore (Directions), Copy, Design,
+    Review & Deliver - so Objectives and Strategy are reached through Brief, and Directions is Explore. */
+const SUBSTEP = { Objectives: 1, Strategy: 1 };
 export async function goStep(page, label) {
-  await page.click(step(label));
+  if (SUBSTEP[label]) {
+    if (!(await page.$(R + '.st-substep:has-text("' + label + '")'))) { await page.click(step('Brief')); await page.waitForSelector(R + '.st-substep', { timeout: 15000 }); }
+    await page.click(R + '.st-substep:has-text("' + label + '")');
+  } else await page.click(step(label));
   await page.waitForSelector(step(label, true), { timeout: 15000 });
 }
-/** A navigator step by its exact label (":has-text" would also match the Copy step's "ready for design"). */
-export function step(label, on) { const t = label === 'Review' ? 'text-matches("^Review")' : 'text-is("' + label + '")'; return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:' + t + ')'; }  // S18: Review is "Review & Delivery"
+/** A navigator phase (or, for Objectives and Strategy, the Brief step) by its exact label (":has-text" would also match the Copy
+    phase's "ready for design"). */
+export function step(label, on) {
+  if (SUBSTEP[label]) return R + '.st-substep' + (on ? '.on' : '') + ':has-text("' + label + '")';
+  const l = label === 'Directions' || label === 'Direction' ? 'Explore' : label;
+  const t = l === 'Review' ? 'text-matches("^Review")' : 'text-is("' + l + '")'; return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:' + t + ')';
+}
 
 /** The wizard, start to finish. o: { type (the card's words, default "Response Creative"), client (default "Minerals
     Council"), campaign ('standalone' | 'new' | a campaign name, default the first existing one), newCampaign, title,

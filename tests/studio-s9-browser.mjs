@@ -4,7 +4,7 @@
  * when the version moves; the Art Director panel says what the model saw (the composed tile or the imagery only), the
  * words it read against the approved copy, what it did not score, and that a review is one read and never approval;
  * and an accessibility audit of the library, the brief, Refine (Copy, Quality, Art Director), Brand, Review and Export
- * finds no unlabeled control, no image without a name and a sane heading order; Alt+1..7 moves between stages, and
+ * finds no unlabeled control, no image without a name and a sane heading order; Alt+1..5 moves between stages, and
  * live status is announced (aria-live).
  * Run: node --experimental-sqlite tests/studio-s9-browser.mjs */
 import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
@@ -75,7 +75,7 @@ await T.t('the Art Director panel is honest about what it saw, what it read and 
   ok(/One read by one model; the scores are its opinion, not a measurement/.test(t) && /Advice, not approval/.test(t), t);
   ok(/an earlier version; review again for this one/.test(t), 'the caption edit made a newer version, and the panel says the review is of the earlier one: ' + t);
 });
-await T.t('accessibility: every control is named, every image has a name, headings do not skip a level, live status is announced - in the library, the brief, Refine (Copy, Quality, Art Director), Brand, Review and Export; Alt+1..7 moves between stages', async () => {
+await T.t('accessibility: every control is named, every image has a name, headings do not skip a level, live status is announced - in the library, the brief, Refine (Copy, Quality, Art Director), Brand, Review and Export; Alt+1..5 moves between stages', async () => {
   const where = [];
   const check = async label => { const a = await audit(page); clean(a, label); where.push(label + ' (' + a.live + ' live regions)'); return a; };
   await itab(page, 'Copy'); await check('Refine / Copy');
@@ -84,10 +84,10 @@ await T.t('accessibility: every control is named, every image has a name, headin
   await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand'); await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); }); await check('Brand');
   await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))'); await check('Brief');
   // seven steps since S17: Brief, Objectives, Strategy, Directions, Copy, Design, Review; Export is a view inside Review
-  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))'); await check('Review');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))'); await check('Review');
   await page.click(R + '.st-subtab:has-text("Delivery")'); await page.waitForSelector(R + '.st-subtab.on:has-text("Delivery")'); await check('Export');
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
-  await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  await page.keyboard.press('Alt+3'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
+  await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
   // keyboard: from a stage button, Tab moves on to the next focusable control without a trap
   await page.focus(R + '.st-step.on'); await page.keyboard.press('Tab'); const active = await page.evaluate(() => { const el = document.activeElement; return el && el !== document.body ? (el.tagName + ' ' + (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)) : ''; }); ok(active, 'focus moved on: ' + active);
   await page.click(R + '.st-head .ov-link:has-text("All projects")'); await page.waitForSelector(R + '.st-lib'); await check('Library');

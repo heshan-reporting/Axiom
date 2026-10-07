@@ -182,7 +182,7 @@ await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pre
   // Option+1 on a Mac: the key is Digit1, the character a symbol
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a1', code: 'Digit1', altKey: true, bubbles: true })));
   await page.waitForFunction(() => /Brief/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
-  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00aa', code: 'Digit6', altKey: true, bubbles: true })));
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a2', code: 'Digit4', altKey: true, bubbles: true })));
   await page.waitForFunction(() => /Design/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
   await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   await shot('keys');

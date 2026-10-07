@@ -14,7 +14,7 @@
  * Run: node --experimental-sqlite tests/studio-s17-browser.mjs   (SHOT=1 writes tests/shots/s17-flow-*.png) */
 import fs from 'node:fs';
 import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
-import { wizardCreate, step } from './studio-flow.mjs';
+import { wizardCreate, step, goStep } from './studio-flow.mjs';
 const fx = await makeStudio({ port: 8807, inspect: false });
 const { api, calls, env } = fx;
 const R = '#studio-root ';
@@ -63,7 +63,7 @@ await T.t('a new project starts at the Brief: every later step is locked and say
   ok(await onStep('Brief'), 'on the Brief');
   for (const l of ['Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review']) ok(/locked|blocked/.test(await stateOf(l) || ''), l + ' is locked: ' + await stateOf(l));
   await page.click(step('Directions')); await page.waitForSelector(R + '.st-locked');
-  const lk = await page.textContent(R + '.st-locked'); ok(/Directions is locked/.test(lk) && /Go to/.test(lk), lk);
+  const lk = await page.textContent(R + '.st-locked'); ok(/(Directions|Explore) is locked/.test(lk) && /Go to/.test(lk), lk);
   eq(await page.$$eval(R + '.st-dcard', x => x.length), 0, 'a locked step shows what opens it, never the work');
   await page.click(R + '.st-locked button:has-text("Go to")'); await page.waitForSelector(step('Brief', true));
   for (const stage of ['direct', 'copy']) {
@@ -114,7 +114,7 @@ await T.t('objectives are ranked with their messages, the strategy is chosen wit
 
 await T.t('the Directions board: free previews, save for later, duplicate and compare at no model cost; selecting opens Copy without moving the page', async () => {
   const cards = await page.$$(R + '.st-dcard'); ok(cards.length >= 3, 'three directions: ' + cards.length);
-  eq(await page.$$eval(R + '.st-dcard .st-dcard-note', x => x.every(e => /no image generated/.test(e.textContent))), true, 'each preview says no image was made');
+  eq(await page.$$eval(R + '.st-dcard .st-dcard-note', x => x.every(e => /no image generated|nothing generated/.test(e.textContent))), true, 'each preview says no image was made');
   ok((await page.$$(R + '.st-dcard canvas')).length >= 3, 'each drawn by the renderer');
   const a0 = calls.anthropic, g0 = calls.gemini; const n0 = (await api('GET', '/studio/get?id=' + pid)).directions.length;
   await page.click(R + '.st-dcard:has-text("The road never driven") button[aria-label^="Save for later"]');
@@ -135,7 +135,7 @@ await T.t('the Directions board: free previews, save for later, duplicate and co
 });
 
 await T.t('changing an earlier choice asks first: Cancel writes nothing; Keep keeps the directions current, with no model call', async () => {
-  await page.click(step('Objectives')); await page.waitForSelector(R + '.st-objectives');
+  await goStep(page, 'Objectives'); await page.waitForSelector(R + '.st-objectives');
   await page.click(R + '.st-choose-col[aria-label="Objectives"] .st-opt:has-text("Reinforce the national campaign") input');
   await page.click(R + '.st-stepbar button:has-text("Confirm and continue to Strategy")');
   await page.waitForSelector(R + '.st-impact', { timeout: 15000 });
@@ -166,7 +166,7 @@ await T.t('Copy starts from the chosen direction and writes words with no image;
   await page.waitForSelector(R + '.st-copy-pick', { timeout: 40000 }); let d = await settle(pid);
   ok(d.assets.length >= 2, 'one piece per channel'); eq(calls.gemini, g0, 'no image call');
   // the strategy changes with "update": the pieces were written on the earlier choice
-  await page.click(step('Strategy')); await page.waitForSelector(R + '.st-strats');
+  await goStep(page, 'Strategy'); await page.waitForSelector(R + '.st-strats');
   await page.click(R + '.st-strat:has-text("Indirect") input, ' + R + '.st-strat:not(.on) input');
   await page.click(R + '.st-stepbar button:has-text("Confirm only")');
   await page.waitForSelector(R + '.st-impact', { timeout: 15000 }); await page.click(R + '.st-impact button:has-text("Update directions")');
@@ -189,7 +189,7 @@ await T.t('a read-only key opens a guided project and sees where it stands, but 
   const p2 = await fx.open({ role: 'read', viewport: { width: 1440, height: 900 } });
   await p2.waitForSelector(R + '.st-lib tbody tr'); eq(await p2.$(R + 'button:has-text("New project")'), null, 'no New project');
   await p2.click(R + '.st-lib tbody tr:has-text("Gate check") button.st-lib-open'); await p2.waitForSelector(R + '.st-step');
-  await p2.click(step('Objectives')); await p2.waitForSelector(R + '.st-objectives');
+  await goStep(p2, 'Objectives'); await p2.waitForSelector(R + '.st-objectives');
   eq(await p2.$(R + '.st-stepbar button:has-text("Confirm")'), null, 'no confirmation for a read-only key');
   await p2.ctxB.close();
 });

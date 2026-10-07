@@ -19,13 +19,15 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st [hidden]{display:none!important}
 
 /* ---------------------------------------------------------------------------------------- header */
-#studio-root .st .st-head{display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:52px;padding:6px 14px;position:relative;z-index:30;
+#studio-root .st .st-head{display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:50px;padding:5px 12px;position:relative;z-index:30;
   background:color-mix(in srgb,var(--sk-panel) 88%,transparent);backdrop-filter:saturate(1.2) blur(10px);-webkit-backdrop-filter:saturate(1.2) blur(10px);border-bottom:1px solid var(--sk-line)}
 #studio-root .st .st-back{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;height:32px;padding:0 11px 0 8px;border-radius:999px;border:1px solid var(--sk-line);background:var(--sk-bg);color:var(--sk-ink-2);font:600 12px/1 var(--sk-font);letter-spacing:.06em;cursor:pointer;transition:border-color .15s,color .15s}
 #studio-root .st .st-back:hover{color:var(--sk-ink);border-color:var(--sk-line-2)}
 #studio-root .st .st-hbrand{flex-shrink:0;padding-right:12px;border-right:1px solid var(--sk-line);height:24px;display:flex;align-items:center}
 #studio-root .st .st-appname{font:650 12.5px/1 var(--sk-display);color:var(--sk-ink-2);letter-spacing:-.005em;white-space:nowrap}
 #studio-root .st .st-proj{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+#studio-root .st.has-project .st-proj{flex:0 1 300px}
+#studio-root .st.has-project .st-hbrand{display:none}
 #studio-root .st .st-proj-row{display:flex;align-items:center;gap:8px;min-width:0}
 #studio-root .st .st-ptitle{font:650 14px/1.2 var(--sk-display);color:var(--sk-ink);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 #studio-root .st .st-allp{font-size:12px;color:var(--sk-sub);white-space:nowrap;flex-shrink:0}
@@ -62,19 +64,19 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-help-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 #studio-root .st .st-help-steps{margin:0 0 8px 18px;padding:0;display:grid;gap:4px}
 
-/* ---------------------------------------------------------------------------------------- the step navigator */
-#studio-root .st .st-steps{display:flex;flex-shrink:0;gap:2px;padding:0 10px;min-height:46px;overflow-x:auto;scrollbar-width:none;position:relative;z-index:20;
-  background:color-mix(in srgb,var(--sk-panel) 80%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--sk-line)}
+/* ---------------------------------------------------------------------------------------- the phase navigator (S20: five phases, in the header) */
+#studio-root .st .st-steps{display:flex;flex:1 1 auto;justify-content:center;gap:2px;min-width:0;padding:3px;overflow-x:auto;scrollbar-width:none;border-radius:999px;
+  background:color-mix(in srgb,var(--sk-bg) 55%,transparent);border:1px solid var(--sk-line)}
 #studio-root .st .st-steps::-webkit-scrollbar{display:none}
-#studio-root .st .st-step{position:relative;flex:1 1 0;min-width:112px;display:flex;align-items:center;gap:8px;padding:6px 8px;border:0;background:transparent;color:var(--sk-ink-2);font:inherit;text-align:left;cursor:pointer;border-radius:8px 8px 0 0}
-#studio-root .st .st-step::after{content:'';position:absolute;left:8px;right:8px;bottom:0;height:2px;border-radius:2px 2px 0 0;background:var(--sk-accent);transform:scaleX(0);transform-origin:left;transition:transform .3s var(--sk-ease-out)}
-#studio-root .st .st-step.on::after{transform:scaleX(1)}
-#studio-root .st .st-step:hover{background:color-mix(in srgb,var(--sk-raised) 50%,transparent)}
-#studio-root .st .st-step-n{width:22px;height:22px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--sk-line-2);border-radius:50%;font:650 10px/1 var(--sk-font);color:var(--sk-sub);font-variant-numeric:tabular-nums}
-#studio-root .st .st-step-txt{display:flex;flex-direction:column;gap:1px;min-width:0}
-#studio-root .st .st-step-l{font:650 12.5px/1.2 var(--sk-display);color:var(--sk-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#studio-root .st .st-step-meta{display:block;min-width:0;font-size:10.5px;color:var(--sk-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#studio-root .st .st-step-meta .st-step-note, #studio-root .st .st-step-meta .st-step-sub{display:block;overflow:hidden;text-overflow:ellipsis}
+#studio-root .st .st-step{position:relative;flex:0 1 auto;min-width:0;display:flex;align-items:center;gap:7px;height:32px;padding:0 12px 0 6px;border:0;border-radius:999px;background:transparent;color:var(--sk-ink-2);font:inherit;text-align:left;cursor:pointer;transition:background-color .15s,color .15s}
+#studio-root .st .st-step:hover{background:color-mix(in srgb,var(--sk-raised) 70%,transparent)}
+#studio-root .st .st-step.on{background:var(--sk-soft-2);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--sk-accent) 40%,transparent)}
+#studio-root .st .st-step-n{width:20px;height:20px;flex-shrink:0;display:grid;place-items:center;border:1px solid var(--sk-line-2);border-radius:50%;font:650 10px/1 var(--sk-font);color:var(--sk-sub);font-variant-numeric:tabular-nums}
+#studio-root .st .st-step-txt{display:flex;align-items:baseline;gap:7px;min-width:0}
+#studio-root .st .st-step-l{font:650 12.5px/1.2 var(--sk-display);color:var(--sk-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+#studio-root .st .st-step-meta{display:none;min-width:0;font-size:10.5px;color:var(--sk-sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:16ch}
+#studio-root .st .st-step-meta .st-step-note{display:block;overflow:hidden;text-overflow:ellipsis}
+@media (min-width:1600px){#studio-root .st .st-step-meta{display:block}}
 #studio-root .st .st-step.on .st-step-n{background:var(--sk-accent);border-color:transparent;color:var(--sk-accent-ink)}
 #studio-root .st .st-step.done .st-step-n{background:color-mix(in srgb,var(--sk-good) 14%,var(--sk-panel));border-color:transparent;color:var(--sk-good)}
 #studio-root .st .st-step.done.on .st-step-n{background:var(--sk-accent);color:var(--sk-accent-ink)}
@@ -84,10 +86,11 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-step.locked .st-step-n, #studio-root .st .st-step.blocked .st-step-n{border-style:dashed;color:var(--sk-quiet)}
 #studio-root .st .st-step.locked .st-step-l, #studio-root .st .st-step.blocked .st-step-l{color:var(--sk-quiet)}
 #studio-root .st .st-step.skipped .st-step-l{text-decoration:line-through;text-decoration-color:var(--sk-quiet);opacity:.75}
-#studio-root .st .st-step.done .st-step-note{color:var(--sk-ink-2)}#studio-root .st .st-step.review .st-step-note{color:var(--sk-warn)}#studio-root .st .st-step.error .st-step-note{color:var(--sk-bad)}
-#studio-root .st .st-step-live{position:absolute;top:8px;left:24px;width:7px;height:7px;border-radius:50%;background:var(--sk-accent);animation:sk-pulse 1.2s var(--sk-ease) infinite}
-#studio-root .st .st-step-dot{position:absolute;top:8px;left:24px;width:7px;height:7px;border-radius:50%;background:var(--sk-warn)}
-#studio-root .st.previewing .st-steps{display:none}
+#studio-root .st .st-step.review .st-step-note{color:var(--sk-warn)}#studio-root .st .st-step.error .st-step-note{color:var(--sk-bad)}
+#studio-root .st .st-step-live{position:absolute;top:4px;left:21px;width:7px;height:7px;border-radius:50%;background:var(--sk-accent);animation:sk-pulse 1.2s var(--sk-ease) infinite}
+#studio-root .st .st-step-dot{position:absolute;top:4px;left:21px;width:7px;height:7px;border-radius:50%;background:var(--sk-warn)}
+@media (prefers-reduced-motion: reduce){#studio-root .st .st-step-live{animation:none}}
+#studio-root .st.previewing .st-steps{visibility:hidden}
 
 /* ---------------------------------------------------------------------------------------- notices and the busy line (outside the scroll regions) */
 #studio-root .st .st-busy, #studio-root .st > .st-notice{flex-shrink:0;margin:8px 16px 0}
@@ -114,33 +117,47 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-aside-open{position:absolute;right:0;top:40%;writing-mode:vertical-rl;font:550 11.5px/1 var(--sk-font);background:var(--sk-panel);border:1px solid var(--sk-line);border-right:0;border-radius:8px 0 0 8px;color:var(--sk-ink-2);padding:12px 6px;cursor:pointer;z-index:5}
 #studio-root .st .st-insp-toggle, #studio-root .st .st-insp-close{display:none}
 
-/* ---------------------------------------------------------------------------------------- stage heads: the five questions, the work starts high */
-#studio-root .st .st-stagehead{display:flex;flex-direction:column;gap:8px;padding:2px 0 14px;margin-bottom:16px;border-bottom:1px solid var(--sk-line)}
-#studio-root .st .st-stagehead-row{display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap}
-#studio-root .st .st-stagehead-main{display:flex;flex-direction:column;gap:4px;min-width:0}
+/* ---------------------------------------------------------------------------------------- stage heads (S20): one row, one status line, the account behind help */
+#studio-root .st .st-stagehead{position:relative;display:flex;flex-direction:column;gap:6px;padding:0 0 10px;margin-bottom:14px;border-bottom:1px solid var(--sk-line)}
+#studio-root .st .st-stagehead-row{display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap}
+#studio-root .st .st-stagehead-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:0 1 auto}
 #studio-root .st .st-eyebrow{display:flex;align-items:center;gap:8px;font:650 10px/1 var(--sk-font);letter-spacing:.14em;text-transform:uppercase;color:var(--sk-sub)}
 #studio-root .st .st-eyebrow-n{display:inline-grid;place-items:center;min-width:22px;height:18px;padding:0 5px;border-radius:5px;background:var(--sk-soft);color:var(--sk-accent);font-variant-numeric:tabular-nums}
-#studio-root .st .st-stage-title{font:700 22px/1.2 var(--sk-display);letter-spacing:-.03em;color:var(--sk-ink);margin:0;text-wrap:balance}
+#studio-root .st .st-eyebrow-step::before{content:'/';margin-right:8px;color:var(--sk-line-2)}
+#studio-root .st .st-stage-title{font:700 18px/1.25 var(--sk-display);letter-spacing:-.02em;color:var(--sk-ink);margin:0;text-wrap:balance}
 #studio-root .st .st-stage-title:focus{outline:none}
-#studio-root .st .st-stage-purpose{margin:0;font-size:13px;color:var(--sk-sub);line-height:1.55;max-width:72ch}
 #studio-root .st .st-stagehead-acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto}
-#studio-root .st .st-stage-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:0;max-width:980px}
-#studio-root .st .st-stage-facts > div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--sk-panel) 70%,transparent);border:1px solid var(--sk-line)}
+#studio-root .st .st-phase-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;font-size:12px;color:var(--sk-ink-2)}
+#studio-root .st .st-pl-k{font:650 9.5px/1 var(--sk-font);letter-spacing:.12em;text-transform:uppercase;color:var(--sk-quiet);margin-right:4px}
+#studio-root .st .st-pl-att{display:inline-flex;align-items:center;gap:6px}
+#studio-root .st .st-pl-att.ok{color:var(--sk-sub)}
+#studio-root .st .st-pl-att.ok::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--sk-good)}
+#studio-root .st .st-stepstate-dot{width:7px;height:7px;border-radius:50%;background:var(--sk-accent)}
+#studio-root .st .st-stepstate.review .st-stepstate-dot{background:var(--sk-warn)}#studio-root .st .st-stepstate.error .st-stepstate-dot{background:var(--sk-bad)}
+#studio-root .st .st-stage-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:0}
+#studio-root .st .st-stage-facts > div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:var(--sk-bg);border:1px solid var(--sk-line)}
 #studio-root .st .st-stage-facts dt{font:650 9.5px/1 var(--sk-font);letter-spacing:.14em;text-transform:uppercase;color:var(--sk-quiet)}
 #studio-root .st .st-stage-facts dd{margin:0;font-size:12.5px;line-height:1.45;color:var(--sk-ink-2)}
-#studio-root .st .st-stage-help{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-radius:8px;background:var(--sk-panel);border:1px solid var(--sk-line);font-size:12.5px}
+#studio-root .st .st-stage-help{position:absolute;top:calc(100% - 4px);right:0;z-index:25;width:min(640px,100%);display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;font-size:12.5px;
+  background:color-mix(in srgb,var(--sk-raised) 90%,transparent);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border:1px solid var(--sk-line-2);box-shadow:var(--sk-sh-2)}
 #studio-root .st .st-stage-help p{margin:0;color:var(--sk-ink-2)}
 #studio-root .st .st-stage-next{display:flex;gap:10px;align-items:baseline;color:var(--sk-ink-2)}
 #studio-root .st .st-stage-next .st-lbl{color:var(--sk-accent);flex-shrink:0;margin:0}
-#studio-root .st .st-blocked{font-size:12.5px;color:var(--sk-ink-2)}
-#studio-root .st .st-subnav{display:flex;gap:4px;padding:3px;border:1px solid var(--sk-line);border-radius:9px;background:var(--sk-panel);width:max-content;max-width:100%;overflow-x:auto}
-#studio-root .st .st-stagehead.compact{flex-direction:row;align-items:center;padding:0 0 10px;margin-bottom:10px;gap:12px}
+#studio-root .st .st-subnav, #studio-root .st .st-phasesteps{display:flex;gap:3px;padding:3px;border:1px solid var(--sk-line);border-radius:9px;background:var(--sk-bg);width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none}
+#studio-root .st .st-substep{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px 0 5px;border:0;border-radius:6px;background:transparent;color:var(--sk-sub);font:600 12px/1 var(--sk-font);cursor:pointer;white-space:nowrap}
+#studio-root .st .st-substep:hover{color:var(--sk-ink)}
+#studio-root .st .st-substep.on{background:var(--sk-raised);color:var(--sk-ink)}
+#studio-root .st .st-substep-n{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1px solid var(--sk-line-2);font-size:10px}
+#studio-root .st .st-substep.done .st-substep-n{border-color:transparent;background:color-mix(in srgb,var(--sk-good) 16%,var(--sk-panel));color:var(--sk-good)}
+#studio-root .st .st-substep.on .st-substep-n{border-color:transparent;background:var(--sk-accent);color:var(--sk-accent-ink)}
+#studio-root .st .st-substep.locked, #studio-root .st .st-substep.blocked{color:var(--sk-quiet)}
+#studio-root .st .st-substep.review .st-substep-n{border-color:var(--sk-warn);color:var(--sk-warn)}
+#studio-root .st .st-stagehead.compact{flex-direction:row;align-items:center;padding:0 0 8px;margin-bottom:8px;gap:12px}
 #studio-root .st .st-stagehead.compact .st-stagehead-row{flex:1;flex-wrap:nowrap;gap:12px}
-#studio-root .st .st-stagehead.compact .st-stage-title{font-size:15px;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#studio-root .st .st-stagehead.compact .st-stage-title{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #studio-root .st .st-stagehead.compact .st-eyebrow{display:none}
 #studio-root .st .st-stagehead.compact .st-subtab{white-space:nowrap;padding:5px 10px!important}
 #studio-root .st .st-stagehead.compact .st-subnav{flex-shrink:1;min-width:0}
-#studio-root .st .st-stagehead.compact .st-stage-help{position:absolute;z-index:25;right:24px;max-width:560px;box-shadow:var(--sk-sh-2)}
 
 /* ---------------------------------------------------------------------------------------- Design: dock | library | canvas, the inspector beside */
 #studio-root .st .st-body.design{grid-template-columns:minmax(0,1fr) var(--st-insp-w,360px)}
@@ -274,6 +291,11 @@ body.in-studio #studio-root{height:100%}
 
 /* ---------------------------------------------------------------------------------------- tablet and laptop: the inspector becomes a drawer */
 @media (max-width:1180px){
+  #studio-root .st .st-step{padding:0 9px 0 5px}
+  #studio-root .st .st-back span{display:none}
+  #studio-root .st .st-back{padding:0 8px}
+  #studio-root .st.has-project .st-proj{flex:0 1 210px}
+  #studio-root .st .st-prov{font-size:0;gap:0}
   #studio-root .st .st-body, #studio-root .st .st-body.noaside, #studio-root .st .st-body.norail, #studio-root .st .st-body.early{grid-template-columns:minmax(0,1fr)}
   #studio-root .st .st-rail, #studio-root .st .st-rail-handle, #studio-root .st .st-rail-open{display:none}
   #studio-root .st .st-body.early .st-ctxaside{display:none}
@@ -299,8 +321,12 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-back span{display:none}
   #studio-root .st .st-back{padding:0 8px}
   #studio-root .st .st-client{min-width:0;width:auto;max-width:48vw}
-  #studio-root .st .st-step{min-width:96px;padding:6px}
-  #studio-root .st .st-step-meta{display:none}
+  #studio-root .st .st-head{flex-wrap:wrap;row-gap:6px}
+  #studio-root .st .st-steps{order:10;flex:1 0 100%;justify-content:flex-start;border-radius:10px}
+  #studio-root .st .st-step{flex:0 0 auto;padding:0 10px 0 5px}
+  #studio-root .st .st-step:not(.on) .st-step-l{display:none}
+  #studio-root .st.has-project .st-proj{flex:1 1 auto}
+  #studio-root .st .st-stage-help{left:0;width:auto}
   #studio-root .st .st-centre{padding:0 14px 72px}
   #studio-root .st .st-canvas-sub{flex-direction:column;align-items:stretch;gap:6px}
   #studio-root .st .st-canvas-sub .st-comp-info{text-align:left}
@@ -406,3 +432,93 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-le-tools .st-cropbar-t .ov-dim{display:none}
 }
 @media (max-width:700px){#studio-root .st .st-le-viewpop{position:fixed;left:12px;right:12px;top:auto;bottom:84px}}
+
+/* ---------------------------------------------------------------------------------------- S20: the Design canvas bar carries the phase */
+/* one slim bar over the canvas: the phase's views, the asset and its state, zoom, the views of the artwork and the one main action;
+   the artboard takes everything else (a fitted 4:5 artboard is at least 560px tall at 1440 x 900 with the inspector open) */
+#studio-root .st .st-refine{padding:8px 12px 0}
+#studio-root .st .st-canvasbar{min-height:40px;padding:3px 4px 3px 4px;gap:8px;border-radius:12px;background:color-mix(in srgb,var(--sk-panel) 86%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+#studio-root .st .st-designtabs{padding:2px;border-radius:8px;flex-shrink:0}
+#studio-root .st .st-designtabs .st-subtab{padding:4px 9px!important;font-size:11.5px}
+#studio-root .st .st-canvasbar-l .st-asset-title{max-width:16ch;font-size:12.5px}
+#studio-root .st .st-canvasbar .st-zoom .st-sel{width:86px}
+#studio-root .st .st-designtabs .st-subtab{white-space:nowrap}
+#studio-root .st .st-canvasbar-meta{max-width:28ch}
+#studio-root .st .st-primary{background:var(--sk-accent);color:var(--sk-accent-ink);border-color:transparent;font-weight:650}
+#studio-root .st .st-primary:hover{filter:brightness(1.06)}
+#studio-root .st .st-more{position:relative;flex-shrink:0}
+#studio-root .st .st-more > summary{list-style:none;cursor:pointer}
+#studio-root .st .st-more > summary::-webkit-details-marker{display:none}
+#studio-root .st .st-more-pop{position:absolute;right:0;top:calc(100% + 6px);z-index:40;min-width:180px;display:flex;flex-direction:column;padding:5px;border-radius:10px;
+  background:color-mix(in srgb,var(--sk-raised) 92%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--sk-line-2);box-shadow:var(--sk-sh-2)}
+#studio-root .st .st-more-it{text-align:left;border:0;background:transparent;color:var(--sk-ink-2);font:550 12px/1 var(--sk-font);padding:8px 10px;border-radius:6px;cursor:pointer}
+#studio-root .st .st-more-it:hover{background:var(--sk-hover);color:var(--sk-ink)}
+#studio-root .st .st-more-it.on::after{content:' \2713';color:var(--sk-accent)}
+#studio-root .st .st-le-tools{padding:3px;border-radius:10px;background:color-mix(in srgb,var(--sk-panel) 86%,transparent)}
+#studio-root .st .st-le-tools .btn.sm{min-height:24px}
+#studio-root .st .st-canvas-col{gap:5px}
+#studio-root .st .st-stage{padding:0}
+#studio-root .st .st-stage.fit .st-stage-inner{width:min(calc(100cqw - 28px),calc((100cqh - 24px) * var(--ar,1)))}
+#studio-root .st .st-canvas-foot{gap:4px;padding-bottom:8px}
+/* the readiness line under the canvas is one line: the state, the top issue, its remedy; the rest is in Checks */
+#studio-root .st .st-readystrip.compact{flex-wrap:nowrap;padding:4px 8px;min-height:34px;gap:10px}
+#studio-root .st .st-readystrip.compact .st-qrow{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
+#studio-root .st .st-readystrip.compact .st-qrow{align-items:center;flex-wrap:nowrap}
+#studio-root .st .st-canvasbar-l{overflow:hidden}
+#studio-root .st .st-canvasbar .st-qstate.mini{display:none}
+#studio-root .st .st-readystrip.compact .st-qtop{min-width:0;display:flex;flex-wrap:nowrap;align-items:center;gap:6px;overflow:hidden;flex:1 1 auto}
+#studio-root .st .st-readystrip.compact .st-qtop > *{flex-shrink:0}
+#studio-root .st .st-readystrip.compact .st-qtop > .ov-dim{flex:1 1 auto;flex-shrink:1}
+#studio-root .st .st-readystrip.compact .st-qtop .ov-dim{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+#studio-root .st .st-readystrip.compact .st-ready-acts{flex-shrink:0;flex-wrap:nowrap}
+#studio-root .st .st-readystrip.compact .st-repair-note{flex-basis:auto;white-space:normal}
+#studio-root .st .st-readystrip.compact:has(.st-repair-note){flex-wrap:wrap}
+#studio-root .st .st-readystrip.compact:has(.st-repair-note) .st-repair-note{flex-basis:100%}
+@media (max-width:1180px){#studio-root .st .st-canvasbar-meta{display:none}}
+@media (max-width:700px){
+  #studio-root .st .st-designtabs{order:-1;flex-basis:100%;width:100%}
+  #studio-root .st .st-readystrip.compact{flex-wrap:wrap}
+}
+#studio-root .st .st-pl-att.decide{color:var(--sk-ink-2)}
+#studio-root .st .st-ctx-steps .st-ctx-phase{display:block}
+#studio-root .st .st-ctx-sub{list-style:none;margin:4px 0 0;padding:0 0 0 12px;border-left:1px solid var(--sk-line);display:flex;flex-direction:column;gap:3px}
+#studio-root .st .st-ctx-sub li{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+#studio-root .st .st-subtab{white-space:nowrap}
+/* S20: a suggestion states its facts in one place, and the two actions are distinct */
+#studio-root .st .st-sugg-facts{display:grid;grid-template-columns:76px minmax(0,1fr);gap:3px 10px;margin:6px 0;font-size:12px}
+#studio-root .st .st-sugg-facts > div{display:contents}
+#studio-root .st .st-sugg-facts dt{color:var(--sk-quiet);font:650 9.5px/1.8 var(--sk-font);letter-spacing:.1em;text-transform:uppercase}
+#studio-root .st .st-sugg-facts dd{margin:0;min-width:0;color:var(--sk-ink-2)}
+#studio-root .st .st-sugg-acts{display:inline-flex;gap:10px;align-items:center}
+#studio-root .st .st-sugg-item.applied{border-color:color-mix(in srgb,var(--sk-accent) 45%,var(--sk-line))}
+#studio-root .st .st-sugg-done{margin-top:6px;font-size:12px;color:var(--sk-ink-2)}
+#studio-root .st .st-divline{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;margin:0 0 12px;font-size:12px;color:var(--sk-ink-2)}
+#studio-root .st .st-divline .st-lbl{margin-right:4px}
+#studio-root .st .st-divwarn{flex-basis:100%;color:var(--sk-warn)}
+/* S20: Explore leads with the pictures - every direction's sketch side by side above the cards */
+#studio-root .st .st-dstrip{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:0 0 16px}
+#studio-root .st .st-dstrip-it{display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--sk-line);border-radius:12px;background:var(--sk-panel);color:var(--sk-ink);text-align:left;cursor:pointer;font:inherit;transition:border-color .15s}
+#studio-root .st .st-dstrip-it:hover{border-color:var(--sk-line-2)}
+#studio-root .st .st-dstrip-it.chosen{border-color:var(--sk-accent)}
+#studio-root .st .st-dstrip-it .st-comp{width:100%!important;border-radius:6px}
+#studio-root .st .st-dstrip-t{font:650 12.5px/1.25 var(--sk-display)}
+#studio-root .st .st-dstrip-m{font-size:11px}
+@media (max-width:700px){#studio-root .st .st-dstrip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-comp{display:none}
+#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art{min-height:0;padding:8px 10px 0;background:none;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-dcard-note, #studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-dcard-badges{position:static}
+/* S20: on a laptop the inspector's opener is an edge tab, never a pill over the readiness line's buttons */
+@media (max-width:1180px){
+  #studio-root .st .st-insp-toggle{top:42%;bottom:auto;right:0;writing-mode:vertical-rl;border-radius:10px 0 0 10px;padding:12px 7px;min-height:0;border-right:0}
+}
+@media (max-width:700px){
+  #studio-root .st .st-insp-toggle{top:auto;bottom:84px;writing-mode:horizontal-tb;border-radius:10px 0 0 10px;padding:8px 10px}
+}
+/* S20: a phone - the header is two rows (back, project and status; then the phases), the save state a dot, the main action kept */
+@media (max-width:700px){
+  #studio-root .st.has-project .st-proj{flex:1 1 0;min-width:0}
+  #studio-root .st .st-head-r{gap:6px}
+  #studio-root .st .st-head-r .st-save{font-size:0;gap:0}
+  #studio-root .st .st-psub{display:none}
+  #studio-root .st .st-canvasbar-r .btn.st-primary{display:inline-flex}
+}

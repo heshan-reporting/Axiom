@@ -26,15 +26,16 @@ await T.t('seven steps in order: the wizard makes a guided project, the understa
   page = await fx.open({ viewport: { width: 1440, height: 900 } });
   const g0 = calls.gemini;
   await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', text: 'Write one Instagram tile on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
-  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review & Delivery'], 'the seven steps');
+  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Explore', 'Copy', 'Design', 'Review & Deliver'], 'S20: five phases over the seven steps');
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page);
   pid = (await latest('mca')).id; const d = await settle(pid);
   eq(d.brief.workflow, 2, 'a guided project');
   ok(await page.$(step('Copy', true)), 'the copy lands on Copy');
   eq(calls.gemini, g0, 'no image call'); eq(d.jobs.filter(j => j.stage === 'render').length, 0, 'no render queued');
   ok(/locked|blocked/.test(await page.getAttribute(step('Design'), 'data-state') || '') || /Locked/.test(await page.textContent(step('Design'))), 'Design waits for the words: ' + await page.textContent(step('Design')));
-  ok(/Needs/.test(await page.textContent(R + '.st-stagehead')) && /Main action/.test(await page.textContent(R + '.st-stagehead')), 'the step states what it needs and what its main action does');
-  await page.click(R + '.st-stagehead button[aria-label^="About the"]'); ok(/What happens next/.test(await page.textContent(R + '.st-stagehead')), 'and, on asking, what happens next');
+  ok(/Working on/.test(await page.textContent(R + '.st-stagehead')), 'the phase says what it is working on and what needs attention');
+  await page.click(R + '.st-stagehead button[aria-label^="About the"]');
+  ok(/Needs/.test(await page.textContent(R + '.st-stagehead')) && /Main action/.test(await page.textContent(R + '.st-stagehead')) && /What happens next/.test(await page.textContent(R + '.st-stagehead')), 'and, on asking, what it needs, what its main action does and what happens next');
   await shot(page, 'copy');
 });
 
@@ -121,7 +122,7 @@ await T.t('Review: the preflight reads copy, design, brand and accessibility fro
   await page.fill(R + '#st-cf-alt', ''); await page.press(R + '#st-cf-alt', 'Tab');
   for (let i = 0; i < 40; i++) { const x = await api('GET', '/studio/get?id=' + pid); if (!cur(x.assets[0]).copy.alt) break; await sleep(150); }
   // an edit to the words drops the copy approval, and Review waits for ready copy (the gate holds on both sides)
-  await page.waitForFunction(() => /locked|blocked/.test((document.querySelector('#studio-root .st-step:nth-child(7)') || {}).getAttribute('data-state') || ''), null, { timeout: 15000 });
+  await page.waitForFunction(() => /locked|blocked/.test((document.querySelector('#studio-root .st-step[data-phase="deliver"]') || {}).getAttribute('data-state') || ''), null, { timeout: 15000 });
   const g1 = calls.gemini; const refused = await api('POST', '/studio/production', { project: pid, mode: 'editable', size: '1K' });
   ok(refused.skipped && refused.skipped.some(x => x.code === 'copy_not_ready') && !(refused.jobs || []).length && calls.gemini === g1, 'the worker holds the same gate: nothing is produced from copy that is not ready: ' + JSON.stringify(refused.skipped));
   await page.waitForSelector(R + '.st-ready-check input:not([disabled])'); await page.click(R + '.st-ready-check input');

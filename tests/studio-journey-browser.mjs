@@ -348,14 +348,14 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   // to a composition (by mouse: the steps are covered above), then the keyboard again
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page); await markCopyReady(page); await produce(page, 'editable');
   const pr = await latest('mca'); await settle(pr.id);
-  await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+6');
+  await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+4');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
-  // stages by keyboard: Alt+1 to Alt+7, focus lands on the stage heading (its editorial headline)
+  // stages by keyboard: Alt+1 to Alt+5, focus lands on the stage heading (its editorial headline)
   await page.focus('#studio-root .st-head .st-back'); await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());
   await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /Start with what happened/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
-  await page.keyboard.press('Alt+7'); await page.waitForFunction(() => /^One final check, then deliver\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
+  await page.keyboard.press('Alt+5'); await page.waitForFunction(() => /^One final check, then deliver\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
   // the navigator itself by Tab and Enter
   const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Design/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-instabs');
@@ -364,7 +364,7 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   await page.waitForFunction(() => document.activeElement.id === 'st-tabbtn-director' && document.activeElement.getAttribute('aria-selected') === 'true');
   ok(await page.isVisible(R + '#st-tab-director') && !(await page.isVisible(R + '#st-tab-properties')), 'the panel follows the tab');
   // approve the design with a reason, by keyboard only (the copy was marked ready in Copy)
-  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-approvals');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-approvals');
   await tabTo(f => /Approve design/.test(f.label || f.text)); await page.keyboard.press('Enter');
   await page.waitForSelector(R + '.st-dialog textarea'); eq((await focused()).tag, 'TEXTAREA', 'the reason field takes focus');
   await page.keyboard.type('Read out and agreed with the client');

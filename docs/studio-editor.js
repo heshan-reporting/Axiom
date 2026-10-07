@@ -65,7 +65,8 @@
   /* ------------------------------------------------------------ the floating toolbar over the selection */
   /** What the selection can do, beside it on the canvas: type for words, fill for shapes, the image's own tools, and for every
       selection duplicate, delete, lock and paint order. "More" opens the Properties tab, where every control lives. */
-  function ContextToolbar({ sel, bbox, layout, ro, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen }) {
+  function ContextToolbar({ sel, bbox, layout, ro, stageW: stageW0, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen }) {
+    const stageW = stageW0 || (layout && layout.stage && layout.stage.w) || 1080;
     const [pop, setPop] = useState('');
     if (!sel.length || !bbox || ro) return null;
     const one = sel.length === 1 ? sel[0] : null; const pal = (layout && layout.palette) || {};
@@ -83,7 +84,7 @@
       ${textAll && !locked ? html`
         ${text ? html`<button class="st-fbar-font" onClick=${() => onFontOpen()} title="Font" aria-label=${'Font: ' + (fam || 'brand font')}>${fam || 'Brand font'}</button>` : null}
         ${tb('Smaller type', 'minus', () => onPatchEach(l => ({ size: r1(Math.max(1.2, l.size - 0.4)) })))}
-        <span class="st-fbar-val" aria-label="Type size">${text ? one.size : '-'}</span>
+        <span class="st-fbar-val" aria-label="Type size" title=${text ? one.size + '% of the width' : ''}>${text ? Math.round(one.size * stageW / 100) + ' px' : '-'}</span>
         ${tb('Larger type', 'plus', () => onPatchEach(l => ({ size: r1(Math.min(20, l.size + 0.4)) })))}
         ${tb('Bold', null, () => onPatchEach(l => ({ weight: (l.weight || 600) >= 700 ? 400 : 800 })), text && (one.weight || 600) >= 700, false, 'Bold (heavier or lighter)')}
         ${tb('Italic', null, () => onPatchEach(l => ({ italic: !l.italic || undefined })), text && one.italic, false, 'Italic')}

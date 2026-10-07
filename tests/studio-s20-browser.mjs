@@ -157,4 +157,46 @@ await T.t('B4. switching to another asset while a save is out: the save lands on
   ok(work && work.base === first.current && work.h === 'Words B', 'the working store holds B on the saved version: ' + JSON.stringify(work));
 });
 
+// ---------------------------------------------------------------- S20 sections 3-6: the workspace, measured in the app
+await T.t('W1. at 1440 x 900 a fitted 4:5 artboard is at least 560px tall with the inspector open and the library closed', async () => {
+  await page.ctxB.close(); await openDesign('S20 A at design');
+  await page.click(R + '.st-pagechip:has-text("Instagram")'); await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]'); await sleep(1200);
+  const m = await page.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas'); const r = c.getBoundingClientRect(); const ins = document.querySelector('#studio-root .st-inspector').getBoundingClientRect(); return { h: Math.round(r.height), w: Math.round(r.width), lib: !!document.querySelector('#studio-root .st-library'), insW: Math.round(ins.width), insIn: ins.left < innerWidth && ins.right <= innerWidth + 1, scroll: document.scrollingElement.scrollHeight <= innerHeight + 1 }; });
+  ok(!m.lib, 'the library is closed'); ok(m.insW >= 300 && m.insIn, 'the inspector is open: ' + JSON.stringify(m));
+  ok(Math.abs(m.w / m.h - 0.8) < 0.02, 'the artboard is 4:5: ' + JSON.stringify(m));
+  ok(m.h >= 560, 'the artboard is at least 560px tall: ' + m.h); ok(m.scroll, 'and the page does not scroll');
+});
+
+await T.t('W2. five phases in the header - Brief, Explore, Copy, Design, Review & Deliver - with Brief\'s three steps in its head, Alt+1..5 between phases, one main action in Design', async () => {
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Explore', 'Copy', 'Design', 'Review & Deliver']);
+  ok(!(await page.$(R + '.st > .st-steps')), 'no navigator bar of its own: the phases sit in the header');
+  eq(await page.$$eval(R + '.st-canvasbar .btn.st-primary, ' + R + '.st-canvasbar .btn:not(.ghost):not(.sm.on)', x => x.filter(e => /Continue to Review/.test(e.textContent)).length), 1, 'Design has one main action');
+  await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))');
+  const subs = await page.$$eval(R + '.st-phasesteps .st-substep', x => x.map(e => e.textContent.replace(/,.*$/, '').replace(/^\S*\d/, '').trim()));
+  ok(subs.join('|').indexOf('Understanding') >= 0 && subs.join('|').indexOf('Objectives') >= 0 && subs.join('|').indexOf('Strategy') >= 0, 'Brief shows its steps: ' + subs.join(' | '));
+  await page.click(R + '.st-substep:has-text("Strategy")'); await page.waitForSelector(R + '.st-substep.on:has-text("Strategy")');
+  ok(/Working on/.test(await page.textContent(R + '.st-stagehead')), 'the head says what this is working on');
+  ok(!/Needs/.test(await page.textContent(R + '.st-stagehead')), 'the long account is behind help, not on the page');
+  await page.keyboard.press('Alt+2'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Explore"))');
+  await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))');
+});
+
+await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it needs a render, why and its basis; Edit instruction and Apply are two actions', async () => {
+  await page.ctxB.close(); await openDesign('S20 C at design');
+  await place(page, 'creative director');
+  await page.click(R + '.st-cd-tab:has-text("Explore")');
+  const ask = page.locator(R + 'button:has-text("Suggest for this version")'); if (await ask.count()) await ask.first().click();
+  await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
+  const first = page.locator(R + '.st-sugg-item').first();
+  const facts = await first.locator('.st-sugg-facts dt').allTextContents();
+  ['Changes', 'Keeps', 'Scope', 'Generation', 'Basis'].forEach(k => ok(facts.indexOf(k) >= 0, k + ' stated: ' + facts.join(', ')));
+  ok(/v\d+ only/.test(await first.locator('.st-sugg-facts').textContent()), 'the scope names the asset and version');
+  ok(await first.locator('button:has-text("Edit instruction")').count() === 1 && await first.locator('button:has-text("Apply")').count() === 1, 'two distinct actions');
+  const n0 = jobsPosted().length; await first.locator('button:has-text("Edit instruction")').click(); await sleep(400);
+  eq(jobsPosted().length, n0, 'Edit instruction sends nothing'); ok((await page.inputValue(R + '.st-composer textarea')).length > 5, 'it fills the composer');
+  ok(/selected|whole tile/.test(await page.textContent(R + '.st-cd-scope')), 'the scope line states the selection');
+});
+
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

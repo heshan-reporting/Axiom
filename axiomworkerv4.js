@@ -6885,7 +6885,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-10-07.studio-p35';
+const AXIOM_BUILD = '2026-10-07.studio-p36';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8084,6 +8084,16 @@ function stFit(layout, copy, format) {
   if (logo && (logo.w < 8 || logo.w > 32)) out.push({ state: 'logo_size', text: 'logo', note: 'The logo is ' + logo.w + '% wide; 8-32% keeps it legible without dominating.' });
   return out;
 }
+/** S20: the web address a campaign's work should carry, resolved explicitly: the campaign's own URL from the kit, or nothing.
+ *  A standalone piece or a campaign without a URL is 'unresolved' - never the client's other campaign's address by default. */
+function stCampaignUrl(kit, campaignId) {
+  const camps = (kit && Array.isArray(kit.campaigns)) ? kit.campaigns : []; const c = campaignId ? camps.find(x => x && x.id === campaignId) : null;
+  const host = u => String(u || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/?#]/)[0];
+  const others = camps.filter(x => x && x.url && (!c || x.id !== c.id)).map(x => ({ campaign: x.id, host: host(x.url) }));
+  if (c && c.url) return { url: c.url, host: host(c.url), source: 'campaign', campaign: c.id, name: c.name || c.id, others };
+  return { url: '', host: '', source: 'unresolved', campaign: c ? c.id : '', name: c ? (c.name || c.id) : '', others, note: c ? 'the campaign ' + (c.name || c.id) + ' has no URL on file' : 'no campaign: a standalone piece has no campaign address' };
+}
+const ST_URL_RX = /\b(?:https?:\/\/)?(?:www\.)?((?:[a-z0-9-]+\.)+(?:com\.au|org\.au|net\.au|gov\.au|edu\.au|au|com|org|net|info))(?:\/[^\s"')]*)?/gi;
 function stChecks(copy, ledger, opts) {
   opts = opts || {}; const out = [];
   copy = copy || {};
@@ -8122,6 +8132,10 @@ function stChecks(copy, ledger, opts) {
   if (spec && cap.length > spec.max) out.push({ state: 'over_limit', text: cap.length + ' characters', claim: null, note: spec.label + ' allows ' + spec.max });
   if (spec && (cap.match(/#\w+/g) || []).length > spec.hashtags) out.push({ state: 'too_many_hashtags', text: (cap.match(/#\w+/g) || []).join(' '), claim: null, note: spec.label + ' allows ' + spec.hashtags });
   if (/!/.test(cap)) out.push({ state: 'exclamation', text: '!', claim: null, note: 'no exclamation marks in this client\'s copy' });
+  // S20: every web address shown is the campaign's own; another campaign's address, or one nobody resolved, is named
+  if (opts.url) { const seen = {}; let m; ST_URL_RX.lastIndex = 0; while ((m = ST_URL_RX.exec(text))) { const h = m[1].toLowerCase().replace(/^www\./, ''); if (seen[h]) continue; seen[h] = 1;
+    if (opts.url.host && h !== opts.url.host) { const o = (opts.url.others || []).find(x => x.host === h); out.push({ state: 'url_mismatch', text: m[0], claim: null, note: (o ? 'the address of another campaign (' + o.campaign + ')' : 'not the campaign\'s address') + '; ' + (opts.url.name || 'the campaign') + ' uses ' + opts.url.host }); }
+    else if (!opts.url.host) out.push({ state: 'url_unresolved', text: m[0], claim: null, note: (opts.url.note || 'no address on file') + '; confirm the address in the Brand workspace' }); } }
   if (opts.layout && opts.layout.layers) stFit(opts.layout, copy, opts.format).forEach(x => out.push(x));
   if (opts.layout && Array.isArray(opts.layout.incomplete)) opts.layout.incomplete.forEach(i => out.push({ state: 'mark_missing', text: i.mark, claim: null, note: i.text }));
   else if (copy.headline && opts.format && copy.headline.length > (ST_HEADLINE_FIT[opts.format] || 64)) out.push({ state: 'overflow', text: copy.headline.slice(0, 60), note: 'Headline is ' + copy.headline.length + ' characters; about ' + ST_HEADLINE_FIT[opts.format] + ' fit at ' + opts.format + ' before the type shrinks.' });
@@ -8133,7 +8147,7 @@ async function stVersionChecks(env, project, asset, v) {
   const kit = (await brandKit(env, project.ns)) || {};
   const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
   const inScope = f => f.status !== 'pending' && (!f.campaign || f.campaign === project.campaign);
-  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(inScope), otherFacts: (kit.facts || []).filter(f => !inScope(f)), channel: asset.channel, format: asset.format, layout: v.layout });
+  const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(inScope), otherFacts: (kit.facts || []).filter(f => !inScope(f)), channel: asset.channel, format: asset.format, layout: v.layout, url: stCampaignUrl(kit, project.campaign) });
   try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(jsonFit(checks, 8000), v.id).run(); } catch (e) {}
   return checks;
 }
@@ -8375,6 +8389,47 @@ async function stStrategyStage(env, job, p, log) {
   return { idea: st.idea, proposition: st.proposition, questions: st.questions, model: r.model };
 }
 /** How different a set of directions really is: 1 - the mean pairwise overlap of their arguments, with a penalty for one medium. */
+/* S20: what a direction says it would draw, reduced to five comparable facts - the medium, where the words sit, how much of the
+   piece is imagery (full, split, inset, a chart or none), the type scale and the palette words. Read from the direction's own
+   composition, layout, visual narrative, typography and colour fields; the same facts lay out the free sketch on its card.
+   It is a reading of descriptions, never of rendered pixels, and is reported as such. */
+const ST_COLOUR_WORDS = ['black', 'white', 'dark', 'light', 'teal', 'gold', 'orange', 'blue', 'green', 'red', 'yellow', 'navy', 'cream', 'grey', 'ochre', 'sand', 'earth', 'charcoal', 'pastel', 'monochrome'];
+function stCompDescriptor(d) {
+  d = d || {}; const vn = d.visualNarrative && typeof d.visualNarrative === 'object' ? d.visualNarrative : {};
+  const low = x => String(x || '').toLowerCase();
+  const place = low([vn.textPlacement, vn.composition, d.layout, d.composition].filter(Boolean).join(' '));
+  const all = low([d.composition, d.layout, vn.composition, vn.textPlacement, vn.scene, d.visual].filter(Boolean).join(' '));
+  const typ = low([d.typography, vn.typography].filter(Boolean).join(' ')); const col = low([d.colour, vn.colour].filter(Boolean).join(' ')) || all;
+  const medium = String(d.medium || '');
+  // where the words sit: a phrase about the words first ("words on the right", "headline across the bottom"), then any placement word
+  const wz = (place.match(/\b(?:words?|headline|text|type|copy|message)\b[^.,;:]{0,40}?\b(top|upper|bottom|foot|lower|left|right|centre|center|middle)\b/) || [])[1];
+  const ZW = { top: 'top', upper: 'top', bottom: 'bottom', foot: 'bottom', lower: 'bottom', left: 'left', right: 'right', centre: 'middle', center: 'middle', middle: 'middle' };
+  const zone = wz ? ZW[wz] : /\b(top|upper|above|header)\b/.test(place) ? 'top' : /\bleft\b/.test(place) ? 'left' : /\bright\b/.test(place) ? 'right' : /\b(centre|center|middle|centred|centered)\b/.test(place) ? 'middle' : 'bottom';
+  const image = medium === 'typographic' || /\b(no (photo|photograph|image|imagery)|type only|type-only|typographic|text only|words only)\b/.test(all) ? 'none'
+    : medium === 'infographic' || medium === 'diagram' || /\b(chart|graph|diagram|infographic|data visuali[sz]ation)\b/.test(all) ? 'chart'
+    : /\b(split|half and half|side by side|two halves|diptych)\b/.test(all) ? 'split'
+    : medium === 'cutout' || /\b(inset|small (photo|photograph|image)|thumbnail|framed (photo|photograph)|cut ?out)\b/.test(all) ? 'inset' : 'full';
+  const scale = /\b(huge|giant|oversized|massive|dominant|towering|very large|poster|billboard)\b/.test(typ + ' ' + all) ? 'large' : /\b(small|understated|quiet|restrained|minimal)\b/.test(typ) ? 'small' : 'standard';
+  const palette = ST_COLOUR_WORDS.filter(w => new RegExp('\\b' + w + '\\b').test(col)).slice(0, 4);
+  return { medium, zone, image, scale, palette };
+}
+/** How different a set of directions is in what it would draw: one minus the mean pairwise likeness of their descriptors
+ *  (medium 0.3, imagery 0.25, where the words sit 0.2, type scale 0.1, palette 0.15); a pair scoring under 0.3 apart is named
+ *  as a look-alike on the page. Beside stDiversity, which compares the arguments. */
+function stCompositionDiversity(dirs) {
+  const ds = (dirs || []).map(d => d.sketch || stCompDescriptor(d)); if (ds.length < 2) return { score: null, pairs: [], descriptors: ds };
+  const pairs = []; let sum = 0, n = 0;
+  for (let i = 0; i < ds.length; i++) for (let k = i + 1; k < ds.length; k++) {
+    const a = ds[i], b = ds[k]; const same = [];
+    let dist = 0; if (a.medium !== b.medium || !a.medium) dist += 0.3; else same.push('medium');
+    if (a.image !== b.image) dist += 0.25; else same.push('imagery ' + a.image);
+    if (a.zone !== b.zone) dist += 0.2; else same.push('words at the ' + a.zone);
+    if (a.scale !== b.scale) dist += 0.1; else same.push(a.scale + ' type');
+    const u = new Set(a.palette.concat(b.palette)); const inter = a.palette.filter(x => b.palette.indexOf(x) >= 0).length; const pd = u.size ? 1 - inter / u.size : 0; dist += 0.15 * pd; if (u.size && pd < 0.5) same.push('palette');
+    dist = Math.round(dist * 100) / 100; pairs.push({ a: dirs[i].title, b: dirs[k].title, distance: dist, close: dist < 0.3, same }); sum += dist; n++;
+  }
+  return { score: Math.round(sum / n * 100) / 100, pairs, descriptors: ds, method: 'compared on what each direction says it would draw (medium, imagery, where the words sit, type scale, palette words); a reading of the descriptions, not of rendered images' };
+}
 function stDiversity(dirs) {
   if (dirs.length < 2) return { score: null, pairs: [] }; const pairs = []; let sum = 0, n = 0;
   for (let i = 0; i < dirs.length; i++) for (let k = i + 1; k < dirs.length; k++) { const a = dirs[i], b = dirs[k]; const sim = Math.max(stSimilar(a.idea + ' ' + a.message + ' ' + a.headline, b.idea + ' ' + b.message + ' ' + b.headline), 0) * 0.75 + (a.medium && a.medium === b.medium ? 0.25 : 0); pairs.push({ a: i, b: k, similarity: Math.round(sim * 100) / 100 }); sum += sim; n++; }
@@ -8409,7 +8464,7 @@ async function stSequenceStage(env, job, p, log) {
       if (L && L.layers.some(l => l.type === 'text')) { layout = L; how = 'plan'; planIn = pl; }
       else { layout = stLayout(kit, p.ns, format, template, copy, { campaign: p.campaign }); how = 'house'; why = pl ? 'its plan placed no words' : 'no plan came back for it'; }
     }
-    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel, format, layout: inp.deliverable === 'copy' ? null : layout });
+    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel, format, layout: inp.deliverable === 'copy' ? null : layout, url: stCampaignUrl(ctx.kit || {}, p.campaign) });
     const aid = stId('a'); const title = (i + 1) + '. ' + role + ' - ' + ST_CHANNELS[channel].label + ' ' + format;
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, 'Sequence: ' + name, channel, format, title, '', '{}', 1, now, now).run();
     const a = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
@@ -9186,6 +9241,7 @@ async function stDirectStage(env, job, p, log) {
         basis, objectiveTitle: (sel.objective || {}).title || '', messageText: (sel.message || {}).primary || '', strategyKind: (sel.strategy || {}).kind || '',
         trace: { intel: basis.intel, source: ((p.brief || {}).analysis || {}).source || '', evidence: [], objective: basis.objective, objectiveTitle: (sel.objective || {}).title || '', message: basis.message, messageText: (sel.message || {}).primary || '', strategy: basis.strategy, strategyKind: (sel.strategy || {}).kind || '' } });
     }
+    out.sketch = stCompDescriptor(Object.assign({}, d, out));
     if (mode === 'refine') { out.refinedFrom = named[0].id; out.instruction = stStr(inp.instruction, 300); }
     if (mode === 'merge') { out.mergedFrom = named.map(x => x.id); out.parts = (Array.isArray(inp.parts) ? inp.parts : []).slice(0, 8).map(x => ({ id: stClean(x && x.id, 24), part: stStr(x && x.part, 30) })); }
     if (mode === 'alternatives') out.alternativeTo = standing.map(x => x.id).slice(0, 8);
@@ -9215,15 +9271,17 @@ async function stDirectStage(env, job, p, log) {
       }
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
   }
-  const diversity = stDiversity(dirs);
+  const diversity = stDiversity(dirs); const compDiv = stCompositionDiversity(dirs);
+  compDiv.pairs.filter(x => x.close).forEach(x => { const d = dirs.find(y => y.title === x.b); if (d) d.lookalike = x.a; });
+  if (compDiv.score != null) await log('info', 'composition diversity ' + compDiv.score + ' (argument ' + diversity.score + ')' + (compDiv.pairs.some(x => x.close) ? '; would look alike on the page: ' + compDiv.pairs.filter(x => x.close).map(x => '"' + x.a + '" ~ "' + x.b + '" (' + x.same.join(', ') + ')').join('; ') : ''));
   if (log.phase) await log.phase('filing', 'Filing ' + dirs.length + ' direction' + (dirs.length === 1 ? '' : 's'), { step: 'filing', completed: 4, total: 4 });
   for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 12000), 0, 'studio', Date.now())); }
   await env.MIND_DB.batch(rows);
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='directions', revision=revision+1, updated=? WHERE id=? AND status='brief'").bind(Date.now(), p.id).run();
   await log('out', dirs.length + ' direction' + (dirs.length === 1 ? '' : 's') + ': ' + dirs.map(d => d.title + (d.medium ? ' [' + d.medium + ']' : '')).join(' / ') + (mode === 'refine' ? ' (refined from "' + named[0].title + '")' : mode === 'merge' ? ' (merged from ' + named.map(x => '"' + x.title + '"').join(', ') + ')' : similar ? ' - ' + similar + ' still read as close to another; ask for another' : ' - distinct arguments') + (replanned ? ' (' + replanned + ' replanned once: ' + replanWhy + ')' : '') + (narrow ? ' - still one medium' : ''));
   const lead = mode === 'refine' ? 'Refined "' + named[0].title + '" into "' + dirs[0].title + '". ' : mode === 'merge' ? 'Merged ' + named.map(x => '"' + x.title + '"').join(' and ') + ' into "' + dirs[0].title + '". ' : mode === 'alternatives' ? dirs.length + ' alternative direction' + (dirs.length === 1 ? '' : 's') + ': ' : (diversity.score != null ? 'Diversity ' + diversity.score + ' (1 = nothing in common). ' : '') + dirs.length + ' directions' + (guided ? ' on the confirmed strategy' : ' for an open brief') + ': ';
-  await stEvent(env, p.id, 'directions', { mode, diversity: diversity.score, media: mediaOf(dirs), replanned: replanned || undefined, replanWhy: replanWhy || undefined, narrow: narrow || undefined, text: lead + (mode === 'refine' || mode === 'merge' ? '' : dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ')) + (replanned ? ' ' + replanned + ' direction' + (replanned === 1 ? ' was' : 's were') + ' replanned once because ' + (replanWhy === 'alike' ? 'it read as another in different words' : 'every direction shared one medium') + '.' : '') + (similar ? ' ' + similar + ' still read' + (similar === 1 ? 's' : '') + ' as close to another and ' + (similar === 1 ? 'is' : 'are') + ' marked.' : '') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
-  return { directions: ids, titles: dirs.map(d => d.title), media: mediaOf(dirs), similar, replanned, replanWhy: replanWhy || undefined, narrow, diversity: diversity.score, mode, model: r.model, model2: model2 || undefined };
+  await stEvent(env, p.id, 'directions', { mode, diversity: diversity.score, argument: diversity.score, composition: compDiv.score, lookalikes: compDiv.pairs.filter(x => x.close).map(x => ({ a: x.a, b: x.b, same: x.same })), media: mediaOf(dirs), replanned: replanned || undefined, replanWhy: replanWhy || undefined, narrow: narrow || undefined, text: lead + (mode === 'refine' || mode === 'merge' ? '' : dirs.map((d, i) => String.fromCharCode(65 + i) + ') ' + d.title + ' - ' + d.message).join(' ')) + (replanned ? ' ' + replanned + ' direction' + (replanned === 1 ? ' was' : 's were') + ' replanned once because ' + (replanWhy === 'alike' ? 'it read as another in different words' : 'every direction shared one medium') + '.' : '') + (similar ? ' ' + similar + ' still read' + (similar === 1 ? 's' : '') + ' as close to another and ' + (similar === 1 ? 'is' : 'are') + ' marked.' : '') + ' Choose one, or ask for another; nothing is produced until you do.', job: job.id, directions: ids, informed: cc.manifest }, 'studio');
+  return { directions: ids, titles: dirs.map(d => d.title), media: mediaOf(dirs), similar, replanned, replanWhy: replanWhy || undefined, narrow, diversity: diversity.score, argument: diversity.score, composition: compDiv.score, mode, model: r.model, model2: model2 || undefined };
 }
 // -- the brief: what is settled, what is assumed, what blocks spending ------------------------------------------
 // A brief carries objective, audience, message, action and deliverables, plus design requirements in three bands
@@ -9525,7 +9583,7 @@ async function stCopyStage(env, job, p, log) {
       if (finished) layout = Object.assign({}, layout, { approach: 'artwork', finished: true, templateName: (layout.templateName || layout.mediumName || 'composition').replace(/, full artwork$/, '') + ', finished creative' });
       if (how === 'plan') mediums.push(c + ' ' + layout.mediumName + (finished ? ' (finished creative)' : layout.approach === 'artwork' ? ' (artwork)' : '') + (layout.frames ? ', ' + layout.frames.length + ' frames' : ''));
     }
-    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel: c, format, layout: deliverable === 'copy' ? null : layout });
+    const checks = stChecks(copy, led.claims, { allowed, banned: ctx.block.banned, facts: ctx.block.facts, channel: c, format, layout: deliverable === 'copy' ? null : layout, url: stCampaignUrl(ctx.kit || {}, p.campaign) });
     if (checks.some(x => x.state !== 'matches' && x.state !== 'fact' && x.state !== 'mark_missing')) flagged++;
     const aid = stId('a'); const title = ST_CHANNELS[c].label + ' ' + (deliverable === 'copy' ? 'copy' : format === '9:16' ? 'story' : format === '4:5' ? 'portrait' : format === '16:9' ? 'landscape' : 'post');
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, inp.variant && direction ? stStr('Narrative: ' + direction.title, 60) : deliverable === 'copy' ? 'Copy' : 'Campaign set', c, format, title, '', '{}', 1, now, now).run();
