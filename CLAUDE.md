@@ -2446,6 +2446,71 @@ more window sizes), `tests/studio-s18-shots.mjs` (matched screenshots of every
 step at four sizes into the ignored `tests/shots/s18/`), seeded by
 `tests/studio-s18-seed.mjs`.
 
+**Data safety, the canvas workspace and an exact Creative Director (S19; build
+`2026-10-07.studio-p35`, page `?v=r13`; `CREATIVE-STUDIO.md` s.42).** Three
+data-loss defects of S18, each reproduced first (`tests/studio-s19-browser.mjs`
+A-C failed on 225aa54): a version save deleted the recovery draft before the
+save succeeded; a conflict while saving a canvas edit kept the layout and
+dropped the words typed on the canvas; switching asset inside the draft
+debounce (or mid-typing) lost the edit. Now: **one edit is layout plus words**
+(`docs/studio-merge.js`, `window.STMerge`: a three-way merge by layer id and
+copy field against the version the edit was made on; independent changes
+combine, the same field or layer changed by both is a conflict a person
+decides in `ConflictDialog` - Keep mine / Keep theirs / item by item / Cancel,
+never a silent choice); `saveEdit()` posts with an **op id** (`POST
+/studio/version {op}` answers a repeat with the version it wrote,
+`duplicate:true`, so a save that committed but timed out is never written
+twice), checks the saved version contains the edit (`STMerge.contains`) and
+only then discards the draft through the **guarded discard** (`POST
+/studio/draft/discard {savedVersion}` deletes only a draft on that base written
+no later than the version; a newer draft survives a late acknowledgement).
+The **working copy lives outside the editor** (`WORK`, `window.STWork`: per
+key fingerprint - never the key - and asset, in memory and localStorage
+`ax_studio_work_<fp>`, written every 250 ms and on `pagehide`, kept 14 days):
+leaving an asset, a stage or the page and coming back restores the unsaved
+edit, words being typed included (`TextEditor onChange`), with no question.
+Save states: Unsaved / Saving recovery draft / Draft saved / Saving version /
+Version saved / Save failed (the draft and the edit kept, Save again).
+**The canvas workspace**: one contextual tool row (Undo, Redo, Add always;
+Align and order only with a selection; Distribute with three; Group with two;
+guides, grid and how a resize treats type in a View menu); reframing the
+photograph is a **crop mode** with Apply framing / Cancel in the tool row
+(Enter / Escape; Cancel restores zoom and pan from before), never a bar over
+the artwork, and the framing panel belongs to the photograph (no selection, or
+an image region); secondary controls fold (`Sec`, remembered per browser:
+typeface, effects, image adjustments); panels the person sizes
+(`usePanelWidth`: drag the edge or arrow keys on it, Shift for 40 px,
+double-click resets, localStorage `ax_studio_w_<key>`) - the inspector
+(300-640) and the tool panel (220-560) - and the inspector **folds to a rail**
+of four icons (`.st-inspector.min`, any tab asked for opens it again); the
+layers list has search, colour swatches and rename (double-click or F2;
+`layer.name`); the activity in Design is one line over the canvas
+(`WorkspaceActivity compact`) and Copy no longer shows the assets rail beside
+its own list of pieces. **The Creative Director in every stage** works on the
+asset on screen (Copy: the piece being written; elsewhere an asset picker,
+`.st-cd-asset`), offers only targets that exist, each named (`<title> vN`,
+`The <family> family (n)`, `The whole set (n)`), and a direction with no asset
+named waits - it is never widened (`directTeam` takes `o.asset` from the
+sender; the worker refuses `asset_required` too). Review findings and the
+correction carry `element` / `layers` only when that layer exists on the
+judged version (`stInspectStage` drops invented ones); the correction states
+Changes / Keeps / Needs / Lands as, "select it" selects the layer on the
+canvas (`st:select-layers`, which also follows "show on the tile" without
+leaving the panel), and after it is applied **Undo** restores the reviewed
+version as a new version. Stage heads add **Produces** and **Your decision**.
+**Imagery is one stated state** (`imageryState`: queued, generating, failed -
+the last usable imagery kept and named -, on file and loading, on file but
+**did not load** with *load again*, hidden, none by choice, drawn), beside the
+composition's facts; a render that lands while the canvas has unsaved changes
+merges with them (test J); Checks say they judge the saved version while the
+canvas holds unsaved changes. Harnesses: `tests/studio-s19-browser.mjs` (16),
+`tests/studio-s19-worker.mjs` (8), `tests/studio-merge-test.mjs` (10),
+`tests/studio-s19-perf-browser.mjs` (a 50-layer composition: draw, measure,
+validate, drag frame intervals, long tasks, pointer-to-frame latency, keyboard
+input-to-paint; figures to `tests/shots/s19/perf-<label>.json`) and
+`tests/studio-s19-shots.mjs` (matched captures at 1440 x 900, 1920 x 1080,
+1024 x 768 and 390 x 844 into the ignored `tests/shots/s19/`).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

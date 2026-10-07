@@ -1823,3 +1823,89 @@ captures (Design, Creative Director, Brief, Review & Delivery at 1440, the mocku
 - Deploy the worker with `tools/deploy-worker.sh` (never `wrangler deploy` from the repository root); the deploy script proves
   `2026-10-07.studio-p34` on `/engine/status`. No D1 migration, no new secret, no new binding.
 - Nothing was deployed and no live model or image call was made in S18.
+
+## 42. S19 - data safety, the canvas workspace and an exact Creative Director (build studio-p35, page r13)
+
+### 42.1 Problems found, and their root causes
+
+Baseline: S18, commit 225aa54 (build p34, page r12). Each data-safety defect was written as a failing test first
+(`tests/studio-s19-browser.mjs` A-C; all failed on the baseline, `s19/baseline-fail.txt` in the session scratchpad).
+
+1. **A version save destroyed the recovery draft before the save succeeded.** `save()` in the layout editor discarded the
+   server draft and cleared its own state, then posted the version; a refused or timed-out save left nothing to recover, and
+   autosave stopped. Root cause: discard was sequenced before the acknowledgement, and unconditional on the server.
+2. **A conflict while saving dropped the words typed on the canvas.** `putLayout` retried a 409 with the layout only; the
+   `copyPatch` of the same edit was not carried into the retry. Root cause: one logical edit (layout + words) travelled as two
+   things, and only one of them through the conflict path.
+3. **Fast navigation lost edits.** The working layout lived in the editor component; leaving the asset inside the 1.2 s draft
+   debounce (or with a text field open) unmounted it with the edit. Root cause: unsaved state owned by a component's lifetime.
+4. **The Creative Director could be sent nowhere, or anywhere.** Outside Design it was given no asset, so its "This asset"
+   target pointed at nothing; the copy partner's quick asks relied on the app-wide selection, which could be empty while Copy
+   showed its first piece; a direction for "this asset" was therefore sent with whatever was selected elsewhere, or refused
+   only at the worker. Root cause: the target of a direction was implicit state, not named by the sender.
+5. **Review findings could not be acted on.** An inspection named problems in prose only - no element, no statement of what a
+   correction keeps or whether it renders, no undo.
+6. **Generated is not visible.** An image on record that the browser failed to fetch was noted only in the composition tag;
+   the tile looked finished. Root cause: one boolean (image key present) stood for both "generated" and "drawn".
+7. **Interface weight.** The tool row showed every arrangement control, disabled, with nothing selected; the reframing bar
+   sat over the artwork; Copy listed its pieces twice (rail and its own list); a running job pushed the canvas down as a panel.
+
+### 42.2 What changed
+
+- `docs/studio-merge.js` (`STMerge`): the three-way merge of one canvas edit (layout by layer id + copy fields) against the
+  version it was made on; conflicts go to `ConflictDialog` (Keep mine / Keep theirs / item by item / Cancel).
+- `saveEdit()` carries the whole edit through every round, posts with an op id, verifies the saved version contains it,
+  and only then calls the guarded discard. Worker: `POST /studio/version {op}` is idempotent per asset
+  (`json_extract(context,'$.op')`), never bypassing the revision check for a different op; `POST /studio/draft/discard
+  {savedVersion}` deletes only the draft on that base written no later than the version.
+- `WORK` (`window.STWork`): the working copy outside the editor, per key fingerprint and asset, in memory and localStorage,
+  flushed on `pagehide`; the open text field's words fold into it as they are typed.
+- Canvas workspace: contextual tool row, View menu, crop mode with Apply / Cancel in the tool row, folded secondary
+  sections, `usePanelWidth` for the inspector and the tool panel (pointer and keyboard, remembered), an inspector that folds
+  to a rail, layer search / swatches / rename, a one-line activity in Design, one list of pieces in Copy.
+- Creative Director: the asset on screen in every stage (picker outside Design), only real targets with counts, a refusal
+  instead of a widened target, findings and corrections with `element` / `layers` checked against the judged version,
+  Changes / Keeps / Needs / Lands as, "select it", Undo after a correction.
+- `imageryState()`: queued, generating, failed (last usable kept), loading, did not load (load again), hidden, none, drawn.
+- Checks state which saved version they judge while the canvas holds unsaved changes.
+
+### 42.3 Tests
+
+New: `studio-s19-browser.mjs` (16: A-C data safety and their variants, D tool row, E panels, F layers, G Copy, H the
+Creative Director's scope and targets, I review elements, J a late render merging with unsaved edits, K imagery that did not
+load, L the scope of Checks), `studio-s19-worker.mjs` (8: op idempotency, the guarded discard, per-person drafts, read-only,
+review elements, HOOF / MCA identity separation), `studio-merge-test.mjs` (10), `studio-s19-perf-browser.mjs` (3).
+Updated for the new interface, never weakened: the activity harness reads the one-line form and opens details; the framing
+harness uses Apply / Cancel; the effects harness opens its section; studio-browser reads Copy's own list and the
+Conversation tab; studio-s9's issue highlight keeps the Checks tab open.
+
+### 42.4 Performance, measured
+
+`tests/studio-s19-perf-browser.mjs`, headless Chromium in the cloud sandbox (no GPU), a 1080 x 1350 composition of 50
+layers over a photograph with three salient regions. Same harness on the S18 baseline and on S19:
+
+| measure | S18 | S19 |
+|---|---|---|
+| full draw at 1080 px, median / worst | 4.4 / 6.5 ms | 4.6 / 8.3 ms |
+| validate(), median / worst | 34.8 / 49.6 ms | 32.3 / 44.2 ms |
+| frameSuggest(), median / worst | 2.6 / 7.3 ms | 2.1 / 3.5 ms |
+| drag, frame interval p50 / p95 / worst | 16.7 / 16.7 / 16.8 ms | 16.7 / 16.7 / 16.8 ms |
+| drag, long tasks (> 50 ms), during and after | 0 / 0 | 0 / 0 |
+| drag, pointer to next frame p50 / p95 | 12.3 / 15.4 ms | 12.6 / 15.0 ms |
+| keyboard nudge, input to paint (Event Timing) p95 | 32 ms | 32 ms |
+
+The canvas met the budgets (60 fps while dragging, interaction p95 under 100 ms, no long task) before S19 and still does;
+S19 added no measurable cost. validate() of 50 layers is the heaviest single call (up to ~50 ms); it is debounced 250 ms
+after an edit and never runs during a drag. Provider latency (model calls, image generation) is not in these figures: it is
+reported per job by the activity panel (`studio_dur_<stage>`), separately.
+
+### 42.5 Limitations
+
+- Measured on one machine class (headless, no GPU); a designer's laptop with a large photograph and a high-DPI canvas will
+  differ. The harness is in the suite so a regression shows.
+- The merge resolves at layer granularity: two people changing different properties of the same layer is a conflict a person
+  decides, not merged property by property.
+- Review elements are as good as the model's naming: an element is shown only when this version has it; a correct finding
+  the model did not tie to a layer is shown without "select it".
+- Imagery load state is per browser: "did not load" says this browser could not fetch or decode it, which may be a network
+  matter rather than a missing file.
