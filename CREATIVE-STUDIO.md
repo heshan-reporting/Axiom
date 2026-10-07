@@ -1783,6 +1783,24 @@ Unchanged in substance from S12 and still the rule: phases are the worker's, a s
 (channels written, renders queued, the steps of a run), and an image call is indeterminate with its elapsed time and the
 typical duration. In Design the live jobs sit in one line above the canvas rather than a block of cards.
 
+### 41.5a Measured after (`tests/studio-s18-shots.mjs after`, the same seeded project as 41.1, mocked providers)
+
+| Window | Document height | Design artboard (top + height) | Creative Director composer |
+|---|---|---|---|
+| 1440 x 900 | 900 at every step (was taller than the window) | y 268, 455 px, in the window (was y 679-1139, below the fold) | y 752, in the window (was y 1348) |
+| 1920 x 1080 | 1080 at every step | y 268, 658 px, in the window (was y 621-1261) | y 932, in the window (was y 1238) |
+| 1024 x 768 | 768 at every step | y 268, 323 px, in the window | in the inspector drawer, one tap (`.st-insp-toggle`) |
+| 390 x 844 | 844 at every step | y 333, 229 px, in the window | in the drawer, as above |
+
+No step scrolls the page and nothing scrolls sideways at any size. To make room for the artboard, the Design foot
+went from four rows to two: the page strip shares a row with the measured / save line and the composition tag, and in
+Design the readiness strip clamps its explanation to one line (the full readiness sits in Checks). Guides (safe area,
+likely subjects) are off by default and remembered per browser (`ax_studio_guides`). An outline someone asked for
+("show on the tile") shows whether the guides are on or not. On a phone the floating Properties and Creative Director
+button has room to scroll past. The mockup's artboard is about 505 px in a 1050 px frame; ours is 455 px in 900, with
+the measured state, page strip and readiness the mockup did not have. The before / after sheet was composed from the
+captures (Design, Creative Director, Brief, Review & Delivery at 1440, the mockup, and the phone and tablet Design).
+
 ### 41.6 Limits and what is not verified
 
 - Every capture and every test runs against the worker module in-process with **every provider mocked**; no paid generation
@@ -1791,6 +1809,8 @@ typical duration. In Design the live jobs sit in one line above the canvas rathe
   not adopted - every figure in the Studio comes from the record.
 - The legacy views inside the island (Sources, Sequence, Recipes and usage, the Brand workspace's long tables) inherit the new
   frame but were not redesigned.
+- At phone width Design is usable but cramped: the asset title truncates beside the zoom control and the canvas foot
+  scrolls inside its own region. The canvas editor's tool row scrolls sideways (faded at its edge) rather than wrapping.
 - The Studio's frame was rebuilt; AXIOM's other screens were not touched, but `index.html`'s Studio block lost its frame
   rules, so a page served with an older `studio-shell.css` cached would look wrong until reloaded (the page scripts and
   styles carry `?v=r12`).

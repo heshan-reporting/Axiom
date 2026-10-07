@@ -297,9 +297,12 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-client{min-width:0;width:auto;max-width:48vw}
   #studio-root .st .st-step{min-width:96px;padding:6px}
   #studio-root .st .st-step-meta{display:none}
-  #studio-root .st .st-centre{padding:0 14px}
+  #studio-root .st .st-centre{padding:0 14px 72px}
+  #studio-root .st .st-canvas-sub{flex-direction:column;align-items:stretch;gap:6px}
+  #studio-root .st .st-canvas-sub .st-comp-info{text-align:left}
+  #studio-root .st .st-canvasbar-l .st-qstate.mini{display:none}
   #studio-root .st .st-stage-title{font-size:19px}
-  #studio-root .st .st-refine{padding:8px 8px 0}
+  #studio-root .st .st-refine{padding:8px 8px 72px}
   #studio-root .st .st-design, #studio-root .st .st-design.has-library{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
   #studio-root .st .st-dock{flex-direction:row;overflow-x:auto;align-self:stretch}
   #studio-root .st .st-dock-btn{flex:1 0 56px}

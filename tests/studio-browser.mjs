@@ -552,7 +552,11 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.waitForSelector(R + '.st-le-type');
   await page.fill(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', '5.2'); await page.press(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', 'Enter');
   await page.selectOption(R + '.st-le-type select[aria-label="Text alignment"]', 'center');
+  // S18: guides are off until asked for (remembered per browser); the Guides button draws them, and off removes them
+  eq(await page.$(R + '.st-le-guide'), null, 'no guide drawn by default');
+  await page.click(R + '.st-canvasbar button:has-text("Guides")'); await page.waitForSelector(R + '.st-le-guide', { timeout: 5000 });
   ok(await page.$(R + '.st-le-guide'), 'the 3% guide is drawn');
+  await page.click(R + '.st-canvasbar button:has-text("Guides")'); await page.waitForFunction(() => !document.querySelector('#studio-root .st-le-guide'), null, { timeout: 5000 });
   await page.waitForSelector(R + '.st-le-val'); ok(/Measured at 1080x1080/.test(await page.textContent(R + '.st-le-val')), 'measured at the output size while editing');
   await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });

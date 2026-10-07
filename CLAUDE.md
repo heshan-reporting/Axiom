@@ -2406,7 +2406,9 @@ zoom - / select / +); **the canvas is the editor** for an editable composition
 show the composition as it stands), its tools above and its save line below the
 stage (portals `toolsSlot` / `footSlot`): the working layout measured, the draft
 state, Save layout as a version, Discard changes; layer outlines and names show
-on hover and selection only, never in Preview. Under the canvas: the page strip
+on hover and selection only, never in Preview; the safe-area and subject guides are off until the Guides button
+(remembered per browser, localStorage `ax_studio_guides`), while an outline asked for through "show on the tile" always
+shows. The measured / save line and the composition tag share the page strip's row (`.st-canvas-sub`). Under the canvas: the page strip
 (every visual piece, `.st-pagechip`, the same `.st-assetpick` class as the rail's
 asset buttons), the compact readiness strip, the remedies, and a finished
 creative's Regenerate / Switch to Editable panel. **The inspector** has two modes,
