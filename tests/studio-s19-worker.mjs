@@ -76,4 +76,21 @@ await T.t('S19d: a review names the element of each finding and of its correctio
   ok(!ev.issues[1].element && !ev.issues[1].layers, 'an element this version does not have is dropped: ' + JSON.stringify(ev.issues[1]));
   eq([ev.fix.element, ev.fix.layers, ev.fix.keeps], ['support', ['sp1'], 'the words, the photograph and the marks'], 'the correction names its element and what it keeps');
 });
+await T.t('S19e: two identities in one client stay apart - a HOOF composition carries one of the approved HOOF wordmark variants (blue, white, black) and never the MCA logo; an MCA national composition carries the MCA logo and never a HOOF wordmark', async () => {
+  const png = n => pngGradientB64(16 + n, 8);
+  await call('POST', '/brand/kit', { ns: 'mca', campaigns: [{ id: 'national', name: 'Australian mining', logoPolicy: 'logo' }, { id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark' }] });
+  await call('POST', '/brand/kit', { ns: 'mca', logoB64: png(1), logoMime: 'image/png' });
+  for (const [variant, tone, n] of [['blue', 'colour', 2], ['white', 'light', 3], ['black', 'dark', 4]]) eq((await call('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkVariant: variant, wordmarkTone: tone, wordmarkB64: png(n), wordmarkMime: 'image/png' })).status, 200);
+  const PH = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'HOOF S19', brief: { objective: 'o', message: 'm', channels: ['instagram'], campaignConfirmed: true } })).body.id;
+  const PN = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'national', title: 'National S19', brief: { objective: 'o', message: 'm', channels: ['instagram'], campaignConfirmed: true } })).body.id;
+  const mk = async P0 => (await call('POST', '/studio/asset', { project: P0, family: 'Set', channel: 'instagram', format: '1:1', title: 'Tile', copy: { headline: 'Hands off our fuel', support: 'Not a subsidy', cta: 'Sign' }, mode: 'composition' })).body.asset;
+  const H = await mk(PH), N = await mk(PN);
+  const marks = a => a.versions[0].layout.layers.filter(l => l.role === 'logo' || l.role === 'wordmark');
+  const hm = marks(H), nm = marks(N);
+  ok(hm.length >= 1 && hm.every(l => l.role === 'wordmark'), 'HOOF carries the wordmark only: ' + JSON.stringify(hm.map(l => [l.role, l.src])));
+  ok(hm.every(l => /campaign=hoof/.test(l.src) && /variant=(blue|white|black)/.test(l.src)), 'an approved HOOF variant: ' + hm.map(l => l.src).join(' '));
+  ok(!hm.some(l => /\/brand\/logo/.test(l.src || '')), 'never the MCA logo on HOOF');
+  ok(nm.length >= 1 && nm.every(l => l.role === 'logo' && /\/brand\/logo/.test(l.src)), 'National carries the MCA logo: ' + JSON.stringify(nm.map(l => [l.role, l.src])));
+  ok(!nm.some(l => /campaign=hoof/.test(l.src || '')), 'never a HOOF wordmark on National');
+});
 const res = T.done(); process.exit(res.fail ? 1 : 0);

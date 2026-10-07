@@ -9,3 +9,12 @@ export function pngGradientB64(w, h) {
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
 }
+/** A PNG with something to look at (S19 performance harness): a muted ground with a bright, edged disc off centre, so the
+    renderer's colour-and-edge saliency finds a subject and the framing suggestion has work to do. */
+export function pngSubjectB64(w, h) {
+  const raw = Buffer.alloc((w * 3 + 1) * h); const cx = w * 0.68, cy = h * 0.34, r = Math.min(w, h) * 0.16;
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; const d = Math.hypot(x - cx, y - cy); const inD = d < r;
+    raw[o] = inD ? 230 : 70 + (y % 40 < 2 ? 20 : 0); raw[o + 1] = inD ? 60 : 90; raw[o + 2] = inD ? 40 : 110 + Math.round(30 * x / w); } }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
+}

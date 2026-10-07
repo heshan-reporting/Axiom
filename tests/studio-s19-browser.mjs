@@ -5,7 +5,7 @@
  *   C  switching asset inside the draft debounce (or during an open text edit) lost the edits without a trace
  * Run: node --experimental-sqlite tests/studio-s19-browser.mjs   (SHOT=1 writes tests/shots/s19/t-*.png) */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok, place } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, PHOTO } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
 const fx = await makeStudio({ port: 8871, inspect: false });
 const { api } = fx;
@@ -258,6 +258,47 @@ await T.t('I. a review\'s finding and its correction name the element; "select i
   ok(/Changes/.test(txt) && /Keeps the words, the photograph and the marks/.test(txt) && /Needs no render/.test(txt), 'the correction says what it changes, keeps and needs');
   await page.click(R + '.st-cd-review button:has-text("select it")'); await sleep(300);
   ok(await page.$(R + '.st-le-layer.sel[aria-label="Layer support"]'), 'the support layer is selected on the canvas');
+});
+
+await T.t('J. a render that lands while the canvas has unsaved changes never overrides them: saving keeps the moved headline and takes the new imagery, and the imagery state says what is drawn', async () => {
+  await page.ctxB.close(); await openDesign('S19 D at design');
+  const A0 = (await assets(PD))[0]; const base = cur(A0);
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp');
+  const moved = await headTop();
+  // the late result: a render lands on the server as a new version with imagery, the layout as it was
+  const key = 'studio/s19late/x/late.png'; fx.r2.set(key, { v: Buffer.from(PHOTO, 'base64'), o: { httpMetadata: { contentType: 'image/png' } } });
+  const r = await api('POST', '/studio/version', { asset: A0.id, layout: base.layout, copy: base.copy, image: { key, url: '/studio/file?key=' + encodeURIComponent(key), model: 'late-render', size: '1K' }, kind: 'render', note: 'a render that finished late' });
+  ok(r.version, 'the late render is a version: ' + JSON.stringify(r).slice(0, 200));
+  await sleep(1200);
+  ok(Math.abs(await headTop() - moved) < 0.2, 'the unsaved move is still on the canvas after the render landed');
+  await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
+  await page.waitForFunction(() => /Version saved/.test(document.querySelector('#studio-root .st-head .st-save').textContent), null, { timeout: 15000 });
+  const A1 = (await assets(PD))[0]; const v1 = cur(A1);
+  ok(v1.image && v1.image.key === key, 'the saved version keeps the imagery the render made');
+  const hl = v1.layout.layers.find(l => l.role === 'headline'); ok(Math.abs(hl.y - base.layout.layers.find(l => l.role === 'headline').y) > 0.5, 'and the moved headline');
+  await page.waitForSelector(R + '.st-imgstate', { timeout: 10000 });
+  ok(/Imagery (drawn|loading)/.test(await page.textContent(R + '.st-imgstate')), 'the imagery state says it is drawn: ' + await page.textContent(R + '.st-imgstate'));
+});
+
+await T.t('K. imagery on record that this browser cannot load is said to be missing from the screen, never shown as drawn; "load again" draws it once it can be fetched', async () => {
+  const A0 = (await assets(PD))[0]; const base = cur(A0);
+  const key = 'studio/s19miss/x/gone.png';   // on record, not in storage
+  await api('POST', '/studio/version', { asset: A0.id, layout: base.layout, copy: base.copy, image: { key, url: '/studio/file?key=' + encodeURIComponent(key), model: 'test', size: '1K' }, kind: 'render', note: 'imagery whose file is not there' });
+  await page.ctxB.close(); await openDesign('S19 D at design');
+  await page.waitForFunction(() => /Imagery did not load/.test((document.querySelector('#studio-root .st-imgstate') || {}).textContent || ''), null, { timeout: 15000 });
+  eq(await page.getAttribute(R + '.st-imgstate', 'data-state'), 'load_failed');
+  fx.r2.set(key, { v: Buffer.from(PHOTO, 'base64'), o: { httpMetadata: { contentType: 'image/png' } } });
+  await page.click(R + '.st-imgstate button:has-text("load again")');
+  await page.waitForFunction(() => /Imagery drawn/.test((document.querySelector('#studio-root .st-imgstate') || {}).textContent || ''), null, { timeout: 15000 });
+  eq(await page.getAttribute(R + '.st-imgstate', 'data-state'), 'visible', 'drawn once the file can be fetched');
+});
+
+await T.t('L. with unsaved canvas changes, the Checks say they judge the saved version, not the working one; after Discard the note is gone', async () => {
+  await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('ArrowUp'); await sleep(300);
+  await place(page, 'checks'); await page.waitForSelector(R + '.st-checks-scope', { timeout: 5000 });
+  ok(/checks are of the saved v\d+/.test(await page.textContent(R + '.st-checks-scope')), 'the scope of the checks is said');
+  await page.click(R + '.st-le-foot .btn:has-text("Discard changes")'); await sleep(500);
+  ok(!(await page.$(R + '.st-checks-scope')), 'with nothing unsaved the note is gone');
 });
 
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);
