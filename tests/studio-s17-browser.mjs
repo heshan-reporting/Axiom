@@ -155,6 +155,9 @@ await T.t('changing an earlier choice asks first: Cancel writes nothing; Keep ke
 });
 
 await T.t('Copy starts from the chosen direction and writes words with no image; copy written on an earlier choice is said once and kept on request, nothing regenerated', async () => {
+  // the Copy step opens once the reload after the last choice has landed: wait for it to be open, then go (a click on a step
+  // that is still locked is refused, which under a loaded machine made this race)
+  for (let i = 0; i < 20 && /locked/.test(await stateOf('Copy') || ''); i++) await sleep(250);
   await page.click(step('Copy')); await page.waitForSelector(R + '.st-copystart', { timeout: 15000 });
   ok(/Following the direction/.test(await page.textContent(R + '.st-copystart')) && /Who it really is/.test(await page.textContent(R + '.st-copystart-dir')), 'the copy follows the selected direction');
   ok(/No image is generated here/.test(await page.textContent(R + '.st-copystart-what')), 'and says no image is made');

@@ -1899,7 +1899,32 @@ S19 added no measurable cost. validate() of 50 layers is the heaviest single cal
 after an edit and never runs during a drag. Provider latency (model calls, image generation) is not in these figures: it is
 reported per job by the activity panel (`studio_dur_<stage>`), separately.
 
-### 42.5 Limitations
+### 42.5 The screen, measured
+
+`tests/studio-s19-shots.mjs before` (on the S18 checkout) and `after`, the same seeded projects, every step plus a layer
+selected, reframing, a validation failure, the Creative Director and a job running; `tests/studio-s19-sheet.mjs` lays them
+side by side (`tests/shots/s19/compare-<size>.png`, ignored by git). Artboard height in the Design step:
+
+| state | 1440 x 900 | 1920 x 1080 | 1024 x 768 | 390 x 844 |
+|---|---|---|---|---|
+| design, nothing selected | 455 -> 454 px | 658 -> 656 | 323 -> 322 | 229 -> 229 |
+| a job running | 330 -> 410 px | 533 -> 612 | 198 -> 282 | 122 -> 167 |
+| a layer selected | 455 -> 454 px | 658 -> 656 | 323 -> 293 | 229 -> 229 |
+| reframing | 455 -> 450 px | 658 -> 652 | 323 -> 322 | 229 -> 229 |
+
+A running job no longer pushes the canvas down (+24% to +42% of artboard height). At 1024 px a selection's arrangement tools
+wrap to a second row (30 px less artboard) where S18 cut them off at the edge of the row; on a phone the row scrolls
+sideways instead. The Creative Director now appears in Copy (no S18 capture exists for that state).
+
+A note on method: the first "after" run showed the S18 interface. A static server left running from the baseline capture
+still held the shots port and served the old pages; the captures were discarded, the server stopped and every "after"
+capture retaken. Figures above are from the retaken set.
+
+The whole suite (`node tests/run.mjs all`) ran 114 suites: 113 passed and `studio-s17-browser` failed once on a step that
+was clicked while still locked (the reload after the previous choice had not landed). It passed alone, twice, and under
+4x CPU throttling; the harness now waits for the step to open before clicking.
+
+### 42.6 Limitations
 
 - Measured on one machine class (headless, no GPU); a designer's laptop with a large photograph and a high-DPI canvas will
   differ. The harness is in the suite so a regression shows.

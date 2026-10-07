@@ -388,3 +388,21 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-imgstate.bad{border-color:var(--sk-bad);color:var(--sk-ink)}
 #studio-root .st .st-imgstate.busy{border-color:color-mix(in srgb,var(--sk-accent) 50%,var(--sk-line))}
 #studio-root .st .st-checks-scope{margin:0 0 10px;padding:8px 10px;border-radius:8px;border:1px solid color-mix(in srgb,var(--sk-warn) 45%,var(--sk-line));font-size:12px}
+/* the imagery state shares the composition-facts line (never a line of its own that would take room from the artboard) */
+#studio-root .st .st-canvas-sub .st-comp-info{display:flex;align-items:center;justify-content:flex-end;gap:8px;white-space:nowrap}
+#studio-root .st .st-canvas-sub .st-comp-info .st-comp-tag{min-width:0;overflow:hidden;text-overflow:ellipsis}
+#studio-root .st .st-canvas-sub .st-imgstate{margin-right:0;flex-shrink:0;padding:0 7px;line-height:16px}
+@media (max-width:700px){#studio-root .st .st-canvas-sub .st-comp-info{justify-content:flex-start}}
+#studio-root .st .st-le-tools .st-cropbar{flex:1 1 0;min-width:240px}
+#studio-root .st .st-cropbar-t{white-space:nowrap}
+#studio-root .st .st-le-keys{min-width:28px;padding:0 8px;font-weight:700}
+/* a phone: the tool row is one line that scrolls sideways (every tool reachable, none cut off) and the selection hint folds away */
+@media (max-width:700px){
+  #studio-root .st .st-le-tools{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+  #studio-root .st .st-le-tools > *{flex-shrink:0}
+  #studio-root .st .st-le-tools .st-le-hint-inline{display:none}
+  #studio-root .st .st-le-tools .st-le-spacer{flex:1 0 8px}
+  #studio-root .st .st-le-tools .st-cropbar{min-width:0;flex:0 0 auto}
+  #studio-root .st .st-le-tools .st-cropbar-t .ov-dim{display:none}
+}
+@media (max-width:700px){#studio-root .st .st-le-viewpop{position:fixed;left:12px;right:12px;top:auto;bottom:84px}}

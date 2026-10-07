@@ -53,7 +53,7 @@ const openDesign = async page => {
   const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click().catch(() => {});
   await page.waitForSelector(R + '.st-stage canvas, ' + R + '.st-artboard canvas', { timeout: 15000 }).catch(() => {}); await wait(1200);
 };
-const cdOpen = async page => { const cd = page.locator(R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Director")'); if (await cd.count()) { const t = page.locator(R + '.st-insp-toggle'); if (await t.count() && await t.first().isVisible()) await t.first().click().catch(() => {}); await cd.first().click().catch(() => {}); await wait(600); return true; } return false; };
+const cdOpen = async page => { const cd = page.locator(R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Director")'); if (!(await cd.count()) && await page.locator(R + '#st-inspector .st-cd').count() && await page.locator(R + '#st-inspector .st-cd').first().isVisible()) return true; if (await cd.count()) { const t = page.locator(R + '.st-insp-toggle'); if (await t.count() && await t.first().isVisible()) await t.first().click().catch(() => {}); await cd.first().click().catch(() => {}); await wait(600); return true; } return false; };
 for (const sz of sizes) {
   const page = await fx.open({ viewport: SZ[sz], quiet: true }); page.on('dialog', d => d.accept().catch(() => {}));
   await page.waitForSelector(R + '.st-lib, ' + R + '.st-libgrid', { timeout: 15000 }).catch(() => {});
@@ -77,6 +77,7 @@ for (const sz of sizes) {
   const release = fx.hold(/^\/studio\/job\/step$/);
   const rv = page.locator(R + 'button:has-text("Review v")'); if (await rv.count()) { await rv.first().click().catch(() => {}); await wait(2200); await shot(page, 'progress', sz); }
   release(); await wait(1500);
+  { const c = page.locator(R + '.st-insp-close'); if (await c.count() && await c.first().isVisible()) await c.first().click().catch(() => {}); await page.keyboard.press('Escape').catch(() => {}); await wait(300); }   // the drawer covers the navigator on narrow windows
   await page.click(stepBtn('Review')).catch(() => {}); await wait(900); await shot(page, 'review', sz);
   const ex = page.locator(R + '.st-subtab:has-text("Delivery")'); if (await ex.count()) { await ex.first().click().catch(() => {}); await wait(700); await shot(page, 'delivery', sz); }
   if (page.errors && page.errors.length) report.shots.push({ size: sz, pageErrors: page.errors.slice(0, 10) });
