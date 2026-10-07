@@ -2554,6 +2554,52 @@ and no credential exists. Harnesses: `tests/studio-s20-worker.mjs` (21),
 after captures into the ignored `tests/shots/s20/`); the flow helper
 (`tests/studio-flow.mjs`) maps the S17 step names onto the phases.
 
+**What the first live run found (S21; build `2026-10-07.studio-p37`, page `?v=r15`;
+`CREATIVE-STUDIO.md` s.44).** `tools/studio-demo.py --cases hoof,mca --approve-calls
+12` on the live worker (real Claude, no images, 10 calls) produced seven tiles and
+none passed the technical validation. Four causes, each reproduced by a failing test
+before the fix: (A) the HOOF refinement drew a bar through the myth and it was judged
+`occluded` - the plan had no way to say an overlap was intended and `stPlanNormalise`
+and adaptation (`ST_TEXT_KEYS` / `ST_SHAPE_KEYS`) dropped `overlaps`. Now the plan's
+elements carry `id` and `overlaps`; the normaliser records a pair on both layers when
+the words still read through the device (under 45% of their height, translucent at 60%
+or less, or a third of their box at most), drops an opaque block with the reason, and
+recognises an undeclared thin device across words as a strike or underline
+(`layout.intended`); the text emphasis `strike` is drawn by the renderer through the
+letters and offered in the editor. (B) marks on grounds they do not read on: the
+worker now reads each mark file's ink from its PNG (`stPngInk`: 8-bit, any colour
+type, transparent or opaque; `brMarkInks` caches it in KV `mark_ink_<version>` and
+attaches `kit.logoInk`, `logoVariants[].ink`, `wordmarks[].ink`, never stored in the
+kit), the client logo takes approved variants like a wordmark (`POST /brand/kit
+{logoB64, logoVariant, logoTone, logoDefault}` -> R2 `brand/<ns>/logo/<variant>/<v>`,
+`removeLogoVariant`, served by `/brand/logo?ns=&variant=&v=`; `tools/brand-logo.py
+<file> --ns mca --variant white --tone light`), `stGroundAt` computes the ground the
+plan paints under a mark (stage colour or gradient, then shapes; null over imagery),
+`stMarkLayers` picks the file that reads there (3:1), and where nothing holds the mark
+the normaliser moves it to the nearest free corner it reads in, or says plainly it
+will not read and which variant to upload; the planner gets `stMarkInkText` (each
+mark's ink and the grounds it reads on) in the identity block; the Brand workspace
+lists logo variants and flags `logo_tones`. (C) text off the stage: a plan's text is
+brought inside 0-100, and `repair()` closes a column's gaps evenly
+(`fitColumns`, down to 0.4%) before spacing could push a block past the safe foot -
+the MCA list tile now repairs to a pass. (D) adaptation to 16:9 shrank type under
+the blocking line: `stPlanForFormat` floors type at 3.2% (headline) / 2.4%, and
+`repair()` raises `unreadable_type` to that minimum when the validation allows.
+`tools/studio-compose.mjs --repair` now takes the first passing layout variation
+(`STRender.variants`, no model call, no render; note "layout variation: <name>")
+when Fix layout cannot clear a tile (`--no-variations` turns it off), and the demo
+stops with the reason before sharing a master that still fails. Opening a
+composition no longer freezes the page: the free layout variations and style
+variations are computed one arrangement at a time (`STRender.variantsAsync` /
+`stylesAsync`, `opts.only`, a cancel token, the page given a turn between each), and
+the measurement reads back only the pixels it judges (the mark's own box in
+`markReadability`, each word's box in `occlusionOf`, the union of the words and marks
+in `contrastOf`; read-back canvases `willReadFrequently`) - in this sandbox one
+arrangement fell from about 1.1 s to 0.9 s and one style from 0.7 s to 0.4 s, and the
+two S17 editor cases that timed out (also on the S20 commit) pass. Harnesses:
+`tests/studio-s21-worker.mjs` (14), `tests/studio-s21-browser.mjs` (12), the
+variation cases in `tests/studio-compose-test.mjs` (14).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

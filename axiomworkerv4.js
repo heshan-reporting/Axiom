@@ -3040,7 +3040,87 @@ const JSON_ONLY_NUDGE = '\n\nAnswer with the JSON object only, exactly in the sh
 async function brandKit(env, ns) {
   let kit = null;
   try { kit = JSON.parse(await kvGet(env.AXIOM_KV, 'brand_' + ns) || 'null'); } catch (e) { kit = null; }
-  return kit && typeof kit === 'object' ? kit : null;
+  if (!kit || typeof kit !== 'object') return null;
+  // the ink of every mark file, read once per file version and cached: which grounds the mark can be read on (S21)
+  try { await brMarkInks(env, ns, kit); } catch (e) {}
+  return kit;
+}
+/* What a mark file looks like as ink, read from its own pixels (S21): the live demonstration put a dark logo on a dark ground
+   because nothing said what the logo was. A PNG is decoded here (8-bit, non-interlaced; any colour type); the ink is the opaque
+   pixels of a transparent file, or the pixels that differ from the file's own border colour when it is opaque. Answers
+   {tone dark|light|colour, lum (relative luminance of the ink), fill (ink share of the file), opaque, field (luminance of an
+   opaque file's own ground)} or null for anything it cannot read (JPEG, WebP, 16-bit, interlaced, very large). */
+async function stPngInk(buf) {
+  try {
+    const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const sig = [137, 80, 78, 71, 13, 10, 26, 10]; if (u.length < 45 || sig.some((b, i) => u[i] !== b)) return null;
+    const dv = new DataView(u.buffer, u.byteOffset, u.byteLength); let p = 8; let W = 0, H = 0, depth = 0, ct = -1, inter = 0, plte = null, trns = null; const idat = [];
+    while (p + 8 <= u.length) {
+      const len = dv.getUint32(p); const type = String.fromCharCode(u[p + 4], u[p + 5], u[p + 6], u[p + 7]); const d = u.subarray(p + 8, p + 8 + len);
+      if (type === 'IHDR') { W = dv.getUint32(p + 8); H = dv.getUint32(p + 12); depth = u[p + 16]; ct = u[p + 17]; inter = u[p + 20]; }
+      else if (type === 'PLTE') plte = d; else if (type === 'tRNS') trns = d; else if (type === 'IDAT') idat.push(d); else if (type === 'IEND') break;
+      p += 12 + len;
+    }
+    const bpp = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct];
+    if (!bpp || depth !== 8 || inter || !W || !H || W * H > 6e6 || !idat.length) return null;
+    const total = idat.reduce((a, c) => a + c.length, 0); const z = new Uint8Array(total); let o = 0; idat.forEach(c => { z.set(c, o); o += c.length; });
+    const raw = new Uint8Array(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+    const stride = W * bpp; if (raw.length < (stride + 1) * H) return null;
+    const px = new Uint8Array(stride * H); const paeth = (a, b, c) => { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; };
+    for (let y = 0; y < H; y++) {
+      const f = raw[y * (stride + 1)]; const src = y * (stride + 1) + 1, dst = y * stride;
+      for (let x = 0; x < stride; x++) {
+        const r = raw[src + x], a = x >= bpp ? px[dst + x - bpp] : 0, b = y ? px[dst - stride + x] : 0, c = x >= bpp && y ? px[dst - stride + x - bpp] : 0;
+        px[dst + x] = (f === 0 ? r : f === 1 ? r + a : f === 2 ? r + b : f === 3 ? r + ((a + b) >> 1) : paeth(a, b, c) + r) & 255;
+      }
+    }
+    const at = i => { // [r, g, b, a] of pixel i
+      const k = i * bpp;
+      if (ct === 6) return [px[k], px[k + 1], px[k + 2], px[k + 3]];
+      if (ct === 2) return [px[k], px[k + 1], px[k + 2], trns && trns.length >= 6 && px[k] === trns[1] && px[k + 1] === trns[3] && px[k + 2] === trns[5] ? 0 : 255];
+      if (ct === 0) return [px[k], px[k], px[k], trns && trns.length >= 2 && px[k] === trns[1] ? 0 : 255];
+      if (ct === 4) return [px[k], px[k], px[k], px[k + 1]];
+      const ix = px[k]; return plte ? [plte[ix * 3] || 0, plte[ix * 3 + 1] || 0, plte[ix * 3 + 2] || 0, trns && ix < trns.length ? trns[ix] : 255] : [ix, ix, ix, 255];
+    };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lumOf = q => 0.2126 * lin(q[0]) + 0.7152 * lin(q[1]) + 0.0722 * lin(q[2]);
+    const n = W * H; const step = Math.max(1, Math.floor(n / 60000)); let transparent = 0, seen = 0;
+    for (let i = 0; i < n; i += step) { seen++; if (at(i)[3] < 128) transparent++; }
+    const opaque = transparent / seen < 0.02;
+    // an opaque file's own field: the commonest colour along its border
+    let field = null;
+    if (opaque) { const counts = new Map(); const add = i => { const q = at(i); const key = (q[0] >> 4) + ',' + (q[1] >> 4) + ',' + (q[2] >> 4); const e = counts.get(key) || { n: 0, q }; e.n++; counts.set(key, e); }; for (let x = 0; x < W; x += Math.max(1, W >> 6)) { add(x); add((H - 1) * W + x); } for (let y = 0; y < H; y += Math.max(1, H >> 6)) { add(y * W); add(y * W + W - 1); } field = Array.from(counts.values()).sort((a, b) => b.n - a.n)[0].q; }
+    let ink = 0, sum = 0, sr = 0, sg = 0, sb = 0;
+    for (let i = 0; i < n; i += step) {
+      const q = at(i);
+      const isInk = opaque ? (Math.abs(q[0] - field[0]) + Math.abs(q[1] - field[1]) + Math.abs(q[2] - field[2]) > 60) : q[3] >= 128;
+      if (!isInk) continue; ink++; sum += lumOf(q); sr += q[0]; sg += q[1]; sb += q[2];
+    }
+    if (!ink) return null;
+    const lum = sum / ink; const mean = [sr / ink, sg / ink, sb / ink]; const spread = Math.max.apply(null, mean) - Math.min.apply(null, mean);
+    const tone = lum <= 0.2 ? 'dark' : lum >= 0.6 ? 'light' : (spread > 60 ? 'colour' : lum < 0.4 ? 'dark' : 'light');
+    return { tone, lum: Math.round(lum * 1000) / 1000, fill: Math.round(ink / seen * 1000) / 1000, opaque, field: field ? Math.round(lumOf(field) * 1000) / 1000 : undefined, rgb: '#' + mean.map(c => ('0' + Math.round(c).toString(16)).slice(-2)).join('') };
+  } catch (e) { return null; }
+}
+/* Attach the measured ink to every mark on the kit (the primary logo, its approved variants, each campaign wordmark and its
+   variants), cached in KV by file version. Never written back into the kit: it is derived from the file, so it travels with
+   the version it was read from (ink.v) and a new upload is read afresh. */
+async function brMarkInks(env, ns, kit) {
+  if (!env.MIND_DOCS || !env.AXIOM_KV) return;
+  const read = async (key, v) => {
+    if (!v) return null; const ck = 'mark_ink_' + String(v).slice(0, 24);
+    const hit = await kvGet(env.AXIOM_KV, ck); if (hit) { try { const j = JSON.parse(hit); return j && j.none ? null : j; } catch (e) {} }
+    const obj = await env.MIND_DOCS.get(key); if (!obj) return null;
+    const ink = await stPngInk(new Uint8Array(await obj.arrayBuffer()));
+    await kvPut(env.AXIOM_KV, ck, JSON.stringify(ink ? Object.assign({ v }, ink) : { none: true, v }), 365 * 86400);
+    return ink ? Object.assign({ v }, ink) : null;
+  };
+  if (kit.hasLogo && kit.logoV) { const ink = await read('brand/' + ns + '/logo@' + kit.logoV, kit.logoV); if (ink) kit.logoInk = ink; }
+  for (const lv of (Array.isArray(kit.logoVariants) ? kit.logoVariants : [])) { const ink = await read(lv.key, lv.v); if (ink) lv.ink = ink; }
+  for (const c of (Array.isArray(kit.campaigns) ? kit.campaigns : [])) {
+    for (const wm of (Array.isArray(c.wordmarks) ? c.wordmarks : [])) { const ink = await read(wm.key, wm.v); if (ink) wm.ink = ink; }
+    if (c.wordmarkV) { const ink = await read('brand/' + ns + '/wordmark/' + c.id + '@' + c.wordmarkV, c.wordmarkV); if (ink) c.wordmarkInk = ink; }
+  }
 }
 async function brandLogo(env, ns) {
   if (!env.MIND_DOCS) return null;
@@ -3088,8 +3168,29 @@ async function brandSave(env, ns, body, who) {
     voice: pick(body.voice != null ? body.voice : cur.voice, 4000),
     rules: pick(body.rules != null ? body.rules : cur.rules, 3000),
     logoMime: cur.logoMime || '', hasLogo: !!cur.hasLogo, logoV: cur.logoV || undefined, logoVersions: Array.isArray(cur.logoVersions) ? cur.logoVersions : undefined, updated: Date.now(), by: String(who || '').slice(0, 40),
+    // approved variants of the client logo (a white one for dark grounds...), each under its own immutable key; the measured ink
+    // is derived from the file (brMarkInks) and never stored here
+    logoVariants: Array.isArray(cur.logoVariants) && cur.logoVariants.length ? cur.logoVariants.map(x => ({ variant: x.variant, v: x.v, key: x.key, mime: x.mime, tone: x.tone, at: x.at, by: x.by, history: x.history })) : undefined, logoDefault: cur.logoDefault || undefined,
   }, kitStructured(body, cur));
-  if (body.logoB64) {
+  (kit.campaigns || []).forEach(c => { delete c.wordmarkInk; (c.wordmarks || []).forEach(x => { delete x.ink; }); });
+  if (body.logoB64 && kitSlug(body.logoVariant || '')) {
+    if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo variant');
+    const mime = String(body.logoMime || 'image/png');
+    if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
+    const buf = bufFromB64(body.logoB64);
+    if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
+    if (buf.byteLength < 64) throw new Error('logo file is empty');
+    const variant = kitSlug(body.logoVariant); const lv = await stContentV(buf); const key = 'brand/' + ns + '/logo/' + variant + '/' + lv;
+    await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
+    const tone = ['light', 'dark', 'colour'].indexOf(body.logoTone) >= 0 ? body.logoTone : 'colour';
+    const prev = (kit.logoVariants || []).find(x => x.variant === variant);
+    const history = prev && prev.v !== lv ? (Array.isArray(prev.history) ? prev.history : []).concat([{ v: prev.v, at: prev.at || 0, tone: prev.tone }]).slice(-12) : (prev && prev.history) || [];
+    kit.logoVariants = (kit.logoVariants || []).filter(x => x.variant !== variant).concat([{ variant, v: lv, key, mime, tone, at: Date.now(), by: String(who || '').slice(0, 40), history }]);
+    if (body.logoDefault) kit.logoDefault = variant;
+  } else if (body.removeLogoVariant && kitSlug(body.removeLogoVariant)) {
+    // the variant leaves new compositions; its immutable copy stays so approved work keeps its exact file
+    const variant = kitSlug(body.removeLogoVariant); kit.logoVariants = (kit.logoVariants || []).filter(x => x.variant !== variant); if (kit.logoDefault === variant) kit.logoDefault = undefined; if (!kit.logoVariants.length) kit.logoVariants = undefined;
+  } else if (body.logoB64) {
     if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo');
     const mime = String(body.logoMime || 'image/png');
     if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
@@ -6885,7 +6986,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-10-07.studio-p36';
+const AXIOM_BUILD = '2026-10-07.studio-p37';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7814,7 +7915,8 @@ async function stCompileContext(env, p, opts) {
   const kit = ctx.kit; const camp = ctx.block.campaign || (kit.campaigns || []).find(c => c.id === p.campaign) || null;
   const identityText = '\n\nCAMPAIGN IDENTITY: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') + '; mark policy: ' + (camp.logoPolicy || 'logo') + (camp.hasWordmark ? ' (wordmark on file)' : '') + (kit.hasLogo ? ' (client logo on file)' : '') : 'no campaign; client logo ' + (kit.hasLogo ? 'on file' : 'not on file'))
     + '\nPALETTE: ' + JSON.stringify(kit.palette || {}) + '; fonts ' + JSON.stringify(kit.fonts || {})
-    + (placement && placement.basis === 'rule' ? '\nMARK PLACEMENT RULE (approved for the campaign): ' + placement.text : placement && placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : '');
+    + (placement && placement.basis === 'rule' ? '\nMARK PLACEMENT RULE (approved for the campaign): ' + placement.text : placement && placement.basis === 'observed' ? '\nMARK PLACEMENT OBSERVED IN THE APPROVED REFERENCES: ' + placement.text : '')
+    + stMarkInkText(kit, p.campaign);
   // the manifest: what reached the model, by id, and what was held back, by reason
   let fixes = []; try { fixes = await engineFixes(env, p.ns, null, false); } catch (e) {}
   const ruleIds = Array.from(new Set([].concat(ctx.rules.copy.ids, ctx.rules.tiles.ids)));
@@ -10045,12 +10147,12 @@ async function stProposalDecide(env, p, body, who) {
 const ST_MEDIA = ['photo-cinematic', 'photo-documentary', 'editorial', 'composite', 'cutout', 'collage', 'illustration', 'diagram', 'infographic', 'typographic', 'carousel'];
 const ST_MEDIA_WORDS = { 'photo-cinematic': 'cinematic photography', 'photo-documentary': 'documentary photography', editorial: 'editorial design', composite: 'surreal compositing', cutout: 'cutout imagery', collage: 'collage', illustration: 'illustration', diagram: 'diagram', infographic: 'infographic', typographic: 'typography-led artwork', carousel: 'carousel' };
 const ST_ROLES = ['headline', 'support', 'cta', 'kicker', 'label', 'myth', 'fact', 'caption', 'free'];
-const ST_EMPHASIS = ['none', 'highlight', 'underline', 'box', 'caps'];
+const ST_EMPHASIS = ['none', 'highlight', 'underline', 'strike', 'box', 'caps'];
 const ST_PLAN_SCHEMA = '{"medium":"' + ST_MEDIA.join('|') + '","approach":"editable|artwork","story":"<=40 words: the communication idea and the visual story","focal":"<=20 words: focal point and negative space","typography":"<=30 words: hierarchy and emphasis","devices":"<=30 words: shapes, overlays, layering","mark":"logo|wordmark|both|none|campaign","bg":null,'
   + '"regions":[{"id":"bg","role":"background|cutout|inset","x":0,"y":0,"w":100,"h":100,"fit":"cover|contain","prompt":"<=140 words: the image to make for this region - subject, framing, lens, lighting, treatment, colour relationships, where it stays quiet and why","refs":[{"id":"reference id","role":"<=12 words: what to take from it"}]}],'
-  + '"elements":[{"type":"text|shape|rule","role":"' + ST_ROLES.join('|') + '","text":"free text only (kicker, label, myth, fact, caption)","x":6,"y":50,"w":74,"h":12,"size":6.2,"weight":750,"color":"#FFFFFF","bg":null,"align":"left|center|right","font":"display|body|mono","emphasis":"' + ST_EMPHASIS.join('|') + '","fill":"#hex or rgba() for shapes","opacity":1,"shape":"rect|pill|circle|rule","gradient":false,"dir":"up|down|left|right","radius":0,"rotate":0,"letterSpacing":0}],'
+  + '"elements":[{"id":"short unique id","type":"text|shape|rule","role":"' + ST_ROLES.join('|') + '","text":"free text only (kicker, label, myth, fact, caption)","x":6,"y":50,"w":74,"h":12,"size":6.2,"weight":750,"color":"#FFFFFF","bg":null,"align":"left|center|right","font":"display|body|mono","emphasis":"' + ST_EMPHASIS.join('|') + '","fill":"#hex or rgba() for shapes","opacity":1,"shape":"rect|pill|circle|rule","gradient":false,"dir":"up|down|left|right","radius":0,"rotate":0,"letterSpacing":0,"overlaps":["ids of elements this one crosses on purpose"]}],'
   + '"frames":[{"name":"Frame 1: the myth","copy":{"headline":"","support":"","cta":""},"regions":[],"elements":[]}]}';
-const ST_PLAN_RULES = 'PLAN. Coordinates are per cent of the stage (x, y, w, h), type sizes per cent of the stage width (2.4 is the smallest readable in a feed; a headline that leads is 6 to 11). The approach "editable" means the image model makes only the imagery of each region and the renderer composes the words, shapes and marks as live layers (the finish must come from typography, hierarchy and layering); "artwork" means the image model paints the whole designed piece including stylised words - use it when the idea needs lettering that is part of the picture, and then the words are a bitmap, not editable, so give them exactly. Text elements with the roles headline, support and cta take the asset\'s copy; kicker, label, myth, fact, caption and free carry their own text. A region is where an image goes; regions with role cutout or inset sit over the background (set bg to a colour or gradient when there is no background region). Marks: "campaign" follows the campaign\'s logo policy (the right choice unless the brief says otherwise); never draw a logo or a wordmark as text. Frames make a carousel: each frame is a complete composition for the same stage; the first frame opens, the next answers. Vary the composition, the medium, the hierarchy and the devices; a different photograph behind the same panel is not a different concept.';
+const ST_PLAN_RULES = 'PLAN. Coordinates are per cent of the stage (x, y, w, h), type sizes per cent of the stage width (2.4 is the smallest readable in a feed; a headline that leads is 6 to 11). The approach "editable" means the image model makes only the imagery of each region and the renderer composes the words, shapes and marks as live layers (the finish must come from typography, hierarchy and layering); "artwork" means the image model paints the whole designed piece including stylised words - use it when the idea needs lettering that is part of the picture, and then the words are a bitmap, not editable, so give them exactly. Text elements with the roles headline, support and cta take the asset\'s copy; kicker, label, myth, fact, caption and free carry their own text. A region is where an image goes; regions with role cutout or inset sit over the background (set bg to a colour or gradient when there is no background region). Marks: "campaign" follows the campaign\'s logo policy (the right choice unless the brief says otherwise); never draw a logo or a wordmark as text. Frames make a carousel: each frame is a complete composition for the same stage; the first frame opens, the next answers. Vary the composition, the medium, the hierarchy and the devices; a different photograph behind the same panel is not a different concept. Elements must not overlap by accident: a strike-through or an underline on words is the text\'s own emphasis (strike, underline, highlight), not a shape; a device that crosses words on purpose (a crossing-out bar, a stamp) names their ids in "overlaps", stays thin or translucent so the words still read, and every word stays inside the stage.';
 function stNum(v, lo, hi, dflt) { const n = Number(v); return isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 10) / 10)) : dflt; }
 function stColour(v, dflt) { v = String(v == null ? '' : v).trim(); return /^#[0-9a-fA-F]{3,8}$/.test(v) || /^rgba?\((\s*[\d.]+\s*,){2,3}\s*[\d.]+\s*\)$/.test(v) ? v : dflt; }
 /** Where approved and brand references put the mark: observed corners only, never an invented measurement; the house default otherwise. */
@@ -10169,6 +10271,73 @@ function stLayerRule(rule) {
   if (r.corner) out.corner = r.corner; if (r.region) out.region = r.region; if (r.clearSpace != null) out.clearSpace = r.clearSpace; if (r.minWidth != null) out.minWidth = r.minWidth;
   return out;
 }
+/* -- S21: marks that read. A mark's ink (measured from its file by brMarkInks, else what its uploader said its tone is) against
+   the ground actually under it in the plan (the stage colour or gradient, then every shape painted over that spot), judged as
+   a contrast ratio. Only what the plan itself paints is known here: over imagery the ground is unknown and the browser measures. */
+function stHexRgb(v) {
+  const s = String(v || '').trim(); let m = s.match(/^#([0-9a-f]{3})$/i); if (m) return [parseInt(m[1][0] + m[1][0], 16), parseInt(m[1][1] + m[1][1], 16), parseInt(m[1][2] + m[1][2], 16), 1];
+  m = s.match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i); if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16), m[2] ? parseInt(m[2], 16) / 255 : 1];
+  m = s.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i); if (m) return [+m[1], +m[2], +m[3], m[4] == null ? 1 : Math.max(0, Math.min(1, +m[4]))];
+  return null;
+}
+function stRelLum(rgb) { const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]); }
+function stContrast(a, b) { const hi = Math.max(a, b), lo = Math.min(a, b); return (hi + 0.05) / (lo + 0.05); }
+/** The colour the plan paints at a box (per cent of the stage), sampled at its centre and corners, as relative luminance; the
+ *  darkest and brightest samples are both answered so a mark straddling two grounds is judged on the worse. null over imagery. */
+function stGroundAt(bg, layers, box, image) {
+  const pts = [[0.5, 0.5], [0.15, 0.25], [0.85, 0.25], [0.15, 0.75], [0.85, 0.75]].map(([fx, fy]) => [box.x + box.w * fx, box.y + box.h * fy]);
+  const lums = [];
+  for (const [x, y] of pts) {
+    let c = null;
+    if (bg && typeof bg === 'object' && bg.from) { const a = stHexRgb(bg.from), b = stHexRgb(bg.to || bg.from); if (a && b) { const t = Math.max(0, Math.min(1, (bg.dir === 'right' ? x : bg.dir === 'left' ? 100 - x : bg.dir === 'up' ? 100 - y : y) / 100)); c = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; } }
+    else if (bg) { const a = stHexRgb(bg); if (a) c = a.slice(0, 3); }
+    for (const l of (layers || [])) {
+      if (l.hidden) continue;
+      if (l.type === 'img' && l.role !== 'logo' && l.role !== 'wordmark') { if (x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + (l.h || 0)) c = null; continue; }
+      if (l.type !== 'shape' || l.gradient || l.shape === 'circle' || l.shape === 'icon' || l.shape === 'triangle') continue;
+      if (!(x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + (l.h || 0))) continue;
+      const f = stHexRgb(l.fill); if (!f) continue; const a = f[3] * (l.opacity == null ? 1 : l.opacity);
+      c = c ? [c[0] * (1 - a) + f[0] * a, c[1] * (1 - a) + f[1] * a, c[2] * (1 - a) + f[2] * a] : (a >= 0.95 ? f.slice(0, 3) : null);
+    }
+    if (!c) return null; lums.push(stRelLum(c));
+  }
+  return { lo: Math.min.apply(null, lums), hi: Math.max.apply(null, lums) };
+}
+/** A mark's ink as a luminance: measured from the file when known, else from the tone its uploader gave it. */
+function stInkLum(ink, tone) { if (ink && typeof ink.lum === 'number') return ink.lum; const t = (ink && ink.tone) || tone; return t === 'light' ? 0.9 : t === 'dark' ? 0.03 : 0.12; }
+/** Does a mark read on a ground: the worse of the ground's samples gives at least 3:1. */
+function stInkReads(lum, g) { return !!g && Math.min(stContrast(lum, g.lo), stContrast(lum, g.hi)) >= 3; }
+/** A file whose ink is known: measured from its pixels, or labelled light or dark by whoever uploaded it. A coloured file that
+ *  could not be read (a JPEG, a WebP) is never judged on a guess. */
+function stInkKnown(f) { return !!f && (f.measured || f.tone === 'light' || f.tone === 'dark'); }
+/** The approved files of a mark layer's asset, each with its ink luminance: the primary logo and its variants, or the
+ *  campaign wordmark's variants (or its single file). */
+function stMarkFiles(kit, ns, camp, role) {
+  if (role === 'logo') {
+    const out = [{ variant: 'primary', tone: (kit.logoInk && kit.logoInk.tone) || 'colour', src: '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : ''), lum: stInkLum(kit.logoInk, null), measured: !!kit.logoInk }];
+    (kit.logoVariants || []).forEach(x => out.push({ variant: x.variant, tone: x.tone || 'colour', src: '/brand/logo?ns=' + ns + '&variant=' + x.variant + '&v=' + x.v, lum: stInkLum(x.ink, x.tone), measured: !!x.ink }));
+    return out;
+  }
+  if (!camp) return [];
+  const vars = (camp.wordmarks || []).map(w => ({ variant: w.variant, tone: w.tone || 'colour', src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v, lum: stInkLum(w.ink, w.tone), measured: !!w.ink }));
+  if (!vars.length && camp.hasWordmark) vars.push({ variant: '', tone: (camp.wordmarkInk && camp.wordmarkInk.tone) || 'colour', src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), lum: stInkLum(camp.wordmarkInk, null), measured: !!camp.wordmarkInk });
+  return vars;
+}
+/** For the planner: each mark the campaign carries, as ink, and the grounds it reads on; so the plan puts the mark where it reads. */
+function stMarkInkText(kit, campaign) {
+  kit = kit || {}; const camp = (kit.campaigns || []).find(c => c.id === campaign) || null;
+  const policy = camp ? (ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo') : 'logo';
+  const say = (name, files) => {
+    if (!files.length) return '';
+    const one = f => !stInkKnown(f) ? (f.variant ? f.variant + ': ' : '') + 'ink not measured (not a PNG) and labelled only as colour' : (f.variant ? f.variant + ': ' : '') + (f.lum <= 0.2 ? 'dark ink' : f.lum >= 0.6 ? 'light ink' : 'coloured ink') + (f.measured ? ' (measured)' : ' (as labelled)') + ', reads on a ' + (f.lum <= 0.35 ? 'light ground' : f.lum >= 0.6 ? 'dark ground' : 'light ground (or a mid ground of strong contrast)');
+    return name + ' - ' + files.map(one).join('; ');
+  };
+  const lines = [];
+  if (policy === 'logo' || policy === 'both') { const s = say('the client logo', kit.hasLogo ? stMarkFiles(kit, '', camp, 'logo') : []); if (s) lines.push(s); }
+  if ((policy === 'wordmark' || policy === 'both') && camp) { const s = say('the ' + (camp.name || camp.id) + ' wordmark', stMarkFiles(kit, '', camp, 'wordmark')); if (s) lines.push(s); }
+  if (!lines.length) return '';
+  return '\nMARK FILES AND THEIR GROUNDS: ' + lines.join(' | ') + '. The mark is placed from its file and never boxed, outlined, recoloured or shadowed, so the ground the plan paints under its corner must be one it reads on (at least 3:1): choose the corner, or paint that corner (a band, a panel), accordingly.';
+}
 function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   opts = opts || {}; kit = kit || {}; const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const aspect = f.w / f.h;
   const camp = (kit.campaigns || []).find(c => c.id === campaign) || null;
@@ -10181,11 +10350,20 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
   const at = pos || (placement ? corners[placement.corner] : corners.br);
   const layers = [];
   const wantLogo = policy === 'logo' || policy === 'both', wantMark = policy === 'wordmark' || policy === 'both';
-  if (wantLogo) { if (kit.hasLogo) layers.push({ id: 'logo', type: 'img', role: 'logo', asset: 'logo', x: at.x, y: at.y, w: lw, h: lh, src: '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : ''), exact: true, name: 'Client logo (exact, from the brand kit)' }); else { notes.push('the client logo is not on file; nothing was drawn in its place'); if (camp) incomplete.push({ code: 'mark_missing', mark: 'logo', text: 'the client logo the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + '); nothing drawn in its place, no other mark substituted' }); } }
+  if (wantLogo) { if (kit.hasLogo) {
+    // with approved variants on file, every file rides on the layer (the browser measures and may switch) and the one that reads
+    // on the known ground is drawn; otherwise the primary logo, as before
+    const files = (kit.logoVariants || []).length ? stMarkFiles(kit, ns, camp, 'logo') : [];
+    const g = opts.groundAt ? opts.groundAt({ x: at.x, y: at.y, w: lw, h: lh }) : null;
+    const pickL = files.length ? (g && files.find(f => stInkKnown(f) && stInkReads(f.lum, g))) || (opts.ground === 'dark' && files.find(f => f.tone === 'light')) || (opts.ground === 'light' && files.find(f => f.tone === 'dark')) || files.find(f => f.variant === (kit.logoDefault || 'primary')) || files[0] : null;
+    layers.push({ id: 'logo', type: 'img', role: 'logo', asset: 'logo', x: at.x, y: at.y, w: lw, h: lh, src: pickL ? pickL.src : '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : ''), variant: pickL ? pickL.variant : undefined, variants: files.length ? files.map(f => ({ variant: f.variant, tone: f.tone, src: f.src })) : undefined, exact: true, name: 'Client logo' + (pickL && pickL.variant !== 'primary' ? ' (' + pickL.variant + ')' : '') + ' (exact, from the brand kit)' });
+  } else { notes.push('the client logo is not on file; nothing was drawn in its place'); if (camp) incomplete.push({ code: 'mark_missing', mark: 'logo', text: 'the client logo the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + '); nothing drawn in its place, no other mark substituted' }); } }
   if (wantMark) { if (camp && camp.hasWordmark) {
     const vars = (camp.wordmarks || []).map(w => ({ variant: w.variant, tone: w.tone || 'colour', src: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v }));
     // over a known dark ground a light variant, over a light ground a dark one; otherwise the campaign's default (the browser measures and may switch)
-    const pick = vars.length ? (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
+    const wfiles = stMarkFiles(kit, ns, camp, 'wordmark'); const wg = opts.groundAt ? opts.groundAt({ x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - (opts.w || 24)), y: at.y, w: opts.w || 24, h: Math.round(8 * aspect * ((opts.w || 24) / 24) * 10) / 10 }) : null;
+    const byGround = wg && vars.length ? wfiles.find(f => f.variant && stInkKnown(f) && stInkReads(f.lum, wg)) : null;
+    const pick = vars.length ? (byGround && vars.find(w => w.variant === byGround.variant)) || (opts.ground === 'dark' && vars.find(w => w.tone === 'light')) || (opts.ground === 'light' && vars.find(w => w.tone === 'dark')) || vars.find(w => w.variant === camp.wordmarkDefault) || vars[0] : null;
     layers.push({ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: camp.id, x: wantLogo ? corners.bl.x : Math.min(at.x, 100 - si.side - (opts.w || 24)), y: at.y, w: opts.w || 24, h: Math.round(8 * aspect * ((opts.w || 24) / 24) * 10) / 10, src: pick ? pick.src : '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + (camp.wordmarkV ? '&v=' + camp.wordmarkV : ''), variant: pick ? pick.variant : undefined, variants: vars.length ? vars : undefined, exact: true, name: (camp.name || camp.id) + ' wordmark' + (pick ? ' (' + pick.variant + ')' : '') + ' (exact, from the brand kit)' });
   } else { notes.push('the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark is not on file; nothing was drawn in its place (tools/brand-logo.py --campaign ' + (campaign || 'id') + ' --wordmark)'); incomplete.push({ code: 'mark_missing', mark: 'wordmark', text: 'the ' + ((camp && camp.name) || campaign || 'campaign') + ' wordmark the policy requires is not on file (tools/brand-logo.py <file> --ns ' + ns + ' --campaign ' + (campaign || 'id') + ' --wordmark); nothing drawn in its place, the client logo not substituted' }); } }
   // the campaign rule rides on the mark layers themselves - mandatory (held: the editor, the layer ops and /studio/version hold
@@ -10199,8 +10377,8 @@ function stMarkLayers(kit, ns, campaign, format, want, pos, opts) {
    layout reads back as a plan with the same element ids, a plan moves between formats with its type rescaled to the
    new stage, focused edits address layers by id, locked layers are carried through, and approved words split across
    several layers are held to reproduce the copy exactly. */
-const ST_TEXT_KEYS = ['id', 'role', 'text', 'x', 'y', 'w', 'h', 'size', 'weight', 'color', 'bg', 'align', 'font', 'emphasis', 'emphasisColor', 'letterSpacing', 'lineHeight', 'part', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'family', 'italic', 'case', 'paraSpacing', 'shadow', 'stroke', 'glow', 'blend', 'blur'];
-const ST_SHAPE_KEYS = ['id', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius', 'x', 'y', 'w', 'h', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'fill2', 'icon', 'iconFill', 'strokeWidth', 'shadow', 'stroke', 'blend', 'blur'];
+const ST_TEXT_KEYS = ['id', 'overlaps', 'role', 'text', 'x', 'y', 'w', 'h', 'size', 'weight', 'color', 'bg', 'align', 'font', 'emphasis', 'emphasisColor', 'letterSpacing', 'lineHeight', 'part', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'family', 'italic', 'case', 'paraSpacing', 'shadow', 'stroke', 'glow', 'blend', 'blur'];
+const ST_SHAPE_KEYS = ['id', 'overlaps', 'role', 'shape', 'fill', 'gradient', 'dir', 'radius', 'x', 'y', 'w', 'h', 'opacity', 'rotate', 'locked', 'hidden', 'group', 'name', 'fill2', 'icon', 'iconFill', 'strokeWidth', 'shadow', 'stroke', 'blend', 'blur'];
 const ST_IMAGE_KEYS = ['id', 'role', 'name', 'key', 'x', 'y', 'w', 'h', 'fit', 'focus', 'adjust', 'flipX', 'flipY', 'mask', 'radius', 'shadow', 'stroke', 'blend', 'blur', 'opacity', 'rotate', 'locked', 'hidden', 'group'];
 /* The editor's styling, sanitised: a plain family name, the case, the paragraph gap, effects in per cent of the stage width
    with bounded values and plain colours, a blend from the canvas's own list. Anything else is dropped, never passed on. */
@@ -10274,7 +10452,11 @@ function stPlanForFormat(plan, from, to) {
   if (from === to) return plan;
   const k = (Math.min(B.w, B.h) / Math.min(A.w, A.h)) * (A.w / B.w);
   const out = JSON.parse(JSON.stringify(plan));
-  const scale = els => (els || []).forEach(e => { if (e && e.type === 'text' && e.size) e.size = Math.round(Math.max(1.6, e.size * k) * 10) / 10; });
+  // type keeps its size against the short side, but never drops under the feed minimum the validator holds it to (a landscape tile
+  // is shown at about 360 px wide, so its words must be a larger share of its width): 3.2% for a headline, 2.4% for everything
+  // else; type that was already smaller is kept as it was, never enlarged past it, and never under the 1.8% blocking line (S21)
+  const floorOf = e => e.role === 'headline' ? 3.2 : 2.4;
+  const scale = els => (els || []).forEach(e => { if (e && e.type === 'text' && e.size) e.size = Math.round(Math.max(1.8, Math.min(e.size, floorOf(e)), e.size * k) * 10) / 10; });
   scale(out.elements); (out.frames || []).forEach(f => f && scale(f.elements));
   if (out.markPlace && out.markPlace.w) out.markPlace.w = Math.round(Math.max(8, out.markPlace.w * k) * 10) / 10;
   const sa = stSafeInset(from), sb = stSafeInset(to);
@@ -10363,7 +10545,7 @@ function stPlanNormalise(plan, format, opts) {
   if (plan.bg && typeof plan.bg === 'object') { const from = stColour(plan.bg.from, ''), to = stColour(plan.bg.to, ''); if (from) bg = to ? { from, to, dir: ['down', 'right', 'up', 'left'].indexOf(plan.bg.dir) >= 0 ? plan.bg.dir : 'down' } : from; }
   else if (plan.bg) bg = stColour(plan.bg, null);
   const regions = (Array.isArray(plan.regions) ? plan.regions : []).slice(0, 4).map((r, i) => r && typeof r === 'object' ? ({ id: stClean(r.id, 16) || (i === 0 ? 'bg' : 'r' + (i + 1)), role: ['background', 'cutout', 'inset'].indexOf(r.role) >= 0 ? r.role : (i === 0 ? 'background' : 'inset'), x: stNum(r.x, 0, 100, 0), y: stNum(r.y, 0, 100, 0), w: stNum(r.w, 2, 100, 100), h: stNum(r.h, 2, 100, 100), fit: r.fit === 'contain' ? 'contain' : 'cover', focus: stFocus(r.focus), prompt: stStr(r.prompt, 1200), refs: (Array.isArray(r.refs) ? r.refs : []).map(x => x && typeof x === 'object' ? { id: stClean(x.id, 24), role: stStr(x.role, 120) } : { id: stClean(x, 24), role: '' }).filter(x => x.id).slice(0, 4) }) : null).filter(Boolean);
-  const layers = [];
+  const layers = []; const offStage = [];
   (Array.isArray(plan.elements) ? plan.elements : []).slice(0, 24).forEach((e, i) => {
     if (!e || typeof e !== 'object') return;
     const type = e.type === 'shape' || e.type === 'rule' ? 'shape' : e.type === 'text' ? 'text' : e.type === 'image' ? 'image' : null;
@@ -10371,6 +10553,14 @@ function stPlanNormalise(plan, format, opts) {
     // a model's plan turns an element by twenty degrees at most; a layout the team made keeps the turn they gave it
     const rotMax = opts.keepStyle ? 180 : 20;
     const base = { id: stClean(e.id, 24) || (type + (i + 1)), type: type === 'image' ? 'img' : type, x: stNum(e.x, -10, 110, 6), y: stNum(e.y, -10, 110, 6), w: stNum(e.w, 1, 120, 50), h: stNum(e.h, 0.5, 120, 10), opacity: isFinite(Number(e.opacity)) && e.opacity !== null && e.opacity !== '' ? Math.round(Math.min(1, Math.max(0, Number(e.opacity))) * 100) / 100 : 1, rotate: stNum(e.rotate, -rotMax, rotMax, 0) };
+    // an overlap the plan means (a strike through the words, a stamp across them), resolved and judged once every id is known
+    if (Array.isArray(e.overlaps) && e.overlaps.length) base._ov = e.overlaps.map(x => stClean(x, 24)).filter(Boolean).slice(0, 8);
+    // words never start off the stage: a text box is brought inside 0-100 on both axes (a shape or an image may bleed)
+    if (type === 'text') {
+      const was = [base.x, base.y, base.w, base.h]; base.w = Math.min(base.w, 100); base.h = Math.min(base.h, 100);
+      base.x = Math.round(Math.max(0, Math.min(100 - base.w, base.x)) * 10) / 10; base.y = Math.round(Math.max(0, Math.min(100 - base.h, base.y)) * 10) / 10;
+      if ([base.x, base.y, base.w, base.h].some((n, k) => Math.abs(n - was[k]) > 0.5)) offStage.push(base.id);
+    }
     if (type === 'image') { const key = stUploadKey(e.key, opts.project); if (!key) { unsupported.push('element ' + (i + 1) + ': an image that is not one of this project\'s uploads cannot be placed'); return; } if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24); layers.push(Object.assign(base, { role: 'image', key, src: '/studio/file?key=' + encodeURIComponent(key) }, stStyleKeys(e, 'image'))); return; }
     if (e.locked) base.locked = true; if (e.hidden) base.hidden = true; if (e.group) base.group = stClean(e.group, 24);
     if (type === 'text') {
@@ -10387,19 +10577,81 @@ function stPlanNormalise(plan, format, opts) {
   const rsrc = opts.regionSrc || {};
   regions.filter(r => r.role !== 'background').forEach(r => layers.unshift(Object.assign({ id: r.id, type: 'img', role: 'region', region: r.id, x: r.x, y: r.y, w: r.w, h: r.h, fit: r.fit, focus: r.focus, src: '', name: 'image region ' + r.id + ' (' + r.role + ')' }, rsrc[r.id] ? { src: rsrc[r.id].src, key: rsrc[r.id].key, opaque: rsrc[r.id].opaque } : {})));
   const bgRegion = regions.find(r => r.role === 'background') || null;
+  if (offStage.length) unsupported.push('text planned partly off the stage (' + offStage.join(', ') + ') was brought onto it');
+  /* S21: overlaps the plan means. Words a device crosses on purpose (a strike through the myth, an underline bar, a stamp) are
+     not an accident: the pair is recorded on both layers, which is what the validator's occlusion and collision checks read.
+     Kept only when the words still read through it - the device is thin against the words (under 45% of their height), or
+     translucent (60% or less), or covers no more than a third of their box; an opaque block declared over the words is
+     dropped with the reason. A thin device drawn across the words with nothing declared is recognised as a strike or an
+     underline and recorded the same way, and said in `intended`. */
+  const intended = []; const byIdN = {}; layers.forEach(l => { byIdN[l.id] = l; });
+  const pair = (a, b) => { a.overlaps = Array.from(new Set((a.overlaps || []).concat([b.id]))); b.overlaps = Array.from(new Set((b.overlaps || []).concat([a.id]))); };
+  const alphaOf = s => s.type === 'shape' ? (((stHexRgb(s.fill) || [0, 0, 0, 1])[3]) * (s.opacity == null ? 1 : s.opacity)) : (s.opacity == null ? 1 : s.opacity);
+  const coverOf = (t, s) => { const ix = Math.max(0, Math.min(t.x + t.w, s.x + s.w) - Math.max(t.x, s.x)), iy = Math.max(0, Math.min(t.y + (t.h || 0), s.y + (s.h || 0)) - Math.max(t.y, s.y)); return (ix * iy) / Math.max(0.01, t.w * (t.h || 0.01)); };
+  const readsThrough = (t, s) => (s.type === 'shape' && (s.h || 0) <= 0.45 * (t.h || 0)) || alphaOf(s) <= 0.6 || coverOf(t, s) <= 0.34;
+  layers.forEach((l, li) => {
+    const ids = l._ov || []; delete l._ov;
+    ids.forEach(id => {
+      const o = byIdN[id]; if (!o || o === l) return; const oi = layers.indexOf(o);
+      const t = l.type === 'text' && oi > li ? l : o.type === 'text' && li > oi ? o : null; const s = t === l ? o : t === o ? l : null;
+      if (!t) { pair(l, o); return; }
+      if (readsThrough(t, s)) { pair(t, s); intended.push({ layers: [t.id, s.id], why: 'declared by the plan: the ' + (s.role || s.type) + ' ' + s.id + ' crosses the ' + (t.role || 'text') + ' on purpose' }); }
+      else unsupported.push('the overlap the plan declared between ' + s.id + ' and the ' + (t.role || 'text') + ' ' + t.id + ' was not kept: ' + s.id + ' would hide ' + Math.round(coverOf(t, s) * 100) + '% of the words');
+    });
+  });
+  layers.forEach((t, ti) => {
+    if (t.type !== 'text' || t.hidden) return;
+    layers.slice(ti + 1).forEach(s => {
+      if (s.type !== 'shape' || s.hidden || s.gradient || (t.overlaps || []).indexOf(s.id) >= 0) return;
+      if (!(s.role === 'device' || s.shape === 'rule')) return;
+      const ix = Math.min(t.x + t.w, s.x + s.w) - Math.max(t.x, s.x); const cy = s.y + (s.h || 0) / 2;
+      if (ix < 0.5 * Math.min(s.w, t.w) || cy < t.y || cy > t.y + (t.h || 0) || (s.h || 0) > 0.45 * (t.h || 0)) return;
+      pair(t, s); intended.push({ layers: [t.id, s.id], why: 'a strike or underline drawn across the ' + (t.role || 'text') + ' (a thin ' + (s.shape || 'device') + ' over the words), recorded as intended' });
+    });
+  });
   const groundHex = typeof bg === 'string' ? bg : bg && bg.to ? bg.to : '';
   const groundL = /^#[0-9a-fA-F]{6}$/.test(groundHex) ? (() => { const n = parseInt(groundHex.slice(1), 16); return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255; })() : null;
   const mp = stMarkPlace(plan.markPlace, format, kit, opts.campaign);
-  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, mp.pos, { placement: opts.placement, w: mp.w, rule: mp.rule, ground: groundL == null ? (regions.some(r => r.role === 'background') ? '' : 'dark') : groundL < 0.45 ? 'dark' : 'light' });
+  const groundAt = box => stGroundAt(bg, layers.filter(l => l.type !== 'text'), box, !!bgRegion);
+  const marks = stMarkLayers(kit, opts.ns, opts.campaign, format, plan.mark === 'campaign' ? null : plan.mark, mp.pos, { placement: opts.placement, w: mp.w, rule: mp.rule, groundAt, ground: groundL == null ? (regions.some(r => r.role === 'background') ? '' : 'dark') : groundL < 0.45 ? 'dark' : 'light' });
   mp.notes.forEach(n => unsupported.push(n));
   marks.layers.forEach(l => layers.push(l)); marks.notes.forEach(n => unsupported.push(n));
+  /* S21: a mark on a ground it does not read on. Known only where the plan paints the ground itself (a colour, a gradient, a band);
+     over imagery the browser measures. An approved file that reads is taken; else, where nothing holds the mark, the nearest
+     corner whose ground it reads on and that no words occupy; else the plan says plainly that it will not read and what fixes it. */
+  const campK = (kit.campaigns || []).find(c => c.id === opts.campaign) || null; const cornerName = { tl: 'top left', tr: 'top right', bl: 'bottom left', br: 'bottom right' };
+  marks.layers.forEach(m => {
+    const files = stMarkFiles(kit, opts.ns, campK, m.role).filter(stInkKnown); if (!files.length) return;
+    const g = groundAt(m); if (!g) return;
+    const cur = files.find(f => f.src === m.src); if (!cur || stInkReads(cur.lum, g)) return;
+    const take = f => { if (f.src !== m.src) { m.src = f.src; if (f.variant) m.variant = f.variant; } };
+    const alt = files.find(f => stInkReads(f.lum, g)); if (alt) { take(alt); return; }
+    const inkWord = cur.lum <= 0.35 ? 'dark ink' : cur.lum >= 0.6 ? 'light ink' : 'coloured ink';
+    const held = !!(m.rule && m.rule.mandatory);
+    const si = stSafeInset(format); const texts = layers.filter(l => l.type === 'text' && !l.hidden);
+    const at = { tl: [si.side, si.top], tr: [100 - si.side - m.w, si.top], bl: [si.side, 100 - si.bottom - (m.h || 0)], br: [100 - si.side - m.w, 100 - si.bottom - (m.h || 0)] };
+    const here = Object.keys(at).sort((a, b) => (Math.abs(at[a][0] - m.x) + Math.abs(at[a][1] - m.y)) - (Math.abs(at[b][0] - m.x) + Math.abs(at[b][1] - m.y)))[0];
+    if (!held) {
+      const order = Object.keys(at).filter(k => k !== here).sort((a, b) => (Math.abs(at[a][0] - m.x) + Math.abs(at[a][1] - m.y)) - (Math.abs(at[b][0] - m.x) + Math.abs(at[b][1] - m.y)));
+      for (const k of order) {
+        const box = { x: at[k][0], y: at[k][1], w: m.w, h: m.h || 0 };
+        if (texts.some(t => Math.min(t.x + t.w, box.x + box.w) - Math.max(t.x, box.x) > 0.3 && Math.min(t.y + (t.h || 0), box.y + box.h) - Math.max(t.y, box.y) > 0.3)) continue;
+        const g2 = groundAt(box); const f = g2 && files.find(x => stInkReads(x.lum, g2)); if (!f) continue;
+        m.x = Math.round(box.x * 10) / 10; m.y = Math.round(box.y * 10) / 10; take(f);
+        unsupported.push('the ' + m.role + ' moved from ' + cornerName[here] + ' to ' + cornerName[k] + ': its ' + inkWord + ' does not read on the ground at ' + cornerName[here] + ' (luminance ' + g.lo.toFixed(2) + ') and reads there (' + g2.lo.toFixed(2) + ')');
+        return;
+      }
+    }
+    const lightWant = cur.lum <= 0.35;
+    unsupported.push('the ' + m.role + ' (' + inkWord + ') will not read ' + (held ? 'where the campaign rule holds it (' + cornerName[here] + ')' : 'in any free corner') + ' on this ground (luminance ' + g.lo.toFixed(2) + '): no approved file reads there. Upload an approved ' + (lightWant ? 'light' : 'dark') + ' variant (tools/brand-logo.py <file> --ns ' + (opts.ns || 'ns') + (m.role === 'wordmark' && campK ? ' --campaign ' + campK.id + ' --wordmark' : '') + ' --variant ' + (lightWant ? 'white --tone light' : 'black --tone dark') + ') or give its corner a ' + (lightWant ? 'light' : 'dark') + ' ground');
+  });
   // references a region names must be on the project; an unknown id is dropped and said
   if (Array.isArray(opts.refs)) { const known = new Set(opts.refs.map(r => r.id)); regions.forEach(rg => { const bad = rg.refs.filter(x => !known.has(x.id)); if (bad.length) { unsupported.push('region ' + rg.id + ' names ' + bad.length + ' reference' + (bad.length === 1 ? '' : 's') + ' not on the project (' + bad.map(x => x.id).join(', ') + '); ignored'); rg.refs = rg.refs.filter(x => known.has(x.id)); } }); }
   if (!layers.some(l => l.type === 'text') && approach === 'editable') unsupported.push('the plan places no text elements; the words would not appear');
   let partsL = { layers }; if (layers.some(l => l.part != null)) { const pr = stPartsReconcile({ layers }, opts.copy || {}); partsL = pr.layout; pr.collapsed.forEach(role => unsupported.push('the ' + role + ' was split across layers in words that do not reproduce the approved ' + role + ' exactly; kept as one block (the copy is never rewritten by a layout)')); }
   const finalLayers = partsL.layers;
   const frames = Array.isArray(plan.frames) && plan.frames.length > 1 ? plan.frames.slice(0, 8).map((fr, i) => { const sub = stPlanNormalise(Object.assign({}, plan, { frames: [], medium: medium === 'carousel' ? 'editorial' : medium }, fr || {}), format, Object.assign({}, opts, { copy: Object.assign({}, opts.copy || {}, stCopy((fr || {}).copy || {})) })); return { name: stStr((fr || {}).name, 60) || 'Frame ' + (i + 1), copy: stCopy((fr || {}).copy || {}), layout: sub }; }) : null;
-  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: stFocus(plan.imageFocus), layers: finalLayers, frames: frames || undefined, unsupported };
+  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: stFocus(plan.imageFocus), layers: finalLayers, frames: frames || undefined, intended: intended.length ? intended : undefined, unsupported };
 }
 /** Where the words and the images sit, as a coarse grid, plus the medium and approach: two plans that share it are the same design in other clothes. */
 function stPlanSignature(L) {
@@ -10703,7 +10955,9 @@ async function brMarks(env, ns, kit, camp) {
   const head = async key => { if (!env.MIND_DOCS || !key) return null; try { const o = await env.MIND_DOCS.get(key); if (!o) return null; const buf = await o.arrayBuffer(); return { bytes: buf.byteLength, mime: (o.httpMetadata && o.httpMetadata.contentType) || '' }; } catch (e) { return null; } };
   const policy = camp ? (ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo') : 'logo';
   const logoObj = await head(kit.logoV ? 'brand/' + ns + '/logo@' + kit.logoV : 'brand/' + ns + '/logo');
-  const logo = { onFile: !!logoObj, kitSays: !!kit.hasLogo, v: kit.logoV || '', mime: kit.logoMime || '', bytes: logoObj ? logoObj.bytes : 0, url: logoObj ? '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : '') : '', versions: Array.isArray(kit.logoVersions) ? kit.logoVersions.slice(-12).reverse() : [], required: policy === 'logo' || policy === 'both', forbidden: policy === 'wordmark' || policy === 'none' };
+  const logo = { onFile: !!logoObj, kitSays: !!kit.hasLogo, v: kit.logoV || '', mime: kit.logoMime || '', bytes: logoObj ? logoObj.bytes : 0, url: logoObj ? '/brand/logo?ns=' + ns + (kit.logoV ? '&v=' + kit.logoV : '') : '', versions: Array.isArray(kit.logoVersions) ? kit.logoVersions.slice(-12).reverse() : [], required: policy === 'logo' || policy === 'both', forbidden: policy === 'wordmark' || policy === 'none', ink: kit.logoInk || null, variants: [] };
+  // S21: approved logo variants (a white one for dark grounds...), each with the ink read from its file
+  for (const x of (Array.isArray(kit.logoVariants) ? kit.logoVariants : [])) { const o = await head(x.key); logo.variants.push({ variant: x.variant, tone: x.tone || 'colour', v: x.v, mime: x.mime || '', at: x.at || 0, default: kit.logoDefault === x.variant, onFile: !!o, bytes: o ? o.bytes : 0, url: '/brand/logo?ns=' + ns + '&variant=' + x.variant + '&v=' + x.v, ink: x.ink || null }); }
   const variants = [];
   for (const w of (camp && Array.isArray(camp.wordmarks) ? camp.wordmarks : [])) { const o = await head(w.key || ('brand/' + ns + '/wordmark/' + camp.id + '/' + w.variant + '/' + w.v)); variants.push({ variant: w.variant, tone: w.tone || 'colour', v: w.v, mime: w.mime || '', at: w.at || 0, default: camp.wordmarkDefault === w.variant, onFile: !!o, bytes: o ? o.bytes : 0, url: '/brand/wordmark?ns=' + ns + '&campaign=' + camp.id + '&variant=' + w.variant + '&v=' + w.v, history: Array.isArray(w.history) ? w.history.slice(-8).reverse() : [] }); }
   const legacyObj = camp && (camp.wordmarkV || camp.hasWordmark) ? await head(camp.wordmarkV ? 'brand/' + ns + '/wordmark/' + camp.id + '@' + camp.wordmarkV : 'brand/' + ns + '/wordmark/' + camp.id) : null;
@@ -10716,6 +10970,8 @@ function brReadiness(ws) {
   if (camp && id.logo.required && !id.logo.onFile) blocking.push({ code: 'logo_missing', text: 'The ' + (camp.name || camp.id) + ' policy (' + id.policy + ') carries the client logo and none is on file' + (id.logo.kitSays ? ' (the kit says it is; storage has no file)' : '') + '.', fix: 'tools/brand-logo.py <file> --ns ' + ws.ns });
   if (camp && id.wordmark.required && !id.wordmark.onFile) blocking.push({ code: 'wordmark_missing', text: 'The ' + (camp.name || camp.id) + ' policy (' + id.policy + ') carries its own wordmark and none is on file.', fix: 'Upload the approved variants here, or tools/brand-logo.py <file> --ns ' + ws.ns + ' --campaign ' + camp.id + ' --wordmark --variant <name> --tone light|dark|colour' });
   if (!camp && !id.logo.onFile) gaps.push({ code: 'logo_missing', text: 'No client logo on file.' });
+  // S21: a logo that reads on one kind of ground only (dark ink on a transparent file, say) with no approved variant for the other
+  if (id.logo.required && id.logo.onFile && id.logo.ink && (id.logo.ink.tone === 'dark' || id.logo.ink.tone === 'light')) { const want = id.logo.ink.tone === 'dark' ? 'light' : 'dark'; const has = (id.logo.variants || []).some(v => v.onFile && ((v.ink && v.ink.tone === want) || v.tone === want)); if (!has) gaps.push({ code: 'logo_tones', text: 'The client logo is ' + id.logo.ink.tone + ' ink (read from its file) and no approved ' + want + ' variant is on file: on a ' + (want === 'light' ? 'dark' : 'light') + ' ground nothing the Studio may place reads, and it never boxes or recolours a mark.', fix: 'tools/brand-logo.py <file> --ns ' + ws.ns + ' --variant ' + (want === 'light' ? 'white' : 'black') + ' --tone ' + want }); }
   if (camp && id.wordmark.required && id.wordmark.onFile && !id.wordmark.variants.length) gaps.push({ code: 'wordmark_unnamed', text: 'Only the single (unnamed) wordmark is on file: no named variants, so contrast cannot be fixed by choosing another approved version.' });
   if (camp && id.wordmark.required && id.wordmark.variants.length && !(id.wordmark.tones.indexOf('light') >= 0 && id.wordmark.tones.indexOf('dark') >= 0)) gaps.push({ code: 'wordmark_tones', text: 'The wordmark variants on file are ' + (id.wordmark.tones.join(', ') || 'none') + ': without both a light and a dark version, a tile on the other kind of ground has no approved mark that reads.' });
   if (camp && id.wordmark.variants.length && id.wordmark.legacy) conflicts.push({ code: 'wordmark_two_sources', text: 'Both the single (unnamed) wordmark and named variants are on file; compositions use the named default (' + (id.wordmark.variants.find(v => v.default) || {}).variant + '). Remove the single upload if it is superseded.' });
@@ -12573,7 +12829,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -13607,6 +13863,15 @@ const AXIOM_WORKER = {
         }
         if (path === '/brand/logo') {
           const lv = String(reqUrl.searchParams.get('v') || '').replace(/[^a-f0-9]/g, '').slice(0, 16);
+          const lvar = kitSlug(reqUrl.searchParams.get('variant') || '');
+          if (lvar && lvar !== 'primary') {
+            // an approved logo variant: by its version when named, else its current version
+            if (!env.MIND_DOCS) return jsonResp({ error: 'no_logo' }, 404);
+            let ver = lv; if (!ver) { const kv0 = await brandKit(env, ns2); const ent = ((kv0 && kv0.logoVariants) || []).find(x => x.variant === lvar); ver = ent ? ent.v : ''; }
+            const o = ver ? await env.MIND_DOCS.get('brand/' + ns2 + '/logo/' + lvar + '/' + ver) : null;
+            if (!o) return jsonResp({ error: 'no_logo', detail: 'No logo variant "' + lvar + '" on file; upload one with tools/brand-logo.py <file> --ns ' + ns2 + ' --variant ' + lvar + ' --tone light|dark|colour.' }, 404);
+            return new Response(await o.arrayBuffer(), { headers: Object.assign({}, CORS, { 'Content-Type': (o.httpMetadata && o.httpMetadata.contentType) || 'image/png', 'Cache-Control': lv ? 'private, max-age=31536000, immutable' : 'private, max-age=300' }) });
+          }
           if (lv && env.MIND_DOCS) { const o = await env.MIND_DOCS.get('brand/' + ns2 + '/logo@' + lv); if (o) return new Response(await o.arrayBuffer(), { headers: Object.assign({}, CORS, { 'Content-Type': (o.httpMetadata && o.httpMetadata.contentType) || 'image/png', 'Cache-Control': 'private, max-age=31536000, immutable' }) }); }
           const lg = await brandLogo(env, ns2);
           if (!lg) return jsonResp({ error: 'no_logo' }, 404);

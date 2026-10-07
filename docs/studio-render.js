@@ -355,6 +355,8 @@
           if (l.stroke && +l.stroke.width > 0) { ctx.save(); ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeStyle = l.stroke.color || '#000000'; ctx.lineWidth = Math.min(t.px * 0.3, +l.stroke.width / 100 * W) * 2; if (!l.bg) shadowOn(ctx, l.shadow, W); t.lines.forEach((s, i) => ctx.strokeText(s, t.tx, ly(i))); ctx.restore(); }
           ctx.fillStyle = ink; if (!l.bg && !(l.stroke && +l.stroke.width > 0)) shadowOn(ctx, l.shadow, W);
           t.lines.forEach((s, i) => ctx.fillText(s, t.tx, ly(i)));
+          // a strike is part of the words themselves: drawn through each line's middle, after the letters, in the emphasis colour
+          if (l.emphasis === 'strike') { shadowOff(ctx); ctx.fillStyle = l.emphasisColor || l.color || '#fff'; t.lines.forEach((s, i) => { const lw = t.widths[i]; const lx = t.align === 'center' ? t.tx - lw / 2 : t.align === 'right' ? t.tx - lw : t.tx; ctx.fillRect(lx - t.px * 0.04, ly(i) + t.px * 0.52, lw + t.px * 0.08, Math.max(2, t.px * 0.1)); }); }
         }
       }
       ctx.restore();
@@ -647,9 +649,12 @@
   function regionLum(data, W, H, r) { return regionStats(data, W, H, r).lum; }
   /** The visible pixels of a mark: mean colour and luminance over the pixels that are not transparent, and how much of the
    *  box they fill (a mark with wide transparent padding is smaller than its box). */
+  /* canvases that are drawn only to be read back (measurement, never shown or exported) are kept in memory rather than on the
+     GPU: reading pixels back from a GPU canvas dominated every repair and variation (S21: about 2.5 s an arrangement) */
+  const RF = { willReadFrequently: true };
   function markStats(img) {
     if (!img) return null; const c = document.createElement('canvas'); const w = Math.min(160, img.naturalWidth || 160), h = Math.max(1, Math.round(w * (img.naturalHeight || 1) / (img.naturalWidth || 1))); c.width = w; c.height = h;
-    const x = c.getContext('2d'); x.drawImage(img, 0, 0, w, h); let d; try { d = x.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+    const x = c.getContext('2d', RF); x.drawImage(img, 0, 0, w, h); let d; try { d = x.getImageData(0, 0, w, h).data; } catch (e) { return null; }
     let n = 0, s = 0, sr = 0, sg = 0, sb = 0; let minX = w, minY = h, maxX = -1, maxY = -1; const hues = {};
     for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 128) { s += lum(d[k], d[k + 1], d[k + 2]); sr += d[k]; sg += d[k + 1]; sb += d[k + 2]; n++; const px = (k / 4) % w, py = Math.floor(k / 4 / w); if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py; hues[(d[k] >> 6) * 16 + (d[k + 1] >> 6) * 4 + (d[k + 2] >> 6)] = (hues[(d[k] >> 6) * 16 + (d[k + 1] >> 6) * 4 + (d[k + 2] >> 6)] || 0) + 1; }
     // distinct colour families with a real share of the ink: a multicolour mark is never averaged into one misleading value
@@ -679,11 +684,14 @@
       if (x1 <= x0 || y1 <= y0) { b.inkN = 0; b.inkLost = 1; b.inkWeak = 1; b.inkLocal = 1; b.inkRun = 1; b.inkWhere = 'whole'; b.inkBoundary = false; b.inkCovered = 0; return; }
       const cw = x1 - x0, ch = y1 - y0;
       // the ground below the mark, the mark alone at full alpha, and what later layers paint over it
-      const G = mk(W, H); draw(G.getContext('2d'), W, H, layout, copy, images, { only: 'ground', belowIndex: i });
-      const M = mk(W, H); draw(M.getContext('2d'), W, H, layout, copy, images, { layersOnly: [Object.assign({}, l, { opacity: 1, hidden: false })] });
+      // each drawn only over the mark's own box (the stage translated into a canvas of that size): the same pixels where they are
+      // read, without painting three full stages for every candidate place a repair tries (S21: this dominated variations)
+      const crop = () => { const c = mk(cw, ch); const x = c.getContext('2d', RF); x.translate(-x0, -y0); return { c, x }; };
+      const G = crop(); draw(G.x, W, H, layout, copy, images, { only: 'ground', belowIndex: i });
+      const M = crop(); draw(M.x, W, H, layout, copy, images, { layersOnly: [Object.assign({}, l, { opacity: 1, hidden: false })] });
       const later = layers.slice(i + 1).filter(x => !x.hidden && b.overlaps.indexOf(String(x.id)) < 0).filter(x => { const lx = x.x / 100 * W, ly = x.y / 100 * H, lw = x.w / 100 * W, lh = (x.h || 0) / 100 * H; const pad = x.rotate ? Math.max(lw, lh) : 0; return Math.min(lx + lw + pad, b.x + b.w) - Math.max(lx - pad, b.x) > 0 && Math.min(ly + lh + pad, b.y + b.h) - Math.max(ly - pad, b.y) > 0; });
-      let C = null; if (later.length) { C = mk(W, H); draw(C.getContext('2d'), W, H, layout, copy, images, { layersOnly: later }); }
-      let g, m, c; try { g = G.getContext('2d').getImageData(x0, y0, cw, ch).data; m = M.getContext('2d').getImageData(x0, y0, cw, ch).data; c = C ? C.getContext('2d').getImageData(x0, y0, cw, ch).data : null; } catch (e) { ok = false; b.inkUnresolved = true; return; }
+      let C = null; if (later.length) { C = crop(); draw(C.x, W, H, layout, copy, images, { layersOnly: later }); }
+      let g, m, c; try { g = G.x.getImageData(0, 0, cw, ch).data; m = M.x.getImageData(0, 0, cw, ch).data; c = C ? C.x.getImageData(0, 0, cw, ch).data : null; } catch (e) { ok = false; b.inkUnresolved = true; return; }
       const op = b.opacity == null ? 1 : b.opacity; const wm = b.role === 'wordmark'; const lostBar = wm ? 2 : 1.6, weakBar = wm ? 3 : 2.5;
       const step = Math.max(1, Math.floor(Math.sqrt((cw * ch) / 24000)));
       const N = 12; const rowN = new Array(N).fill(0), rowLost = new Array(N).fill(0), colN = new Array(N).fill(0), colLost = new Array(N).fill(0);
@@ -723,7 +731,7 @@
     opts = opts || {}; const { w: W, h: H } = stageSize(layout, opts.width);
     const boxes = measure(layout, copy, images, W, H); const b = boxes.find(x => x.id === id && x.mark); if (!b || b.asset !== 'loaded') return null;
     const layers = layout.layers || []; const i = layers.findIndex((l, k) => String(l.id || ('layer' + k)) === id);
-    const G = document.createElement('canvas'); G.width = W; G.height = H; draw(G.getContext('2d'), W, H, layout, copy, images, { only: 'ground', belowIndex: i });
+    const G = document.createElement('canvas'); G.width = W; G.height = H; draw(G.getContext('2d', RF), W, H, layout, copy, images, { only: 'ground', belowIndex: i });
     let d; try { d = G.getContext('2d').getImageData(0, 0, W, H).data; } catch (e) { return { unresolved: true }; }
     const rowStat = y => { let s = 0, s2 = 0, n = 0; for (let x = 0; x < W; x += 4) { const k = (y * W + x) * 4; const L = lum(d[k], d[k + 1], d[k + 2]); s += L; s2 += L * L; n++; } const mu = s / n; return { mu, sd: Math.sqrt(Math.max(0, s2 / n - mu * mu)) }; };
     // anchor on the row just under the mark's ink, then grow up and down while the band stays flat and alike
@@ -740,14 +748,21 @@
    *  colour's alpha and the layer's opacity before it is compared, so a transparent plate is not a ground and a faint word
    *  is a faint word. */
   function contrastOf(layout, copy, images, boxes, W, H) {
-    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
-    draw(x, W, H, layout, copy, images, { only: 'ground' }); let data; try { data = x.getImageData(0, 0, W, H).data; } catch (e) { return false; }
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', RF);
+    draw(x, W, H, layout, copy, images, { only: 'ground' });
+    // only the area the words and marks occupy is read back (their union), and each box is sampled within it (S21)
+    const want = boxes.filter(b => !b.hidden && !b.empty && b.valid !== false && (b.type === 'text' || (b.mark && b.asset === 'loaded')));
+    if (!want.length) return true;
+    const ux = Math.max(0, Math.floor(Math.min.apply(null, want.map(b => b.x)))), uy = Math.max(0, Math.floor(Math.min.apply(null, want.map(b => b.y))));
+    const uw = Math.max(1, Math.min(W, Math.ceil(Math.max.apply(null, want.map(b => b.x + b.w)))) - ux), uh = Math.max(1, Math.min(H, Math.ceil(Math.max.apply(null, want.map(b => b.y + b.h)))) - uy);
+    let sub; try { sub = x.getImageData(ux, uy, uw, uh).data; } catch (e) { return false; }
+    const regionStatsIn = (bx) => regionStats(sub, uw, uh, { x: bx.x - ux, y: bx.y - uy, w: bx.w, h: bx.h });
     const byId = {}; (layout.layers || []).forEach(l => { byId[String(l.id)] = l; });
     boxes.forEach(b => {
       const l = byId[b.id]; if (!l || b.hidden || b.empty || b.valid === false) return;
       const op = b.opacity == null ? 1 : b.opacity;
       if (b.type === 'text') {
-        const g = regionStats(data, W, H, b); const fgc = colourRGBA(l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff'));
+        const g = regionStatsIn(b); const fgc = colourRGBA(l.emphasis === 'highlight' ? (l.emphasisColor ? l.color || '#fff' : '#111') : (l.color || '#fff'));
         const a = fgc[3] * op; const eff = blend(fgc, a, g.rgb); const fl = lum(eff[0], eff[1], eff[2]);
         b.contrast = Math.round(ratio(fl, g.lum) * 100) / 100; b.alpha = Math.round(a * 100) / 100;
         // the worst local contrast: against the brightest and the darkest tenth of the ground, whichever the words lose to
@@ -758,7 +773,7 @@
         b.groundLum = Math.round(g.lum * 1000) / 1000; b.groundRange = [Math.round(g.p10 * 1000) / 1000, Math.round(g.p90 * 1000) / 1000];
       } else if (b.mark && b.asset === 'loaded') {
         // marks are read per pixel by markReadability(); only the ground's mean is noted here for the record
-        const g = regionStats(data, W, H, b); b.alpha = Math.round(op * 100) / 100; b.groundLum = Math.round(g.lum * 1000) / 1000;
+        const g = regionStatsIn(b); b.alpha = Math.round(op * 100) / 100; b.groundLum = Math.round(g.lum * 1000) / 1000;
       }
     });
     return true;
@@ -767,7 +782,7 @@
    *  a clear stage and the alpha under its occupied box is sampled; the covered share and the covering layers are recorded. */
   function occlusionOf(layout, copy, images, boxes, W, H) {
     const layers = Array.isArray(layout.layers) ? layout.layers : []; if (layers.length < 2) return true;
-    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', RF);
     const idx = {}; layers.forEach((l, i) => { idx[String(l.id || ('layer' + i))] = i; });
     for (const b of boxes) {
       if (!(b.type === 'text' || b.mark) || b.hidden || b.empty || b.valid === false) continue;
@@ -777,10 +792,12 @@
       // only layers whose own box meets this one can cover it (a cheap geometric filter before the pixels are read)
       const near = later.filter(l => { const lx = l.x / 100 * W, ly = l.y / 100 * H, lw = l.w / 100 * W, lh = (l.h || 0) / 100 * H; const pad = l.rotate ? Math.max(lw, lh) : 0; return Math.min(lx + lw + pad, b.x + b.w) - Math.max(lx - pad, b.x) > 0 && Math.min(ly + lh + pad, b.y + b.h) - Math.max(ly - pad, b.y) > 0; });
       if (!near.length) continue;
-      draw(x, W, H, layout, copy, images, { layersOnly: near }); let data; try { data = x.getImageData(0, 0, W, H).data; } catch (e) { return false; }
       const x0 = Math.max(0, Math.floor(b.x)), y0 = Math.max(0, Math.floor(b.y)), x1 = Math.min(W, Math.ceil(b.x + b.w)), y1 = Math.min(H, Math.ceil(b.y + b.h));
+      if (x1 <= x0 || y1 <= y0) continue;
+      // only the box's own pixels are read back (S21: whole-stage reads per word dominated the variations)
+      draw(x, W, H, layout, copy, images, { layersOnly: near }); let data; const bw = x1 - x0; try { data = x.getImageData(x0, y0, bw, y1 - y0).data; } catch (e) { return false; }
       const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 6000))); let n = 0, cov = 0;
-      for (let yy = y0; yy < y1; yy += step) for (let xx = x0; xx < x1; xx += step) { n++; if (data[(yy * W + xx) * 4 + 3] >= 128) cov++; }
+      for (let yy = y0; yy < y1; yy += step) for (let xx = x0; xx < x1; xx += step) { n++; if (data[((yy - y0) * bw + (xx - x0)) * 4 + 3] >= 128) cov++; }
       if (n) { b.occluded = Math.round(cov / n * 1000) / 1000; b.occludedBy = near.map(l => String(l.id)); }
     }
     return true;
@@ -792,7 +809,7 @@
    * that names the confidence, and the framing suggestion offers, never applies. */
   function subjects(img) {
     if (!img || !(img.naturalWidth > 0)) return { regions: [], method: 'none', confidence: 0 };
-    const N = 48; const c = document.createElement('canvas'); c.width = N; c.height = N; const x = c.getContext('2d');
+    const N = 48; const c = document.createElement('canvas'); c.width = N; c.height = N; const x = c.getContext('2d', RF);
     let d; try { x.drawImage(img, 0, 0, N, N); d = x.getImageData(0, 0, N, N).data; } catch (e) { return { regions: [], method: 'unavailable', confidence: 0, unresolved: true }; }
     const L = new Float32Array(N * N); const R = new Float32Array(N * N), G = new Float32Array(N * N), B = new Float32Array(N * N); let mr = 0, mg = 0, mb = 0;
     for (let i = 0; i < N * N; i++) { R[i] = d[i * 4]; G[i] = d[i * 4 + 1]; B[i] = d[i * 4 + 2]; L[i] = 0.2126 * R[i] + 0.7152 * G[i] + 0.0722 * B[i]; mr += R[i]; mg += G[i]; mb += B[i]; }
@@ -941,7 +958,8 @@
     // a mark that does not read, or breaks its clear space or placement region: blocking findings always, warnings when asked
     const markIssues = r => r.issues.filter(i => (markBad(i) || i.code === 'mark_clear_space' || i.code === 'mark_outside_region' || i.code === 'mark_small') && (i.severity === 'blocking' || opts.fixContrast));
     const dupIssues = r => r.issues.filter(i => i.code === 'duplicate_text');
-    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !dupIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
+    const smallIssues = r => r.issues.filter(i => i.code === 'unreadable_type');
+    if (!layoutIssues(before).length && !contrastIssues(before).length && !markIssues(before).length && !dupIssues(before).length && !smallIssues(before).length && !opts.variants) return Object.assign(result(''), { layout: layout0, changed: false });
     const layers = L.layers || []; const byId = {}; layers.forEach((l, i) => { byId[String(l.id || ('layer' + i))] = l; });
     const movable = l => l && !l.locked && !l.hidden;
     const sa0 = safeAreaOf(opts.format || L.format, opts.channel); const story = sa0.hard; const sp = { top: sa0.top * 100 + (story ? 0 : 0.2), bottom: sa0.bottom * 100 + (story ? 0 : 0.2), side: sa0.side * 100 + (story ? 0 : 0.2) };
@@ -996,7 +1014,27 @@
     const panelsFor = col => layers.filter(l => l.type === 'shape' && movable(l) && (l.role === 'panel' || l.role === 'overlay') && col.every(t => t.x >= l.x - 0.5 && t.x + t.w <= l.x + l.w + 0.5));
     const before0 = {}; columns().forEach((col, ci) => { const t = Math.min.apply(null, col.map(l => l.y)); const b = Math.max.apply(null, col.map(l => l.y + (l.h || 0))); panelsFor(col).forEach(pn => { if (t >= pn.y - 0.5 && b <= pn.y + (pn.h || 0) + 0.5) before0[pn.id] = { col: ci, padT: t - pn.y, padB: pn.y + pn.h - b }; }); });
     const refitPanels = () => { columns().forEach((col, ci) => { const t = Math.min.apply(null, col.map(l => l.y)); const b = Math.max.apply(null, col.map(l => l.y + (l.h || 0))); panelsFor(col).forEach(pn => { const k = before0[pn.id]; if (!k) return; const ny = Math.max(0, Math.min(pn.y, t - Math.max(0, k.padT))); const nb = Math.min(100, Math.max(pn.y + pn.h, b + Math.max(0, k.padB))); if (Math.abs(ny - pn.y) > 0.05 || Math.abs(nb - (pn.y + pn.h)) > 0.05) { pn.y = Math.round(ny * 10) / 10; pn.h = Math.round((nb - ny) * 10) / 10; } }); }); };
-    const settle = () => { let n = 0; for (let k = 0; k < 4; k++) { const a = grow() + restack(); n += a; if (!a) break; } refitPanels(); return n; };
+    /* a column the explicit gaps push past the stage's safe foot (a long list of names, a planner's crowded stack): its gaps are
+       closed up evenly, down to a hairline, from where the column starts, so no block is pushed off the stage by spacing alone
+       (S21: the live MCA demonstration ended with the support and the call to action below the frame). The type steps below
+       take over when even hairline gaps do not fit. */
+    const fitColumns = () => {
+      let moved = 0;
+      const foot = 100 - sp.bottom; const cols = columns().filter(col => col.length > 1 && col.some(l => l.y + (l.h || 0) > foot + 0.05));
+      if (!cols.length) return 0;
+      // a box's height does not depend on where it sits, so the words are measured once for every column
+      const g = geo(); const hOf = l => { const b = g[String(l.id)]; return l.type === 'text' && b && b.contentH ? Math.max(l.h || 0, pY(b.contentH)) : (l.h || 0.6); };
+      cols.forEach(col => {
+        const s = col.slice().sort((a, b) => a.y - b.y); const bottom = Math.max.apply(null, s.map(l => l.y + hOf(l)));
+        if (bottom <= foot + 0.05) return;
+        const top = s[0].y; const sumH = s.reduce((a, l) => a + hOf(l), 0); const room = foot - top; const minGap = 0.4;
+        if (sumH + (s.length - 1) * minGap > room + 0.01) return;
+        const gap = Math.max(minGap, (room - sumH) / (s.length - 1)); let y = top;
+        s.forEach(l => { const ny = Math.round(y * 10) / 10; if (Math.abs(ny - l.y) > 0.05) { l.y = ny; moved++; } y = ny + hOf(l) + gap; });
+      });
+      return moved;
+    };
+    const settle = () => { let n = 0; for (let k = 0; k < 4; k++) { const a = grow() + restack(); n += a; if (!a) break; } n += fitColumns(); refitPanels(); return n; };
     // 0. a mark outside the safe area comes in from the edge in its own corner (its placement is kept, only inset)
     const markOut = new Set(); layoutIssues(before).filter(i => i.code === 'safe_area' || i.code === 'off_canvas').forEach(i => i.layers.forEach(id => { if (isMark(byId[id]) && movable(byId[id])) markOut.add(id); }));
     markOut.forEach(id => { const mk = byId[id]; const nx = Math.min(Math.max(mk.x, sp.side), 100 - sp.side - mk.w), ny = Math.min(Math.max(mk.y, sp.top), 100 - sp.bottom - mk.h); if (Math.abs(nx - mk.x) > 0.05 || Math.abs(ny - mk.y) > 0.05) { mk.x = Math.round(nx * 10) / 10; mk.y = Math.round(ny * 10) / 10; steps.push('brought the ' + mk.role + ' inside the safe area in the same corner'); } });
@@ -1034,6 +1072,22 @@
       scale *= 0.94; settle(); now = validate(L, copy, images, vopts);
     }
     if (scale < 1) steps.push('stepped the type in that column down to ' + Math.round(scale * 100) + '% of its size, hierarchy kept, above the readable minimum');
+    /* 6. words under the readable size (an adaptation to a wide format shrank them): raised to the feed minimum - 2.4% of the
+       width, 3.2% for a headline - and kept only when the complete validation has no more blocking findings for it (S21) */
+    {
+      // the size findings do not depend on contrast, so the validation the type steps already made answers it (no extra pass)
+      const small = now.issues.filter(i => i.code === 'unreadable_type').reduce((a, i) => a.concat(i.layers), []);
+      const raised = [];
+      small.forEach(id => {
+        const l = byId[id]; if (!movable(l) || l.type !== 'text') return;
+        const want = l.role === 'headline' ? 3.2 : 2.4; if (!(l.size < want)) return;
+        const keep = JSON.stringify(L.layers); const n0 = blockingOf(validate(L, copy, images, vopts)).length;
+        l.size = want; settle();
+        if (blockingOf(validate(L, copy, images, vopts)).length >= n0) { const back = JSON.parse(keep); L.layers.forEach((x, k) => { Object.keys(x).forEach(key => { delete x[key]; }); Object.assign(x, back[k]); }); }
+        else raised.push(id);
+      });
+      if (raised.length) { steps.push('raised the type of ' + raised.join(', ') + ' to the feed minimum (2.4% of the width, 3.2% for a headline): it was too small to read when a feed shows the tile'); now = validate(L, copy, images, vopts); }
+    }
     /* a mark that does not read, or sits too close to the words, or outside its permitted region: the smallest local
        correction, in this order - (1) another place inside its permitted region (the rule's region, else its own corner's
        neighbourhood: a nudge, never a jump to another corner), measured per pixel at each candidate; (2) the approved variant that
@@ -1187,7 +1241,8 @@
     ];
     if (opts.allowNoImagery !== false) recipes.push({ id: 'type-only', name: 'Type only, no photograph', panel: 'none', typeOnly: true, zone: { x: sp.side + 2, y: sp.top + 4, w: 100 - 2 * sp.side - 4, h: 100 - sp.top - sp.bottom - 8 }, anchor: 'middle', grow: 1.25 });
     const out = [];
-    recipes.forEach(r => {
+    // opts.only: just these arrangements (variantsAsync computes them one at a time so the page never freezes)
+    recipes.filter(r => !opts.only || opts.only.indexOf(r.id) >= 0).forEach(r => {
       const L = JSON.parse(JSON.stringify(L0)); const byId = {}; (L.layers || []).forEach(l => { byId[String(l.id)] = l; });
       const keepImgs = r.typeOnly ? [] : L.layers.filter(l => l.type === 'img' && !isMark(l));
       const lockedShapes = L.layers.filter(l => l.type === 'shape' && l.locked);
@@ -1343,7 +1398,7 @@
     const pendingCodes = { imagery_missing: 1, mark_unloaded: 1, imagery_sketch: 1 };
     const blockers = x => x.issues.filter(i => i.severity === 'blocking' && !pendingCodes[i.code]);
     const out = [];
-    STYLES.forEach(([id, name, note]) => {
+    STYLES.filter(([id]) => !opts.only || opts.only.indexOf(id) >= 0).forEach(([id, name, note]) => {
       const L = styleLayout(L0, id, copy); if (!L) return;
       let v = validate(L, copy, images, vopts); let final = L; let steps = [];
       if (blockers(v).length || v.issues.some(i => i.code === 'low_contrast')) { const rp = repair(L, copy, images, Object.assign({}, opts, { fixContrast: true })); if (rp.changed) { final = Object.assign(rp.layout, { styleName: id }); steps = rp.steps; v = validate(final, copy, images, vopts); } }
@@ -1351,6 +1406,22 @@
     });
     return out;
   }
+  /* Variations and styles, worked out one arrangement at a time with the page given a turn between each: the same results as
+     variants() and styles(), without a freeze of tens of seconds while every arrangement is repaired and measured (S21). onEach
+     receives the list so far; a cancel token ({cancelled}) stops it between arrangements. */
+  const VARIANT_IDS = ['band-foot', 'band-head', 'col-left', 'col-right', 'card-low', 'card-high', 'centre', 'fade', 'type-only'];
+  const pause = () => new Promise(r => setTimeout(r, 0));
+  async function inTurns(fn, ids, layout, copy, images, opts, onEach) {
+    opts = opts || {}; let out = [];
+    for (const id of ids) {
+      await pause(); if (opts.cancel && opts.cancel.cancelled) return null;
+      out = out.concat(fn(layout, copy, images, Object.assign({}, opts, { only: [id] })));
+      if (onEach) onEach(out.slice());
+    }
+    return out;
+  }
+  async function variantsAsync(layout, copy, images, opts, onEach) { const out = await inTurns(variants, VARIANT_IDS, layout, copy, images, opts, onEach); return out && out.sort((a, b) => (b.ok - a.ok)); }
+  async function stylesAsync(layout, copy, images, opts, onEach) { return inTurns(styles, STYLES.map(x => x[0]), layout, copy, images, opts, onEach); }
   /* a store-only zip: enough for images and text, no compression, readable everywhere */
   const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
   function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
@@ -1372,5 +1443,5 @@
   function report(v, val) {
     return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, styles, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
+  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

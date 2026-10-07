@@ -287,7 +287,7 @@ def run_case(base, key, args, cid, rec):
     for t, r in fixed:
         print('  repaired %s with no render: %s%s' % (t, '; '.join(r.get('steps') or []) or r.get('error', ''), (' (still: ' + r['conflict'] + ')') if r.get('conflict') else ''))
     if fixed:
-        rec['repaired'] = [{'asset': t, 'steps': r.get('steps'), 'fixed': r.get('fixed')} for t, r in fixed]
+        rec['repaired'] = [{'asset': t, 'steps': r.get('steps'), 'fixed': r.get('fixed'), 'variation': r.get('variation')} for t, r in fixed]
     rec['composed'] = [dict(x, file=os.path.relpath(x['file'], args.out)) for x in (comp.get('composed') or []) if x.get('file')]
     failing = [(x.get('title'), list((x.get('validation') or {}).get('blocking') or [])) for x in comp.get('composed') or [] if (x.get('validation') or {}).get('ok') is False]
     if failing:
@@ -296,6 +296,8 @@ def run_case(base, key, args, cid, rec):
     if not comp.get('ok'):
         rec['composeError'] = (comp.get('error') or '') + ' ' + (comp.get('detail') or '')
         raise Stop('the tiles could not be composed and measured here (%s); steps 5 and 6 need a passing technical validation' % rec['composeError'].strip())
+    if any(t == master['title'] for t, _ in failing):
+        raise Stop('the master "%s" still fails its technical validation after Fix layout and the free layout variations (%s); a client is only shown a composition that passed, so steps 5 and 6 stop here' % (master['title'], ', '.join(dict(failing).get(master['title']) or [])))
     # 5. a client comment, resolved in a new version
     share = http(base, key, 'POST', '/studio/share', {'project': pid, 'assets': [master['id']], 'label': 'Demo review', 'expiresDays': 7, 'allowApprove': True})
     tok = {'X-Review-Token': share['token']}

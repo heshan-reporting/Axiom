@@ -2046,3 +2046,104 @@ Interaction p95 is under the 100 ms budget in every measured interaction.
 - The 1920 / 1024 / 390 layouts are coherent in the captures; the 390 artboard is 324 px, a phone is not a production surface.
 - Not deployed: the worker build `2026-10-07.studio-p36` and page `?v=r14` go live only when the branch is merged and the worker
   is deployed from the laptop.
+
+## 44. S21 - what the first live run found, and the fixes (build studio-p37, page r15)
+
+### 44.1 The run
+
+On 7 October 2026 the demonstration ran for the first time against the live worker with real Claude output:
+`tools/studio-demo.py --cases hoof,mca --approve-calls 12`, no images approved (typographic tiles). It spent 10 model
+calls and no renders. What held: three genuinely different directions per client (HOOF diagram / carousel /
+typographic, diversity 0.91; MCA carousel / typographic / diagram, 0.90), the refinement as a free layout version, the
+adaptation to the other channels, the mark separation (HOOF tiles carry only the HOOF wordmark, MCA tiles only the MCA
+logo; isolation clean), Fix layout naming what it could not fix, and the share gate refusing failing work. What failed:
+none of the seven composed tiles passed the technical validation, so neither case reached client review.
+
+| Case | Tile | Blocking after repair |
+| --- | --- | --- |
+| HOOF | Instagram 4:5, Facebook 1:1 | `occluded` (text2 under shape3) |
+| HOOF | LinkedIn 16:9 | `occluded`, `unreadable_type` x3 |
+| MCA | LinkedIn 1:1, Facebook 4:5, Facebook 1:1 | `off_canvas` (text13, text14), `mark_unreadable` (logo) |
+| MCA | Facebook story 9:16 | `mark_unreadable` (logo) |
+
+The mocked harnesses could never have shown this: the stub plans were written to pass.
+
+### 44.2 Causes and fixes (each reproduced by a failing test first)
+
+**A. An intended device read as occlusion.** The HOOF refinement ("Labelled strike, louder fact") drew a bar through
+the myth. The validator has an exception for an intended overlap (`overlaps` on the layer), but the plan schema had no
+such field, `stPlanNormalise` did not keep one, and `stLayoutToPlan` (adaptation) dropped it. Fix: elements carry `id`
+and `overlaps`; the normaliser resolves the pair on both layers when the words still read through the device (the
+device under 45% of the words' height, or translucent at 60% or less, or covering a third of their box at most) and
+drops an opaque block with the reason; a thin device across words with nothing declared is recognised as a strike or
+an underline and recorded (`layout.intended`). The rules tell the planner a strike or underline is the words' own
+emphasis: `strike` is a new emphasis, drawn by the renderer through each line after the letters, and offered in the
+editor. `overlaps` is in the keys adaptation carries.
+
+**B. Marks placed on grounds they do not read on.** Nothing told the planner what the marks look like; the MCA logo
+file is about 80% transparent padding with dark ink, placed on a dark ground, and the logo had no approved variants
+(only wordmarks did), while repair never boxes or recolours a mark. Fix:
+- `stPngInk` decodes a PNG in the worker (8-bit, any colour type, transparent or opaque, up to 6 MP) and reads the
+  ink: tone, relative luminance, ink share, whether the file is opaque. `brMarkInks` caches it per file version in KV
+  `mark_ink_<v>` and attaches it to the kit as read (`logoInk`, `logoVariants[].ink`, `wordmarks[].ink`); it is never
+  written into the stored kit.
+- Logo variants: `POST /brand/kit {logoB64, logoVariant, logoTone, logoDefault}` stores an approved variant under an
+  immutable key `brand/<ns>/logo/<variant>/<v>` beside the primary logo; `removeLogoVariant` retires one;
+  `/brand/logo?ns=&variant=&v=` serves it; `tools/brand-logo.py <file> --ns mca --variant white --tone light`.
+- `stGroundAt` computes the ground the plan itself paints under a box (the stage colour or gradient, then every shape
+  over it; null over imagery, where the browser measures). `stMarkLayers` takes the approved file that reads there at
+  3:1 and carries every file on the layer for the browser's measurement. Where no file reads and nothing holds the
+  mark, the normaliser moves it to the nearest corner that reads and that no words occupy, and says so; otherwise it
+  says plainly that it will not read and which variant to upload.
+- The planner is told each mark's ink and the grounds it reads on (`stMarkInkText`, in the identity block every stage
+  receives).
+- The Brand workspace lists the logo's variants with their ink, and readiness flags `logo_tones` when the logo reads on
+  one kind of ground only.
+
+**C. Text off the stage.** Reproduced with a long stacked list (the MCA "who uses the credit" shape): `repair()`
+restacks with explicit gaps and, when the column cannot move up past what sits above it, pushed the last blocks (the
+support and the call to action - text13 and text14 in the reproduction too) below the frame. Fix: `fitColumns` closes
+a column's gaps evenly (down to 0.4%) from where it starts so it ends at the safe foot; the type steps take over only
+when even hairline gaps do not fit. The reproduction now repairs to a complete pass with no type reduced. The
+normaliser also brings any text box a plan puts off the stage inside it, and says so.
+
+**D. Adaptation shrank type under the readable line.** `stPlanForFormat` keeps type against the short side; from 4:5
+to 16:9 that is a factor of about 0.56, and its floor (1.6%) was under the 1.8% blocking line. Fix: the floor is the
+feed minimum (3.2% for a headline, 2.4% otherwise), type already smaller is kept as it was and never under 1.8%; and
+`repair()` raises `unreadable_type` to that minimum when the complete validation allows.
+
+**E. The demonstration gave up where the app would not.** `tools/studio-compose.mjs --repair` now takes the first
+measured layout variation that passes (`STRender.variants`; no model call, no render; the version note reads "layout
+variation: <name> (no render)") when Fix layout cannot clear a tile; `--no-variations` keeps the old behaviour. The
+demo stops with the reason before sharing a master that still fails, instead of meeting a 409.
+
+**F. A freeze found on the way.** The full browser run showed the S17 editor harness timing out when the Design tool
+opened. Profiling showed the free layout variations (9 arrangements) and style variations (10) were computed in one
+synchronous block, about 40 seconds in this sandbox, on the S20 commit as well as here (one of the two cases already
+failed there). Each arrangement is repaired and measured, and the time went to reading pixels back from full-stage
+canvases. Now: `STRender.variantsAsync` / `stylesAsync` compute one arrangement at a time (`opts.only`, a cancel token,
+the page given a turn between each) and the island uses them; `markReadability` draws and reads only the mark's own
+box, `occlusionOf` only the word's box, `contrastOf` only the union of the words and marks; canvases drawn only to be
+read are `willReadFrequently`. One arrangement fell from about 1.1 s to 0.9 s and one style from 0.7 s to 0.4 s in this
+sandbox (software rendering; a machine with a GPU differs), and both editor cases pass.
+
+### 44.3 Evidence
+
+`tests/studio-s21-worker.mjs` (14): declared and inferred overlaps, an opaque block refused, the strike emphasis, the
+overlap kept through adaptation, text brought onto the stage, the 16:9 floor, PNG ink for dark, white and opaque files,
+logo variants stored and served, the light variant chosen on a dark ground, the move to a corner that reads, the held
+mark's plain statement, the planner's mark line, a logo whose ink could not be read left alone. `tests/studio-s21-browser.mjs` (12, Chromium): the strike's pixels
+read back, the intended overlap passing where the unrecorded one is occluded, the list repaired with nothing off the
+stage, small type raised, a measured variation that passes where repair cannot. `tests/studio-compose-test.mjs` (14):
+the covered tile failing with `--no-variations` and passing as "layout variation: Band across the foot" without it.
+All providers mocked; nothing was spent.
+
+### 44.4 Limits
+
+- Not yet proven live: the fixes are tested against reproductions, not against the live run's own projects (the
+  sandbox cannot reach the worker or its data). The next live run is the proof.
+- The MCA logo will read on dark grounds only once an approved light variant is uploaded; until then the planner is
+  told to keep a light ground under it, and a plan that does not is moved or named.
+- Ink is read from PNG files only; a JPEG or WebP mark falls back to the tone its uploader gave.
+- The ground is known only where the plan paints it; over a photograph the browser's per-pixel measurement decides,
+  as before.
