@@ -45,13 +45,37 @@
       conflicts.push({ id: 'layer:' + id, kind: 'layer', key: id, label: 'the ' + layerName(m || t || b), base: b, mine: m, theirs: t });
       chosen[id] = t;                               // provisional
     });
-    // the order: mine if they did not reorder, theirs if I did not, else theirs with my additions kept
+    /* the stacking order is document state (S20). Over the layers all three share, each pair keeps the relation whoever changed
+       it gave it (a pair both changed can only have changed the same way). If those relations still make one order, it is the
+       merge; if they form a cycle - I put B over A while they put C over B and A stays over C - it is an order conflict a person
+       decides. Additions keep their place beside the neighbour they were added next to; a deletion stands. */
     const bo = ids(baseL), mo = ids(mineL), to = ids(theirL);
-    const common = a => a.filter(id => bo.indexOf(id) >= 0);
-    let order;
-    if (same(common(to), common(bo))) order = mo.concat(to.filter(id => mo.indexOf(id) < 0 && bo.indexOf(id) < 0));
-    else if (same(common(mo), common(bo))) order = to.concat(mo.filter(id => to.indexOf(id) < 0 && bo.indexOf(id) < 0));
-    else order = to.concat(mo.filter(id => to.indexOf(id) < 0));
+    const common = bo.filter(id => mo.indexOf(id) >= 0 && to.indexOf(id) >= 0);
+    const pos = a => { const m = {}; a.forEach((id, i) => { m[id] = i; }); return m; };
+    const pb = pos(bo), pm = pos(mo), pt = pos(to);
+    const before = {}; common.forEach(x => { before[x] = []; });
+    common.forEach((x, i) => common.slice(i + 1).forEach(y => {
+      const b = pb[x] < pb[y], m = pm[x] < pm[y], t = pt[x] < pt[y];
+      const want = m !== b ? m : t;          // x below y?
+      if (want) before[y].push(x); else before[x].push(y);
+    }));
+    // a topological order of the common layers under those relations, ties broken by their order
+    let core = []; const left = common.slice().sort((x, y) => pt[x] - pt[y]); let cyclic = false;
+    while (left.length) { const k = left.findIndex(id => before[id].every(z => core.indexOf(z) >= 0)); if (k < 0) { cyclic = true; break; } core.push(left.splice(k, 1)[0]); }
+    const commonOf = a => a.filter(id => common.indexOf(id) >= 0);
+    if (cyclic) {
+      conflicts.push({ id: 'layout:order', kind: 'order', key: 'order', label: 'the stacking order', base: commonOf(bo), mine: commonOf(mo), theirs: commonOf(to) });
+      core = commonOf(to);                    // provisional: theirs until a person chooses
+    }
+    // additions: placed just above the layer below them in their own side's order (or at the bottom)
+    const addFrom = (src, mark) => src.forEach((id, i) => {
+      if (bo.indexOf(id) >= 0 || core.indexOf(id) >= 0) return;
+      let k = i - 1; while (k >= 0 && core.indexOf(src[k]) < 0) k--;
+      core.splice(k >= 0 ? core.indexOf(src[k]) + 1 : 0, 0, id); if (mark) mark.push(id);
+    });
+    addFrom(mo); addFrom(to);
+    // a layer one side deleted and the other only kept is gone; anything else still standing goes on top
+    let order = core.concat(all.filter(id => core.indexOf(id) < 0 && bo.indexOf(id) < 0));
     order = order.concat(all.filter(id => order.indexOf(id) < 0));
     layout.layers = order.map(id => chosen[id]).filter(Boolean);
     return { layout, copy, conflicts, clean: !conflicts.length, order };
@@ -64,6 +88,7 @@
     let layers = (layout.layers || []).slice();
     m.conflicts.forEach(c => {
       const w = pick(c);
+      if (c.kind === 'order') { const want = w === 'mine' ? c.mine : c.theirs; const keep = layers.filter(l => want.indexOf(idOf(l, 0)) >= 0).sort((a, b) => want.indexOf(idOf(a, 0)) - want.indexOf(idOf(b, 0))); let k = 0; layers = layers.map(l => (want.indexOf(idOf(l, 0)) >= 0 ? keep[k++] : l)); return; }
       if (c.kind === 'copy') { copy[c.key] = w === 'mine' ? c.mine : c.theirs; return; }
       if (c.kind === 'layout') { const v = w === 'mine' ? c.mine : c.theirs; if (v === undefined) delete layout[c.key]; else layout[c.key] = v; return; }
       const v = w === 'mine' ? c.mine : c.theirs;
@@ -86,6 +111,14 @@
   /** a short, stable signature of a working edit (FNV-1a over its JSON) - for telling one edit from another, never security */
   function sig(x) { const s = J(x); let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36) + ':' + s.length; }
 
-  const api = { merge, resolve, contains, sig, same };
+  /** the lock contract (S20), the same as the worker's ST_LOCK_FREE: a locked layer may change only its name and its lock; every
+      other property is what the artwork draws. Returns the protected properties a patch would change on a locked layer. */
+  const LOCK_FREE = ['name', 'renamed', 'locked'];
+  function lockedChanges(layer, patch) {
+    if (!layer || !layer.locked || !patch) return [];
+    if (patch.locked === false && Object.keys(patch).every(k => LOCK_FREE.indexOf(k) >= 0)) return [];
+    return Object.keys(patch).filter(k => LOCK_FREE.indexOf(k) < 0 && !same(layer[k], patch[k]));
+  }
+  const api = { merge, resolve, contains, sig, same, LOCK_FREE, lockedChanges };
   root.STMerge = api;
 })(typeof window !== 'undefined' ? window : globalThis);

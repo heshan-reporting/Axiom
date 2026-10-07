@@ -58,4 +58,35 @@ t('contains: a saved version holds the edit only when the layout and every inten
 t('sig is stable for equal edits and differs for different ones', () => {
   eq(M.sig({ a: 1 }), M.sig({ a: 1 })); ok(M.sig({ a: 1 }) !== M.sig({ a: 2 }));
 });
+
+// S20 C: stacking order is document state. Base A,B,C; mine B,A,C; theirs A,C,B cannot both hold (B over A, C over B, A over C
+// is a cycle): it is a conflict, never "theirs, clean".
+const ord = ids => L(ids.map(id => ({ id, role: 'free', type: 'shape', x: 10, y: 10, w: 20, h: 20 })));
+const ordBase = { layout: ord(['A', 'B', 'C']), copy: {} };
+const orderOf = r => r.layout.layers.map(l => l.id);
+t('C: incompatible reorders (A,B,C -> B,A,C and A,C,B) are an order conflict, not a silent win for theirs', () => {
+  const r = M.merge({ base: ordBase, mine: { layout: ord(['B', 'A', 'C']), copy: {} }, theirs: { layout: ord(['A', 'C', 'B']), copy: {} } });
+  ok(!r.clean, 'not clean'); eq(r.conflicts.map(c => c.id), ['layout:order']);
+  eq(orderOf(M.resolve(r, null, null, null, 'mine')), ['B', 'A', 'C'], 'mine restores my order');
+  eq(orderOf(M.resolve(r, null, null, null, 'theirs')), ['A', 'C', 'B'], 'theirs keeps theirs');
+});
+t('C: compatible reorders combine - I raise A to the top, they swap B and C: C, B, A keeps both intentions', () => {
+  const r = M.merge({ base: ordBase, mine: { layout: ord(['B', 'C', 'A']), copy: {} }, theirs: { layout: ord(['A', 'C', 'B']), copy: {} } });
+  ok(r.clean, JSON.stringify(r.conflicts)); eq(orderOf(r), ['C', 'B', 'A']);
+});
+t('C: the same reorder by both is clean; a reorder on one side only wins', () => {
+  eq(orderOf(M.merge({ base: ordBase, mine: { layout: ord(['B', 'A', 'C']), copy: {} }, theirs: { layout: ord(['B', 'A', 'C']), copy: {} } })), ['B', 'A', 'C']);
+  eq(orderOf(M.merge({ base: ordBase, mine: { layout: ord(['A', 'B', 'C']), copy: {} }, theirs: { layout: ord(['C', 'A', 'B']), copy: {} } })), ['C', 'A', 'B']);
+});
+t('C: additions keep their place beside their neighbour while the other side reorders; a deletion by one side stands', () => {
+  const r = M.merge({ base: ordBase, mine: { layout: ord(['A', 'D', 'B', 'C']), copy: {} }, theirs: { layout: ord(['B', 'A', 'C']), copy: {} } });
+  ok(r.clean, JSON.stringify(r.conflicts)); eq(orderOf(r), ['B', 'A', 'D', 'C'], 'D stays just above A');
+  const r2 = M.merge({ base: ordBase, mine: { layout: ord(['C', 'A', 'B']), copy: {} }, theirs: { layout: ord(['A', 'C']), copy: {} } });
+  ok(r2.clean, JSON.stringify(r2.conflicts)); eq(orderOf(r2), ['C', 'A'], 'their deletion of B stands under my reorder');
+});
+t('C: grouping on one side and reordering on the other combine', () => {
+  const g = (ids, grp) => L(ids.map(id => Object.assign({ id, role: 'free', type: 'shape', x: 10, y: 10, w: 20, h: 20 }, grp && grp.indexOf(id) >= 0 ? { group: 'g1' } : {})));
+  const r = M.merge({ base: { layout: g(['A', 'B', 'C']), copy: {} }, mine: { layout: g(['A', 'B', 'C'], ['A', 'B']), copy: {} }, theirs: { layout: g(['C', 'A', 'B']), copy: {} } });
+  ok(r.clean, JSON.stringify(r.conflicts)); eq(orderOf(r), ['C', 'A', 'B']); ok(r.layout.layers.filter(l => l.group === 'g1').length === 2, 'the group holds');
+});
 console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

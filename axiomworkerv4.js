@@ -6883,6 +6883,8 @@ async function briefCron(env) {
 //   work. Release packs and content sets appear as read-only legacy projects
 //   and are imported explicitly and idempotently; originals are never touched.
 // ==============================================================================
+// S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
+const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
 const AXIOM_BUILD = '2026-10-07.studio-p35';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
@@ -6928,6 +6930,8 @@ async function ensureStudio(env) {
     // S17: the editor's autosaved working layout, one per person per asset: not a version, kept until saved or discarded
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_drafts(asset TEXT, who TEXT, project TEXT, version TEXT, layout TEXT, copy TEXT, at INTEGER, PRIMARY KEY(asset, who))'),
   ]); } catch (e) {}
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN rev TEXT').run(); } catch (e) {}   // S20: which working snapshot a draft holds
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN seq INTEGER').run(); } catch (e) {}   // S20: the order the browser wrote drafts in
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN file TEXT').run(); } catch (e) {}   // S16: an uploaded image or PDF the analysis reads
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN analysis TEXT').run(); } catch (e) {}   // art direction: what the vision pass saw in a reference
@@ -9021,6 +9025,21 @@ const ST_RESIZE_PRESETS = {
   'linkedin-square': { format: '1:1', channel: 'linkedin', label: 'LinkedIn square' }, x: { format: '16:9', channel: 'x', label: 'X landscape' },
   display: { format: '6:5', channel: '', label: 'Display (medium rectangle)' }, youtube: { format: '16:9', channel: '', label: 'YouTube thumbnail' },
 };
+/** S20, the lock contract when a composition is re-laid for another format: a locked layer keeps every property it had - its
+ *  face, leading, tracking, colour, effects, image treatment, words - except the box and the type size, which the new format
+ *  sets (both are per cent of a different stage). A locked layer the re-lay dropped is put back, scaled into the new stage. */
+const ST_LOCK_GEOMETRY = ['x', 'y', 'w', 'h', 'size'];
+function stKeepLocked(newL, srcL) {
+  const kept = []; if (!newL || !Array.isArray(newL.layers) || !srcL || !Array.isArray(srcL.layers)) return kept;
+  srcL.layers.filter(l => l && l.locked).forEach(src => {
+    let nl = newL.layers.find(x => x.id === src.id);
+    if (!nl) { nl = JSON.parse(JSON.stringify(src)); newL.layers.push(nl); kept.push(src.id); return; }
+    Object.keys(nl).forEach(k => { if (ST_LOCK_GEOMETRY.indexOf(k) < 0 && !(k in src)) delete nl[k]; });
+    Object.keys(src).forEach(k => { if (ST_LOCK_GEOMETRY.indexOf(k) < 0) nl[k] = JSON.parse(JSON.stringify(src[k])); });
+    kept.push(src.id);
+  });
+  return kept;
+}
 async function stResize(env, p, a, sb, who) {
   const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 400 };
   if (src.mode === 'copy') return { error: 'copy_only', status: 409, detail: 'A copy-only piece has no composition to resize.' };
@@ -9040,10 +9059,11 @@ async function stResize(env, p, a, sb, who) {
     if (src.layout.v !== 5) { layout.template = src.layout.template || layout.template; layout.templateName = (src.layout.templateName || 'composition') + ', resized for ' + format; }
     (layout.regions || []).forEach(x => { if (x.role === 'background') x.prompt = 'keep the current image'; });
     if (src.layout.imageFocus) layout.imageFocus = src.layout.imageFocus;
+    const kept = stKeepLocked(layout, src.layout);
     const aid = stId('a'); const title = stStr(a.title + ' - ' + (w.label || ST_FORMATS[format].label), 80);
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, a.family, channel, format, title, '', JSON.stringify(a.locks || {}), 1, now, now).run();
     const na = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
-    const v = await stAppendVersion(env, na, { kind: 'layout', note: 'resized from ' + a.title + ' (v' + (src.id || '') + ') for ' + (w.label || ST_FORMATS[format].label) + ': the composition as it stands, re-laid for ' + format + '; the image reused, no render', copy, layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { resizedFrom: a.id + ':' + src.id, planIn, how: 'resize', master: a.id, masterVersion: src.id, preset: w.preset || undefined }) }, who);
+    const v = await stAppendVersion(env, na, { kind: 'layout', note: 'resized from ' + a.title + ' (v' + (src.id || '') + ') for ' + (w.label || ST_FORMATS[format].label) + ': the composition as it stands, re-laid for ' + format + '; the image reused, no render' + (kept.length ? '; locked ' + kept.join(', ') + ' kept every property but its box and type size, which the format sets' : ''), copy, layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { resizedFrom: a.id + ':' + src.id, planIn, how: 'resize', master: a.id, masterVersion: src.id, preset: w.preset || undefined }) }, who);
     await stVersionChecks(env, p, na, v);
     made.push({ asset: aid, format, channel, title, preset: w.preset || '' });
   }
@@ -9729,7 +9749,9 @@ async function stReviseStage(env, job, p, log) {
   if (!all.length) throw new Error('no_assets: nothing to direct yet - produce the set first (not retried)');
   let targets;
   if (target === 'set') targets = all;
-  else { const t = all.find(x => x.asset.id === stClean(inp.asset, 24)); if (!t) throw new Error('asset_required: name the asset the direction is for (not retried)'); targets = target === 'family' ? all.filter(x => x.asset.family === t.asset.family) : [t]; }
+  else { const t = all.find(x => x.asset.id === stClean(inp.asset, 24)); if (!t) throw new Error('asset_required: name the asset the direction is for (not retried)'); targets = target === 'family' ? all.filter(x => x.asset.family === t.asset.family) : [t];
+    // S20: a direction made against one version is not applied to newer artwork it never saw (a delayed or repeated request)
+    const vin = stClean(inp.version, 24); if (vin && t.version && t.version.id !== vin) throw new Error('stale_version: this direction was made for an earlier version of ' + t.asset.title + '; it now has a newer one. Read it again and resend (not retried)'); }
   const eid = stId('e');
   // an ambiguous pronoun aimed at the whole set is asked about, not applied to everything
   if (target === 'set' && all.length > 1 && /\b(this|it|that)\b/i.test(instruction) && !/\b(all|every|each|whole|set|both)\b/i.test(instruction)) {
@@ -13845,7 +13867,7 @@ const AXIOM_WORKER = {
             const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
             const row = await env.MIND_DB.prepare('SELECT * FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, stStr(auth.name || 'operator', 60)).first();
             if (!row) return jsonResp({ ok: true, draft: null });
-            return jsonResp({ ok: true, draft: { version: row.version, current: row.version === pair.asset.current, layout: pjs(row.layout, null), copy: pjs(row.copy, {}), at: row.at } });
+            return jsonResp({ ok: true, draft: { version: row.version, current: row.version === pair.asset.current, layout: pjs(row.layout, null), copy: pjs(row.copy, {}), at: row.at, rev: row.rev || null, seq: row.seq || null } });
           }
           if (path === '/studio/file') {
             const key = String(qf('key') || '');
@@ -14078,6 +14100,18 @@ const AXIOM_WORKER = {
           if (path === '/studio/draft/discard') {
             // S19: after a version is saved the browser discards the draft that edit came from - only a draft made on the same base
             // version and written no later than the saved version, so a late acknowledgement never deletes newer work
+            // S20: a discard names the working snapshot the saved version holds (rev); only a draft of exactly that snapshot goes, so
+            // a newer draft written while the save was pending survives however late the acknowledgement arrives
+            // the browser names the moment it took the snapshot it saved (upto, in its draft sequence): every draft written at or
+            // before that moment is held by the saved version or superseded by it and goes; one written after it is newer work and stays
+            if (Number(sb.upto) > 0) {
+              const r = await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=? AND COALESCE(seq, 0) <= ?').bind(pair.asset.id, me, Math.floor(Number(sb.upto))).run();
+              return jsonResp({ ok: true, discarded: !!(r && r.meta && r.meta.changes), kept: !(r && r.meta && r.meta.changes) });
+            }
+            if (sb.rev) {
+              const r = await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=? AND rev=?').bind(pair.asset.id, me, stStr(sb.rev, 80)).run();
+              return jsonResp({ ok: true, discarded: !!(r && r.meta && r.meta.changes), kept: !(r && r.meta && r.meta.changes) });
+            }
             if (sb.savedVersion) {
               const sv = await stVersion(env, stClean(sb.savedVersion, 24)); if (!sv || sv.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404);
               const r = await env.MIND_DB.prepare('DELETE FROM studio_drafts WHERE asset=? AND who=? AND version=? AND at<=?').bind(pair.asset.id, me, stClean(sb.version || sv.parent || '', 24), sv.created).run();
@@ -14089,8 +14123,12 @@ const AXIOM_WORKER = {
           if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'bad_version', detail: 'A draft names the version of this asset it was made on.' }, 400);
           if (!sb.layout || typeof sb.layout !== 'object' || !Array.isArray(sb.layout.layers)) return jsonResp({ error: 'bad_layout', detail: 'A draft carries the working layout.' }, 400);
           { const lim = jsonLimitProblem({ layout: sb.layout, copy: sb.copy || {} }, 300000, 250000, 'the draft'); if (lim) return jsonResp({ error: 'draft_too_large', detail: 'The draft was not saved: ' + lim + '.' }, 413); }
-          await env.MIND_DB.prepare('INSERT OR REPLACE INTO studio_drafts(asset, who, project, version, layout, copy, at) VALUES(?,?,?,?,?,?,?)').bind(pair.asset.id, me, pair.project.id, v.id, JSON.stringify(sb.layout), JSON.stringify(sb.copy && typeof sb.copy === 'object' ? stCopy(sb.copy) : {}), now).run();
-          return jsonResp({ ok: true, at: now, version: v.id });
+          // S20: drafts land in the order the browser wrote them (seq); an older write arriving late never replaces a newer one
+          const seq = Number(sb.seq) > 0 ? Math.floor(Number(sb.seq)) : now;
+          const w = await env.MIND_DB.prepare('INSERT INTO studio_drafts(asset, who, project, version, layout, copy, at, rev, seq) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(asset, who) DO UPDATE SET project=excluded.project, version=excluded.version, layout=excluded.layout, copy=excluded.copy, at=excluded.at, rev=excluded.rev, seq=excluded.seq WHERE COALESCE(studio_drafts.seq, 0) <= excluded.seq')
+            .bind(pair.asset.id, me, pair.project.id, v.id, JSON.stringify(sb.layout), JSON.stringify(sb.copy && typeof sb.copy === 'object' ? stCopy(sb.copy) : {}), now, sb.rev ? stStr(sb.rev, 80) : null, seq).run();
+          const landed = !!(w && w.meta && w.meta.changes);
+          return jsonResp({ ok: true, at: now, version: v.id, stale: !landed || undefined });
         }
         if (path === '/studio/direction/choose') {
           const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
@@ -14150,18 +14188,36 @@ const AXIOM_WORKER = {
           // locks hold on the server too: a layer the team locked on the layout (layer.locked) is not moved, resized, retyped, recoloured
           // or removed by any layout version, and a mark a campaign rule holds (layer.rule.mandatory) is not moved - whatever client sent
           // it - unless the override is explicit (unlock:true), which the version's note then records
-          let heldMoved = false;
+          let heldMoved = false; const lockNotes = [];
+          /* S20: the lock contract. A locked layer is protected in everything it draws - every property except its name (ST_LOCK_FREE),
+             not a short geometry list - and a locked copy-role layer protects the words it shows (its copy field). Unlocking on its own
+             is allowed and recorded; changing a locked layer needs unlock:true, and the note says what changed deliberately. */
+          if (cur && cur.layout && Array.isArray(cur.layout.layers) && !sb.restoreFrom) {
+            const curCopy = cur.copy || {};
+            for (const a of cur.layout.layers) {
+              if (!a || !a.locked || a.type !== 'text' || ['headline', 'support', 'cta'].indexOf(a.role) < 0) continue;
+              const nb = sb.layout && Array.isArray(sb.layout.layers) ? sb.layout.layers.find(l => l && String(l.id) === String(a.id)) : a;
+              if (nb && nb.locked === false) continue;   // being unlocked in this very version: judged below
+              if (wantCopy[a.role] != null && String(wantCopy[a.role]) !== String(curCopy[a.role] == null ? '' : curCopy[a.role])) {
+                if (!sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + a.role + ' layer is locked; this version changes the words it shows. Unlock it first, or send unlock:true to change it deliberately.', element: String(a.id), changed: ['words'] }, 409);
+                lockNotes.push('locked ' + a.role + ' words changed deliberately');
+              }
+            }
+          }
           if (sb.layout && typeof sb.layout === 'object' && cur && cur.layout && Array.isArray(cur.layout.layers) && Array.isArray(sb.layout.layers) && !sb.restoreFrom) {
             const next = {}; sb.layout.layers.forEach((l, i) => { if (l) next[String(l.id || ('layer' + i))] = l; });
-            const GEO = ['x', 'y', 'w', 'h', 'size', 'text', 'rotate', 'hidden', 'color', 'bg', 'align', 'weight', 'src', 'opacity', 'font', 'emphasis', 'fill'];
             const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
             for (let i = 0; i < cur.layout.layers.length; i++) {
               const a = cur.layout.layers[i]; if (!a) continue; const id = String(a.id || ('layer' + i)); const b = next[id]; const name = (a.role || a.type) + ' layer ' + id;
               const isMark = a.type === 'img' && (a.role === 'logo' || a.role === 'wordmark'); const held = isMark && a.rule && a.rule.mandatory;
               if (a.locked) {
-                if (!b) { if (!sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + name + ' is locked on the layout and the version removed it. Unlock it first, or send unlock:true to change it deliberately.', element: id }, 409); continue; }
-                const changed = GEO.filter(k => !same(a[k], b[k]));
+                if (!b) { if (!sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + name + ' is locked on the layout and the version removed it. Unlock it first, or send unlock:true to change it deliberately.', element: id }, 409); lockNotes.push('locked ' + id + ' removed deliberately'); continue; }
+                const keys = Array.from(new Set(Object.keys(a).concat(Object.keys(b)))).filter(k => ST_LOCK_FREE.indexOf(k) < 0);
+                const changed = keys.filter(k => !same(a[k], b[k]));
+                const unlocking = b.locked === false || b.locked === undefined;
                 if (changed.length && !sb.unlock) return jsonResp({ error: 'locked', detail: 'The ' + name + ' is locked on the layout; this version changes its ' + changed.join(', ') + '. Unlock it first, or send unlock:true to change it deliberately.', element: id, changed }, 409);
+                if (changed.length) lockNotes.push('locked ' + id + ' changed deliberately: ' + changed.join(', '));
+                if (unlocking) lockNotes.push('unlocked ' + id);
               }
               if (held) {
                 const moved = !b || ['x', 'y', 'w', 'h'].some(k => Math.abs((Number(a[k]) || 0) - (Number((b || {})[k]) || 0)) > 0.05);
@@ -14172,7 +14228,7 @@ const AXIOM_WORKER = {
           }
           // a hand edit keeps what the composition was made from (its plan, medium, master), so an adaptation or an inspection later still knows it
           const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of', 'basis', 'trace', 'direction', 'creationMode', 'imagery'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
-          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved ? stStr((sb.note || 'layout edited') + ' (a rule-held mark moved against the campaign rule, deliberately)', 200) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: opId ? Object.assign({}, sb.context || carry || {}, { op: opId }) : (sb.context || carry) };
+          let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved || lockNotes.length ? stStr((sb.note || 'layout edited') + (heldMoved ? ' (a rule-held mark moved against the campaign rule, deliberately)' : '') + (lockNotes.length ? ' (' + lockNotes.join('; ') + ')' : ''), 300) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: opId ? Object.assign({}, sb.context || carry || {}, { op: opId }) : (sb.context || carry) };
           let base;
           if (sb.restoreFrom) { const src = await stVersion(env, sb.restoreFrom); if (!src || src.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version', detail: 'restoreFrom must name a version of this asset.' }, 404); patch = { kind: 'restore', note: sb.note || ('restored from ' + src.id), copy: src.copy, layout: src.layout, image: src.image, mode: src.mode, restoredFrom: src.id, context: { restoredFrom: src.id } }; }
           let v;

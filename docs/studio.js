@@ -53,11 +53,33 @@
       get: id => mem().m[id] || null,
       set: (id, rec, now) => { mem().m[id] = Object.assign({ at: Date.now() }, rec); persist(now); },
       del: (id, base) => { const { m } = mem(); if (m[id] && (!base || m[id].base === base)) { delete m[id]; persist(true); } },
+      patch: (id, fields, now) => { const { m } = mem(); if (!m[id]) return; m[id] = Object.assign({}, m[id], fields); persist(now); },
       any: () => Object.keys(mem().m).length,
       clear: () => { const { m } = mem(); Object.keys(m).forEach(k => delete m[k]); persist(true); },
     };
   })();
   window.STWork = WORK;
+  /* S20: the working document travels with the version it was made on (baseDoc) and, while a save is out, the exact snapshot
+     being saved (pending). When the asset has moved on - the save was acknowledged, someone else saved, a render landed - the
+     unsaved edit is carried onto the new version by a three-way merge from the right base: the pending snapshot when the new
+     version holds it (so edits made during the save rebase cleanly onto it), else the version the edit started from. A conflict
+     is never resolved here: null, and the editor offers the draft back as before. {empty:true} means nothing is left to keep. */
+  // drafts carry the order they were written in, so an older write arriving late never replaces a newer one on the server
+  let draftSeqN = 0; const draftSeq = () => { draftSeqN = Math.max(draftSeqN + 1, Date.now() * 1000); return draftSeqN; };
+  const stripCopy = L => { const o = Object.assign({}, L); delete o._copy; return o; };
+  function rebaseWork(w, v) {
+    if (!MERGE || !w || !w.layout || !v || !v.layout) return null;
+    const mine = { layout: stripCopy(w.layout), copy: w.layout._copy || {} };
+    const snap = w.pending && w.pending.snap; const vdoc = { layout: v.layout, copy: v.copy || {} };
+    const base = snap && MERGE.contains(vdoc, { layout: snap.layout, copy: snap.copy || {} }) ? snap : w.baseDoc;
+    if (!base) return null;
+    const m = MERGE.merge({ base: { layout: base.layout, copy: Object.assign({}, vdoc.copy, base.copy || {}) }, mine, theirs: vdoc });
+    if (!m.clean) return null;
+    const cp = {}; Object.keys(m.copy || {}).forEach(k => { if ((m.copy[k] || '') !== ((v.copy || {})[k] || '')) cp[k] = m.copy[k]; });
+    const same = JSON.stringify(m.layout) === JSON.stringify(v.layout) && !Object.keys(cp).length;
+    if (same) return { empty: true };
+    return { base: v.id, project: w.project, ns: w.ns, layout: Object.assign({}, m.layout, Object.keys(cp).length ? { _copy: cp } : {}), baseDoc: vdoc, draftSig: null, rebasedFrom: w.base };
+  }
   const chanLabel = c => (CHANNELS[c] || { label: c || '-' }).label;
   const isClear = t => /^(adapt|write|make|produce|resize|shorten|draft|three|two|one|give me|turn|create)\b/i.test(String(t || '').trim());
   const FORMAT_RATIO = { '1:1': 1, '4:5': 0.8, '9:16': 0.5625, '16:9': 1.7778 };
@@ -2297,13 +2319,17 @@
     const targets = (a ? [['asset', a.title + ' v' + vtotal(a)]].concat(a.family && famN > 1 ? [['family', 'The ' + a.family + ' family (' + famN + ')']] : []) : []).concat([['set', 'The whole set (' + p.assets.length + ')']]);
     const tgtOk = targets.some(t => t[0] === target);
     const why = () => !text.trim() ? 'Write an instruction first' : sendingRef.current ? 'Sending the last instruction' : busy ? 'Wait for the running step to finish' : !tgtOk ? 'Choose what this direction is for: no asset is selected' : '';
-    const send = async (words) => {
-      const t = String(words != null ? words : text).trim();
-      if (!t || sendingRef.current || busy || !tgtOk) return;
+    /* S20: every send carries an explicit scope - target, asset, the version it was made against and the layers it is about. The
+       composer builds one from its own controls; a suggestion carries its own (the asset and version it was made for), so a
+       suggestion never borrows the composer's target, and the confirmation, the job and the change all name the same scope. */
+    const composerScope = () => ({ target, asset: target !== 'set' && a ? a.id : undefined, version: target !== 'set' && a ? a.current : undefined, layers: target === 'asset' && selLayers && selLayers.length ? selLayers.slice() : undefined });
+    const send = async (words, scope) => {
+      const t = String(words != null ? words : text).trim(); const sc = scope || composerScope();
+      if (!t || sendingRef.current || busy || (!scope && !tgtOk)) return;
       sendingRef.current = true; setSending(true); setFailed(null); stick.current = true;
-      let r = null; try { r = await onDirect(t, target, { asset: target !== 'set' && a ? a.id : undefined, layers: target === 'asset' && selLayers && selLayers.length ? selLayers.slice() : undefined }); } catch (e) { r = { error: e }; }
+      let r = null; try { r = await onDirect(t, sc.target, { asset: sc.asset, layers: sc.layers, version: sc.version }); } catch (e) { r = { error: e }; }
       sendingRef.current = false; setSending(false);
-      if (r && r.accepted) { setText(cur0 => (cur0.trim() === t ? '' : cur0)); return; }
+      if (r && r.accepted) { if (!scope) setText(cur0 => (cur0.trim() === t ? '' : cur0)); return; }
       if (r === null || (r && r.busy)) { setFailed({ text: t, title: 'Not sent: another instruction is still running.', retry: true }); return; }
       const x = explain((r && r.error) || {}, 'The instruction was not sent');
       setText(cur0 => (cur0.trim() ? cur0 : t)); setFailed({ text: t, title: 'Not sent. ' + x.title, detail: x.text, retry: true });
@@ -2339,7 +2365,7 @@
         ${cur === 'review' ? html`<${CDReview} p=${p} a=${a} ro=${ro} busy=${busy} onReview=${onReview} onApplyInspection=${onApplyInspection} onRestore=${onRestore} canSelect=${!!design} />` : null}
         ${cur === 'ideas' ? html`<div class="st-cd-ideas">
           <div class="ov-dim">A few suggestions for v${vtotal(a)}, asked for only when you want them. Each says what it changes and keeps, what it rests on, and whether it needs a render. Use one as an instruction (edit it first, then Send), or apply it as it stands.</div>
-          ${!ro && sugg ? html`<div class="st-sugg-tabs" role="tablist" aria-label="Kinds of suggestion">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${sk === k} class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy || sending} onUse=${t => { setText(t); setTarget('asset'); setFailed(null); try { ta.current && ta.current.focus(); } catch (e) {} }} onApply=${t => { if (window.confirm('Apply this suggestion to ' + a.title + ' as it stands? One model call reads it against the composition; the result lands as a new version (a render is only proposed, never spent without your yes).')) { setTarget('asset'); send(t); } }} onRefresh=${onSuggRefresh} />` : ro ? html`<div class="ov-dim">Suggestions need a full key.</div>` : null}
+          ${!ro && sugg ? html`<div class="st-sugg-tabs" role="tablist" aria-label="Kinds of suggestion">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${sk === k} class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy || sending} onUse=${t => { setText(t); setTarget('asset'); setFailed(null); try { ta.current && ta.current.focus(); } catch (e) {} }} onApply=${async t => { const made = sugg && sugg.data && sugg.data.version; const stale = () => setFailed({ text: t, title: 'Not sent: this suggestion was made for an earlier version.', detail: 'The artwork has moved on since it was suggested. Ask for suggestions again for the current version, or use it as an instruction and edit it first.' }); if (made && made !== a.current) { stale(); return; } if (sendingRef.current) return; if (made) { try { const d = await call('/studio/versions?asset=' + encodeURIComponent(a.id) + '&limit=1'); if (d && d.current && d.current !== made) { stale(); return; } } catch (e) {} } if (window.confirm('Apply this suggestion to ' + a.title + ' v' + vtotal(a) + ' as it stands? One model call reads it against this composition only; the result lands as a new version of this asset (a render is only proposed, never spent without your yes).')) send(t, { target: 'asset', asset: a.id, version: a.current }); }} onRefresh=${onSuggRefresh} />` : ro ? html`<div class="ov-dim">Suggestions need a full key.</div>` : null}
           <div class="st-cd-new"><span class="st-lbl">New directions</span><span class="ov-dim">Different ideas for this piece, not tweaks: the Images tool proposes three or four directions (one model call that sees the artwork); each card states its cost before anything is applied.</span>${onTool ? html`<button class="btn sm ghost" onClick=${() => onTool('images')}>Open art direction</button>` : null}<span class="ov-dim">Free alternatives of the same words and imagery are in the Design tool's layout variations.</span>${onTool ? html`<button class="btn sm ghost" onClick=${() => onTool('design')}>Open layout variations</button>` : null}</div>
         </div>` : null}
         ${cur === 'conversation' ? html`<div class="st-cd-conv">
@@ -2387,7 +2413,8 @@
     // the working layout with its history: every finished gesture or command is one step that undo and redo walk. Words typed on
     // the canvas for the approved copy ride in the working layout as _copy, so undo walks them too; they are saved as copy.
     // S19: an edit left on this exact version comes back from the working store (a switch of asset, stage or project does not lose it)
-    const work0 = useMemo(() => { const w = WORK.get(a.id); return w && w.base === v.id && w.layout && Array.isArray(w.layout.layers) ? w : null; }, []);
+    const work0 = useMemo(() => { const w = WORK.get(a.id); if (!w || !w.layout || !Array.isArray(w.layout.layers)) return null; if (w.base === v.id) return w;
+      const rb = rebaseWork(w, v); if (!rb) return null; if (rb.empty) { WORK.del(a.id); return null; } WORK.set(a.id, rb, true); return rb; }, []);
     const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(work0 ? work0.layout : v.layout)), future: [] }));
     const layout = hist.now;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides0, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
@@ -2484,7 +2511,8 @@
     const moveTo = (id, toIndex) => { const l = byId(id); if (!l || !movable(l)) return; const rest = layers.filter(x => x.id !== id); const at = Math.max(0, Math.min(rest.length, toIndex)); commit(Object.assign({}, layout, { layers: rest.slice(0, at).concat([l], rest.slice(at)) })); };
     const group = () => { const s = selected().filter(movable); if (s.length < 2) return; const g = 'g' + Date.now().toString(36); const patches = {}; s.forEach(l => { patches[l.id] = { group: g }; }); commit(patchMany(layout, patches)); };
     const ungroup = () => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = { group: undefined }; }); commit(patchMany(layout, patches)); };
-    const setOne = (id, patch) => commit(patchMany(layout, { [id]: patch }));
+    // the lock contract on the canvas: a locked layer takes a new name or an unlock, nothing it draws (the worker refuses the rest too)
+    const setOne = (id, patch) => { const l = byId(id); const bad = window.STMerge && STMerge.lockedChanges ? STMerge.lockedChanges(l, patch) : (l && l.locked && !('locked' in patch || 'name' in patch) ? Object.keys(patch) : []); if (bad.length) { toastMsg('The ' + ((l && (l.name || l.role || l.type)) || 'layer') + ' is locked: unlock it to change its ' + bad.join(', ') + '.', true); return; } commit(patchMany(layout, { [id]: patch })); };
     const setEach = fn => { const patches = {}; selected().filter(movable).forEach(l => { patches[l.id] = fn(l); }); if (Object.keys(patches).length) commit(patchMany(layout, patches)); };
     /* add, duplicate, delete, copy and paste. The approved words are hidden rather than deleted (they stay in the copy), and a
        mark is never duplicated or deleted here: it is placed from its file by the campaign policy */
@@ -2591,10 +2619,12 @@
     const savedSig = useRef(null); const savedTo = useRef(null);   // the content a version now holds, and that version's id
     const layoutRef = useRef(layout); layoutRef.current = layout;
     const sigOf = L => (MERGE ? MERGE.sig({ l: strip(L), c: L._copy || {} }) : JSON.stringify(L).length + '');
-    const sendDraft = (L, now) => { const sg = sigOf(L); if (sg === draftSig.current) return Promise.resolve({ same: true }); if (!now) setDraftSt({ state: 'saving' }); return call('/studio/draft', { asset: a.id, version: v.id, layout: strip(L), copy: L._copy || {} }).then(r => { draftSig.current = sg; const w = WORK.get(a.id); if (w && w.base === v.id) WORK.set(a.id, Object.assign({}, w, { draftSig: sg })); if (!now) setDraftSt({ state: 'saved', at: r.at || Date.now(), sig: sg }); return r; }).catch(e => { if (!now) setDraftSt({ state: 'error', msg: e.message }); throw e; }); };
+    const sendDraft = (L, now) => { const sg = sigOf(L); if (sg === draftSig.current) return Promise.resolve({ same: true }); if (!now) setDraftSt({ state: 'saving' }); return call('/studio/draft', { asset: a.id, version: v.id, layout: strip(L), copy: L._copy || {}, rev: sg, seq: draftSeq() }).then(r => { if (r && r.stale) return r; draftSig.current = sg; const w = WORK.get(a.id); if (w && w.base === v.id) WORK.set(a.id, Object.assign({}, w, { draftSig: sg })); if (!now) setDraftSt({ state: 'saved', at: r.at || Date.now(), sig: sg }); return r; }).catch(e => { if (!now) setDraftSt({ state: 'error', msg: e.message }); throw e; }); };
     useEffect(() => { let live2 = true; if (work0) { toastMsg('Your unsaved changes to ' + a.title + ' are back'); return () => { live2 = false; }; } call('/studio/draft?asset=' + encodeURIComponent(a.id)).then(d => { if (!live2 || !d || !d.draft || !d.draft.layout) return; const same = JSON.stringify(d.draft.layout) === JSON.stringify(v.layout) && !Object.keys(d.draft.copy || {}).some(k => d.draft.copy[k] !== ((v.copy || {})[k] || '')); if (!same) setRestore(d.draft); }).catch(() => {}); return () => { live2 = false; }; }, []);
     // the working store follows every change; the server draft follows a moment later
-    useEffect(() => { if (changed) WORK.set(a.id, { base: v.id, project: p && p.id, ns, layout, draftSig: draftSig.current }); else if (!savedTo.current) WORK.del(a.id, v.id); }, [layout]);
+    const baseDoc = { layout: v.layout, copy: v.copy || {} };
+    const workRec = (L, extra) => { const w = WORK.get(a.id); return Object.assign({ base: v.id, project: p && p.id, ns, layout: L, draftSig: draftSig.current, baseDoc }, w && w.base === v.id && w.pending ? { pending: w.pending } : {}, extra || {}); };
+    useEffect(() => { if (changed) WORK.set(a.id, workRec(layout)); else if (!savedTo.current && !(WORK.get(a.id) || {}).pending) WORK.del(a.id, v.id); }, [layout]);
     useEffect(() => { if (!changed || !draftOn.current || restore) return; if (draftSig.current && draftSig.current === sigOf(layout)) return; clearTimeout(draftT.current); setDraftSt(d => d && d.state === 'saved' ? Object.assign({}, d, { state: 'pending' }) : { state: 'pending' }); draftT.current = setTimeout(() => { sendDraft(layoutRef.current).catch(() => {}); }, 1200); return () => clearTimeout(draftT.current); }, [layout]);
     /* leaving the canvas (another asset, stage or project, or the Studio itself) never drops the work: the open text edit is
        folded in, the working store keeps it, and the draft is written at once instead of after the debounce */
@@ -2603,8 +2633,9 @@
       const L = foldText(layoutRef.current, pendingText.current); const sg = sigOf(L);
       if (savedSig.current && sg === savedSig.current) { WORK.del(a.id); return; }   // exactly what the saved version holds
       if (!isChanged(L)) return;
-      const base = savedTo.current || v.id;                                             // edits made while a save was answered ride on the saved version
-      WORK.set(a.id, { base, project: p && p.id, ns, layout: L, draftSig: draftSig.current }, true);
+      // S20: kept on the version it was made on, with the snapshot of any save still out; the next editor rebases it onto whatever
+      // version is current when it opens (a late acknowledgement, someone else's save, a render)
+      WORK.set(a.id, workRec(L), true);
       if (!savedTo.current && draftOn.current) sendDraft(L, true).catch(() => {});
     }, []);
     // S18/S19: the page's save state names the difference
@@ -2615,16 +2646,32 @@
     const doRestore = () => { const d = restore; setRestore(null); if (!d) return; const L = JSON.parse(JSON.stringify(d.layout)); const c = d.copy || {}; if (Object.keys(c).length) L._copy = c; commit(L); toastMsg('Your unsaved layout is back'); };
     /* saving a version: the draft stays until the worker acknowledges a version that holds the edit; the op id makes a retry of the
        same edit idempotent (a save that committed but timed out is answered, not written twice) */
-    const saving = useRef(false);
+    const saving = useRef(false); const mounted = useRef(true); useEffect(() => () => { mounted.current = false; }, []);
     const save = async () => {
       if (saving.current) return; saving.current = true;
-      const L = layoutRef.current; const sg = sigOf(L); const op = 'e' + (MERGE ? MERGE.sig(v.id + '|' + sg).replace(':', '') : Date.now().toString(36));
+      const L = foldText(layoutRef.current, pendingText.current); const sg = sigOf(L); const seqAt = draftSeq(); const op = 'e' + (MERGE ? MERGE.sig(v.id + '|' + sg).replace(':', '') : Date.now().toString(36));
+      /* S20: the save is bound to an immutable snapshot of the working document. Edits made while it is out stay in the working store
+         with that snapshot named (pending); the acknowledgement clears only what the snapshot holds, and the editor that opens on the
+         new version rebases the newer edits onto it. Nothing is frozen while the request runs. */
+      const snap = { layout: JSON.parse(JSON.stringify(strip(L))), copy: Object.assign({}, L._copy || {}) };
+      WORK.set(a.id, workRec(layoutRef.current, { pending: { snap, sig: sg, op } }), true);
       setSaveSt({ state: 'saving' });
       let r = null;
-      try { r = await onDone(strip(L), patchOf(L), { op, base: v.id }); }
+      try { r = await onDone(strip(L), patchOf(L), { op, base: v.id, sig: sg, seqAt }); }
       catch (e) { r = { status: 'failed', error: e }; }
       finally { saving.current = false; }
-      if (r && r.status === 'saved') { savedSig.current = sg; savedTo.current = r.version || null; setSaveSt(null); WORK.del(a.id, v.id); return; }
+      if (r && r.status === 'saved') {
+        savedSig.current = sg; savedTo.current = r.version || null; if (mounted.current) setSaveSt(null);
+        const w = WORK.get(a.id);
+        // the working store is cleared only when it still holds exactly the saved snapshot (or nothing newer was made)
+        if (w && w.base === v.id && sigOf(w.layout) === sg) WORK.del(a.id, v.id);
+        else if (w && w.base === v.id && w.pending && w.pending.sig === sg) WORK.patch(a.id, { pending: w.pending }, true);
+        return;
+      }
+      // a refusal (the worker answered) means the snapshot never became a version; a request cut off (a reload, the network) has an
+      // unknown outcome - the version may still land - so the snapshot stays named and the next open rebases onto it if it did
+      const unknown = !!(r && r.error && !r.error.status && r.status !== 'conflict' && r.status !== 'cancelled');
+      if (!unknown) { const w = WORK.get(a.id); if (w && w.pending && w.pending.sig === sg) { const x = Object.assign({}, w); delete x.pending; WORK.set(a.id, x, true); } }
       if (r && r.status === 'cancelled') { setSaveSt(null); return; }
       setSaveSt({ state: r && r.status === 'conflict' ? 'conflict' : 'failed', msg: r && r.error ? (r.error.message || String(r.error)) : 'the version was not saved' });
       draftOn.current = true; if (draftSig.current !== sg) sendDraft(L).catch(() => {});   // keep a recovery copy of exactly what failed
@@ -2725,7 +2772,7 @@
         </div>`; }) : null}
         ${snapLines.map((g, i) => html`<div key=${'snap' + i} class=${'st-le-snap ' + g.axis} aria-hidden="true" style=${g.axis === 'x' ? { left: g.at + '%' } : { top: g.at + '%' }}></div>`)}
         ${marquee && marquee.on ? html`<div class="st-le-marquee" aria-hidden="true" style=${{ left: Math.min(marquee.x0, marquee.x1) + '%', top: Math.min(marquee.y0, marquee.y1) + '%', width: Math.abs(marquee.x1 - marquee.x0) + '%', height: Math.abs(marquee.y1 - marquee.y0) + '%' }}></div>` : null}
-        ${editingL && E.TextEditor && layout.stage ? html`<${E.TextEditor} key=${'te-' + editingL.id} layer=${editingL} value=${R.displayedText(Object.assign({}, layout, { baked: [] }), Object.assign({}, editingL, { hidden: false }), wcopy)} layout=${layout} stageW=${box.current ? box.current.getBoundingClientRect().width : layout.stage.w} onCommit=${t => { pendingText.current = null; commitEdit(editingL, t); }} onCancel=${() => { pendingText.current = null; setEditing(null); }} onChange=${t => { pendingText.current = { id: editingL.id, t }; WORK.set(a.id, { base: v.id, project: p && p.id, ns, layout: foldText(layout, pendingText.current), draftSig: draftSig.current }); }} />` : null}
+        ${editingL && E.TextEditor && layout.stage ? html`<${E.TextEditor} key=${'te-' + editingL.id} layer=${editingL} value=${R.displayedText(Object.assign({}, layout, { baked: [] }), Object.assign({}, editingL, { hidden: false }), wcopy)} layout=${layout} stageW=${box.current ? box.current.getBoundingClientRect().width : layout.stage.w} onCommit=${t => { pendingText.current = null; commitEdit(editingL, t); }} onCancel=${() => { pendingText.current = null; setEditing(null); }} onChange=${t => { pendingText.current = { id: editingL.id, t }; WORK.set(a.id, workRec(foldText(layout, pendingText.current))); }} />` : null}
         ${!preview && !editing && !(act.current) && E.ContextToolbar ? html`<${E.ContextToolbar} sel=${selected()} bbox=${selBox} layout=${layout} ro=${false} locks=${a.locks || {}} onPatch=${pt => { const s = selected().filter(movable); if (s.length === 1) setOne(s[0].id, pt); }} onPatchEach=${fn => setEach(l => (l.type === 'text' ? fn(l) : {}))} onDuplicate=${duplicate} onDelete=${remove} onLock=${() => { const s = selected(); const lockIt = !s.some(l => l.locked); const patches = {}; s.forEach(l => { patches[l.id] = { locked: lockIt || undefined }; }); commit(patchMany(layout, patches)); }} onOrder=${reorder} onMore=${() => { if (onMore) onMore(); }} onEditText=${startEdit} onReplace=${replaceImage} onFontOpen=${() => setFontOpen(true)} />` : null}
         ${fontOpen && E.FontPicker ? html`<div class="st-le-fontwrap" onPointerDown=${e => e.stopPropagation()}><${E.FontPicker} value=${(byId(fontTargets()[0]) || {}).family || ''} brand=${brandFonts} onPick=${pickFont} onPreview=${f => setFontPreview(f == null ? null : { family: f, ids: fontTargets() })} onClose=${() => { setFontOpen(false); setFontPreview(null); }} /></div>` : null}
       </div>
@@ -2819,7 +2866,7 @@
       edit on the canvas (and in the recovery draft) and writes nothing. */
   function ConflictDialog({ c, onDone }) {
     const [per, setPer] = useState(false); const [ch, setCh] = useState({});
-    const show = (x, kind) => x === undefined ? html`<i class="ov-dim">removed</i>` : kind === 'copy' ? (String(x) || html`<i class="ov-dim">empty</i>`) : kind === 'layer' ? html`<span class="ov-dim">${'x ' + x.x + ' y ' + x.y + ' w ' + x.w + (x.size ? ', size ' + x.size : '') + (x.hidden ? ', hidden' : '')}</span>` : html`<span class="ov-dim">${JSON.stringify(x).slice(0, 80)}</span>`;
+    const show = (x, kind) => x === undefined ? html`<i class="ov-dim">removed</i>` : kind === 'order' ? html`<span class="ov-dim">${'front to back: ' + (x || []).slice().reverse().join(', ')}</span>` : kind === 'copy' ? (String(x) || html`<i class="ov-dim">empty</i>`) : kind === 'layer' ? html`<span class="ov-dim">${'x ' + x.x + ' y ' + x.y + ' w ' + x.w + (x.size ? ', size ' + x.size : '') + (x.hidden ? ', hidden' : '')}</span>` : html`<span class="ov-dim">${JSON.stringify(x).slice(0, 80)}</span>`;
     const all = c.m.conflicts.every(x => ch[x.id]);
     return html`<div class="st-dialog st-conflict" role="dialog" aria-modal="true" aria-labelledby="st-conflict-h"><div class="st-dialog-box">
       <div class="ov-title" id="st-conflict-h">${c.as.title} changed while you edited</div>
@@ -3312,7 +3359,8 @@
           const r = await call('/studio/version', Object.assign({ asset: as.id, revision: fresh.revision, layout: want.layout, kind: 'layout', note: note + (round ? ' (merged with a newer version)' : ''), op }, want.copy ? { copy: want.copy } : {}));
           await reload();
           if (MERGE && r.version && !MERGE.contains(r.version, intended())) return { status: 'failed', error: new Error('the version written does not hold the edit; nothing is lost - save again') };
-          call('/studio/draft/discard', { asset: as.id, version: baseVid, savedVersion: r.version && r.version.id }).catch(() => {});
+          // S20: only the draft of exactly the saved snapshot goes (rev); a newer draft written while this save was out stays
+          call('/studio/draft/discard', edit.seqAt ? { asset: as.id, upto: edit.seqAt } : edit.sig ? { asset: as.id, rev: edit.sig } : { asset: as.id, version: baseVid, savedVersion: r.version && r.version.id }).catch(() => {});
           return { status: 'saved', version: r.version && r.version.id, duplicate: !!r.duplicate };
         } catch (e) {
           if (e.status !== 409 || e.code !== 'conflict') return { status: 'failed', error: e };
@@ -3387,7 +3435,7 @@
     });
     const saveLayout = async (as, layout, baseVid, note, copyPatch, o) => {
       const words = copyPatch && Object.keys(copyPatch).length;
-      const r = await saveEdit(as, { layout, copyPatch, baseVid: baseVid || as.current, op: o && o.op, note: note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : words ? 'layout and words (' + Object.keys(copyPatch).join(', ') + ') edited on the canvas' : 'layout edited by hand' });
+      const r = await saveEdit(as, { layout, copyPatch, baseVid: baseVid || as.current, op: o && o.op, sig: o && o.sig, seqAt: o && o.seqAt, note: note ? 'layout: ' + String(note).slice(0, 160) + ' (no render)' : words ? 'layout and words (' + Object.keys(copyPatch).join(', ') + ') edited on the canvas' : 'layout edited by hand' });
       if (r.status === 'failed') fail(r.error, 'The layout was not saved (your changes and the recovery draft are kept)');
       return r;
     };
@@ -3439,7 +3487,7 @@
       const asset = ta ? ta.id : undefined; const layers = tgt === 'asset' ? (o.layers || undefined) : undefined;
       const label = 'Reading the direction against ' + (tgt === 'set' ? 'the whole set' : tgt === 'family' ? 'the ' + (ta.family || 'family') : ta.title);
       let r;
-      try { r = await call('/studio/job', { project: P0.id, stage: 'revise', input: { target: tgt, asset, instruction: text, layers }, idem: 'revise:' + P0.id + ':' + Date.now() }); }
+      try { r = await call('/studio/job', { project: P0.id, stage: 'revise', input: Object.assign({ target: tgt, asset, instruction: text, layers }, tgt !== 'set' && o.version ? { version: o.version } : {}), idem: 'revise:' + P0.id + ':' + Date.now() }); }
       catch (e) { once.current.delete(key); return { error: e }; }
       if (!r || !r.job) { once.current.delete(key); return { error: { message: 'the worker did not create the job' } }; }
       setP(prev => prev && prev.id === r.job.project && !(prev.jobs || []).some(j => j.id === r.job.id) ? Object.assign({}, prev, { jobs: (prev.jobs || []).concat([r.job]) }) : prev);
