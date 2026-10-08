@@ -7,7 +7,8 @@
  *   C. suggestions were cached on the version, references and last event only, so a retired rule kept being advised.
  *   D. the content desk labelled rejected and other-campaign material "APPROVED EXAMPLES".
  *   E. the stream reader waited for the connection to close after message_stop, and accepted a stream that closed after an
- *      end_turn delta without message_stop.
+ *      end_turn delta without message_stop; a data frame that did not parse was skipped, so an answer could arrive shorter
+ *      than the model wrote it.
  * Run: node --experimental-sqlite tests/studio-s23-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 const T = suite('studio-s23-worker (engine defects A-E: required marks, filtered context, cache identity, approved examples, stream protocol)');
@@ -33,16 +34,33 @@ w.answer(/generativelanguage/, async (u, init) => {
 const sentImages = c => { const turn = c.body.contents[c.body.contents.length - 1]; return turn.parts.filter(p => p.inline_data || p.inlineData).map(p => (p.inline_data || p.inlineData).data); };
 const sentText = c => { const turn = c.body.contents[c.body.contents.length - 1]; return turn.parts.filter(p => p.text).map(p => p.text).join('\n'); };
 
-/* Claude: answers by what the system prompt asks; every request is kept */
+/* Claude: answers by what the system prompt asks; every request is kept. When `stream.plan` is set the answer is a server-sent
+   event stream built byte for byte from the plan (chunks with pauses; `open` keeps the connection open after the last chunk) */
 const anth = { calls: [] };
+const stream = { plan: null, open: false, aborted: 0 };
 const answerFor = sys => {
   if (/suggest|next directions|Suggested/i.test(sys)) return { design: [{ title: 'Use the brand blue', why: 'the rule', refs: [] }], image: [] };
   return {};
 };
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
   const body = JSON.parse(init.body); anth.calls.push(body);
+  if (stream.plan) {
+    const plan = stream.plan, keepOpen = stream.open; const signal = init && init.signal; let stopped = false;
+    if (signal) signal.addEventListener('abort', () => { stopped = true; stream.aborted++; });
+    return new Response(new ReadableStream({ async start(c) {
+      for (const step of plan) { if (stopped) return; if (step.wait) await sleep(step.wait); if (stopped) return; try { c.enqueue(typeof step.bytes === 'string' ? new TextEncoder().encode(step.bytes) : step.bytes); } catch (e) { return; } }
+      if (!keepOpen) { try { c.close(); } catch (e) {} }
+    }, cancel() { stopped = true; } }), { status: 200, headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+  }
   return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answerFor(String(body.system || ''))) }], stop_reason: 'end_turn', model: body.model, usage: { input_tokens: 10, output_tokens: 10 } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 });
+const frame = (type, data, eol) => { eol = eol || '\n'; return 'event: ' + type + eol + 'data: ' + JSON.stringify(Object.assign({ type }, data || {})) + eol + eol; };
+const START = frame('message_start', { message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], usage: { input_tokens: 120, output_tokens: 1 } } });
+const textBlock = (i, pieces) => [frame('content_block_start', { index: i, content_block: { type: 'text', text: '' } })].concat(pieces.map(t => frame('content_block_delta', { index: i, delta: { type: 'text_delta', text: t } })), [frame('content_block_stop', { index: i })]);
+const END = (out) => [frame('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: out || 42 } }), frame('message_stop', {})];
+const steps = (frames, wait) => frames.map(f => ({ bytes: f, wait: wait == null ? 5 : wait }));
+const mkLog = over => { const lines = []; const f = async (lvl, t) => { lines.push([lvl, t]); }; f.lines = lines; f.phase = async () => true; f.lease = async () => true; f.fence = async () => {}; f.compiled = []; return Object.assign(f, over || {}); };
+const claude = o => w.mod.__test.stClaude(w.env, Object.assign({ role: 'extract', system: 'Answer in JSON.', user: 'Say hello.', maxTok: 1000 }, o || {}));
 
 /* MCA with its logo; HOOF carries its wordmark only; a second campaign with both marks */
 await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark', url: 'handsoffourfuel.com.au' }, { id: 'national', name: 'Australian mining', logoPolicy: 'both' }] });
@@ -151,6 +169,89 @@ await T.t('A7 at the limit the rank decides which references stay (approved over
   eq(r.excluded.map(x => x.name), ['insp2'], 'the weaker reference is the one left out');
   const none = att([{ data: 'c', kind: 'current', required: true, name: 'current' }, { data: 'm', mark: 'logo', kind: 'mark', required: true, name: 'logo' }], 1);
   ok(!none.ok && /2 required images/.test(none.detail), none.detail);
+});
+
+// ---------------------------------------------------------------------------------------------------- E. the stream protocol
+const usageNow = async () => (await w.mod.__test.aiUsage(w.env, 'studio'));
+await T.t('E1 reproduced: an answer whose message_stop has arrived is finished at once, even when the connection stays open', async () => {
+  w.env.STUDIO_STREAM_IDLE_MS = '1500';
+  stream.plan = steps([START].concat(textBlock(0, ['{"hello":', '"world"}']), END())); stream.open = true;
+  try {
+    const t0 = Date.now(); let res = null, err = null;
+    try { res = await claude({ log: mkLog() }); } catch (e) { err = e; }
+    const ms = Date.now() - t0;
+    ok(!err, 'no error: ' + (err && err.message));
+    eq(res && res.text, '{"hello":"world"}', 'the whole answer');
+    ok(ms < 1000, 'finished on message_stop, not when the idle limit ran out: ' + ms + ' ms');
+  } finally { stream.plan = null; stream.open = false; delete w.env.STUDIO_STREAM_IDLE_MS; }
+});
+await T.t('E2 reproduced: a stream that ends after the end_turn delta but before message_stop is cut: retried, never parsed', async () => {
+  stream.plan = steps([START].concat(textBlock(0, ['{"partial":', 'true}']), [frame('message_delta', { delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 9 } })]));
+  try {
+    let res = null, err = null; try { res = await claude({ log: mkLog() }); } catch (e) { err = e; }
+    ok(err && /stream_cut/.test(err.message), 'stream_cut, not an answer: ' + (err ? err.message : JSON.stringify(res)));
+    ok(w.mod.__test.stTransient(err && err.message), 'and it is retried (transient)');
+  } finally { stream.plan = null; }
+});
+await T.t('E3 split UTF-8 and CRLF: a character split across chunks and CRLF line ends assemble exactly', async () => {
+  const text = '{"t":"Hands Off Our Fuel \u2014 not a subsidy \ud83d\udee2\ufe0f, caf\u00e9"}';
+  const all = new TextEncoder().encode([START].concat(textBlock(0, [text]), END()).join('').replace(/\n/g, '\r\n'));
+  // cut the bytes every 7, so multi-byte characters and CR / LF pairs fall across chunk edges
+  const plan = []; for (let i = 0; i < all.length; i += 7) plan.push({ bytes: all.slice(i, i + 7), wait: 0 });
+  stream.plan = plan;
+  try { const res = await claude({ log: mkLog() }); eq(res.text, text, 'byte-exact'); }
+  finally { stream.plan = null; }
+});
+await T.t('E4 reproduced: a data frame that does not parse is a broken stream, never a silently shorter answer', async () => {
+  const bad = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"not "\n\n';
+  stream.plan = steps([START, frame('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }), frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: '{"claim":"' } }), bad, frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'a subsidy"}' } }), frame('content_block_stop', { index: 0 })].concat(END()));
+  try {
+    let res = null, err = null; try { res = await claude({ log: mkLog() }); } catch (e) { err = e; }
+    ok(err && /stream_protocol/.test(err.message), 'the answer is refused: ' + (err ? err.message : 'answered ' + JSON.stringify(res && res.text)));
+    ok(w.mod.__test.stTransient(err && err.message), 'and retried');
+  } finally { stream.plan = null; }
+});
+await T.t('E5 pings, SSE comments and event types the reader does not know are ignored; the answer is whole', async () => {
+  stream.plan = steps([': keep-alive comment\n\n', frame('ping', {}), START, frame('ping', {}), frame('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }), frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: '{"a":' } }), frame('content_block_annotation', { index: 0, note: 'new event type' }), frame('content_block_delta', { index: 0, delta: { type: 'citations_delta', citation: {} } }), frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: '1}' } }), frame('content_block_stop', { index: 0 })].concat(END()));
+  try { const res = await claude({ log: mkLog() }); eq(res.text, '{"a":1}'); }
+  finally { stream.plan = null; }
+});
+await T.t('E6 events out of order are refused: a delta for a block that never started, and content before message_start', async () => {
+  stream.plan = steps([START, frame('content_block_delta', { index: 3, delta: { type: 'text_delta', text: '{"x":1}' } }), frame('content_block_stop', { index: 3 })].concat(END()));
+  try { let err = null; try { await claude({ log: mkLog() }); } catch (e) { err = e; } ok(err && /stream_protocol/.test(err.message) && /never started|not started|without its start/i.test(err.message), err && err.message); }
+  finally { stream.plan = null; }
+  stream.plan = steps(textBlock(0, ['{"x":1}']).concat(END()));
+  try { let err = null; try { await claude({ log: mkLog() }); } catch (e) { err = e; } ok(err && /stream_protocol/.test(err.message) && /message_start/.test(err.message), err && err.message); }
+  finally { stream.plan = null; }
+});
+await T.t('E7 an error event ends the call as the provider\'s overload, retried, with nothing parsed', async () => {
+  stream.plan = steps([START, frame('content_block_start', { index: 0, content_block: { type: 'text', text: '' } }), frame('content_block_delta', { index: 0, delta: { type: 'text_delta', text: '{"half":' } }), frame('error', { error: { type: 'overloaded_error', message: 'Overloaded' } })]);
+  try { let err = null; try { await claude({ log: mkLog() }); } catch (e) { err = e; } ok(err && /overloaded/i.test(err.message) && w.mod.__test.stTransient(err.message), err && err.message); }
+  finally { stream.plan = null; }
+});
+await T.t('E8 a cancel while the answer streams stops the call (the request is aborted) and nothing is returned', async () => {
+  let n = 0; w.env.STUDIO_LEASE_BEAT_MS = '30';
+  const pieces = Array.from({ length: 40 }, () => 'abcde');
+  stream.plan = steps([START].concat(textBlock(0, pieces), END()), 20); stream.aborted = 0;
+  try {
+    let err = null; const t0 = Date.now();
+    try { await claude({ log: mkLog({ lease: async () => (++n < 3), fence: async () => { throw Object.assign(new Error('fenced: the job was cancelled'), { fenced: true }); } }) }); } catch (e) { err = e; }
+    ok(err && (err.fenced || /fenced/.test(err.message)), 'the call ends as fenced: ' + (err && err.message));
+    ok(stream.aborted >= 1, 'the provider request was aborted');
+    ok(Date.now() - t0 < 700, 'promptly: ' + (Date.now() - t0) + ' ms');
+  } finally { stream.plan = null; delete w.env.STUDIO_LEASE_BEAT_MS; }
+});
+await T.t('E9 usage: a finished stream is settled once as confirmed with the final cumulative tokens; a cut one as failed', async () => {
+  const u0 = await usageNow();
+  stream.plan = steps([START].concat(textBlock(0, ['{"ok":true}']), END(77)));
+  try { await claude({ log: mkLog() }); } finally { stream.plan = null; }
+  const u1 = await usageNow();
+  eq([u1.confirmed - u0.confirmed, u1.failed - u0.failed], [1, 0], 'one confirmed');
+  eq([u1.in_tok - u0.in_tok, u1.out_tok - u0.out_tok], [120, 77], 'the input tokens from message_start, the final output tokens from message_delta');
+  stream.plan = steps([START].concat(textBlock(0, ['{"ok":'])));
+  try { try { await claude({ log: mkLog() }); } catch (e) {} } finally { stream.plan = null; }
+  const u2 = await usageNow();
+  eq([u2.confirmed - u1.confirmed, u2.failed - u1.failed], [0, 1], 'one failed');
 });
 
 T.done(); w.restore();

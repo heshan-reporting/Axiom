@@ -7412,7 +7412,7 @@ async function stJobClaim(env, id) {
   const r = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='running', lease_until=?, attempts=attempts+1, updated=? WHERE id=? AND attempts<? AND (state='queued' OR (state='running' AND lease_until<?))").bind(now + ST_LEASE_MS, now, id, ST_MAX_ATTEMPTS, now).run();
   return !!(r && r.meta && r.meta.changes);
 }
-function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|stream_(idle|cut)|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
+function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|stream_(idle|cut|protocol)|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
 /** Run one claimed job to its end state. Never writes over a version the asset has moved past. */
 async function stJobRun(env, job) {
   // ownership: this attempt owns the job only while it is running under this attempt's number. A cancel, or another
@@ -7831,27 +7831,82 @@ function stIsV5(model) { return /(opus|sonnet|fable|haiku)-5(-|$)/i.test(String(
 const ST_STREAM_IDLE_MS = 120000;   // nothing at all for this long (the API pings while it works): abandoned, retried
 const ST_LEASE_BEAT_MS = 30000;     // the lease is renewed this often while a call runs
 const stThou = n => String(Math.max(0, Math.round(Number(n) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-/** Read a server-sent event stream: onEvent(type, data) per event (awaited; true stops reading), poke() per chunk.
- *  Answers { ended } when the stream closed, { stopped } when onEvent asked, { error } when reading failed. */
+/** Read a server-sent event stream: onEvent(type, data) per event (awaited; true stops reading), poke() per chunk. Lines end
+ *  in LF, CRLF or a lone CR (a CR at the end of a chunk may be half of a CRLF, so it waits for the next); a multi-byte
+ *  character split across chunks is decoded whole; comment lines (":") and events with no data carry nothing. A data
+ *  frame that is not JSON reaches onEvent as null, so the caller can refuse the answer rather than lose a piece of it.
+ *  The last event counts without its blank line only when its data is whole JSON. Answers { ended } when the stream
+ *  closed, { stopped } when onEvent asked, { error } when reading failed. */
 async function stSseRead(reader, onEvent, poke) {
-  const dec = new TextDecoder(); let buf = '';
+  const dec = new TextDecoder('utf-8'); let buf = '';
+  const parse = block => {
+    let type = '', data = '', has = false;
+    for (const line of block.split('\n')) {
+      if (!line || line[0] === ':') continue;
+      const c = line.indexOf(':'); const field = c < 0 ? line : line.slice(0, c); let val = c < 0 ? '' : line.slice(c + 1); if (val[0] === ' ') val = val.slice(1);
+      if (field === 'event') type = val; else if (field === 'data') { data += (has ? '\n' : '') + val; has = true; }
+    }
+    if (!has) return null;
+    let d = null; try { d = JSON.parse(data); } catch (e) { d = null; }
+    return { type: type || (d && typeof d === 'object' ? String(d.type || '') : ''), d };
+  };
+  const lines = () => { buf = buf.replace(/\r\n/g, '\n').replace(/\r(?!$)/g, '\n'); };
   for (;;) {
     let x; try { x = await reader.read(); } catch (e) { return { error: e }; }
     if (!x || x.done) break;
     if (poke) poke();
-    // CRLF is folded on the whole remainder, so a CR at the end of one chunk meets its LF in the next
-    buf = (buf + dec.decode(x.value, { stream: true })).replace(/\r\n/g, '\n');
+    buf += dec.decode(x.value, { stream: true }); lines();
     let cut;
     while ((cut = buf.indexOf('\n\n')) >= 0) {
       const block = buf.slice(0, cut); buf = buf.slice(cut + 2);
-      let type = '', data = '';
-      block.split('\n').forEach(line => { if (line.indexOf('event:') === 0) type = line.slice(6).trim(); else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.slice(5).replace(/^ /, ''); });
-      if (!data) continue;
-      let d; try { d = JSON.parse(data); } catch (e) { continue; }
-      if (await onEvent(type || String(d.type || ''), d)) return { stopped: true };
+      const ev = parse(block); if (!ev) continue;
+      if (await onEvent(ev.type, ev.d)) return { stopped: true };
     }
   }
+  buf += dec.decode(); buf = buf.replace(/\r\n?/g, '\n');
+  const tail = buf.trim() ? parse(buf.trim()) : null;
+  if (tail && tail.d && (await onEvent(tail.type, tail.d))) return { stopped: true, tail: true };
   return { ended: true };
+}
+/** The Messages API stream as a state machine, as the streaming documentation describes it: message_start; then for each
+ *  content block content_block_start, its deltas and content_block_stop; then message_delta (the stop reason and the
+ *  cumulative usage); then message_stop, which alone completes the message. ping may come at any time; an error event ends
+ *  the stream with the provider's error; event and delta types it does not know are ignored, as the documentation asks.
+ *  Anything out of that order, or a data frame that is not JSON, is a violation: the answer is never assembled from such a
+ *  stream (stream_protocol, retried). feed(type, data) answers true when reading should stop (complete, error, violation). */
+function stStreamMachine() {
+  const S = { state: 'start', msg: { model: '', content: [], stop_reason: null, usage: {} }, blocks: {}, thinking: 0, written: 0, error: null, violation: '' };
+  const bad = why => { S.state = 'violation'; S.violation = why; return true; };
+  S.feed = (type, ev) => {
+    if (S.state === 'complete' || S.state === 'error' || S.state === 'violation') return true;
+    if (ev == null || typeof ev !== 'object') return bad('a data frame that is not JSON' + (type ? ' (event ' + String(type).slice(0, 40) + ')' : ''));
+    if (type === 'ping') return false;
+    if (type === 'error') { S.state = 'error'; S.error = ev.error && typeof ev.error === 'object' ? ev.error : { type: 'error', message: 'the stream reported an error' }; return true; }
+    if (type === 'message_start') { if (S.state !== 'start') return bad('a second message_start'); const m = ev.message || {}; S.msg.model = String(m.model || ''); S.msg.usage = Object.assign({}, m.usage || {}); S.state = 'message'; return false; }
+    if (['content_block_start', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop'].indexOf(type) < 0) return false;
+    if (S.state === 'start') return bad(type + ' before message_start');
+    if (type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) S.msg.stop_reason = ev.delta.stop_reason; if (ev.usage && typeof ev.usage === 'object') Object.assign(S.msg.usage, ev.usage); return false; }
+    if (type === 'message_stop') {
+      const open = Object.keys(S.blocks).filter(i => S.blocks[i] === 'open');
+      if (open.length) return bad('message_stop while content block ' + open.join(', ') + ' was still open');
+      S.state = 'complete'; return true;
+    }
+    const i = ev.index;
+    if (!Number.isInteger(i) || i < 0 || i > 1000) return bad(type + ' without a valid index');
+    if (type === 'content_block_start') {
+      if (S.blocks[i]) return bad('content block ' + i + ' started twice');
+      const b = ev.content_block || {}; S.blocks[i] = 'open';
+      S.msg.content[i] = b.type === 'text' ? { type: 'text', text: String(b.text || '') } : { type: String(b.type || 'unknown') };
+      return false;
+    }
+    if (S.blocks[i] !== 'open') return bad(type + ' for content block ' + i + (S.blocks[i] ? ' after it stopped' : ' that never started'));
+    if (type === 'content_block_stop') { S.blocks[i] = 'stopped'; return false; }
+    const dl = ev.delta || {}; const b = S.msg.content[i];
+    if (dl.type === 'text_delta') { if (b.type !== 'text') return bad('text for a ' + b.type + ' block'); const t = String(dl.text == null ? '' : dl.text); b.text += t; S.written += t.length; }
+    else if (dl.type === 'thinking_delta') S.thinking += String(dl.thinking || '').length;
+    return false;   // signature, citations and any other delta: nothing for the answer's text
+  };
+  return S;
 }
 /** Why a streamed call was given up, as the model answer's error: silent (retried), past the cap (not retried), stopped. */
 function stStreamFail(why, idleMs, capMs, counts) {
@@ -7917,29 +7972,22 @@ async function stClaude(env, o) {
       const ctype = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
       if (r.ok && r.body && /event-stream/i.test(ctype)) {
         reader = r.body.getReader(); if (why) stop(why);
-        const msg = { model: '', content: [], stop_reason: null, usage: {} }; let complete = false, errEv = null;
+        const M = stStreamMachine();
         const end = await stSseRead(reader, async (type, ev) => {
-          if (type === 'message_start') { const m = ev.message || {}; msg.model = m.model || ''; msg.usage = Object.assign({}, m.usage || {}); return false; }
-          if (type === 'content_block_start') { const b = ev.content_block || {}; msg.content[Number(ev.index) || 0] = b.type === 'text' ? { type: 'text', text: String(b.text || '') } : { type: String(b.type || 'unknown') }; return false; }
-          if (type === 'content_block_delta') {
-            const dl = ev.delta || {}; const i = Number(ev.index) || 0; const b = msg.content[i] || (msg.content[i] = { type: dl.type === 'text_delta' ? 'text' : 'thinking' });
-            if (dl.type === 'text_delta') { const t = String(dl.text || ''); b.text = (b.text || '') + t; counts.written += t.length; }
-            else if (dl.type === 'thinking_delta') counts.thinking += String(dl.thinking || '').length;
-            await tell(); return !!why;
-          }
-          if (type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) msg.stop_reason = ev.delta.stop_reason; if (ev.usage) Object.assign(msg.usage, ev.usage); return false; }
-          if (type === 'message_stop') { complete = true; return false; }
-          if (type === 'error') { errEv = ev.error || { type: 'error', message: 'the stream reported an error' }; return true; }
-          return false;   // ping, content_block_stop
+          const stopNow = M.feed(type, ev); counts.thinking = M.thinking; counts.written = M.written;
+          if (type === 'content_block_delta' && M.state === 'message') await tell();
+          return stopNow || !!why;
         }, poke);
-        const d = { model: msg.model || body.model, content: msg.content.filter(Boolean), stop_reason: msg.stop_reason, usage: msg.usage };
-        Object.assign(rec, { streamed: true, thinkingChars: counts.thinking, answerChars: counts.written, ms: Date.now() - counts.t0 });
+        const d = { model: M.msg.model || body.model, content: M.msg.content.filter(Boolean), stop_reason: M.msg.stop_reason, usage: M.msg.usage };
+        Object.assign(rec, { streamed: true, thinkingChars: counts.thinking, answerChars: counts.written, ms: Date.now() - counts.t0, stream: M.state });
+        // the message is whole only on message_stop; then it stands even if a clock (idle, cap) fired in the same moment -
+        // but never for an attempt that is no longer the job's (fenced: nothing is filed)
+        if (M.state === 'complete' && why !== 'fenced') { await aiSettle(env, 'studio', true, d.usage); await fenceNow(); return { status: r.status, d }; }
         if (why) { await aiSettle(env, 'studio', false, d.usage); if (why === 'fenced') await fenceNow(); return { status: 0, d: stStreamFail(why, idleMs, capMs, counts) }; }
-        if (errEv) { await aiSettle(env, 'studio', false, d.usage); await fenceNow(); return { status: errEv.type === 'overloaded_error' ? 529 : 500, d: { error: { type: String(errEv.type || 'error'), message: 'the answer stream reported ' + String(errEv.type || 'an error') + ': ' + String(errEv.message || '').slice(0, 160) } } }; }
-        if (!complete && !d.stop_reason) { await aiSettle(env, 'studio', false, d.usage); await fenceNow(); return { status: 0, d: { error: { type: 'stream_cut', message: 'the answer stream ended before the model finished (' + (end.error ? 'the connection dropped: ' + String((end.error && end.error.message) || end.error).slice(0, 80) + '; ' : '') + stThou(counts.written) + ' characters of the answer had arrived); nothing was parsed' } } }; }
-        await aiSettle(env, 'studio', true, d.usage);
-        await fenceNow();
-        return { status: r.status, d };
+        await aiSettle(env, 'studio', false, d.usage); await fenceNow();
+        if (M.state === 'error') { const e = M.error; return { status: e.type === 'overloaded_error' ? 529 : 500, d: { error: { type: String(e.type || 'error'), message: 'the answer stream reported ' + String(e.type || 'an error') + ': ' + String(e.message || '').slice(0, 160) } } }; }
+        if (M.state === 'violation') return { status: 0, d: { error: { type: 'stream_protocol', message: 'the answer stream broke the protocol (' + M.violation + ') after ' + stThou(counts.written) + ' characters of the answer; nothing was parsed' } } };
+        return { status: 0, d: { error: { type: 'stream_cut', message: 'the answer stream ended before message_stop (' + (end.error ? 'the connection dropped: ' + String((end.error && end.error.message) || end.error).slice(0, 80) + '; ' : '') + (M.msg.stop_reason ? 'the stop reason had arrived, the end of the message had not; ' : '') + stThou(counts.written) + ' characters of the answer had arrived); nothing was parsed' } } };
       }
       // not a stream: an error status, or a proxy that answered in one piece. The body is read as text first: a gateway page
       // (HTTP 502 / 504 / 524 as HTML), an empty body or a cut-off answer is an upstream failure with its status and an
@@ -7971,7 +8019,7 @@ async function stClaude(env, o) {
     rec.error = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     const m = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     if (/credit balance|spend limit|billing|usage limit/i.test(m)) throw new Error('account_limit: ' + m + ' (not retried)');
-    // a stream that fell silent or ended early is retried (stream_idle, stream_cut); one stopped at the cap is not
+    // a stream that fell silent, ended early or broke the protocol is retried (stream_idle, stream_cut, stream_protocol); one stopped at the cap is not
     if (/^stream_/.test(String(res.d.error.type || ''))) throw new Error(res.d.error.type + ': ' + m);
     if (res.status === 429 || res.status >= 500 || /overloaded/i.test(m)) throw new Error('overloaded: ' + m);
     throw new Error(m);
@@ -13024,7 +13072,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 

@@ -2266,7 +2266,7 @@ the evidence. It is updated with every slice; an item is marked done only with t
   written in the working tree; both pass on the finished fix (4 of 4, 3 of 3). The checks (syntax, ASCII, the shared
   RULES block, page scripts, nothing private in `docs/`) passed.
 - No paid model call is made while S23 is built: Claude and Gemini are mocked in every harness. The owner-run live
-  test is `tools/studio-smoke.py`, capped (46.6).
+  test is `tools/studio-smoke.py`, capped (described below when it lands).
 
 ### 46.2 Checklist
 
@@ -2279,14 +2279,14 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 2B | One filtered context package; excluded references reach no model, as text or image | planned | |
 | 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | planned | |
 | 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | planned | |
-| 2E | Stream read as the documented state machine | planned | |
+| 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
 | 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | planned | |
 | 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | planned | |
 | 5 | Canvas: elements, context menus, arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets | planned | |
 | 6 | Both creation paths explained; image lifecycle (stored versus displayed) | planned | |
 | 7 | Validation, repair and export agree; render fingerprint | planned | |
 | 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | planned | |
-| 9 | Every long operation visible and recoverable (inventory 46.5) | planned | |
+| 9 | Every long operation visible and recoverable (the wait inventory, below) | planned | |
 | 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | planned | |
 | 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | planned | |
 
@@ -2298,7 +2298,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-B | A reference excluded as another campaign's still reached the suggestions call through the unfiltered reference text. | | | open |
 | S23-C | Suggestions were cached on version, references and last event only, so a retired rule kept being advised. | | | open |
 | S23-D | `contentExemplars` labelled rejected and other-campaign material "APPROVED EXAMPLES". | | | open |
-| S23-E | The stream reader waited for the connection to close after `message_stop`, and accepted a stream that closed after an `end_turn` delta with no `message_stop`. | | | open |
+| S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `5d43a8f` | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
 
@@ -2323,3 +2323,29 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
   render whose wanted mark is not among the attachments is not filed (`mark_not_sent`). References a caller supplies
   (`/nano`, a raw `references` list on a job) are optional material and cannot pose as marks; the Release Desk's logo
   is a required mark.
+
+### 46.5 Slice E - the answer stream as the documented state machine
+
+The Messages API streams `message_start`; for each content block `content_block_start`, its deltas and
+`content_block_stop`; `message_delta` (the stop reason and the cumulative usage); and `message_stop`, which alone
+completes the message. `ping` may come at any time, `error` ends the stream, and new event and delta types may be added
+and are to be ignored. `stStreamMachine` reads exactly that:
+
+- **finished on `message_stop`**: reading stops there, whether or not the connection closes; a clock (idle, cap) that
+  fires in the same moment does not undo a whole answer, but a fenced attempt (cancelled or taken over) files nothing;
+- **cut without it**: a stream that ends before `message_stop` is `stream_cut` even when the stop reason has arrived,
+  and is retried; nothing from it is parsed;
+- **violations refuse the answer** (`stream_protocol`, retried): a data frame that is not JSON, a delta or stop for a
+  block that never started or already stopped, a block started twice, text for a non-text block, anything before
+  `message_start`, `message_stop` while a block is open;
+- **tolerated**: `ping`, SSE comment lines, events with no data, unknown event types, signature and citation deltas;
+- **decoding**: LF, CRLF and lone CR line ends; a CR at the end of a chunk waits for the next; a multi-byte character
+  split across chunks is decoded whole; the last event counts without its blank line only when its data is whole JSON;
+- **usage**: settled once - confirmed with the input tokens from `message_start` and the final cumulative output tokens
+  from `message_delta`, or failed with what had arrived.
+
+Tests (`studio-s23-worker.mjs`, providers mocked, bytes controlled): E1 open connection after `message_stop` (finished
+in milliseconds, not at the idle limit), E2 no `message_stop`, E3 a stream cut every seven bytes with CRLF and multi-byte
+characters, E4 an unparseable frame, E5 pings, comments and unknown events, E6 out-of-order events, E7 an error event, E8
+a cancel mid-stream (the request is aborted), E9 the usage ledger. The browser fixture's stub follows the same order.
+The island explains `stream_protocol` ("The model's answer arrived damaged ... none of it was used").
