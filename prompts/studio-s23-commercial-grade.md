@@ -512,3 +512,17 @@ under "not done" or "not proven".
   - the evidence, with links;
   - what is not done or not proven, and why;
   - the owner's next steps: the deploy command, the smoke-test command, and "go live".
+
+## 7. If the Canva connector is available in this session
+
+- **Use it as a reference, read-only.** Look at comparable social designs and at how Canva's editor
+  behaves (the elements panel, context menu, guides, multi-selection, pages, colour picker). Record
+  what you adopt and what you deliberately do not, and why it suits AXIOM.
+- **Do not change the owner's Canva account.** Create, change, share or export nothing there unless
+  the owner asks.
+- **Canva is not a dependency.** AXIOM's editor must work fully without it.
+- **Opening AXIOM work in Canva is a separate decision for the owner.** It would need Canva's Connect
+  API, a Canva developer app and OAuth, and the design would leave AXIOM's validation and approvals.
+  Propose it with its trade-offs; do not build it unasked.
+
+If the connector is not available, say so and carry on. Nothing above depends on it.
