@@ -7031,6 +7031,8 @@ async function ensureStudio(env) {
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_texts_p ON studio_texts(project, created)'),
     // S17: the editor's autosaved working layout, one per person per asset: not a version, kept until saved or discarded
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_drafts(asset TEXT, who TEXT, project TEXT, version TEXT, layout TEXT, copy TEXT, at INTEGER, PRIMARY KEY(asset, who))'),
+    // S23: the suggestions for one asset, keyed on the fingerprint of the context they were made from (started orders answers)
+    env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_suggestions(asset TEXT PRIMARY KEY, project TEXT, fp TEXT, parts TEXT, started INTEGER, at INTEGER, data TEXT)'),
   ]); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN rev TEXT').run(); } catch (e) {}   // S20: which working snapshot a draft holds
   try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN seq INTEGER').run(); } catch (e) {}   // S20: the order the browser wrote drafts in
@@ -12209,15 +12211,39 @@ async function stInspectStage(env, job, p, log) {
 }
 // -- Suggested next directions: specific, editable instructions for this tile, split into design and imagery ----
 const ST_SUGGEST_SYS = 'You are the art director of an Australian political communications agency suggesting the next things the team might ask for on one social tile. You see the tile (attached when on file), its words, the brief, the campaign, the brand kit, the references and the recent feedback. Answer as strict JSON only, no prose: {"design":[{"text":"<=40 words: one imperative instruction about the composition, layout, panel, mark or CTA, specific to this tile and ready to send as written","why":"<=12 words","refs":["reference ids it draws on"],"basis":"rule|preference|reference|inferred","changes":"<=8 words: what changes","preserves":"<=8 words: what stays","paid":false}],"image":[{"text":"<=40 words: one photograph to make - subject, setting, framing, light, and where the quiet space for the words is","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":true}],"typography":[{"text":"<=30 words: one change to hierarchy, size, weight, case or emphasis","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":false}],"copy":[{"text":"<=30 words: one change to the words, in the client voice, figures only from the facts given","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":false}],"concept":[{"text":"<=40 words: one different concept worth exploring (medium, idea, composition)","why":"<=12 words","basis":"rule|preference|reference|inferred","changes":"<=8 words","preserves":"<=8 words","paid":true}]}. Two or three of each, each a different idea; design and typography suggestions never regenerate the imagery (paid false); image and concept suggestions cost a render (paid true); keep the campaign message; respect the brand rules, the brand and approved references and any recorded preferences; say for each what it is based on; Australian English, no exclamation marks.';
+// S23: suggestions are advice about one tile in one context. They were cached on the version, the references and the last event,
+// so a rule retired, a reference re-analysed or a campaign changed left yesterday's advice standing. The cache identity is now a
+// fingerprint of everything the suggestions are made from - the version, the campaign, the brand kit, the learned rules in force,
+// the references and their analyses, the brief, the feedback on the asset and the artwork memory - kept part by part, so advice
+// read later can say it is outdated and why (GET /studio/suggest, free). A new call is only made when someone asks for it.
+const ST_SUGG_PARTS = { version: 'the tile (a new version)', campaign: 'the campaign', kit: 'the brand kit', rules: 'the learned rules and preferences in force', references: 'the references or their analyses', brief: 'the brief', feedback: 'new feedback on this asset', artwork: 'the artwork memory' };
+async function stSuggestFingerprint(env, p, asset, v) {
+  const q = async (sql, binds) => { try { return (await env.MIND_DB.prepare(sql).bind(...binds).all()).results || []; } catch (e) { return []; } };
+  const kit = (await brandKit(env, p.ns)) || {}; const kitC = Object.assign({}, kit); delete kitC.updated;
+  const rules = await q('SELECT id, active, rule, task, scope, source FROM engine_fixes WHERE ns=? ORDER BY id', [p.ns]);
+  const refs = await q('SELECT id, campaign, purpose, analysis, recipe, note FROM studio_references WHERE project=? ORDER BY id', [p.id]);
+  const fb = await q("SELECT id FROM studio_events WHERE project=? AND kind IN ('revise','proposal','concepts','applied','question','note','alternatives') AND data LIKE ? ORDER BY id DESC LIMIT 1", [p.id, '%' + asset.id + '%']);
+  const art = await q('SELECT COUNT(*) AS n, MAX(created) AS m FROM engine_art WHERE ns=?', [p.ns]);
+  const b = p.brief || {};
+  const parts = { version: String((v && v.id) || ''), campaign: String(p.campaign || ''), kit: stSigHash(JSON.stringify(kitC)), rules: stSigHash(JSON.stringify(rules)), references: stSigHash(JSON.stringify(refs)), brief: stSigHash(JSON.stringify([b.objective || '', b.audience || '', b.message || ''])), feedback: String((fb[0] || {}).id || 0), artwork: JSON.stringify(art[0] || {}) };
+  return { fp: stSigHash(JSON.stringify(parts)), parts };
+}
+function stSuggestChanged(was, now) { was = was || {}; return Object.keys(ST_SUGG_PARTS).filter(k => String(was[k] == null ? '' : was[k]) !== String(now[k] == null ? '' : now[k])).map(k => ST_SUGG_PARTS[k]); }
+/** The cached suggestions for an asset and whether they still match their context. Never calls a model. */
+async function stSuggestPeek(env, p, asset) {
+  const v = await stCurrent(env, asset); if (!v) return { ok: false, error: 'no_version', detail: 'The asset has no version yet.' };
+  const row = await env.MIND_DB.prepare('SELECT * FROM studio_suggestions WHERE asset=?').bind(asset.id).first();
+  if (!row) return { ok: true, none: true, asset: asset.id, version: v.id };
+  const now = await stSuggestFingerprint(env, p, asset, v); const was = pjs(row.parts, {}) || {};
+  const changed = row.fp === now.fp ? [] : stSuggestChanged(was, now.parts);
+  return Object.assign({ ok: true, cached: true, outdated: row.fp !== now.fp, changed, fp: row.fp, current: now.fp }, pjs(row.data, {}) || {});
+}
 async function stSuggest(env, p, asset, opts) {
-  opts = opts || {}; const log = opts.log || (async () => {});
+  opts = opts || {}; const log = opts.log || (async () => {}); const started = Date.now();
   const v = await stCurrent(env, asset); if (!v) return { ok: false, error: 'no_version', detail: 'The asset has no version yet.' };
   if (v.mode === 'copy') return { ok: false, error: 'copy_only', detail: 'A copy-only asset has no composition to suggest for.' };
-  const refRows = (await env.MIND_DB.prepare('SELECT id FROM studio_references WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
-  const lastEv = await env.MIND_DB.prepare("SELECT id FROM studio_events WHERE project=? AND data LIKE ? ORDER BY id DESC LIMIT 1").bind(p.id, '%' + asset.id + '%').first();
-  const sig = v.id + '|' + refRows.map(r => r.id).join(',') + '|' + (lastEv ? lastEv.id : 0);
-  const key = 'studio_sugg_' + asset.id;
-  if (!opts.refresh) { try { const c = JSON.parse((await kvGet(env.AXIOM_KV, key)) || 'null'); if (c && c.sig === sig) return Object.assign({ ok: true, cached: true }, c); } catch (e) {} }
+  const F = await stSuggestFingerprint(env, p, asset, v); const sig = F.fp;
+  if (!opts.refresh) { const row = await env.MIND_DB.prepare('SELECT * FROM studio_suggestions WHERE asset=?').bind(asset.id).first(); if (row && row.fp === sig) return Object.assign({ ok: true, cached: true, outdated: false, changed: [] }, pjs(row.data, {}) || {}); }
   const cc = await stCompileContext(env, p, { channels: [asset.channel], log, stage: 'suggest', refs: { images: 1 }, art: 4 }); const ctx = cc.ctx, refs = cc.refs, mem = cc.mem;
   const art = await stVersionImage(env, v, log);
   const recent = ((await env.MIND_DB.prepare("SELECT kind, data FROM studio_events WHERE project=? AND kind IN ('revise','proposal','concepts','applied','question','note','alternatives') AND data LIKE ? ORDER BY id DESC LIMIT 5").bind(p.id, '%' + asset.id + '%').all()).results || []).map(r => { const d = pjs(r.data, {}); return r.kind + ': ' + (d.instruction || d.feedback || d.text || '').slice(0, 160); });
@@ -12233,9 +12259,12 @@ async function stSuggest(env, p, asset, opts) {
   const led = await stLedger(env, p.id); const facts = (ctx.kit.facts || []).filter(f => f.status !== 'pending' && (!f.campaign || f.campaign === p.campaign));
   const figureCheck = list => list.map(sg => { const bad = stChecks({ body: sg.text }, led.claims, { facts }).filter(c => c.state === 'unsupported' || c.state === 'differs').map(c => c.text); return bad.length ? Object.assign(sg, { unverifiedFigures: bad, basis: sg.basis === 'rule' ? 'inferred' : sg.basis }) : sg; });
   const _clean = clean; const cleanF = (arr, withRefs, paid) => figureCheck(_clean(arr, withRefs, paid));
-  const out = { sig, at: Date.now(), asset: asset.id, version: v.id, design: cleanF(j.design, true, false), image: cleanF(j.image, false, true), typography: cleanF(j.typography, true, false), copy: cleanF(j.copy, false, false), concept: cleanF(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed, informed: cc.manifest };
-  try { await kvPut(env.AXIOM_KV, key, JSON.stringify(out), 6 * 3600); } catch (e) {}
-  return Object.assign({ ok: true, cached: false }, out);
+  const out = { sig, fp: sig, at: Date.now(), started, asset: asset.id, version: v.id, design: cleanF(j.design, true, false), image: cleanF(j.image, false, true), typography: cleanF(j.typography, true, false), copy: cleanF(j.copy, false, false), concept: cleanF(j.concept, true, true), model: r.model, imageSeen: !!art, refsUsed: refs.used, unanalysed: refs.unanalysed, informed: cc.manifest };
+  // filed under the fingerprint it was made from (a context that changed while the call ran reads as outdated next time), and
+  // only over advice that started earlier: an older answer still in flight never replaces newer advice
+  let superseded = false;
+  try { const u = await env.MIND_DB.prepare('INSERT INTO studio_suggestions(asset, project, fp, parts, started, at, data) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset) DO UPDATE SET project=excluded.project, fp=excluded.fp, parts=excluded.parts, started=excluded.started, at=excluded.at, data=excluded.data WHERE excluded.started >= studio_suggestions.started').bind(asset.id, p.id, sig, JSON.stringify(F.parts), started, out.at, jsonFit(out, 60000)).run(); superseded = !(u && u.meta && u.meta.changes); } catch (e) {}
+  return Object.assign({ ok: true, cached: false, outdated: false, changed: [], superseded: superseded || undefined }, out);
 }
 /** Stage dispatch for the production stages; the render stage and echo stay in stJobRun. */
 /* -- compiled instructions (P21): what each model call of a job was actually sent, kept in R2 beside the project ----------
@@ -14424,6 +14453,7 @@ const AXIOM_WORKER = {
           if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
           if (path === '/studio/actions') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (qf('version') && (!v || v.asset !== pair.asset.id)) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stActions(env, pair.project, pair.asset, v)); }
+          if (path === '/studio/suggest') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); return jsonResp(await stSuggestPeek(env, pair.project, pair.asset)); }
           if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit

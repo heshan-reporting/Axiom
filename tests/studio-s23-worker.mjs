@@ -5,7 +5,8 @@
  *      limit, which could cut identity rules and approved wording.
  *   B. a reference excluded as another campaign's still reached the suggestions call (and directions and revise) through the
  *      unfiltered reference text, could be cited as a basis, and could be attached to a render.
- *   C. suggestions were cached on the version, references and last event only, so a retired rule kept being advised.
+ *   C. suggestions were cached on the version, references and last event only, so a retired rule kept being advised; an
+ *      older answer still in flight could overwrite newer advice.
  *   D. the content desk labelled rejected and other-campaign material "APPROVED EXAMPLES".
  *   E. the stream reader waited for the connection to close after message_stop, and accepted a stream that closed after an
  *      end_turn delta without message_stop; a data frame that did not parse was skipped, so an answer could arrive shorter
@@ -45,8 +46,10 @@ const answerFor = sys => {
   if (/suggest|next directions|Suggested/i.test(sys)) return { design: [{ text: 'Use the brand blue', why: 'the rule', refs: [] }], image: [] };
   return {};
 };
+const anthDelay = { fn: null };
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
   const body = JSON.parse(init.body); anth.calls.push(body);
+  if (anthDelay.fn) { const ms = anthDelay.fn(body); if (ms) await sleep(ms); }
   if (stream.plan) {
     const plan = stream.plan, keepOpen = stream.open; const signal = init && init.signal; let stopped = false;
     if (signal) signal.addEventListener('abort', () => { stopped = true; stream.aborted++; });
@@ -231,6 +234,47 @@ await T.t('B5 the manifest names the excluded reference as left out, so "What in
   const r = await call('POST', '/studio/suggest', { asset: A, refresh: true });
   const inf = r.body.informed || {}; ok(inf.references && inf.references.excluded >= 1, JSON.stringify(inf.references));
   ok((inf.omitted || []).some(o => o.what === 'reference' && /National gold tile/.test(o.text) && /campaign/.test(o.why)), JSON.stringify(inf.omitted));
+});
+
+// ---------------------------------------------------------------------------------------------------- C. suggestions keyed on their context
+const peek = async A => (await call('GET', '/studio/suggest?asset=' + A)).body;
+await T.t('C1 reproduced: retiring a learned rule marks the cached advice outdated; asking again is a new call that no longer carries the rule', async () => {
+  const { P, A } = await fresh('hoof');
+  const fx = await call('POST', '/engine/fix', { ns: 'mca', task: 'tiles', scope: 'client', wrong: 'gold panels', right: 'RULE-GOLD-NEVER: never a gold panel on HOOF', why: 'brand', source: 'test' }); eq(fx.status, 200, JSON.stringify(fx.body));
+  const fid = fx.body.id || (fx.body.fix || {}).id; ok(fid, 'a rule id: ' + JSON.stringify(fx.body));
+  anth.calls = [];
+  const s1 = await call('POST', '/studio/suggest', { asset: A }); eq([s1.status, s1.body.cached], [200, false]); ok(/RULE-GOLD-NEVER/.test(payloadText(anth.calls[0])), 'the rule was in force');
+  const s2 = await call('POST', '/studio/suggest', { asset: A }); eq(s2.body.cached, true, 'unchanged context: served from the cache'); eq(anth.calls.length, 1);
+  eq((await call('POST', '/engine/fix/update', { id: fid, active: false })).status, 200);
+  const pk = await peek(A); eq(pk.outdated, true, 'the cached advice is outdated: ' + JSON.stringify(pk).slice(0, 300)); ok((pk.changed || []).some(c => /rule|correction|preference/i.test(c)), 'and says what changed: ' + JSON.stringify(pk.changed));
+  eq(anth.calls.length, 1, 'looking costs nothing');
+  const s3 = await call('POST', '/studio/suggest', { asset: A }); eq(s3.body.cached, false, 'asked again: a new call'); eq(anth.calls.length, 2);
+  ok(!/RULE-GOLD-NEVER/.test(payloadText(anth.calls[1])), 'the retired rule is not sent');
+  const pk2 = await peek(A); eq(pk2.outdated, false);
+});
+await T.t('C2 a reference re-analysed, and a campaign changed, mark the advice outdated and name the change', async () => {
+  const { P, A } = await fresh('hoof'); const ids = await seedRefs(P);
+  await call('POST', '/studio/suggest', { asset: A }); eq((await peek(A)).outdated, false);
+  await w.env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(JSON.stringify({ summary: 'HOOF-OWN re-read: teal panels only', at: Date.now() }), ids.own).run();
+  const a = await peek(A); eq(a.outdated, true); ok((a.changed || []).some(c => /reference/i.test(c)), JSON.stringify(a.changed));
+  await call('POST', '/studio/suggest', { asset: A }); eq((await peek(A)).outdated, false);
+  const pj = (await get(P)); const up = await call('POST', '/studio/project/update', { id: P, patch: { campaign: 'national' }, revision: pj.revision }); eq(up.status, 200, JSON.stringify(up.body));
+  const b = await peek(A); eq(b.outdated, true); ok((b.changed || []).some(c => /campaign/i.test(c)), JSON.stringify(b.changed));
+});
+await T.t('C3 an older answer still in flight never replaces newer advice', async () => {
+  const { P, A } = await fresh('hoof'); let n = 0;
+  const prev = answerForOverride.fn; const prevDelay = anthDelay.fn;
+  answerForOverride.fn = sys => /suggest|Suggested/i.test(sys) ? { design: [{ text: 'ANSWER-' + (++n), why: 'w' }], image: [] } : null;
+  let arrivals = 0; anthDelay.fn = () => (++arrivals === 1 ? 400 : 10);   // the first request to arrive answers last
+  try {
+    const first = call('POST', '/studio/suggest', { asset: A, refresh: true }); await sleep(60);
+    const second = await call('POST', '/studio/suggest', { asset: A, refresh: true });
+    const f = await first;
+    eq(second.body.design[0].text, 'ANSWER-1', 'the later request answered first');
+    eq(f.body.design[0].text, 'ANSWER-2', 'the earlier request answered later');
+    ok(f.body.superseded, 'the late answer is marked superseded: ' + JSON.stringify(Object.keys(f.body)));
+    const pk = await peek(A); eq(pk.design[0].text, 'ANSWER-1', 'the cache keeps the newer advice');
+  } finally { answerForOverride.fn = prev; anthDelay.fn = prevDelay; }
 });
 
 // ---------------------------------------------------------------------------------------------------- E. the stream protocol

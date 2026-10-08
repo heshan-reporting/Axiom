@@ -1637,7 +1637,8 @@
     const d = sugg && sugg.data; const items = d && Array.isArray(d[kind]) ? d[kind] : [];
     const title = kind === 'image' ? 'Suggested photographs' : kind === 'typography' ? 'Suggested type changes' : kind === 'copy' ? 'Suggested copy changes' : kind === 'concept' ? 'Concepts worth exploring' : 'Suggested next directions';
     return html`<div class=${'st-sugg ' + kind + (compact ? ' compact' : '')} aria-label=${title}>
-      <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? ', the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh && sugg && !sugg.idle ? html`<button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => onRefresh(true)} title="Ask again for this version: one model call">refresh</button>` : null}</div>
+      <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.outdated ? '' : d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? (d.outdated ? '' : ', ') + 'the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh && sugg && !sugg.idle ? html`<button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => onRefresh(true)} title="Ask again with the context as it is now: one model call">${d && d.outdated ? 'refresh (1 model call)' : 'refresh'}</button>` : null}</div>
+      ${d && d.outdated ? html`<div class="st-sugg-outdated" role="status"><${Chip} kind="warn">outdated</${Chip}> Made before a change to ${(d.changed || []).join(', ') || 'its context'}. Read it as history; refresh for advice on the context as it is now.</div>` : null}
       ${sugg && sugg.idle && onRefresh ? html`<div><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onRefresh(false)} title="One small model call for this version (none when an answer for it is already cached); nothing is applied until you choose">Suggest for this version (1 model call)</button></div>` : null}
       ${sugg && sugg.err ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.err}</div>` : null}
       ${d && !items.length && !sugg.loading ? html`<div class="ov-dim">Nothing suggested for this version.</div>` : null}
@@ -3029,8 +3030,12 @@
       try { const d = await call('/studio/suggest', { project: pidRef.current, asset: suggKey.split('|')[0], refresh: !!refresh }); if (suggSig.current !== suggKey) return; if (d.ok) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: d.detail || d.error || 'no answer' }); }
       catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
     }, [suggKey]);
-    // asked for, never fetched on its own: a new version (every pause in typing makes one) must not spend a call by itself
-    useEffect(() => { suggSig.current = suggKey; setSugg(suggKey ? { idle: true, data: null, err: '' } : null); }, [suggKey]);
+    // asked for, never fetched on its own: a new version (every pause in typing makes one) must not spend a call by itself. What
+    // was asked for before is shown at once (a free read), labelled outdated with the reason when its context has changed since
+    useEffect(() => {
+      suggSig.current = suggKey; setSugg(suggKey ? { idle: true, data: null, err: '' } : null); if (!suggKey) return;
+      const key = suggKey; call('/studio/suggest?asset=' + encodeURIComponent(key.split('|')[0])).then(d => { if (suggSig.current === key && d && d.ok && d.cached) setSugg({ loading: false, data: d, err: '' }); }).catch(() => {});
+    }, [suggKey]);
 
     const refreshStatus = useCallback(() => call('/studio/status').then(s => { setStatus(s); return s; }).catch(() => null), []);
     /* the library of one client; a slower answer for a client no longer chosen is dropped, never shown */

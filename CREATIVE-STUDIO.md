@@ -2277,7 +2277,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 1 | Baseline verified; checklist, bug ledger, wait inventory written | done | this section |
 | 2A | Required marks never dropped from an image request; records read from the payload | done | `studio-s23-worker.mjs` A1-A7 |
 | 2B | One filtered context package; excluded references reach no model, as text or image | done | `studio-s23-worker.mjs` B1-B5 |
-| 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | planned | |
+| 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | done | `studio-s23-worker.mjs` C1-C3 |
 | 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | planned | |
 | 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
 | 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | planned | |
@@ -2296,7 +2296,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 |---|---|---|---|---|
 | S23-A | A finished creative could leave out the campaign's required wordmark: `nanoRender` kept the first six images it was given and `stRenderJob` appended the marks after the references, while the version recorded the mark as sent (`marksSent` was written before the request). The prompt was also cut at 8,000 characters, which could cut the identity rules and the approved words at its end. | A1 (six references + wordmark), A2 (current image + logo + wordmark), A3 (fallback model), A4 (required over the limit), A5 (long prompt) - all failing on `e67f0e5` | slice A | fixed |
 | S23-B | A reference excluded as another campaign's still reached the models: the suggestions, directions and revise calls sent the raw bundle text (its name and analysis), concepts and suggestions accepted its id as a cited basis, a render could attach its image, and even the pack text named it ("EXCLUDED FROM THIS PACK: ..."). | B1-B4 failing on `438104d` | slice B | fixed |
-| S23-C | Suggestions were cached on version, references and last event only, so a retired rule kept being advised. | | | open |
+| S23-C | Suggestions were cached on version, references and last event only, so a retired rule, a re-analysed reference or a changed campaign left the old advice standing as current; and an older answer still in flight could overwrite newer advice (a KV write with no order). | C1-C3 failing on `cffc482` | slice C | fixed |
 | S23-D | `contentExemplars` labelled rejected and other-campaign material "APPROVED EXAMPLES". | | | open |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
@@ -2365,3 +2365,22 @@ Tests: B1 suggestions, B2 directions / copy / revise / concepts (the payloads re
 the image), B3 a model citing the excluded id gets nothing for it, B4 a render, B5 the manifest. Updated to the new
 contract: `studio-p8-worker.mjs` (the excluded name is no longer in the prompt; the record carries it) and
 `studio-p6-worker.mjs` (the stages read "REFERENCE PACK", not the raw "REFERENCES ON THE PROJECT").
+
+### 46.7 Slice C - suggestions keyed on their context
+
+The suggestions for an asset live in D1 `studio_suggestions(asset, project, fp, parts, started, at, data)`, keyed on a
+fingerprint of what they were made from (`stSuggestFingerprint`): the version, the campaign, the brand kit (its saved
+time left out), the learned rules of the namespace with their state and wording, the project's references with their
+analyses, recipes and notes, the brief's objective, audience and message, the last feedback event on the asset, and the
+artwork memory. Each part is kept, so `GET /studio/suggest?asset=` (read role, never calls a model) answers the cached
+advice with `outdated` and `changed` - "the learned rules and preferences in force", "the references or their analyses",
+"the campaign" and so on. `POST /studio/suggest` serves the cache only when the fingerprint matches; otherwise the
+person's explicit request makes one call. An answer is filed under the fingerprint it was made from (so a change made
+while it ran reads as outdated afterwards) by a conditional upsert that only replaces advice started earlier: an older
+answer arriving late is returned to its own requester marked `superseded` and never replaces the newer advice. In the
+island, opening an asset reads the cache for free and shows it with an "outdated" note naming the change; "refresh (1
+model call)" asks again.
+
+Tests: C1 a rule retired (outdated, then a new call without the rule), C2 a reference re-analysed and a campaign
+changed, C3 two requests in flight answering out of order. The p6, p3, s20 and s7 worker harnesses and the studio and
+s20 browser harnesses pass unchanged.
