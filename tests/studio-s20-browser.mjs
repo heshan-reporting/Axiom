@@ -191,7 +191,8 @@ await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it
   await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
   const first = page.locator(R + '.st-sugg-item').first();
   const facts = await first.locator('.st-sugg-facts dt').allTextContents();
-  ['Changes', 'Keeps', 'Scope', 'Generation', 'Basis'].forEach(k => ok(facts.indexOf(k) >= 0, k + ' stated: ' + facts.join(', ')));
+  // S23: what it costs is two lines - the model call and the render - so "no render" never reads as "free"
+  ['Changes', 'Keeps', 'Scope', 'Model call', 'Render', 'Basis'].forEach(k => ok(facts.indexOf(k) >= 0, k + ' stated: ' + facts.join(', ')));
   ok(/v\d+ only/.test(await first.locator('.st-sugg-facts').textContent()), 'the scope names the asset and version');
   ok(await first.locator('button:has-text("Edit instruction")').count() === 1 && await first.locator('button:has-text("Apply")').count() === 1, 'two distinct actions');
   const n0 = jobsPosted().length; await first.locator('button:has-text("Edit instruction")').click(); await sleep(400);

@@ -138,6 +138,26 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-stage-facts > div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:var(--sk-bg);border:1px solid var(--sk-line)}
 #studio-root .st .st-stage-facts dt{font:650 9.5px/1 var(--sk-font);letter-spacing:.14em;text-transform:uppercase;color:var(--sk-quiet)}
 #studio-root .st .st-stage-facts dd{margin:0;font-size:12.5px;line-height:1.45;color:var(--sk-ink-2)}
+/* S23: the five questions in every stage head (missing, accepted, main action, next; "working on" is the phase line above),
+   and the line that says what is built on an earlier choice. Never truncated: each answer wraps. */
+#studio-root .st .st-five{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 10px;margin:2px 0 0}
+#studio-root .st .st-five > div{display:flex;flex-direction:column;gap:3px;min-width:0;padding:7px 10px;border-radius:8px;background:color-mix(in srgb,var(--sk-panel) 70%,transparent);border:1px solid var(--sk-line)}
+#studio-root .st .st-five dt{font:650 9.5px/1 var(--sk-font);letter-spacing:.14em;text-transform:uppercase;color:var(--sk-quiet)}
+#studio-root .st .st-five dd{margin:0;font-size:12px;line-height:1.45;color:var(--sk-ink-2);overflow-wrap:anywhere}
+#studio-root .st .st-five-missing dd:not(:has(.ov-dim)){color:var(--sk-ink)}
+#studio-root .st .st-five-missing:has(dd:not(:has(.ov-dim))){border-color:color-mix(in srgb,var(--sk-warn) 45%,var(--sk-line))}
+#studio-root .st .st-downstream{display:flex;flex-direction:column;gap:4px;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.5;color:var(--sk-ink-2);border:1px solid color-mix(in srgb,var(--sk-warn) 40%,var(--sk-line));background:color-mix(in srgb,var(--sk-warn) 7%,var(--sk-panel))}
+#studio-root .st .st-downstream b{color:var(--sk-ink)}
+#studio-root .st .st-dstep{position:relative;flex-shrink:1;min-width:0}
+#studio-root .st .st-dstep > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font:600 11.5px/1 var(--sk-font);color:var(--sk-sub);padding:7px 9px;border:1px solid var(--sk-line);border-radius:8px;white-space:nowrap}
+#studio-root .st .st-dstep-dot{width:7px;height:7px;border-radius:50%;background:var(--sk-good)}
+#studio-root .st .st-dstep-dot.warn{background:var(--sk-warn)}
+#studio-root .st .st-dstep > summary::-webkit-details-marker{display:none}
+#studio-root .st .st-dstep[open] > summary{color:var(--sk-ink);border-color:var(--sk-line-2)}
+#studio-root .st .st-dstep-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:30;width:min(560px,80vw);padding:10px;border-radius:12px;border:1px solid var(--sk-line-2);background:var(--sk-raised);box-shadow:var(--sk-sh-2)}
+#studio-root .st .st-dstep-pop .st-five{grid-template-columns:1fr}
+@media (max-width:1180px){#studio-root .st .st-five{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){#studio-root .st .st-five{grid-template-columns:1fr}}
 #studio-root .st .st-stage-help{position:absolute;top:calc(100% - 4px);right:0;z-index:25;width:min(640px,100%);display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:12px;font-size:12.5px;
   background:color-mix(in srgb,var(--sk-raised) 90%,transparent);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border:1px solid var(--sk-line-2);box-shadow:var(--sk-sh-2)}
 #studio-root .st .st-stage-help p{margin:0;color:var(--sk-ink-2)}
@@ -228,7 +248,8 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvas-subr{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 #studio-root .st .st-canvas-sub .st-comp-info{min-width:0;text-align:right;margin:0;padding:0 6px;border:0;background:none}
 #studio-root .st .st-canvas-sub .st-comp-tag{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
-#studio-root .st .st-readystrip.compact .st-qrow .ov-dim{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+/* S23: the top issue is essential: it wraps to a second line rather than being cut off */
+#studio-root .st .st-readystrip.compact .st-qrow .ov-dim{display:inline;overflow:visible}
 #studio-root .st .st-pagefam{display:flex;gap:6px;flex-shrink:0;padding-right:10px;border-right:1px solid var(--sk-line)}
 #studio-root .st .st-pagefam:last-child{border-right:0}
 #studio-root .st .st-pagechip{display:flex;align-items:center;gap:6px;padding:3px 8px 3px 3px;border:1px solid var(--sk-line);border-radius:8px;background:var(--sk-panel);color:var(--sk-ink-2);font:550 11px/1 var(--sk-font);cursor:pointer;flex-shrink:0}
@@ -274,6 +295,15 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-cd-scores li.s4 b, #studio-root .st .st-cd-scores li.s5 b{color:var(--sk-good)}
 #studio-root .st .st-cd-scores li.sn b{color:var(--sk-quiet);font-weight:500}
 #studio-root .st .st-cd-note{font-size:11.5px}
+/* S23: raw ids, model names and measurements sit behind a disclosure; the design scores stay in view */
+#studio-root .st .st-cd-diag{margin-top:8px;font-size:11.5px;color:var(--sk-sub)}
+#studio-root .st .st-cd-diag > summary{cursor:pointer;font:600 11px/1.2 var(--sk-font);color:var(--sk-quiet);letter-spacing:.02em}
+#studio-root .st .st-cd-diag code{font:500 11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--sk-ink-2);overflow-wrap:anywhere}
+#studio-root .st .st-cd-diagdl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;margin:6px 0 0}
+#studio-root .st .st-cd-diagdl > div{display:contents}
+#studio-root .st .st-cd-diagdl dt{color:var(--sk-quiet)}
+#studio-root .st .st-cd-diagdl dd{margin:0;min-width:0}
+#studio-root .st .st-cd-elsewhere{display:flex;flex-direction:column;gap:10px;align-items:flex-start;padding:12px 0}
 #studio-root .st .st-cd-new{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-top:10px;border-top:1px solid var(--sk-line)}
 #studio-root .st .st-cd-convhead{display:flex;align-items:center;justify-content:space-between;gap:8px}
 #studio-root .st .st-thread{display:flex;flex-direction:column;gap:10px;min-height:0;max-height:none;overflow:visible;padding:0}
@@ -440,7 +470,9 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvasbar{min-height:40px;padding:3px 4px 3px 4px;gap:8px;border-radius:12px;background:color-mix(in srgb,var(--sk-panel) 86%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 #studio-root .st .st-designtabs{padding:2px;border-radius:8px;flex-shrink:0}
 #studio-root .st .st-designtabs .st-subtab{padding:4px 9px!important;font-size:11.5px}
-#studio-root .st .st-canvasbar-l .st-asset-title{max-width:16ch;font-size:12.5px}
+/* S23: the piece on the canvas is named in full by the page strip under it (the current page highlighted); the bar keeps the
+   name for assistive technology only, instead of showing it cut off */
+#studio-root .st .st-canvasbar-l .st-asset-title{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 #studio-root .st .st-canvasbar .st-zoom .st-sel{width:86px}
 #studio-root .st .st-designtabs .st-subtab{white-space:nowrap}
 #studio-root .st .st-canvasbar-meta{max-width:28ch}
@@ -462,14 +494,17 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvas-foot{gap:4px;padding-bottom:8px}
 /* the readiness line under the canvas is one line: the state, the top issue, its remedy; the rest is in Checks */
 #studio-root .st .st-readystrip.compact{flex-wrap:nowrap;padding:4px 8px;min-height:34px;gap:10px}
-#studio-root .st .st-readystrip.compact .st-qrow{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
-#studio-root .st .st-readystrip.compact .st-qrow{align-items:center;flex-wrap:nowrap}
+#studio-root .st .st-readystrip.compact .st-qrow{flex:1 1 auto;min-width:0;display:flex;align-items:flex-start;gap:8px;white-space:normal;overflow:visible}
+#studio-root .st .st-readystrip.compact .st-qrow{flex-wrap:nowrap}
+#studio-root .st .st-readystrip.compact .st-qrow > .st-qstate{flex-shrink:0;margin-top:1px}
 #studio-root .st .st-canvasbar-l{overflow:hidden}
 #studio-root .st .st-canvasbar .st-qstate.mini{display:none}
-#studio-root .st .st-readystrip.compact .st-qtop{min-width:0;display:flex;flex-wrap:nowrap;align-items:center;gap:6px;overflow:hidden;flex:1 1 auto}
-#studio-root .st .st-readystrip.compact .st-qtop > *{flex-shrink:0}
-#studio-root .st .st-readystrip.compact .st-qtop > .ov-dim{flex:1 1 auto;flex-shrink:1}
-#studio-root .st .st-readystrip.compact .st-qtop .ov-dim{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+/* the top issue reads as one sentence that wraps (state, kind, the layers by name, the measurement, show on the tile, the remedy) */
+#studio-root .st .st-readystrip.compact .st-qtop{min-width:0;display:block;overflow:visible;flex:1 1 auto;font-size:11.5px;line-height:1.45}
+#studio-root .st .st-readystrip.compact .st-qtop > *{display:inline;vertical-align:baseline}
+#studio-root .st .st-readystrip.compact .st-qtop > .btn{display:inline-flex;vertical-align:middle;margin-left:6px}
+#studio-root .st .st-readystrip.compact .st-qtop > .ov-link{margin-left:6px}
+#studio-root .st .st-readystrip.compact .st-qtop .ov-dim{min-width:0;overflow:visible;white-space:normal;display:inline;line-height:1.35}
 #studio-root .st .st-readystrip.compact .st-ready-acts{flex-shrink:0;flex-wrap:nowrap}
 #studio-root .st .st-readystrip.compact .st-repair-note{flex-basis:auto;white-space:normal}
 #studio-root .st .st-readystrip.compact:has(.st-repair-note){flex-wrap:wrap}
@@ -495,18 +530,14 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-divline{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;margin:0 0 12px;font-size:12px;color:var(--sk-ink-2)}
 #studio-root .st .st-divline .st-lbl{margin-right:4px}
 #studio-root .st .st-divwarn{flex-basis:100%;color:var(--sk-warn)}
-/* S20: Explore leads with the pictures - every direction's sketch side by side above the cards */
-#studio-root .st .st-dstrip{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:0 0 16px}
-#studio-root .st .st-dstrip-it{display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--sk-line);border-radius:12px;background:var(--sk-panel);color:var(--sk-ink);text-align:left;cursor:pointer;font:inherit;transition:border-color .15s}
-#studio-root .st .st-dstrip-it:hover{border-color:var(--sk-line-2)}
-#studio-root .st .st-dstrip-it.chosen{border-color:var(--sk-accent)}
-#studio-root .st .st-dstrip-it .st-comp{width:100%!important;border-radius:6px}
-#studio-root .st .st-dstrip-t{font:650 12.5px/1.25 var(--sk-display)}
-#studio-root .st .st-dstrip-m{font-size:11px}
-@media (max-width:700px){#studio-root .st .st-dstrip{grid-template-columns:repeat(2,minmax(0,1fr))}}
-#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-comp{display:none}
-#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art{min-height:0;padding:8px 10px 0;background:none;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-#studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-dcard-note, #studio-root .st .st-dstrip ~ .st-dgrid .st-dcard-art .st-dcard-badges{position:static}
+/* S23: Explore is one set of direction cards side by side, each with its own sketch and its words (the S20 strip of the same
+   previews above text-only cards is gone). Three or four directions sit in one row on a desktop so they read as a comparison. */
+#studio-root .st .st-dgrid.st-dgrid-n3{grid-template-columns:repeat(3,minmax(0,1fr))}
+#studio-root .st .st-dgrid.st-dgrid-n4{grid-template-columns:repeat(4,minmax(0,1fr))}
+#studio-root .st .st-dgrid.st-dgrid-n2{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:1280px){#studio-root .st .st-dgrid.st-dgrid-n4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:1024px){#studio-root .st .st-dgrid.st-dgrid-n3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:700px){#studio-root .st .st-dgrid.st-dgrid-n2, #studio-root .st .st-dgrid.st-dgrid-n3, #studio-root .st .st-dgrid.st-dgrid-n4{grid-template-columns:1fr}}
 /* S20: on a laptop the inspector's opener is an edge tab, never a pill over the readiness line's buttons */
 @media (max-width:1180px){
   #studio-root .st .st-insp-toggle{top:42%;bottom:auto;right:0;writing-mode:vertical-rl;border-radius:10px 0 0 10px;padding:12px 7px;min-height:0;border-right:0}
@@ -521,4 +552,8 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-head-r .st-save{font-size:0;gap:0}
   #studio-root .st .st-psub{display:none}
   #studio-root .st .st-canvasbar-r .btn.st-primary{display:inline-flex}
+  /* S23: the artwork keeps a usable size on a phone; the column scrolls to the readiness line and the page strip below it */
+  #studio-root .st .st-stage{min-height:min(86vw,520px)}
+  /* what is scrolled to, or focused, stops above the inspector opener fixed at the foot of the window */
+  #studio-root .st .st-centre, #studio-root .st .st-refine, #studio-root .st .st-canvas-col{scroll-padding-bottom:84px}
 }

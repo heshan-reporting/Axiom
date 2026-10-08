@@ -2280,8 +2280,8 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | done | `studio-s23-worker.mjs` C1-C3 |
 | 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | done | `studio-s23-worker.mjs` D1-D4 |
 | 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
-| 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | planned | |
-| 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | planned | |
+| 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | done (canvas capabilities are row 5) | `studio-s23g-browser.mjs` G-B1-G-B4, G-B6-G-B8; captures `tests/shots/s23/before-*` and `after-*` (and `after-light-*`) |
+| 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | done | `studio-s23g-browser.mjs` G-B5; `studio-s20-browser.mjs` W3 (now asserting the model-call and render lines) |
 | 5 | Canvas: elements, context menus, arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets | planned | |
 | 6 | Both creation paths explained; image lifecycle (stored versus displayed) | planned | |
 | 7 | Validation, repair and export agree; render fingerprint | planned | |
@@ -2298,6 +2298,13 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-B | A reference excluded as another campaign's still reached the models: the suggestions, directions and revise calls sent the raw bundle text (its name and analysis), concepts and suggestions accepted its id as a cited basis, a render could attach its image, and even the pack text named it ("EXCLUDED FROM THIS PACK: ..."). | B1-B4 failing on `438104d` | slice B | fixed |
 | S23-C | Suggestions were cached on version, references and last event only, so a retired rule, a re-analysed reference or a changed campaign left the old advice standing as current; and an older answer still in flight could overwrite newer advice (a KV write with no order). | C1-C3 failing on `cffc482` | slice C | fixed |
 | S23-D | `contentExemplars` labelled everything of kind copy, outcome, brief or release "APPROVED EXAMPLES" - rejected work (LOSS outcomes), background briefs and other campaigns' captions included - and judged a document's campaign by whether its source contained the campaign id anywhere. | D1-D4 failing on `795a136` | slice D | fixed |
+| S23-G1 | Reframing a photograph wrote its hint over the artwork, beside the mark (`.st-le-frame-hint`). | the S23 "before" captures (`before-crop-*`); G-B6 | slice G | fixed |
+| S23-G2 | Essential words were cut off with an ellipsis: the readiness line's top issue in Design, the composition facts under the stage, the asset name in the canvas bar. | the "before" captures; G-B6 (no clipped text in the readiness line) | slice G | fixed |
+| S23-G3 | On a phone the inspector opener sat over the readiness line's buttons, and an artwork shrank to make room for the strips under it. | the "before" 390 captures; G-B7 | slice G | fixed |
+| S23-G4 | Explore showed every direction twice: a strip of miniature previews, then text-only cards. | the "before" directions captures; G-B4 | slice G | fixed |
+| S23-G5 | The readiness line, the checks and the Fix layout note named layers by internal id ("panel, hl, sp, cta"), and the Creative Director's focused-edit messages did too. | the "before" design captures; G-B6 | slice G | fixed |
+| S23-G6 | The Creative Director kept the previous part's scroll position when its part or asset changed (a review opened scrolled to its foot after the conversation). | G-B5 | slice G | fixed |
+| S23-G7 | A suggestion's cost line read "no render" with nothing about the model call that applying it makes. | G-B5 / S20 W3 | slice G | fixed |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
@@ -2456,3 +2463,58 @@ end), F2 suggestions as a job (one job per version), F3 reference reading queued
 recovery by the tick; `studio-s23-browser.mjs` F-B1 acknowledged in 15 ms and described in 15 ms in this harness (the
 targets are 300 ms and 1 s), F-B2 the Drafting preview labelled and inert, F-B3 reconnecting shown and cleared with
 one attempt, F-B4 notices opt-in, page unmoved.
+
+### 46.10 Slice G - a workspace that answers its questions in place
+
+Matched captures first (`node --experimental-sqlite tests/studio-s23-shots.mjs before|after [sizes]`, five sizes - 1440 x 900,
+1920 x 1080, 1024 x 768, 834 x 1194 and 390 x 844 - and `THEME=light` for the light set; written to the ignored
+`tests/shots/s23/`). The "before" set is the S22 page; the defects it showed are G1-G7 in the ledger.
+
+- **The library** draws each project's lead composition with the one renderer (`p.lead` from `stList`: the newest visual
+  asset's current version; its imagery is fetched through `/studio/file?key=` with the access key - never a public
+  address, nothing copied into `docs/`), with the count of visual and copy pieces; a project without a composition says
+  so in words. Search (name and campaign), a campaign filter and a stage filter where there is more than one, sort
+  (recent activity, name, stage), "opened recently" (this browser, per client, localStorage `ax_studio_recent_<ns>`),
+  skeleton cards while it loads (announced), a failure that says nothing was changed and offers **Try again**, and a
+  plain answer when nothing matches with **Clear the search and filters**. The cards are still the table's rows (each
+  cell placed by its class, so assistive technology reads a table of projects).
+- **The appearance** - Dark (the default), Light or System - is a segmented control in the library header and in Help,
+  kept per browser (`ax_studio_theme`) as `data-st-theme` on the Studio root. Light is a full token set in
+  `studio-polish.css` (ground, panels, lines, inks, states) with its own accent: `studioTheme()` now also darkens the
+  campaign or client colour until it reads at 4.5:1 on white (`--st-client-accent-light`) with its ink. Only the
+  interface changes: the renderer draws the artwork from its layout, and G-B2 compares the artwork's pixels in both.
+- **Motion and glass**: 120 / 180 / 240 ms tokens; translucent chrome only where it floats over work (header, canvas bar,
+  inspector tabs) with a solid fallback where `backdrop-filter` is missing; the artwork surface stays solid; everything
+  stops under reduced motion.
+- **Every stage head answers the five questions from the record** (`stageQuestions`): "Working on" (the step and its
+  state), **Missing** (from the gate's need, the brief check or the counts), **Accepted** (the confirmed objective,
+  message, strategy, direction, ready copy, passing compositions, approvals), **Main action** and **Next**
+  (`STAGES[].then`). Design keeps its canvas: the same answers sit behind **Step** in the canvas bar. A step upstream of
+  finished work says what a change there would leave on an earlier choice (`workflow.impact`) before anything changes,
+  and once a choice has changed every head names what is built on the earlier one (`workflow.earlier`) with a way to it;
+  nothing is deleted.
+- **Brief suggestions** state their authority and their source (an approved record, a preference, an earlier brief, an
+  observation in a reference, the team, or an AI inference, not verified), beside free typing as before.
+- **Explore** is one set of cards side by side (two, three or four to a row on a desktop), each with its sketch and its
+  words; the S20 strip of the same previews above text-only cards is gone.
+- **Copy** gained **Adapt for another channel**: one stated model call (the revise stage's adapt) that makes a new piece
+  in the channel's format and length, checked like any other, no render.
+- **Design**: the reframing hint is said once, in the tool row; the readiness line's top issue reads as one sentence that
+  wraps instead of an ellipsis, with layers named (`layerLabel`: the layer's name, its role in words, its first words, or
+  what it is - the ids stay in the records and behind disclosures); the asset's name is given by the page strip under
+  the canvas rather than cut off in the bar; on a phone the inspector opener is a bar at the foot that never covers the
+  readiness line (scroll padding keeps what is scrolled to above it) and the artwork keeps a minimum size. At 1440 x 900
+  with the inspector open, a fitted 4:5 artboard measures 581 px (target 560).
+- **The Creative Director** offers Review, Explore and Conversation wherever an asset is in scope (outside Design,
+  Explore says it works on the composition and opens the piece in Design); a new asset, version, part or scope starts at
+  its own beginning (the top of a review, the newest message of a conversation) while an unchanged review keeps the
+  reader's place; each suggestion states its cost as two lines - the model call that applies it (editing it first costs
+  nothing) and whether a render is needed - and, once applied, offers **Compare** beside **Undo**; the review's model,
+  event, version and signature sit in a closed **Diagnostics** disclosure, the scores and their reasons stay in view,
+  and the focused-edit messages name layers by name with the ids behind **Layer ids**.
+
+Tests: `studio-s23g-browser.mjs` G-B1-G-B8 (library, appearance, stage questions and downstream, Explore, Creative
+Director, Design geometry at 1440 x 900, phone, Copy adaptation). The fixture's `open()` takes `isMobile` and `hasTouch`.
+Limits: the light theme is checked for its tokens, the accent's contrast and the artwork's pixels, and looked at in the
+captures; a full contrast audit of every light-theme component is part of the accessibility run (row 10).
+

@@ -39,6 +39,8 @@
 .st .st-copy-partner p{margin:0}
 .st .st-copy-asks{display:flex;flex-wrap:wrap;gap:6px}
 .st .st-copy-ask{display:flex;gap:6px;align-items:flex-end}
+.st .st-copy-adapt{display:flex;flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid var(--sk-line,var(--st-line))}
+.st .st-copy-adapt .st-nd-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .st .st-copy-ask .st-ta{flex:1;min-width:0}
 .st .st-copy-alts{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--st-line);padding-top:8px}
 .st .st-copy-alt{border:1px solid var(--st-line);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}

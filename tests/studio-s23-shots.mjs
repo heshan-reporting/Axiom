@@ -10,7 +10,8 @@
 import fs from 'node:fs';
 import { makeStudio } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
-const label = process.argv[2] || 'after';
+const THEME = process.env.THEME || '';
+const label = (process.argv[2] || 'after') + (THEME ? '-' + THEME : '');
 const SZ = { 1440: { width: 1440, height: 900 }, 1920: { width: 1920, height: 1080 }, 1024: { width: 1024, height: 768 }, 834: { width: 834, height: 1194 }, 390: { width: 390, height: 844 } };
 const sizes = (process.argv[3] || '1440,1920,1024,834,390').split(',').filter(s => SZ[s]);
 const OUT = new URL('./shots/s23/', import.meta.url).pathname; fs.mkdirSync(OUT, { recursive: true });
@@ -68,7 +69,8 @@ const openDesign = async page => {
 };
 const cdOpen = async page => { const cd = page.locator(R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Director")'); if (!(await cd.count()) && await page.locator(R + '#st-inspector .st-cd').count() && await page.locator(R + '#st-inspector .st-cd').first().isVisible()) return true; if (await cd.count()) { const t = page.locator(R + '.st-insp-toggle'); if (await t.count() && await t.first().isVisible()) await t.first().click().catch(() => {}); await cd.first().click().catch(() => {}); await wait(600); return true; } return false; };
 for (const sz of sizes) {
-  const page = await fx.open({ viewport: SZ[sz], quiet: true }); page.on('dialog', d => d.accept().catch(() => {}));
+  // THEME=light|system captures the same states in that appearance (the label carries it: after-light-...)
+  const page = await fx.open({ viewport: SZ[sz], quiet: true, init: THEME ? 'try { localStorage.setItem("ax_studio_theme", ' + JSON.stringify(THEME) + '); } catch (e) {}' : undefined }); page.on('dialog', d => d.accept().catch(() => {}));
   await page.waitForSelector(R + '.st-lib, ' + R + '.st-libgrid', { timeout: 15000 }).catch(() => {});
   await shot(page, 'library', sz);
   for (const [k, l] of [['brief', 'Brief'], ['objectives', 'Objectives'], ['strategy', 'Strategy'], ['directions', 'Directions'], ['copy', 'Copy']]) {

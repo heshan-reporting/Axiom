@@ -126,7 +126,7 @@ export async function makeStudio(opts) {
   const holds = []; const seen = []; const fails = [];
   async function open(o) {
     o = o || {};
-    const ctxB = await browser.newContext({ viewport: o.viewport || { width: 1440, height: 900 }, acceptDownloads: true, reducedMotion: o.reducedMotion || 'no-preference' });
+    const ctxB = await browser.newContext(Object.assign({ viewport: o.viewport || { width: 1440, height: 900 }, acceptDownloads: true, reducedMotion: o.reducedMotion || 'no-preference' }, o.isMobile ? { isMobile: true } : {}, o.hasTouch ? { hasTouch: true } : {}));
     const page = await ctxB.newPage();
     page.errors = [];
     page.on('pageerror', e => { page.errors.push(String(e.message)); if (!o.quiet) console.log('  [pageerror] ' + String(e.stack || e.message).split('\n').slice(0, 3).join(' | ').slice(0, 400)); });
