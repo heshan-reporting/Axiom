@@ -2147,3 +2147,106 @@ All providers mocked; nothing was spent.
 - Ink is read from PNG files only; a JPEG or WebP mark falls back to the tone its uploader gave.
 - The ground is known only where the plan paints it; over a photograph the browser's per-pixel measurement decides,
   as before.
+
+## 45. S22 - long model calls, streamed (build studio-p38, page r16)
+
+### 45.1 The report
+
+On 8 October 2026 the guided brief stopped on its processing card: "Understanding your brief - Checking campaign
+relevance, topics, issues, facts and risks and drafting objectives and the strategy Axiom recommends - 1 of 4",
+"1 min 7 s so far. One model call: no share is shown until it answers." The person could not tell a long answer from
+a stuck one, and after a while it was a stuck one.
+
+### 45.2 What was happening
+
+The reading (`stAnalyseStage`) is one call to the creative model at high effort, with a `max_tokens` floor of 16,000
+and a prompt carrying the client context, the knowledge retrieved by relevance, the material and a large answer
+schema. `stClaude` sent it as a single non-streamed request with `AbortSignal.timeout(240000)`:
+
+- nothing came back until the whole answer was written; at the speed such a model writes, sixteen thousand tokens of
+  reasoning and JSON can take longer than four minutes, and an answer that outran the timeout was aborted as a
+  `TimeoutError`, judged transient and sent again - up to three attempts, each of which could be billed;
+- the browser's step request (`POST /studio/job/step`) stayed open and silent for the whole call, which a proxy or a
+  network change can close; on Cloudflare a closed client connection ends the worker's run with it;
+- the job's lease was set once, before the call, to the timeout plus a minute (five minutes for the reading), so a
+  runner that died was noticed only when that ran out, and then only by the next step from an open tab or by the
+  tick (twice an hour);
+- the page could show nothing but a clock, and "1 of 4" was the count the step before ("Matching client knowledge")
+  had left behind, since the model phase reported none of its own.
+
+### 45.3 The fix
+
+**The answer streams.** Every Studio model call now asks for `stream: true` and reads the server-sent events
+(`stSseRead`): `message_start`, the content blocks and their deltas, `message_delta` (stop reason and usage),
+`message_stop`, `ping`, `error`. The assembled message is the same object the rest of `stClaude` already handled, so
+the plain retry on a refused thinking field, the retry with twice the room on `max_tokens`, the refusal and empty-answer
+handling and the usage accounting are unchanged. The reasoning is asked for as a summary (`thinking.display:
+'summarized'`; on these models it is otherwise omitted, which streams empty thinking blocks and looks like a pause):
+visibility only, billed the same.
+
+**What arrives is shown.** Each delta moves the job's `progress.activity` on through `job.progress` (one write per
+700 ms at most): `thinking` and `written` (characters received), `streamAt` (when the model last sent anything) and
+a label - "thinking: 2,345 characters of reasoning so far", then "writing the answer: 12,345 characters so far". These
+are counts, not a share: the length of an answer is not known before it is written. The reading's model phase now
+counts its own steps (`phaseCounts`: 2 of 4 while the model writes), and so do the directions calls.
+
+**Three clocks run beside the call.**
+- The lease is renewed every `STUDIO_LEASE_BEAT_MS` (default 30 s) to `ST_LEASE_MS` (2 minutes) ahead, so a runner
+  that stops is noticed within two minutes. `job.lease` and `job.progress` now answer whether the attempt still owns
+  the job; a renewal or a progress write that finds it cancelled or taken over aborts the fetch, so a cancel stops the
+  generation itself (within a progress write while it writes, within a beat when it is quiet) instead of letting it
+  run on and be billed.
+- A stream that sends nothing at all for `STUDIO_STREAM_IDLE_MS` (default 120 s; the API pings while it works) is
+  abandoned as `stream_idle` and retried. A stream that ends before `message_stop` is `stream_cut` and retried. An
+  `error` event is `overloaded: the answer stream reported ...` and retried. None of them is ever parsed as a partial
+  answer.
+- A call still writing after `STUDIO_STREAM_MAX_MS` (default the larger of 10 minutes and 40 ms per max token) is
+  stopped as `stream_cap` and not retried: the same request would very likely do the same again.
+
+An answer that is not an event stream - an error status, or a proxy that answers in one piece - is read as JSON exactly
+as before.
+
+**The step request keeps its connection.** `stStepRespond` answers `POST /studio/job/step`: a step that finishes
+within `STUDIO_HEARTBEAT_MS` (default 15 s) answers as before; one still running then begins its answer and sends a
+single space every interval until the job's JSON ends it (JSON allows the leading whitespace; `Cache-Control: no-store,
+no-transform` so an edge that compresses does not hold the spaces back). After the first space the status is
+committed, so a failure is written as a JSON error body (`studio_failed`); an unknown job is still a plain 404, checked
+before anything is streamed. The Python tools' step loops stop with that error instead of a `KeyError`.
+
+**The page carries on when the connection drops.** `runJob` treats a step that ends without an answer from the worker
+(a network error, an answer cut off mid-body, a gateway page with no error code) as a dropped connection, not a
+failure: it reads the job, keeps waiting while a runner holds the lease (up to 400 rounds of three seconds), and steps
+it again when the lease runs out. An answer from the worker that is an error is shown as before. The processing card
+says what has arrived ("The model is answering: 12,345 characters of the answer written", with the count beside the
+current step and "nothing new for N s" after twenty quiet seconds), says "Trying again (attempt 2 of 3): the model's
+answer stopped arriving" when a transient failure requeued the job, and the activity panel's foot no longer says a
+model call shows nothing until it answers. `explain()` words the three stream failures. The cancel note on the
+worker and in the page says what is now true: a model call that is writing stops within half a minute (what it wrote
+may be billed); an image generation already sent may still finish and be billed.
+
+### 45.4 Evidence
+
+`tests/studio-s22-worker.mjs` (9), the worker in process with a streamed Messages API stub: the request asks for a
+stream and the reading is assembled and filed; mid-stream the activity counts thinking, then characters of the answer
+with a label that says so, and the lease moves forward beat by beat; a silent stream is abandoned at the idle limit and
+requeued (well before the stream itself ends); an error event and a cut-off stream are requeued and never parsed;
+cancelling mid-stream returns the cancelled job, aborts the provider call and files nothing; the step answer begins with
+whitespace and ends with the JSON while an unknown job is a 404; the model phase counts 2 of 4; a plain JSON answer is
+still accepted. The first eight failed on the S21 worker; the ninth guards the path that did not change. `tests/studio-s22-browser.mjs` (2, Chromium): through the wizard, the
+processing card shows 2 of 4 and the characters that have arrived, the count grows, and the understanding opens; a step
+whose connection drops while the worker carries on is waited for and opens the understanding, with no error and no
+second attempt. Both failed against the S21 page. `tests/studio-progress-test.mjs` gained the stream cases of the job
+model. Every other backend and browser harness passes unchanged except two assertions in `tests/studio-p2-worker.mjs`
+that named the thinking setting, updated for `display`. All providers mocked; nothing was spent.
+
+### 45.5 Limits
+
+- Not yet proven live: the sandbox cannot reach the model API. The event format and the summarized thinking display
+  follow the Messages API documentation; the first reading after this deploy is the proof.
+- When the browser's connection to the worker drops, Cloudflare ends the worker's run with it; the job is taken up
+  again when its lease runs out (two minutes now, five before) by the next step from an open tab, or by the tick when no
+  tab is open. Closing the tab still leaves a running job to the tick.
+- A model that sends no reasoning summary shows "the model has started" and, after ninety seconds without an update,
+  the activity panel's "no update" note; the idle limit (two minutes of nothing at all, pings included) is what ends a
+  call that has really stalled.
+- A cancelled call is stopped, not refunded: the tokens produced before the stop may be billed.

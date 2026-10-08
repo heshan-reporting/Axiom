@@ -40,5 +40,16 @@ ok(/2 of 4 steps finished \(1 words and composition, 2 image generation, 1 creat
 eq(S.run([{ id: 'old', stage: 'copy', state: 'done', created: now - 3600000, updated: now - 3500000 }], now), null, 'nothing live and nothing recent: no run');
 eq(S.typical({ n: 1, median: 5000 }), '', 'one sample is not a typical duration');
 eq(S.typical({ n: 3, median: 125000, p80: 130000 }), 'about 2 min 5 s', 'minutes and seconds, no tail when it is short');
+// S22: a streamed model call shows what has arrived - characters, never a share of an answer whose length is unknown
+const reading = { id: 'a1', stage: 'analyse', state: 'running', created: now - 70000, attempts: 1, progress: { activity: { phase: 'model', step: 'model', completed: 2, total: 4, label: 'writing the answer: 12,345 characters so far', thinking: 2345, written: 12345, streamAt: now - 1000, startedAt: now - 70000, at: now - 1000 } } };
+const a1 = S.job(reading, now);
+eq([a1.streaming, a1.written, a1.thinking], [true, 12345, 2345], 'the counts the worker reported while the model writes');
+eq(a1.streamText, '12,345 characters of the answer written', 'in words, with thousands marked');
+eq([a1.completed, a1.total], [2, 4], 'the steps finished are counted apart from the characters');
+const think = S.job({ id: 'a2', stage: 'analyse', state: 'running', created: now - 30000, attempts: 1, progress: { activity: { phase: 'model', thinking: 900, written: 0, streamAt: now - 25000, startedAt: now - 30000, at: now - 25000 } } }, now);
+eq(think.streamText, 'thinking, 900 characters of reasoning so far', 'before the answer begins, the reasoning is counted');
+eq(Math.round(think.quiet), 25, 'and how long since the model last sent anything');
+eq(S.job({ id: 'a3', stage: 'analyse', state: 'running', created: now, attempts: 1, progress: { activity: { phase: 'knowledge', thinking: 50, written: 9 } } }, now).streaming, false, 'counts left from a model call do not show in a later phase');
+eq(S.job(Object.assign({}, reading, { state: 'done' }), now).streaming, false, 'a finished job is not streaming');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

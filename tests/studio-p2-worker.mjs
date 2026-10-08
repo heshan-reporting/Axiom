@@ -94,7 +94,7 @@ await t('extract: the ledger ties every figure and quotation to its passage, mar
   eq((await req('POST', '/studio/job', { project: P, stage: 'extract', input: {} })).d.error, 'source_required');
   const j = await req('POST', '/studio/job', { project: P, stage: 'extract', input: { source: S }, idem: 'x1' }); eq(j.status, 200);
   const done = await run(j.d.job); eq(done.state, 'done', done.error); eq(done.result.model, 'claude-sonnet-5-5'); eq(done.result.unverified, 2); ok(done.result.figures >= 2);
-  const body = anth.calls[anth.calls.length - 1]; eq(body.model, 'claude-sonnet-5-5'); eq(body.thinking, { type: 'adaptive' }); eq(body.output_config, { effort: 'low' });
+  const body = anth.calls[anth.calls.length - 1]; eq(body.model, 'claude-sonnet-5-5'); eq(body.thinking, { type: 'adaptive', display: 'summarized' }); eq(body.output_config, { effort: 'low' });
   const g = await req('GET', '/studio/get?id=' + P); const cl = g.d.sources[0].claims;
   const bn = cl.find(c => c.value === 74); ok(bn && bn.unit === 'billion' && bn.period === '2023-24' && bn.passage === 'p3' && bn.verified === true, JSON.stringify(bn));
   const q = cl.find(c => c.quote && /road fuel tax/.test(c.text)); ok(q && q.verbatim === true && q.passage === 'p4' && q.who === 'Tania Constable', JSON.stringify(q));
@@ -109,7 +109,7 @@ await t('extract: the ledger ties every figure and quotation to its passage, mar
 await t('directions: an open brief gets two distinct directions on the creative model with adaptive thinking; claims outside the ledger are dropped; the client\'s rules are in the prompt and no other client\'s', async () => {
   const j = await req('POST', '/studio/job', { project: P, stage: 'direct', input: { n: 2, channels: ['linkedin'] }, idem: 'd1' });
   const done = await run(j.d.job); eq(done.state, 'done', done.error); eq(done.result.titles, ['The plain ask', 'Who it really is']); eq(done.result.similar, 0); eq(done.result.model, 'claude-opus-5-5');
-  const body = anth.calls[anth.calls.length - 1]; eq(body.model, 'claude-opus-5-5'); eq(body.thinking, { type: 'adaptive' }); eq(body.output_config, { effort: 'medium' });
+  const body = anth.calls[anth.calls.length - 1]; eq(body.model, 'claude-opus-5-5'); eq(body.thinking, { type: 'adaptive', display: 'summarized' }); eq(body.output_config, { effort: 'medium' });
   ok(/MCA-RULE-ANY-OTHER-INDUSTRY/.test(body.system) && /Label the answer Fact/.test(body.system) && /NEVER USE these words/.test(body.system) && /"busted"/.test(body.system), 'the kit rules, banned terms and learned corrections are in the prompt');
   ok(!/AEP-RULE/.test(body.system), 'another client\'s rule is absent');
   ok(/\[c1\]/.test(body.messages[0].content) && /\[UNVERIFIED\]/.test(body.messages[0].content), 'the ledger goes in with unverified rows marked');

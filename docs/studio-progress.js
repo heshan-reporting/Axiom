@@ -1,7 +1,9 @@
 /* STProgress: the job model behind the Studio's activity panel (docs/studio.js, WorkspaceActivity). Presentation only.
    A job's progress is what the worker reports while the attempt runs (progress.activity: phase, label, counts, times) and
    its log lines; a share is shown only where the work is countable (the copy stage's channels, a run's finished steps).
-   Elapsed time is never turned into a completion percentage: a model call shows no share until it answers.
+   Elapsed time is never turned into a completion percentage. Since S22 a model call streams: while it runs the worker
+   reports how many characters of reasoning and of the answer have arrived (thinking, written, streamAt) - counts, never a
+   share, since the length of an answer is not known before it is written.
    Started as a ChatGPT draft (5 October 2026), rewritten here with the worker's real progress shape, the run grouping and
    the typical-duration reading. Loads before studio.js; also usable in Node for its tests. */
 (function (root) {
@@ -9,6 +11,7 @@
   const names = { render: 'Image generation', copy: 'Words and composition', direct: 'Creative directions', strategy: 'Creative strategy', concepts: 'Design exploration', extract: 'Source analysis', analyse: 'Brief analysis', kit: 'Message kit', inspect: 'Creative Director review', revise: 'Design revision', sequence: 'Campaign sequence', export: 'Export', echo: 'Connection check' };
   const active = j => !!j && (j.state === 'queued' || j.state === 'running');
   const percent = (done, total) => total > 0 ? Math.min(100, Math.max(0, Math.floor(done / total * 100))) : null;
+  const thou = n => String(Math.max(0, Math.round(Number(n) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const fmt = s => { s = Math.max(0, Math.round(s)); return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60 ? (s % 60) + ' s' : ''); };
   /** A stage's typical duration from the worker's history ({n, median, p80} in ms): "about 40 s", or '' without history. */
   const typical = d => d && d.n >= 2 && d.median > 0 ? 'about ' + fmt(d.median / 1000).trim() + (d.p80 > d.median * 1.6 ? ', up to ' + fmt(d.p80 / 1000).trim() : '') : '';
@@ -29,9 +32,14 @@
     // the phase text is what the worker said it was doing, else its latest log line, else the state
     const phaseText = running && a.label ? a.label : running && last ? last : terminal && a.phase && a.phase !== 'done' && a.label && j.state !== 'done' ? a.label : label;
     const pct = j.state === 'done' ? 100 : running && total ? percent(completed, total) : null;
+    // a streamed model call: what has arrived so far, and how long since the model last sent anything
+    const thinking = Number(a.thinking) || 0, written = Number(a.written) || 0;
+    const streaming = running && a.phase === 'model' && (thinking > 0 || written > 0 || Number(a.streamAt) > 0);
+    const streamText = !streaming ? '' : written ? thou(written) + ' characters of the answer written' : thinking ? 'thinking, ' + thou(thinking) + ' characters of reasoning so far' : 'the model has started';
+    const quiet = streaming && Number(a.streamAt) > 0 ? Math.max(0, (now - Number(a.streamAt)) / 1000) : 0;
     return { title: names[j.stage] || j.stage || 'Job', label, phaseText, phase: a.phase || (running ? 'working' : j.state), running, queued, terminal, completed, total, percent: pct,
       elapsed, time: fmt(elapsed), typical: running || queued ? typical(dur) : '', lastAt, attempt: Math.max(1, (Number(j.attempts) || 0) + (running ? 0 : 0)),
-      slow: running && now - lastAt > 90000, model: a.model || '' };
+      slow: running && now - lastAt > 90000, model: a.model || '', streaming, thinking, written, streamText, quiet };
   }
   /** The jobs worth showing: a failure that has a live or finished retry is history, not a second thing to act on. */
   function jobsForDisplay(jobs) {
@@ -52,5 +60,5 @@
     const text = Object.keys(stages).map(s => stages[s] + ' ' + (names[s] || s).toLowerCase()).join(', ');
     return { total, done, failed, cancelled, active: live.length, percent: percent(done + cancelled, total), stages, text: done + ' of ' + total + ' steps finished (' + text + ')' + (failed ? '; ' + failed + ' failed' : '') };
   }
-  root.STProgress = { names, job, active, percent, jobsForDisplay, run, typical, fmt };
+  root.STProgress = { names, job, active, percent, jobsForDisplay, run, typical, fmt, thou };
 })(typeof window !== 'undefined' ? window : globalThis);

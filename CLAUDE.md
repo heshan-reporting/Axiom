@@ -2600,6 +2600,44 @@ two S17 editor cases that timed out (also on the S20 commit) pass. Harnesses:
 `tests/studio-s21-worker.mjs` (14), `tests/studio-s21-browser.mjs` (12), the
 variation cases in `tests/studio-compose-test.mjs` (14).
 
+**Long model calls, streamed (S22; build `2026-10-08.studio-p38`, page `?v=r16`;
+`CREATIVE-STUDIO.md` s.45).** The 8 October report: "Understanding your brief" sat on
+"Checking campaign relevance, topics, issues, facts and risks ... 1 of 4" with only a
+clock moving. The reading is one creative-model call at high effort (up to 16,000
+tokens) that went out as one non-streamed request with a 240 s timeout: nothing came
+back until the whole answer was written, an answer that took longer was aborted and
+retried (and paid for) up to three times, the step request sat silent for minutes, the
+lease was set once for five minutes, and "1 of 4" was a count left over from the step
+before. Now every `stClaude` call streams (`stream: true`, events parsed by
+`stSseRead`; thinking asked for with `display: 'summarized'`, visibility only, billed
+the same): each delta moves `progress.activity` on (`thinking` and `written`
+characters, `streamAt`, the label "writing the answer: N characters so far"); the
+lease is renewed every `STUDIO_LEASE_BEAT_MS` (30 s) to `ST_LEASE_MS` ahead, and a
+renewal or progress write that finds the job no longer this attempt's (`job.lease` and
+`job.progress` now answer false) aborts the fetch, so a cancel stops the generation; a
+stream silent for `STUDIO_STREAM_IDLE_MS` (120 s) is abandoned as `stream_idle` and one
+that ends before `message_stop` is `stream_cut` (both retried, never parsed); an
+`error` event is `overloaded:` (retried); past `STUDIO_STREAM_MAX_MS` (default the
+larger of 10 minutes and 40 ms per max token) it stops as `stream_cap` (not retried); an
+answer that is not a stream (an error status, a proxy) is read as JSON as before. The
+reading's model phase counts 2 of 4 (`phaseCounts`), as do the directions calls. `POST
+/studio/job/step` answers through `stStepRespond`: a step still running after
+`STUDIO_HEARTBEAT_MS` (15 s) begins its answer and sends a space every interval until
+the JSON (`Cache-Control: no-store, no-transform`, so an edge does not hold the spaces
+back); a failure after that is a JSON error body with status 200; an unknown job is
+still a plain 404. In the island `runJob` survives a dropped step connection (no
+status, a cut answer, a gateway page without a code): it reads the job, waits while a
+runner holds it (up to 400 rounds) and carries on; the processing card and the
+activity panel show "N characters of the answer written" or "thinking, N characters of
+reasoning so far", how long since the model last sent anything, and "Trying again
+(attempt 2 of 3): ..." on a retry; `explain()` names `stream_idle`, `stream_cut` and
+`stream_cap`. The tools (`studio-demo.py`, `studio-showcase.py`, `studio-golden.py`)
+stop on a step answer that carries no `job`. Harnesses: `tests/studio-s22-worker.mjs`
+(9), `tests/studio-s22-browser.mjs` (2), the stream cases in
+`tests/studio-progress-test.mjs`; the fixture's Claude stub streams with
+`setProvider('claude', 'stream')`, and `failNext(re, 0, null, {abort, detach})` drops a
+connection while the worker carries on.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

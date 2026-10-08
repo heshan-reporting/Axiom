@@ -42,7 +42,10 @@ def http(base, key, method, path, body=None):
 
 def step_until_done(base, key, job_id, label):
     for _ in range(40):
-        j = http(base, key, 'POST', '/studio/job/step', {'id': job_id})['job']
+        d = http(base, key, 'POST', '/studio/job/step', {'id': job_id})
+        if 'job' not in d:   # a long step answers with spaces while it runs, so a later failure arrives as a JSON error body
+            raise SystemExit('step %s: %s %s' % (job_id, d.get('error', ''), d.get('detail', '')))
+        j = d['job']
         if j['state'] in ('done', 'failed', 'cancelled'):
             if j['state'] != 'done':
                 raise SystemExit('%s failed: %s' % (label, j.get('error', '')))

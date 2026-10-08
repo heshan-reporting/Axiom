@@ -47,6 +47,23 @@ const LOGO = pngGradient(40, 16, [255, 255, 255], [240, 240, 240]).toString('bas
 
 import { RELEASE, answerFor } from './studio-answers.mjs';
 export { RELEASE, answerFor };
+/* ------------------------------------------------------------ a streamed answer (S22): the Messages API's event stream */
+export function sseAnswer(text, totalMs, model, signal) {
+  const enc = new TextEncoder(); const ev = (type, data) => enc.encode('event: ' + type + '\ndata: ' + JSON.stringify(Object.assign({ type }, data)) + '\n\n');
+  const pieces = []; const n = 12; const step = Math.ceil(text.length / n); for (let i = 0; i < text.length; i += step) pieces.push(text.slice(i, i + step));
+  const gap = Math.max(10, Math.round(totalMs / (pieces.length + 4))); let stopped = false;
+  if (signal) signal.addEventListener('abort', () => { stopped = true; });
+  return new Response(new ReadableStream({ async start(c) {
+    const put = async (type, data, wait) => { if (stopped) return false; try { c.enqueue(ev(type, data)); } catch (e) { return false; } if (wait) await new Promise(r => setTimeout(r, gap)); return !stopped; };
+    if (!(await put('message_start', { message: { id: 'msg_fx', type: 'message', role: 'assistant', model, content: [], usage: { input_tokens: 1200, output_tokens: 1 } } }, true))) return;
+    await put('content_block_start', { index: 0, content_block: { type: 'thinking', thinking: '' } });
+    for (let i = 0; i < 3; i++) if (!(await put('content_block_delta', { index: 0, delta: { type: 'thinking_delta', thinking: 'Reading the material against the client and its campaigns. ' } }, true))) return;
+    await put('content_block_stop', { index: 0 }); await put('content_block_start', { index: 1, content_block: { type: 'text', text: '' } });
+    for (const p of pieces) if (!(await put('content_block_delta', { index: 1, delta: { type: 'text_delta', text: p } }, true))) return;
+    await put('content_block_stop', { index: 1 }); await put('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2400 } }); await put('message_stop', {});
+    try { c.close(); } catch (e) {}
+  }, cancel() { stopped = true; } }), { status: 200, headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+}
 /* ------------------------------------------------------------ the fixture */
 export async function makeStudio(opts) {
   opts = opts || {};
@@ -84,6 +101,9 @@ export async function makeStudio(opts) {
       calls.bySys.push(sys.slice(0, 80));
       if (providers.claude === 'down') return new Response(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }), { status: 529 });
       if (providers.claude === 'slow') await new Promise(r => setTimeout(r, providers.slowMs));
+      // S22: 'stream' answers a streamed request as the API does - server-sent events, reasoning first, then the answer in
+      // pieces spread over streamMs - so the page can be watched while the model writes
+      if (providers.claude === 'stream' && body.stream) return sseAnswer(JSON.stringify(answerFor(sys, user)), providers.streamMs || 8000, body.model, init && init.signal);
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answerFor(sys, user)) }], stop_reason: 'end_turn', model: body.model }), { status: 200 });
     }
     if (u.startsWith('http://127.0.0.1')) return realFetch(url, init);
@@ -117,7 +137,12 @@ export async function makeStudio(opts) {
       const path = u.slice(W.length); seen.push({ method: rq.method(), path, body: rq.postData() });
       for (const h of holds) if (h.re.test(path)) await h.wait;
       // a request made to fail on purpose (once): the page must cope and retry, never pretend it succeeded
-      const fi = fails.findIndex(f => f.re.test(path)); if (fi >= 0) { const f = fails.splice(fi, 1)[0]; f.hit++; if (f.after) { const b0 = rq.postDataBuffer(); const r0 = await handler.fetch(new Request(u, { method: rq.method(), headers: rq.headers(), body: b0 && rq.method() !== 'GET' ? b0 : undefined }), env, ctx); f.committed = await r0.text(); } return route.fulfill({ status: f.status || 500, headers: { 'content-type': 'application/json' }, body: JSON.stringify(f.body || { error: 'internal_error', detail: 'made to fail by the harness' }) }); }
+      const fi = fails.findIndex(f => f.re.test(path)); if (fi >= 0) { const f = fails.splice(fi, 1)[0]; f.hit++;
+        const run0 = async () => { const b0 = rq.postDataBuffer(); const r0 = await handler.fetch(new Request(u, { method: rq.method(), headers: rq.headers(), body: b0 && rq.method() !== 'GET' ? b0 : undefined }), env, ctx); return r0.text(); };
+        // detach: the worker carries on with the request while the browser loses the connection (S22: a step dropped mid-call)
+        if (f.detach) f.running = run0().then(t => { f.committed = t; }, () => {}); else if (f.after) f.committed = await run0();
+        if (f.abort) return route.abort('connectionreset');
+        return route.fulfill({ status: f.status || 500, headers: { 'content-type': 'application/json' }, body: JSON.stringify(f.body || { error: 'internal_error', detail: 'made to fail by the harness' }) }); }
       const headers = rq.headers(); const body = rq.postDataBuffer();
       const res = await handler.fetch(new Request(u, { method: rq.method(), headers, body: body && rq.method() !== 'GET' ? body : undefined }), env, ctx);
       const hh = {}; res.headers.forEach((v, k) => { hh[k] = v; });
@@ -128,8 +153,9 @@ export async function makeStudio(opts) {
     if (o.go !== false) { await page.evaluate(() => go('studio')); await page.waitForSelector('#studio-root .st-head'); }
     page.ctxB = ctxB; return page;
   }
-  /* fail the next matching request; with {after:true} the worker handles it first (it commits) and the browser still sees the failure, as a timeout after the server wrote */
-  function failNext(re, status, body, o2) { const f = { re, status, body, hit: 0, after: !!(o2 && o2.after) }; fails.push(f); return f; }
+  /* fail the next matching request; with {after:true} the worker handles it first (it commits) and the browser still sees the failure, as a timeout after the server wrote;
+     {abort:true} drops the connection instead of answering, and {detach:true} lets the worker carry on with it in the background meanwhile */
+  function failNext(re, status, body, o2) { const f = { re, status, body, hit: 0, after: !!(o2 && o2.after), abort: !!(o2 && o2.abort), detach: !!(o2 && o2.detach) }; fails.push(f); return f; }
   function hold(re) { let release; const wait = new Promise(r => { release = r; }); const h = { re, wait }; holds.push(h); return () => { release(); holds.splice(holds.indexOf(h), 1); }; }
   async function close() { await browser.close(); server.kill(); globalThis.fetch = realFetch; }
   return { env, handler, api, calls, providers, setProvider, open, close, hold, failNext, seen, r2, kv, PORT };

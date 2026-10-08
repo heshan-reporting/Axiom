@@ -6986,7 +6986,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-10-07.studio-p37';
+const AXIOM_BUILD = '2026-10-08.studio-p38';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -7411,7 +7411,7 @@ async function stJobClaim(env, id) {
   const r = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='running', lease_until=?, attempts=attempts+1, updated=? WHERE id=? AND attempts<? AND (state='queued' OR (state='running' AND lease_until<?))").bind(now + ST_LEASE_MS, now, id, ST_MAX_ATTEMPTS, now).run();
   return !!(r && r.meta && r.meta.changes);
 }
-function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
+function stTransient(err) { return /gemini_5\d\d|gemini_429|TimeoutError|AbortError|no_image|network|fetch failed|overloaded|stream_(idle|cut)|rate[ _-]?limit|too many requests|\b429\b/i.test(String(err || '')); }   // never a bare 'rate': it is inside strategy, generate, accurate
 /** Run one claimed job to its end state. Never writes over a version the asset has moved past. */
 async function stJobRun(env, job) {
   // ownership: this attempt owns the job only while it is running under this attempt's number. A cancel, or another
@@ -7420,7 +7420,8 @@ async function stJobRun(env, job) {
   const owned = async () => { const r = await env.MIND_DB.prepare('SELECT state, attempts FROM studio_jobs WHERE id=?').bind(job.id).first(); return !!r && r.state === 'running' && Number(r.attempts) === attempt; };
   job.fence = async () => { if (!(await owned())) { const e = new Error('fenced: attempt ' + attempt + ' of job ' + job.id + ' no longer owns it (cancelled, or another runner took over); nothing more is filed'); e.fenced = true; throw e; } };
   // checkpoint before a long provider call: the lease must outlast the call, so no second runner starts beside this one
-  job.lease = async (ms) => { await env.MIND_DB.prepare("UPDATE studio_jobs SET lease_until=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(Date.now() + Math.max(ST_LEASE_MS, ms || 0), Date.now(), job.id, attempt).run(); };
+  // answers whether this attempt still owns the job: a renewal that changes nothing found it cancelled or taken over
+  job.lease = async (ms) => { const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET lease_until=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(Date.now() + Math.max(ST_LEASE_MS, ms || 0), Date.now(), job.id, attempt).run(); return !!(u && u.meta && u.meta.changes); };
   // live progress: what this attempt is doing now - a phase, a label, and counts where the work is countable (never a
   // percentage invented from elapsed time) - persisted while it runs, fenced like the lease, so the app can show it during
   // a long provider call; throttled to one write per 700 ms unless the phase changes; the lines so far travel with it
@@ -7430,9 +7431,10 @@ async function stJobRun(env, job) {
     const phaseChanged = !!(patch && patch.phase && patch.phase !== act.phase);
     if (patch) Object.keys(patch).forEach(k => { if (patch[k] !== undefined) act[k] = patch[k]; });
     act.at = Date.now(); if (lines) lastLines = lines;
-    if (!phaseChanged && Date.now() - lastWrite < 700) return;
+    if (!phaseChanged && Date.now() - lastWrite < 700) return undefined;
     lastWrite = Date.now();
-    try { await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit({ activity: act, lines: lastLines || [] }, 30000), Date.now(), job.id, attempt).run(); } catch (e) {}
+    // false when the write found the job no longer this attempt's (cancelled, taken over): a streamed call stops on it
+    try { const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit({ activity: act, lines: lastLines || [] }, 30000), Date.now(), job.id, attempt).run(); return !!(u && u.meta && u.meta.changes); } catch (e) { return undefined; }
   };
   const done = async (state, patch) => {
     const endedAt = Date.now();
@@ -7481,11 +7483,31 @@ async function stJobStep(env, id) {
   if (!(await stJobClaim(env, job.id))) { const j2 = await stJob(env, job.id); return Object.assign(j2, { note: j2.state === 'failed' ? 'its upstream step failed' : j2.after && j2.state === 'queued' ? 'waiting for the step before it (' + j2.after + ')' : job.state === 'running' ? 'another runner holds the lease' : job.attempts >= ST_MAX_ATTEMPTS ? 'attempts exhausted' : 'not claimable' }); }
   return stJobRun(env, await stJob(env, job.id));
 }
+/** S22: the step route's answer. A step can hold one long model call (minutes), and a request that says nothing for that
+ *  long can be closed by a proxy or a network on the way, which ends the worker's run with it. So once the step has run
+ *  for STUDIO_HEARTBEAT_MS (default 15 s) the answer begins and a space is sent every interval until the job's JSON ends
+ *  it (JSON allows the leading whitespace). A step that finishes sooner answers exactly as before. After the first space
+ *  the status is committed, so a failure is written as a JSON error body (the app reads `error` either way). */
+async function stStepRespond(env, id) {
+  if (!(await stJob(env, id))) return jsonResp({ error: 'unknown_job' }, 404);
+  const beat = Math.max(20, Number(env.STUDIO_HEARTBEAT_MS) || 15000);
+  let settled = null; const work = stJobStep(env, id).then(v => { settled = { v }; }, e => { settled = { e }; });
+  let t = null; await Promise.race([work, new Promise(r => { t = setTimeout(r, beat); })]); clearTimeout(t);
+  const answer = s => (s.e ? { ok: false, error: 'studio_failed', detail: String((s.e && s.e.message) || s.e).slice(0, 200) } : s.v ? { ok: true, job: s.v } : { error: 'unknown_job' });
+  if (settled) { if (settled.e) throw settled.e; return settled.v ? jsonResp(answer(settled)) : jsonResp({ error: 'unknown_job' }, 404); }
+  const ts = new TransformStream(); const w = ts.writable.getWriter(); const enc = new TextEncoder();
+  // one write at a time: each waits for the one before it (a slow reader holds the queue, never the job)
+  let chain = Promise.resolve(); const put = s => { chain = chain.then(() => w.write(enc.encode(s))).catch(() => {}); return chain; };
+  put(' '); const tick = setInterval(() => { put(' '); }, beat);
+  work.then(() => { clearInterval(tick); put(JSON.stringify(answer(settled))); chain = chain.then(() => w.close()).catch(() => {}); });
+  // no-transform: an edge that compresses would hold the single spaces in its buffer, and they would keep nothing alive
+  return new Response(ts.readable, { status: 200, headers: Object.assign({}, CORS, { 'Cache-Control': 'no-store, no-transform' }) });
+}
 async function stJobCancel(env, id, who) {
   const job = await stJob(env, id);
   if (!job) return null;
   if (job.state === 'done' || job.state === 'failed' || job.state === 'cancelled') return job;
-  const note = job.state === 'running' ? 'cancelled while running: the provider call in flight may still complete and cost; its result will not be filed' : 'cancelled before it ran';
+  const note = job.state === 'running' ? 'cancelled while running: a model call that is streaming stops within half a minute (what it wrote so far may be billed); an image call already sent may still complete and cost; its result will not be filed' : 'cancelled before it ran';
   const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state='cancelled', lease_until=0, error=?, updated=? WHERE id=? AND state IN ('queued','running')").bind(note, Date.now(), id).run();
   if (!(u && u.meta && u.meta.changes)) return stJob(env, id);   // it ended first: its end state stands
   await stEvent(env, job.project, 'job', { text: 'Job ' + id + ' ' + note, job: id }, who);
@@ -7796,6 +7818,48 @@ async function stBudget(env) {
   return { used: u.reserved, cap: u.cap, left: u.left, day: u.day, confirmed: u.confirmed, failed: u.failed, retries: u.retries, inFlight: u.inFlight, tokens: { in: u.in_tok, out: u.out_tok }, accounting: 'reserved before each provider call (attempts sent, retries included); confirmed and failed as settled', models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') } };
 }
 function stIsV5(model) { return /(opus|sonnet|fable|haiku)-5(-|$)/i.test(String(model || '')); }
+// -- S22: the model's answer as a stream -------------------------------------------------------------------------------
+// One call at high effort can write for minutes (the brief reading: up to 16,000 tokens). Asked as one request it came back
+// all at once or not at all: the job sat on "1 of 4" with only a clock moving, an answer that outran the fixed timeout was
+// cut off and paid for again (three attempts), and a runner that died was noticed only when a five-minute lease ran out.
+// Every Studio call now streams: each event moves the job's activity on (characters of reasoning, then of the answer, and
+// when the model last sent anything), the lease is renewed on a beat so a runner that stopped is noticed within
+// ST_LEASE_MS, a renewal or progress write that finds the job no longer this attempt's stops the call itself, a stream
+// that falls silent is abandoned and retried, and an error event or a stream that ends before message_stop is retried,
+// never parsed as a partial answer. An answer that is not a stream (an error status, a proxy) is read as JSON as before.
+const ST_STREAM_IDLE_MS = 120000;   // nothing at all for this long (the API pings while it works): abandoned, retried
+const ST_LEASE_BEAT_MS = 30000;     // the lease is renewed this often while a call runs
+const stThou = n => String(Math.max(0, Math.round(Number(n) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+/** Read a server-sent event stream: onEvent(type, data) per event (awaited; true stops reading), poke() per chunk.
+ *  Answers { ended } when the stream closed, { stopped } when onEvent asked, { error } when reading failed. */
+async function stSseRead(reader, onEvent, poke) {
+  const dec = new TextDecoder(); let buf = '';
+  for (;;) {
+    let x; try { x = await reader.read(); } catch (e) { return { error: e }; }
+    if (!x || x.done) break;
+    if (poke) poke();
+    // CRLF is folded on the whole remainder, so a CR at the end of one chunk meets its LF in the next
+    buf = (buf + dec.decode(x.value, { stream: true })).replace(/\r\n/g, '\n');
+    let cut;
+    while ((cut = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, cut); buf = buf.slice(cut + 2);
+      let type = '', data = '';
+      block.split('\n').forEach(line => { if (line.indexOf('event:') === 0) type = line.slice(6).trim(); else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.slice(5).replace(/^ /, ''); });
+      if (!data) continue;
+      let d; try { d = JSON.parse(data); } catch (e) { continue; }
+      if (await onEvent(type || String(d.type || ''), d)) return { stopped: true };
+    }
+  }
+  return { ended: true };
+}
+/** Why a streamed call was given up, as the model answer's error: silent (retried), past the cap (not retried), stopped. */
+function stStreamFail(why, idleMs, capMs, counts) {
+  const got = stThou(counts.thinking) + ' characters of reasoning and ' + stThou(counts.written) + ' of the answer had arrived';
+  const span = ms => (ms < 10000 ? ms + ' ms' : Math.round(ms / 1000) + ' s');
+  if (why === 'idle') return { error: { type: 'stream_idle', message: 'the model sent nothing for ' + span(idleMs) + ' and the call was abandoned (' + got + ')' } };
+  if (why === 'cap') return { error: { type: 'stream_cap', message: 'the model was still writing after ' + Math.round(capMs / 60000) + ' min, so the call was stopped (' + got + ') (not retried)' } };
+  return { error: { type: 'stream_cut', message: 'the call was stopped before its answer finished (' + got + ')' } };
+}
 /** One Claude call for a Studio stage. The 5.x models think adaptively and take an effort level; when a
  *  deployment answers 400 to those fields the call is repeated plain, so a schema change cannot stall
  *  production. Account spend limits and an exhausted daily budget are reported as such, never retried. */
@@ -7807,29 +7871,86 @@ async function stClaude(env, o) {
   const imgs = (Array.isArray(o.images) ? o.images : []).filter(im => im && im.b64).slice(0, 4);
   const docs = (Array.isArray(o.docs) ? o.docs : []).filter(dc => dc && dc.b64).slice(0, 2);
   const content = imgs.length || docs.length ? docs.map(dc => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: dc.b64 } })).concat(imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime || 'image/png', data: im.b64 } }))).concat([{ type: 'text', text: o.user }]) : o.user;
-  if (o.log && o.log.phase) await o.log.phase('model', (o.phaseLabel ? o.phaseLabel + ' - ' : '') + 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; one call, no progress until it answers', { model, step: o.phaseStep || undefined });
+  const said = o.phaseLabel ? o.phaseLabel + ' - ' : '';
+  // a fresh call starts its counts at nothing (a stage may make several calls); the step counts are the stage's, when it gives them
+  if (o.log && o.log.phase) await o.log.phase('model', said + 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; its answer is shown as it is written', Object.assign({ model, step: o.phaseStep || undefined, thinking: 0, written: 0, streamAt: 0 }, o.phaseCounts || {}));
   const base = { model, max_tokens: o.maxTok || 6000, system: String(o.system || '') + AX_UNTRUSTED_RULE, messages: [{ role: 'user', content }] };
   const effort = ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium');
   // adaptive thinking is paid out of max_tokens: at high effort a small cap leaves the JSON cut off mid-sentence, so the cap has
-  // a floor by effort (only tokens actually produced are billed; a higher cap costs nothing unless it is used)
+  // a floor by effort (only tokens actually produced are billed; a higher cap costs nothing unless it is used). The reasoning
+  // is asked for as a summary (display: visibility only, billed the same): it streams while the model thinks, so a long
+  // thinking period shows movement instead of a silent pause
   const floor = { low: 4000, medium: 8000, high: 16000, max: 32000 }[effort];
-  const rich = stIsV5(model) ? Object.assign({}, base, { max_tokens: Math.max(base.max_tokens, floor), thinking: { type: 'adaptive' }, output_config: { effort } }) : base;
+  const rich = stIsV5(model) ? Object.assign({}, base, { max_tokens: Math.max(base.max_tokens, floor), thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort } }) : base;
+  const idleMs = Math.max(20, Number(env.STUDIO_STREAM_IDLE_MS) || ST_STREAM_IDLE_MS);
+  const beatMs = Math.max(20, Number(env.STUDIO_LEASE_BEAT_MS) || ST_LEASE_BEAT_MS);
   let attempts = 0;
   const once = async (body) => {
-    if (o.log && o.log.lease) await o.log.lease((o.timeoutMs || 150000) + 60000);
+    // a renewal that finds the job cancelled or taken over sends nothing (and spends nothing)
+    if (o.log && o.log.lease) { const mine = await o.log.lease(ST_LEASE_MS); if (mine === false && o.log.fence) await o.log.fence(); }
     const rv = await aiReserve(env, 'studio', { retry: attempts++ > 0 });
     if (!rv.ok) throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)');
-    let r;
-    try { r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(body), signal: AbortSignal.timeout ? AbortSignal.timeout(o.timeoutMs || 150000) : undefined }); } catch (e) { await aiSettle(env, 'studio', false); throw e; }
-    // the body is read as text first: a gateway page (HTTP 502 / 504 / 524 as HTML), an empty body or a cut-off stream is an
-    // upstream failure with its status and an excerpt, never an "empty answer" that looks like the model's own
-    const raw = await r.text().catch(() => ''); let d = {}; try { d = JSON.parse(raw); } catch (e) { d = {}; }
-    if (!d || typeof d !== 'object') d = {};
-    if (!d.error && (!r.ok || !Array.isArray(d.content))) d = { error: { type: 'upstream_' + r.status, message: 'HTTP ' + r.status + ' from the model API ' + (Array.isArray(d.content) ? 'with an unexpected body' : 'without a JSON answer') + (raw ? ' - ' + raw.replace(/\s+/g, ' ').trim().slice(0, 140) : ' (empty body)') + (r.ok ? '' : '; the request is retried') } };
-    await aiSettle(env, 'studio', r.ok && !d.error, d.usage);
+    // S22: the answer streams. Three clocks run beside it: the idle limit (nothing at all for idleMs: abandoned, retried), the
+    // cap (still writing after capMs: stopped, not retried) and the lease beat (renewed while the call runs; a renewal that
+    // finds the job no longer this attempt's stops the call, so a cancel ends the generation and its cost)
+    const capMs = Number(env.STUDIO_STREAM_MAX_MS) || Math.max(600000, (Number(body.max_tokens) || 8000) * 40, Number(o.timeoutMs) || 0);
+    const ctl = new AbortController(); const counts = { thinking: 0, written: 0, t0: Date.now() };
+    let why = '', reader = null, lastAt = Date.now();
+    const stop = reason => { if (!why) why = reason; try { ctl.abort(); } catch (e) {} if (reader) { try { reader.cancel().catch(() => {}); } catch (e) {} } };
+    let idle = setTimeout(() => stop('idle'), idleMs);
+    const poke = () => { lastAt = Date.now(); clearTimeout(idle); idle = setTimeout(() => stop('idle'), idleMs); };
+    const cap = setTimeout(() => stop('cap'), capMs);
+    const beat = o.log && o.log.lease ? setInterval(() => { Promise.resolve(o.log.lease(ST_LEASE_MS)).then(mine => { if (mine === false) stop('fenced'); }, () => {}); }, beatMs) : null;
+    const tell = async () => {
+      if (!(o.log && o.log.phase)) return;
+      const mine = await o.log.phase('model', said + (counts.written ? 'writing the answer: ' + stThou(counts.written) + ' characters so far' : counts.thinking ? 'thinking: ' + stThou(counts.thinking) + ' characters of reasoning so far' : 'the model has started'), Object.assign({ model, step: o.phaseStep || undefined, thinking: counts.thinking, written: counts.written, streamAt: lastAt }, o.phaseCounts || {}));
+      if (mine === false) stop('fenced');
+    };
     // a job cancelled or taken over while this call was in flight files nothing from its answer
-    if (o.log && o.log.fence) await o.log.fence();
-    return { status: r.status, d };
+    const fenceNow = async () => { if (o.log && o.log.fence) await o.log.fence(); };
+    try {
+      let r;
+      try { r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(Object.assign({}, body, { stream: true })), signal: ctl.signal }); }
+      catch (e) { await aiSettle(env, 'studio', false); if (why === 'fenced') await fenceNow(); if (why) return { status: 0, d: stStreamFail(why, idleMs, capMs, counts) }; throw e; }
+      poke();
+      const ctype = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
+      if (r.ok && r.body && /event-stream/i.test(ctype)) {
+        reader = r.body.getReader(); if (why) stop(why);
+        const msg = { model: '', content: [], stop_reason: null, usage: {} }; let complete = false, errEv = null;
+        const end = await stSseRead(reader, async (type, ev) => {
+          if (type === 'message_start') { const m = ev.message || {}; msg.model = m.model || ''; msg.usage = Object.assign({}, m.usage || {}); return false; }
+          if (type === 'content_block_start') { const b = ev.content_block || {}; msg.content[Number(ev.index) || 0] = b.type === 'text' ? { type: 'text', text: String(b.text || '') } : { type: String(b.type || 'unknown') }; return false; }
+          if (type === 'content_block_delta') {
+            const dl = ev.delta || {}; const i = Number(ev.index) || 0; const b = msg.content[i] || (msg.content[i] = { type: dl.type === 'text_delta' ? 'text' : 'thinking' });
+            if (dl.type === 'text_delta') { const t = String(dl.text || ''); b.text = (b.text || '') + t; counts.written += t.length; }
+            else if (dl.type === 'thinking_delta') counts.thinking += String(dl.thinking || '').length;
+            await tell(); return !!why;
+          }
+          if (type === 'message_delta') { if (ev.delta && ev.delta.stop_reason) msg.stop_reason = ev.delta.stop_reason; if (ev.usage) Object.assign(msg.usage, ev.usage); return false; }
+          if (type === 'message_stop') { complete = true; return false; }
+          if (type === 'error') { errEv = ev.error || { type: 'error', message: 'the stream reported an error' }; return true; }
+          return false;   // ping, content_block_stop
+        }, poke);
+        const d = { model: msg.model || body.model, content: msg.content.filter(Boolean), stop_reason: msg.stop_reason, usage: msg.usage };
+        Object.assign(rec, { streamed: true, thinkingChars: counts.thinking, answerChars: counts.written, ms: Date.now() - counts.t0 });
+        if (why) { await aiSettle(env, 'studio', false, d.usage); if (why === 'fenced') await fenceNow(); return { status: 0, d: stStreamFail(why, idleMs, capMs, counts) }; }
+        if (errEv) { await aiSettle(env, 'studio', false, d.usage); await fenceNow(); return { status: errEv.type === 'overloaded_error' ? 529 : 500, d: { error: { type: String(errEv.type || 'error'), message: 'the answer stream reported ' + String(errEv.type || 'an error') + ': ' + String(errEv.message || '').slice(0, 160) } } }; }
+        if (!complete && !d.stop_reason) { await aiSettle(env, 'studio', false, d.usage); await fenceNow(); return { status: 0, d: { error: { type: 'stream_cut', message: 'the answer stream ended before the model finished (' + (end.error ? 'the connection dropped: ' + String((end.error && end.error.message) || end.error).slice(0, 80) + '; ' : '') + stThou(counts.written) + ' characters of the answer had arrived); nothing was parsed' } } }; }
+        await aiSettle(env, 'studio', true, d.usage);
+        await fenceNow();
+        return { status: r.status, d };
+      }
+      // not a stream: an error status, or a proxy that answered in one piece. The body is read as text first: a gateway page
+      // (HTTP 502 / 504 / 524 as HTML), an empty body or a cut-off answer is an upstream failure with its status and an
+      // excerpt, never an "empty answer" that looks like the model's own
+      const raw = await r.text().catch(() => ''); let d = {}; try { d = JSON.parse(raw); } catch (e) { d = {}; }
+      if (why) { await aiSettle(env, 'studio', false); if (why === 'fenced') await fenceNow(); return { status: 0, d: stStreamFail(why, idleMs, capMs, counts) }; }
+      if (!d || typeof d !== 'object') d = {};
+      if (!d.error && (!r.ok || !Array.isArray(d.content))) d = { error: { type: 'upstream_' + r.status, message: 'HTTP ' + r.status + ' from the model API ' + (Array.isArray(d.content) ? 'with an unexpected body' : 'without a JSON answer') + (raw ? ' - ' + raw.replace(/\s+/g, ' ').trim().slice(0, 140) : ' (empty body)') + (r.ok ? '' : '; the request is retried') } };
+      await aiSettle(env, 'studio', r.ok && !d.error, d.usage);
+      await fenceNow();
+      return { status: r.status, d };
+    } finally { clearTimeout(idle); clearTimeout(cap); if (beat) clearInterval(beat); }
   };
   // the compiled instruction: exactly what this call sent (system, user text, the images by name and size, the settings), kept per job
   const rec = { at: Date.now(), provider: 'anthropic', op: o.op || '', role: o.role || 'creative', model, effort: rich.output_config ? rich.output_config.effort : null, thinking: rich.thinking ? 'adaptive' : 'off', maxTok: base.max_tokens,
@@ -7849,6 +7970,8 @@ async function stClaude(env, o) {
     rec.error = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     const m = String(res.d.error.message || res.d.error.type || 'anthropic_error').slice(0, 200);
     if (/credit balance|spend limit|billing|usage limit/i.test(m)) throw new Error('account_limit: ' + m + ' (not retried)');
+    // a stream that fell silent or ended early is retried (stream_idle, stream_cut); one stopped at the cap is not
+    if (/^stream_/.test(String(res.d.error.type || ''))) throw new Error(res.d.error.type + ': ' + m);
     if (res.status === 429 || res.status >= 500 || /overloaded/i.test(m)) throw new Error('overloaded: ' + m);
     throw new Error(m);
   }
@@ -8731,7 +8854,7 @@ async function stAnalyseStage(env, job, p, log) {
       ? '\n\nMATERIAL: ' + srcs.length + ' sources that make one brief, ' + items.length + ' paragraphs numbered across them:' + srcs.map((s0, si) => '\n\n--- SOURCE ' + (si + 1) + ' "' + stStr(s0.name, 120) + '" (' + stStr(String(s0.kind || '').replace(/^analyse:/, ''), 30) + (s0.provenance ? ', from ' + stStr(s0.provenance, 160) : '') + ') ---\n' + items.map((x, i) => x.si === si ? '[P' + (i + 1) + '] ' + stStr(x.text, 1600) : '').filter(Boolean).join('\n\n')).join('')
       : '\n\nMATERIAL "' + stStr(src.name, 120) + '" (' + (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'unknown kind') + (src.provenance ? ', from ' + stStr(src.provenance, 160) : '') + '), ' + keys.length + ' paragraphs:\n' + items.map((x, i) => '[P' + (i + 1) + '] ' + stStr(x.text, 1600)).join('\n\n'));
   await log('cmd', 'claude ' + stModel(env, 'creative') + ' (effort high): understand, situate, compare and propose for ' + ctx.client + ' from ' + keys.length + ' paragraphs' + (multi ? ' in ' + srcs.length + ' sources' : ''));
-  const r = await stClaude(env, { role: 'creative', op: 'analyse', effort: 'high', system: sys, user, images: seenImages, maxTok: 16000, timeoutMs: 240000, log, phaseLabel: 'Checking campaign relevance, topics, issues, facts and risks; drafting objectives and the strategy Axiom recommends', phaseStep: 'model' });
+  const r = await stClaude(env, { role: 'creative', op: 'analyse', effort: 'high', system: sys, user, images: seenImages, maxTok: 16000, timeoutMs: 240000, log, phaseLabel: 'Checking campaign relevance, topics, issues, facts and risks; drafting objectives and the strategy Axiom recommends', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
   if (log.phase) await log.phase('checking', 'Checking every paragraph, fact and knowledge id the answer cites against what was given', { step: 'checking', completed: 3, total: 4 });
   const j = relJson(r.text);
   if (!j || typeof j !== 'object' || (!Array.isArray(j.relevant) && !j.brief && !Array.isArray(j.objectives))) throw new Error('analysis_unparseable: the model did not return the analysis as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
@@ -9328,7 +9451,7 @@ async function stDirectStage(env, job, p, log) {
     + cc.refs.text + cc.mem.text + cc.identityText + modeText
     + '\n\nGive ' + n + ' direction' + (n === 1 ? '' : 's') + '.';
   await log('cmd', 'claude ' + stModel(env, 'creative') + ': ' + (mode === 'refine' ? 'refine "' + named[0].title + '"' : mode === 'merge' ? 'merge ' + named.length + ' directions' : mode === 'alternatives' ? n + ' alternatives to the ' + standing.length + ' standing' : n + ' directions') + (guided ? ' on the confirmed ' + [basis.objective, basis.message, basis.strategy].join(' / ') : ' for an open brief') + ', grounded in ' + led.claims.length + ' ledger claims, the references and the client context');
-  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Developing visual narratives and generating creative concepts', phaseStep: 'model' });
+  const r = await stClaude(env, { role: 'creative', system: sys, user, maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Developing visual narratives and generating creative concepts', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
   const j = relJson(r.text);
   if (!j || !Array.isArray(j.directions) || !j.directions.length) throw new Error('directions_unparseable: the model did not return directions as JSON - "' + llmExcerpt(r.text).slice(0, 150) + '"');
   if (log.phase) await log.phase('checking', 'Measuring how different the directions are, in argument and in medium', { step: 'checking', completed: 3, total: 4 });
@@ -9364,7 +9487,7 @@ async function stDirectStage(env, job, p, log) {
     replanWhy = similar ? 'alike' : 'one medium';
     await log('info', (similar ? dup.length + ' direction' + (dup.length === 1 ? ' reads' : 's read') + ' as another in different words (' + dup.map(d => '"' + d.title + '" ~ "' + d.similar + '"').join(', ') + ')' : 'every direction is ' + dirs[0].medium) + '; asking once for ' + dup.length + ' replacement' + (dup.length === 1 ? '' : 's') + ' that differ in argument and medium');
     try {
-      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model' });
+      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
       const j2 = relJson(again.text); model2 = again.model;
       if (j2 && Array.isArray(j2.directions) && j2.directions.length) {
         const fresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model));
@@ -12123,7 +12246,7 @@ async function stActions(env, p, a, v) {
 async function stStageRun(env, job, done, fail) {
   const lines = []; const log = async (k, t) => { lines.push({ id: lines.length + 1, ts: Date.now(), kind: k, text: String(t).slice(0, 600) }); if (job.progress) await job.progress({ label: String(t).slice(0, 200) }, lines); };
   // a phase is what the stage is doing now (planning, composing, queueing, the model call), with counts where the work is countable
-  log.phase = async (phase, label, extra) => { if (job.progress) await job.progress(Object.assign({ phase: String(phase).slice(0, 24), label: String(label).slice(0, 200) }, extra || {}), lines); };
+  log.phase = async (phase, label, extra) => { if (job.progress) return job.progress(Object.assign({ phase: String(phase).slice(0, 24), label: String(label).slice(0, 200) }, extra || {}), lines); return undefined; };
   log.compiled = []; log.fence = job.fence; log.lease = job.lease;
   const p = await stProject(env, job.project);
   if (!p) return done('failed', { error: 'project gone (not retried)' });
@@ -14716,7 +14839,7 @@ const AXIOM_WORKER = {
           if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '', step: r.step, need: r.need }, r.status || 400);
           return jsonResp({ ok: true, existing: r.existing, job: r.job });
         }
-        if (path === '/studio/job/step') { const j = await stJobStep(env, sb.id); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
+        if (path === '/studio/job/step') return await stStepRespond(env, stClean(sb.id, 24));
         if (path === '/studio/job/cancel') { const j = await stJobCancel(env, sb.id, who); return j ? jsonResp({ ok: true, job: j }) : jsonResp({ error: 'unknown_job' }, 404); }
         return jsonResp({ error: 'not_found' }, 404);
       } catch (e) { return jsonResp({ ok: false, error: 'studio_failed', detail: String((e && e.message) || e).slice(0, 200) }, 500); }

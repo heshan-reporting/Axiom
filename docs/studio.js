@@ -101,6 +101,8 @@
     if (has(/brief_incomplete/)) return out('The brief is missing something mandatory', msg.replace(/^brief_incomplete:\s*/, '').replace(/\s*\(not retried\)\s*$/, '') + ' Resolve it in the Brief, or tick "Proceed on the stated assumptions".', 'warn');
     if (has(/answer_truncated|unparseable/)) return out('The model\'s answer could not be read', 'Nothing was saved from it; your work is as it was. Retry: it is a new call and may be billed.');
     if (has(/refus/i)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
+    if (has(/stream_cap/)) return out('The model was still writing at its time limit', 'The call was stopped so it would not run on, and nothing from it was saved; your work is as it was. Shorten the material or the instruction, then retry.', 'warn');
+    if (has(/stream_idle|stream_cut/)) return out('The model\'s answer stopped arriving', 'It went quiet, or the connection dropped mid-answer, so the call was given up and nothing from it was saved. The worker tries again by itself, up to three attempts; your work is as it was.', 'provider');
     if (has(/gemini_5\d\d|gemini_429|overloaded|\b529\b|\b503\b|rate[ _-]?limit|too many requests|\b429\b|TimeoutError|AbortError|timed out|timeout/i)) return out('The provider is busy or timed out', 'Your work is kept. Retry when ready; a retry is a new attempt and may be billed.', 'provider');
     if (has(/brief_too_large|input_too_large|data_too_large|layout_too_large|content_too_large/)) return out('That is too long to save', msg.replace(/^[a-z_]+:\s*/, '') + ' Nothing was saved and your text is still where you typed it; put long material in a Source instead.');
     if (has(/input_corrupt/)) return out('This job\'s stored instruction is damaged', 'It was not run with an empty instruction. Start the step again from here; the damaged job stays in Jobs as history.');
@@ -121,7 +123,7 @@
     if (status >= 500 && status < 600 && !msg) return failedHere();
     return out(what || 'That did not work', msg);
   }
-  const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent; a provider call already in flight may still finish and be billed.';
+  const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent, and a model call that is writing within half a minute (what it wrote so far may be billed); an image generation already sent may still finish and be billed.';
 
   /* ------------------------------------------------------------ where the team left off: this browser only, never shared */
   const STORE = 'ax_studio_v1';
@@ -432,7 +434,7 @@
   /* Every job is shown while it runs: what it is (the stage in plain words), what it is doing now (the phase the worker
      reports mid-run, else its latest log line), how long it has taken against how long that stage typically takes here,
      a bar that is determinate only where the work is countable (the copy stage's channels, the run's finished steps) and
-     indeterminate otherwise - a model call shows no share until it answers; nothing is estimated from the clock. The job
+     indeterminate otherwise - a model call shows the characters it has written (S22), never a share; nothing is estimated from the clock. The job
      model is STProgress (docs/studio-progress.js); this is its one consumer in the Studio. */
   const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', analyse: 'one model call: the material read against the client, its campaigns and knowledge (plus one to read an image or PDF)', kit: 'one model call for the whole kit', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
   function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset, liveOnly, compact, busy }) {
@@ -483,7 +485,7 @@
           ${j.state === 'queued' && j.error ? html`<div class="st-work-hint ov-dim">${j.error}</div>` : null}
           <div class="st-work-acts">${!ro && j.state === 'failed' ? html`<button class="btn sm" onClick=${() => onRetry(j)}>Retry</button>` : null}${!ro && S.active(j) ? html`<button class="btn sm ghost" onClick=${() => onCancel(j.id)}>Cancel</button>` : null}<button class="ov-link" onClick=${onOpenJobs}>log</button></div>
         </div>`; })}</div>
-        <div class="st-work-foot"><span>Shares are counts of finished steps; a model call shows none until it answers. Nothing here is estimated from the clock.</span><button class="ov-link" onClick=${onOpenJobs}>All jobs</button></div></div>` : null}
+        <div class="st-work-foot"><span>Shares are counts of finished steps; a model call shows the characters it has written so far, never a share. Nothing here is estimated from the clock.</span><button class="ov-link" onClick=${onOpenJobs}>All jobs</button></div></div>` : null}
     </section>`;
   }
 
@@ -3061,15 +3063,26 @@
     /* the same action twice while it is still running is refused here, before any request: a double click never makes two jobs or two charges */
     const guard = async (key, fn) => { if (once.current.has(key)) { setNotice({ kind: 'info', title: 'Already in progress.', text: 'That was not started a second time.' }); return null; } once.current.add(key); try { return await fn(); } finally { once.current.delete(key); } };
 
-    /* a job: step it until it ends; a lease held elsewhere is waited out; the project is reloaded as it moves */
+    /* a job: step it until it ends; a lease held elsewhere is waited out; the project is reloaded as it moves. S22: one step
+       can hold a model call for minutes, and a connection that drops meanwhile (a proxy, a network change, a laptop asleep)
+       does not end the job - it lives in the worker - so the job is read again and stepping carries on; a runner that
+       stopped hands the job back when its lease runs out (two minutes) and the next step takes it. An answer from the
+       worker that is an error is shown as before. */
     const runJob = useCallback(async (id, label) => {
       if (stepping.current.has(id)) return null; stepping.current.add(id);
       try {
-        let waits = 0;
-        for (let i = 0; i < 60; i++) {
+        let waits = 0, lost = 0;
+        for (let i = 0; i < 400; i++) {
           if (label) setBusy(label);
           let j;
-          try { j = (await call('/studio/job/step', { id })).job; } catch (e) { fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
+          try { j = (await call('/studio/job/step', { id })).job; if (!j) { const cut = new Error('the step answer was cut off'); cut.code = 'answer_cut'; throw cut; } lost = 0; }
+          catch (e) {
+            const dropped = !e || !e.status || e.code === 'answer_cut' || (!e.code && e.status >= 500);
+            if (!dropped || ++lost > 6) { fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
+            await sleep(Math.min(15000, 2000 * lost));
+            try { j = (await call('/studio/job?id=' + encodeURIComponent(id))).job; } catch (e2) { j = null; }
+            if (!j || j.state === 'queued' || j.state === 'running') { await reload(); continue; }
+          }
           const d = await reload();
           if (j.state === 'done' || j.state === 'failed' || j.state === 'cancelled') {
             if (j.state === 'failed' && pidRef.current === j.project) { const x = explain({ message: j.error, code: (String(j.error).match(/^[a-z_0-9]+/) || [''])[0] }, 'The ' + j.stage + ' step failed'); setNotice(Object.assign(x, { title: x.title + (x.title.indexOf(j.stage) < 0 ? ' (' + j.stage + ')' : ''), actions: canWrite() && !/not retried|not_configured|budget_exhausted|account_limit/.test(j.error) ? [{ label: 'Retry ' + j.stage, fn: () => retryJob(j) }, { label: 'Jobs', fn: () => setView('jobs', true) }] : [{ label: 'Jobs', fn: () => setView('jobs', true) }] })); if (x.kind === 'provider') refreshStatus(); }
