@@ -3,7 +3,8 @@
  *   A. a required campaign wordmark could be dropped from an image request (nanoRender kept the first six images; the marks
  *      were appended after the references) while the version recorded it as sent; an image prompt was cut blind at a length
  *      limit, which could cut identity rules and approved wording.
- *   B. a reference excluded as another campaign's still reached the suggestions call through the unfiltered reference text.
+ *   B. a reference excluded as another campaign's still reached the suggestions call (and directions and revise) through the
+ *      unfiltered reference text, could be cited as a basis, and could be attached to a render.
  *   C. suggestions were cached on the version, references and last event only, so a retired rule kept being advised.
  *   D. the content desk labelled rejected and other-campaign material "APPROVED EXAMPLES".
  *   E. the stream reader waited for the connection to close after message_stop, and accepted a stream that closed after an
@@ -38,8 +39,10 @@ const sentText = c => { const turn = c.body.contents[c.body.contents.length - 1]
    event stream built byte for byte from the plan (chunks with pauses; `open` keeps the connection open after the last chunk) */
 const anth = { calls: [] };
 const stream = { plan: null, open: false, aborted: 0 };
+const answerForOverride = { fn: null };
 const answerFor = sys => {
-  if (/suggest|next directions|Suggested/i.test(sys)) return { design: [{ title: 'Use the brand blue', why: 'the rule', refs: [] }], image: [] };
+  const o = answerForOverride.fn && answerForOverride.fn(sys); if (o) return o;
+  if (/suggest|next directions|Suggested/i.test(sys)) return { design: [{ text: 'Use the brand blue', why: 'the rule', refs: [] }], image: [] };
   return {};
 };
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
@@ -169,6 +172,65 @@ await T.t('A7 at the limit the rank decides which references stay (approved over
   eq(r.excluded.map(x => x.name), ['insp2'], 'the weaker reference is the one left out');
   const none = att([{ data: 'c', kind: 'current', required: true, name: 'current' }, { data: 'm', mark: 'logo', kind: 'mark', required: true, name: 'logo' }], 1);
   ok(!none.ok && /2 required images/.test(none.detail), none.detail);
+});
+
+// ---------------------------------------------------------------------------------------------------- B. one filtered context package
+// A HOOF project holds two analysed references: its own, and an approved tile of the national campaign. In the recommended
+// pack (every stage's default) the national one is excluded; neither its analysis, its name nor its image may reach a model.
+const payloadText = b => String(b.system || '') + '\n' + (typeof b.messages[0].content === 'string' ? b.messages[0].content : b.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('\n'));
+const payloadImages = b => (typeof b.messages[0].content === 'string' ? [] : b.messages[0].content.filter(x => x.type === 'image').map(x => x.source.data));
+const REF_NAT = REF(30), REF_HOOF = REF(31);
+const seedRefs = async P => {
+  const nat = (await call('POST', '/studio/reference', { project: P, name: 'National gold tile', purpose: 'approved', campaign: 'national', imageB64: REF_NAT, mime: 'image/png', analyse: false })).body.id;
+  const own = (await call('POST', '/studio/reference', { project: P, name: 'HOOF myth tile', purpose: 'approved', campaign: 'hoof', imageB64: REF_HOOF, mime: 'image/png', analyse: false })).body.id;
+  await w.env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(JSON.stringify({ summary: 'NATIONAL-ONLY gold panel carrying the MCA logo bottom right', at: Date.now() }), nat).run();
+  await w.env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(JSON.stringify({ summary: 'HOOF-OWN red and teal myth / fact panels with the wordmark', at: Date.now() }), own).run();
+  return { nat, own };
+};
+const leakCheck = (b, label, refsIds) => {
+  const t = payloadText(b);
+  ok(!/NATIONAL-ONLY|National gold tile/.test(t), label + ': the other campaign\'s reference is not in the text sent');
+  ok(!refsIds || t.indexOf(refsIds.nat) < 0, label + ': its id is not in the text sent');
+  ok(payloadImages(b).indexOf(REF_NAT) < 0, label + ': its image is not attached');
+};
+await T.t('B1 reproduced: suggestions never see a reference excluded as another campaign\'s (text, id or image)', async () => {
+  const { P, A } = await fresh('hoof'); const ids = await seedRefs(P); anth.calls = [];
+  const r = await call('POST', '/studio/suggest', { asset: A, refresh: true }); eq(r.status, 200, JSON.stringify(r.body));
+  const b = anth.calls[anth.calls.length - 1]; ok(b, 'a model call was made');
+  ok(/HOOF-OWN/.test(payloadText(b)), 'the campaign\'s own reference is read');
+  leakCheck(b, 'suggest', ids);
+});
+await T.t('B2 directions, copy, revise and concepts receive the same filtered package', async () => {
+  const { P, A } = await fresh('hoof'); const ids = await seedRefs(P);
+  for (const [stage, input] of [['direct', { n: 2 }], ['copy', { channels: ['instagram'], deliverable: 'visual' }], ['revise', { target: 'asset', asset: A, instruction: 'make the headline bolder' }], ['concepts', { asset: A, mode: 'explore' }]]) {
+    anth.calls = [];
+    const jr = await call('POST', '/studio/job', { project: P, asset: stage === 'concepts' ? A : undefined, stage, input, idem: 'b2:' + stage + ':' + P });
+    eq(jr.status, 200, stage + ': ' + JSON.stringify(jr.body)); await run(jr.body.job);
+    ok(anth.calls.length, stage + ': a model call was made');
+    anth.calls.forEach(b => leakCheck(b, stage, ids));
+  }
+});
+await T.t('B3 a model citing an excluded reference id gets nothing for it: the id is not accepted as a reference', async () => {
+  const { P, A } = await fresh('hoof'); const ids = await seedRefs(P);
+  const prev = answerForOverride.fn; answerForOverride.fn = sys => /suggest|Suggested/i.test(sys) ? { design: [{ text: 'Use the national gold panel', why: 'reference', refs: [ids.nat, ids.own] }], image: [] } : null;
+  try {
+    const r = await call('POST', '/studio/suggest', { asset: A, refresh: true }); eq(r.status, 200, JSON.stringify(r.body));
+    const d = (r.body.design || [])[0] || {}; eq((d.refs || []).map(x => x.id), [ids.own], 'only the campaign\'s own reference is kept as a basis');
+  } finally { answerForOverride.fn = prev; }
+});
+await T.t('B4 a render never attaches a reference from another campaign unless the team chose it; the exclusion is recorded', async () => {
+  const { P, A } = await fresh('hoof'); const ids = await seedRefs(P); gem.calls = [];
+  const j = await run(await renderJob(P, A, { prompt: 'a road at dusk', region: 'bg', referenceIds: [{ id: ids.nat, role: 'mood' }, { id: ids.own, role: 'mood' }], aspect: '1:1' }, 'b4'));
+  eq(j.state, 'done', j.error);
+  const imgs = sentImages(gem.calls[0]); ok(imgs.indexOf(REF_NAT) < 0, 'the national reference image was not sent'); ok(imgs.indexOf(REF_HOOF) >= 0, 'the campaign\'s own was');
+  const v = curOf((await get(P)).assets.find(x => x.id === A));
+  ok((v.image.meta.excludedRefs || []).some(x => /National gold tile/.test(x.name) && /campaign/.test(x.reason)), 'recorded: ' + JSON.stringify(v.image.meta.excludedRefs));
+});
+await T.t('B5 the manifest names the excluded reference as left out, so "What informed this creative?" is honest', async () => {
+  const { P, A } = await fresh('hoof'); await seedRefs(P);
+  const r = await call('POST', '/studio/suggest', { asset: A, refresh: true });
+  const inf = r.body.informed || {}; ok(inf.references && inf.references.excluded >= 1, JSON.stringify(inf.references));
+  ok((inf.omitted || []).some(o => o.what === 'reference' && /National gold tile/.test(o.text) && /campaign/.test(o.why)), JSON.stringify(inf.omitted));
 });
 
 // ---------------------------------------------------------------------------------------------------- E. the stream protocol

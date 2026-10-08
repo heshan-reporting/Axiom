@@ -2276,7 +2276,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 |---|---|---|---|
 | 1 | Baseline verified; checklist, bug ledger, wait inventory written | done | this section |
 | 2A | Required marks never dropped from an image request; records read from the payload | done | `studio-s23-worker.mjs` A1-A7 |
-| 2B | One filtered context package; excluded references reach no model, as text or image | planned | |
+| 2B | One filtered context package; excluded references reach no model, as text or image | done | `studio-s23-worker.mjs` B1-B5 |
 | 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | planned | |
 | 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | planned | |
 | 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
@@ -2295,10 +2295,10 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | Id | Defect | Reproduced by | Fixed in | Status |
 |---|---|---|---|---|
 | S23-A | A finished creative could leave out the campaign's required wordmark: `nanoRender` kept the first six images it was given and `stRenderJob` appended the marks after the references, while the version recorded the mark as sent (`marksSent` was written before the request). The prompt was also cut at 8,000 characters, which could cut the identity rules and the approved words at its end. | A1 (six references + wordmark), A2 (current image + logo + wordmark), A3 (fallback model), A4 (required over the limit), A5 (long prompt) - all failing on `e67f0e5` | slice A | fixed |
-| S23-B | A reference excluded as another campaign's still reached the suggestions call through the unfiltered reference text. | | | open |
+| S23-B | A reference excluded as another campaign's still reached the models: the suggestions, directions and revise calls sent the raw bundle text (its name and analysis), concepts and suggestions accepted its id as a cited basis, a render could attach its image, and even the pack text named it ("EXCLUDED FROM THIS PACK: ..."). | B1-B4 failing on `438104d` | slice B | fixed |
 | S23-C | Suggestions were cached on version, references and last event only, so a retired rule kept being advised. | | | open |
 | S23-D | `contentExemplars` labelled rejected and other-campaign material "APPROVED EXAMPLES". | | | open |
-| S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `5d43a8f` | slice E | fixed |
+| S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
 
@@ -2349,3 +2349,19 @@ in milliseconds, not at the idle limit), E2 no `message_stop`, E3 a stream cut e
 characters, E4 an unparseable frame, E5 pings, comments and unknown events, E6 out-of-order events, E7 an error event, E8
 a cancel mid-stream (the request is aborted), E9 the usage ledger. The browser fixture's stub follows the same order.
 The island explains `stream_protocol` ("The model's answer arrived damaged ... none of it was used").
+
+### 46.6 Slice B - one filtered reference package
+
+`stCompileContext` now hands every stage the pack, never the raw bundle: `refs.text` is the pack's text, `refs.rows` the
+references kept (so a model can cite only those ids, and plans are validated against them), `refs.images` only kept
+references' images, and `refs.used` / `refs.unanalysed` only kept ones. What the pack left out - another campaign's
+references in the recommended pack (every stage's default), references the team did not choose, or all of them by the
+team's choice - is named only in the record: the version's `refPack.excluded` and the manifest's `omitted` list, with the
+reason. The pack text counts the exclusions ("1 excluded") and no longer names them. Renders hold the same line
+(`stRefsForGemini`): another campaign's reference is attached only when the team chose it (a chosen pack recorded on the
+version, or `refsChosen` on the job), and otherwise lands in `image.meta.excludedRefs` with the reason.
+
+Tests: B1 suggestions, B2 directions / copy / revise / concepts (the payloads read for the name, the analysis, the id and
+the image), B3 a model citing the excluded id gets nothing for it, B4 a render, B5 the manifest. Updated to the new
+contract: `studio-p8-worker.mjs` (the excluded name is no longer in the prompt; the record carries it) and
+`studio-p6-worker.mjs` (the stages read "REFERENCE PACK", not the raw "REFERENCES ON THE PROJECT").

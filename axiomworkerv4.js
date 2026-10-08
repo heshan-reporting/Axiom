@@ -8082,6 +8082,12 @@ async function stCompileContext(env, p, opts) {
     if (mode === 'chosen' && opts.refs.attachChosen) { const want = new Set((opts.refs.chosen || []).map(x => stClean(x, 24))); for (const r of refs.rows) { if (want.has(r.id) && !refs.images.some(im => im.ref === r.id) && refs.images.length < 3) { const im = await stRefImage(env, r); if (im) { refs.images.push(Object.assign(im, { ref: r.id, purpose: r.purpose, name: r.name })); r.attached = true; r.prepared = !!im.prepared; r.unavailable = false; } else if (r.key) r.unavailable = true; } } }
     pack = stReferencePack(refs, { mode, chosen: opts.refs.chosen, campaign: p.campaign });
     placement = stPlacementEvidence(pack.rows, ctx.kit, p.campaign || '');
+    // S23: every stage receives the pack, never the raw bundle. A reference the pack excluded (another campaign's in the
+    // recommended pack, one the team did not choose, or all of them by the team's choice) reaches no model: not as text, not as
+    // an id a model may cite as its basis, not as an image. The exclusions travel only in the manifest (omitted, with reasons).
+    const keepIds = new Set(pack.rows.map(r => r.id)); const all = refs;
+    refs = { text: pack.text, rows: pack.rows, images: (all.images || []).filter(im => keepIds.has(im.ref)), used: (all.used || []).filter(u => keepIds.has(u.id)),
+      unanalysed: pack.rows.filter(r => !r.analysis || r.analysis.error).map(r => r.name + (r.analysis && r.analysis.error ? ' (' + r.analysis.error + ')' : '')), excluded: pack.record.excluded };
   }
   if (opts.art) mem = await stArtMemory(env, p.ns, opts.art, p.campaign);
   const kit = ctx.kit; const camp = ctx.block.campaign || (kit.campaigns || []).find(c => c.id === p.campaign) || null;
@@ -11428,7 +11434,8 @@ function stReferencePack(refs, opts) {
   const lines = [];
   ST_PACK_GROUPS.forEach(([key, label, purposes]) => { const rows = keep.filter(r => purposes.indexOf(r.purpose) >= 0); record.groups[key] = rows.length; if (rows.length) lines.push(label.toUpperCase() + ':' + rows.map(r => '\n' + stRefLine(r, r.analysis) + (refs.images.some(im => im.ref === r.id) ? ' [attached as an image' + (r.prepared ? ', prepared copy' : '') + ']' : r.unavailable ? ' [no image available to attach]' : '')).join('')); });
   const summary = mode === 'none' ? 'no references by the team\'s choice' + ((refs.rows || []).length ? ' (' + refs.rows.length + ' on the project left out)' : '') : keep.length + ' reference' + (keep.length === 1 ? '' : 's') + ' in the pack (' + mode + '): ' + Object.keys(record.groups).filter(k => record.groups[k]).map(k => k + ' ' + record.groups[k]).join(', ') + (record.attached.length ? '; ' + record.attached.length + ' attached as images' : '; none attached as images') + (record.excluded.length ? '; ' + record.excluded.length + ' excluded' : '') + (record.unavailable.length ? '; ' + record.unavailable.length + ' without an image' : '');
-  const text = (!(refs.rows || []).length ? '\nREFERENCES: none on the project. Work from the kit, the campaign identity and the client\'s artwork memory.' : '\nREFERENCE PACK - ' + summary + '. How to read them: brand and approved references carry the client\'s requirements - logo treatment, colours, sign-off - and are constraints; an approved layout is an example with room for variation unless its note says mandatory; composition, typography, mood and imagery references say what to take in that one respect; inspiration is inspiration only, never a logo, a claim or an exact layout. Name the reference ids a direction draws on. Facts and approved copy are in the client context; recorded preferences are the learned corrections.' + (lines.length ? '\n' + lines.join('\n') : mode === 'none' ? '\nWork from the kit, the campaign identity and the facts alone.' : '') + (record.excluded.length ? '\nEXCLUDED FROM THIS PACK: ' + record.excluded.map(x => x.name + ' (' + x.why + ')').join('; ') : ''));
+  const text = (!(refs.rows || []).length ? '\nREFERENCES: none on the project. Work from the kit, the campaign identity and the client\'s artwork memory.' : '\nREFERENCE PACK - ' + summary + '. How to read them: brand and approved references carry the client\'s requirements - logo treatment, colours, sign-off - and are constraints; an approved layout is an example with room for variation unless its note says mandatory; composition, typography, mood and imagery references say what to take in that one respect; inspiration is inspiration only, never a logo, a claim or an exact layout. Name the reference ids a direction draws on. Facts and approved copy are in the client context; recorded preferences are the learned corrections.' + (lines.length ? '\n' + lines.join('\n') : mode === 'none' ? '\nWork from the kit, the campaign identity and the facts alone.' : ''));
+  // what the pack left out is named only in the record (the manifest's omitted list): its name, analysis and image never reach a model
   return { mode, text, summary, record, rows: keep };
 }
 /** The client's artwork memory: past creatives the Engine has catalogued (descriptions, never another client's). */
@@ -11473,11 +11480,16 @@ const ST_CONCEPT_SYS = 'You are the art director of an Australian political comm
 /** Resolve a plan's region references (ids on the project) to images with roles, for the image model. */
 // when an image request is at the model's input limit, references go in the purpose order the reference bundle uses (ST_REF_RANK,
 // lower first): the client's requirements, then how the piece is built, then the look, then loose inspiration
-async function stRefsForGemini(env, p, refs) {
-  const out = [];
-  for (const r of (refs || []).slice(0, 4)) {
+async function stRefsForGemini(env, p, refs, opts) {
+  opts = opts || {}; const out = []; const allow = new Set((opts.allow || []).map(x => stClean(x, 24)));
+  for (const r of (refs || [])) {
+    if (out.length >= 4) break;
     const row = r && r.id ? await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=? AND project=?').bind(stClean(r.id, 24), p.id).first() : null;
-    if (!row) continue; const im = await stRefImage(env, row); if (!im) continue;
+    if (!row) continue;
+    // another campaign's reference goes to the image model only when the team chose it for this piece (S23): a plan written
+    // before the context was filtered, or a hand-made job, cannot carry it there; the exclusion is recorded on the version
+    if (p.campaign && row.campaign && row.campaign !== p.campaign && !allow.has(row.id)) { if (Array.isArray(opts.excluded)) opts.excluded.push({ name: String(row.name || 'reference').slice(0, 120), id: row.id, reason: 'belongs to the campaign ' + row.campaign + ', not ' + p.campaign + ': another campaign\'s reference is not sent unless the team chose it' }); continue; }
+    const im = await stRefImage(env, row); if (!im) continue;
     out.push({ data: im.b64, mime: im.mime, role: (r.role ? r.role + ' ' : '') + '(' + row.purpose + ' reference: ' + row.name + (row.purpose === 'inspiration' ? '; inspiration only, copy nothing exactly' : row.purpose === 'brand' || row.purpose === 'approved' ? '; the client\'s requirements, follow them' : '') + ')', name: row.name, id: row.id, rank: ST_REF_RANK[row.purpose] != null ? ST_REF_RANK[row.purpose] : 9 });
   }
   return out;
@@ -11816,10 +11828,14 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (!env.MIND_DOCS) return done('failed', { error: 'storage_not_configured: the worker has no image storage bound (MIND_DOCS), so no image was requested (not retried)' });
   if (job.progress) await job.progress({ phase: 'preparing', label: 'reading the current version' + (Array.isArray(inp.referenceIds) && inp.referenceIds.length ? ', ' + inp.referenceIds.length + ' reference' + (inp.referenceIds.length === 1 ? '' : 's') : '') + (inp.finished ? ' and the mark files' : '') });
   const cur = await stCurrent(env, a);
+  // the references the team chose for this piece (a chosen pack recorded on the version, or named on the job) may come from
+  // another campaign; any other reference of another campaign is left out and recorded
+  const refsChosenFor = (v, input) => { const inf = v && v.context && v.context.informed; const fromPack = inf && inf.references && inf.references.mode === 'chosen' ? [].concat(inf.references.attached || [], inf.references.read || []).map(x => x && x.id).filter(Boolean) : []; return fromPack.concat(Array.isArray(input.refsChosen) ? input.refsChosen : []); };
+  const refsExcluded = [];
   // references: ids on the project (with roles from the plan), or raw data a caller supplied. A raw reference is optional
   // material: it can never pose as a mark or as required (only the mark files this job reads from R2 are marks)
   const references = (Array.isArray(inp.references) ? inp.references.filter(r => r && r.data) : []).map(r => ({ data: r.data, mime: r.mime, role: r.role, name: r.name, id: r.id, rank: Number.isFinite(Number(r.rank)) ? Number(r.rank) : undefined }))
-    .concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : []));
+    .concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : [], { allow: refsChosenFor(cur, inp), excluded: refsExcluded }));
   // a finished creative: the mark files named on the job are read from R2 and go to the image model as image inputs to reproduce;
   // a file that cannot be read stops the job before anything is spent - nothing is painted from a description in its place
   const finished = !!inp.finished; const marksWanted = [];
@@ -11887,7 +11903,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
-  const meta = { references: attachedRows.map(r => r.name || r.role).filter(Boolean).slice(0, 16), attached: attachedRows.map(r => ({ kind: r.kind, role: r.role, name: r.name, mark: r.mark, required: !!r.required })), excludedRefs: Array.isArray(out.excluded) && out.excluded.length ? out.excluded : undefined, promptDropped: Array.isArray(out.promptDropped) && out.promptDropped.length ? out.promptDropped : undefined, model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
+  const meta = { references: attachedRows.map(r => r.name || r.role).filter(Boolean).slice(0, 16), attached: attachedRows.map(r => ({ kind: r.kind, role: r.role, name: r.name, mark: r.mark, required: !!r.required })), excludedRefs: refsExcluded.length || (Array.isArray(out.excluded) && out.excluded.length) ? refsExcluded.concat(out.excluded || []) : undefined, promptDropped: Array.isArray(out.promptDropped) && out.promptDropped.length ? out.promptDropped : undefined, model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
   if (compiledKey) meta.compiled = { job: job.id, key: compiledKey };
   if (finished) { meta.finished = true; meta.marksSent = marksSent; }
   if (areaEdit) meta.edit = Object.assign({}, areaEdit, { of: editOf, preservation: 'pending', limits: 'Described-area editing (semantic masking): the image model is asked to leave everything outside the area alone, with no pixel mask to hold it there. What changed outside the area is measured afterwards.' });

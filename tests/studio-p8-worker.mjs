@@ -147,7 +147,11 @@ await t('the campaigns stay apart: a national project carries the client logo an
   const rn = await req('POST', '/studio/reference', { project: pn.d.id, kind: 'image', name: 'A HOOF tile on a national project', purpose: 'approved', campaign: 'hoof', imageB64: PNG, mime: 'image/png' }); eq(rn.status, 200);
   const j = await jobRun(pn.d.id, 'copy', { channels: ['instagram'], deliverable: 'set', render: false }); eq(j.state, 'done', j.error);
   const user = textOf(anth.calls.filter(b => /producing a coordinated set/.test(String(b.system))).pop());
-  ok(/0 references in the pack \(recommended\)/.test(user) && /EXCLUDED FROM THIS PACK: A HOOF tile on a national project \(belongs to the campaign hoof, not national\)/.test(user), user.slice(user.indexOf('REFERENCE PACK'), user.indexOf('REFERENCE PACK') + 300));
+  // S23: the excluded reference is counted in the pack summary and named only in the record (the event's pack and the
+  // manifest's omitted list) - its name, analysis and image never reach the model
+  ok(/0 references in the pack \(recommended\)/.test(user) && /1 excluded/.test(user) && !/A HOOF tile on a national project/.test(user), user.slice(user.indexOf('REFERENCE PACK'), user.indexOf('REFERENCE PACK') + 300));
+  const g0 = await get(pn.d.id); const pk = (cur(g0, g0.assets[0].id).context || {}).refPack || {};
+  ok((pk.excluded || []).some(x => /A HOOF tile on a national project/.test(x.name) && /belongs to the campaign hoof, not national/.test(x.why)), 'the version\'s record names it with the reason: ' + JSON.stringify(pk));
   const g = await get(pn.d.id); const v = cur(g, g.assets[0].id); ok(layerOf(v.layout, 'logo') && !layerOf(v.layout, 'wordmark'), 'national: client logo, no wordmark'); eq(v.layout.incomplete, []);
   const pa = await req('POST', '/studio/project', { ns: 'aep', campaign: 'gas', title: 'AEP', brief: { objective: 'o', message: 'm', channels: ['linkedin'] } });
   const ja = await jobRun(pa.d.id, 'copy', { channels: ['linkedin'], deliverable: 'set', render: false }); eq(ja.state, 'done', ja.error);
