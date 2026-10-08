@@ -2278,7 +2278,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 2A | Required marks never dropped from an image request; records read from the payload | done | `studio-s23-worker.mjs` A1-A7 |
 | 2B | One filtered context package; excluded references reach no model, as text or image | done | `studio-s23-worker.mjs` B1-B5 |
 | 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | done | `studio-s23-worker.mjs` C1-C3 |
-| 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | planned | |
+| 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | done | `studio-s23-worker.mjs` D1-D4 |
 | 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
 | 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | planned | |
 | 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | planned | |
@@ -2297,7 +2297,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-A | A finished creative could leave out the campaign's required wordmark: `nanoRender` kept the first six images it was given and `stRenderJob` appended the marks after the references, while the version recorded the mark as sent (`marksSent` was written before the request). The prompt was also cut at 8,000 characters, which could cut the identity rules and the approved words at its end. | A1 (six references + wordmark), A2 (current image + logo + wordmark), A3 (fallback model), A4 (required over the limit), A5 (long prompt) - all failing on `e67f0e5` | slice A | fixed |
 | S23-B | A reference excluded as another campaign's still reached the models: the suggestions, directions and revise calls sent the raw bundle text (its name and analysis), concepts and suggestions accepted its id as a cited basis, a render could attach its image, and even the pack text named it ("EXCLUDED FROM THIS PACK: ..."). | B1-B4 failing on `438104d` | slice B | fixed |
 | S23-C | Suggestions were cached on version, references and last event only, so a retired rule, a re-analysed reference or a changed campaign left the old advice standing as current; and an older answer still in flight could overwrite newer advice (a KV write with no order). | C1-C3 failing on `cffc482` | slice C | fixed |
-| S23-D | `contentExemplars` labelled rejected and other-campaign material "APPROVED EXAMPLES". | | | open |
+| S23-D | `contentExemplars` labelled everything of kind copy, outcome, brief or release "APPROVED EXAMPLES" - rejected work (LOSS outcomes), background briefs and other campaigns' captions included - and judged a document's campaign by whether its source contained the campaign id anywhere. | D1-D4 failing on `795a136` | slice D | fixed |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
@@ -2384,3 +2384,29 @@ model call)" asks again.
 Tests: C1 a rule retired (outdated, then a new call without the rule), C2 a reference re-analysed and a campaign
 changed, C3 two requests in flight answering out of order. The p6, p3, s20 and s7 worker harnesses and the studio and
 s20 browser harnesses pass unchanged.
+
+### 46.8 Slice D - examples by explicit classification
+
+`mind_docs` gained `campaign`, `approval` (approved / rejected / background), `scope` (campaign / client) and
+`classified` (who or what said so). `/mind/ingest` takes them, `tools/engine-ingest.py` sends them from a pack's
+frontmatter (`campaign:`, and `approval:` or `status:` when stated), and every outcome the Engine files carries its verdict
+and the project's campaign (`engineOutcome`: Studio approvals, the message kit, the Content Desk). `contentExemplars`
+reads each retrieved document's row and groups it:
+
+- **APPROVED EXAMPLES** (learn from them): the client's own documents approved for this campaign, or for the client as a
+  whole;
+- **AVOID** (never imitate): what the team rejected for this campaign or the client;
+- **BACKGROUND** (context and facts, not style): briefs, releases, guides;
+- **not used**: another campaign's work (counted), the agency's own namespace as an example, and anything nobody classified
+  (counted and listed by `GET /mind/unclassified?namespace=`; `POST /mind/classify {docId, campaign, approval, scope}`,
+  full role, classifies one, recorded as the person who did).
+
+One labelled legacy rule keeps the voice packs that were loaded before S23 working: a document whose source is the
+ingest tool's tag `pack:<ns>:<campaign>:...` and whose kind is copy is an approved caption by the voice-pack contract,
+attributed to a campaign only on exact equality with the tag's segment; such documents are counted as `legacy` until
+someone classifies them. The context manifest records the example sets (`exampleSets`) and lists unclassified and
+other-campaign examples under `omitted`.
+
+Tests: D1 HOOF (approved, avoid, background, nothing from national or AEP, unclassified and a substring trap unused), D2
+MCA national and a client-wide example, D3 a Studio rejection filed as a classified outcome, D4 classification by a
+person (a read key refused). `content-worker.mjs` updated to the new narration.

@@ -215,7 +215,8 @@ await t('POST /content/generate writes n pieces per platform in the campaign fra
   ok(!/LEARNED CORRECTIONS/.test(sys), 'no corrections yet');
   const log = env.MIND_DB.table('bridge_log').filter(l => l.job === jobId).map(l => l.text);
   ok(log.some(l => /voice profile: campaign "Hands Off Our Fuel", 2 approved facts, 2 banned terms, audience Segment 6/.test(l)), 'console narrates the profile: ' + log.join(' | '));
-  ok(log.some(l => /Mind: 1 approved example \(1 from hoof\)/.test(l)), 'console narrates the examples');
+  // S23: the narration says what each document is - approved to learn from, to avoid, background - and how it was classified
+  ok(log.some(l => /Mind for mca \/ hoof: 1 approved example, 0 to avoid, 0 background, 1 classified by their voice-pack tag/.test(l)), 'console narrates the examples: ' + log.filter(l => /Mind/.test(l)).join(' | '));
   ok(log.some(l => /6 pieces: facebook x2, linkedin x2, instagram x2 - 3 flagged/.test(l)), 'console narrates the result: ' + log.join(' | '));
   const job = env.MIND_DB.table('bridge_jobs').find(j => j.id === jobId); eq(job.status, 'done'); eq(job.source, 'content');
 });

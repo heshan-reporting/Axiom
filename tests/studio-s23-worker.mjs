@@ -7,7 +7,8 @@
  *      unfiltered reference text, could be cited as a basis, and could be attached to a render.
  *   C. suggestions were cached on the version, references and last event only, so a retired rule kept being advised; an
  *      older answer still in flight could overwrite newer advice.
- *   D. the content desk labelled rejected and other-campaign material "APPROVED EXAMPLES".
+ *   D. the examples block labelled rejected, background and other-campaign material "APPROVED EXAMPLES", judged the campaign
+ *      by a substring of the source, and had no record of what was never classified.
  *   E. the stream reader waited for the connection to close after message_stop, and accepted a stream that closed after an
  *      end_turn delta without message_stop; a data frame that did not parse was skipped, so an answer could arrive shorter
  *      than the model wrote it.
@@ -275,6 +276,57 @@ await T.t('C3 an older answer still in flight never replaces newer advice', asyn
     ok(f.body.superseded, 'the late answer is marked superseded: ' + JSON.stringify(Object.keys(f.body)));
     const pk = await peek(A); eq(pk.design[0].text, 'ANSWER-1', 'the cache keeps the newer advice');
   } finally { answerForOverride.fn = prev; anthDelay.fn = prevDelay; }
+});
+
+// ---------------------------------------------------------------------------------------------------- D. examples by explicit metadata
+// The Mind stub answers a query with every stored chunk of the namespace asked for (retrieval quality is not under test here;
+// what the examples block does with what retrieval returns is).
+w.env.MIND_VECTORS.query = async (vec, o) => ({ matches: Array.from(w.vectors.values()).filter(v => (v.namespace || '') === (o && o.namespace)).map(v => ({ id: v.id, score: 0.9, metadata: v.metadata })) });
+const ingest = async (ns, kind, title, text, extra) => { const r = await call('POST', '/mind/ingest', Object.assign({ namespace: ns, kind, title, text, source: 'test:' + title }, extra || {})); eq(r.status, 200, JSON.stringify(r.body)); return r.body.docId; };
+let seededD = false;
+const seedMind = async () => {
+  if (seededD) return; seededD = true;
+  await ingest('mca_creative', 'copy', 'HOOF caption approved', 'HOOF-APPROVED-COPY: Hands off our fuel - it is a credit, not a subsidy.', { campaign: 'hoof', approval: 'approved', scope: 'campaign' });
+  await ingest('mca_creative', 'copy', 'National caption approved', 'NATIONAL-APPROVED-COPY: Mining pays its way for every Australian.', { campaign: 'national', approval: 'approved', scope: 'campaign' });
+  await ingest('mca_creative', 'outcome', 'LOSS: HOOF tile', 'HOOF-REJECTED-COPY: Miners get a fuel handout.', { campaign: 'hoof', approval: 'rejected', scope: 'campaign' });
+  await ingest('mca_creative', 'brief', 'HOOF content guide', 'HOOF-BRIEF-BACKGROUND: the campaign answers the subsidy framing.', { campaign: 'hoof', approval: 'background' });
+  await ingest('mca_creative', 'copy', 'An old caption', 'LEGACY-UNCLASSIFIED: a caption nobody classified.', {});
+  await ingest('mca_creative', 'copy', 'A pack caption', 'HOOF-SUBSTRING-TRAP: filed under a source naming hoof only in passing.', { source: 'notes about hoofprints' });
+  await ingest('aep_creative', 'copy', 'AEP caption approved', 'AEP-APPROVED-COPY: Gas keeps the lights on.', { campaign: 'gas', approval: 'approved' });
+};
+const exemplars = (ns, campId) => w.mod.__test.contentExemplars(w.env, ns, campId ? { id: campId, name: campId } : null, ['instagram'], 'brief', async () => {});
+await T.t('D1 reproduced: HOOF gets its own approved examples to imitate, its rejected work as "avoid", its brief as background, and nothing from another campaign or client', async () => {
+  await seedMind(); const ex = await exemplars('mca', 'hoof'); const t = ex.text;
+  const approved = (t.split(/\n\n(?=AVOID|BACKGROUND)/)[0] || '');
+  ok(/APPROVED EXAMPLES/.test(t) && /HOOF-APPROVED-COPY/.test(approved), 'the HOOF approved caption is an example: ' + t.slice(0, 400));
+  ok(!/HOOF-REJECTED-COPY/.test(approved), 'the rejected caption is never among the examples to imitate');
+  ok(/AVOID[^]*HOOF-REJECTED-COPY/.test(t), 'the rejected caption is listed to avoid');
+  ok(/BACKGROUND[^]*HOOF-BRIEF-BACKGROUND/.test(t) && !/HOOF-BRIEF-BACKGROUND/.test(approved), 'the brief is background, not an example');
+  ok(!/NATIONAL-APPROVED-COPY/.test(t), 'another campaign\'s approved copy is not offered');
+  ok(!/AEP-APPROVED-COPY/.test(t), 'another client never');
+  ok(!/LEGACY-UNCLASSIFIED/.test(t) && !/HOOF-SUBSTRING-TRAP/.test(t), 'unclassified material is not used, and a source that merely contains the campaign id is not a campaign tag');
+  ok(ex.unclassified >= 2, 'the unclassified records are counted for classification: ' + JSON.stringify(ex));
+});
+await T.t('D2 MCA national gets its own examples, not HOOF\'s; a client-wide approved example reaches both campaigns', async () => {
+  await seedMind();
+  await ingest('mca_creative', 'copy', 'Client-wide approved', 'CLIENT-WIDE-APPROVED: The MCA signs off with mining dot org.', { approval: 'approved', scope: 'client' });
+  const n = await exemplars('mca', 'national'); ok(/NATIONAL-APPROVED-COPY/.test(n.text) && !/HOOF-APPROVED-COPY|HOOF-REJECTED-COPY/.test(n.text), n.text.slice(0, 400));
+  ok(/CLIENT-WIDE-APPROVED/.test(n.text), 'client-wide approved work applies to every campaign');
+  const h = await exemplars('mca', 'hoof'); ok(/CLIENT-WIDE-APPROVED/.test(h.text));
+});
+await T.t('D3 an outcome filed through the Studio carries its verdict and campaign explicitly; a kill is "avoid" next time', async () => {
+  const { P, A } = await fresh('hoof');
+  const ap = await call('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'reject', reason: 'OUTCOME-KILLED: reads as a handout, never say handout' }); ok(ap.status === 200 || ap.status === 409, JSON.stringify(ap.body));
+  const row = (await w.env.MIND_DB.prepare("SELECT kind, campaign, approval FROM mind_docs WHERE title LIKE 'LOSS:%' ORDER BY created DESC LIMIT 1").all()).results[0];
+  eq(row && [row.kind, row.campaign, row.approval], ['outcome', 'hoof', 'rejected'], 'the outcome document is classified explicitly');
+});
+await T.t('D4 a legacy record is classified by a person, explicitly, and only then used', async () => {
+  await seedMind();
+  const docs = (await call('GET', '/mind/unclassified?namespace=mca_creative')).body; ok(docs.ok && docs.docs.some(d => d.title === 'An old caption'), JSON.stringify(docs).slice(0, 300));
+  const id = docs.docs.find(d => d.title === 'An old caption').id;
+  eq((await call('POST', '/mind/classify', { docId: id, campaign: 'hoof', approval: 'approved', scope: 'campaign' }, 'read-key')).status, 403, 'a read key cannot classify');
+  eq((await call('POST', '/mind/classify', { docId: id, campaign: 'hoof', approval: 'approved', scope: 'campaign' })).status, 200);
+  const ex = await exemplars('mca', 'hoof'); ok(/LEGACY-UNCLASSIFIED/.test(ex.text.split(/\n\n(?=AVOID|BACKGROUND)/)[0]), 'now an approved HOOF example');
 });
 
 // ---------------------------------------------------------------------------------------------------- E. the stream protocol

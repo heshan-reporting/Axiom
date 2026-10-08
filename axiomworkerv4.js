@@ -2118,7 +2118,9 @@ async function mindSchema(env) {
   await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS mind_runs(id INTEGER PRIMARY KEY AUTOINCREMENT, ns TEXT, mode TEXT, q TEXT, created INTEGER)').run();
   // the coverage columns arrive by migration; a column that cannot be added is an error, not something to swallow
   const have = new Set(((await env.MIND_DB.prepare('PRAGMA table_info(mind_docs)').all()).results || []).map(c => c.name));
-  for (const [c, t] of [['chars', 'INTEGER'], ['hash', 'TEXT'], ['indexed', 'INTEGER'], ['status', 'TEXT'], ['error', 'TEXT'], ['updated', 'INTEGER']]) if (!have.has(c)) await env.MIND_DB.prepare('ALTER TABLE mind_docs ADD COLUMN ' + c + ' ' + t).run();
+  // S23: a document's classification is explicit - the campaign it belongs to, whether the team approved or rejected it or it is
+  // background, its scope, and who or what classified it - never inferred from its text or a substring of its source
+  for (const [c, t] of [['chars', 'INTEGER'], ['hash', 'TEXT'], ['indexed', 'INTEGER'], ['status', 'TEXT'], ['error', 'TEXT'], ['updated', 'INTEGER'], ['campaign', 'TEXT'], ['approval', 'TEXT'], ['scope', 'TEXT'], ['classified', 'TEXT']]) if (!have.has(c)) await env.MIND_DB.prepare('ALTER TABLE mind_docs ADD COLUMN ' + c + ' ' + t).run();
   try { await env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS mind_docs_ns_hash ON mind_docs(ns, hash)').run(); } catch (e) { /* an index is an optimisation; the lookup still works without it */ }
   MIND_SCHEMA_OK = true;
 }
@@ -2136,15 +2138,27 @@ async function mindIngestDoc(env, doc, opts) {
   const hash = await sha256hex(text);
   if (!doc.force) {
     const had = await env.MIND_DB.prepare('SELECT id, status FROM mind_docs WHERE ns=? AND hash=? ORDER BY created DESC LIMIT 1').bind(ns, hash).first();
-    if (had) { const r = had.status === 'complete' ? await mindDocSummary(env, had.id) : await mindIndexResume(env, had.id, { text }); return Object.assign(r, { existing: true }); }
+    if (had) {
+      // the same text sent again with an explicit classification classifies the stored document
+      const cls = mindClass(doc); if (cls.classified) await env.MIND_DB.prepare('UPDATE mind_docs SET campaign=?, approval=?, scope=?, classified=? WHERE id=?').bind(cls.campaign, cls.approval, cls.scope, cls.classified, had.id).run();
+      const r = had.status === 'complete' ? await mindDocSummary(env, had.id) : await mindIndexResume(env, had.id, { text }); return Object.assign(r, { existing: true });
+    }
   }
   const docId = ns + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const title = String(doc.title || 'Untitled').slice(0, 200), kind = String(doc.kind || 'doc').slice(0, 40);
+  const cls = mindClass(doc);
   const chunks = mindChunks(text);
   await env.MIND_DOCS.put('mind/' + ns + '/' + docId + '.txt', text);
-  await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created,chars,hash,indexed,status,error,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .bind(docId, ns, title, kind, String(doc.source || '').slice(0, 300), String(doc.date || '').slice(0, 20), chunks.length, Date.now(), text.length, hash, 0, 'indexing', '', Date.now()).run();
+  await env.MIND_DB.prepare('INSERT INTO mind_docs(id,ns,title,kind,source,dt,chunks,created,chars,hash,indexed,status,error,updated,campaign,approval,scope,classified) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(docId, ns, title, kind, String(doc.source || '').slice(0, 300), String(doc.date || '').slice(0, 20), chunks.length, Date.now(), text.length, hash, 0, 'indexing', '', Date.now(), cls.campaign, cls.approval, cls.scope, cls.classified).run();
   return mindIndexResume(env, docId, { text });
+}
+/** The explicit classification a caller gave a document (campaign, approval, scope), sanitised; classified names who said so. */
+const MIND_APPROVALS = ['approved', 'rejected', 'background'];
+function mindClass(doc) {
+  doc = doc || {}; const campaign = String(doc.campaign || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+  const approval = MIND_APPROVALS.indexOf(doc.approval) >= 0 ? doc.approval : ''; const scope = doc.scope === 'campaign' || doc.scope === 'client' ? doc.scope : (campaign ? 'campaign' : (approval ? 'client' : ''));
+  return { campaign, approval, scope, classified: approval || campaign ? stStr(doc.classifiedBy || 'ingest', 60) : '' };
 }
 async function mindDocSummary(env, docId) {
   const row = await env.MIND_DB.prepare('SELECT * FROM mind_docs WHERE id=?').bind(docId).first(); if (!row) return { ok: false, error: 'unknown_document', docId };
@@ -3491,7 +3505,8 @@ async function engineOutcome(env, body, who) {
   try {
     const text = 'VERDICT: ' + verdict.toUpperCase() + '\nSurface: ' + o.surface + (o.ref ? ' ' + o.ref + ' tile ' + (o.n + 1) : '') + '\nDate: ' + new Date().toISOString().slice(0, 10)
       + (o.headline ? '\nHeadline: ' + o.headline : '') + (o.support ? '\nSupport: ' + o.support : '') + (o.cta ? '\nCTA: ' + o.cta : '') + (o.why ? '\nWhy: ' + o.why : '');
-    const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: new Date().toISOString().slice(0, 10) });
+    const camp = String(body.campaign || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
+    const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: new Date().toISOString().slice(0, 10), campaign: camp, approval: verdict === 'approved' ? 'approved' : 'rejected', scope: camp ? 'campaign' : 'client', classifiedBy: 'verdict:' + o.surface });
     docId = r.docId;
   } catch (e) { o.exemplarError = String((e && e.message) || e).slice(0, 200); console.log('outcome exemplar not filed: ' + o.exemplarError); }   // the verdict stands; the answer says the exemplar is missing
   return Object.assign(o, { docId });
@@ -3715,19 +3730,48 @@ function contentKitBlock(kit, campaignId, segmentId, platforms, opts) {
 }
 /** Approved examples for this client from the Mind: copy filed by the voice
  *  pack, WIN outcomes the team approved, the content guide. */
+/* S23: the examples a model sees are chosen by each document's explicit classification (mind_docs: campaign, approval, scope),
+ * never by its kind alone or a substring of its source. APPROVED EXAMPLES (to learn from) are the client's own documents the team
+ * approved for this campaign or for the client as a whole; AVOID lists what the team rejected (never offered to imitate);
+ * BACKGROUND holds briefs, releases and guides (for context and facts, not style). Another campaign's work is left out, the
+ * agency's own namespace is never an example, and a document nobody classified is not used: it is counted for classification.
+ * One labelled legacy rule keeps the voice packs working: a document filed by tools/engine-ingest.py from a pack carries the
+ * source tag pack:<ns>:<campaign>:..., and the pack contract makes its copy approved captions; the campaign must equal the
+ * tag's segment exactly, and such documents are reported as legacy until someone classifies them. */
 async function contentExemplars(env, ns, camp, platforms, brief, log) {
   let hits = [];
   try {
     const q = [(camp && camp.name) || '', (platforms || []).join(' '), 'approved caption post copy example', String(brief || '').slice(0, 300)].join(' ');
     hits = await mindRetrieve(env, ns, q, 10, { creative: true });
-  } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); return { text: '', count: 0 }; }
-  const want = hits.filter(h => /^(copy|outcome|brief|release)$/.test(String(h.meta.kind || '')));
-  const own = want.filter(h => camp && String(h.meta.source || '').indexOf(camp.id) >= 0);
-  const picked = own.concat(want.filter(h => own.indexOf(h) < 0)).slice(0, 8);
-  await log('out', 'Mind: ' + picked.length + ' approved example' + (picked.length === 1 ? '' : 's') + (camp ? ' (' + own.length + ' from ' + camp.id + ')' : '') + ' for ' + ns);
-  if (!picked.length) return { text: '', count: 0 };
-  const text = '\n\nAPPROVED EXAMPLES - match their shape, rhythm, sign-offs and source lines; do not copy them word for word:\n' + picked.map(h => '[' + String(h.meta.kind || 'doc').toUpperCase() + ' - ' + (h.meta.title || '') + ']\n' + String(h.meta.snippet || '').slice(0, 700)).join('\n\n').slice(0, 6000);
-  return { text, count: picked.length };
+  } catch (e) { await log('info', 'Mind retrieval skipped: ' + String(e.message || e).slice(0, 80)); return { text: '', count: 0, approved: 0, avoid: 0, background: 0, unclassified: 0, otherCampaign: 0, legacy: 0 }; }
+  const ids = Array.from(new Set(hits.map(h => String((h.meta || {}).docId || '')).filter(Boolean))).slice(0, 90);
+  const rows = {};
+  if (ids.length && env.MIND_DB) { try { await mindSchema(env); const r = await env.MIND_DB.prepare('SELECT id, ns, kind, title, source, campaign, approval, scope FROM mind_docs WHERE id IN (' + ids.map(() => '?').join(',') + ')').bind(...ids).all(); (r.results || []).forEach(x => { rows[x.id] = x; }); } catch (e) {} }
+  const cid = camp ? String(camp.id || '') : ''; const seen = new Set();
+  const G = { approved: [], avoid: [], background: [] }; let unclassified = 0, otherCampaign = 0, legacy = 0;
+  for (const h of hits) {
+    const m = h.meta || {}; const id = String(m.docId || ''); const key = id || String(m.title || '') + '|' + String(m.snippet || '').slice(0, 60); if (seen.has(key)) continue; seen.add(key);
+    const row = rows[id] || null; const own = h.ns === ns || h.ns === ns + '_creative';
+    const kind = String((row && row.kind) || m.kind || '');
+    let approval = row ? String(row.approval || '') : ''; let campaign = row ? String(row.campaign || '') : ''; let scope = row ? String(row.scope || '') : ''; let isLegacy = false;
+    if (!approval) { const tag = String((row && row.source) || m.source || '').split(':'); if (tag[0] === 'pack' && tag[1] === ns && (kind === 'copy' || kind === 'brief')) { approval = kind === 'copy' ? 'approved' : 'background'; campaign = cid && tag[2] === cid ? cid : (tag.length > 4 && tag[2] ? tag[2] : ''); scope = campaign ? 'campaign' : 'client'; isLegacy = true; } }
+    const entry = { kind, title: String((row && row.title) || m.title || ''), snippet: String(m.snippet || '').slice(0, 700), campaign };
+    if (approval === 'background' || /^(brief|release|doc|slack|guide)$/.test(kind)) { if (own || h.ns === 'cmm') { if (!campaign || !cid || campaign === cid) G.background.push(entry); else otherCampaign++; } continue; }
+    if (!/^(copy|outcome)$/.test(kind)) continue;
+    if (!own) continue;                                                   // the agency's namespace is never a client's example
+    if (!approval) { unclassified++; continue; }                          // nobody said whether it was approved: not used, counted
+    const fits = campaign ? campaign === cid : scope !== 'campaign';      // a campaign's work for that campaign; client-wide work for any
+    if (!fits) { otherCampaign++; continue; }
+    if (isLegacy) legacy++;
+    (approval === 'approved' ? G.approved : approval === 'rejected' ? G.avoid : G.background).push(entry);
+  }
+  const A = G.approved.slice(0, 6), V = G.avoid.slice(0, 4), B = G.background.slice(0, 3);
+  await log('out', 'Mind for ' + ns + (cid ? ' / ' + cid : '') + ': ' + A.length + ' approved example' + (A.length === 1 ? '' : 's') + ', ' + V.length + ' to avoid, ' + B.length + ' background' + (otherCampaign ? ', ' + otherCampaign + ' from another campaign left out' : '') + (unclassified ? ', ' + unclassified + ' unclassified (not used until classified)' : '') + (legacy ? ', ' + legacy + ' classified by their voice-pack tag' : ''));
+  const sect = (head, list) => list.length ? '\n\n' + head + '\n' + list.map(e => '[' + e.kind.toUpperCase() + ' - ' + e.title + (e.campaign ? ' (' + e.campaign + ')' : ' (client-wide)') + ']\n' + e.snippet).join('\n\n') : '';
+  const text = (sect('APPROVED EXAMPLES - approved by the team' + (cid ? ' for this campaign or for the client as a whole' : '') + '; match their shape, rhythm, sign-offs and source lines; do not copy them word for word:', A)
+    + sect('AVOID - work the team rejected; never imitate it, and do not repeat what made it fail:', V)
+    + sect('BACKGROUND - briefs and source material for context and facts, not examples of style:', B)).slice(0, 7000);
+  return { text, count: A.length, approved: A.length, avoid: V.length, background: B.length, unclassified, otherCampaign, legacy };
 }
 function contentNorm(t, i, ns) {
   const platform = contentPlatform(t.platform) || 'facebook';
@@ -3895,7 +3939,7 @@ async function contentVerdict(env, id, n, verdict, why, who) {
   const it = set.items.find(x => x.n === n);
   if (!it) return { ok: false, error: 'unknown_piece', status: 404 };
   const v = verdict === 'killed' ? 'killed' : 'approved';
-  const o = await engineOutcome(env, { ns: set.ns, surface: 'content', ref: set.id, n, verdict: v, why: why || '', headline: (it.title || it.platform + ' - ' + (set.campaign || set.ns)).slice(0, 200), support: it.body.slice(0, 300), cta: it.cta }, who);
+  const o = await engineOutcome(env, { ns: set.ns, campaign: set.campaign || '', surface: 'content', ref: set.id, n, verdict: v, why: why || '', headline: (it.title || it.platform + ' - ' + (set.campaign || set.ns)).slice(0, 200), support: it.body.slice(0, 300), cta: it.cta }, who);
   it.verdict = v;
   await contentSave(env, set);
   return { ok: true, item: it, outcome: o };
@@ -8046,7 +8090,7 @@ async function stContext(env, p, opts) {
   try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log); } catch (e) {}
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
   const text = block.text + ex.text + rulesCopy.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
-  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, examples: ex.count, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
+  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
   await log('out', 'client context for ' + client + ': ' + (block.campaign ? 'campaign ' + block.campaign.name + ', ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms, ' + (rulesCopy.count + tilesOnly.length) + ' learned corrections, ' + ex.count + ' approved examples' + (kit.hasLogo ? ', logo on file' : ', no logo on file'));
   return { client, kit, block, text, snapshot, rules: { copy: rulesCopy, tiles: rulesTiles } };
 }
@@ -8107,11 +8151,14 @@ async function stCompileContext(env, p, opts) {
   if (pack) pack.record.excluded.forEach(x => omitted.push({ what: 'reference', id: x.id, text: x.name, why: x.why }));
   if (pack) pack.record.unavailable.forEach(x => omitted.push({ what: 'reference image', id: x.id, text: x.name, why: x.why + ' (read by its analysis only)' }));
   refs.unanalysed.forEach(n => omitted.push({ what: 'reference analysis', text: stStr(n, 120), why: 'not analysed: the model knows its name and purpose only' }));
+  const exs = ctx.snapshot.exampleSets || {};
+  if (exs.unclassified) omitted.push({ what: 'examples', text: exs.unclassified + ' document' + (exs.unclassified === 1 ? '' : 's') + ' of copy or outcomes', why: 'nobody classified them as approved or rejected: not used until they are (GET /mind/unclassified)' });
+  if (exs.otherCampaign) omitted.push({ what: 'examples', text: exs.otherCampaign + ' example' + (exs.otherCampaign === 1 ? '' : 's'), why: 'from another campaign: another campaign\'s work is not this one\'s example' });
   if (mem.otherCampaigns) omitted.push({ what: 'artwork', text: mem.otherCampaigns + ' catalogued artwork' + (mem.otherCampaigns === 1 ? '' : 's'), why: 'from other campaigns: another campaign\'s look is not this one\'s identity' });
   const sections = [{ id: 'kit', chars: ctx.block.text.length, what: 'voice, standing rules, campaign wording, approved facts, banned terms' }, { id: 'examples', chars: Math.max(0, ctx.text.length - ctx.block.text.length - ctx.rules.copy.text.length), what: 'approved examples from the creative shelf' }, { id: 'corrections', chars: ctx.rules.copy.text.length + (ctx.rules.tiles.ids.some(id => ctx.rules.copy.ids.indexOf(id) < 0) ? ctx.rules.tiles.text.length : 0), what: 'learned corrections' }, { id: 'identity', chars: identityText.length, what: 'campaign identity, palette, fonts, mark placement' }, { id: 'references', chars: pack ? pack.text.length : refs.text.length, what: 'the reference pack' }, { id: 'artMemory', chars: mem.text.length, what: 'catalogued past artwork' }].filter(s => s.chars > 0);
   const manifest = { v: 1, build: AXIOM_BUILD, stage: opts.stage || '', at: Date.now(), ns: p.ns, client: ctx.client, campaign: cid,
     kit: { name: kit.name || '', updated: kit.updated || 0, voice: !!kit.voice, standingRules: String(kit.rules || '').split(/\n+/).filter(s => s.trim()).length, identity: camp ? stStr(camp.identity, 200) : '', policy: camp ? (camp.logoPolicy || 'logo') : (kit.hasLogo ? 'logo' : 'none'), facts: ctx.block.facts.map(f => ({ id: f.id, text: stStr(f.text, 100), source: stStr(f.source, 60) })).slice(0, 40), banned: ctx.block.banned.map(b => b.term).slice(0, 60) },
-    corrections, examples: ctx.snapshot.examples || 0,
+    corrections, examples: ctx.snapshot.examples || 0, exampleSets: ctx.snapshot.exampleSets || null,
     references: pack ? { mode: pack.mode, attached: pack.record.attached.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), read: pack.record.read.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), excluded: pack.record.excluded.length, unavailable: pack.record.unavailable.length } : (wantRefs ? { mode: 'all', attached: [], read: refs.used.filter(r => r.analysed).map(r => ({ id: r.id, name: r.name, purpose: r.purpose })), excluded: 0, unavailable: 0 } : null),
     artMemory: opts.art ? { count: mem.count || 0, sameCampaign: mem.sameCampaign || 0, otherCampaigns: mem.otherCampaigns || 0 } : null,
     placement: placement ? { basis: placement.basis, corner: placement.corner, confidence: placement.confidence, mandatory: !!placement.mandatory, evidence: placement.evidence.length, exceptions: placement.exceptions.length } : null,
@@ -13117,7 +13164,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -14608,7 +14655,7 @@ const AXIOM_WORKER = {
           const verdict = sb.verdict === 'approve' ? 'approved' : sb.verdict === 'reject' ? 'rejected' : ''; if (!verdict) return jsonResp({ error: 'bad_verdict' }, 400);
           const reason = stStr(sb.reason, 400).trim(); if (reason.length < 4) return jsonResp({ error: 'reason_required', detail: 'Say why, in a few words.' }, 400);
           await env.MIND_DB.prepare('UPDATE studio_texts SET status=?, updated=?, who=? WHERE id=?').bind(verdict, Date.now(), who, row.id).run();
-          try { await engineOutcome(env, { ns: p.ns, surface: 'studio_kit', ref: row.id, verdict: verdict === 'approved' ? 'approved' : 'killed', why: reason, headline: stStr(row.title, 200), support: stStr(row.body, 300) }, who); } catch (e) {}
+          try { await engineOutcome(env, { ns: p.ns, campaign: p.campaign || '', surface: 'studio_kit', ref: row.id, verdict: verdict === 'approved' ? 'approved' : 'killed', why: reason, headline: stStr(row.title, 200), support: stStr(row.body, 300) }, who); } catch (e) {}
           await stIntelLog(env, p.ns, p.id, verdict, row.kind, (ST_TEXT_KINDS[row.kind] || row.kind) + ' ' + verdict + ': "' + stStr(row.body, 160) + '" - ' + reason, who);
           await stEvent(env, p.id, 'kit_verdict', { text: (ST_TEXT_KINDS[row.kind] || row.kind) + ' ' + verdict + ': ' + reason, text_id: row.id }, who);
           return jsonResp({ ok: true, text: stTextRow(await env.MIND_DB.prepare('SELECT * FROM studio_texts WHERE id=?').bind(row.id).first()) });
@@ -14895,7 +14942,7 @@ const AXIOM_WORKER = {
           if (!(apr && apr.meta && apr.meta.changes)) return jsonResp({ ok: false, error: 'version_moved', detail: 'A newer version of ' + pair.asset.title + ' landed while you decided; nothing was recorded. Look at the current version and decide again.' }, 409);
           await stBump(env, pair.project.id);
           let outcome = '';
-          if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
+          if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, campaign: pair.project.campaign || '', surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
           if (decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4 && String(sb.reason || '').trim() !== 'copy ready') { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
           await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome }, who);
           // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope
@@ -16013,7 +16060,7 @@ const AXIOM_WORKER = {
         const ns = nsClean(b.namespace);
         if (!ns || !String(b.text || '').trim()) return jsonResp({ error: 'missing_fields', detail: 'namespace and text are required' }, 400);
         try {
-          const r = await mindIngestDoc(env, { ns, text: String(b.text), title: b.title, kind: b.kind, source: b.source, date: b.date, force: !!b.force });
+          const r = await mindIngestDoc(env, { ns, text: String(b.text), title: b.title, kind: b.kind, source: b.source, date: b.date, force: !!b.force, campaign: b.campaign, approval: b.approval, scope: b.scope, classifiedBy: auth && auth.name ? 'ingest:' + auth.name : 'ingest' });
           return jsonResp(Object.assign({ ok: r.status === 'complete' }, r), r.error ? 207 : 200);
         } catch (e) { const m = String(e && e.message || e); return jsonResp({ error: /^document_too_large/.test(m) ? 'document_too_large' : 'ingest_failed', detail: m.slice(0, 300) }, e && e.status ? e.status : 502); }
       }
@@ -16021,6 +16068,22 @@ const AXIOM_WORKER = {
         let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
         try { const r = await mindIndexResume(env, b.docId); return jsonResp(Object.assign({ ok: r.status === 'complete' }, r), r.error === 'unknown_document' ? 404 : r.error ? 207 : 200); }
         catch (e) { return jsonResp({ error: 'resume_failed', detail: String(e && e.message || e).slice(0, 300) }, 502); }
+      }
+      // S23: documents of kind copy or outcome that nobody has classified (never used as examples until they are)
+      if (path === '/mind/unclassified' && req.method === 'GET') {
+        const ns = nsClean(reqUrl.searchParams.get('namespace')); if (!ns) return jsonResp({ error: 'no_namespace' }, 400);
+        await mindSchema(env);
+        const rows = (await env.MIND_DB.prepare("SELECT id, title, kind, source, dt, created FROM mind_docs WHERE ns=? AND kind IN ('copy','outcome') AND COALESCE(approval,'')='' ORDER BY created DESC LIMIT 200").bind(ns).all()).results || [];
+        return jsonResp({ ok: true, ns, docs: rows, note: 'Not used as examples until classified: POST /mind/classify {docId, campaign, approval approved|rejected|background, scope campaign|client}.' });
+      }
+      if (path === '/mind/classify' && req.method === 'POST') {
+        let b = {}; try { b = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
+        await mindSchema(env); const id = String(b.docId || '').slice(0, 80);
+        const row = id ? await env.MIND_DB.prepare('SELECT id, ns FROM mind_docs WHERE id=?').bind(id).first() : null; if (!row) return jsonResp({ error: 'unknown_document' }, 404);
+        const cls = mindClass(Object.assign({}, b, { classifiedBy: 'person:' + ((auth && auth.name) || 'unknown') }));
+        if (!cls.approval) return jsonResp({ error: 'approval_required', detail: 'Say approved, rejected or background.' }, 400);
+        await env.MIND_DB.prepare('UPDATE mind_docs SET campaign=?, approval=?, scope=?, classified=? WHERE id=?').bind(cls.campaign, cls.approval, cls.scope, cls.classified, id).run();
+        return jsonResp({ ok: true, docId: id, campaign: cls.campaign, approval: cls.approval, scope: cls.scope, classified: cls.classified });
       }
       if (path === '/mind/coverage' && req.method === 'GET') {
         const ns = nsClean(reqUrl.searchParams.get('namespace')); if (!ns) return jsonResp({ error: 'no_namespace' }, 400);

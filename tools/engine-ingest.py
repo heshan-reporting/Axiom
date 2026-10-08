@@ -172,6 +172,13 @@ def file_doc(worker, key, ns, path, rel):
     tags = ':'.join(x for x in [ns, re.sub(r'[^a-z0-9_-]', '', (meta.get('campaign') or '').lower())[:24], re.sub(r'[^a-z0-9_, -]', '', (meta.get('platform') or '').lower())[:60]] if x)
     if len(text) > MAX_TEXT: raise RuntimeError('%d characters; the limit is %d - split the file (nothing was cut or sent)' % (len(text), MAX_TEXT))
     body = {'namespace': ns, 'title': title, 'text': text, 'kind': kind, 'source': ('pack:' + tags + ':' if meta else 'ingest:') + rel[:240], 'date': date_from(rel, path)}
+    # S23: the classification travels explicitly (the worker never infers it): the campaign from the frontmatter, and the approval
+    # when the frontmatter states it (approval: or status: approved / rejected / background)
+    camp = re.sub(r'[^a-z0-9_-]', '', (meta.get('campaign') or '').lower())[:40]
+    appr = (meta.get('approval') or meta.get('status') or '').strip().lower()
+    if camp: body['campaign'] = camp
+    if appr in ('approved', 'rejected', 'background'): body['approval'] = appr
+    if camp or appr in ('approved', 'rejected', 'background'): body['scope'] = 'campaign' if camp else 'client'
     d = http(worker.rstrip('/') + '/mind/ingest', key, body, timeout=120)
     # a long document is indexed over several calls: resume until it is complete, or say how much is indexed
     for _ in range(60):
