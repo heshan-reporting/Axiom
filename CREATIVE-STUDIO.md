@@ -2286,7 +2286,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 6 | Both creation paths explained; image lifecycle (stored versus displayed) | planned | |
 | 7 | Validation, repair and export agree; render fingerprint | planned | |
 | 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | planned | |
-| 9 | Every long operation visible and recoverable (the wait inventory, below) | planned | |
+| 9 | Every long operation visible and recoverable (the wait inventory, below) | done (two short synchronous calls deferred, named below) | `studio-s23f-worker.mjs` F1-F5, `studio-s23-browser.mjs` F-B1-F-B4 |
 | 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | planned | |
 | 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | planned | |
 
@@ -2410,3 +2410,49 @@ other-campaign examples under `omitted`.
 Tests: D1 HOOF (approved, avoid, background, nothing from national or AEP, unclassified and a substring trap unused), D2
 MCA national and a client-wide example, D3 a Studio rejection filed as a classified outcome, D4 classification by a
 person (a read key refused). `content-worker.mjs` updated to the new narration.
+
+### 46.9 Slice F - every long operation visible and recoverable
+
+**The wait inventory.** Every Studio operation that can take more than a second, its contract, and what the person sees.
+
+| Operation | Contract | Typical | What the person sees |
+|---|---|---|---|
+| Read the brief (`analyse`), strategy, directions, copy, sequence, message kit, revise, concepts, claim ledger, Creative Director review | durable job; the model answer streams | seconds to minutes | the processing card or activity card: the phase, counted steps, characters of reasoning and of the answer as they arrive, a **Drafting** preview of what has finished, elapsed time against the typical time here, Cancel |
+| Suggestions for a tile (`suggest`) | durable job (S23; was one request held open) | 5-60 s | the activity panel; then the advice, or "outdated" with the reason |
+| Reading a reference (`refanalyse`) | durable job queued by the upload (S23; the upload used to wait for it) | 5-30 s | the upload answers at once; the activity panel shows the reading |
+| An image (`render`) | durable job; one image-model call, which does not stream | 10-90 s | the direction, the references offered and the marks attached; the tile on screen is labelled a placeholder (or the last imagery on file) until the image lands |
+| Export | durable job, no model call; the browser draws each approved tile first | seconds | the export panel's progress per file |
+| Measuring a composition, layout and style variations | in the browser, one arrangement at a time with the page given a turn between them (S21) | under 1 s each | "measuring each arrangement at the output size" |
+| Creating a project with its material | three requests (project, material, job) | under 1 s each | the **Starting** card at once: creating the project, saving the material, queuing the reading |
+| Reading a link into a source (`/studio/source/url`) | one request: the page fetched and read (no model) | up to about 20 s | the busy line; a failure names each route tried |
+| AI suggestions for brief fields (`/studio/brief/suggest?ai=1`), describing catalogued artwork | one request with one small model call | 5-30 s | a loading state on the control. **Deferred:** moving these two onto jobs (named in the deferred list) |
+
+**What the person sees, by state.** *Acknowledged* within 300 ms of the click (the control disabled, a card shown);
+*described* within one second (a step marked current: the Starting card covers the requests before the job exists);
+*working* with real stages and counts - a share only where there is a denominator (the copy stage's channels, a
+run's finished steps), otherwise an indeterminate bar and the characters that have arrived; *Drafting* - the values the
+model has finished, read-only, at most 8 KB, never a value still being written (the worker reads only closed values and
+never adds a bracket), never the reasoning, never saved, gone when the answer is complete; *stalled* after 90 s
+without an update, with what happens next said plainly; *reconnecting* when the step connection drops (the job carries
+on in the worker; the page reads it again; nothing is started twice); *failed* with the explained error and Retry;
+*completed*. Progress writes are throttled to one every 700 ms and a skipped write now lands at the end of its window
+(a trailing write), so what is shown is never older than about 700 ms while a job runs; a model `ping` moves the
+"last heard" time on.
+
+**Notices.** A job that finishes while the Studio tab is in the background can raise a desktop notice - opt-in per
+browser ("Notify me when a job finishes" in the activity panel; nothing is asked of the browser until then). The page
+never moves by itself.
+
+**Recovery, and the bound without a tab.** A running job renews its claim every 30 s. If the runner stops (the tab is
+closed, the network drops, the worker is evicted), the claim lapses within two minutes; the next step from any open tab,
+or the worker's tick (at 7 and 37 minutes past the hour), claims it as a new attempt and finishes it - up to three
+attempts. With no tab open, a job therefore resumes within about 32 minutes of its last renewal (the lease plus the
+time to the next tick), and each tick runs up to ten such jobs within its two-minute budget. The dead attempt's late
+answer files nothing (the attempt is fenced). F5 runs exactly this: a runner stopped mid-call, the claim expired, the
+tick finished the job as attempt 2, and the first attempt's answer, when it finally came, filed no version.
+
+Tests: `studio-s23f-worker.mjs` F1 the Drafting preview (finished items only, no reasoning, 8 KB, removed at the
+end), F2 suggestions as a job (one job per version), F3 reference reading queued by the upload, F4 the render brief, F5
+recovery by the tick; `studio-s23-browser.mjs` F-B1 acknowledged in 15 ms and described in 15 ms in this harness (the
+targets are 300 ms and 1 s), F-B2 the Drafting preview labelled and inert, F-B3 reconnecting shown and cleared with
+one attempt, F-B4 notices opt-in, page unmoved.

@@ -10,7 +10,7 @@
 (function () {
   'use strict';
   const K = window.STKit; if (!K || !window.React) return;
-  const { html, call, blobUrl, toastMsg, ago, Chip, Icon, Lbl, Composition, explain, canWrite, chanLabel, CHANNELS, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, StrategyPanel } = K;
+  const { html, call, blobUrl, toastMsg, ago, Chip, Icon, Lbl, Drafting, Composition, explain, canWrite, chanLabel, CHANNELS, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, StrategyPanel } = K;
   const { useState, useEffect, useMemo, useRef } = React;
   const S = window.STProgress;
 
@@ -55,6 +55,9 @@
     return ph;
   }
   function ProcessingCard({ job, kind, now, onRetry, onCancel, onManual, onChange, durations }) {
+    // S23: when the step connection to the worker drops, the card says it is reconnecting (the job carries on in the worker)
+    const [link, setLinkState] = useState(null);
+    useEffect(() => { const h = e => setLinkState(e.detail || null); window.addEventListener('st:link', h); return () => window.removeEventListener('st:link', h); }, []);
     const cl = CHECKLISTS[kind] || CHECKLISTS.analyse; if (!job) return null;
     const a = (job.progress || {}).activity || {}; const x = S ? S.job(job, now || Date.now(), (durations || {})[job.stage]) : { time: '', typical: '' };
     const order = cl.items.map(i => i[0]); const cur = stepOf(kind, a); let at = order.indexOf(cur);
@@ -65,6 +68,8 @@
         <div><h3>${failed ? 'We couldn\'t complete this generation.' : done ? cl.title.replace(/^Building /, '').replace(/^Understanding your brief$/, 'Understanding ready') + (done && kind !== 'analyse' ? ' ready' : '') : cl.title}</h3>
           <span class="ov-dim">${failed ? explain({ message: job.error, code: (String(job.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title + '. Nothing you made before was touched.' : queued ? (job.attempts && job.error ? 'Trying again (attempt ' + (Number(job.attempts) + 1) + ' of 3): ' + explain({ message: job.error, code: (String(job.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title.toLowerCase() : 'Queued, waiting to start') : done ? 'Finished in ' + x.time : x.time + (x.typical ? ' so far, typically ' + x.typical : ' so far') + (x.streaming ? '. The model is answering: ' + x.streamText + (x.quiet > 20 ? ' (nothing new for ' + Math.round(x.quiet) + ' s)' : '') + '.' : cur === 'model' ? '. One model call; what it writes is counted as it arrives.' : '.')}</span></div></div>
       <ol class="st-proc-list">${cl.items.map(([k, l, sub], i) => { const st = failed && i === Math.max(0, at) ? 'bad' : i < at ? 'done' : i === at && !done ? 'now' : 'wait'; return html`<li key=${k} class=${'st-proc-item ' + st} style=${{ '--i': i }}><span class="st-proc-dot" aria-hidden="true">${st === 'done' ? html`<${Icon} n="check" size=${12} />` : st === 'bad' ? '!' : ''}</span><span>${l}${sub ? html` <span class="ov-dim">${sub}</span>` : null}${st === 'now' && a.completed != null && a.total ? html` <span class="st-proc-count">${a.completed} of ${a.total}</span>` : null}${st === 'now' && x.streamText ? html` <span class="st-proc-count st-proc-stream" data-written=${x.written} data-thinking=${x.thinking}>${x.streamText}</span>` : null}</span></li>`; })}</ol>
+      ${link && link.id === job.id && !failed && !done ? html`<div class="st-work-link full" role="status" data-state="reconnecting">Reconnecting to the worker (try ${link.tries}). The job carries on there; this page reads it again and nothing is started twice.</div>` : null}
+      ${!failed && !done && Drafting ? html`<${Drafting} draft=${a.draft} />` : null}
       ${failed ? html`<div class="st-proc-acts">${onRetry ? html`<button class="btn sm" onClick=${onRetry}>Retry</button>` : null}${onChange ? html`<button class="btn sm ghost" onClick=${onChange}>Change input</button>` : null}${onManual ? html`<button class="btn sm ghost" onClick=${onManual}>Continue manually</button>` : null}</div>`
         : !done && onCancel ? html`<div class="st-proc-acts"><button class="ov-link" onClick=${onCancel}>Cancel</button><span class="ov-dim">a model call that is writing stops within half a minute; what it wrote so far may be billed</span></div>` : null}
     </section>`;

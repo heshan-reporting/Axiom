@@ -7033,7 +7033,7 @@ async function briefCron(env) {
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
 const AXIOM_BUILD = '2026-10-08.studio-p38';
 let STUDIO_READY = false;
-const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit'];   // render and echo run in stJobRun; the production stages in stStageRun
+const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit', 'suggest', 'refanalyse'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
 const ST_MAX_ATTEMPTS = 3;
 const ST_PARTS = ['copy', 'design'];
@@ -7288,6 +7288,27 @@ async function stList(env, f) {
   if (f.q) { w.push("title LIKE ? ESCAPE '\\'"); b.push(arcLike(String(f.q).slice(0, 80))); }
   const rows = (await env.MIND_DB.prepare('SELECT p.*, (SELECT COUNT(*) FROM studio_assets a WHERE a.project=p.id) n_assets, (SELECT COUNT(*) FROM studio_sources s WHERE s.project=p.id) n_sources FROM studio_projects p WHERE ' + w.join(' AND ') + ' ORDER BY updated DESC LIMIT ?').bind(...b, Math.min(parseInt(f.limit, 10) || 100, 300)).all()).results || [];
   const projects = rows.map(r => Object.assign(stProjectRow(r), { assets: r.n_assets || 0, sources: r.n_sources || 0 }));
+  // S23: the library shows each project's lead composition (its first visual asset, as it stands) for the most recent projects:
+  // the layout and words the renderer draws, and the imagery by its access-controlled file route - nothing public, nothing copied
+  try {
+    const recent = projects.slice(0, 24).map(p => p.id);
+    if (recent.length) {
+      const assets = (await env.MIND_DB.prepare('SELECT id, project, title, format, channel, current, created FROM studio_assets WHERE project IN (' + recent.map(() => '?').join(',') + ') ORDER BY created').bind(...recent).all()).results || [];
+      const cur = assets.map(a => a.current).filter(Boolean).slice(0, 90);
+      const vers = cur.length ? (await env.MIND_DB.prepare('SELECT id, asset, layout, copy, image, mode FROM studio_versions WHERE id IN (' + cur.map(() => '?').join(',') + ')').bind(...cur).all()).results || [] : [];
+      const byId = {}; vers.forEach(v => { byId[v.id] = v; });
+      const lead = {}; const counts = {};
+      for (const a of assets) {
+        counts[a.project] = counts[a.project] || { visual: 0, copy: 0 };
+        const v = byId[a.current]; if (!v) continue; const mode = v.mode || 'composition';
+        if (mode === 'copy') { counts[a.project].copy++; continue; } counts[a.project].visual++;
+        if (lead[a.project]) continue;
+        const layoutRaw = String(v.layout || ''); const im = pjs(v.image, null); const cp = pjs(v.copy, {}) || {};
+        lead[a.project] = { asset: a.id, title: stStr(a.title, 80), format: a.format || '1:1', channel: a.channel || '', version: v.id, mode, layout: layoutRaw && layoutRaw.length <= 40000 ? pjs(layoutRaw, null) : null, copy: { headline: stStr(cp.headline, 160), support: stStr(cp.support, 240), cta: stStr(cp.cta, 80) }, image: im && im.key ? { url: '/studio/file?key=' + encodeURIComponent(im.key) } : null };
+      }
+      projects.forEach(p => { if (lead[p.id]) p.lead = lead[p.id]; if (counts[p.id]) p.pieces = counts[p.id]; });
+    }
+  } catch (e) {}
   const legacy = f.legacy === false ? [] : await stLegacyList(env, ns, projects);
   return { ok: true, ns, projects, legacy };
 }
@@ -7413,7 +7434,7 @@ async function stDurRecord(env, stage, ms) {
 }
 async function stDurations(env) {
   const out = {}; if (!env.AXIOM_KV) return out;
-  for (const s of ['render', 'copy', 'direct', 'strategy', 'concepts', 'extract', 'inspect', 'revise', 'sequence', 'export', 'analyse', 'kit']) {
+  for (const s of ['render', 'copy', 'direct', 'strategy', 'concepts', 'extract', 'inspect', 'revise', 'sequence', 'export', 'analyse', 'kit', 'suggest', 'refanalyse']) {
     try { const arr = pjs(await env.AXIOM_KV.get('studio_dur_' + s), []); const a = (Array.isArray(arr) ? arr : []).filter(x => typeof x === 'number' && x > 0).sort((x, y) => x - y); if (a.length) out[s] = { n: a.length, median: a[Math.floor(a.length / 2)], p80: a[Math.min(a.length - 1, Math.floor(a.length * 0.8))] }; } catch (e) {}
   }
   return out;
@@ -7430,7 +7451,8 @@ async function stJobCreate(env, body, who) {
   const input0 = body.input && typeof body.input === 'object' ? body.input : {};
   { const lim = jsonLimitProblem(input0, ST_INPUT_MAX, ST_FIELD_MAX, 'input'); if (lim) return { error: 'input_too_large', status: 413, detail: 'Nothing was queued: ' + lim + '. Shorten it, or put long material in a source.' }; }
   if (stage === 'extract') { const src = input0.source ? await env.MIND_DB.prepare('SELECT id FROM studio_sources WHERE id=? AND project=?').bind(stClean(input0.source, 24), p.id).first() : null; if (!src) return { error: 'source_required', status: 400, detail: 'extract needs input.source, a source of this project.' }; }
-  if ((stage === 'concepts' || stage === 'inspect') && !asset) return { error: 'asset_required', status: 400, detail: stage + ' needs the asset it is about.' };
+  if ((stage === 'concepts' || stage === 'inspect' || stage === 'suggest') && !asset) return { error: 'asset_required', status: 400, detail: stage + ' needs the asset it is about.' };
+  if (stage === 'refanalyse') { const rf = input0.reference ? await env.MIND_DB.prepare('SELECT id FROM studio_references WHERE id=? AND project=?').bind(stClean(input0.reference, 24), p.id).first() : null; if (!rf) return { error: 'reference_required', status: 400, detail: 'refanalyse needs input.reference, a reference of this project.' }; }
   if (stage === 'copy' && !(Array.isArray(input0.channels) && input0.channels.some(c => ST_CHANNELS[String(c).toLowerCase()]))) return { error: 'channels_required', status: 400, detail: 'copy needs input.channels from ' + Object.keys(ST_CHANNELS).join(', ') + '.' };
   // S17: a guided project's steps cannot be skipped by any client: directions need the confirmed strategy, the copy a chosen direction
   if (['direct', 'copy', 'sequence', 'kit', 'strategy'].indexOf(stage) >= 0) { const g = await stWfGate(env, p, stage, input0); if (g) return g; }
@@ -7474,18 +7496,23 @@ async function stJobRun(env, job) {
   // a long provider call; throttled to one write per 700 ms unless the phase changes; the lines so far travel with it
   const act = { startedAt: Date.now(), at: Date.now(), phase: 'starting', label: 'starting attempt ' + (attempt + 1) }; let lastWrite = 0, lastLines = null;
   job.activity = act;
+  // S23: a write skipped by the throttle is not lost - the latest state lands at the end of the window (a trailing write), so what
+  // the page shows is never older than about 700 ms while the job runs; the write is conditional, so it never lands on an ended job
+  let trailing = null;
+  const writeNow = async () => { lastWrite = Date.now(); try { const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit({ activity: act, lines: lastLines || [] }, 30000), Date.now(), job.id, attempt).run(); return !!(u && u.meta && u.meta.changes); } catch (e) { return undefined; } };
   job.progress = async (patch, lines) => {
     const phaseChanged = !!(patch && patch.phase && patch.phase !== act.phase);
     if (patch) Object.keys(patch).forEach(k => { if (patch[k] !== undefined) act[k] = patch[k]; });
     act.at = Date.now(); if (lines) lastLines = lines;
-    if (!phaseChanged && Date.now() - lastWrite < 700) return undefined;
-    lastWrite = Date.now();
+    if (!phaseChanged && Date.now() - lastWrite < 700) { if (!trailing) trailing = setTimeout(() => { trailing = null; writeNow(); }, Math.max(50, 700 - (Date.now() - lastWrite))); return undefined; }
+    if (trailing) { clearTimeout(trailing); trailing = null; }
     // false when the write found the job no longer this attempt's (cancelled, taken over): a streamed call stops on it
-    try { const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET progress=?, updated=? WHERE id=? AND state='running' AND attempts=?").bind(jsonFit({ activity: act, lines: lastLines || [] }, 30000), Date.now(), job.id, attempt).run(); return !!(u && u.meta && u.meta.changes); } catch (e) { return undefined; }
+    return writeNow();
   };
   const done = async (state, patch) => {
+    if (trailing) { clearTimeout(trailing); trailing = null; }
     const endedAt = Date.now();
-    const progress = Object.assign({}, patch.progress || {}, { activity: Object.assign({}, act, { at: endedAt, endedAt, phase: state, label: state === 'done' ? 'finished' : state === 'queued' ? 'will retry' : 'stopped' }) });
+    const progress = Object.assign({}, patch.progress || {}, { activity: Object.assign({}, act, { at: endedAt, endedAt, phase: state, label: state === 'done' ? 'finished' : state === 'queued' ? 'will retry' : 'stopped', draft: undefined }) });
     const u = await env.MIND_DB.prepare("UPDATE studio_jobs SET state=?, lease_until=0, result=?, error=?, cost=?, progress=?, updated=? WHERE id=? AND state='running' AND attempts=?")
       .bind(state, patch.result ? jsonFit(patch.result, 30000) : null, stStr(patch.error, 300), Number(patch.cost) || 0, jsonFit(progress, 60000), endedAt, job.id, attempt).run();
     if (state === 'done' && u && u.meta && u.meta.changes) await stDurRecord(env, job.stage, endedAt - act.startedAt);
@@ -7954,6 +7981,41 @@ function stStreamMachine() {
   };
   return S;
 }
+/** S23: what a partial JSON answer has already finished, for the "Drafting" preview while the model writes. Only values whose
+ *  closing quote or bracket has arrived are read - a value still being written is left alone, and nothing is closed, guessed or
+ *  repaired. Top-level strings, numbers and booleans become fields; the complete items of a top-level array (even while the
+ *  array itself is still open) become a list of their titles. Reasoning never reaches it (only the answer's text is scanned).
+ *  The preview is capped at maxChars, is never saved with the work and offers nothing to act on. */
+function stDraftScan(text, maxChars) {
+  const t = String(text || ''); const n = t.length; const start = t.indexOf('{'); if (start < 0) return null;
+  const cap = Math.max(200, Number(maxChars) || 8000); let used = 0;
+  const valueEnd = k => {
+    const c = t[k];
+    if (c === '"') { for (let j = k + 1; j < n; j++) { if (t[j] === '\\') { j++; continue; } if (t[j] === '"') return j + 1; } return -1; }
+    if (c === '{' || c === '[') { let depth = 0, inStr = false; for (let j = k; j < n; j++) { const ch = t[j]; if (inStr) { if (ch === '\\') { j++; continue; } if (ch === '"') inStr = false; } else if (ch === '"') inStr = true; else if (ch === '{' || ch === '[') depth++; else if (ch === '}' || ch === ']') { depth--; if (depth === 0) return j + 1; } } return -1; }
+    let j = k; while (j < n && !/[,}\]\s]/.test(t[j])) j++; return j < n && j > k ? j : -1;   // a number or literal needs the delimiter after it
+  };
+  const title = v => { if (v == null) return ''; if (typeof v !== 'object') return String(v); for (const k of ['title', 'name', 'headline', 'label', 'summary', 'idea', 'text', 'what', 'message']) if (typeof v[k] === 'string' && v[k].trim()) return v[k]; return ''; };
+  const room = s0 => { const s1 = String(s0).replace(/\s+/g, ' ').trim().slice(0, 280); if (!s1 || used + s1.length > cap) return ''; used += s1.length; return s1; };
+  const out = { fields: [], lists: [] }; let i = start + 1;
+  const ws = () => { while (i < n && /[\s,]/.test(t[i])) i++; };
+  for (let guard = 0; guard < 200; guard++) {
+    ws(); if (i >= n || t[i] !== '"') break;
+    const ke = valueEnd(i); if (ke < 0) break; let key; try { key = JSON.parse(t.slice(i, ke)); } catch (e) { break; }
+    i = ke; while (i < n && /\s/.test(t[i])) i++; if (t[i] !== ':') break; i++; while (i < n && /\s/.test(t[i])) i++; if (i >= n) break;
+    if (t[i] === '[') {
+      const items = []; let j = i + 1, closed = false;
+      for (let g2 = 0; g2 < 200; g2++) { while (j < n && /[\s,]/.test(t[j])) j++; if (j >= n) break; if (t[j] === ']') { closed = true; j++; break; } const e = valueEnd(j); if (e < 0) break; let v; try { v = JSON.parse(t.slice(j, e)); } catch (x) { break; } const tt = room(title(v)); if (tt) items.push(tt); j = e; }
+      if (items.length) out.lists.push({ key: String(key).slice(0, 60), items, open: !closed });
+      if (!closed) break; i = j; continue;
+    }
+    const ve = valueEnd(i); if (ve < 0) break;
+    let v; try { v = JSON.parse(t.slice(i, ve)); } catch (e) { break; }
+    const tt = room(title(v)); if (tt) out.fields.push({ key: String(key).slice(0, 60), text: tt });
+    i = ve;
+  }
+  return out.fields.length || out.lists.length ? Object.assign(out, { chars: used }) : null;
+}
 /** Why a streamed call was given up, as the model answer's error: silent (retried), past the cap (not retried), stopped. */
 function stStreamFail(why, idleMs, capMs, counts) {
   const got = stThou(counts.thinking) + ' characters of reasoning and ' + stThou(counts.written) + ' of the answer had arrived';
@@ -7975,7 +8037,7 @@ async function stClaude(env, o) {
   const content = imgs.length || docs.length ? docs.map(dc => ({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: dc.b64 } })).concat(imgs.map(im => ({ type: 'image', source: { type: 'base64', media_type: im.mime || 'image/png', data: im.b64 } }))).concat([{ type: 'text', text: o.user }]) : o.user;
   const said = o.phaseLabel ? o.phaseLabel + ' - ' : '';
   // a fresh call starts its counts at nothing (a stage may make several calls); the step counts are the stage's, when it gives them
-  if (o.log && o.log.phase) await o.log.phase('model', said + 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; its answer is shown as it is written', Object.assign({ model, step: o.phaseStep || undefined, thinking: 0, written: 0, streamAt: 0 }, o.phaseCounts || {}));
+  if (o.log && o.log.phase) await o.log.phase('model', said + 'asking the ' + (o.role || 'creative') + ' model (' + model + ')' + (imgs.length ? ' with ' + imgs.length + ' image' + (imgs.length === 1 ? '' : 's') : '') + '; its answer is shown as it is written', Object.assign({ model, step: o.phaseStep || undefined, thinking: 0, written: 0, streamAt: 0, draft: null }, o.phaseCounts || {}));
   const base = { model, max_tokens: o.maxTok || 6000, system: String(o.system || '') + AX_UNTRUSTED_RULE, messages: [{ role: 'user', content }] };
   const effort = ['low', 'medium', 'high', 'max'].indexOf(o.effort) >= 0 ? o.effort : ['low', 'medium', 'high', 'max'].indexOf(env.STUDIO_EFFORT) >= 0 ? env.STUDIO_EFFORT : (o.role === 'extract' ? 'low' : 'medium');
   // adaptive thinking is paid out of max_tokens: at high effort a small cap leaves the JSON cut off mid-sentence, so the cap has
@@ -8003,9 +8065,12 @@ async function stClaude(env, o) {
     const poke = () => { lastAt = Date.now(); clearTimeout(idle); idle = setTimeout(() => stop('idle'), idleMs); };
     const cap = setTimeout(() => stop('cap'), capMs);
     const beat = o.log && o.log.lease ? setInterval(() => { Promise.resolve(o.log.lease(ST_LEASE_MS)).then(mine => { if (mine === false) stop('fenced'); }, () => {}); }, beatMs) : null;
+    // the "Drafting" preview: what the answer has finished so far, re-read at most once a second (never the reasoning)
+    let answerNow = () => '', draft = null, draftAt = 0;
     const tell = async () => {
       if (!(o.log && o.log.phase)) return;
-      const mine = await o.log.phase('model', said + (counts.written ? 'writing the answer: ' + stThou(counts.written) + ' characters so far' : counts.thinking ? 'thinking: ' + stThou(counts.thinking) + ' characters of reasoning so far' : 'the model has started'), Object.assign({ model, step: o.phaseStep || undefined, thinking: counts.thinking, written: counts.written, streamAt: lastAt }, o.phaseCounts || {}));
+      if (counts.written && Date.now() - draftAt >= 1000) { draftAt = Date.now(); try { draft = stDraftScan(answerNow(), 8000); } catch (e) { draft = null; } }
+      const mine = await o.log.phase('model', said + (counts.written ? 'writing the answer: ' + stThou(counts.written) + ' characters so far' : counts.thinking ? 'thinking: ' + stThou(counts.thinking) + ' characters of reasoning so far' : 'the model has started'), Object.assign({ model, step: o.phaseStep || undefined, thinking: counts.thinking, written: counts.written, streamAt: lastAt, draft }, o.phaseCounts || {}));
       if (mine === false) stop('fenced');
     };
     // a job cancelled or taken over while this call was in flight files nothing from its answer
@@ -8018,10 +8083,10 @@ async function stClaude(env, o) {
       const ctype = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
       if (r.ok && r.body && /event-stream/i.test(ctype)) {
         reader = r.body.getReader(); if (why) stop(why);
-        const M = stStreamMachine();
+        const M = stStreamMachine(); answerNow = () => M.msg.content.filter(b => b && b.type === 'text').map(b => b.text || '').join('');
         const end = await stSseRead(reader, async (type, ev) => {
           const stopNow = M.feed(type, ev); counts.thinking = M.thinking; counts.written = M.written;
-          if (type === 'content_block_delta' && M.state === 'message') await tell();
+          if ((type === 'content_block_delta' || type === 'ping') && M.state === 'message') await tell();
           return stopNow || !!why;
         }, poke);
         const d = { model: M.msg.model || body.model, content: M.msg.content.filter(Boolean), stop_reason: M.msg.stop_reason, usage: M.msg.usage };
@@ -11913,7 +11978,8 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (job.lease) await job.lease(300000);
   const what = areaEdit ? 'the ' + areaEdit.kind + ' edit' : finished ? 'the finished creative (words and mark painted)' : inp.approach === 'artwork' ? 'the hybrid artwork' : inp.region && inp.region !== 'bg' ? 'the ' + (inp.regionRole || 'region') + ' image' : 'the background image';
   const offeredOpt = references.filter(r => !r.required).length;
-  if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (marksWanted.length ? ', the ' + marksWanted.join(' and ') + ' attached first' : '') + (offeredOpt ? ', ' + offeredOpt + ' reference image' + (offeredOpt === 1 ? '' : 's') + ' offered within the model\'s limit' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: offeredOpt });
+  if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (marksWanted.length ? ', the ' + marksWanted.join(' and ') + ' attached first' : '') + (offeredOpt ? ', ' + offeredOpt + ' reference image' + (offeredOpt === 1 ? '' : 's') + ' offered within the model\'s limit' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: offeredOpt,
+    render: { what, direction: stStr(String(areaEdit ? areaEdit.instruction || inp.prompt || '' : inp.prompt || '').replace(/\s+/g, ' ').trim(), 240), references: references.filter(r => !r.required).map(r => stStr(r.name || r.role || 'reference', 80)).slice(0, 6), marks: marksWanted.slice(0, 3), size: inp.size || env.IMAGE_SIZE || '2K', aspect: inp.aspect || a.format || '' } });
   // the prompt is never cut blind: a structured prompt (promptParts) gives way in its optional parts only, and essentials over
   // the limit stop the job before anything is sent (nanoRender)
   const promptParts = !areaEdit && Array.isArray(inp.promptParts) && inp.promptParts.length ? inp.promptParts.map(x => ({ text: String((x && x.text) || ''), essential: !!(x && x.essential), label: String((x && x.label) || '').slice(0, 60) })).filter(x => x.text) : undefined;
@@ -12313,6 +12379,26 @@ async function stSuggest(env, p, asset, opts) {
   try { const u = await env.MIND_DB.prepare('INSERT INTO studio_suggestions(asset, project, fp, parts, started, at, data) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset) DO UPDATE SET project=excluded.project, fp=excluded.fp, parts=excluded.parts, started=excluded.started, at=excluded.at, data=excluded.data WHERE excluded.started >= studio_suggestions.started').bind(asset.id, p.id, sig, JSON.stringify(F.parts), started, out.at, jsonFit(out, 60000)).run(); superseded = !(u && u.meta && u.meta.changes); } catch (e) {}
   return Object.assign({ ok: true, cached: false, outdated: false, changed: [], superseded: superseded || undefined }, out);
 }
+/* S23: the two model calls that used to run inside a request - suggestions for a tile and the vision pass over a reference -
+ * are jobs too, so they show their phase and the answer as it streams, survive a dropped connection and can be cancelled.
+ * The suggestions are filed in studio_suggestions as before; the job's result says what was filed. */
+async function stSuggestStage(env, job, p, log) {
+  const pair = await stAsset(env, job.asset); if (!pair) throw new Error('asset gone (not retried)');
+  await log.phase('reading', 'reading the tile, its references and the client context', { step: 1, completed: 0, total: 2 });
+  const r = await stSuggest(env, p, pair.asset, { refresh: !!(job.input || {}).refresh, log });
+  if (!r.ok) throw new Error((r.error || 'suggest_failed') + ': ' + (r.detail || '') + (/^(copy_only|no_version)$/.test(r.error || '') || /\(not retried\)/.test(r.detail || '') ? ' (not retried)' : ''));
+  await log('out', 'suggestions ' + (r.cached ? 'already current for this context (no call)' : 'filed') + ': ' + ['design', 'image', 'typography', 'copy', 'concept'].map(k => (r[k] || []).length + ' ' + k).join(', ') + (r.superseded ? ' - newer advice was filed meanwhile and kept' : ''));
+  return { ok: true, asset: pair.asset.id, version: r.version, cached: !!r.cached, fp: r.fp || r.sig, superseded: r.superseded || undefined, counts: { design: (r.design || []).length, image: (r.image || []).length, typography: (r.typography || []).length, copy: (r.copy || []).length, concept: (r.concept || []).length } };
+}
+async function stRefAnalyseStage(env, job, p, log) {
+  const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=? AND project=?').bind(stClean((job.input || {}).reference, 24), p.id).first();
+  if (!ref) throw new Error('reference gone (not retried)');
+  await log.phase('reading', 'reading the reference image: ' + stStr(ref.name, 80), { step: 1, completed: 0, total: 1 });
+  const analysis = await stRefAnalyse(env, p, ref, log);
+  await stBump(env, p.id);
+  if (analysis && analysis.error && /overloaded|timeout|429|5\d\d|stream_/i.test(analysis.error)) throw new Error('overloaded: the reference could not be read now (' + stStr(analysis.error, 120) + ')');
+  return { ok: !(analysis && analysis.error), reference: ref.id, error: analysis && analysis.error ? stStr(analysis.error, 200) : undefined };
+}
 /** Stage dispatch for the production stages; the render stage and echo stay in stJobRun. */
 /* -- compiled instructions (P21): what each model call of a job was actually sent, kept in R2 beside the project ----------
    The record is the evidence behind "the model was told X": the system and user text as compiled (kit, rules, references,
@@ -12422,6 +12508,8 @@ async function stStageRun(env, job, done, fail) {
     else if (job.stage === 'revise') result = await stReviseStage(env, job, p, log);
     else if (job.stage === 'concepts') result = await stConceptsStage(env, job, p, log);
     else if (job.stage === 'inspect') result = await stInspectStage(env, job, p, log);
+    else if (job.stage === 'suggest') result = await stSuggestStage(env, job, p, log);
+    else if (job.stage === 'refanalyse') result = await stRefAnalyseStage(env, job, p, log);
     else return done('failed', { error: 'unknown stage ' + job.stage });
     const again = await stJob(env, job.id);
     if (!again || again.state !== 'running') return again;
@@ -13164,7 +13252,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -14692,9 +14780,11 @@ const AXIOM_WORKER = {
             await env.MIND_DB.prepare('INSERT INTO studio_references(id,project,kind,name,purpose,key,note,who,created,campaign,prep_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'image', 20), stStr(sb.name || 'Reference', 120), purpose, key, stStr(sb.note, 300) + (purpose === 'inspiration' ? (sb.note ? ' ' : '') + 'Inspiration only: no logos, claims or exact layouts reused.' : ''), who, now, stStr(sb.campaign != null ? sb.campaign : p.campaign, 40), prepKey).run();
             // the vision pass at upload, so the reference contributes more than its name: what a designer would note in it (a failure is recorded as the limitation it is)
             let analysis = null;
-            if (key && env.ANTHROPIC_API_KEY && sb.analyse !== false) { const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(id).first(); analysis = await stRefAnalyse(env, p, ref); }
+            let analyseJob = null;
+            if (key && env.ANTHROPIC_API_KEY && sb.analyse === 'job') { const r = await stJobCreate(env, { project: p.id, stage: 'refanalyse', input: { reference: id }, idem: 'refan:' + id }, who); analyseJob = r.job || null; }
+            else if (key && env.ANTHROPIC_API_KEY && sb.analyse !== false) { const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(id).first(); analysis = await stRefAnalyse(env, p, ref); }
             await stBump(env, p.id); await stEvent(env, p.id, 'reference', { text: 'Reference added: ' + stStr(sb.name || 'Reference', 120) + ' (' + purpose + ').' + (analysis ? (analysis.error ? ' Not analysed: ' + analysis.error + '; the models know its name and purpose only.' : ' Read: ' + analysis.summary) : ''), reference: id, analysed: !!(analysis && !analysis.error) }, who);
-            return jsonResp({ ok: true, id, key, url: key ? '/studio/file?key=' + encodeURIComponent(key) : '', prepKey, prepared: !!prepKey, bytes: originalBytes, overLimit: originalBytes >= 4500000, note: originalBytes >= 4500000 && !prepKey ? 'The original is over 4.5 MB and cannot be shown to the models; upload a prepared copy (prepB64) and the original stays on file.' : undefined, analysis });
+            return jsonResp({ ok: true, id, key, job: analyseJob || undefined, url: key ? '/studio/file?key=' + encodeURIComponent(key) : '', prepKey, prepared: !!prepKey, bytes: originalBytes, overLimit: originalBytes >= 4500000, note: originalBytes >= 4500000 && !prepKey ? 'The original is over 4.5 MB and cannot be shown to the models; upload a prepared copy (prepB64) and the original stays on file.' : undefined, analysis });
           }
           { const lim = jsonLimitProblem(sb.data || {}, 30000, ST_FIELD_MAX, 'the direction'); if (lim) return jsonResp({ error: 'input_too_large', detail: 'The direction was not saved: ' + lim + '.' }, 413); }
           const id = stId('d');
@@ -14979,6 +15069,11 @@ const AXIOM_WORKER = {
         if (path === '/studio/suggest') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project' }, 403);
+          if (sb.job) {
+            const v = await stCurrent(env, pair.asset); if (!v) return jsonResp({ error: 'no_version' }, 400); if (v.mode === 'copy') return jsonResp({ error: 'copy_only', detail: 'A copy-only asset has no composition to suggest for.' }, 400);
+            const r = await stJobCreate(env, { project: pair.project.id, asset: pair.asset.id, stage: 'suggest', input: { refresh: !!sb.refresh }, idem: 'suggest:' + pair.asset.id + ':' + v.id + (sb.refresh ? ':' + Date.now().toString(36) : '') }, who);
+            return r.error ? jsonResp(r, r.status || 400) : jsonResp({ ok: true, job: r.job, existing: !!r.existing });
+          }
           const r = await stSuggest(env, pair.project, pair.asset, { refresh: !!sb.refresh });
           return jsonResp(r, r.ok || r.error === 'suggest_failed' || r.error === 'suggest_unparseable' ? 200 : 400);
         }
@@ -15013,6 +15108,7 @@ const AXIOM_WORKER = {
         if (path === '/studio/reference/analyse') {
           const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!ref) return jsonResp({ error: 'unknown_reference' }, 404);
           const p = await stProject(env, ref.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (sb.job) { const r = await stJobCreate(env, { project: p.id, stage: 'refanalyse', input: { reference: ref.id }, idem: 'refan:' + ref.id + ':' + Date.now().toString(36) }, who); return r.error ? jsonResp(r, r.status || 400) : jsonResp({ ok: true, job: r.job }); }
           const analysis = await stRefAnalyse(env, p, ref);
           await stBump(env, p.id);
           return jsonResp({ ok: !analysis.error, id: ref.id, analysis });

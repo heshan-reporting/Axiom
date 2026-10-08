@@ -431,6 +431,37 @@
     </div>`;
   }
 
+  /* S23: while a model writes, what it has finished so far - labelled Drafting, read-only, never saved, nothing to act on. The
+     worker builds it from values that have finished arriving (stDraftScan); a value still being written is never shown. */
+  const DRAFT_KEY = k => String(k || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+  function Drafting({ draft, compact }) {
+    const f = (draft && draft.fields) || [], l = (draft && draft.lists) || []; if (!f.length && !l.length) return null;
+    return html`<div class=${'st-drafting' + (compact ? ' compact' : '')} role="region" aria-label="Drafting: what the model has finished so far, not saved">
+      <div class="st-drafting-head"><span class="st-drafting-tag">Drafting</span><span class="ov-dim">${compact ? 'not saved yet' : 'what the model has finished writing so far - not saved, nothing to act on until it is done'}</span></div>
+      ${f.slice(0, compact ? 2 : 6).map((x, i) => html`<div key=${'f' + i} class="st-drafting-row"><span class="st-drafting-k">${DRAFT_KEY(x.key)}</span><span class="st-drafting-v">${x.text}</span></div>`)}
+      ${l.slice(0, compact ? 1 : 4).map((x, i) => html`<div key=${'l' + i} class="st-drafting-row"><span class="st-drafting-k">${DRAFT_KEY(x.key)}</span><ol class="st-drafting-list">${x.items.slice(0, compact ? 3 : 6).map((t, j) => html`<li key=${j}>${t}</li>`)}${x.open ? html`<li class="ov-dim st-drafting-more">the next one is being written...</li>` : null}</ol></div>`)}
+    </div>`;
+  }
+  /** S23: what happens between a click and the job that does the work - the project made, the material saved, the job queued -
+      shown at once, step by step, so the first second already says what is going on. Nothing is spent in these steps. */
+  function StartingCard({ s }) {
+    if (!s) return null;
+    return html`<section class="st-proc starting" role="status" aria-live="polite" aria-label=${s.title} aria-busy="true">
+      <div class="st-proc-head"><span class="st-proc-orb" aria-hidden="true"><span class="st-proc-spin"></span></span>
+        <div><h3>${s.title}</h3><span class="ov-dim">Getting everything in place before the model is asked; nothing is spent in these steps.</span></div></div>
+      <ol class="st-proc-list">${s.items.map(([k, l], i) => { const st = i < s.at ? 'done' : i === s.at ? 'now' : 'wait'; return html`<li key=${k} class=${'st-proc-item ' + st} style=${{ '--i': i }}><span class="st-proc-dot" aria-hidden="true">${st === 'done' ? html`<${Icon} n="check" size=${12} />` : ''}</span><span>${l}</span></li>`; })}</ol>
+    </section>`;
+  }
+  /** What a render is making while the image model works, from the worker's activity: the direction, the references offered and
+      the marks attached. The tile on screen meanwhile is a placeholder, said as such. */
+  function RenderBrief({ r, compact }) {
+    if (!r) return null;
+    return html`<div class=${'st-renderbrief' + (compact ? ' compact' : '')}>
+      ${r.direction ? html`<div><span class="st-drafting-k">Direction</span> <span class="st-drafting-v">${r.direction}</span></div>` : null}
+      ${(r.references || []).length || (r.marks || []).length ? html`<div class="ov-dim">${(r.marks || []).length ? 'marks attached: ' + r.marks.join(', ') : ''}${(r.marks || []).length && (r.references || []).length ? '; ' : ''}${(r.references || []).length ? 'references: ' + r.references.join(', ') : ''}${r.size ? '; ' + r.size : ''}</div>` : null}
+    </div>`;
+  }
+
   /* ------------------------------------------------------------ workspace activity: everything that runs, visibly */
   /* Every job is shown while it runs: what it is (the stage in plain words), what it is doing now (the phase the worker
      reports mid-run, else its latest log line), how long it has taken against how long that stage typically takes here,
@@ -438,7 +469,7 @@
      indeterminate otherwise - a model call shows the characters it has written (S22), never a share; nothing is estimated from the clock. The job
      model is STProgress (docs/studio-progress.js); this is its one consumer in the Studio. */
   const STAGE_NOTE = { render: 'one image model call; no share until it answers', copy: 'one model call for the words and plans, then one composition per channel', direct: 'one model call', strategy: 'one model call', concepts: 'one model call that sees the artwork', extract: 'one model call over the source', analyse: 'one model call: the material read against the client, its campaigns and knowledge (plus one to read an image or PDF)', kit: 'one model call for the whole kit', inspect: 'one model call that sees the composed tile', revise: 'one model call', sequence: 'one model call, then one composition per item', export: 'files written; nothing is generated', echo: 'a round trip' };
-  function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset, liveOnly, compact, busy }) {
+  function WorkspaceActivity({ p, status, now, ro, open, onToggle, onRetry, onCancel, onOpenJobs, onOpenAsset, liveOnly, compact, busy, link, notify }) {
     const S = window.STProgress; if (!S || !p) return null;
     const all = p.jobs || []; const jobs = S.jobsForDisplay(all);
     const live = jobs.filter(S.active); const failed = jobs.filter(j => j.state === 'failed');
@@ -456,6 +487,7 @@
     if (compact && !open && topJ) return html`<section class=${'st-workspace-activity compact ' + beacon} aria-label="Activity"><div class="st-work-line" role="status" aria-live="polite">
       <span class=${'st-work-beacon ' + beacon} aria-hidden="true"></span>
       <b>${topJ.title}${top.asset && title(top.asset) ? ' - ' + title(top.asset) : ''}</b>
+      ${link ? html`<span class="st-work-link" data-state="reconnecting">reconnecting (try ${link.tries})</span>` : null}
       <span class="ov-dim st-work-line-phase">${topJ.phaseText}</span>
       <span class="ov-dim">${topJ.time}${topJ.typical ? ' (typically ' + topJ.typical + ')' : ''}${topJ.percent != null ? ' - ' + topJ.completed + ' of ' + topJ.total : ''}</span>
       ${live.length + failed.length > 1 ? html`<span class="ov-dim">${running ? running + ' running' : ''}${queued ? (running ? ', ' : '') + queued + ' queued' : ''}${failed.length ? ', ' + failed.length + ' failed' : ''}</span>` : null}
@@ -463,6 +495,7 @@
       <button class="ov-link" onClick=${onToggle} aria-expanded="false">details</button>
     </div></section>`;
     return html`<section class=${'st-workspace-activity ' + beacon} aria-label="Activity">
+      ${link ? html`<div class="st-work-link full" role="status" data-state="reconnecting">Reconnecting to the worker (try ${link.tries}). The job carries on there; this page reads it again and nothing is started twice.</div>` : null}
       <div class="st-work-summary">
         <button class="st-work-toggle" onClick=${onToggle} aria-expanded=${open ? 'true' : 'false'} aria-controls="st-work-detail">
           <span class=${'st-work-beacon ' + beacon} aria-hidden="true"></span>
@@ -479,14 +512,16 @@
           <div class="st-work-card-head"><b>${x.title}</b><span class=${'st-status ' + j.state}>${j.state}</span></div>
           ${j.asset ? html`<div class="st-work-asset">${onOpenAsset && title(j.asset) ? html`<button class="ov-link" onClick=${() => onOpenAsset(j.asset)}>${title(j.asset)}</button>` : title(j.asset) || j.asset}</div>` : null}
           <div class="st-work-phase">${x.phaseText}</div>
+          ${x.running ? html`<${Drafting} compact=${true} draft=${((j.progress || {}).activity || {}).draft} />` : null}
+          ${x.running && j.stage === 'render' ? html`<${RenderBrief} compact=${true} r=${((j.progress || {}).activity || {}).render} />` : null}
           <div class=${'st-progress-track' + (x.percent == null ? ' indeterminate' : '') + (x.running ? ' active' : '')} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${x.percent == null ? undefined : x.percent} aria-valuetext=${x.percent == null ? (x.running ? 'in progress, no measurable share yet' : x.label) : x.percent + '%'}><span style=${{ width: (x.percent == null ? (j.state === 'done' ? 100 : 0) : x.percent) + '%' }}></span></div>
           <div class="st-work-meta"><span>${x.percent != null ? x.completed + ' of ' + x.total + ' (' + x.percent + '%)' : STAGE_NOTE[j.stage] || ''}</span><span>${x.time}${x.typical ? ' / typically ' + x.typical : ''}${x.attempt > 1 ? ' / attempt ' + x.attempt + ' of 3' : ''}</span></div>
-          ${x.slow ? html`<div class="st-work-slow">No update for ${Math.round((now - x.lastAt) / 1000)} s. A provider call can take a few minutes; if this tab was asleep, the worker's tick resumes the job.</div>` : null}
+          ${x.slow ? html`<div class="st-work-slow" data-state="stalled">Stalled? No update for ${Math.round((now - x.lastAt) / 1000)} s. A running job renews its claim every 30 s; if the worker stopped, the claim lapses within 2 minutes and the next step, or the worker's tick (at 7 and 37 minutes past the hour), takes it up as a new attempt.</div>` : null}
           ${j.state === 'failed' ? html`<div class="st-work-error">${explain({ message: j.error, code: (String(j.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title}</div>` : null}
           ${j.state === 'queued' && j.error ? html`<div class="st-work-hint ov-dim">${j.error}</div>` : null}
           <div class="st-work-acts">${!ro && j.state === 'failed' ? html`<button class="btn sm" onClick=${() => onRetry(j)}>Retry</button>` : null}${!ro && S.active(j) ? html`<button class="btn sm ghost" onClick=${() => onCancel(j.id)}>Cancel</button>` : null}<button class="ov-link" onClick=${onOpenJobs}>log</button></div>
         </div>`; })}</div>
-        <div class="st-work-foot"><span>Shares are counts of finished steps; a model call shows the characters it has written so far, never a share. Nothing here is estimated from the clock.</span><button class="ov-link" onClick=${onOpenJobs}>All jobs</button></div></div>` : null}
+        <div class="st-work-foot"><span>Shares are counts of finished steps; a model call shows the characters it has written so far, never a share. Nothing here is estimated from the clock.</span>${notify && notify.supported ? html`<button class="ov-link" aria-pressed=${notify.on ? 'true' : 'false'} onClick=${notify.toggle} title="A notice from this browser when a job you started finishes while the Studio tab is in the background; the page never moves by itself">${notify.on ? 'Desktop notices: on' : 'Notify me when a job finishes'}</button>` : null}<button class="ov-link" onClick=${onOpenJobs}>All jobs</button></div></div>` : null}
     </section>`;
   }
 
@@ -2200,7 +2235,7 @@
         ${full ? html`<div class="st-full-bar"><b>${a.title}</b><button class="btn sm ghost" onClick=${() => setFull(false)}>Leave full screen</button></div>` : null}
         <div class="st-stage-inner st-artboard" style=${zoomStyle}>${le ? html`<${LayoutEditor} key=${v.id + ':' + edKey} v=${Object.assign({}, v, { copy })} a=${a} ns=${p.ns} p=${p} kit=${kit} preview=${preview} onMore=${() => setTab('properties')} onDirty=${d => { setDirtyNow(d); if (onLayoutDirty) onLayoutDirty(d); }} propsSlot=${propsSlot} layersSlot=${layersSlot} toolsSlot=${edTools} footSlot=${edFoot} onSel=${ids => { setLayerSel(ids); if (ids.length && tab !== 'director' && Date.now() - quietSelAt > 600) setTab('properties'); }} guides=${overlays && !preview} highlight=${!preview ? hlIds : []} onDone=${(layout, cp, o) => { if (layout) return onLayoutSave(a, layout, (o && o.base) || v.id, null, cp, o); setEdKey(k => k + 1); return null; }} />` : html`<${Composition} v=${v} a=${a} ns=${p.ns} copy=${copy} highlight=${!preview ? hlIds : []} tagOut=${true} />`}</div>
         ${hlIds.length && !preview ? html`<div class="st-hl-note" role="status">Outlined on the tile: ${hlIds.join(', ')}. <button class="ov-link" onClick=${() => setHlIds([])}>clear</button></div>` : null}
-        ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The Creative Director is reviewing this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. The composition stays editable meanwhile.</div>` : null}
+        ${renderJob ? html`<div class="st-stage-job" role="status"><span class="st-spin" aria-hidden="true"></span> ${renderJob.stage === 'inspect' ? 'The Creative Director is reviewing this version' : 'Imagery ' + (renderJob.state === 'running' ? 'is being generated' : 'is queued') + (renderJob.attempts ? ' (attempt ' + (renderJob.attempts + 1) + ' of 3)' : '')}. ${renderJob.stage === 'render' ? (v && v.image ? 'The imagery on screen is the last one on file until the new one lands. ' : 'What you see is a placeholder - the words over the ground - not the result. ') : ''}The composition stays editable meanwhile.${renderJob.stage === 'render' ? html`<${RenderBrief} r=${((renderJob.progress || {}).activity || {}).render} />` : null}</div>` : null}
       </div>`;
     // the notes that explain what kind of artwork this is: said once, under the canvas, never on the artwork
     const notes = !preview ? html`${flat ? html`<div class="st-flatnote">A flattened legacy tile: the text on the image is not editable. Editing the caption does not change the image.</div>` : null}
@@ -2959,6 +2994,13 @@
     const [selAsset, setSelAsset] = useState(null); const [selField, setSelField] = useState(null);
     const [target, setTarget] = useState('asset');
     const [busy, setBusy] = useState('');
+    // S23: the step connection to the worker dropped and is being re-read (shown as "reconnecting"), and the opt-in desktop notices
+    const [link, setLink] = useState(null); const linkRef = useRef(null); const [starting, setStarting] = useState(null);
+    // the link state is also announced as an event, so the guided flow's processing card shows it beside the job it concerns
+    const linkTo = v => { linkRef.current = v; setLink(v); try { window.dispatchEvent(new CustomEvent('st:link', { detail: v })); } catch (e) {} };
+    const notifyOk = typeof window !== 'undefined' && 'Notification' in window;
+    const [notifyOn, setNotifyOn] = useState(() => { try { return notifyOk && localStorage.getItem('ax_studio_notify') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } });
+    const notify = { supported: notifyOk, on: notifyOn, toggle: async () => { if (notifyOn) { setNotifyOn(false); try { localStorage.removeItem('ax_studio_notify'); } catch (e) {} return; } let perm = 'denied'; try { perm = await Notification.requestPermission(); } catch (e) {} if (perm === 'granted') { setNotifyOn(true); try { localStorage.setItem('ax_studio_notify', '1'); } catch (e) {} } else toastMsg('This browser did not allow notices; the Studio works the same without them.'); } };
     const [cmp, setCmp] = useState(null);
     const [dialog, setDialog] = useState(null);
     const [exportState, setExportState] = useState(null);
@@ -3022,13 +3064,19 @@
     // the heading is brought to just under the sticky context bar and navigator (its scroll-margin), so a new stage starts at its top
     useEffect(() => { if (focusNext.current && titleRef.current) { focusNext.current = false; try { titleRef.current.focus({ preventScroll: true }); const c = titleRef.current.closest('.st-centre'); if (c) c.scrollTop = 0; } catch (e) {} } }, [view, p && p.id]);
     /* suggested next directions for the selected composition: one small, cached model call per version, made only when the team asks for it */
-    const [sugg, setSugg] = useState(null); const suggSig = useRef('');
+    const [sugg, setSugg] = useState(null); const suggSig = useRef(''); const runJobRef = useRef(async () => null);
     const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() && prov && prov.claude ? a.id + '|' + av.id + '|' + p.references.length : '';
     const fetchSugg = useCallback(async (refresh) => {
       if (!suggKey) { setSugg(null); return; }
       suggSig.current = suggKey; setSugg(s => ({ loading: true, data: refresh ? null : (s && s.data) || null, err: '' }));
-      try { const d = await call('/studio/suggest', { project: pidRef.current, asset: suggKey.split('|')[0], refresh: !!refresh }); if (suggSig.current !== suggKey) return; if (d.ok) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: d.detail || d.error || 'no answer' }); }
-      catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
+      try {
+        const assetId = suggKey.split('|')[0];
+        const q = await call('/studio/suggest', { project: pidRef.current, asset: assetId, refresh: !!refresh, job: true });
+        const j = q.job ? await runJobRef.current(q.job.id) : null; if (suggSig.current !== suggKey) return;
+        if (j && j.state === 'failed') { setSugg({ loading: false, data: null, err: explain({ message: j.error, code: (String(j.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title }); return; }
+        const d = await call('/studio/suggest?asset=' + encodeURIComponent(assetId)); if (suggSig.current !== suggKey) return;
+        if (d.ok && d.cached) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: (j && j.state === 'cancelled') ? 'cancelled' : 'no answer' });
+      } catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
     }, [suggKey]);
     // asked for, never fetched on its own: a new version (every pause in typing makes one) must not spend a call by itself. What
     // was asked for before is shown at once (a free read), labelled outdated with the reason when its context has changed since
@@ -3081,10 +3129,11 @@
         for (let i = 0; i < 400; i++) {
           if (label) setBusy(label);
           let j;
-          try { j = (await call('/studio/job/step', { id })).job; if (!j) { const cut = new Error('the step answer was cut off'); cut.code = 'answer_cut'; throw cut; } lost = 0; }
+          try { j = (await call('/studio/job/step', { id })).job; if (!j) { const cut = new Error('the step answer was cut off'); cut.code = 'answer_cut'; throw cut; } if (lost) linkTo(null); lost = 0; }
           catch (e) {
             const dropped = !e || !e.status || e.code === 'answer_cut' || (!e.code && e.status >= 500);
-            if (!dropped || ++lost > 6) { fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
+            if (!dropped || ++lost > 6) { linkTo(null); fail(e, 'The job could not be stepped', () => runJob(id, label)); break; }
+            linkTo({ id, tries: lost, at: Date.now() });
             await sleep(Math.min(15000, 2000 * lost));
             try { j = (await call('/studio/job?id=' + encodeURIComponent(id))).job; } catch (e2) { j = null; }
             if (!j || j.state === 'queued' || j.state === 'running') { await reload(); continue; }
@@ -3098,9 +3147,18 @@
           if (j.note && /waiting for the step before/.test(j.note)) { if (++waits >= 4) return j; await sleep(2500); continue; }
           await sleep(j.note && /another runner/.test(j.note) ? 3000 : 600);
         }
-      } finally { stepping.current.delete(id); setBusy(''); }
+      } finally { stepping.current.delete(id); setBusy(''); if (linkRef.current && linkRef.current.id === id) linkTo(null); }
       return null;
     }, [reload]);
+    runJobRef.current = runJob;
+    /* S23: a job that finishes while the Studio tab is in the background says so through a desktop notice, when the person turned
+       them on; the page itself never moves */
+    const seenStates = useRef({});
+    useEffect(() => {
+      const jobs = (p && p.jobs) || []; const prev = seenStates.current; const next = {};
+      jobs.forEach(j => { next[j.id] = j.state; const was = prev[j.id]; if (notifyOn && was && (was === 'running' || was === 'queued') && (j.state === 'done' || j.state === 'failed') && document.hidden) { try { const n = new Notification('AXIOM Studio: ' + ((window.STProgress && window.STProgress.names[j.stage]) || j.stage) + (j.state === 'done' ? ' finished' : ' needs attention'), { body: (p.title || '') + (j.state === 'failed' ? ' - ' + String(j.error || '').slice(0, 120) : ''), tag: 'ax-studio-' + j.id }); n.onclick = () => { try { window.focus(); } catch (e) {} n.close(); }; } catch (e) {} } });
+      seenStates.current = next;
+    }, [p && p.jobs, notifyOn]);
     /* the composed tile for one version, drawn by the one renderer at native size and saved as that version's export PNG */
     const composeExport = useCallback(async (d, assetId, versionId) => {
       try {
@@ -3210,9 +3268,9 @@
       }
     };
     const addSource = async (name, text) => { try { const s = await call('/studio/source', { project: p.id, kind: 'text', name, text }); await reload(); await job('extract', { source: s.id }, null, 'extract:' + s.id, 'Reading ' + name); } catch (e) { fail(e, 'The source was not added'); } };
-    const addReference = async (r) => { try { setBusy('Adding the reference and reading it'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image' }, r)); await reload(); toastMsg(d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e, 'The reference was not added'); } finally { setBusy(''); } };
+    const addReference = async (r) => { try { setBusy('Adding the reference'); const d = await call('/studio/reference', Object.assign({ project: p.id, kind: 'image', analyse: 'job' }, r)); if (d.job) runJob(d.job.id); await reload(); toastMsg(d.job ? 'Reference added; reading it now (the activity panel shows it)' : d.analysis ? (d.analysis.error ? 'Reference added; not analysed: ' + d.analysis.error : 'Reference added and read') : 'Reference added'); } catch (e) { fail(e, 'The reference was not added'); } finally { setBusy(''); } };
     const saveRecipe = async (id, recipe) => { try { setBusy('Saving the recipe'); const d = await call('/studio/reference/recipe', Object.assign({ id, project: p.id }, recipe)); await reload(); toastMsg(d.recipe && d.recipe.conflict ? 'Saved, with a note: ' + d.recipe.conflict : 'Recipe saved', !!(d.recipe && d.recipe.conflict)); } catch (e) { fail(e, 'The recipe was not saved'); } finally { setBusy(''); } };
-    const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id }); await reload(); toastMsg(d.ok ? 'Reference read' : 'Not analysed: ' + ((d.analysis || {}).error || ''), !d.ok); } catch (e) { fail(e, 'The reference was not read'); } finally { setBusy(''); } };
+    const analyseReference = async (id) => { try { setBusy('Reading the reference'); const d = await call('/studio/reference/analyse', { id, job: true }); const j = d.job ? await runJob(d.job.id, 'Reading the reference') : null; await reload(); if (j && j.state === 'done') toastMsg(j.result && j.result.ok ? 'Reference read' : 'Not analysed: ' + ((j.result || {}).error || ''), !(j.result && j.result.ok)); } catch (e) { fail(e, 'The reference was not read'); } finally { setBusy(''); } };
     const chooseDirection = async (did) => { try {
       // a narrative from the brief analysis names its route: a finished one sets the project to Finished creative before
       // production, an editable one back to Editable (copy-only projects have no route to follow)
@@ -3264,6 +3322,8 @@
         as sources, and - when asked - one analysis of all of it. The project opens on its Brief; nothing else is spent. */
     const createGuided = (o) => guard('create:' + o.ns, async () => {
       try {
+        const nMat = (o.text && o.text.trim() ? 1 : 0) + (o.items || []).length;
+        setStarting({ title: o.analyse ? 'Starting the reading' : 'Creating the project', at: 0, items: [['project', 'Creating the project' + (o.campaignMode === 'new' ? ' and its campaign' : '')], ['material', 'Saving your material' + (nMat > 1 ? ' (' + nMat + ' pieces)' : '')]].concat(o.analyse ? [['queue', 'Queuing the reading with the worker']] : []) });
         setBusy('Creating the project'); setIntake(false);
         let campaign = o.campaign || '';
         if (o.campaignMode === 'new' && o.newCampaign) { const c = await call('/studio/campaign/create', { ns: o.ns, name: o.newCampaign.name, description: o.newCampaign.description }); campaign = c.campaign.id; }
@@ -3273,14 +3333,19 @@
         const brief = { workflow: 2, projectType: o.type, campaignMode: o.campaignMode, channels: o.channels, deliverable: o.deliverable, formats, deliverables: (o.deliverable === 'copy' ? 'Copy only for ' : o.deliverable === 'visual' ? 'One visual for ' : 'Coordinated set for ') + o.channels.map(chanLabel).join(', '), creationMode: 'editable', imageryTiming: 'after_copy', campaignConfirmed: o.campaignMode !== 'detect', assumptions: o.campaignMode === 'standalone' ? ['Standalone: no campaign identity or campaign facts apply'] : [] };
         const pr = await call('/studio/project', { ns: o.ns, campaign, title: (o.title || first || typeName + ' ' + new Date().toLocaleDateString('en-AU')).slice(0, 80), brief, idem: 'p:' + o.ns + ':' + Date.now() });
         if (o.ns !== clientRef.current) { resumed.current = true; clientRef.current = o.ns; setClientId(o.ns); }
+        setStarting(x => x && Object.assign({}, x, { at: 1 }));
         setPid(pr.id); pidRef.current = pr.id; setSelAsset(null); setView('brief', true); await reload(pr.id);
         const m = await window.STFlow.materialSources(pr.id, o.text, o.kind, o.items);
         if (m.fails.length) setNotice({ kind: 'warn', title: 'Some material was not added', text: m.fails.join('; ') });
+        setStarting(x => x && Object.assign({}, x, { at: 2 }));
         await reload(pr.id);
+        if (!(o.analyse && m.ids.length)) setStarting(null);
         if (o.analyse && m.ids.length) await job('analyse', { sources: m.ids, kind: m.ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + m.ids.join(','), 'Reading the brief against ' + ((CLIENTS.find(c => c.id === o.ns) || {}).name || o.ns));
         await reload(pr.id);
-      } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); }
+      } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); setStarting(null); }
     });
+    // the starting card gives way to the job's own card as soon as the worker has the job
+    useEffect(() => { if (starting && p && (p.jobs || []).some(j => j.stage === 'analyse' && (j.state === 'queued' || j.state === 'running' || j.state === 'done'))) setStarting(null); }, [p && p.jobs, !!starting]);
     /** Material added on the Brief (text, links, files, notes, Axiom items) plus sources already on the project, read as one. */
     const analyseGuided = (o) => guard('analyse:' + pidRef.current, async () => {
       try {
@@ -3694,8 +3759,8 @@
       : id === 'review' ? { tabs: [['review', 'Preflight and approvals'], ['export', 'Delivery', flow.counts.ready || null]], tab: view, onTab: k => setView(k) } : {};
     const Staged = (id, acts, body) => html`<div class="st-centre-pad"><${StageHead} ...${headOf(id, tabsFor(id))}>${acts}</${StageHead}>${body}</div>`;
     // the activity panel replaces the old line of job chips: every running, queued, failed or just-finished job with its phase
-    const jobsLine = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
-    const jobsLineLive = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} ro=${!canWrite()} open=${actOpen} liveOnly=${!actOpen} compact=${true} busy=${busy} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
+    const jobsLine = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} link=${link} notify=${notify} ro=${!canWrite()} open=${actOpen} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
+    const jobsLineLive = p ? html`<${WorkspaceActivity} p=${p} status=${status} now=${now} link=${link} notify=${notify} ro=${!canWrite()} open=${actOpen} liveOnly=${!actOpen} compact=${true} busy=${busy} onToggle=${() => setActOpen(o => !o)} onRetry=${retryJob} onCancel=${cancelJob} onOpenJobs=${() => setView('jobs', true)} onOpenAsset=${id => { if (p.assets.some(y => y.id === id)) openAsset(id); }} />` : null;
 
     const F = window.STFlow; const guided = !!(p && p.workflow && p.workflow.v === 2 && F);
     const lockedAt = id => guided && flow && flow[id] && flow[id].state === 'locked';
@@ -3704,8 +3769,10 @@
     const wizPreset = preset ? Object.assign({}, preset, { type: preset.type || (preset.from === 'release' || preset.start === 'release' ? 'announcement' : preset.from === 'content' ? 'social' : preset.from === 'sentinel' || preset.start === 'analyse' ? 'response' : preset.start === 'reference' ? 'campaign' : ''), kind: preset.start === 'release' ? 'article' : preset.from === 'sentinel' ? 'situation' : 'brief', text: [preset.text, preset.instruction].filter(Boolean).join('\n\n') }) : null;
     let centre;
     if (!pid && intake && F && F.Wizard) centre = html`<${F.Wizard} key=${'wiz:' + ((preset && preset.at) || 0)} clients=${CLIENTS} clientId=${clientId} preset=${wizPreset} busy=${busy} prov=${prov} onClient=${() => {}} onCreate=${o => { setPreset(null); createGuided(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />`;
+    else if (!pid && starting) centre = html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>`;
     else if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} />`;
-    else if (!p) centre = html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
+    else if (!p) centre = starting ? html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>` : html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
+    else if (starting && view === 'brief') centre = html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
     else if (lockedAt(stage) && view !== 'brand' && view !== 'context') centre = Staged(stage, null, html`<${F.LockedStage} step=${stage} wf=${p.workflow} onGo=${goStage} />`);
     else if (view === 'brief' && guided) centre = Staged('brief', null, html`<${F.BriefWorkspace} key=${p.id} p=${p} client=${client} kit=${kit} busy=${busy} prov=${prov} wf=${p.workflow} job=${lastJob('analyse')} now=${now} durations=${(status || {}).durations} onAnalyse=${analyseGuided} onConfirm=${() => confirmStep('brief', {}, { then: async () => { const st = ((pRef.current || {}).workflow || {}).steps || {}; if (st.objectives && st.objectives.state !== 'locked' && (st.brief || {}).state === 'complete') setView('objectives', true); } })} onCampaign=${setCampaign} onRetry=${() => { const j = lastJob('analyse'); if (j) retryJob(j); }} onCancel=${() => { const j = lastJob('analyse'); if (j) cancelJob(j.id); }} onGo=${goStage} onSaveBrief=${saveBriefPatch} />`);
@@ -3787,7 +3854,7 @@
 
   /* S17: the parts the guided workflow (docs/studio-guided.js) builds on - one renderer, one set of chips and icons, one way of
      explaining an error - shared rather than copied; studio-guided.js loads after this file and registers window.STFlow */
-  window.STKit = { html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
+  window.STKit = { html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Drafting, RenderBrief, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
   let mounted = false;
   window.studioInit = function () {
     const root = document.getElementById('studio-root');

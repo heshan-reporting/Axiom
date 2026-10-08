@@ -148,6 +148,7 @@ export async function makeStudio(opts) {
       const hh = {}; res.headers.forEach((v, k) => { hh[k] = v; });
       return route.fulfill({ status: res.status, headers: hh, body: Buffer.from(await res.arrayBuffer()) });
     });
+    if (o.init) await page.addInitScript(o.init);   // S23: a script the page runs before its own (a stubbed browser API)
     await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof go === 'function' && window.AXUI && window.STRender && typeof studioInit === 'function');
     if (o.go !== false) { await page.evaluate(() => go('studio')); await page.waitForSelector('#studio-root .st-head'); }
