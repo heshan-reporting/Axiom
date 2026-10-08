@@ -3382,7 +3382,8 @@ async function releaseRender(env, packId, n, patch, who) {
   const kit = (await brandKit(env, row.ns)) || {};
   const client = (CLIENT_ISSUES.find(ci => ci.ns === row.ns) || {}).client || kit.name || 'the client';
   const refs = [];
-  if (kit.hasLogo) { const lg = await brandLogo(env, row.ns); if (lg) refs.push({ data: b64FromBuf(lg.bytes), mime: lg.mime }); }
+  // the logo is the one image the tile must carry: a required mark, attached first and never dropped for the model's input limit
+  if (kit.hasLogo) { const lg = await brandLogo(env, row.ns); if (lg) refs.push({ data: b64FromBuf(lg.bytes), mime: lg.mime, role: 'the client logo, exact: place it as attached, never redrawn', name: 'client logo', mark: 'logo', kind: 'mark', required: true }); }
   const log = mkJobLog(env, row.job);
   await log('cmd', 'gemini: render tile ' + (n + 1) + ' (' + tile.kind + ') - "' + tile.headline.slice(0, 60) + '"' + (refs.length ? ' with the brand logo' : ''));
   const out = await nanoRender(env, { prompt: releasePrompt(tile, kit, client, row.format), references: refs, aspect: RELEASE_FORMATS[row.format] || '1:1', size: env.IMAGE_SIZE || '2K' });
@@ -7055,7 +7056,7 @@ function stCopy(c) {
   const out = {}; ['headline', 'support', 'body', 'cta', 'caption', 'alt', 'title'].forEach(k => { if (c[k] != null) out[k] = String(c[k]).slice(0, k === 'body' || k === 'caption' ? 4000 : 400); });
   return out;
 }
-function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 8), model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ST_EDIT_KINDS[im.meta.edit.kind] ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined, finished: im.meta.finished ? true : undefined, marksSent: im.meta.finished ? (Array.isArray(im.meta.marksSent) ? im.meta.marksSent : []).map(x => stStr(x, 12)).slice(0, 4) : undefined }; return out; }
+function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 16), attached: Array.isArray(im.meta.attached) ? im.meta.attached.slice(0, 16).map(x => ({ kind: stStr(x && x.kind, 12), role: stStr(x && x.role, 160), name: stStr(x && x.name, 120), mark: x && x.mark ? stStr(x.mark, 12) : undefined, required: !!(x && x.required) })) : undefined, excludedRefs: Array.isArray(im.meta.excludedRefs) && im.meta.excludedRefs.length ? im.meta.excludedRefs.slice(0, 16).map(x => ({ name: stStr(x && x.name, 120), id: stStr(x && x.id, 60), reason: stStr(x && x.reason, 200) })) : undefined, promptDropped: Array.isArray(im.meta.promptDropped) && im.meta.promptDropped.length ? im.meta.promptDropped.slice(0, 12).map(x => stStr(x, 80)) : undefined, model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ST_EDIT_KINDS[im.meta.edit.kind] ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined, finished: im.meta.finished ? true : undefined, marksSent: im.meta.finished ? (Array.isArray(im.meta.marksSent) ? im.meta.marksSent : []).map(x => stStr(x, 12)).slice(0, 4) : undefined }; return out; }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -9678,7 +9679,9 @@ async function stMarkImages(env, kit, ns, campaign, opts) {
 }
 /** The brief to the image model for a finished creative: the whole piece, the exact words, the URL, the mark reproduced from the
  *  attached file in its place, nothing else lettered. `marks` are the entries stMarkImages returns (bytes not needed here). */
-function stFinishedPrompt(layout, copy, ctx, format, marks, opts) {
+/** The finished-creative prompt as parts: the format, the words, the address, the marks, the identity rules, the palette and rules and
+ *  the team's direction are essential (never cut to fit); the concept is descriptive and gives way first if the request is too long. */
+function stFinishedPromptParts(layout, copy, ctx, format, marks, opts) {
   opts = opts || {}; const f = ST_FORMATS[format] || ST_FORMATS['1:1']; layout = layout || {}; copy = copy || {};
   const camp = ctx && ctx.block && ctx.block.campaign ? ctx.block.campaign : null;
   const medium = ST_MEDIA_WORDS[layout.medium] || 'photography';
@@ -9691,17 +9694,18 @@ function stFinishedPrompt(layout, copy, ctx, format, marks, opts) {
   const forbid = []; const policy = (layout.marks && layout.marks.policy) || (marks && marks.length ? (marks.some(m => m.role === 'logo') && marks.some(m => m.role === 'wordmark') ? 'both' : marks[0].role) : 'none');
   if (policy === 'wordmark') forbid.push('The client logo must not appear anywhere on this piece: this campaign carries its wordmark only.');
   if (policy === 'none') forbid.push('No logo, wordmark or badge of any kind.');
-  const lines = [
-    'Paint the whole tile as a finished creative in ' + medium + ' for an Australian ' + ((ctx && ctx.client) || 'client') + ' campaign' + (camp ? ' (' + camp.name + (camp.identity ? ': ' + camp.identity : '') + ')' : '') + ', ' + format + ' (' + f.w + 'x' + f.h + '). Nothing will be added afterwards: words, mark and URL are all part of this one image.',
-    'Concept: ' + (layout.story || '') + (layout.focal ? ' Focal point and negative space: ' + layout.focal : '') + (layout.devices ? ' Devices: ' + layout.devices : ''),
-    'Set these words exactly as given, as designed type (' + (layout.typography || 'a clear hierarchy, the headline leading') + '): ' + words.concat(free).join('; ') + '. Spell every word and figure exactly; add no other words, figures, claims, hashtags or signage.',
-    url ? 'Include the address "' + url + '" exactly, small and legible, where the composition wants it.' : '',
-  ].concat(markLines, forbid, [
-    'No political figures or recognisable people. Palette: ' + JSON.stringify((layout.palette && { primary: layout.palette.primary, secondary: layout.palette.secondary }) || (ctx && ctx.kit && ctx.kit.palette) || {}) + '.' + (ctx && ctx.rules && ctx.rules.tiles && ctx.rules.tiles.count ? '\n' + ctx.rules.tiles.text.replace(/\n\n/g, '\n') : ''),
-    opts.instruction ? 'DIRECTION FROM THE TEAM: ' + String(opts.instruction).slice(0, 1200) : '',
-  ]);
-  return lines.filter(Boolean).join('\n');
+  const P = (text, label, essential) => ({ text, label, essential: !!essential });
+  return [
+    P('Paint the whole tile as a finished creative in ' + medium + ' for an Australian ' + ((ctx && ctx.client) || 'client') + ' campaign' + (camp ? ' (' + camp.name + (camp.identity ? ': ' + camp.identity : '') + ')' : '') + ', ' + format + ' (' + f.w + 'x' + f.h + '). Nothing will be added afterwards: words, mark and URL are all part of this one image.', 'format', true),
+    P('Concept: ' + (layout.story || '') + (layout.focal ? ' Focal point and negative space: ' + layout.focal : '') + (layout.devices ? ' Devices: ' + layout.devices : ''), 'concept', false),
+    P('Set these words exactly as given, as designed type (' + (layout.typography || 'a clear hierarchy, the headline leading') + '): ' + words.concat(free).join('; ') + '. Spell every word and figure exactly; add no other words, figures, claims, hashtags or signage.', 'words', true),
+    url ? P('Include the address "' + url + '" exactly, small and legible, where the composition wants it.', 'address', true) : null,
+  ].concat(markLines.map(t => P(t, 'mark', true)), forbid.map(t => P(t, 'identity rule', true)), [
+    P('No political figures or recognisable people. Palette: ' + JSON.stringify((layout.palette && { primary: layout.palette.primary, secondary: layout.palette.secondary }) || (ctx && ctx.kit && ctx.kit.palette) || {}) + '.' + (ctx && ctx.rules && ctx.rules.tiles && ctx.rules.tiles.count ? '\n' + ctx.rules.tiles.text.replace(/\n\n/g, '\n') : ''), 'palette and rules', true),
+    opts.instruction ? P('DIRECTION FROM THE TEAM: ' + String(opts.instruction).slice(0, 1200), 'direction', true) : null,
+  ]).filter(x => x && x.text);
 }
+function stFinishedPrompt(layout, copy, ctx, format, marks, opts) { return stFinishedPromptParts(layout, copy, ctx, format, marks, opts).map(x => x.text).join('\n'); }
 async function stCopyStage(env, job, p, log) {
   const inp = job.input || {};
   const channels = (Array.isArray(inp.channels) ? inp.channels : []).map(c => String(c).toLowerCase()).filter(c => ST_CHANNELS[c]);
@@ -11419,12 +11423,14 @@ const ST_CONCEPT_SYS = 'You are the art director of an Australian political comm
   + '"basis":[{"claim":"<=14 words","kind":"rule|preference|reference|inferred","ref":"reference id when kind is reference"}],"refs":["reference ids this concept draws on"],"influence":[{"ref":"reference id","component":"' + ST_REF_COMPONENTS.join('|') + '"}],"missing":["<=12 words each: what the brief, the kit or the references do not give and you did not invent"]}]}\n'
   + 'RULES. When exploring, three concepts that differ visibly - in medium, composition, hierarchy and devices - not three names for one layout; at least one reuses the current photograph when one is on file (its region prompt then says \'keep the current image\'), the others may call for new imagery; assess your own set and merge two that would look alike. When refining, one or two concepts that keep the current idea and improve it in named ways. When creating a new design, start from the brief and the campaign identity, not from the current panel or layout; honour what the team said to retain. Every concept serves the message and the campaign identity (a myth-busting format is content, not identity: the campaign\'s own colours, devices and mark define identity); new imagery depicts the world of the message (no sport, leisure or lifestyle stock); white type needs a dark ground; the subject stays visible beside the words; locked elements stay where they are. Brand and approved references are constraints; other references lend only their stated respect; where the kit and the references are silent, say so under missing. Mark each basis item as a stated rule, a recorded preference, a named reference or your inference. Name under influence which reference shaped which component; take from a reference only what its recipe borrows and never what it says DO NOT TAKE. Australian English, no exclamation marks.\n' + ST_PLAN_RULES + '\n' + ST_SPEC_RULES;
 /** Resolve a plan's region references (ids on the project) to images with roles, for the image model. */
+// when an image request is at the model's input limit, references go in the purpose order the reference bundle uses (ST_REF_RANK,
+// lower first): the client's requirements, then how the piece is built, then the look, then loose inspiration
 async function stRefsForGemini(env, p, refs) {
   const out = [];
   for (const r of (refs || []).slice(0, 4)) {
     const row = r && r.id ? await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=? AND project=?').bind(stClean(r.id, 24), p.id).first() : null;
     if (!row) continue; const im = await stRefImage(env, row); if (!im) continue;
-    out.push({ data: im.b64, mime: im.mime, role: (r.role ? r.role + ' ' : '') + '(' + row.purpose + ' reference: ' + row.name + (row.purpose === 'inspiration' ? '; inspiration only, copy nothing exactly' : row.purpose === 'brand' || row.purpose === 'approved' ? '; the client\'s requirements, follow them' : '') + ')', name: row.name, id: row.id });
+    out.push({ data: im.b64, mime: im.mime, role: (r.role ? r.role + ' ' : '') + '(' + row.purpose + ' reference: ' + row.name + (row.purpose === 'inspiration' ? '; inspiration only, copy nothing exactly' : row.purpose === 'brand' || row.purpose === 'approved' ? '; the client\'s requirements, follow them' : '') + ')', name: row.name, id: row.id, rank: ST_REF_RANK[row.purpose] != null ? ST_REF_RANK[row.purpose] : 9 });
   }
   return out;
 }
@@ -11564,7 +11570,7 @@ async function stPlanRenders(env, p, a, v, layout, planIn, opts) {
     const mf = opts.marks ? { marks: opts.marks, missing: [] } : await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
     if (mf.missing.length) throw new Error('mark_missing: ' + mf.missing.map(m => m.text).join('; ') + ' - a finished creative paints the mark from its file (not retried)');
     const marks = mf.marks.map(m => ({ role: m.role, key: m.key, name: m.name, variant: m.variant || undefined, v: m.v || undefined }));
-    const r = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stFinishedPrompt(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), finished: true, approach: 'artwork', marks, baked: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden).map(l => l.role).filter((x, i, arr) => arr.indexOf(x) === i), bakedText: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden && l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => ({ role: l.role || 'free', text: stStr(l.text, 200) })), copy: opts.copy || undefined, edit: !!opts.edit, instruction: opts.instruction ? stStr(opts.instruction, 1200) : undefined, aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'finished creative: ' + (layout.mediumName || 'the whole piece painted') }, idem: (opts.idem || 'plan:' + v.id) + ':finished' }, opts.who || 'studio');
+    const r = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stFinishedPrompt(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), promptParts: stFinishedPromptParts(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), finished: true, approach: 'artwork', marks, baked: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden).map(l => l.role).filter((x, i, arr) => arr.indexOf(x) === i), bakedText: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden && l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => ({ role: l.role || 'free', text: stStr(l.text, 200) })), copy: opts.copy || undefined, edit: !!opts.edit, instruction: opts.instruction ? stStr(opts.instruction, 1200) : undefined, aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'finished creative: ' + (layout.mediumName || 'the whole piece painted') }, idem: (opts.idem || 'plan:' + v.id) + ':finished' }, opts.who || 'studio');
     if (r.job) jobs.push(r.job.id); return jobs;
   }
   if (layout.approach === 'artwork') {
@@ -11762,18 +11768,21 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (!env.MIND_DOCS) return done('failed', { error: 'storage_not_configured: the worker has no image storage bound (MIND_DOCS), so no image was requested (not retried)' });
   if (job.progress) await job.progress({ phase: 'preparing', label: 'reading the current version' + (Array.isArray(inp.referenceIds) && inp.referenceIds.length ? ', ' + inp.referenceIds.length + ' reference' + (inp.referenceIds.length === 1 ? '' : 's') : '') + (inp.finished ? ' and the mark files' : '') });
   const cur = await stCurrent(env, a);
-  // references: ids on the project (with roles from the plan), or raw data a caller supplied
-  const references = (Array.isArray(inp.references) ? inp.references.filter(r => r && r.data) : []).concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : []));
+  // references: ids on the project (with roles from the plan), or raw data a caller supplied. A raw reference is optional
+  // material: it can never pose as a mark or as required (only the mark files this job reads from R2 are marks)
+  const references = (Array.isArray(inp.references) ? inp.references.filter(r => r && r.data) : []).map(r => ({ data: r.data, mime: r.mime, role: r.role, name: r.name, id: r.id, rank: Number.isFinite(Number(r.rank)) ? Number(r.rank) : undefined }))
+    .concat(await stRefsForGemini(env, p, Array.isArray(inp.referenceIds) ? inp.referenceIds : []));
   // a finished creative: the mark files named on the job are read from R2 and go to the image model as image inputs to reproduce;
   // a file that cannot be read stops the job before anything is spent - nothing is painted from a description in its place
-  const finished = !!inp.finished; const marksSent = [];
+  const finished = !!inp.finished; const marksWanted = [];
   if (finished) {
     const want = Array.isArray(inp.marks) ? inp.marks : [];
     for (const m of want) {
       let im = null; try { const o = m && m.key && env.MIND_DOCS ? await env.MIND_DOCS.get(m.key) : null; if (o) { const buf = await o.arrayBuffer(); if (buf.byteLength && buf.byteLength < 4500000) im = { data: b64FromBuf(buf), mime: (o.httpMetadata && o.httpMetadata.contentType) || 'image/png' }; } } catch (e) { im = null; }
       if (!im) return done('failed', { error: 'mark_missing: the ' + (m && (m.name || m.role) || 'mark') + ' file could not be read from R2 (' + (m && m.key) + '); a finished creative paints the mark from its file, so nothing was rendered (not retried)' });
-      references.push({ data: im.data, mime: im.mime, role: 'the ' + (m.name || ST_MARK_WORDS[m.role] || m.role) + ', exact: reproduce it exactly as attached (same proportions, letterforms and colours), never redrawn, restyled or recoloured', name: m.name || m.role, id: m.key, mark: m.role });
-      marksSent.push(m.role);
+      // a required mark: attached before any optional reference and never dropped to make room (nanoRender refuses the request instead)
+      references.push({ data: im.data, mime: im.mime, role: 'the ' + (m.name || ST_MARK_WORDS[m.role] || m.role) + ', exact: reproduce it exactly as attached (same proportions, letterforms and colours), never redrawn, restyled or recoloured', name: m.name || m.role, id: m.key, mark: m.role, kind: 'mark', required: true });
+      marksWanted.push(m.role);
     }
   }
   // an edit continues the conversation the image came from: the model's earlier parts (thought signatures included) are replayed
@@ -11781,7 +11790,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (inp.edit && cur && cur.image && env.MIND_DOCS) {
     if (cur.image.conv) { try { const obj = await env.MIND_DOCS.get(cur.image.conv); if (obj) { const conv = JSON.parse(await obj.text()); history = Array.isArray(conv.contents) ? conv.contents : []; historyModel = String(conv.model || ''); editOf = cur.id; } } catch (e) {} }
     // the current image is read in either case: it stands in when the history cannot be replayed (another model answers)
-    if (cur.image.key) { const im = await stVersionImage(env, cur); if (im) { currentImage = { data: im.b64, mime: im.mime }; editOf = editOf || cur.id; if (!history.length) references.unshift({ data: im.b64, mime: im.mime, role: 'the current image to edit; change only what the instruction says' }); } }
+    if (cur.image.key) { const im = await stVersionImage(env, cur); if (im) { currentImage = { data: im.b64, mime: im.mime }; editOf = editOf || cur.id; if (!history.length) references.unshift({ data: im.b64, mime: im.mime, role: 'the current image to edit; change only what the instruction says', name: 'the current image', kind: 'current', required: true }); } }
   }
   const areaEdit = inp.edit && inp.editKind ? { kind: ST_EDIT_KINDS[inp.editKind] ? inp.editKind : 'area', area: inp.editKind === 'area' || inp.editKind === 'remove' ? stEditArea(inp.area) : null, instruction: String(inp.instruction || '').slice(0, 1200) } : null;
   if (areaEdit && !currentImage) return done('failed', { error: 'nothing_to_edit: this version has no image to edit (not retried)' });
@@ -11790,12 +11799,21 @@ async function stRenderJob(env, job, pair, done, fail) {
   if (areaEdit && areaEdit.kind === 'remove' && !areaEdit.area) return done('failed', { error: 'area_required: mark the area that holds what to remove (not retried)' });
   if (job.lease) await job.lease(300000);
   const what = areaEdit ? 'the ' + areaEdit.kind + ' edit' : finished ? 'the finished creative (words and mark painted)' : inp.approach === 'artwork' ? 'the hybrid artwork' : inp.region && inp.region !== 'bg' ? 'the ' + (inp.regionRole || 'region') + ' image' : 'the background image';
-  if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' attached' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: references.length });
-  const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '').slice(0, 8000), references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
+  const offeredOpt = references.filter(r => !r.required).length;
+  if (job.progress) await job.progress({ phase: 'generating', label: 'the image model is making ' + what + ' at ' + (inp.size || env.IMAGE_SIZE || '2K') + (marksWanted.length ? ', the ' + marksWanted.join(' and ') + ' attached first' : '') + (offeredOpt ? ', ' + offeredOpt + ' reference image' + (offeredOpt === 1 ? '' : 's') + ' offered within the model\'s limit' : '') + '; one call, no progress until it answers', size: inp.size || env.IMAGE_SIZE || '2K', references: offeredOpt });
+  // the prompt is never cut blind: a structured prompt (promptParts) gives way in its optional parts only, and essentials over
+  // the limit stop the job before anything is sent (nanoRender)
+  const promptParts = !areaEdit && Array.isArray(inp.promptParts) && inp.promptParts.length ? inp.promptParts.map(x => ({ text: String((x && x.text) || ''), essential: !!(x && x.essential), label: String((x && x.label) || '').slice(0, 60) })).filter(x => x.text) : undefined;
+  const out = await nanoRender(env, { prompt: areaEdit ? stAreaPrompt(inp) : String(inp.prompt || ''), promptParts, references, history, historyModel, currentImage, aspect: inp.aspect || a.format, size: inp.size, model: inp.model });
+  // what went to the model, read from the request as built: the marks counted as sent are the ones attached, nothing else
+  const attachedRows = Array.isArray(out.attached) ? out.attached : (out.sent && Array.isArray(out.sent.images) ? out.sent.images : []);
+  const marksSent = attachedRows.filter(x => x && x.mark).map(x => x.mark);
   if (job.fence) await job.fence();
   if (job.progress) await job.progress({ phase: out.ok ? 'filing' : 'failed', label: out.ok ? 'the image is back (' + out.model + (out.ms ? ', ' + (out.ms / 1000).toFixed(1) + ' s' : '') + '); saving it and the version' : 'the image model did not answer with an image', model: out.ok ? out.model : undefined });
   const compiledKey = out.sent ? await stCompiledSave(env, job, [Object.assign({ at: Date.now(), op: areaEdit ? 'area edit (' + areaEdit.kind + ')' : finished ? 'finished creative render (marks attached: ' + (marksSent.join(', ') || 'none') + ')' : inp.approach === 'artwork' ? 'artwork render' : 'render ' + (inp.region || 'bg'), answered: out.ok ? out.model : '', fallback: !!out.fallback, error: out.ok ? undefined : out.error + (out.detail ? ': ' + out.detail : ''), masks: false, areaNote: areaEdit ? 'the area is described in words; no pixel mask is sent' : undefined }, out.sent)]) : '';
   if (!out.ok) return fail(out.error + (out.detail ? ': ' + out.detail : ''), compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : undefined);
+  const notSent = marksWanted.filter(m => marksSent.indexOf(m) < 0);
+  if (finished && notSent.length) return done('failed', { error: 'mark_not_sent: the ' + notSent.join(' and ') + ' did not go to the image model with the request, so the result is not filed as a finished creative (not retried)' });
   const again = await stJob(env, job.id);
   if (!again || again.state !== 'running') return again;   // cancelled while the render ran: the image is not filed
   const vid = stId('v'); const key = 'studio/' + p.id + '/' + a.id + '/' + vid + '.png'; let convKey = '';
@@ -11821,12 +11839,12 @@ async function stRenderJob(env, job, pair, done, fail) {
   // a cutout must carry transparency, or it is a picture in a box: the PNG header says which (colour type 4 or 6 carries alpha)
   let alpha = null;
   if (inp.regionRole === 'cutout') { try { const bytes = new Uint8Array(bufFromB64(out.imageB64)); alpha = /png/i.test(out.mime || '') && bytes.length > 26 && bytes[0] === 0x89 && bytes[1] === 0x50 ? (bytes[25] === 4 || bytes[25] === 6) : false; } catch (e) { alpha = null; } }
-  const meta = { references: references.map(r => r.name || r.role).filter(Boolean).slice(0, 8), model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
+  const meta = { references: attachedRows.map(r => r.name || r.role).filter(Boolean).slice(0, 16), attached: attachedRows.map(r => ({ kind: r.kind, role: r.role, name: r.name, mark: r.mark, required: !!r.required })), excludedRefs: Array.isArray(out.excluded) && out.excluded.length ? out.excluded : undefined, promptDropped: Array.isArray(out.promptDropped) && out.promptDropped.length ? out.promptDropped : undefined, model: out.model, requested: out.requested, size: out.size || inp.size || env.IMAGE_SIZE || '2K', sizeAsked: out.sizeAsked || inp.size || undefined, capped: out.capped || undefined, pixels: out.pixels || undefined, fallback: !!out.fallback, ms: out.ms || 0, usage: out.usage, historyReplayed: history.length ? !!out.historyReplayed : undefined, alpha: alpha == null ? undefined : alpha };
   if (compiledKey) meta.compiled = { job: job.id, key: compiledKey };
   if (finished) { meta.finished = true; meta.marksSent = marksSent; }
   if (areaEdit) meta.edit = Object.assign({}, areaEdit, { of: editOf, preservation: 'pending', limits: 'Described-area editing (semantic masking): the image model is asked to leave everything outside the area alone, with no pixel mask to hold it there. What changed outside the area is measured afterwards.' });
   const image = { key, url: '/studio/file?key=' + encodeURIComponent(key), model: out.model, requested: out.requested, fallback: !!out.fallback, size: meta.size, conv: convKey || undefined, editOf: editOf || undefined, meta };
-  const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: (areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '')).slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0 } }) };
+  const patch = { kind: 'render', note: stale ? 'render for an earlier version, filed as a branch' : (inp.note || 'render') + (out.fallback ? ' (fell back to ' + out.model + (history.length && !out.historyReplayed ? '; the edit history belonged to ' + (historyModel || out.requested) + ' and was not replayed - the current image was attached instead' : '') + ')' : '') + (alpha === false ? ' (the cutout came back opaque: no transparency, shows as a picture in its box)' : ''), context: Object.assign({}, (live && live.context) || {}, { job: job.id, model: out.model, size: image.size, prompt: (areaEdit ? stAreaPrompt(inp) : String(inp.prompt || '')).slice(0, 2000), references: meta.references, render: { requested: out.requested, model: out.model, fallback: !!out.fallback, size: meta.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, thoughtImages: out.thoughtImages || 0, attached: attachedRows.length, excluded: (out.excluded || []).length, promptDropped: (out.promptDropped || []).length } }) };
   if (isRegion && live && live.layout && Array.isArray(live.layout.layers)) {
     // a cutout or inset lands in its own layer; the background and everything else stay as they are
     const layout = JSON.parse(JSON.stringify(live.layout)); const l = layout.layers.find(x => x.type === 'img' && x.region === inp.region);
@@ -11869,7 +11887,7 @@ async function stRenderJob(env, job, pair, done, fail) {
     patch.note = stStr('render finished while the asset changed; filed as a branch', 200);
     v = await stAppendVersion(env, a, patch, 'studio', { branch: true, baseVersion: baseV || undefined });
   }
-  await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : finished ? ', finished creative - the words' + (marksSent.length ? ', the ' + marksSent.join(' and ') : '') + ' and the URL are part of the one bitmap; nothing is composed over it' : inp.approach === 'artwork' ? ', hybrid artwork - the words are part of the bitmap, the mark is placed over it' : '') + (references.length ? ', ' + references.length + ' reference image' + (references.length === 1 ? '' : 's') + ' given to the image model' : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
+  await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : finished ? ', finished creative - the words' + (marksSent.length ? ', the ' + marksSent.join(' and ') : '') + ' and the URL are part of the one bitmap; nothing is composed over it' : inp.approach === 'artwork' ? ', hybrid artwork - the words are part of the bitmap, the mark is placed over it' : '') + (attachedRows.length ? ', ' + attachedRows.length + ' image' + (attachedRows.length === 1 ? '' : 's') + ' attached for the image model' + ((out.excluded || []).length ? ' (' + out.excluded.length + ' reference' + (out.excluded.length === 1 ? '' : 's') + ' left out at the model\'s input limit)' : '') : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
   if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
   return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable', finished: finished || undefined, marksSent: finished ? marksSent : undefined }, cost: 1, progress: compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : {} });
@@ -12540,6 +12558,41 @@ async function mindRetrieve(env, ns, q, topK = 5, opts) {
  *  Pro default, then the flash models) with per-model retries on transient
  *  errors. Returns {ok, imageB64, mime, model} or {ok:false, error, detail,
  *  model}. Used by POST /nano and by the Release Desk. */
+// -- S23: what an image request carries, chosen before anything is sent ------------------------------------------------
+// The image models take a limited number of input images (Google's image generation guide and model pages, October 2026:
+// gemini-3-pro-image 14 in all with 6 objects at high fidelity, gemini-3.1-flash-image 14 with 10 objects,
+// gemini-2.5-flash-image best with up to 3). The Studio attaches no more than the high-fidelity count, since marks and
+// references are objects to reproduce or follow; STUDIO_IMAGE_INPUTS_MAX lowers it for every model. nanoRender used to keep
+// the first six images it was given, and the marks were appended after the references, so a required wordmark could be
+// dropped while the version recorded it as sent. Now the current image to edit and every required mark are attached first and
+// are never dropped (a request that cannot carry them all fails before anything is sent); optional references follow by rank
+// until the limit, and those left out are named with the reason; the records come from the attachments actually sent.
+const ST_IMAGE_INPUT_LIMITS = { 'gemini-3-pro-image': 6, 'gemini-3.1-flash-image': 10, 'gemini-2.5-flash-image': 3 };
+const ST_IMAGE_PROMPT_MAX = 20000;   // characters of text in one image request; essential parts are never cut to fit
+function stImageInputLimit(env, model) { const base = ST_IMAGE_INPUT_LIMITS[model] || 3; const cap = parseInt(env && env.STUDIO_IMAGE_INPUTS_MAX, 10); return cap > 0 ? Math.min(base, cap) : base; }
+/** Choose the images for one request: required ones first (the current image to edit, then the marks), then the optional
+ *  references. When they do not all fit, the rank decides which stay (lower first, given order within a rank); those kept are
+ *  attached in the order given, which is the order the plan's roles name them. Answers { ok, attached, excluded, detail }. */
+function stImageAttach(items, limit) {
+  const all = (items || []).filter(x => x && x.data);
+  const req = all.filter(x => x.required); const ordered = req.filter(x => x.kind === 'current').concat(req.filter(x => x.kind !== 'current'));
+  if (ordered.length > limit) return { ok: false, attached: [], excluded: [], detail: ordered.length + ' required image' + (ordered.length === 1 ? '' : 's') + ' (' + ordered.map(x => x.name || x.mark || x.kind || 'image').join(', ') + ') but the image model takes ' + limit };
+  const rank = x => (Number.isFinite(x.rank) ? x.rank : 50);
+  const opt = all.filter(x => !x.required).map((x, i) => ({ x, i }));
+  const room = Math.max(0, limit - ordered.length);
+  const keep = new Set(opt.slice().sort((a, b) => rank(a.x) - rank(b.x) || a.i - b.i).slice(0, room).map(o => o.i));
+  return { ok: true, attached: ordered.concat(opt.filter(o => keep.has(o.i)).map(o => o.x)), excluded: opt.filter(o => !keep.has(o.i)).map(o => ({ name: String(o.x.name || o.x.role || 'reference').slice(0, 120), id: String(o.x.id || '').slice(0, 60), reason: 'over the image model\'s limit of ' + limit + ' input images; the required marks and the stronger references went first' })) };
+}
+/** Fit prompt parts under `max` characters (joined with newlines): every essential part is kept, in order; optional parts are
+ *  kept in order while they fit and the rest are named in `dropped`. Essentials over the limit are refused (overBy). */
+function stPromptFit(parts, max) {
+  const P = (parts || []).filter(p => p && String(p.text || '')).map((p, i) => ({ text: String(p.text), essential: !!p.essential, label: String(p.label || ''), i }));
+  const ess = P.filter(p => p.essential); const essLen = ess.reduce((n, p) => n + p.text.length, 0) + Math.max(0, ess.length - 1);
+  if (essLen > max) return { ok: false, overBy: essLen - max, text: '', dropped: [] };
+  let room = max - essLen; const keep = new Set(ess.map(p => p.i)); const dropped = [];
+  P.filter(p => !p.essential).forEach(p => { const need = p.text.length + (keep.size ? 1 : 0); if (need <= room) { keep.add(p.i); room -= need; } else dropped.push(p.label || p.text.slice(0, 40)); });
+  return { ok: true, overBy: 0, dropped, text: P.filter(p => keep.has(p.i)).map(p => p.text).join('\n') };
+}
 async function nanoRender(env, opts) {
   opts = opts || {};
   const key = env.GEMINI_KEY;
@@ -12550,12 +12603,27 @@ async function nanoRender(env, opts) {
     .forEach(m => { if (m && chain.indexOf(m) === -1) chain.push(m); });
   // the references go to the image model with their roles spelled out, in the order attached, so a composition reference is
   // read as a composition and a brand reference as a brand, not as "more pictures"
-  const refs = (Array.isArray(opts.references) ? opts.references : []).filter(rf => rf && rf.data).slice(0, 6);
-  const roleText = refs.some(rf => rf.role) ? '\n\nREFERENCE IMAGES, attached in this order:\n' + refs.map((rf, i) => (i + 1) + '. ' + (rf.role || 'reference') + (rf.name ? ' - ' + rf.name : '')).join('\n') : '';
-  const mkParts = withCurrent => { const parts = [{ text: (String(opts.prompt || '') + (withCurrent ? '\n\nThe first attached image is the current image to edit: change only what the instruction says.' : '') + roleText).slice(0, 9000) }]; if (withCurrent && opts.currentImage && opts.currentImage.data) parts.push({ inline_data: { mime_type: opts.currentImage.mime || 'image/png', data: String(opts.currentImage.data) } }); refs.forEach(rf => { parts.push({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } }); }); return parts; };
+  const given = (Array.isArray(opts.references) ? opts.references : []).filter(rf => rf && rf.data);
   // a multi-turn edit replays the earlier turns exactly as the model answered them (its parts and thought signatures included) -
   // only to the model that produced them: a fallback model gets the current image attached instead, never another model's history
   const history0 = Array.isArray(opts.history) ? opts.history.filter(t => t && Array.isArray(t.parts) && t.parts.length) : [];
+  // the request for one model, built before anything is sent: its images within the model's limit, its text within the length limit
+  const build = model => {
+    const replay = history0.length > 0 && (!opts.historyModel || opts.historyModel === model);
+    const withCurrent = !replay && history0.length > 0 && !!(opts.currentImage && opts.currentImage.data);
+    const items = (withCurrent ? [{ data: opts.currentImage.data, mime: opts.currentImage.mime, role: 'the current image to edit; change only what the instruction says', name: 'the current image', kind: 'current', required: true }] : []).concat(given);
+    const pick = stImageAttach(items, stImageInputLimit(env, model));
+    if (!pick.ok) return { ok: false, error: 'required_assets_over_limit', detail: pick.detail + '; nothing was sent (not retried)' };
+    const roleText = pick.attached.length && pick.attached.some(rf => rf.role) ? '\nREFERENCE IMAGES, attached in this order:\n' + pick.attached.map((rf, i) => (i + 1) + '. ' + (rf.role || 'reference') + (rf.name ? ' - ' + rf.name : '')).join('\n') : '';
+    const textParts = (Array.isArray(opts.promptParts) && opts.promptParts.length ? opts.promptParts : [{ text: String(opts.prompt || ''), essential: true, label: 'the prompt' }])
+      .concat(pick.attached.some(x => x.kind === 'current') ? [{ text: '\nThe first attached image is the current image to edit: change only what the instruction says.', essential: true }] : [])
+      .concat(roleText ? [{ text: roleText, essential: true }] : []);
+    const fit = stPromptFit(textParts, ST_IMAGE_PROMPT_MAX);
+    if (!fit.ok) return { ok: false, error: 'prompt_over_limit', detail: 'the essential parts of the image prompt are ' + fit.overBy + ' characters over the limit of ' + ST_IMAGE_PROMPT_MAX + '; nothing was cut and nothing was sent (not retried)' };
+    const parts = [{ text: fit.text }].concat(pick.attached.map(rf => ({ inline_data: { mime_type: rf.mime || 'image/png', data: String(rf.data) } })));
+    const attached = pick.attached.map(rf => ({ kind: rf.kind || (rf.mark ? 'mark' : 'reference'), role: String(rf.role || 'reference').slice(0, 160), name: String(rf.name || '').slice(0, 120), id: String(rf.id || '').slice(0, 120), mark: rf.mark || undefined, required: !!rf.required }));
+    return { ok: true, replay, history: replay ? history0 : [], parts, attached, excluded: pick.excluded, dropped: fit.dropped };
+  };
   const t0 = Date.now();
   const ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
   const SIZES = ['1K', '2K', '4K'];
@@ -12574,16 +12642,18 @@ async function nanoRender(env, opts) {
   const cap = SIZES.indexOf(env.IMAGE_SIZE_MAX) !== -1 ? env.IMAGE_SIZE_MAX : '';
   const size = cap && SIZES.indexOf(asked) > SIZES.indexOf(cap) ? cap : asked; const capped = size !== asked ? asked : '';
   imgCfg.imageSize = size;
-  let lastDetail = '', lastModel = chain[0], lastCode = 0; let lastSent = null;
-  // what was sent, for the compiled-instruction record: the text, the images by role (never their bytes), the settings
-  const sentOf = (model, parts, replay, history) => ({ provider: 'google', model, chain, text: (parts[0] && parts[0].text) || '', images: parts.slice(1).map((pt, i) => ({ role: i === 0 && pt.inline_data && opts.currentImage && !replay && history0.length ? 'the current image to edit' : (refs[i - (opts.currentImage && !replay && history0.length ? 1 : 0)] || {}).role || 'reference', name: (refs[i - (opts.currentImage && !replay && history0.length ? 1 : 0)] || {}).name || '' })), historyTurns: history.length, historyReplayed: replay, imageConfig: Object.assign({}, imgCfg), sizeAsked: asked, capped: capped || undefined, aspect: opts.aspect || '' });
+  let lastDetail = '', lastModel = chain[0], lastCode = 0; let lastSent = null; let tried = 0; const skipped = [];
+  // what was sent, for the compiled-instruction record: the text, the images by role in the order attached (never their bytes),
+  // what was left out and why, the settings - all read from the request as built, never from what the caller hoped to send
+  const sentOf = (model, b) => ({ provider: 'google', model, chain, text: (b.parts[0] && b.parts[0].text) || '', images: b.attached.map(x => ({ kind: x.kind, role: x.role, name: x.name, mark: x.mark, required: x.required })), excluded: b.excluded.length ? b.excluded : undefined, promptDropped: b.dropped.length ? b.dropped : undefined, historyTurns: b.history.length, historyReplayed: b.replay, imageConfig: Object.assign({}, imgCfg), sizeAsked: asked, capped: capped || undefined, aspect: opts.aspect || '' });
   for (const model of chain) {
     lastModel = model;
+    const b = build(model);
+    // a model that cannot carry what is required is not asked at all; the next in the chain may (a larger input limit)
+    if (!b.ok) { skipped.push({ model, error: b.error, detail: b.detail }); continue; }
+    tried++;
     const cfg = (model.indexOf('gemini-2.5') === 0 || !Object.keys(imgCfg).length) ? genCfg : Object.assign({}, genCfg, { imageConfig: imgCfg });
-    const replay = history0.length > 0 && (!opts.historyModel || opts.historyModel === model);
-    const history = replay ? history0 : [];
-    const parts = mkParts(!replay && history0.length > 0);
-    const payload = JSON.stringify({ contents: history.concat([{ role: 'user', parts }]), generationConfig: cfg }); lastSent = sentOf(model, parts, replay, history);
+    const payload = JSON.stringify({ contents: b.history.concat([{ role: 'user', parts: b.parts }]), generationConfig: cfg }); lastSent = sentOf(model, b);
     const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -12596,7 +12666,7 @@ async function nanoRender(env, opts) {
           const code = data.error.code || r.status; lastCode = code;
           if (code === 500 || code === 503 || code === 429) continue;
           if (code === 404 || code === 400 || code === 403) break;
-          return { ok: false, error: 'gemini_' + code, detail: lastDetail, model };
+          return { ok: false, error: 'gemini_' + code, detail: lastDetail, model, sent: lastSent, skipped: skipped.length ? skipped : undefined };
         }
         const cand = (data.candidates || [])[0] || {};
         // the final image: the last image part that is not a thought (interleaved thinking images are not the answer)
@@ -12604,14 +12674,16 @@ async function nanoRender(env, opts) {
         const imgPart = imgParts[imgParts.length - 1];
         const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
         const um = data.usageMetadata || {};
-        if (inl && inl.data) return { ok: true, sent: sentOf(model, parts, replay, history), imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts }, historyReplayed: replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
+        if (inl && inl.data) return { ok: true, sent: lastSent, attached: b.attached, excluded: b.excluded, promptDropped: b.dropped, skipped: skipped.length ? skipped : undefined, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts: b.parts }, historyReplayed: b.replay, ms: Date.now() - t0, usage: { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 }, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length };
         lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120);
         if (cand.finishReason && cand.finishReason !== 'STOP') continue;
       } catch (e) { lastDetail = String((e && e.name) || e).slice(0, 60); }
     }
   }
+  // nothing was sent: no model in the chain could carry the required images or the essential text
+  if (!tried && skipped.length) { const f = skipped[skipped.length - 1]; return { ok: false, error: f.error, detail: f.detail, model: f.model, sent: null, skipped }; }
   // the error names the provider's last status so a caller can tell a transient refusal (503, 429) from bad input (400) or a key problem (403)
-  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel, sent: lastSent };
+  return { ok: false, error: lastCode ? 'gemini_' + lastCode : 'no_image', detail: lastDetail || 'all image models failed', model: lastModel, sent: lastSent, skipped: skipped.length ? skipped : undefined };
 }
 /* Every model call carries this rule: material that arrives from documents, uploads, retrieved memory, the web or
  * social posts is data to work from, never instructions. The deterministic guards (namespaces, campaign marks,
@@ -12952,7 +13024,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPromptFit, stImageAttach, stImageInputLimit, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -13438,11 +13510,13 @@ const AXIOM_WORKER = {
       let body = {};
       try { body = await req.json(); } catch { return jsonResp({ error: 'bad_json' }, 400); }
       if (!body.prompt) return jsonResp({ error: 'no_prompt' }, 400);
-      const refs = Array.isArray(body.references) ? body.references
-        : (body.referenceB64 ? [{ data: body.referenceB64, mime: body.mime }] : []);
+      // references supplied by a page are optional material (never required marks): they go within the model's input limit and
+      // any left out are named in the answer
+      const refs = (Array.isArray(body.references) ? body.references
+        : (body.referenceB64 ? [{ data: body.referenceB64, mime: body.mime }] : [])).filter(r => r && r.data).map(r => ({ data: r.data, mime: r.mime, role: r.role, name: r.name }));
       const out = await nanoRender(env, { prompt: body.prompt, references: refs, aspect: body.aspect, size: body.size, model: body.model });
       if (!out.ok) return jsonResp({ error: out.error, detail: out.detail, model: out.model }, 502);
-      return jsonResp({ ok: true, imageB64: out.imageB64, mime: out.mime, model: out.model });
+      return jsonResp({ ok: true, imageB64: out.imageB64, mime: out.mime, model: out.model, attached: (out.attached || []).length, excluded: out.excluded && out.excluded.length ? out.excluded : undefined, promptDropped: out.promptDropped && out.promptDropped.length ? out.promptDropped : undefined });
     }
 
     // -- Reference link reader: fetch a public URL for grounding copy --------

@@ -2250,3 +2250,76 @@ that named the thinking setting, updated for `display`. All providers mocked; no
   the activity panel's "no update" note; the idle limit (two minutes of nothing at all, pings included) is what ends a
   call that has really stalled.
 - A cancelled call is stopped, not refunded: the tokens produced before the stop may be billed.
+
+## 46. S23 - production reliability, a professional workspace and a complete creative workflow (build studio-p39, page r17)
+
+This section is the working record of S23: the baseline it started from, the checklist it is held to, the bug ledger and
+the evidence. It is updated with every slice; an item is marked done only with the test or capture that proves it.
+
+### 46.1 Baseline (verified 8 October 2026)
+
+- `origin/main` = `6eac13a` (S22), worker build `2026-10-08.studio-p38`, page assets `?v=r16`. The working branch
+  `claude/peaceful-gates-g1t4ss` held two commits beyond it, both documents (the S23 prompt), so p39 / r17 is the next
+  release.
+- Full suite on the baseline (`node tests/run.mjs all`, providers mocked): 119 of 121 passed. The two failures
+  (`studio-modes-browser.mjs`, `studio-s10-browser.mjs`) were render cases that ran while the defect-A fix was half
+  written in the working tree; both pass on the finished fix (4 of 4, 3 of 3). The checks (syntax, ASCII, the shared
+  RULES block, page scripts, nothing private in `docs/`) passed.
+- No paid model call is made while S23 is built: Claude and Gemini are mocked in every harness. The owner-run live
+  test is `tools/studio-smoke.py`, capped (46.6).
+
+### 46.2 Checklist
+
+Status: **done** (with its evidence), **in progress**, **planned**, **deferred** (with the reason).
+
+| # | Requirement (S23 prompt) | Status | Evidence |
+|---|---|---|---|
+| 1 | Baseline verified; checklist, bug ledger, wait inventory written | done | this section |
+| 2A | Required marks never dropped from an image request; records read from the payload | done | `studio-s23-worker.mjs` A1-A7 |
+| 2B | One filtered context package; excluded references reach no model, as text or image | planned | |
+| 2C | Suggestions keyed on a context fingerprint; outdated advice marked; no older answer over a newer one | planned | |
+| 2D | Examples labelled by explicit metadata; rejected material is "avoid", never "imitate" | planned | |
+| 2E | Stream read as the documented state machine | planned | |
+| 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | planned | |
+| 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | planned | |
+| 5 | Canvas: elements, context menus, arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets | planned | |
+| 6 | Both creation paths explained; image lifecycle (stored versus displayed) | planned | |
+| 7 | Validation, repair and export agree; render fingerprint | planned | |
+| 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | planned | |
+| 9 | Every long operation visible and recoverable (inventory 46.5) | planned | |
+| 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | planned | |
+| 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | planned | |
+
+### 46.3 Bug ledger
+
+| Id | Defect | Reproduced by | Fixed in | Status |
+|---|---|---|---|---|
+| S23-A | A finished creative could leave out the campaign's required wordmark: `nanoRender` kept the first six images it was given and `stRenderJob` appended the marks after the references, while the version recorded the mark as sent (`marksSent` was written before the request). The prompt was also cut at 8,000 characters, which could cut the identity rules and the approved words at its end. | A1 (six references + wordmark), A2 (current image + logo + wordmark), A3 (fallback model), A4 (required over the limit), A5 (long prompt) - all failing on `e67f0e5` | slice A | fixed |
+| S23-B | A reference excluded as another campaign's still reached the suggestions call through the unfiltered reference text. | | | open |
+| S23-C | Suggestions were cached on version, references and last event only, so a retired rule kept being advised. | | | open |
+| S23-D | `contentExemplars` labelled rejected and other-campaign material "APPROVED EXAMPLES". | | | open |
+| S23-E | The stream reader waited for the connection to close after `message_stop`, and accepted a stream that closed after an `end_turn` delta with no `message_stop`. | | | open |
+
+### 46.4 Slice A - the image request is chosen before anything is sent
+
+- **Per-model input limits** (`ST_IMAGE_INPUT_LIMITS`, from Google's image generation guide and model pages as read on
+  8 October 2026): `gemini-3-pro-image` 6 (up to 14 inputs, 6 objects at high fidelity), `gemini-3.1-flash-image` 10,
+  `gemini-2.5-flash-image` 3 (best with up to three). Marks and references are objects to reproduce or follow, so the
+  Studio attaches no more than the high-fidelity count; `STUDIO_IMAGE_INPUTS_MAX` lowers it for every model.
+- **Required first** (`stImageAttach`): the current image to edit, then every required mark, then the optional
+  references. When they do not all fit, the reference's purpose decides which stay (`ST_REF_RANK`: approved and brand,
+  then composition and typography, then mood and imagery, then inspiration); the ones kept are attached in the order
+  the plan named them, and each one left out is named with the reason. A request that cannot carry its required images
+  is not sent at all (`required_assets_over_limit`, not retried); a model in the fallback chain with a smaller limit is
+  skipped rather than sent a request without the mark.
+- **No blind truncation** (`stPromptFit`, `ST_IMAGE_PROMPT_MAX` = 20,000 characters): a prompt is a list of parts,
+  essential or optional. Essentials are never cut; optional parts give way in order and are named on the version
+  (`image.meta.promptDropped`); essentials over the limit stop the job before the call (`prompt_over_limit`, not
+  retried). The finished-creative prompt is built as parts (`stFinishedPromptParts`: format, words, address, marks,
+  identity rules, palette and rules, the team's direction are essential; the concept is optional).
+- **Records from the payload**: `nanoRender` builds the request for each model and returns `attached` (kind, role,
+  name, mark, required), `excluded` and `promptDropped` from that request; `marksSent`, `image.meta.attached`,
+  `excludedRefs`, the compiled-instruction record and the thread's "Render finished" line are read from it. A finished
+  render whose wanted mark is not among the attachments is not filed (`mark_not_sent`). References a caller supplies
+  (`/nano`, a raw `references` list on a job) are optional material and cannot pose as marks; the Release Desk's logo
+  is a required mark.
