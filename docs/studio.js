@@ -2621,17 +2621,32 @@
     // S19: an edit left on this exact version comes back from the working store (a switch of asset, stage or project does not lose it)
     const work0 = useMemo(() => { const w = WORK.get(a.id); if (!w || !w.layout || !Array.isArray(w.layout.layers)) return null; if (w.base === v.id) return w;
       const rb = rebaseWork(w, v); if (!rb) return null; if (rb.empty) { WORK.del(a.id); return null; } WORK.set(a.id, rb, true); return rb; }, []);
-    const [hist, setHist] = useState(() => ({ past: [], now: JSON.parse(JSON.stringify(work0 ? work0.layout : v.layout)), future: [] }));
-    const layout = hist.now;
+    // S23: every step of the history is named for what it did ("Move headline", "Recolour panel"), read from the two layouts; the
+    // list of steps is distinct from the saved versions
+    const CV = window.STCanvas || {};
+    const nameStep = (a0, b0, hint) => (CV.describeStep ? CV.describeStep(a0, b0, hint) : hint || 'Change');
+    const [hist, setHist] = useState(() => ({ past: [], now: { layout: JSON.parse(JSON.stringify(work0 ? work0.layout : v.layout)), name: work0 ? 'Your unsaved changes, restored' : 'Opened v' + vnum(a, v), at: Date.now() }, future: [] }));
+    const layout = hist.now.layout;
     const [sel, setSelIds] = useState([]); const [focusId, setFocus] = useState(null); const [guides0, setGuides] = useState(true); const [scaleType, setScaleType] = useState(false); const box = useRef(null); const act = useRef(null);
     useEffect(() => { const h = e => { const d = e.detail || {}; if (d.asset !== a.id) return; const ids = (d.ids || []).filter(id => (layout.layers || []).some(l => l.id === id && !l.hidden)); if (ids.length) { setSelIds(ids); setFocus(ids[0]); } }; window.addEventListener('st:select-layers', h); return () => window.removeEventListener('st:select-layers', h); }, [a.id, layout]);
     const [grid, setGrid] = useState(false); const [snapLines, setSnapLines] = useState([]); const [marquee, setMarquee] = useState(null); const [keysOpen, setKeysOpen] = useState(false);
+    // S23: distances and equal spacing while moving; the context menu; the named history list; rulers with the asset's guides; an
+    // element being dragged onto the artwork (its dashed preview); the eyedropper's fallback (the next click reads the artwork)
+    const [dist, setDist] = useState([]); const [menu, setMenu] = useState(null); const [histOpen, setHistOpen] = useState(false);
+    const [rulers, setRulers0] = useState(() => { try { return localStorage.getItem('ax_studio_rulers') === '1'; } catch (e) { return false; } });
+    const setRulers = x => { setRulers0(x); try { localStorage.setItem('ax_studio_rulers', x ? '1' : '0'); } catch (e) {} };
+    const [uGuides, setUGuides] = useState(() => (Array.isArray(a.guides) ? a.guides : []).slice());
+    const [ghost, setGhost] = useState(null); const dragEl = useRef(null); const [pickColour, setPickColour] = useState(null);
+    const lp = useRef(null); const pasteSeen = useRef(false);
     const [editing, setEditing] = useState(null); const [fontOpen, setFontOpen] = useState(false); const [fontPreview, setFontPreview] = useState(null);
     const guides = guidesOn == null ? guides0 : (guidesOn && guides0);
     useEffect(() => { if (onSel) onSel(sel); }, [sel.join(',')]);
     const clickFocus = useRef(null);   // the layer being focused by a click (the click already chose the selection; keyboard focus selects)
-    const commit = next => setHist(h => ({ past: h.past.concat([h.now]).slice(-80), now: next, future: [] }));
-    const live = next => setHist(h => Object.assign({}, h, { now: next }));            // during a drag; the step is committed on release
+    const commit = (next, hint) => setHist(h => ({ past: h.past.concat([h.now]).slice(-80), now: { layout: next, name: nameStep(h.now.layout, next, hint), at: Date.now() }, future: [] }));
+    const live = next => setHist(h => Object.assign({}, h, { now: Object.assign({}, h.now, { layout: next }) }));            // during a drag; the step is committed on release
+    // a gesture ends: the entry it began from becomes the step before, and the layout now is named for what the gesture did
+    const settle = (start, hint) => setHist(h => (start && JSON.stringify(start.layout) !== JSON.stringify(h.now.layout) ? { past: h.past.concat([start]).slice(-80), now: { layout: h.now.layout, name: nameStep(start.layout, h.now.layout, hint), at: Date.now() }, future: [] } : h));
+    const jumpTo = k => setHist(h => { let x = h; for (let i = 0; i < Math.abs(k); i++) x = k < 0 ? (x.past.length ? { past: x.past.slice(0, -1), now: x.past[x.past.length - 1], future: [x.now].concat(x.future) } : x) : (x.future.length ? { past: x.past.concat([x.now]), now: x.future[0], future: x.future.slice(1) } : x); return x; });
     const undo = () => setHist(h => h.past.length ? { past: h.past.slice(0, -1), now: h.past[h.past.length - 1], future: [h.now].concat(h.future) } : h);
     const redo = () => setHist(h => h.future.length ? { past: h.past.concat([h.now]), now: h.future[0], future: h.future.slice(1) } : h);
     const layers = layout.layers;
@@ -2658,7 +2673,7 @@
       // visible layer (the guides they offer) - taken once, since the live layout moves the measurement with it
       const boxes = mode === 'move' ? ids.map(id => inkOf(byId(id))) : null;
       const others = mode === 'move' ? layers.filter(o => !o.hidden && ids.indexOf(o.id) < 0 && o.role !== 'overlay').map(inkOf).filter(b => b.w > 0 && b.w < 99) : null;
-      act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, rw: r.width, rh: r.height, rl: r.left, rt: r.top, boxes, others }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
+      act.current = { id: l.id, ids, mode, sx: e.clientX, sy: e.clientY, start: layout, startE: hist.now, rw: r.width, rh: r.height, rl: r.left, rt: r.top, boxes, others }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const apply = e => { const c = act.current; if (!c) return; const dx = (e.clientX - c.sx) / c.rw * 100, dy = (e.clientY - c.sy) / c.rh * 100; const patches = {};
       if (c.mode === 'move') {
         c.ids.forEach(id => { const o = c.start.layers.find(x => x.id === id); if (movable(o)) patches[id] = { x: r1(Math.max(-o.w + 2, Math.min(98, o.x + dx))), y: r1(Math.max(-2, Math.min(98, o.y + dy))) }; });
@@ -2668,10 +2683,20 @@
         if (!e.altKey && c.ids.length) {
           const bx = c.boxes.map(b => ({ x: b.x + dx, y: b.y + dy, w: b.w, h: b.h }));
           const u = { x: Math.min.apply(null, bx.map(b => b.x)), y: Math.min.apply(null, bx.map(b => b.y)) }; u.w = Math.max.apply(null, bx.map(b => b.x + b.w)) - u.x; u.h = Math.max.apply(null, bx.map(b => b.y + b.h)) - u.y;
-          const sn = E.snapMove ? E.snapMove(u, c.others, edges(), { grid: grid ? 10 : 0 }) : { dx: 0, dy: 0, guides: [] };
+          // S23: the guides kept on the asset are snap targets too (a vertical guide offers its x, a horizontal one its y)
+          const ug = (rulers ? uGuides : []).map(g => g.a === 'x' ? { x: g.at, y: -1000, w: 0, h: 0 } : { x: -1000, y: g.at, w: 0, h: 0 });
+          const sn = E.snapMove ? E.snapMove(u, c.others.concat(ug), edges(), { grid: grid ? 10 : 0 }) : { dx: 0, dy: 0, guides: [] };
           if (sn.dx || sn.dy) Object.keys(patches).forEach(id => { patches[id].x = r1(patches[id].x + sn.dx); patches[id].y = r1(patches[id].y + sn.dy); });
           lines = sn.guides;
-        }
+          // S23: equal spacing to the neighbours on each side (a snap when nearly equal) and the gaps in output pixels
+          if (CV.spacingHints && c.others.length && layout.stage) {
+            const u2 = { x: u.x + sn.dx, y: u.y + sn.dy, w: u.w, h: u.h };
+            const sp = CV.spacingHints(u2, c.others, layout.stage.w, layout.stage.h);
+            if (!sn.dx && sp.dx) Object.keys(patches).forEach(id => { patches[id].x = r1(patches[id].x + sp.dx); });
+            if (!sn.dy && sp.dy) Object.keys(patches).forEach(id => { patches[id].y = r1(patches[id].y + sp.dy); });
+            setDist(sp.marks);
+          }
+        } else setDist([]);
         setSnapLines(lines);
       }
       else if (c.mode === 'rotate') { const o = c.start.layers.find(x => x.id === c.id); const cx = c.rl + (o.x + o.w / 2) / 100 * c.rw, cy = c.rt + (o.y + (o.h || 0) / 2) / 100 * c.rh; const ang = E.angleTo ? E.angleTo(cx, cy, e.clientX, e.clientY, e.shiftKey) : 0; patches[o.id] = { rotate: ang || undefined }; }
@@ -2683,7 +2708,7 @@
         if (rz) { const pt = { x: rz.x, y: rz.y, w: rz.w, h: rz.h }; if (o.type === 'text' && scaleType) pt.size = r1(Math.max(1.2, o.size * rz.k)); patches[o.id] = pt; } }
       live(patchMany(c.start, patches)); };
     const move = e => { if (marquee && marquee.on) { marqueeMove(e); return; } if (!act.current) return; pend.current = { clientX: e.clientX, clientY: e.clientY, altKey: e.altKey, shiftKey: e.shiftKey }; if (!raf.current) raf.current = requestAnimationFrame(() => { raf.current = 0; const q = pend.current; pend.current = null; if (q) apply(q); }); };
-    const up = () => { if (marquee && marquee.on) { marqueeUp(); return; } if (raf.current) { cancelAnimationFrame(raf.current); raf.current = 0; } if (pend.current) { const q = pend.current; pend.current = null; apply(q); } const c = act.current; act.current = null; setSnapLines([]); if (c) setHist(h => (JSON.stringify(c.start) !== JSON.stringify(h.now) ? { past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] } : h)); };
+    const up = () => { if (marquee && marquee.on) { marqueeUp(); return; } if (raf.current) { cancelAnimationFrame(raf.current); raf.current = 0; } if (pend.current) { const q = pend.current; pend.current = null; apply(q); } const c = act.current; act.current = null; setSnapLines([]); setDist([]); if (c) settle(c.startE); };
     /* a marquee from the empty stage selects every visible, unlocked layer it touches (Shift adds to the selection); a click selects nothing */
     const marqueeDown = e => { if (editing || preview) return; if (e.target.closest && (e.target.closest('.st-le-layer') || e.target.closest('.st-fbar') || e.target.closest('.st-le-frame') || e.target.closest('.st-le-fontwrap') || e.target.closest('.st-le-textedit'))) return; const r = box.current.getBoundingClientRect(); const x0 = (e.clientX - r.left) / r.width * 100, y0 = (e.clientY - r.top) / r.height * 100; setMarquee({ on: true, x0, y0, x1: x0, y1: y0, add: e.shiftKey, base: e.shiftKey ? sel : [] }); try { box.current.setPointerCapture(e.pointerId); } catch (x) {} };
     const marqueeMove = e => { const r = box.current.getBoundingClientRect(); setMarquee(m => m ? Object.assign({}, m, { x1: (e.clientX - r.left) / r.width * 100, y1: (e.clientY - r.top) / r.height * 100 }) : m); };
@@ -2791,7 +2816,7 @@
     // S19: reframing is a mode with an explicit end: Apply keeps the new crop (each drag was already one undo step), Cancel puts the
     // crop back as it was when the mode began and drops those steps; Enter applies, Escape cancels
     const frameStart = useRef(null);
-    const startFrame = () => { frameStart.current = { now: layout, past: hist.past.length }; setFrame(true); };
+    const startFrame = () => { frameStart.current = { now: hist.now, past: hist.past.length }; setFrame(true); };
     const applyFrame = () => { frameStart.current = null; setFrame(false); };
     const cancelFrame = () => { const s0 = frameStart.current; frameStart.current = null; setFrame(false); if (s0) setHist(h => ({ past: h.past.slice(0, s0.past), now: s0.now, future: [] })); };
     const subj = useMemo(() => { if (!comp.ready || !comp.imgs.bg || layout.noImagery || !R.subjects) return null; try { return R.subjects(comp.imgs.bg); } catch (e) { return null; } }, [comp.key, comp.ready]);
@@ -2799,10 +2824,10 @@
     const suggestion = useMemo(() => { if (!subj || !subj.regions.length || !comp.ready || !R.frameSuggest) return null; try { return R.frameSuggest(layout, wcopy, comp.imgs, { format: a.format }); } catch (e) { return null; } }, [layout, comp.key, comp.ready, subj]);
     const frameTarget = () => { const s = selected(); const reg = s.length === 1 && s[0].type === 'img' && s[0].role === 'region' && !s[0].locked ? s[0] : null; if (reg) { const im = comp.imgs[reg.id]; if (!im) return null; return { reg, img: im, box: { x: reg.x, y: reg.y, w: reg.w, h: reg.h || 0 }, focus: reg.focus }; } if (!comp.imgs.bg) return null; const ib = layout.image && layout.image.w > 0 ? layout.image : { x: 0, y: 0, w: 100, h: 100 }; return { reg: null, img: comp.imgs.bg, box: ib, focus: layout.imageFocus }; };
     const applyFocus = (L0, t, nf) => { const plain = nf.x === 50 && nf.y === 50 && nf.zoom === 1; const val2 = plain ? undefined : nf; return t.reg ? patchMany(L0, { [t.reg.id]: { focus: val2 } }) : Object.assign({}, L0, { imageFocus: val2 }); };
-    const frameDown = e => { const t = frameTarget(); if (!t || !layout.stage) return; e.preventDefault(); e.stopPropagation(); const r = box.current.getBoundingClientRect(); pan.current = { t, sx: e.clientX, sy: e.clientY, start: layout, k: layout.stage.w / r.width }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
+    const frameDown = e => { const t = frameTarget(); if (!t || !layout.stage) return; e.preventDefault(); e.stopPropagation(); const r = box.current.getBoundingClientRect(); pan.current = { t, sx: e.clientX, sy: e.clientY, start: layout, startE: hist.now, k: layout.stage.w / r.width }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
     const frameMove = e => { const c = pan.current; if (!c) return; const W = c.start.stage.w, H = c.start.stage.h; const bx = { x: c.t.box.x / 100 * W, y: c.t.box.y / 100 * H, w: c.t.box.w / 100 * W, h: c.t.box.h / 100 * H }; const nf = R.panFocus(c.t.img.naturalWidth, c.t.img.naturalHeight, bx, c.t.focus, (e.clientX - c.sx) * c.k, (e.clientY - c.sy) * c.k); live(applyFocus(c.start, c.t, nf)); };
-    const frameUp = () => { const c = pan.current; pan.current = null; if (c && JSON.stringify(c.start) !== JSON.stringify(layout)) setHist(h => ({ past: h.past.concat([c.start]).slice(-80), now: h.now, future: [] })); };
-    const frameWheel = e => { const t = frameTarget(); if (!t) return; e.preventDefault(); const f = t.focus || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 }; const nf = Object.assign({}, cur, { zoom: Math.round(Math.max(1, Math.min(3, cur.zoom - Math.sign(e.deltaY) * 0.05)) * 100) / 100 }); if (nf.zoom === cur.zoom) return; if (!wheelT.current) wheelT.current = { start: layout }; live(applyFocus(layout, t, nf)); clearTimeout(wheelT.current.timer); wheelT.current.timer = setTimeout(() => { const s0 = wheelT.current && wheelT.current.start; wheelT.current = null; if (s0) setHist(h => (JSON.stringify(s0) !== JSON.stringify(h.now) ? { past: h.past.concat([s0]).slice(-80), now: h.now, future: [] } : h)); }, 500); };
+    const frameUp = () => { const c = pan.current; pan.current = null; if (c) settle(c.startE, 'Reframe the ' + (c.t.reg ? (c.t.reg.name || 'image') : 'photograph')); };
+    const frameWheel = e => { const t = frameTarget(); if (!t) return; e.preventDefault(); const f = t.focus || {}; const cur = { x: f.x == null ? 50 : f.x, y: f.y == null ? 50 : f.y, zoom: f.zoom || 1 }; const nf = Object.assign({}, cur, { zoom: Math.round(Math.max(1, Math.min(3, cur.zoom - Math.sign(e.deltaY) * 0.05)) * 100) / 100 }); if (nf.zoom === cur.zoom) return; if (!wheelT.current) wheelT.current = { start: hist.now }; live(applyFocus(layout, t, nf)); clearTimeout(wheelT.current.timer); wheelT.current.timer = setTimeout(() => { const s0 = wheelT.current && wheelT.current.start; wheelT.current = null; if (s0) settle(s0, 'Zoom the crop'); }, 500); };
     // the wheel is bound natively and non-passively on the overlay, so zooming the photograph never scrolls the page under it
     const frameRef = useRef(null); const wheelFn = useRef(null); wheelFn.current = frameWheel;
     useEffect(() => { const el = frameRef.current; if (!frame || !el) return; const h = e => { if (wheelFn.current) wheelFn.current(e); }; el.addEventListener('wheel', h, { passive: false }); return () => el.removeEventListener('wheel', h); }, [frame]);

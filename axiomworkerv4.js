@@ -7078,6 +7078,11 @@ async function ensureStudio(env) {
     // S23: the suggestions for one asset, keyed on the fingerprint of the context they were made from (started orders answers)
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_suggestions(asset TEXT PRIMARY KEY, project TEXT, fp TEXT, parts TEXT, started INTEGER, at INTEGER, data TEXT)'),
   ]); } catch (e) {}
+  // S23: pages are ordered assets inside their family (ord), a deleted page is archived (recoverable), and the editor's own
+  // guides are kept on the asset - none of them a version, so none of them touches a signature or an approval
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_assets ADD COLUMN ord REAL').run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_assets ADD COLUMN archived INTEGER').run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_assets ADD COLUMN guides TEXT').run(); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN rev TEXT').run(); } catch (e) {}   // S20: which working snapshot a draft holds
   try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN seq INTEGER').run(); } catch (e) {}   // S20: the order the browser wrote drafts in
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN file TEXT').run(); } catch (e) {}   // S16: an uploaded image or PDF the analysis reads
@@ -7106,7 +7111,22 @@ function stImage(im) { if (!im || typeof im !== 'object') return null; const out
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
-function stAssetRow(r) { return { id: r.id, project: r.project, family: r.family || '', channel: r.channel || '', format: r.format || '1:1', title: r.title || '', current: r.current || '', locks: pjs(r.locks, {}), revision: r.revision || 0, created: r.created, updated: r.updated }; }
+function stAssetRow(r) { return { id: r.id, project: r.project, family: r.family || '', channel: r.channel || '', format: r.format || '1:1', title: r.title || '', current: r.current || '', locks: pjs(r.locks, {}), revision: r.revision || 0, created: r.created, updated: r.updated, ord: r.ord == null ? null : Number(r.ord), archived: !!r.archived, guides: pjs(r.guides, []) }; }
+/* S23: pages are ordered assets within their family (a carousel's frames, a sequence's items); versions stay the revision
+   history and are never used as pages. The list keeps the order the assets were made in; only the places a family holds in
+   it are re-filled in the family's explicit order, so a project nobody reordered lists exactly as before. Inside a family an
+   asset made later without an order (an adaptation, a resize) comes after the ordered ones, in the order it was made. */
+function stOrderAssets(list) {
+  const fam = {};
+  list.forEach((a, i) => { const f = a.family || ''; (fam[f] = fam[f] || []).push({ a, i }); });
+  const out = list.slice();
+  Object.keys(fam).forEach(f => {
+    const m = fam[f]; if (!m.some(x => x.a.ord != null)) return;
+    const sorted = m.map((x, k) => ({ a: x.a, k })).sort((x, y) => { const ox = x.a.ord != null ? x.a.ord : 1e6 + x.k, oy = y.a.ord != null ? y.a.ord : 1e6 + y.k; return ox - oy || x.k - y.k; });
+    m.forEach((x, j) => { out[x.i] = sorted[j].a; });
+  });
+  return out;
+}
 function stProjectRow(r) {
   return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false };
 }
@@ -7271,7 +7291,10 @@ async function stGet(env, id, opts) {
     jobs: (jobs.results || []).map(stJobRow),
   });
   const kitR = (assets.results || []).length ? (await brandKit(env, p.ns)) || {} : {};
-  for (const a of (assets.results || [])) out.assets.push(await stAssetView(env, stAssetRow(a), { project: p, kit: kitR }));
+  const rowsA = stOrderAssets((assets.results || []).map(stAssetRow));
+  for (const a of rowsA.filter(x => !x.archived)) out.assets.push(await stAssetView(env, a, { project: p, kit: kitR }));
+  // S23: a deleted page is archived, not destroyed: listed here so it can be restored in its place
+  out.archivedAssets = rowsA.filter(x => x.archived).map(a => ({ id: a.id, title: a.title, family: a.family, format: a.format, channel: a.channel, ord: a.ord, updated: a.updated }));
   // S16: the latest whole reading of the material and the message kit
   try { const it = await stIntelGet(env, p.id); if (it) { const ki = it.knowItems || {}; it.knowItems = {}; Object.keys(ki).forEach(k => { it.knowItems[k] = (Array.isArray(ki[k]) ? ki[k] : []).map(x => ({ id: x.id, label: stStr(x.title || x.label || x.what || x.entity || x.text || '', 140), kind: x.kind || '', why: stStr(x.why || x.claim || x.angle || '', 160) })); }); out.intel = it; } } catch (e) {}
   try { out.texts = ((await db.prepare('SELECT * FROM studio_texts WHERE project=? ORDER BY created DESC LIMIT 60').bind(p.id).all()).results || []).map(stTextRow); } catch (e) { out.texts = []; }
@@ -7286,14 +7309,14 @@ async function stList(env, f) {
   if (!f.archived) w.push('archived=0');
   if (f.status) { w.push('status=?'); b.push(stStr(f.status, 20)); }
   if (f.q) { w.push("title LIKE ? ESCAPE '\\'"); b.push(arcLike(String(f.q).slice(0, 80))); }
-  const rows = (await env.MIND_DB.prepare('SELECT p.*, (SELECT COUNT(*) FROM studio_assets a WHERE a.project=p.id) n_assets, (SELECT COUNT(*) FROM studio_sources s WHERE s.project=p.id) n_sources FROM studio_projects p WHERE ' + w.join(' AND ') + ' ORDER BY updated DESC LIMIT ?').bind(...b, Math.min(parseInt(f.limit, 10) || 100, 300)).all()).results || [];
+  const rows = (await env.MIND_DB.prepare('SELECT p.*, (SELECT COUNT(*) FROM studio_assets a WHERE a.project=p.id AND COALESCE(a.archived,0)=0) n_assets, (SELECT COUNT(*) FROM studio_sources s WHERE s.project=p.id) n_sources FROM studio_projects p WHERE ' + w.join(' AND ') + ' ORDER BY updated DESC LIMIT ?').bind(...b, Math.min(parseInt(f.limit, 10) || 100, 300)).all()).results || [];
   const projects = rows.map(r => Object.assign(stProjectRow(r), { assets: r.n_assets || 0, sources: r.n_sources || 0 }));
   // S23: the library shows each project's lead composition (its first visual asset, as it stands) for the most recent projects:
   // the layout and words the renderer draws, and the imagery by its access-controlled file route - nothing public, nothing copied
   try {
     const recent = projects.slice(0, 24).map(p => p.id);
     if (recent.length) {
-      const assets = (await env.MIND_DB.prepare('SELECT id, project, title, format, channel, current, created FROM studio_assets WHERE project IN (' + recent.map(() => '?').join(',') + ') ORDER BY created').bind(...recent).all()).results || [];
+      const assets = (await env.MIND_DB.prepare('SELECT id, project, title, format, channel, current, created FROM studio_assets WHERE project IN (' + recent.map(() => '?').join(',') + ') AND COALESCE(archived,0)=0 ORDER BY created').bind(...recent).all()).results || [];
       const cur = assets.map(a => a.current).filter(Boolean).slice(0, 90);
       const vers = cur.length ? (await env.MIND_DB.prepare('SELECT id, asset, layout, copy, image, mode FROM studio_versions WHERE id IN (' + cur.map(() => '?').join(',') + ')').bind(...cur).all()).results || [] : [];
       const byId = {}; vers.forEach(v => { byId[v.id] = v; });
@@ -7689,7 +7712,7 @@ async function stUsage(env, p) {
 /** What an upstream change has made stale, asset by asset, with the remedy and whether it costs a model call. */
 async function stImpact(env, p) {
   await ensureBrand(env);
-  const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id).all()).results || [];
   const revs = ((await env.MIND_DB.prepare('SELECT at, summary FROM brand_revisions WHERE ns=? ORDER BY at').bind(p.ns).all()).results || []).map(r => ({ at: r.at, summary: pjs(r.summary, []) }));
   const st = (p.brief || {}).strategy; const out = [];
   for (const r of assets) {
@@ -7746,7 +7769,7 @@ async function stMetricsWindow(env, ns, from, to) {
     const jobs = (await env.MIND_DB.prepare("SELECT stage, cost FROM studio_jobs WHERE project=? AND state='done'").bind(p.id).all()).results || [];
     jobs.forEach(j => { if (j.stage === 'render') out.images++; else if (j.stage !== 'export') out.calls += Number(j.cost) || 1; });
     try { const cr = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) AS n FROM studio_review WHERE project=? GROUP BY kind').bind(p.id).all()).results || []; cr.forEach(r => { if (r.kind === 'changes') out.clientChanges += r.n; if (r.kind === 'approve') out.clientApprovals += r.n; }); } catch (e) {}
-    const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=?').bind(p.id).all()).results || [];
+    const assets = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0').bind(p.id).all()).results || [];
     out.assets += assets.length;
     for (const r of assets) {
       const a = stAssetRow(r); const v = await stCurrent(env, a); if (!v) continue;
@@ -9519,6 +9542,52 @@ async function stResize(env, p, a, sb, who) {
   if (made.length) await stEvent(env, p.id, 'resized', { asset: a.id, text: 'Resized ' + a.title + ' to ' + made.map(m => m.title.replace(a.title + ' - ', '')).join(', ') + ': the same words, styling and image, re-laid for each format. Nothing generated; each new composition is measured before it is approved.' + (skipped.length ? ' Not made: ' + skipped.map(x => x.format + ' (' + x.why + ')').join('; ') + '.' : '') }, who);
   return { ok: true, made, skipped };
 }
+/* S23: the pages of a carousel or a sequence are ordered assets in their family; versions stay each page's revision history.
+   duplicate and add make a new asset placed right after the one asked (the composition as it stands; add gives it new words to
+   write), move rewrites the family's order, delete archives the page (recoverable; out of the workflow, the review and the
+   export) and restore brings it back in its place. None of these rewrites an existing page, calls a model or renders. */
+const ST_PAGE_ACTIONS = ['duplicate', 'add', 'move', 'delete', 'restore'];
+async function stPage(env, p, a, sb, who) {
+  const act = String(sb.action || '');
+  if (ST_PAGE_ACTIONS.indexOf(act) < 0) return { error: 'bad_action', status: 400, detail: 'action is one of ' + ST_PAGE_ACTIONS.join(', ') };
+  if (p.legacy) return { error: 'read_only', status: 409, detail: 'An imported legacy project is read-only.' };
+  const fam = stOrderAssets(((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? ORDER BY created, rowid').bind(p.id, a.family).all()).results || []).map(stAssetRow));
+  const live = fam.filter(x => !x.archived);
+  const renumber = async list => { const st = list.map((x, i) => env.MIND_DB.prepare('UPDATE studio_assets SET ord=? WHERE id=?').bind(i + 1, x.id)); if (st.length) await env.MIND_DB.batch(st); };
+  const now = Date.now(); const famName = a.family || 'its family';
+  if (act === 'move') {
+    if (a.archived) return { error: 'archived', status: 409, detail: 'Restore the page before moving it.' };
+    const rest = live.filter(x => x.id !== a.id); const to = Math.max(0, Math.min(rest.length, Math.floor(Number(sb.to) || 0)));
+    const list = rest.slice(0, to).concat([a], rest.slice(to)); await renumber(list);
+    await stEvent(env, p.id, 'pages', { asset: a.id, text: 'Moved ' + a.title + ' to page ' + (to + 1) + ' of ' + list.length + ' in ' + famName + '. No version written.' }, who);
+    return { ok: true, order: list.map(x => x.id) };
+  }
+  if (act === 'delete' || act === 'restore') {
+    if ((act === 'delete') === !!a.archived) return { ok: true, unchanged: true, archived: !!a.archived };
+    // the page keeps its place in the order while archived, so a restore puts it back where it was
+    if (act === 'delete') await renumber(fam);
+    await env.MIND_DB.prepare('UPDATE studio_assets SET archived=?, updated=? WHERE id=?').bind(act === 'delete' ? 1 : 0, now, a.id).run();
+    await stEvent(env, p.id, 'pages', { asset: a.id, text: (act === 'delete' ? 'Deleted ' + a.title + ' from ' + famName + ': archived, so it can be restored in its place; it leaves the review and the export.' : 'Restored ' + a.title + ' in its place in ' + famName + '.') }, who);
+    return { ok: true, archived: act === 'delete' };
+  }
+  if (a.archived) return { error: 'archived', status: 409, detail: 'Restore the page first.' };
+  const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 409, detail: 'The page has no version to start from.' };
+  if (act === 'add' && (src.mode === 'finished' || src.mode === 'artwork')) return { error: 'not_reflowable', status: 409, detail: 'This page is one painted bitmap: a new page cannot take new words in it. Duplicate it, or make an editable copy first (free).' };
+  const aid = stId('a'); const n = live.length + 1;
+  const title = act === 'duplicate' ? stStr(a.title + ' (copy)', 80) : stStr((a.family || 'Page') + ' - page ' + n, 80);
+  const copy = act === 'duplicate' ? Object.assign({}, src.copy) : { headline: 'New page' };
+  await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, a.family, a.channel, a.format, title, '', JSON.stringify(act === 'duplicate' ? (a.locks || {}) : {}), 1, now, now).run();
+  const na = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
+  const note = act === 'duplicate' ? 'duplicated from ' + a.title + ' (v' + src.id + '): the same composition, words and imagery; no model call, no render' : 'a new page after ' + a.title + ': its layout and imagery, with new words to write; no model call, no render';
+  const v = await stAppendVersion(env, na, { kind: 'layout', note, copy, layout: src.layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { pageFrom: a.id + ':' + src.id, how: act === 'duplicate' ? 'page-duplicate' : 'page-add' }) }, who);
+  await stVersionChecks(env, p, na, v);
+  const i = live.findIndex(x => x.id === a.id); const list = live.slice(0, i + 1).concat([na], live.slice(i + 1)); await renumber(list);
+  await stEvent(env, p.id, 'pages', { asset: aid, text: (act === 'duplicate' ? 'Duplicated ' + a.title + ' as ' + title : 'Added ' + title + ' after ' + a.title) + ' (page ' + (i + 2) + ' of ' + list.length + ' in ' + famName + '). Nothing generated.' }, who);
+  return { ok: true, made: { asset: aid, title, version: v.id, page: i + 2, of: list.length } };
+}
+/* S23: the editor's own guides for an asset - kept on the asset, never in a version, so they change no signature, no validation
+   and no approval. An axis is x or y; a position is a share of the stage, kept between -10 and 110; at most 40. */
+function stGuidesClean(g) { return (Array.isArray(g) ? g : []).filter(x => x && (x.a === 'x' || x.a === 'y') && isFinite(Number(x.at))).slice(0, 40).map(x => ({ a: x.a, at: Math.round(Math.max(-10, Math.min(110, Number(x.at))) * 10) / 10 })); }
 /** S17: the production mode, chosen in Design once the words are ready. editable: the Studio composes the words and the exact
  *  mark as live layers over generated imagery, so the imagery each composition plans is queued. finished: the image model paints
  *  the whole piece from the approved words and the mark files, so a finished version is appended from the composition's plan and
@@ -9529,7 +9598,7 @@ async function stProduction(env, p, sb, who) {
   if (!mode) return { error: 'bad_mode', status: 400, detail: 'mode is editable or finished' };
   if (!env.GEMINI_KEY) return { error: 'gemini_not_configured', status: 409, detail: 'Image generation is not configured on the worker (GEMINI_KEY): neither production mode can make imagery yet. Compositions and copy work without it.' };
   const want = Array.isArray(sb.assets) && sb.assets.length ? sb.assets.map(x => stClean(x, 24)) : null;
-  const list = ((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow).filter(a => !want || want.indexOf(a.id) >= 0);
+  const list = ((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow).filter(a => !want || want.indexOf(a.id) >= 0);
   if (!list.length) return { error: 'no_assets', status: 409, detail: 'Nothing to produce yet: generate the copy first.' };
   const size = /^(1K|2K|4K)$/.test(String(sb.size || '')) ? sb.size : ((p.brief || {}).size || undefined);
   const guided = stWfOn(p); const done = [], skipped = [], jobs = [];
@@ -10019,10 +10088,10 @@ function stCopySheet(p, items) {
 }
 async function stExportStage(env, job, p, log) {
   const want = Array.isArray(job.input.assets) && job.input.assets.length ? new Set(job.input.assets.map(x => stClean(x, 24))) : null;
-  const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const rows = stOrderAssets(((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow));
   const items = [], excluded = [];
-  for (const r of rows) {
-    const a = stAssetRow(r); if (want && !want.has(a.id)) continue;
+  for (const a of rows) {
+    if (want && !want.has(a.id)) continue;
     const cur = await stCurrent(env, a); if (!cur) { excluded.push({ asset: a.id, title: a.title, why: 'no version' }); continue; }
     const ap = await stStanding(env, a);
     const need = cur.mode === 'copy' ? ['copy'] : ['copy', 'design'];
@@ -10182,9 +10251,9 @@ const ST_REVISE_KINDS = ['text', 'alternatives', 'render', 'adapt', 'layout', 'l
 const ST_COPY_FIELDS = ['headline', 'support', 'cta', 'caption', 'alt'];
 function stCampaignOf(fix) { const m = /:campaign:([a-z0-9_-]+)$/.exec(String((fix && fix.source) || '')); return m ? m[1] : ''; }
 async function stProjectAssets(env, p) {
-  const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? ORDER BY created').bind(p.id).all()).results || [];
+  const rows = stOrderAssets(((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow));
   const out = [];
-  for (const r of rows) { const a = stAssetRow(r); out.push({ asset: a, version: await stCurrent(env, a) }); }
+  for (const a of rows) { out.push({ asset: a, version: await stCurrent(env, a) }); }
   return out;
 }
 function stAssetBrief(t) {
@@ -12271,7 +12340,7 @@ async function stInspectStage(env, job, p, log) {
   const inventory = ['headline', 'support', 'cta'].filter(k => v.copy[k] && (v.mode === 'artwork' || finished || textLayers.some(l => l.role === k))).map(k => k + ' "' + v.copy[k] + '"').concat(textLayers.filter(l => l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => (l.role || 'text') + ' "' + l.text + '"')).concat(finished ? (L.bakedText || []).map(t => (t.role || 'text') + ' "' + t.text + '"') : []);
   const marksOn = finished ? markRoles.map(r => r === 'wordmark' ? 'the campaign wordmark, painted from its file (attached after the artwork for comparison)' : 'the client logo, painted from its file (attached after the artwork for comparison)') : (L.layers || []).filter(l => l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && !l.hidden).map(l => l.role === 'wordmark' ? 'the campaign wordmark (exact file)' : 'the client logo (exact file)');
   let siblings = [];
-  if (L.frame && L.frame.of > 1) { try { const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? ORDER BY created').bind(p.id, a.family).all()).results || []; for (const r of rows) { if (r.id === a.id) continue; const sv = r.current ? await stVersion(env, r.current) : null; if (sv) siblings.push((sv.layout && sv.layout.frame ? 'frame ' + (sv.layout.frame.index + 1) : r.title) + ': "' + (sv.copy.headline || '') + '"' + (sv.layout && sv.layout.bg ? ', ground ' + (typeof sv.layout.bg === 'string' ? sv.layout.bg : sv.layout.bg.from + ' to ' + sv.layout.bg.to) : '') + (sv.image ? ', imagery on file' : ', no imagery')); } } catch (e) {} }
+  if (L.frame && L.frame.of > 1) { try { const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id, a.family).all()).results || []; for (const r of rows) { if (r.id === a.id) continue; const sv = r.current ? await stVersion(env, r.current) : null; if (sv) siblings.push((sv.layout && sv.layout.frame ? 'frame ' + (sv.layout.frame.index + 1) : r.title) + ': "' + (sv.copy.headline || '') + '"' + (sv.layout && sv.layout.bg ? ', ground ' + (typeof sv.layout.bg === 'string' ? sv.layout.bg : sv.layout.bg.from + ' to ' + sv.layout.bg.to) : '') + (sv.image ? ', imagery on file' : ', no imagery')); } } catch (e) {} }
   const user = 'THE TILE: ' + a.title + ', ' + a.format + '. ' + (finished ? 'This is a FINISHED CREATIVE: the image model painted the whole piece - words, mark and URL - as one bitmap, and nothing is composed over it. You see exactly what would be exported. Read back every word and every mark; compare each mark with its attached file.' : composed ? 'You see the COMPOSED TILE exactly as it will be exported: imagery, words, shapes and marks drawn by the renderer. Judge the whole: hierarchy, legibility, spacing, the mark, every word.' : v.mode === 'artwork' ? 'This is a full artwork: the words are painted into the image. Baked: ' + ((L.baked || []).join(', ') || 'all') + '.' : 'This is the IMAGERY ONLY (no composed export saved yet); the words and marks will be composed over it as live layers' + (L.v === 5 ? ' at: ' + textLayers.map(l => (l.role || 'text') + ' ' + l.x + ',' + l.y + ' ' + l.w + 'x' + l.h).join('; ') : L.design ? ' (' + stDescribeSpec(L.design) + ')' : '') + '. Judge the imagery and the room it leaves; do not score words you cannot see.')
     + '\nAPPROVED WORDS (the complete inventory; anything else legible is unapproved): ' + (inventory.join('; ') || '(none)') + (v.copy.caption ? '. The caption is posted beside the tile, not on it.' : '')
     + (baked.length ? '\nPAINTED WORDS TO READ BACK (they are part of the bitmap; list in words.missing any you cannot read exactly): ' + baked.map(b => b.role + ' "' + b.text + '"').join('; ') : '')
@@ -13336,6 +13405,16 @@ const AXIOM_WORKER = {
       const pair = await stAsset(env, reqUrl.searchParams.get('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
       const pg = await stVersionPage(env, pair.asset.id, { before: parseInt(reqUrl.searchParams.get('before') || '0', 10) || 0, limit: parseInt(reqUrl.searchParams.get('limit') || '60', 10) || 60 });
       return jsonResp({ ok: true, asset: pair.asset.id, current: pair.asset.current, total: pg.total, versions: pg.versions });
+    }
+    // S23: the images placed in this project (the Elements panel's uploads), newest first, by the keyed file route
+    if (path === '/studio/uploads' && req.method === 'GET') {
+      if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
+      await ensureStudio(env);
+      const p = await stProject(env, reqUrl.searchParams.get('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+      const rows = (await env.MIND_DB.prepare("SELECT data, created FROM studio_events WHERE project=? AND kind='upload' ORDER BY id DESC LIMIT 80").bind(p.id).all()).results || [];
+      const seen = new Set(); const uploads = [];
+      for (const r of rows) { const d = pjs(r.data, {}); const key = stUploadKey(d.key, p.id); if (!key || seen.has(key)) continue; seen.add(key); const m = /^Image placed for the canvas: (.*) \(\d+ KB\)\.$/.exec(String(d.text || '')); uploads.push({ key, url: '/studio/file?key=' + encodeURIComponent(key), name: m ? m[1] : key.split('/').pop(), at: r.created }); }
+      return jsonResp({ ok: true, project: p.id, uploads });
     }
     if (path === '/integrity' && (req.method === 'GET' || req.method === 'HEAD')) {
       if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
@@ -14829,6 +14908,20 @@ const AXIOM_WORKER = {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           const r = await stResize(env, pair.project, pair.asset, sb, who); if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
           await stBump(env, pair.project.id); return jsonResp(Object.assign({}, r, await stGet(env, pair.project.id)));
+        }
+        // S23: pages as ordered assets, and the editor's guides kept on the asset (neither is a version)
+        if (path === '/studio/page') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The page belongs to another project; nothing was changed.' }, 403);
+          const r = await stPage(env, pair.project, pair.asset, sb, who); if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
+          await stBump(env, pair.project.id); return jsonResp(r);
+        }
+        if (path === '/studio/guides') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project' }, 403);
+          const g = stGuidesClean(sb.guides);
+          await env.MIND_DB.prepare('UPDATE studio_assets SET guides=? WHERE id=?').bind(JSON.stringify(g), pair.asset.id).run();
+          return jsonResp({ ok: true, guides: g });
         }
         if (path === '/studio/image/upload') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);

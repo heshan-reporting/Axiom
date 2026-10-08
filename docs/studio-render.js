@@ -318,6 +318,8 @@
           if (l.shape === 'rule') { ctx.beginPath(); ctx.rect(x, y, w, Math.max(1, h || W * 0.004)); }
           else if (l.shape === 'circle') { ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); }
           else if (l.shape === 'triangle') { ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.closePath(); }
+          // S23: an arrow - a shaft along the middle of its box and a head at the right end; turn the layer to point it elsewhere
+          else if (l.shape === 'arrow') { const hh = Math.max(2, h); const t = Math.max(1, Math.min(hh * 0.32, w * 0.2)); const hd = Math.min(w * 0.4, hh * 1.1); const cy = y + hh / 2; ctx.beginPath(); ctx.moveTo(x, cy - t / 2); ctx.lineTo(x + w - hd, cy - t / 2); ctx.lineTo(x + w - hd, y); ctx.lineTo(x + w, cy); ctx.lineTo(x + w - hd, y + hh); ctx.lineTo(x + w - hd, cy + t / 2); ctx.lineTo(x, cy + t / 2); ctx.closePath(); }
           else roundRect(ctx, x, y, w, h, l.radius === 0 ? 0 : l.radius ? l.radius / 100 * W : l.shape === 'pill' ? Math.min(w, h) / 2 : Math.max(2, W * 0.004));
           ctx.fill();
           if (l.stroke && +l.stroke.width > 0) { shadowOff(ctx); ctx.filter = 'none'; ctx.strokeStyle = l.stroke.color || '#ffffff'; ctx.lineWidth = Math.max(0.5, +l.stroke.width / 100 * W); ctx.stroke(); }
