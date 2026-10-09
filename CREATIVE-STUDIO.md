@@ -2790,6 +2790,12 @@ several formats each, every tile measured, the export holding exactly the approv
 calls made sit inside the reservation inside the cap; a render the cap cannot cover is cancelled, never painted; and the
 Full AI path approves and exports a piece only when its reading verified it.
 
+**The full run** (9 October, this sandbox, providers mocked): checks 24 of 24, backend 63 of 63, browser 48 of 49. The one
+failure was `studio-s22-browser.mjs` case A, whose first sample of the processing card read "thinking, 118 characters of
+reasoning so far" without "2 of 4" while the whole suite loaded the machine; run alone it passed twice in a row. The worker
+writes the count with every model-phase update (`phaseCounts`), so the gap is a page-side window between the card's first
+streamed reading and the counts reaching it - not fixed in S23, recorded here as a known timing-dependent case.
+
 **Release**: worker build `2026-10-09.studio-p39`, page assets `?v=r17` (all fifteen references in `docs/index.html`).
 
 **Not proven here, stated plainly**: live model output (what a real Claude and Gemini make of these prompts, and whether a
