@@ -2638,6 +2638,37 @@ stop on a step answer that carries no `job`. Harnesses: `tests/studio-s22-worker
 `setProvider('claude', 'stream')`, and `failNext(re, 0, null, {abort, detach})` drops a
 connection while the worker carries on.
 
+**Production reliability, a professional workspace and a complete creative workflow (S23; build
+`2026-10-09.studio-p39`, page `?v=r17`; `CREATIVE-STUDIO.md` s.46 holds the checklist, the bug ledger and the evidence
+per slice).** Ten slices, each defect reproduced by a failing test first. **A** - the image request is chosen before
+anything is sent: required marks are never dropped behind references (the request's own payload is what `marksSent`
+records), the prompt is never cut through its identity rules or approved words. **B** - one filtered reference package for
+every generation path: a reference excluded as another campaign's reaches no model as text, id or image. **C** -
+suggestions are cached on a context fingerprint (rules, references, campaign, version); outdated advice is marked and an
+older answer never lands over a newer one. **D** - examples by explicit metadata: rejected work is "avoid", never
+"imitate". **E** - the answer stream read as the documented state machine (`message_stop` ends it; an unparseable frame
+fails it). **F** - every long operation visible and recoverable. **G** - the workspace redesigned (library, stage heads,
+brief, Explore, Copy, Design, the Creative Director's scope and stated costs). **H** - the canvas: elements, context menus,
+arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets; `POST /studio/version` refuses a mark the
+campaign policy does not carry (409 `mark_policy`). **I** - creative quality and brand memory: the render fingerprint shared
+by validation, repair and export; imagery on file but mostly covered reads "Imagery mostly covered"; board repetition;
+reference records (`studio_references.meta`: where it ran, approval, likes and dislikes) and observations with authority
+(observed / inferred / preferred / mandatory) through `/studio/reference/meta|observation`, promoted to campaign rules by
+Teach this brand with ambiguity resolved by a person; readiness names `scope_uncertain`, `rule_outdated` and the references
+`wanted`; the identity audit lists each wordmark variant against storage (`docs/studio-brandmem.js`). **J** - failure
+contained: `PanelBoundary` around the workspace, the Creative Director, the context panel and the rail (Try again; the rest
+keeps working), `getRead()` retries reads on a dropped connection, 429 or 502-504 (writes are sent once), an offline banner
+and a re-read on reconnect, Try again after a failed open opens the project; axe-core 4.10.2 (dev dependency) finds no
+serious or critical violation; measured budgets (cold 347 ms, transitions p95 76 ms, no growth over 200 actions); the core
+journey in Chromium, Firefox and WebKit (`tests/pw.mjs` exports all three; CI installs them; an engine not installed is
+skipped, never passed). **The live test is owner-run and capped:** `python3 tools/studio-smoke.py --key $AXIOM_KEY
+[--approve-calls N] [--approve-renders N] [--cases hoof,mca,synth] [--size 1K]` prints the worst-case estimate and runs
+nothing without `--approve-calls`; it reserves every job at its worst case (three attempts; a render with its inspection),
+cancels what it will not run, reads `/studio/budget` before and after, and writes `smoke/` (ignored by git). Harnesses:
+`studio-s23-worker.mjs`, `studio-s23f-worker.mjs`, `studio-s23g/h/i-worker.mjs`, `studio-s23-browser.mjs`,
+`studio-s23g/h/i/j-browser.mjs`, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`, `studio-smoke-test.mjs`;
+captures `tests/studio-s23-shots.mjs before|after` into the ignored `tests/shots/s23/`.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

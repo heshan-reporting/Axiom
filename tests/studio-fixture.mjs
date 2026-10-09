@@ -6,7 +6,7 @@
  * page and the worker agree; it does not prove what a live model would answer. */
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
-import { chromium, DOCS } from './pw.mjs';
+import { chromium, firefox, webkit, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
@@ -124,7 +124,9 @@ export async function makeStudio(opts) {
 
   const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
   await new Promise(r => setTimeout(r, 900));
-  const browser = await chromium.launch();
+  // S23: another engine when asked (firefox, webkit); Chromium by default
+  const engine = (opts && opts.browser === 'firefox') ? firefox : (opts && opts.browser === 'webkit') ? webkit : chromium;
+  const browser = await engine.launch();
   /* hold: a path pattern whose requests wait until released, to make a request "still running" on purpose */
   const holds = []; const seen = []; const fails = [];
   async function open(o) {

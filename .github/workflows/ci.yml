@@ -36,5 +36,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: node tests/run.mjs browser

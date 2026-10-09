@@ -2287,8 +2287,8 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 7 | Validation, repair and export agree; render fingerprint | done | `studio-s23i-worker.mjs` I-W1; `studio-s23i-browser.mjs` I-B1, I-B2, I-B5 |
 | 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | done | `studio-s23i-worker.mjs` I-W2-I-W7; `studio-s23i-browser.mjs` I-B3, I-B4 |
 | 9 | Every long operation visible and recoverable (the wait inventory, below) | done (two short synchronous calls deferred, named below) | `studio-s23f-worker.mjs` F1-F5, `studio-s23-browser.mjs` F-B1-F-B4 |
-| 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | planned | |
-| 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | planned | |
+| 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | done (Firefox and WebKit run in CI only: this sandbox ships Chromium) | `studio-s23j-browser.mjs` J-B1-J-B8, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`; `tests/shots/s23/axe.json`, `perf.json` |
+| 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | done (live model output unproven until the owner runs the smoke test) | `studio-smoke-test.mjs`; the local package `evidence/s23/` (ignored by git); build `2026-10-09.studio-p39`, page `?v=r17` |
 
 ### 46.3 Bug ledger
 
@@ -2310,6 +2310,11 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-I2 | Imagery on file and loaded was reported "Imagery drawn" (ok) however much of it a solid panel covered: stored and loaded was taken for visible. | I-B6 | slice I | fixed |
 | S23-I3 | A reference was its picture and one vision pass: no record of where it ran, whether and when it was approved, or what the team liked and disliked; nothing it showed carried an authority, so an inference and a requirement read the same to the models, and a person could not correct one reading without re-running the pass. | I-W2-I-W4 failing on `460b646` (the routes did not exist) | slice I | fixed |
 | S23-I4 | The Brand workspace did not name a reference counted under a campaign only because its project was, nor a learned rule for a campaign the kit no longer has (it reached no prompt and no one was told), and it could not say which references would help. | I-W5 failing on `460b646` | slice I | fixed |
+| S23-J1 | The theme switch (Dark / Light / System) put `aria-pressed` on `role="radio"` buttons, which a screen reader cannot announce as a choice (axe `aria-allowed-attr`, serious). | J-B6 failing on `8ca278c` | slice J | fixed |
+| S23-J2 | The inspector's tab list held its collapse and close buttons beside the tabs, so the `tablist` owned children that are not tabs (axe `aria-required-children`, critical). | J-B6 failing on `8ca278c` | slice J | fixed |
+| S23-J3 | After a project failed to open (a worker error that is not retried), the notice's **Try again** did nothing: the failed open had already cleared the project the retry was waiting for, so the reload it called was thrown away. Found from the "failed" capture. | J-B3 (the second half) failing without the fix | slice J | fixed |
+| S23-J4 | A single slow or refused read (`/studio/list`, `/studio/get`) failed the whole view: a busy gateway (502 / 503 / 504), a 429 or a dropped connection was shown as a failure on the first try, and nothing noticed the connection coming back. | J-B2, J-B3 | slice J | fixed |
+| S23-J5 | One panel that threw (the Creative Director, the context panel, the rail, the workspace) took the whole Studio down to a blank island; unsaved work survived in the working store but nothing could be reached. | J-B1 | slice J | fixed |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
@@ -2700,3 +2705,95 @@ suite can answer one kind of model call (here the vision pass) without changing 
 measure is geometry from the layout, not pixels (a dark photograph under a 60% plate is not "covered"); repetition compares
 drawn arrangements and pixels, never meaning; whether a live Gemini painting reproduces a mark is unproven here (providers
 are mocked) and is what the owner-run smoke test reads back.
+
+### 46.13 Slice J - failure contained, measured, checked in three engines, and a capped live test
+
+**Panels stop alone** (S23-J5). `PanelBoundary` in `docs/studio.js` (a React error boundary) wraps the workspace
+(`main.st-centre`), the Creative Director, the project context panel and the assets rail. A panel that throws is replaced by
+a notice (`.st-panelerr`) that names what stopped, says that unsaved edits are kept in this browser and every saved version
+is untouched, and offers **Try again**, which mounts the panel afresh; a boundary resets on its own when the project, the
+step or the asset changes. The rest of the Studio keeps working: J-B1 throws inside the Creative Director (the named
+fault-injection hook `window.__stCrashPanel`, which nothing but a harness sets) and then edits and saves on the canvas.
+
+**Reads ride out a busy gateway; writes are never repeated behind the person's back** (S23-J4). `getRead(path)` retries
+a read up to three times (400 ms, then 1.2 s) on no status (a dropped connection), 429, 502, 503 or 504; the library and the
+project load go through it. A write (a version, an approval, a job) is sent once: a failure is shown with the edit kept
+and the person decides (J-B3 counts the requests). **Offline**: the page listens for the browser's offline and online
+events; offline, a banner (`.st-offline`) says that unsaved edits stay in this browser and are saved when the connection
+returns and that nothing is generated, approved or exported until then; online, the project (or the library) is read
+again and the notice says "Back online." (J-B2). **A failed open can be tried again** (S23-J3): the open now hands the
+notice a Try again that opens the project, not a reload of a project the failed open had already cleared.
+
+**Accessibility** (S23-J1, J2). axe-core 4.10.2 (pinned in `package.json`, a dev dependency read from `node_modules`, never
+a CDN) runs in J-B6 over the library, the Brief, Design, Review and the Brand workspace. On `8ca278c` it found one serious
+and one critical violation: `aria-pressed` on the theme radios, and the inspector's tab list owning its collapse and close
+buttons. Both are fixed (the radios carry `aria-checked` only; the buttons sit beside the tab list in `.st-instabs-row`).
+Now: **no serious or critical violation in any of the five**. Recorded, not hidden (`tests/shots/s23/axe.json`): the Brief
+has two moderate landmark findings (`landmark-complementary-is-top-level`, `landmark-unique` - the project context aside
+sits inside the Studio's own region beside the inspector), and Design one minor (`aria-allowed-role`). J-B5 is a keyboard-only
+journey: search the library, open a project, move between phases with Alt+number, open and close the shortcuts sheet, the
+focus never left on the page body. J-B7 is a tablet with touch at 820 x 1180: Design opens with the artwork in view, no
+sideways scroll, the inspector reachable.
+
+**Seeded random editing** (J-B4). A seeded generator chooses forty operations on a composition through the real editor's
+keyboard (a layer selected at random, then a nudge or a shift-nudge, forward, backward, or an undo in the middle); undoing all of them gives back exactly the layout that
+was opened, redoing all of them gives exactly the edited one, and saving writes exactly that layout (compared field by
+field from the worker's record). The seed is fixed (23), so a failure reproduces.
+
+**The console guard** (J-B8). Across the journeys every page error, console error and unhandled rejection is kept;
+the run fails on any not named as injected on purpose. Named: the director fault of J-B1 (and React's report of it), the
+503 and 500 the tests inject, the offline fetch failures of J-B2, and `fonts.googleapis.com` (the fixture refuses every
+host but the worker, so the Google Fonts stylesheet fails here by design and the page falls back to system fonts).
+
+**Measured** (`tests/studio-s23-perf-browser.mjs`, `tests/shots/s23/perf.json`; headless Chromium, 4 vCPU Xeon at 2.1 GHz,
+17 GB, Node 22, the worker in-process, providers mocked - provider latency is not part of these figures):
+
+| Budget (S23 prompt) | Target | Measured |
+|---|---|---|
+| Cold interactive: navigation to the library listing its projects | 2.5 s | median 347 ms (three runs: 403, 306, 347; the Studio's own part 82 ms) |
+| Stage transitions: a phase clicked to the phase drawn, twelve times | 150 ms | p50 49 ms, p95 76 ms |
+| Growth across 200 actions (tiles switched, nudged, undone, phases changed) | none unexplained | heap after a forced collection -0.6 MB; DOM nodes -329 (attached 2,148 before and after); listeners on window and document 0; unrevoked object URLs 0 |
+
+A first measurement showed about 33,000 nodes retained across the run. The heap snapshot traced them to the harness, not
+the page: each Playwright `waitForSelector` returns a handle that keeps its element, and the detached tree around it, alive.
+The measured loop uses handle-free waits (`waitForFunction`); the growth is then nil. Editing input-to-paint, 50-layer drag
+frames and long tasks stay with `studio-s20-perf-browser.mjs` (unchanged and passing).
+
+**Three engines** (`tests/studio-xbrowser-browser.mjs`): the core journey - the library lists the project, it opens, Design
+draws the composition on the canvas, a layer is nudged and saved as a version the worker holds, Review opens, no page error -
+in Chromium, Firefox and WebKit. `tests/pw.mjs` exports all three and the fixture takes `browser`. An engine that is not
+installed is reported as skipped with the reason and never counted as a pass. In this sandbox Chromium passes and Firefox and
+WebKit are skipped (only Chromium ships here, and `playwright install` is not run); CI now installs all three
+(`npx playwright install --with-deps chromium firefox webkit`), so the first CI run on this branch is where they are proven.
+
+**Captures** (`tests/studio-s23-shots.mjs after`, into the ignored `tests/shots/s23/`): every step at 1920, 1440, 1024, 834
+and 390 wide, plus the states that are not a step - loading (the library read held), failed (an open refused with 500,
+the notice and Try again), recovered (Try again, then Design), offline (the banner), and a panel stopped (the workspace
+boundary's notice).
+
+**The live test, capped** (`tools/studio-smoke.py`, owner-run). Built on `tools/studio-demo.py`. For each case (HOOF, MCA
+national, the labelled synthetic client): the editable path - a release read into a claim ledger, the copy stage writes and
+lays out the master, the master re-laid free for story 9:16, LinkedIn 1.91:1 and square, every tile drawn with the app's
+renderer, repaired where it can be without a render, measured and filed, the passing tiles approved and exported, and the
+export checked to hold exactly those; with renders approved, the Full AI path - one painting per piece with the campaign's
+mark file attached, the words and the mark read back from that exact image, approval and export only when the reading
+verified it. Then the marks of each case are its own and the isolation audit is clean. **Spending**: nothing runs without
+`--approve-calls`; each job is charged before it starts at its worst case (a model call reserves `--reserve-attempts`
+calls, default 3, the worker's own retry ceiling; a render reserves that many images and that many inspection calls); a job
+that would pass a cap is not started, and a queued job the tool will not run is cancelled at once so the cron cannot take
+it; the worker's ledger (`/studio/budget`) is read before and after, so the report gives the actual spend beside the
+reservation. Output (`smoke/`, ignored by git): `smoke.json`, `index.html`, the drawn tiles, the export bundles; the
+projects are archived unless `--keep`. `tests/studio-smoke-test.mjs` (16) runs the tool end to end against the worker module served over
+HTTP in-process, with stub models and the real compose tool: without approval it prints the estimate and creates nothing; a
+cap that cannot cover the next job at its worst case stops before it; the editable path finishes for all three cases with
+several formats each, every tile measured, the export holding exactly the approved passing tiles and no image made; the
+calls made sit inside the reservation inside the cap; a render the cap cannot cover is cancelled, never painted; and the
+Full AI path approves and exports a piece only when its reading verified it.
+
+**Release**: worker build `2026-10-09.studio-p39`, page assets `?v=r17` (all fifteen references in `docs/index.html`).
+
+**Not proven here, stated plainly**: live model output (what a real Claude and Gemini make of these prompts, and whether a
+real painting reproduces a mark) - the smoke test is how; Firefox and WebKit - CI; the operating system's clipboard and a
+drag from the desktop (the paste path is tested with synthetic clipboard events); performance on a person's laptop and over a
+real network (the figures above are local and headless).
+

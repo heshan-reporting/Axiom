@@ -3,6 +3,7 @@
   "private": true,
   "description": "Local tooling only (not deployed): Playwright for tools/studio-compose.mjs, tools/studio-demo.py, tools/studio-showcase.py and the browser harnesses in tests/.",
   "devDependencies": {
+    "axe-core": "4.10.2",
     "playwright": "1.56.1"
   },
   "type": "module",

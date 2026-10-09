@@ -13,3 +13,5 @@ demo/
 node_modules/
 requests/
 tests/shots/
+smoke/
+evidence/

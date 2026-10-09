@@ -265,6 +265,9 @@ body.in-studio #studio-root{height:100%}
 
 /* ---------------------------------------------------------------------------------------- the inspector: tabs, one scroll region, the composer anchored */
 #studio-root .st .st-instabs{display:flex;align-items:stretch;gap:2px;flex-shrink:0;padding:6px 8px 0;border-bottom:1px solid var(--sk-line);background:var(--sk-panel)}
+#studio-root .st .st-instabs-row{display:flex;align-items:stretch;flex-shrink:0;border-bottom:1px solid var(--sk-line);background:var(--sk-panel)}
+#studio-root .st .st-instabs-row .st-instabs{flex:1 1 auto;min-width:0;border-bottom:0}
+#studio-root .st .st-instabs-acts{display:flex;align-items:center;gap:2px;padding:6px 8px 0 0}
 #studio-root .st .st-instab, #studio-root .st .st-cd-tab, #studio-root .st .st-subtab{text-transform:none!important;letter-spacing:0!important}
 #studio-root .st .st-instab{display:inline-flex;align-items:center;gap:5px;padding:8px 7px 9px;border:0;border-bottom:2px solid transparent;background:none;color:var(--sk-sub);font:600 11.5px/1 var(--sk-font);cursor:pointer;white-space:nowrap}
 #studio-root .st .st-instab.ctl{margin-left:auto;padding-left:7px;padding-right:7px}

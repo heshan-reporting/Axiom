@@ -379,7 +379,7 @@
   const APPEARANCES = [['dark', 'Dark'], ['light', 'Light'], ['system', 'System']];
   const appearanceGet = () => { try { const v = localStorage.getItem('ax_studio_theme'); return v === 'light' || v === 'system' ? v : 'dark'; } catch (e) { return 'dark'; } };
   function ThemeSwitch({ value, onChange }) {
-    return html`<div class="st-theme" role="radiogroup" aria-label="Appearance">${APPEARANCES.map(([k, l]) => html`<button key=${k} type="button" role="radio" aria-checked=${value === k} aria-pressed=${value === k} title=${k === 'system' ? 'Follow this device\'s light or dark setting' : l + ' interface; the artwork is unaffected'} onClick=${() => onChange(k)}>${l}</button>`)}</div>`;
+    return html`<div class="st-theme" role="radiogroup" aria-label="Appearance">${APPEARANCES.map(([k, l]) => html`<button key=${k} type="button" role="radio" aria-checked=${value === k} title=${k === 'system' ? 'Follow this device\'s light or dark setting' : l + ' interface; the artwork is unaffected'} onClick=${() => onChange(k)}>${l}</button>`)}</div>`;
   }
   const Icon = ({ n, size }) => html`<svg class=${'st-ic st-ic-' + n} viewBox="0 0 24 24" width=${size || 16} height=${size || 16} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" dangerouslySetInnerHTML=${{ __html: ICON[n] || '' }}></svg>`;
   const FORMAT_ICON = { '1:1': 'square', '4:5': 'portrait', '9:16': 'phone', '16:9': 'wide' };
@@ -424,6 +424,29 @@
      planned but never generated, queued, generating, the last render failed (the imagery on screen is the last usable one),
      on file but not loaded yet, on file but it failed to load (or timed out), hidden by the layout, or drawn. Generated is
      not the same as visible: an image on file that did not load is said to be missing from the screen, never shown as fine. */
+  /* S23 slice J: a panel that throws stops alone. The boundary shows what stopped and a Try again that re-mounts the panel;
+     the rest of the Studio, the working store of unsaved edits and every saved version are untouched. CrashProbe is the named
+     fault-injection hook the harness uses (window.__stCrashPanel = '<panel name>'); nothing else sets it. */
+  function CrashProbe({ name }) { if (typeof window !== 'undefined' && window.__stCrashPanel === name) throw new Error('fault injected into the ' + name + ' panel (test)'); return null; }
+  class PanelBoundary extends React.Component {
+    constructor(props) { super(props); this.state = { err: null, n: 0 }; }
+    static getDerivedStateFromError(err) { return { err }; }
+    componentDidCatch(err) { try { console.warn('[studio] the ' + (this.props.label || this.props.name) + ' panel stopped: ' + String((err && err.message) || err)); } catch (e) {} }
+    componentDidUpdate(prev) { if (this.state.err && prev.reset !== this.props.reset) this.setState({ err: null, n: this.state.n + 1 }); }
+    render() {
+      if (this.state.err) return html`<div class="st-panelerr" role="alert"><b>The ${this.props.label || this.props.name} panel stopped.</b><span class="ov-dim">${String((this.state.err && this.state.err.message) || this.state.err).slice(0, 200)}</span><span>The rest of the Studio is working; saved versions are untouched and unsaved edits are kept in this browser.</span><button class="btn sm" onClick=${() => this.setState({ err: null, n: this.state.n + 1 })}>Try again</button></div>`;
+      return html`<${React.Fragment} key=${this.state.n}><${CrashProbe} name=${this.props.name} />${this.props.children}</${React.Fragment}>`;
+    }
+  }
+  /* S23 slice J: reads that change nothing are retried on a dropped connection or a busy gateway (502, 503, 504, 429): three
+     attempts, 0.4 s then 1.2 s apart with a little jitter. Writes are never retried here (they carry their own op ids). */
+  async function getRead(path) {
+    let last = null;
+    for (let i = 0; i < 3; i++) {
+      try { return await call(path); } catch (e) { last = e; const st = e && e.status; const transient = !st || st === 429 || st === 502 || st === 503 || st === 504; if (!transient || i === 2) throw e; await new Promise(r => setTimeout(r, (i ? 1200 : 400) + Math.round(Math.random() * 150))); }
+    }
+    throw last;
+  }
   // S23: how much of the photograph opaque layers cover - a 24 x 24 sample of the photograph's box against the layer boxes
   // (geometry, not pixels: a solid fill or a text plate at 90% opacity or more covers; gradients, translucent fills, other
   // images and marks do not). Stored, loaded and drawn is not the same as visible.
@@ -3584,7 +3607,7 @@
     const loadLib = useCallback(async () => {
       const seq = ++libSeq.current; const ns = clientId; setLib(null); setLibErr(''); setKit(null);
       try {
-        const [l, s, k] = await Promise.all([call('/studio/list?ns=' + encodeURIComponent(ns)), call('/studio/status').catch(() => null), call('/brand/kit?ns=' + encodeURIComponent(ns)).catch(() => null)]);
+        const [l, s, k] = await Promise.all([getRead('/studio/list?ns=' + encodeURIComponent(ns)), call('/studio/status').catch(() => null), call('/brand/kit?ns=' + encodeURIComponent(ns)).catch(() => null)]);
         if (seq !== libSeq.current || clientRef.current !== ns) return;
         setLib(Object.assign({}, l, { status: s })); if (s) setStatus(s); setKit(k && k.kit ? k.kit : {});
         // reopen the project this browser had open for this client, where it was left (unless another desk sent work in)
@@ -3598,13 +3621,17 @@
     useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
     useGoto('studio', q => { q = q || {}; resumed.current = true; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
+    // S23 slice J: the connection as the browser reports it; coming back reloads the open project and says so
+    const [online, setOnline] = useState(typeof navigator === 'undefined' || navigator.onLine !== false);
+    useEffect(() => { const off = () => setOnline(false); const on = () => { setOnline(true); if (pidRef.current) { reload(); setNotice({ kind: 'info', title: 'Back online.', text: 'The project was read again; anything saved while you were away is shown.' }); } else loadLib(); };
+      window.addEventListener('offline', off); window.addEventListener('online', on); return () => { window.removeEventListener('offline', off); window.removeEventListener('online', on); }; }, [loadLib]);
     const reloadSeq = useRef(0), reloadApplied = useRef(0);
     const reload = useCallback(async (id) => {
       const want = id || pidRef.current; if (!want) return null;
       // reloads overlap (the poll, an action's own reload): an answer older than one already applied is never laid over it
       const seq = ++reloadSeq.current;
       // the ref moves with the answer, not with the next render: a write that follows a reload in the same handler sends the fresh revision
-      try { const d = await call('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < reloadApplied.current) return pRef.current; reloadApplied.current = seq; pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want && seq >= reloadApplied.current) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
+      try { const d = await getRead('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < reloadApplied.current) return pRef.current; reloadApplied.current = seq; pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want && seq >= reloadApplied.current) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
     }, []);
     /* an error explained where the work is, with a real retry when one makes sense; a provider problem refreshes the status chips */
     const fail = (e, what, retry) => { const x = explain(e, what); setNotice(Object.assign(x, { actions: retry ? [{ label: 'Retry', fn: retry }] : [] })); setBusy(''); if (x.kind === 'provider') refreshStatus(); };
@@ -3678,7 +3705,7 @@
     }, [runJob, reload, composeExport]);
     const openProject = async (id, place) => {
       setPid(id); pidRef.current = id; setCmp(null); setIntake(false); setP(null); setNotice(null); setConflict(null); setExportState(null); setTab('properties');
-      const d = await reload(id); if (!d) { setPid(null); pidRef.current = null; return null; }
+      const d = await reload(id); if (!d) { setPid(null); pidRef.current = null; setNotice(n => n && n.actions ? Object.assign({}, n, { actions: [{ label: 'Try again', fn: () => openProject(id, place) }] }) : n); return null; }
       const asset = place && place.asset && d.assets.some(x => x.id === place.asset) ? place.asset : d.assets[0] ? d.assets[0].id : null;
       setSelAsset(asset); setSelField(null);
       const want = place && place.view && stageOfView(place.view) && (place.view !== 'asset' || asset) ? place.view : d.assets.length ? 'asset' : d.directions.length ? 'directions' : 'brief';
@@ -4346,17 +4373,18 @@
       ${header}
       ${helpPanel}
       ${busy && p && !inRefine ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
+      ${!online ? html`<div class="st-offline" role="status" aria-live="polite"><b>You are offline.</b> <span>Unsaved edits stay in this browser and are saved when the connection returns; nothing is generated, approved or exported until then.</span></div>` : null}
       <${Notice} n=${notice} onClose=${() => setNotice(null)} />
       <div class=${'st-body' + (p ? '' : ' lib') + (inRefine ? ' design' : '') + (inRefine && inspMin ? ' inspmin' : '') + (p && !showAside ? ' noaside' : '') + (p && !showRail ? ' norail' : '') + (early ? ' early' : '')} style=${Object.assign({ '--st-insp-w': inspW + 'px' }, showRail ? { '--st-rail-w': railW + 'px' } : {})}>
-        ${showRail ? html`<${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${null} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} />` : p && !early && !inRefine && !copyOwnList ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the assets panel" title="Show the assets">›</button>` : null}
+        ${showRail ? html`<${PanelBoundary} name="rail" label="assets" reset=${p ? p.id : ''}><${Rail} p=${p} view=${cmp ? 'compare' : view} setView=${v => setView(v, true)} sel=${selAsset} setSel=${id => { setSelAsset(id); setSelField(null); setCmp(null); }} toolsOpen=${toolsOpen} setToolsOpen=${setToolsOpen} layersRef=${null} onCollapse=${() => { setRailOpen(false); store.set({ rail: false }); }} /></${PanelBoundary}>` : p && !early && !inRefine && !copyOwnList ? html`<button class="st-rail-open" onClick=${() => { setRailOpen(true); store.set({ rail: true }); }} aria-label="Show the assets panel" title="Show the assets">›</button>` : null}
         ${showRail ? html`<div class="st-rail-handle" role="separator" aria-orientation="vertical" aria-label="Resize the left panel" title="Drag to resize" onPointerDown=${railDown} onPointerMove=${railMove} onPointerUp=${railUp} onPointerCancel=${railUp}></div>` : null}
-        <main class="st-centre" aria-label="Workspace">${centre}</main>
-        ${p && showCtx && !inRefine ? html`<aside class="st-inspector st-ctxaside" aria-label="Project context"><${F.ContextPanel} p=${p} client=${client} kit=${kit} wf=${p.workflow} /><div class="st-ctx-links"><button class="ov-link" onClick=${() => setView('brand', true)}>Brand</button><button class="ov-link" onClick=${() => setView('context', true)}>Client context</button><button class="ov-link" onClick=${() => setView('jobs', true)}>Jobs</button></div></aside>` : p ? (showAside ? html`<aside class=${'st-inspector' + (inspOpen ? ' open' : '') + (inRefine && inspMin ? ' min' : '')} id="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative Director'}>
+        <main class="st-centre" aria-label="Workspace"><${PanelBoundary} name="workspace" label="workspace" reset=${view + ':' + (p ? p.id : '') + ':' + (selAsset || '')}>${centre}</${PanelBoundary}></main>
+        ${p && showCtx && !inRefine ? html`<aside class="st-inspector st-ctxaside" aria-label="Project context"><${PanelBoundary} name="context" label="project context" reset=${p.id}><${F.ContextPanel} p=${p} client=${client} kit=${kit} wf=${p.workflow} /></${PanelBoundary}><div class="st-ctx-links"><button class="ov-link" onClick=${() => setView('brand', true)}>Brand</button><button class="ov-link" onClick=${() => setView('context', true)}>Client context</button><button class="ov-link" onClick=${() => setView('jobs', true)}>Jobs</button></div></aside>` : p ? (showAside ? html`<aside class=${'st-inspector' + (inspOpen ? ' open' : '') + (inRefine && inspMin ? ' min' : '')} id="st-inspector" aria-label=${inRefine ? 'Inspector' : 'Creative Director'}>
           ${!(inRefine && inspMin) ? html`<div class="st-panel-handle left" ...${inspHandle} aria-label="Resize the inspector (arrow keys; double-click resets)" title="Drag to resize; double-click resets"></div>` : null}
           ${inRefine && inspMin ? html`<div class="st-insp-rail" role="toolbar" aria-label="Inspector (collapsed)" aria-orientation="vertical"><button class="st-iconbtn st-insp-expand" onClick=${() => setInspMin(false)} aria-label="Expand the inspector" title="Expand the inspector"><${Icon} n="back" size=${15} /></button>${insTabs.map(([k, l]) => html`<button key=${k} class=${'st-iconbtn' + (tab === k ? ' on' : '')} aria-label=${'Open ' + l} title=${l} onClick=${() => { setTab(k); setInspMin(false); }}><${Icon} n=${k === 'properties' ? 'sliders' : k === 'director' ? 'partner' : k === 'checks' ? 'shield' : 'history'} size=${16} /></button>`)}</div>` : null}
-          ${inRefine ? html`<div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '') + (k === 'checks' || k === 'history' ? ' ctl' : ' mode')} title=${k === 'checks' ? 'Validation, quality and the human approval of this version' : k === 'history' ? 'Every version, and what the Studio used' : undefined} onClick=${() => setTab(k)}>${k === 'checks' ? html`<${Icon} n="shield" size=${14} />` : k === 'history' ? html`<${Icon} n="history" size=${14} />` : null}<span>${l}</span>${k === 'checks' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}<button class="st-iconbtn sm st-insp-collapse" onClick=${() => setInspMin(true)} aria-label="Collapse the inspector" title="Collapse the inspector: more room for the canvas"><${Icon} n="arrow" size=${14} /></button><button class="st-iconbtn sm st-insp-close" onClick=${() => setInspOpen(false)} aria-label="Close the inspector"><${Icon} n="x" size=${14} /></button></div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Creative Director">hide</button></div>`}
+          ${inRefine ? html`<div class="st-instabs-row"><div class="st-instabs" role="tablist" aria-label="Inspector" onKeyDown=${tabKey}>${insTabs.map(([k, l]) => html`<button key=${k} id=${'st-tabbtn-' + k} role="tab" aria-selected=${tab === k} aria-controls=${'st-tab-' + k} tabIndex=${tab === k ? 0 : -1} class=${'st-instab' + (tab === k ? ' on' : '') + (k === 'checks' || k === 'history' ? ' ctl' : ' mode')} title=${k === 'checks' ? 'Validation, quality and the human approval of this version' : k === 'history' ? 'Every version, and what the Studio used' : undefined} onClick=${() => setTab(k)}>${k === 'checks' ? html`<${Icon} n="shield" size=${14} />` : k === 'history' ? html`<${Icon} n="history" size=${14} />` : null}<span>${l}</span>${k === 'checks' && a && (a.readiness || {}).technical === 'failed' ? html` <span class="st-dot bad" aria-label="failing"></span>` : null}</button>`)}</div><div class="st-instabs-acts"><button class="st-iconbtn sm st-insp-collapse" onClick=${() => setInspMin(true)} aria-label="Collapse the inspector" title="Collapse the inspector: more room for the canvas"><${Icon} n="arrow" size=${14} /></button><button class="st-iconbtn sm st-insp-close" onClick=${() => setInspOpen(false)} aria-label="Close the inspector"><${Icon} n="x" size=${14} /></button></div></div>` : html`<div class="st-insp-head"><span class="st-lbl">Creative Director</span><button class="ov-link" onClick=${() => setPartnerOpen(false)} aria-label="Hide the Creative Director">hide</button></div>`}
           <div class="st-slot" ref=${setSlot} hidden=${inRefine && tab === 'director'}></div>
-          <div class="st-partner-wrap" id="st-tab-director" role=${inRefine ? 'tabpanel' : undefined} aria-labelledby=${inRefine ? 'st-tabbtn-director' : undefined} hidden=${inRefine && tab !== 'director'}>${partnerEl}</div>
+          <div class="st-partner-wrap" id="st-tab-director" role=${inRefine ? 'tabpanel' : undefined} aria-labelledby=${inRefine ? 'st-tabbtn-director' : undefined} hidden=${inRefine && tab !== 'director'}><${PanelBoundary} name="director" label="Creative Director" reset=${(p ? p.id : '') + ':' + (selAsset || '')}>${partnerEl}</${PanelBoundary}></div>
         </aside>${inRefine ? html`<button class="st-insp-toggle btn sm" aria-expanded=${inspOpen ? 'true' : 'false'} aria-controls="st-inspector" onClick=${() => setInspOpen(!inspOpen)}>${inspOpen ? 'Close panel' : 'Properties and Creative Director'}</button>` : null}` : early ? null : html`<button class="st-aside-open" onClick=${() => setPartnerOpen(true)} aria-label="Show the Creative Director">Creative Director</button>`) : null}
       </div>
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}

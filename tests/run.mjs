@@ -21,7 +21,7 @@ const run = (name, cmd, args, timeoutMs) => {
 };
 const check = (name, fn) => { try { const r = fn(); const ok = r === true || r === undefined; results.push({ name, ok, summary: ok ? 'ok' : String(r) }); console.log((ok ? '  ok   ' : '  FAIL ') + name + (ok ? '' : '  ' + r)); } catch (e) { results.push({ name, ok: false, summary: e.message }); console.log('  FAIL ' + name + '  ' + e.message); } };
 
-const BROWSER = /(-browser|compose-test|showcase-test|demo-test|studio-p23-worker)\.mjs$/;
+const BROWSER = /(-browser|compose-test|showcase-test|demo-test|smoke-test|studio-p23-worker)\.mjs$/;
 const suites = fs.readdirSync(T('.')).filter(f => /(-worker|-test)\.mjs$/.test(f) || /-browser\.mjs$/.test(f)).sort();
 
 if (mode === 'check' || mode === 'all') {

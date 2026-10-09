@@ -100,6 +100,20 @@ for (const sz of sizes) {
   const ex = page.locator(R + '.st-subtab:has-text("Delivery")'); if (await ex.count()) { await ex.first().click().catch(() => {}); await wait(700); await shot(page, 'delivery', sz); }
   if (page.errors && page.errors.length) report.shots.push({ size: sz, pageErrors: page.errors.slice(0, 10) });
   await page.ctxB.close();
+  // S23 slice J: the states that are not a step - loading, a failed load and its recovery, offline, a panel that stopped
+  if (label.indexOf('before') !== 0) {
+    const pg = await fx.open({ viewport: SZ[sz], quiet: true, go: false }); pg.on('dialog', d => d.accept().catch(() => {}));
+    const rel = fx.hold(/^\/studio\/list/); await pg.evaluate(() => go('studio')); await wait(700); await shot(pg, 'loading', sz); rel();
+    await pg.waitForSelector(R + '.st-lib tbody tr', { timeout: 15000 }).catch(() => {});
+    fx.failNext(/^\/studio\/get\?id=/, 500, { error: 'internal_error' }); await openProject(pg, PFX + ' at design').catch(() => {}); await wait(900); await shot(pg, 'failed', sz);
+    const tryAgain = pg.locator(R + '.st-notice button:has-text("Try again"), ' + R + '.st-notice button:has-text("Retry")'); if (await tryAgain.count()) { await tryAgain.first().click().catch(() => {}); await wait(900); }
+    await goTo(pg, 'Design').catch(() => {}); await wait(800); await shot(pg, 'recovered', sz);
+    await pg.context().setOffline(true); await pg.evaluate(() => window.dispatchEvent(new Event('offline'))); await wait(400); await shot(pg, 'offline', sz);
+    await pg.context().setOffline(false); await pg.evaluate(() => window.dispatchEvent(new Event('online'))); await wait(600);
+    await pg.evaluate(() => { window.__stCrashPanel = 'workspace'; }); await goTo(pg, 'Review').catch(() => {}); await wait(700); await shot(pg, 'panel-stopped', sz);
+    await pg.evaluate(() => { window.__stCrashPanel = null; });
+    await pg.ctxB.close();
+  }
 }
 fs.writeFileSync(OUT + label + '-report.json', JSON.stringify(report, null, 1));
 await fx.close(); process.exit(0);

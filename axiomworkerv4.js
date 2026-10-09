@@ -7031,7 +7031,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-10-08.studio-p38';
+const AXIOM_BUILD = '2026-10-09.studio-p39';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit', 'suggest', 'refanalyse'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it

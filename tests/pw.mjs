@@ -27,3 +27,5 @@ export const chromium = RATE > 1 ? Object.assign(Object.create(pw.chromium), {
   },
 }) : pw.chromium;
 export const DOCS = new URL('../docs', import.meta.url).pathname;
+/* S23: the other engines, for the cross-browser harness (installed with npx playwright install firefox webkit) */
+export const firefox = pw.firefox; export const webkit = pw.webkit;
