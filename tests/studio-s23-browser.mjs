@@ -45,12 +45,15 @@ await T.t('F-B1 + F-B2 the reading is acknowledged within 300 ms, described with
 await T.t('F-B3 a dropped step connection shows "reconnecting" beside the job, and the job finishes on its first attempt', async () => {
   fx.setProvider('claude', 'stream'); fx.providers.streamMs = 6000;
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
+  // a loaded machine (CI) commits the processing card after the connection has already dropped; the card must still say so.
+  // The CPU is slowed four times to make that order certain, and the page records the line itself, so nothing is missed
+  // between two looks from the test
+  const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  await page.evaluate(() => { window.__sawReconnect = false; new MutationObserver(() => { if (document.querySelector('#studio-root [data-state="reconnecting"]')) window.__sawReconnect = true; }).observe(document.body, { childList: true, subtree: true }); });
   const f = fx.failNext(/^\/studio\/job\/step/, 0, null, { abort: true, detach: true });
-  const made = wizardCreate(page, { title: 'S23 reconnect', text: MATERIAL }); let done = false; made.then(() => { done = true; }, () => { done = true; });
-  let seen = false;
-  for (let i = 0; i < 300 && !done; i++) { if (await page.$(R + '[data-state="reconnecting"]')) { seen = true; break; } await sleep(100); }
-  await made; await f.running;
-  ok(seen, 'the page said it was reconnecting');
+  await wizardCreate(page, { title: 'S23 reconnect', text: MATERIAL }); await f.running;
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  ok(await page.evaluate(() => window.__sawReconnect), 'the page said it was reconnecting');
   ok(!(await page.$(R + '[data-state="reconnecting"]')), 'and stopped saying so once the job was read again');
   const g = await fx.api('GET', '/studio/list?ns=mca'); const pr = (g.projects || []).find(x => x.title === 'S23 reconnect');
   const full = await fx.api('GET', '/studio/get?id=' + pr.id); eq(full.jobs.filter(j => j.stage === 'analyse').map(j => [j.state, j.attempts]), [['done', 1]]);

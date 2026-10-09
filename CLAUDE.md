@@ -2639,7 +2639,7 @@ stop on a step answer that carries no `job`. Harnesses: `tests/studio-s22-worker
 connection while the worker carries on.
 
 **Production reliability, a professional workspace and a complete creative workflow (S23; build
-`2026-10-09.studio-p39`, page `?v=r17`; `CREATIVE-STUDIO.md` s.46 holds the checklist, the bug ledger and the evidence
+`2026-10-09.studio-p39`, page `?v=r18`; `CREATIVE-STUDIO.md` s.46 holds the checklist, the bug ledger and the evidence
 per slice).** Ten slices, each defect reproduced by a failing test first. **A** - the image request is chosen before
 anything is sent: required marks are never dropped behind references (the request's own payload is what `marksSent`
 records), the prompt is never cut through its identity rules or approved words. **B** - one filtered reference package for
@@ -2658,7 +2658,9 @@ Teach this brand with ambiguity resolved by a person; readiness names `scope_unc
 `wanted`; the identity audit lists each wordmark variant against storage (`docs/studio-brandmem.js`). **J** - failure
 contained: `PanelBoundary` around the workspace, the Creative Director, the context panel and the rail (Try again; the rest
 keeps working), `getRead()` retries reads on a dropped connection, 429 or 502-504 (writes are sent once), an offline banner
-and a re-read on reconnect, Try again after a failed open opens the project; axe-core 4.10.2 (dev dependency) finds no
+and a re-read on reconnect, Try again after a failed open opens the project, the processing card reads the reconnecting
+state when it mounts (`STKit.linkNow()`), and suggestions that arrive after the version moved are shown, labelled outdated
+by the worker (`suggLanded`); axe-core 4.10.2 (dev dependency) finds no
 serious or critical violation; measured budgets (cold 347 ms, transitions p95 76 ms, no growth over 200 actions); the core
 journey in Chromium, Firefox and WebKit (`tests/pw.mjs` exports all three; CI installs them; an engine not installed is
 skipped, never passed). **The live test is owner-run and capped:** `python3 tools/studio-smoke.py --key $AXIOM_KEY

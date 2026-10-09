@@ -10,11 +10,13 @@
  *   J-B6 accessibility: axe-core (4.10.2, pinned) finds no serious or critical violation in the library, the Brief, Design,
  *        Review and the Brand workspace;
  *   J-B7 a tablet with touch (820 x 1180): Design opens with the artwork in view, no sideways scroll, the inspector reachable;
+ *   J-B9 suggestions asked for while the composition moves on (a render landing, an edit saved) are shown when they arrive,
+ *        marked as made before the change - CI caught them dropped, the panel back at its button with nothing to show;
  *   J-B8 the console guard: across the journeys above no page error, console error or unhandled rejection except the named
  *        ones a test injected on purpose.
  * Run: node --experimental-sqlite tests/studio-s23j-browser.mjs */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8882, inspect: false });
 const { api } = fx;
 const R = '#studio-root ';
@@ -182,6 +184,38 @@ await T.t('J-B7 a tablet with touch (820 x 1180): Design opens with the artwork 
   ok(m.sw <= m.cw + 1, 'no sideways scroll: ' + JSON.stringify(m)); ok(m.h > 300 && m.top < m.vh, 'the artwork is in view: ' + JSON.stringify(m));
   const t = page.locator(R + '.st-insp-toggle'); ok(await t.count(), 'the inspector has its opener on a tablet'); await t.first().tap(); await sleep(300);
   ok(await page.$(R + '.st-inspector.open'), 'and it opens with a tap');
+});
+
+await T.t('J-B9 suggestions asked for while a new version lands are shown when they arrive, labelled as the worker reads them', async () => {
+  await fresh(); await openProject(page, 'Reliability check');
+  const ask = R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")', items = R + '.st-partner .st-sugg.design .st-sugg-item';
+  const openAsk = async title => { await openTile(page, title); await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Explore")'); await page.waitForSelector(ask, { timeout: 20000 }); };
+  const nudgeSave = async () => {
+    await page.click(R + '.st-le-layer[data-id="chip"]', { force: true }); await page.keyboard.press('ArrowLeft'); await sleep(300);
+    await page.click(R + '.st-le-foot .btn:has-text("Save layout as a version")');
+    await page.waitForFunction(() => /No unsaved changes|Version saved/.test((document.querySelector('#studio-root .st-le-draft') || {}).textContent || ''), null, { timeout: 15000 });
+  };
+  // the job waits its turn while a nudge is saved: the answer is made for the version on screen and shown as current
+  await openAsk('Steady tile');
+  const rel = fx.hold(/^\/studio\/job\/step/); await page.click(ask); await sleep(400); await nudgeSave(); await sleep(600); rel();
+  await page.waitForSelector(items, { timeout: 20000 });
+  let peek = await api('GET', '/studio/suggest?asset=' + A1); eq(peek.outdated, false, 'made for the version on screen');
+  ok(!(await page.$(R + '.st-partner .st-sugg-outdated')), 'and not marked outdated');
+  // CI's order: the version moves while the model is still answering; the answer arrives made for the earlier version and
+  // is shown, marked as made before the change (it used to be dropped, the panel back at its button)
+  fx.setProvider('claude', 'stream'); fx.providers.streamMs = 5000;
+  try {
+    await openAsk('Random tile');
+    await page.click(ask);
+    // the save waits until the model is answering, so the job has read the version the save then moves past
+    let answering = false;
+    for (let i = 0; i < 150 && !answering; i++) { const js = (await api('GET', '/studio/jobs?project=' + pr.id)).jobs || []; answering = js.some(j => j.stage === 'suggest' && j.asset === A2 && j.state === 'running' && ((j.progress || {}).activity || {}).phase === 'model'); if (!answering) await sleep(100); }
+    ok(answering, 'the suggestion job was answering before the save');
+    await nudgeSave();
+    await page.waitForSelector(items, { timeout: 30000 });
+    peek = await api('GET', '/studio/suggest?asset=' + A2); eq(peek.outdated, true, 'the worker reads it as made before the change');
+    ok(await page.$(R + '.st-partner .st-sugg-outdated'), 'and the panel says so');
+  } finally { fx.setProvider('claude', 'ok'); }
 });
 
 await T.t('J-B8 the console guard: no page error, console error or unhandled rejection except the named faults injected on purpose', async () => {

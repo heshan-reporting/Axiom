@@ -56,8 +56,9 @@
   }
   function ProcessingCard({ job, kind, now, onRetry, onCancel, onManual, onChange, durations }) {
     // S23: when the step connection to the worker drops, the card says it is reconnecting (the job carries on in the worker)
-    const [link, setLinkState] = useState(null);
-    useEffect(() => { const h = e => setLinkState(e.detail || null); window.addEventListener('st:link', h); return () => window.removeEventListener('st:link', h); }, []);
+    // the state now, then every change: a card that mounts after the connection dropped still says so
+    const [link, setLinkState] = useState(() => (K.linkNow ? K.linkNow() : null));
+    useEffect(() => { const h = e => setLinkState(e.detail || null); window.addEventListener('st:link', h); if (K.linkNow) setLinkState(K.linkNow()); return () => window.removeEventListener('st:link', h); }, []);
     const cl = CHECKLISTS[kind] || CHECKLISTS.analyse; if (!job) return null;
     const a = (job.progress || {}).activity || {}; const x = S ? S.job(job, now || Date.now(), (durations || {})[job.stage]) : { time: '', typical: '' };
     const order = cl.items.map(i => i[0]); const cur = stepOf(kind, a); let at = order.indexOf(cur);

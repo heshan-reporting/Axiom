@@ -427,6 +427,10 @@
   /* S23 slice J: a panel that throws stops alone. The boundary shows what stopped and a Try again that re-mounts the panel;
      the rest of the Studio, the working store of unsaved edits and every saved version are untouched. CrashProbe is the named
      fault-injection hook the harness uses (window.__stCrashPanel = '<panel name>'); nothing else sets it. */
+  /* S23: the state of the step connection right now (null, or {id, tries, at} while the page reconnects). The 'st:link' event
+     tells cards that are already listening; a card that mounts after the change - on a loaded machine React can commit it
+     after the connection dropped - reads it here, or it would never say it is reconnecting (CI caught exactly that). */
+  let LINK_NOW = null;
   function CrashProbe({ name }) { if (typeof window !== 'undefined' && window.__stCrashPanel === name) throw new Error('fault injected into the ' + name + ' panel (test)'); return null; }
   class PanelBoundary extends React.Component {
     constructor(props) { super(props); this.state = { err: null, n: 0 }; }
@@ -3512,7 +3516,7 @@
     // S23: the step connection to the worker dropped and is being re-read (shown as "reconnecting"), and the opt-in desktop notices
     const [link, setLink] = useState(null); const linkRef = useRef(null); const [starting, setStarting] = useState(null);
     // the link state is also announced as an event, so the guided flow's processing card shows it beside the job it concerns
-    const linkTo = v => { linkRef.current = v; setLink(v); try { window.dispatchEvent(new CustomEvent('st:link', { detail: v })); } catch (e) {} };
+    const linkTo = v => { linkRef.current = v; LINK_NOW = v; setLink(v); try { window.dispatchEvent(new CustomEvent('st:link', { detail: v })); } catch (e) {} };
     const notifyOk = typeof window !== 'undefined' && 'Notification' in window;
     const [notifyOn, setNotifyOn] = useState(() => { try { return notifyOk && localStorage.getItem('ax_studio_notify') === '1' && Notification.permission === 'granted'; } catch (e) { return false; } });
     const notify = { supported: notifyOk, on: notifyOn, toggle: async () => { if (notifyOn) { setNotifyOn(false); try { localStorage.removeItem('ax_studio_notify'); } catch (e) {} return; } let perm = 'denied'; try { perm = await Notification.requestPermission(); } catch (e) {} if (perm === 'granted') { setNotifyOn(true); try { localStorage.setItem('ax_studio_notify', '1'); } catch (e) {} } else toastMsg('This browser did not allow notices; the Studio works the same without them.'); } };
@@ -3583,18 +3587,25 @@
     /* suggested next directions for the selected composition: one small, cached model call per version, made only when the team asks for it */
     const [sugg, setSugg] = useState(null); const suggSig = useRef(''); const runJobRef = useRef(async () => null);
     const av = a ? current(a) : null; const suggKey = a && av && av.mode !== 'copy' && av.mode !== 'generated' && p && !p.readOnly && canWrite() && prov && prov.claude ? a.id + '|' + av.id + '|' + p.references.length : '';
+    // the composition moved on while the answer was being made (a render landed, an edit was saved): the answer is on file for
+    // this asset, so it is read again for the version on screen and shown - the worker labels it outdated with what changed -
+    // instead of being dropped with the panel back at its button and nothing to show for the call (CI caught exactly that)
+    const suggLanded = useCallback(async assetId => {
+      const cur = suggSig.current; if (!cur || cur.split('|')[0] !== assetId) return;
+      try { const d = await call('/studio/suggest?asset=' + encodeURIComponent(assetId)); if (suggSig.current === cur && d && d.ok && d.cached) setSugg({ loading: false, data: d, err: '' }); } catch (e) {}
+    }, []);
     const fetchSugg = useCallback(async (refresh) => {
       if (!suggKey) { setSugg(null); return; }
       suggSig.current = suggKey; setSugg(s => ({ loading: true, data: refresh ? null : (s && s.data) || null, err: '' }));
       try {
         const assetId = suggKey.split('|')[0];
         const q = await call('/studio/suggest', { project: pidRef.current, asset: assetId, refresh: !!refresh, job: true });
-        const j = q.job ? await runJobRef.current(q.job.id) : null; if (suggSig.current !== suggKey) return;
+        const j = q.job ? await runJobRef.current(q.job.id) : null; if (suggSig.current !== suggKey) { await suggLanded(assetId); return; }
         if (j && j.state === 'failed') { setSugg({ loading: false, data: null, err: explain({ message: j.error, code: (String(j.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title }); return; }
-        const d = await call('/studio/suggest?asset=' + encodeURIComponent(assetId)); if (suggSig.current !== suggKey) return;
+        const d = await call('/studio/suggest?asset=' + encodeURIComponent(assetId)); if (suggSig.current !== suggKey) { await suggLanded(assetId); return; }
         if (d.ok && d.cached) setSugg({ loading: false, data: d, err: '' }); else setSugg({ loading: false, data: null, err: (j && j.state === 'cancelled') ? 'cancelled' : 'no answer' });
       } catch (e) { if (suggSig.current === suggKey) setSugg({ loading: false, data: null, err: e.message }); }
-    }, [suggKey]);
+    }, [suggKey, suggLanded]);
     // asked for, never fetched on its own: a new version (every pause in typing makes one) must not spend a call by itself. What
     // was asked for before is shown at once (a free read), labelled outdated with the reason when its context has changed since
     useEffect(() => {
@@ -4397,7 +4408,7 @@
 
   /* S17: the parts the guided workflow (docs/studio-guided.js) builds on - one renderer, one set of chips and icons, one way of
      explaining an error - shared rather than copied; studio-guided.js loads after this file and registers window.STFlow */
-  window.STKit = { html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Drafting, RenderBrief, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
+  window.STKit = { linkNow: () => LINK_NOW, html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Drafting, RenderBrief, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
   let mounted = false;
   window.studioInit = function () {
     const root = document.getElementById('studio-root');

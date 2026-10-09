@@ -2251,7 +2251,7 @@ that named the thinking setting, updated for `display`. All providers mocked; no
   call that has really stalled.
 - A cancelled call is stopped, not refunded: the tokens produced before the stop may be billed.
 
-## 46. S23 - production reliability, a professional workspace and a complete creative workflow (build studio-p39, page r17)
+## 46. S23 - production reliability, a professional workspace and a complete creative workflow (build studio-p39, page r17; r18 after the release fixes)
 
 This section is the working record of S23: the baseline it started from, the checklist it is held to, the bug ledger and
 the evidence. It is updated with every slice; an item is marked done only with the test or capture that proves it.
@@ -2315,6 +2315,8 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-J3 | After a project failed to open (a worker error that is not retried), the notice's **Try again** did nothing: the failed open had already cleared the project the retry was waiting for, so the reload it called was thrown away. Found from the "failed" capture. | J-B3 (the second half) failing without the fix | slice J | fixed |
 | S23-J4 | A single slow or refused read (`/studio/list`, `/studio/get`) failed the whole view: a busy gateway (502 / 503 / 504), a 429 or a dropped connection was shown as a failure on the first try, and nothing noticed the connection coming back. | J-B2, J-B3 | slice J | fixed |
 | S23-J5 | One panel that threw (the Creative Director, the context panel, the rail, the workspace) took the whole Studio down to a blank island; unsaved work survived in the working store but nothing could be reached. | J-B1 | slice J | fixed |
+| S23-J6 | After a step connection dropped, the processing card could fail to say "reconnecting": it learned of the drop only from the `st:link` event and started empty, so a card React committed after the drop (a loaded machine does) never said it. Found by CI on `main` (run 99). | F-B3, now run with the CPU slowed four times and the line recorded in the page: fails 2 of 2 on the old card | release fix (r18) | fixed |
+| S23-J7 | Suggestions asked for while the composition moved on (a background render landing, an edit saved) were dropped: the request returned when its key changed, and the new key's own free read had run before the answer was filed, so the panel went back to its button with nothing to show for the call. Found by CI on `main` (run 99, the `studio-browser.mjs` suggestions case after a queued re-render). | J-B9 (both orders): fails on the old page | release fix (r18) | fixed |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
@@ -2803,6 +2805,20 @@ measure 322, 331, 331 mid-entrance and 312, 312, 312 once finished; the test now
 layout was never wrong; the measurement was early.
 
 **Release**: worker build `2026-10-09.studio-p39`, page assets `?v=r17` (all fifteen references in `docs/index.html`).
+
+**After the release (page `?v=r18`, worker unchanged).** The first CI run on `main` (run 99, commit `d0c4a33`) failed on two
+cases that passed in run 97 on the same code; both were page races a slower runner exposed, and both are fixed with a test
+that fails before the fix:
+- *Reconnecting not said* (S23-J6). Under four times CPU slowdown the page entered the reconnecting state for about 2.1 s
+  while the processing card stayed silent (3 of 3 runs); logging the card showed its listener registered after the drop and
+  heard only the clear. The page now keeps the current state (`STKit.linkNow()`, set by `linkTo`), and the card reads it when
+  it mounts, then follows the event. F-B3 runs with the CPU slowed four times and records the line through a mutation
+  observer in the page, so a short display is never missed between two looks.
+- *Suggestions dropped* (S23-J7). `fetchSugg` returned when its key had changed during the job, and the new key's free read
+  had already run before the answer was filed. `suggLanded` now reads the filed answer for the version on screen when the
+  request finishes for the same asset; the worker (`stSuggestPeek`) labels it outdated with what changed when it was made
+  for an earlier version. J-B9 holds the job while a nudge is saved (the answer is current and shown as such), then lets a
+  streamed answer arrive after the version moved (shown, marked outdated), the panel agreeing with the worker both times.
 
 **Not proven here, stated plainly**: live model output (what a real Claude and Gemini make of these prompts, and whether a
 real painting reproduces a mark) - the smoke test is how; the operating system's clipboard and a
