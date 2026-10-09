@@ -7091,6 +7091,7 @@ async function ensureStudio(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN campaign TEXT').run(); } catch (e) {}   // P8: the campaign a reference belongs to (another campaign's references are excluded from a pack)
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN prep_key TEXT').run(); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN recipe TEXT').run(); } catch (e) {}   // P21: what to borrow from this reference and what to leave   // P8: a prepared (smaller) copy of an original over the models' limit; the original is kept untouched
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN meta TEXT').run(); } catch (e) {}   // S23: the reference's record (paid or organic, format, channel, approval, likes and dislikes) and its observations
   STUDIO_READY = true;
   return true;
 }
@@ -7285,7 +7286,7 @@ async function stGet(env, id, opts) {
   ]);
   const out = Object.assign({}, p, {
     sources: (src.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, text: opts && opts.light ? undefined : r.text, chars: (r.text || '').length, passages: pjs(r.passages, {}), claims: pjs(r.claims, []), provenance: r.provenance || '', who: r.who, created: r.created })),
-    references: (refs.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, purpose: r.purpose, key: r.key || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', prepKey: r.prep_key || '', prepUrl: r.prep_key ? '/studio/file?key=' + encodeURIComponent(r.prep_key) : '', campaign: r.campaign || '', note: r.note || '', analysis: pjs(r.analysis, null), recipe: pjs(r.recipe, null), who: r.who, created: r.created })),
+    references: (refs.results || []).map(r => ({ id: r.id, kind: r.kind, name: r.name, purpose: r.purpose, key: r.key || '', url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', prepKey: r.prep_key || '', prepUrl: r.prep_key ? '/studio/file?key=' + encodeURIComponent(r.prep_key) : '', campaign: r.campaign || '', note: r.note || '', analysis: pjs(r.analysis, null), recipe: pjs(r.recipe, null), meta: pjs(r.meta, null), who: r.who, created: r.created })),
     directions: (dirs.results || []).map(r => Object.assign({ id: r.id, chosen: !!r.chosen, who: r.who, created: r.created }, pjs(r.data, {}))),
     assets: [], thread: (events.results || []).reverse().map(r => Object.assign({ id: r.id, kind: r.kind, who: r.who, at: r.created }, pjs(r.data, {}))),
     jobs: (jobs.results || []).map(stJobRow),
@@ -9547,6 +9548,49 @@ async function stResize(env, p, a, sb, who) {
    write), move rewrites the family's order, delete archives the page (recoverable; out of the workflow, the review and the
    export) and restore brings it back in its place. None of these rewrites an existing page, calls a model or renders. */
 const ST_PAGE_ACTIONS = ['duplicate', 'add', 'move', 'delete', 'restore'];
+/* S23: a carousel tile draws its own page number ("2 / 4", from layout.frame). When the pages of a family change (added,
+   duplicated, moved, deleted, restored) every live page whose drawn number no longer matches its place gets a layout version
+   with the number put right - the tile changed, so it is a revision, and an approval of the old tile no longer stands. A page
+   whose number is painted into its bitmap, or whose layout is locked, keeps the old number and is named. */
+async function stPageNumbers(env, p, family, who) {
+  const live = stOrderAssets(((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND family=? AND COALESCE(archived,0)=0 ORDER BY created, rowid').bind(p.id, family).all()).results || []).map(stAssetRow));
+  const out = { updated: [], kept: [] };
+  for (let i = 0; i < live.length; i++) {
+    const a = live[i]; const v = await stCurrent(env, a); const fr = v && v.layout && v.layout.frame;
+    if (!fr || typeof fr !== 'object') continue;
+    if (Number(fr.index) === i && Number(fr.of) === live.length) continue;
+    const says = (i + 1) + ' / ' + live.length;
+    if (v.mode === 'finished' || v.mode === 'artwork' || v.mode === 'generated') { out.kept.push({ asset: a.id, title: a.title, why: 'its page number is painted into the bitmap; regenerate it to show ' + says }); continue; }
+    if (a.locks && a.locks.layout) { out.kept.push({ asset: a.id, title: a.title, why: 'its layout is locked; unlock it to show ' + says }); continue; }
+    const ctx = Object.assign({}, v.context || {}); delete ctx.op;
+    try {
+      const nv = await stAppendVersion(env, a, { kind: 'layout', note: 'page number ' + says + ' after the pages of ' + (family || 'the set') + ' changed (no render)', copy: v.copy, layout: Object.assign({}, v.layout, { frame: Object.assign({}, fr, { index: i, of: live.length }) }), image: v.image, mode: v.mode, context: ctx }, who);
+      await stVersionChecks(env, p, a, nv);
+      out.updated.push({ asset: a.id, title: a.title, page: i + 1, of: live.length, version: nv.id });
+    } catch (e) { out.kept.push({ asset: a.id, title: a.title, why: 'changed elsewhere at the same moment (' + String((e && e.code) || (e && e.message) || e).slice(0, 60) + '); open it to renumber' }); }
+  }
+  return out;
+}
+/** S23: why a mark placed by hand cannot stand, or null: the campaign's mark policy (logo / wordmark / both / none), the file
+    route the mark must come from, the client it belongs to and, for a wordmark, the campaign. Deterministic; no model involved. */
+async function stMarkPolicyProblem(env, p, marks) {
+  const kit = (await brandKit(env, p.ns)) || {};
+  const camp = (kit.campaigns || []).find(c => c.id === p.campaign) || null;
+  const policy = camp ? (ST_MARK_POLICIES.indexOf(camp.logoPolicy) >= 0 ? camp.logoPolicy : 'logo') : 'logo';
+  const name = camp ? (camp.name || camp.id) : 'this client';
+  for (const l of marks) {
+    let u = null; try { u = new URL(String(l.src || ''), 'https://studio.invalid'); } catch (e) { u = null; }
+    const route = u ? u.pathname : ''; const q = u ? u.searchParams : new URLSearchParams();
+    const el = String(l.id || '');
+    if (l.role === 'logo' && (policy === 'wordmark' || policy === 'none')) return { element: el, policy, detail: 'The ' + name + ' mark policy carries ' + (policy === 'none' ? 'no mark' : 'its own wordmark, never the client logo') + ', so the client logo was not placed. Nothing was saved.' };
+    if (l.role === 'wordmark' && (policy === 'logo' || policy === 'none')) return { element: el, policy, detail: 'The ' + name + ' mark policy carries ' + (policy === 'none' ? 'no mark' : 'the client logo, not a campaign wordmark') + ', so the wordmark was not placed. Nothing was saved.' };
+    if (route !== (l.role === 'logo' ? '/brand/logo' : '/brand/wordmark')) return { element: el, policy, detail: 'A mark is placed from its file in the brand kit, never from another picture; this ' + l.role + ' layer points elsewhere. Nothing was saved.' };
+    if ((q.get('ns') || '') !== p.ns) return { element: el, policy, detail: 'This ' + l.role + ' belongs to another client (' + (q.get('ns') || 'none named') + '); a client\'s work carries only its own marks. Nothing was saved.' };
+    if (l.role === 'wordmark' && (q.get('campaign') || '') !== (p.campaign || '')) return { element: el, policy, detail: 'This wordmark belongs to the campaign ' + (q.get('campaign') || 'none named') + ', not ' + name + '. Nothing was saved.' };
+  }
+  return null;
+}
+const stPageNumbersText = n => (n.updated.length ? ' Page numbers drawn on ' + n.updated.length + ' tile' + (n.updated.length === 1 ? '' : 's') + ' updated (a layout version each, no render; their design approvals are given again).' : '') + (n.kept.length ? ' Kept the old number on ' + n.kept.map(k => k.title + ' (' + k.why + ')').join('; ') + '.' : '');
 async function stPage(env, p, a, sb, who) {
   const act = String(sb.action || '');
   if (ST_PAGE_ACTIONS.indexOf(act) < 0) return { error: 'bad_action', status: 400, detail: 'action is one of ' + ST_PAGE_ACTIONS.join(', ') };
@@ -9559,31 +9603,39 @@ async function stPage(env, p, a, sb, who) {
     if (a.archived) return { error: 'archived', status: 409, detail: 'Restore the page before moving it.' };
     const rest = live.filter(x => x.id !== a.id); const to = Math.max(0, Math.min(rest.length, Math.floor(Number(sb.to) || 0)));
     const list = rest.slice(0, to).concat([a], rest.slice(to)); await renumber(list);
-    await stEvent(env, p.id, 'pages', { asset: a.id, text: 'Moved ' + a.title + ' to page ' + (to + 1) + ' of ' + list.length + ' in ' + famName + '. No version written.' }, who);
-    return { ok: true, order: list.map(x => x.id) };
+    const nums = await stPageNumbers(env, p, a.family, who);
+    await stEvent(env, p.id, 'pages', { asset: a.id, text: 'Moved ' + a.title + ' to page ' + (to + 1) + ' of ' + list.length + ' in ' + famName + '.' + (nums.updated.length || nums.kept.length ? stPageNumbersText(nums) : ' No version written.') }, who);
+    return { ok: true, order: list.map(x => x.id), numbers: nums };
   }
   if (act === 'delete' || act === 'restore') {
     if ((act === 'delete') === !!a.archived) return { ok: true, unchanged: true, archived: !!a.archived };
     // the page keeps its place in the order while archived, so a restore puts it back where it was
     if (act === 'delete') await renumber(fam);
     await env.MIND_DB.prepare('UPDATE studio_assets SET archived=?, updated=? WHERE id=?').bind(act === 'delete' ? 1 : 0, now, a.id).run();
-    await stEvent(env, p.id, 'pages', { asset: a.id, text: (act === 'delete' ? 'Deleted ' + a.title + ' from ' + famName + ': archived, so it can be restored in its place; it leaves the review and the export.' : 'Restored ' + a.title + ' in its place in ' + famName + '.') }, who);
-    return { ok: true, archived: act === 'delete' };
+    const nums = await stPageNumbers(env, p, a.family, who);
+    await stEvent(env, p.id, 'pages', { asset: a.id, text: (act === 'delete' ? 'Deleted ' + a.title + ' from ' + famName + ': archived, so it can be restored in its place; it leaves the review and the export.' : 'Restored ' + a.title + ' in its place in ' + famName + '.') + stPageNumbersText(nums) }, who);
+    return { ok: true, archived: act === 'delete', numbers: nums };
   }
   if (a.archived) return { error: 'archived', status: 409, detail: 'Restore the page first.' };
   const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 409, detail: 'The page has no version to start from.' };
   if (act === 'add' && (src.mode === 'finished' || src.mode === 'artwork')) return { error: 'not_reflowable', status: 409, detail: 'This page is one painted bitmap: a new page cannot take new words in it. Duplicate it, or make an editable copy first (free).' };
-  const aid = stId('a'); const n = live.length + 1;
+  const aid = stId('a'); const n = live.length + 1; const at = live.findIndex(x => x.id === a.id) + 1;
+  // the new page draws its own place from its first version ("3 / 4"), so it never needs a second version to be numbered
+  const fr0 = src.layout && src.layout.frame && typeof src.layout.frame === 'object' ? src.layout.frame : null;
+  const layout0 = fr0 ? Object.assign({}, src.layout, { frame: Object.assign({}, fr0, { index: at, of: n }) }) : src.layout;
   const title = act === 'duplicate' ? stStr(a.title + ' (copy)', 80) : stStr((a.family || 'Page') + ' - page ' + n, 80);
   const copy = act === 'duplicate' ? Object.assign({}, src.copy) : { headline: 'New page' };
   await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, a.family, a.channel, a.format, title, '', JSON.stringify(act === 'duplicate' ? (a.locks || {}) : {}), 1, now, now).run();
   const na = stAssetRow(await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE id=?').bind(aid).first());
   const note = act === 'duplicate' ? 'duplicated from ' + a.title + ' (v' + src.id + '): the same composition, words and imagery; no model call, no render' : 'a new page after ' + a.title + ': its layout and imagery, with new words to write; no model call, no render';
-  const v = await stAppendVersion(env, na, { kind: 'layout', note, copy, layout: src.layout, image: src.image, mode: src.mode, context: Object.assign({}, src.context || {}, { pageFrom: a.id + ':' + src.id, how: act === 'duplicate' ? 'page-duplicate' : 'page-add' }) }, who);
+  const ctx0 = Object.assign({}, src.context || {}, { pageFrom: a.id + ':' + src.id, how: act === 'duplicate' ? 'page-duplicate' : 'page-add' }); delete ctx0.op;
+  const v = await stAppendVersion(env, na, { kind: 'layout', note, copy, layout: layout0, image: src.image, mode: src.mode, context: ctx0 }, who);
   await stVersionChecks(env, p, na, v);
   const i = live.findIndex(x => x.id === a.id); const list = live.slice(0, i + 1).concat([na], live.slice(i + 1)); await renumber(list);
-  await stEvent(env, p.id, 'pages', { asset: aid, text: (act === 'duplicate' ? 'Duplicated ' + a.title + ' as ' + title : 'Added ' + title + ' after ' + a.title) + ' (page ' + (i + 2) + ' of ' + list.length + ' in ' + famName + '). Nothing generated.' }, who);
-  return { ok: true, made: { asset: aid, title, version: v.id, page: i + 2, of: list.length } };
+  const nums = await stPageNumbers(env, p, a.family, who);
+  await stEvent(env, p.id, 'pages', { asset: aid, text: (act === 'duplicate' ? 'Duplicated ' + a.title + ' as ' + title : 'Added ' + title + ' after ' + a.title) + ' (page ' + (i + 2) + ' of ' + list.length + ' in ' + famName + '). Nothing generated.' + stPageNumbersText(nums) }, who);
+  const made = nums.updated.find(x => x.asset === aid);
+  return { ok: true, made: { asset: aid, title, version: made ? made.version : v.id, page: i + 2, of: list.length }, numbers: nums };
 }
 /* S23: the editor's own guides for an asset - kept on the asset, never in a version, so they change no signature, no validation
    and no approval. An axis is x or y; a position is a share of the stage, kept between -10 and 110; at most 40. */
@@ -11058,7 +11110,7 @@ function stRegionPrompt(plan, region, piece, ctx, format) {
 const ST_SPEC_SCHEMA = '{"concept":"<=30 words","objective":"<=20 words: what the composition must say first","image":{"keep":true,"subject":"","setting":"","framing":"","lighting":"","mood":"","focal":"left|centre|right"},"composition":{"style":"panel|translucent|none|gradient|split|typographic","zone":"top|middle|bottom|left|right","coverage":"compact|standard|large"},"type":{"align":"left|centre","scale":"same|larger|smaller"},"panel":{"fill":"teal|gold|plain|kit|dark","opacity":0.94},"logo":{"corner":"br|bl|tr|tl|panel"},"cta":{"style":"button|text"}}';
 const ST_SPEC_RULES = 'DESIGN SPEC. image.keep true reuses the current photograph (leave the other image fields empty); false means a new photograph, described by subject, setting, framing, lighting, mood and focal (where the subject sits so the words have room). composition.style: panel = a solid text panel; translucent = the panel lets the photograph through; none = the words straight over a darkened photograph; gradient = the words over a gradient that darkens from the zone edge; split = the words on a solid field with the photograph in its own region beside or above; typographic = the brand colour fills the stage, the type leads, a small photograph sits in the opposite corner. zone places the words; coverage is how much of the stage they take. type.align centre only for a symmetrical composition. panel.fill kit = the client palette primary, dark = near black. logo.corner panel puts the logo inside the text panel. cta.style text drops the button. Variation comes from the composition, the hierarchy and the treatment, not from a different photograph alone or a synonym.';
 const ST_REF_RANK = { approved: 0, brand: 1, composition: 2, typography: 3, mood: 4, imagery: 5, inspiration: 6 };
-const ST_REF_SYS = 'You are a senior designer describing one reference image for colleagues who will design in a related style. Answer as strict JSON only, no prose: {"summary":"<=40 words: what it is and what makes it work","typography":"<=30 words: families as they look, weights, case, size relationships","colour":{"palette":["#hex"],"relationships":"<=25 words: ground, accent and type colours, contrast"},"hierarchy":"<=25 words: what reads first, second, third","composition":"<=30 words: grid, zones, where the image and the words sit, negative space","imageTreatment":"<=25 words: photograph or illustration, crop, light, grade, overlays","panels":"<=25 words: boxes, bands, shapes, their opacity and corners, or none","spacing":"<=20 words: margins, padding, density","logo":"<=20 words: where and how large, or none","mark":{"present":true,"kind":"logo|wordmark|both|none|unsure","corner":"tl|tr|bl|br|centre|none","size":"<=12 words: its width against the stage","clearSpace":"<=12 words: the margin kept around it"},"text":["every word that appears, verbatim"],"takeaways":["<=12 words each, three to five: what to take from it"]}. Describe only what is visible; do not guess the client or the intent. In "mark", corner is where the mark sits (none when there is no mark); say unsure rather than guess.';
+const ST_REF_SYS = 'You are a senior designer describing one reference image for colleagues who will design in a related style. Answer as strict JSON only, no prose: {"summary":"<=40 words: what it is and what makes it work","typography":"<=30 words: families as they look, weights, case, size relationships","colour":{"palette":["#hex"],"relationships":"<=25 words: ground, accent and type colours, contrast"},"hierarchy":"<=25 words: what reads first, second, third","composition":"<=30 words: grid, zones, where the image and the words sit, negative space","imageTreatment":"<=25 words: photograph or illustration, crop, light, grade, overlays","panels":"<=25 words: boxes, bands, shapes, their opacity and corners, or none","spacing":"<=20 words: margins, padding, density","logo":"<=20 words: where and how large, or none","url":"<=20 words: where the web address sits, its size and colour, or none","mark":{"present":true,"kind":"logo|wordmark|both|none|unsure","corner":"tl|tr|bl|br|centre|none","size":"<=12 words: its width against the stage","clearSpace":"<=12 words: the margin kept around it"},"text":["every word that appears, verbatim"],"takeaways":["<=12 words each, three to five: what to take from it"]}. Describe only what is visible; do not guess the client or the intent. In "mark", corner is where the mark sits (none when there is no mark); say unsure rather than guess.';
 /** The mark a reference shows, as data: kind, corner, size and clear space, each held to its vocabulary; an unreadable answer is unsure / none. */
 function stRefMark(m) {
   if (!m || typeof m !== 'object') return undefined;
@@ -11090,12 +11142,127 @@ async function stRefAnalyse(env, p, ref, log) {
       const r = await stClaude(env, { role: 'extract', system: ST_REF_SYS, user: 'REFERENCE "' + (ref.name || 'reference') + '" (purpose: ' + (ref.purpose || 'inspiration') + (ref.note ? '; note: ' + ref.note : '') + '). Describe it.', images: [im], maxTok: 1800, timeoutMs: 60000, log });
       const j = relJson(r.text);
       if (!j || !j.summary) analysis = { error: 'the model did not describe it as JSON', at: Date.now() };
-      else analysis = { summary: stStr(j.summary, 300), typography: stStr(j.typography, 240), colour: { palette: (Array.isArray(j.colour && j.colour.palette) ? j.colour.palette : []).map(x => stStr(x, 9)).filter(x => /^#[0-9a-fA-F]{3,8}$/.test(x)).slice(0, 6), relationships: stStr(j.colour && j.colour.relationships, 200) }, hierarchy: stStr(j.hierarchy, 200), composition: stStr(j.composition, 240), imageTreatment: stStr(j.imageTreatment, 200), panels: stStr(j.panels, 200), spacing: stStr(j.spacing, 160), logo: stStr(j.logo, 160), mark: stRefMark(j.mark), text: (Array.isArray(j.text) ? j.text : []).map(x => stStr(x, 120)).slice(0, 12), takeaways: (Array.isArray(j.takeaways) ? j.takeaways : []).map(x => stStr(x, 120)).slice(0, 5), model: r.model, at: Date.now() };
+      else analysis = { summary: stStr(j.summary, 300), typography: stStr(j.typography, 240), colour: { palette: (Array.isArray(j.colour && j.colour.palette) ? j.colour.palette : []).map(x => stStr(x, 9)).filter(x => /^#[0-9a-fA-F]{3,8}$/.test(x)).slice(0, 6), relationships: stStr(j.colour && j.colour.relationships, 200) }, hierarchy: stStr(j.hierarchy, 200), composition: stStr(j.composition, 240), imageTreatment: stStr(j.imageTreatment, 200), panels: stStr(j.panels, 200), spacing: stStr(j.spacing, 160), logo: stStr(j.logo, 160), url: stStr(j.url, 160), mark: stRefMark(j.mark), text: (Array.isArray(j.text) ? j.text : []).map(x => stStr(x, 120)).slice(0, 12), takeaways: (Array.isArray(j.takeaways) ? j.takeaways : []).map(x => stStr(x, 120)).slice(0, 5), model: r.model, at: Date.now() };
     } catch (e) { analysis = { error: String((e && e.message) || e).slice(0, 160), at: Date.now() }; }
   }
   try { await env.MIND_DB.prepare('UPDATE studio_references SET analysis=? WHERE id=?').bind(jsonFit(analysis, 6000), ref.id).run(); } catch (e) {}
+  // S23: what the pass saw becomes observations a person can correct; the team's own items and everything they touched stay
+  if (!analysis.error) { try { await stRefObsRefresh(env, ref.id, analysis); } catch (e) {} }
   await log(analysis.error ? 'info' : 'out', 'reference "' + (ref.name || ref.id) + '" ' + (analysis.error ? 'not analysed: ' + analysis.error : 'analysed: ' + analysis.summary.slice(0, 90)));
   return analysis;
+}
+/* -- S23: the reference's record and its observations. A reference says more than its picture: whether it ran paid or
+   organic, its format and channel, whether and when it was approved and by whom, what the team liked and disliked in it
+   (with the evidence), and what was observed in it. Every observation carries its authority: observed (seen in the image),
+   inferred (a conclusion drawn from it), preferred or mandatory (only a person says so, with the reason). The vision pass
+   writes observed and inferred items only. A person corrects an item (the original is kept as `was`), retires and restores
+   it, adds their own and changes an item's authority; a re-analysis replaces only the vision pass's untouched items. Nothing
+   here is a standing rule until Teach this brand promotes it, which asks first: an inference must be confirmed, and other
+   references of the campaign that say something different about the same thing must be resolved. */
+const ST_REF_CONTEXTS = ['paid', 'organic', 'both', 'unknown'];
+const ST_REF_APPROVAL = ['approved', 'rejected', 'pending', 'unknown'];
+const ST_OBS_AREAS = ['logo', 'url', 'typography', 'colour', 'spacing', 'composition', 'hierarchy', 'imagery', 'panels', 'words', 'takeaway', 'other'];
+const ST_OBS_AREA_WORD = { logo: 'Mark', url: 'URL', typography: 'Typography', colour: 'Colour', spacing: 'Spacing', composition: 'Composition', hierarchy: 'Hierarchy', imagery: 'Imagery', panels: 'Panels', words: 'Words', takeaway: 'Lesson', other: 'Note' };
+const ST_OBS_AUTH = ['observed', 'inferred', 'preferred', 'mandatory'];
+const ST_OBS_MAX = 60;
+function stIsoDate(d) { const s = String(d == null ? '' : d).trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null; const t = new Date(s + 'T00:00:00Z'); return isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== s ? null : s; }
+function stRefNotes(a) { return (Array.isArray(a) ? a : []).map(x => typeof x === 'string' ? { text: stStr(x, 240).trim() } : x && typeof x === 'object' ? { text: stStr(x.text, 240).trim(), evidence: stStr(x.evidence, 240).trim() } : null).filter(x => x && x.text).map(x => x.evidence ? x : { text: x.text }).slice(0, 12); }
+/** The record a person gives a reference, checked and bounded: fields sent replace, fields left out keep what was there, unknown fields are dropped. */
+function stRefMetaClean(body, prev) {
+  const out = Object.assign({}, prev || {}); const b = body || {};
+  if (b.context !== undefined) { const c = String(b.context || '').toLowerCase().trim(); if (c && ST_REF_CONTEXTS.indexOf(c) < 0) return { error: 'bad_context', detail: 'context is paid, organic, both or unknown' }; out.context = c || undefined; }
+  if (b.format !== undefined) { const f = stStr(b.format, 12).trim(); if (f && !/^\d+(\.\d+)?:\d+(\.\d+)?$/.test(f)) return { error: 'bad_format', detail: 'format is a ratio such as 1:1, 4:5, 9:16, 16:9 or 1.91:1' }; out.format = f || undefined; }
+  if (b.channel !== undefined) { const c = stStr(b.channel, 30).toLowerCase().replace(/[^a-z0-9 _-]/g, '').trim(); out.channel = c || undefined; }
+  if (b.approval !== undefined) {
+    const a = b.approval && typeof b.approval === 'object' ? b.approval : {};
+    const state = String(a.state || 'unknown').toLowerCase(); if (ST_REF_APPROVAL.indexOf(state) < 0) return { error: 'bad_approval', detail: 'approval.state is approved, rejected, pending or unknown' };
+    let date = null; if (a.date != null && a.date !== '') { date = stIsoDate(a.date); if (!date) return { error: 'bad_date', detail: 'approval.date is a calendar date written YYYY-MM-DD (got "' + stStr(a.date, 20) + '")' }; }
+    out.approval = { state }; if (date) out.approval.date = date;
+    if (stStr(a.by, 60).trim()) out.approval.by = stStr(a.by, 60).trim(); if (stStr(a.evidence, 240).trim()) out.approval.evidence = stStr(a.evidence, 240).trim();
+  }
+  if (b.likes !== undefined) out.likes = stRefNotes(b.likes);
+  if (b.dislikes !== undefined) out.dislikes = stRefNotes(b.dislikes);
+  Object.keys(out).forEach(k => { if (out[k] === undefined) delete out[k]; });
+  return { meta: out };
+}
+function stObsId() { return 'o' + Math.random().toString(36).slice(2, 10); }
+const stObsNorm = s => String(s || '').toLowerCase().replace(/[^a-z0-9#]+/g, ' ').trim();
+/** What the vision pass saw (observed) and what it concluded (inferred), as items a person can correct; never preferred or mandatory. */
+function stObsSeed(an) {
+  if (!an || an.error) return [];
+  const at = an.at || Date.now(); const out = [];
+  const add = (area, text, authority) => { text = stStr(text, 300).trim(); if (text && !/^(none|n\/a|no logo|no url)\.?$/i.test(text)) out.push({ id: stObsId(), area, text, authority, source: 'analysis', status: 'active', at }); };
+  const m = an.mark || null;
+  add('logo', an.logo || (m && m.present ? [m.kind, m.corner && m.corner !== 'none' ? 'at ' + (ST_CORNER_WORDS[m.corner] || m.corner) : '', m.size || '', m.clearSpace ? 'clear space ' + m.clearSpace : ''].filter(Boolean).join(', ') : ''), 'observed');
+  add('url', an.url, 'observed');
+  add('typography', an.typography, 'observed');
+  add('colour', [an.colour && an.colour.relationships, an.colour && an.colour.palette && an.colour.palette.length ? 'palette ' + an.colour.palette.join(' ') : ''].filter(Boolean).join('; '), 'observed');
+  add('spacing', an.spacing, 'observed');
+  add('composition', an.composition, 'observed');
+  add('hierarchy', an.hierarchy, 'observed');
+  add('imagery', an.imageTreatment, 'observed');
+  add('panels', an.panels, 'observed');
+  if (Array.isArray(an.text) && an.text.length) add('words', an.text.map(t => '"' + String(t).replace(/"/g, "'") + '"').join(', '), 'observed');
+  (an.takeaways || []).forEach(t => add('takeaway', t, 'inferred'));
+  return out;
+}
+/** A re-analysis: the pass's untouched items are replaced; every item a person wrote or touched (corrected, retired, restored,
+ *  re-ranked, promoted) stays; a new item that repeats one the team set aside, or an area the team corrected, is not brought back. */
+function stObsMerge(prev, seeded) {
+  const keep = (Array.isArray(prev) ? prev : []).filter(o => o.source !== 'analysis' || o.touched || o.status !== 'active');
+  const corrected = new Set(keep.filter(o => o.was && o.area !== 'takeaway').map(o => o.area));
+  const seen = new Set(); keep.forEach(o => { seen.add(stObsNorm(o.text)); if (o.was) seen.add(stObsNorm(o.was.text)); });
+  return keep.concat((seeded || []).filter(n => !corrected.has(n.area) && !seen.has(stObsNorm(n.text)))).slice(0, ST_OBS_MAX);
+}
+async function stRefObsRefresh(env, refId, an) {
+  if (!an || an.error) return null;
+  const row = await env.MIND_DB.prepare('SELECT meta FROM studio_references WHERE id=?').bind(refId).first(); const meta = pjs(row && row.meta, {}) || {};
+  meta.observations = stObsMerge(meta.observations, stObsSeed(an)); meta.analysedAt = an.at || Date.now();
+  await env.MIND_DB.prepare('UPDATE studio_references SET meta=? WHERE id=?').bind(JSON.stringify(meta), refId).run();
+  return meta;
+}
+/** One person's action on a reference's observations: add, correct (the original kept), retire, restore, or authority (with why). */
+function stObsAct(meta, b, who) {
+  const list = Array.isArray(meta.observations) ? meta.observations.map(o => Object.assign({}, o)) : [];
+  const action = String(b.action || ''); const why = stStr(b.why, 300).trim(); const now = Date.now(); const by = stStr(who, 60);
+  if (action === 'add') {
+    const area = ST_OBS_AREAS.indexOf(b.area) >= 0 ? b.area : null; if (!area) return { error: 'bad_area', status: 400, detail: 'area is one of ' + ST_OBS_AREAS.join(', ') };
+    const text = stStr(b.text, 300).trim(); if (!text) return { error: 'text_required', status: 400, detail: 'Say what is observed or required.' };
+    const authority = ST_OBS_AUTH.indexOf(b.authority) >= 0 ? b.authority : 'observed';
+    if ((authority === 'mandatory' || authority === 'preferred') && !why) return { error: 'why_required', status: 400, detail: 'A ' + authority + ' item carries its evidence: say who requires it and where it was agreed.' };
+    if (list.length >= ST_OBS_MAX) return { error: 'too_many', status: 413, detail: 'A reference keeps up to ' + ST_OBS_MAX + ' observations; retire some first.' };
+    const item = { id: stObsId(), area, text, authority, source: 'team', status: 'active', at: now, who: by }; if (why) item.why = why;
+    list.push(item); meta.observations = list; return { meta, item };
+  }
+  const o = list.find(x => x.id === stClean(b.obs, 24)); if (!o) return { error: 'unknown_observation', status: 404 };
+  if (o.status === 'promoted' && action !== 'retire') return { error: 'promoted', status: 409, detail: 'This observation became a standing rule; change the rule in the Learned table, or retire the observation.' };
+  if (action === 'correct') {
+    const text = stStr(b.text, 300).trim(); if (!text) return { error: 'text_required', status: 400 };
+    if (!o.was) o.was = { text: o.text, authority: o.authority, source: o.source, at: o.at };
+    o.text = text; o.source = 'team'; o.touched = true; o.at = now; o.who = by; if (why) o.why = why;
+    if (ST_OBS_AUTH.indexOf(b.authority) >= 0) { if ((b.authority === 'mandatory' || b.authority === 'preferred') && !why) return { error: 'why_required', status: 400, detail: 'A ' + b.authority + ' item carries its evidence.' }; o.authority = b.authority; }
+  } else if (action === 'retire') { o.status = 'retired'; o.touched = true; o.retired = { why: why || 'retired by ' + (by || 'the team'), at: now, who: by }; }
+  else if (action === 'restore') { if (o.status !== 'retired') return { error: 'not_retired', status: 409, detail: 'Only a retired observation is restored.' }; o.status = 'active'; o.touched = true; o.restored = { at: now, who: by }; }
+  else if (action === 'authority') {
+    if (ST_OBS_AUTH.indexOf(b.authority) < 0) return { error: 'bad_authority', status: 400, detail: 'authority is ' + ST_OBS_AUTH.join(', ') };
+    if (!why) return { error: 'why_required', status: 400, detail: 'Say why the authority changes: who confirmed it, and where.' };
+    o.history = (Array.isArray(o.history) ? o.history : []).concat([{ authority: o.authority, at: now, who: by, why }]).slice(-8);
+    o.authority = b.authority; o.touched = true; o.confirmed = { at: now, who: by, why };
+  } else return { error: 'bad_action', status: 400, detail: 'action is add, correct, retire, restore or authority' };
+  meta.observations = list; return { meta, item: o };
+}
+/** The record and the team's word on a reference, as the models read it beside the vision pass. */
+function stRefTeamText(meta) {
+  if (!meta || typeof meta !== 'object') return '';
+  const bits = [];
+  const ap = meta.approval; const rec = [meta.context && meta.context !== 'unknown' ? 'ran ' + meta.context : '', meta.format ? meta.format : '', meta.channel ? 'on ' + meta.channel : '', ap && ap.state && ap.state !== 'unknown' ? ap.state + (ap.date ? ' ' + ap.date : '') + (ap.by ? ' by ' + ap.by : '') : ''].filter(Boolean);
+  if (rec.length) bits.push('Record: ' + rec.join(', '));
+  if ((meta.likes || []).length) bits.push('The team liked: ' + meta.likes.map(x => x.text).join('; '));
+  if ((meta.dislikes || []).length) bits.push('The team disliked (avoid): ' + meta.dislikes.map(x => x.text).join('; '));
+  const obs = Array.isArray(meta.observations) ? meta.observations : [];
+  obs.filter(o => o.status === 'active' && (o.source === 'team' || o.authority === 'mandatory' || o.authority === 'preferred' || o.confirmed)).forEach(o => bits.push((ST_OBS_AREA_WORD[o.area] || o.area) + ' [' + o.authority + (o.source === 'team' ? (o.was ? ', corrected by the team' : ', the team') : ', confirmed by the team') + ']: ' + o.text));
+  obs.filter(o => o.status === 'retired').slice(0, 6).forEach(o => bits.push('Set aside by the team (do not take): ' + stStr(o.text, 120)));
+  return bits.length ? ' TEAM ON THIS REFERENCE: ' + bits.join('. ') + '.' : '';
 }
 /* -- reference recipes (P21): per reference, the team says which components to borrow and which to leave. The models see it
    on the reference's line; each concept names which reference influenced which component, and an influence outside a recipe
@@ -11115,9 +11282,9 @@ function stRecipeNorm(x, purpose) {
 function stRecipeText(rc) { if (!rc) return ''; return (rc.borrow.length ? ' BORROW ONLY: ' + rc.borrow.join(', ') + '.' : '') + (rc.exclude.length ? ' DO NOT TAKE: ' + rc.exclude.join(', ') + '.' : '') + (rc.note ? ' Team note: ' + rc.note : ''); }
 function stRefLine(r, an) {
   const head = '[' + r.id + '] ' + r.name + ' (' + r.purpose + (r.note ? '; ' + r.note : '') + ')';
-  const rc = stRecipeText(r.recipe);
-  if (!an || an.error) return head + rc + ' - not analysed' + (an && an.error ? ': ' + an.error : '') + '; only its name and purpose are known.';
-  return head + rc + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (Array.isArray(an.text) && an.text.length ? ' Words on it: ' + an.text.map(t => '"' + String(t).replace(/"/g, "'") + '"').join(', ') + '.' : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
+  const rc = stRecipeText(r.recipe) + stRefTeamText(r.meta);
+  if (!an || an.error) return head + rc + ' - not analysed' + (an && an.error ? ': ' + an.error : '') + '; only its name and purpose' + (r.meta ? ' and what the team recorded' : '') + ' are known.';
+  return head + rc + ' - ' + an.summary + (an.typography ? ' Typography: ' + an.typography : '') + (an.colour && (an.colour.palette.length || an.colour.relationships) ? ' Colour: ' + an.colour.palette.join(' ') + (an.colour.relationships ? ' - ' + an.colour.relationships : '') : '') + (an.hierarchy ? ' Hierarchy: ' + an.hierarchy : '') + (an.composition ? ' Composition: ' + an.composition : '') + (an.imageTreatment ? ' Image: ' + an.imageTreatment : '') + (an.panels ? ' Panels: ' + an.panels : '') + (an.spacing ? ' Spacing: ' + an.spacing : '') + (an.logo ? ' Logo: ' + an.logo : '') + (an.url && !/^none\.?$/i.test(an.url) ? ' URL: ' + an.url : '') + (Array.isArray(an.text) && an.text.length ? ' Words on it: ' + an.text.map(t => '"' + String(t).replace(/"/g, "'") + '"').join(', ') + '.' : '') + (an.takeaways && an.takeaways.length ? ' Take: ' + an.takeaways.join('; ') : '');
 }
 /** The project's references as the models receive them: ranked by purpose, analysed (lazily, up to two a call), the strongest attached as images. */
 async function stRefBundle(env, p, opts) {
@@ -11128,7 +11295,7 @@ async function stRefBundle(env, p, opts) {
   for (const r of rows) {
     let an = pjs(r.analysis, null);
     if ((!an || (an.error && !/over 4.5 MB|no image/.test(an.error) && Date.now() - (an.at || 0) > 600000)) && r.key && opts.analyse !== false && analysed < 2) { an = await stRefAnalyse(env, p, r, log); analysed++; }
-    const ref = { id: r.id, name: r.name, purpose: r.purpose, note: r.note || '', key: r.key || '', campaign: r.campaign || '', prepKey: r.prep_key || '', analysis: an, recipe: pjs(r.recipe, null) };
+    const ref = { id: r.id, name: r.name, purpose: r.purpose, note: r.note || '', key: r.key || '', campaign: r.campaign || '', prepKey: r.prep_key || '', analysis: an, recipe: pjs(r.recipe, null), meta: pjs(r.meta, null) };
     out.rows.push(ref); out.used.push({ id: r.id, name: r.name, purpose: r.purpose, analysed: !!(an && !an.error) });
     if (!an || an.error) out.unanalysed.push(r.name + (an && an.error ? ' (' + an.error + ')' : ''));
     if (out.images.length < max && r.key) { const im = await stRefImage(env, r); if (im) { out.images.push(Object.assign(im, { ref: r.id, purpose: r.purpose, name: r.name })); ref.attached = true; ref.prepared = !!im.prepared; } else ref.unavailable = true; }
@@ -11155,7 +11322,9 @@ async function stIdentityAudit(env, ns) {
     const policy = ST_MARK_POLICIES.indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : 'logo';
     // a named variant on file counts as the wordmark; the single (unnamed) slot is the fallback
     const marks = await brMarks(env, ns, kit, c); const wmVar = marks.wordmark.variants.find(v => v.onFile && v.default) || marks.wordmark.variants.find(v => v.onFile);
-    const wm = wmVar ? { bytes: wmVar.bytes, mime: wmVar.mime, variant: wmVar.variant, variants: marks.wordmark.variants.map(v => ({ variant: v.variant, tone: v.tone, v: v.v, onFile: v.onFile, default: v.default })) } : (c.hasWordmark ? await head('brand/' + ns + '/wordmark/' + c.id) : null);
+    // S23: every variant the kit records, each read from storage (bytes, type) - a variant whose file is gone is reported, never assumed
+    const wmVariants = marks.wordmark.variants.map(v => ({ variant: v.variant, tone: v.tone, v: v.v, onFile: v.onFile, bytes: v.bytes, mime: v.mime, default: v.default, url: v.onFile ? v.url : '' }));
+    const wm = wmVar ? { bytes: wmVar.bytes, mime: wmVar.mime, variant: wmVar.variant, variants: wmVariants } : (c.hasWordmark ? await head('brand/' + ns + '/wordmark/' + c.id) : null);
     const refs = refsFor(c.id); const byPurpose = {}; refs.forEach(r => { byPurpose[r.purpose] = (byPurpose[r.purpose] || 0) + 1; });
     const placement = stPlacementEvidence(refs.map(r => ({ id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign, key: r.key, analysis: pjs(r.analysis, null) })), kit, c.id);
     const prefs = fixes.filter(f => !stCampaignOf(f) || stCampaignOf(f) === c.id);
@@ -11166,7 +11335,12 @@ async function stIdentityAudit(env, ns) {
     if (!c.identity) gaps.push('no identity note (colours, devices, type) recorded on the campaign');
     if (!byPurpose.brand && !byPurpose.approved) gaps.push('no brand or approved reference for this campaign on any project');
     if (placement.basis === 'default') gaps.push('mark placement is not observed in any approved reference and no rule is taught; the house default (bottom right) applies');
-    campaigns.push({ id: c.id, name: c.name || c.id, active: c.active !== false, policy, identity: c.identity || '', logo: logo ? { onFile: true, bytes: logo.bytes, mime: logo.mime } : { onFile: false }, wordmark: wm ? { onFile: true, bytes: wm.bytes, mime: wm.mime } : { onFile: false, kitSays: !!c.hasWordmark }, references: { total: refs.length, byPurpose, analysed: refs.filter(r => { const a = pjs(r.analysis, null); return a && !a.error; }).length }, placement, preferences: prefs.map(f => ({ id: f.id, rule: f.rule, scope: stCampaignOf(f) ? 'campaign' : f.scope, who: f.who })), artworks: artworks.length, gaps });
+    wmVariants.filter(v => !v.onFile).forEach(v => gaps.push('the ' + v.variant + ' wordmark variant (' + v.tone + ') is recorded in the kit but its file is not in storage: re-upload it or remove it from the kit'));
+    const wmDefault = wmVariants.find(v => v.default); if (wmDefault && !wmDefault.onFile) gaps.push('the default wordmark variant (' + wmDefault.variant + ') is not in storage' + (wmVar ? '; ' + wmVar.variant + ' stands in' : ''));
+    const carriesLogo = policy === 'logo' || policy === 'both';
+    const logoOut = carriesLogo ? (logo ? { carried: true, onFile: true, bytes: logo.bytes, mime: logo.mime } : { carried: true, onFile: false }) : { carried: false, onFile: !!logo, note: (c.name || c.id) + (policy === 'none' ? ' carries no mark' : ' carries its own wordmark, never the client logo') + ': the logo is not placed on its compositions or sent to the image model' };
+    const wordmarkOut = (policy === 'wordmark' || policy === 'both' || wmVariants.length || wm) ? Object.assign(wm ? { onFile: true, bytes: wm.bytes, mime: wm.mime, variant: wm.variant || '' } : { onFile: false, kitSays: !!c.hasWordmark || wmVariants.length > 0 }, { variants: wmVariants, missing: wmVariants.filter(v => !v.onFile).map(v => v.variant), carried: policy === 'wordmark' || policy === 'both' }) : { onFile: false, kitSays: false, variants: [], carried: false };
+    campaigns.push({ id: c.id, name: c.name || c.id, active: c.active !== false, policy, identity: c.identity || '', logo: logoOut, wordmark: wordmarkOut, references: { total: refs.length, byPurpose, analysed: refs.filter(r => { const a = pjs(r.analysis, null); return a && !a.error; }).length }, placement, preferences: prefs.map(f => ({ id: f.id, rule: f.rule, scope: stCampaignOf(f) ? 'campaign' : f.scope, who: f.who })), artworks: artworks.length, gaps });
   }
   const unassigned = refRows.filter(r => !(r.campaign || r.project_campaign));
   return { ok: true, ns, kit: { name: kit.name || '', hasLogo: !!kit.hasLogo, logo: logo ? { onFile: true, bytes: logo.bytes, mime: logo.mime } : { onFile: false, kitSays: !!kit.hasLogo }, palette: kit.palette || {}, fonts: kit.fonts || {} }, campaigns, references: { total: refRows.length, unassigned: unassigned.length, byPurpose: refRows.reduce((acc, r) => Object.assign(acc, { [r.purpose]: (acc[r.purpose] || 0) + 1 }), {}) }, preferences: fixes.length, artworks: art.length, note: 'Every count is what the kit, R2, the references, the learned corrections and the artwork memory hold now. A policy is mandatory on its campaign; a mark the policy wants but R2 does not hold makes every composition on that campaign incomplete, never substituted. Placement knowledge comes only from approved and brand references that describe a mark position.' };
@@ -11367,7 +11541,25 @@ function brReadiness(ws) {
   claims.filter(c => c.status === 'active').forEach(c => { const ys = (String(c.body).match(/\b(19|20)\d\d\b/g) || []).map(Number); if (ys.length && Math.max.apply(null, ys) < yr - 2) outdated.push({ code: 'fact_dated', text: 'An approved fact names ' + Math.max.apply(null, ys) + ': "' + stStr(c.body, 100) + '". Check it is still current.' }); });
   claims.filter(c => c.status === 'proposed').forEach(c => outdated.push({ code: 'fact_pending', text: 'A fact is still pending review and cannot be quoted: "' + stStr(c.body, 100) + '".' }));
   ws.items.filter(i => i.status === 'proposed').length && gaps.push({ code: 'proposals_waiting', text: ws.items.filter(i => i.status === 'proposed').length + ' proposed memory update' + (ws.items.filter(i => i.status === 'proposed').length === 1 ? '' : 's') + ' waiting for review; none applies until a person keeps it.' });
-  return { state: blocking.length ? 'blocked' : (gaps.length || conflicts.length) ? 'gaps' : 'ready', blocking, gaps, conflicts, outdated };
+  // S23: a reference whose campaign is only inferred from its project, on a client with more than one identity
+  const camps = ws.campaigns || []; const campName = id => ((camps.find(c => c.id === id) || {}).name || id);
+  if (camps.length > 1) ws.references.filter(r => r.campaignFrom !== 'reference').slice(0, 8).forEach(r => gaps.push({ code: 'scope_uncertain', ref: r.id, text: 'The reference "' + r.name + '" (' + r.purpose + ') carries no campaign of its own' + (r.campaignFrom === 'project' ? '; it is counted under ' + campName(r.campaign) + ' only because its project is' : '') + '. With ' + camps.length + ' identities on this client, say which one it shows before it informs placement, observations or a rule.', fix: 'Open the reference\'s record in the References view and set its campaign (or none, if it is client-wide).' }));
+  // S23: learned rules scoped to a campaign the kit no longer has, or has switched off
+  (ws.orphanRules || []).forEach(f => outdated.push({ code: 'rule_outdated', id: f.id, text: 'A learned ' + f.task + ' rule is scoped to the campaign "' + f.campaign + '", which the kit ' + (f.gone ? 'no longer has' : 'has switched off') + ': "' + stStr(f.rule, 120) + '". It reaches no prompt.', fix: 'Switch it off or delete it in the Learned table, or teach it again for a current campaign.' }));
+  // S23: exactly which references would help, and why
+  const wanted = []; const designRefsMeta = designRefs.filter(r => r.meta);
+  if (camp) {
+    const cname = camp.name || camp.id;
+    const FW = { '1:1': 'square', '4:5': 'portrait feed', '9:16': 'story or reel', '16:9': 'landscape', '1.91:1': 'link card' };
+    const covered = new Set(designRefsMeta.map(r => r.meta.format).filter(Boolean));
+    (ws.formatsInUse || []).filter(f => !covered.has(f.format)).slice(0, 6).forEach(f => wanted.push({ purpose: 'approved', campaign: camp.id, format: f.format, text: 'An approved ' + cname + ' tile in ' + f.format + (FW[f.format] ? ' (' + FW[f.format] + ')' : '') + ', with its approval recorded', why: f.n + ' composition' + (f.n === 1 ? '' : 's') + ' on ' + cname + (f.n === 1 ? ' is ' : ' are ') + f.format + ' and no approved reference of the campaign is recorded in that format, so placement, scale and safe areas there are inferred from other shapes.' }));
+    if (!designRefsMeta.some(r => r.meta.approval && r.meta.approval.state === 'approved' && r.meta.approval.date)) wanted.push({ purpose: 'approved', campaign: camp.id, text: 'An approved ' + cname + ' tile with its approval recorded (state, date, who approved it)', why: 'no reference of ' + cname + ' records when and by whom it was approved, so an approved example cannot be told from a draft.' });
+    if (ws.placement.basis === 'default') wanted.push({ purpose: 'approved', campaign: camp.id, text: 'An approved ' + cname + ' tile that shows the ' + (id.policy === 'wordmark' ? 'campaign wordmark' : id.policy === 'none' ? 'layout without a mark' : 'client logo') + ' in place', why: 'no approved reference shows where the mark sits on ' + cname + '; the house default (bottom right) applies until one does or a rule is taught.' });
+    if (!ws.references.some(r => r.meta && r.meta.dislikes)) wanted.push({ purpose: 'approved', campaign: camp.id, text: 'A ' + cname + ' piece the client turned down, with what they disliked and where they said it', why: 'nothing records what ' + cname + ' does not want; dislikes with their evidence reach the models as things to avoid.' });
+  }
+  const have = {}; ws.references.forEach(r => { have[r.purpose] = (have[r.purpose] || 0) + 1; });
+  ['brand', 'typography', 'imagery', 'composition'].filter(pu => !have[pu]).forEach(pu => wanted.push({ purpose: pu, campaign: camp ? camp.id : '', text: (BR_EXAMPLE_PURPOSES[pu] || pu).replace(/^an? /, 'A ').replace(/^([a-z])/, m => m.toUpperCase()) + (camp ? ' (' + (camp.name || camp.id) + ')' : ''), why: 'no ' + pu + ' reference ' + (camp ? 'for ' + (camp.name || camp.id) : 'for the client') + ': the models work that respect out from the kit alone.' }));
+  return { state: blocking.length ? 'blocked' : (gaps.length || conflicts.length) ? 'gaps' : 'ready', blocking, gaps, conflicts, outdated, wanted };
 }
 /** The whole workspace for a client, or for one of its campaigns: every item normalised with its authority, scope, status and source. */
 async function brandWorkspace(env, ns, campaignId) {
@@ -11379,8 +11571,10 @@ async function brandWorkspace(env, ns, campaignId) {
   const item = (o) => Object.assign({ status: 'active', scope: o.campaign ? 'campaign' : 'client', campaign: o.campaign || '', authorityWord: BR_AUTH_WORD[o.authority] || o.authority }, o);
   const identity = await brMarks(env, ns, kit, camp);
   // references: every project of this client; a campaign view shows that campaign's and the unassigned ones
-  const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
-  const refs = refRows.filter(r => { const c = r.campaign || r.pc || ''; return cid ? (c === cid || c === '') : true; }).map(r => { const an = pjs(r.analysis, null); return item({ id: r.id, kind: 'reference', authority: 'observation', campaign: r.campaign || r.pc || '', name: r.name, title: r.name, purpose: r.purpose, body: an && !an.error ? stStr(an.summary, 300) : (r.note || ''), analysed: !!(an && !an.error), project: r.project, projectTitle: r.ptitle, url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', source: { type: 'reference', id: r.id, label: 'reference on project ' + (r.ptitle || r.project), project: r.project }, created: r.created }); });
+  const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, r.meta, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
+  // S23: where a reference's campaign comes from (its own record, or only its project), its record, and its observations by authority
+  const refMeta = r => { const m = pjs(r.meta, {}) || {}; const obs = (m.observations || []); const n = k => obs.filter(o => o.status === 'active' && o.authority === k).length; return { context: m.context || '', format: m.format || '', channel: m.channel || '', approval: m.approval || null, likes: (m.likes || []).length, dislikes: (m.dislikes || []).length, observations: { active: obs.filter(o => o.status === 'active').length, observed: n('observed'), inferred: n('inferred'), preferred: n('preferred'), mandatory: n('mandatory'), promoted: obs.filter(o => o.status === 'promoted').length, retired: obs.filter(o => o.status === 'retired').length } }; };
+  const refs = refRows.filter(r => { const c = r.campaign || r.pc || ''; return cid ? (c === cid || c === '') : true; }).map(r => { const an = pjs(r.analysis, null); return item({ id: r.id, kind: 'reference', authority: 'observation', campaign: r.campaign || r.pc || '', campaignFrom: r.campaign ? 'reference' : r.pc ? 'project' : 'none', name: r.name, title: r.name, purpose: r.purpose, body: an && !an.error ? stStr(an.summary, 300) : (r.note || ''), analysed: !!(an && !an.error), meta: refMeta(r), project: r.project, projectTitle: r.ptitle, url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', source: { type: 'reference', id: r.id, label: 'reference on project ' + (r.ptitle || r.project), project: r.project }, created: r.created }); });
   const placement = stPlacementEvidence(refs.map(r => { const row = refRows.find(x => x.id === r.id) || {}; return { id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign, key: row.key || '', analysis: pjs(row.analysis, null) }; }), kit, cid);
   const excludedReferences = refRows.length - refs.length;
   const voice = [];
@@ -11399,9 +11593,12 @@ async function brandWorkspace(env, ns, campaignId) {
   let art = []; try { art = (await env.MIND_DB.prepare('SELECT id, title, meta, created FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || []; } catch (e) {}
   const artworks = art.filter(a => { const c = String((pjs(a.meta, {}) || {}).campaign || ''); return !cid || c === cid || c === ''; }).slice(0, 60).map(a => ({ id: a.id, title: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || ''), url: '/engine/art?id=' + a.id, created: a.created }));
   const native = await brItems(env, ns, cid);
+  // S23: learned rules scoped to a campaign the kit no longer has (or has switched off): they reach no prompt
+  const kitCamps = (kit.campaigns || []); const orphanRules = fixes.filter(f => f.active && stCampaignOf(f) && !kitCamps.some(c => c.id === stCampaignOf(f) && c.active !== false)).map(f => ({ id: f.id, task: f.task, rule: f.rule, campaign: stCampaignOf(f), gone: !kitCamps.some(c => c.id === stCampaignOf(f)) }));
+  let formatsInUse = []; if (cid) { try { formatsInUse = ((await env.MIND_DB.prepare("SELECT a.format AS format, COUNT(*) AS n FROM studio_assets a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND p.campaign=? AND COALESCE(a.archived,0)=0 AND COALESCE(a.format,'')<>'' GROUP BY a.format ORDER BY n DESC").bind(ns, cid).all()).results || []).map(r => ({ format: r.format, n: r.n })); } catch (e) {} }
   const ws = { ok: true, ns, client: kit.name || ns, campaign: camp ? { id: camp.id, name: camp.name || camp.id, identity: camp.identity || '', policy: identity.policy, active: camp.active !== false } : null, campaigns: (kit.campaigns || []).map(c => ({ id: c.id, name: c.name || c.id, policy: c.logoPolicy || 'logo', active: c.active !== false })),
     identity, type: { fonts: kit.fonts || {}, note: camp ? camp.identity || '' : '' }, colour: { palette: kit.palette || {} }, references: refs, excludedReferences, artworks, placement: { basis: placement.basis, corner: placement.corner, text: placement.text || '', mandatory: placement.mandatory, confidence: placement.confidence, rule: placement.rule, evidence: placement.evidence, exceptions: placement.exceptions, supporting: placement.evidence.filter(e => e.corner === placement.corner).map(e => ({ id: e.ref, name: e.name })) },
-    voice: { items: voice }, words: { items: words, excludedFacts }, preferences, accepted, items: native,
+    voice: { items: voice }, words: { items: words, excludedFacts }, preferences, accepted, items: native, orphanRules, formatsInUse,
     authorities: BR_AUTH.map(k => ({ id: k, word: BR_AUTH_WORD[k] })), kitUpdated: at };
   ws.readiness = brReadiness(ws);
   const revs = (await env.MIND_DB.prepare('SELECT id, at, who, summary FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 30').bind(ns).all()).results || [];
@@ -11485,6 +11682,50 @@ async function brTeachInspect(env, ns, campaignId) {
   ws.items.filter(i => i.status === 'proposed').forEach(i => proposals.push({ kind: 'item', campaign: i.campaign || '', proposal: { id: i.id, title: i.title, body: i.body, kind: i.kind, authority: i.authority }, why: 'proposed from ' + ((i.source && i.source.label) || 'the Studio') + '; kept or dismissed in the Brand workspace' }));
   return { ok: true, ns, campaign: camp, proposals, placement: pl, note: 'Proposals only: nothing here is written until POST /brand/teach confirms one with a reason.' };
 }
+/** S23: promote one observation of a reference to a standing rule for its campaign. An inference is refused until a person
+ *  confirms it; the reference must belong to the campaign in so many words (not only through its project); other approved or
+ *  brand references of the campaign that say something different about the same thing are named and must be resolved first -
+ *  "this" (this one takes precedence; theirs are retired as superseded, kept and restorable) or "both" (they do not conflict).
+ *  Without confirm it previews; with confirm and a reason it writes a learned rule (engine_fixes, campaign-scoped) that cites
+ *  the reference and the observation, and marks the observation promoted. Retrieval memory: no model is trained. */
+async function brTeachObservation(env, ns, camp, cid, proposal, confirm, reason, who) {
+  await ensureStudio(env);
+  const refId = stClean(proposal.observation.ref, 24), obsId = stClean(proposal.observation.obs, 24);
+  const ref = await env.MIND_DB.prepare('SELECT r.*, p.ns AS pns, p.campaign AS pc FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE r.id=?').bind(refId).first();
+  if (!ref || ref.pns !== ns) return { error: 'unknown_reference', status: 404, detail: 'No reference ' + refId + ' for ' + ns + '.' };
+  const meta = pjs(ref.meta, {}) || {}; const o = (meta.observations || []).find(x => x.id === obsId);
+  if (!o) return { error: 'unknown_observation', status: 404 };
+  if (o.status !== 'active') return { error: 'not_active', status: 409, detail: 'The observation is ' + o.status + '; restore it before teaching from it.' };
+  if (!cid || !camp) return { error: 'campaign_required', status: 400, detail: 'A rule taught from a reference belongs to one campaign: name it.' };
+  if (!ref.campaign) return { error: 'scope_uncertain', status: 409, detail: 'The reference "' + ref.name + '" carries no campaign of its own' + (ref.pc ? ' (it is counted under ' + ref.pc + ' only because its project is)' : '') + '. Set its campaign in its record first, so the rule is not taught to the wrong identity.' };
+  if (ref.campaign !== cid) return { error: 'wrong_campaign', status: 409, detail: 'The reference "' + ref.name + '" belongs to ' + ref.campaign + ', not ' + cid + '.' };
+  if (o.authority === 'inferred') return { error: 'unconfirmed', status: 409, detail: 'This is an inference the vision pass drew ("' + stStr(o.text, 120) + '"). A person confirms it first - set its authority to observed, preferred or mandatory and say who confirmed it; an inference never becomes a standing rule as it stands.', observation: o };
+  const rows = (await env.MIND_DB.prepare("SELECT r.id, r.name, r.purpose, r.meta FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? AND r.id<>? AND r.campaign=? AND r.purpose IN ('approved','brand')").bind(ns, ref.id, cid).all()).results || [];
+  const others = [];
+  rows.forEach(r => { const m = pjs(r.meta, {}) || {}; (m.observations || []).filter(x => x.area === o.area && x.status === 'active' && stObsNorm(x.text) !== stObsNorm(o.text)).forEach(x => others.push({ ref: r.id, name: r.name, purpose: r.purpose, obs: x.id, text: x.text, authority: x.authority })); });
+  const resolve = String(proposal.resolve || '');
+  const area = (ST_OBS_AREA_WORD[o.area] || o.area).toLowerCase();
+  if (others.length && resolve !== 'this' && resolve !== 'both') return { error: 'ambiguous', status: 409, detail: others.length + ' other ' + (camp.name || cid) + ' reference observation' + (others.length === 1 ? '' : 's') + ' say' + (others.length === 1 ? 's' : '') + ' something different about ' + area + ' (' + others.slice(0, 3).map(x => x.name + ': "' + stStr(x.text, 80) + '"').join('; ') + '). Resolve it first: "this" - this one takes precedence and theirs are retired as superseded (kept, restorable); or "both" - they do not conflict and theirs stay.', observation: o, others };
+  const task = o.area === 'words' ? 'copy' : 'tiles';
+  const rule = stStr(proposal.rule, 400).trim() || ((ST_OBS_AREA_WORD[o.area] || o.area) + ' on ' + (camp.name || cid) + ': ' + o.text);
+  const writes = ['a learned rule (engine_fixes) for task ' + task + ', the ' + (camp.name || cid) + ' campaign only, citing the reference "' + ref.name + '" and this observation'];
+  if (others.length) writes.push(resolve === 'this' ? 'this observation takes precedence: ' + others.length + ' differing observation' + (others.length === 1 ? '' : 's') + ' of other references retired as superseded (kept, restorable)' : 'the differing observations stay as they are: they are taken not to conflict');
+  const preview = { fix: { task, rule, scope: 'campaign ' + cid }, observation: o, reference: { id: ref.id, name: ref.name, purpose: ref.purpose }, others, writes, note: 'A learned rule reaches the copy and tiles prompts of this campaign as a correction the models follow. It is retrieval memory: no model is trained or changed.' };
+  if (!confirm) return { ok: true, written: false, preview };
+  const fix = await engineAddFix(env, { ns, task, scope: 'client', right: rule, rule, exemplar: stStr(o.text, 300), why: reason + ' (taught from the reference "' + ref.name + '" [' + ref.id + '], observation ' + o.id + ', ' + o.authority + ')', source: 'teach:brand:campaign:' + cid }, who);
+  const now = Date.now(); const by = stStr(who, 60);
+  // the observation is marked with the rule it became; the others, when this one takes precedence, are retired as superseded
+  const fresh = pjs((await env.MIND_DB.prepare('SELECT meta FROM studio_references WHERE id=?').bind(ref.id).first() || {}).meta, {}) || {};
+  (fresh.observations || []).forEach(x => { if (x.id === o.id) { x.status = 'promoted'; x.touched = true; x.promoted = { fix: fix.id, at: now, who: by, campaign: cid, reason }; } });
+  await env.MIND_DB.prepare('UPDATE studio_references SET meta=? WHERE id=?').bind(JSON.stringify(fresh), ref.id).run();
+  let superseded = 0;
+  if (resolve === 'this') for (const rid of Array.from(new Set(others.map(x => x.ref)))) {
+    const row = await env.MIND_DB.prepare('SELECT meta FROM studio_references WHERE id=?').bind(rid).first(); const m = pjs(row && row.meta, {}) || {};
+    (m.observations || []).forEach(x => { if (others.some(y => y.ref === rid && y.obs === x.id) && x.status === 'active') { x.status = 'retired'; x.touched = true; x.retired = { why: 'superseded by the ' + (camp.name || cid) + ' rule taught from "' + ref.name + '": ' + stStr(o.text, 120), at: now, who: by, by: fix.id }; superseded++; } });
+    await env.MIND_DB.prepare('UPDATE studio_references SET meta=? WHERE id=?').bind(JSON.stringify(m), rid).run();
+  }
+  return { ok: true, written: true, fix: { id: fix.id, task: fix.task, rule: fix.rule, campaign: cid }, observation: Object.assign({}, o, { status: 'promoted' }), superseded };
+}
 /** Teach this brand, the write: previews without confirm; with confirm and a reason writes the kit (a revision), a learned rule or a brand item. */
 async function brTeach(env, ns, body, who) {
   const kind = String(body.kind || ''); const kit = (await brandKit(env, ns)) || {}; const cid = kitSlug(body.campaign || '');
@@ -11530,6 +11771,8 @@ async function brTeach(env, ns, body, who) {
     return { ok: true, written: true, banned: entry };
   }
   if (kind === 'rule') {
+    // S23: a rule taught from what a reference shows - it waits for a person when it is an inference or the references disagree
+    if (proposal.observation && typeof proposal.observation === 'object') return brTeachObservation(env, ns, camp, cid, proposal, confirm, reason, who);
     const rule = stStr(proposal.rule, 400).trim(); if (!rule) return { error: 'rule_required', status: 400, detail: 'Give the rule in the words the models should follow.' };
     const task = engTask(proposal.task || 'tiles');
     const preview = { fix: { task, rule, scope: cid ? 'campaign ' + cid : 'client' }, writes: ['a learned correction (engine_fixes) for task ' + task + ', ' + (cid ? 'the ' + (camp.name || cid) + ' campaign only' : 'the whole client')] };
@@ -12301,7 +12544,10 @@ async function stReadiness(env, p, a, v, kit) {
     const marksOk = !marks.length || !!(ins && ins.marks && marks.every(r => (ins.marks.present || []).indexOf(r) >= 0) && !(ins.marks.missing || []).length && !(ins.marks.wrong || []).length);
     const ok = !!(ins && inspection.state !== 'stale' && ins.composed !== false && ins.baked && ins.baked.verified) && marksOk;
     const markWhy = !marksOk && ins && ins.marks ? ((ins.marks.missing || []).length ? ' (mark not seen: ' + ins.marks.missing.join(', ') + ')' : '') + ((ins.marks.wrong || []).length ? ' (mark wrong: ' + ins.marks.wrong.join(', ') + ')' : '') : '';
-    baked = { words: words.map(w => w.role), marks, verified: ok, why: ok ? 'the inspection read every painted word' + (marks.length ? ' and the ' + marks.join(' and ') : '') + ' as approved' : !ins ? 'no inspection has read the painted ' + (finished ? 'words and marks' : 'words') + ' yet' : inspection.state === 'stale' ? 'the inspection is of an earlier ' + (finished ? 'bitmap' : 'composition') : 'the inspection could not confirm every painted ' + (finished ? 'word and mark' : 'word') + (ins.baked && ins.baked.missing && ins.baked.missing.length ? ' (not read: ' + ins.baked.missing.join(', ') + ')' : '') + (ins.words && ins.words.wrong && ins.words.wrong.length ? ' (unapproved: ' + ins.words.wrong.join(', ') + ')' : '') + markWhy };
+    // S23: what the reading found wrong with the identity, so the page can offer the editable path (the exact file) instead of another roll
+    const markProblem = !marksOk && ins && ins.marks && inspection.state !== 'stale' && ((ins.marks.missing || []).length || (ins.marks.wrong || []).length) ? { missing: (ins.marks.missing || []).slice(0, 4), wrong: (ins.marks.wrong || []).slice(0, 4) } : null;
+    const wordProblem = ins && inspection.state !== 'stale' && ((ins.baked && ins.baked.missing && ins.baked.missing.length) || (ins.words && ins.words.wrong && ins.words.wrong.length)) ? { missing: ((ins.baked || {}).missing || []).slice(0, 6), wrong: ((ins.words || {}).wrong || []).slice(0, 6) } : null;
+    baked = { words: words.map(w => w.role), marks, verified: ok, markProblem, wordProblem, why: ok ? 'the inspection read every painted word' + (marks.length ? ' and the ' + marks.join(' and ') : '') + ' as approved' : !ins ? 'no inspection has read the painted ' + (finished ? 'words and marks' : 'words') + ' yet' : inspection.state === 'stale' ? 'the inspection is of an earlier ' + (finished ? 'bitmap' : 'composition') : 'the inspection could not confirm every painted ' + (finished ? 'word and mark' : 'word') + (ins.baked && ins.baked.missing && ins.baked.missing.length ? ' (not read: ' + ins.baked.missing.join(', ') + ')' : '') + (ins.words && ins.words.wrong && ins.words.wrong.length ? ' (unapproved: ' + ins.words.wrong.join(', ') + ')' : '') + markWhy };
     if (!ok) reasons.push('painted ' + (finished ? 'words and marks' : 'words') + ' not verified: ' + baked.why);
   }
   return { sig, technical, finished, hybrid, mode: v.mode, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '' } : null, inspection, baked, production: finished ? !!(v.image && v.image.key && baked && baked.verified) : technical === 'passed' && (!baked || baked.verified), reasons };
@@ -13300,6 +13546,7 @@ const AX_JSON_COLUMNS = [
   ['studio_directions', 'data', 'id', 'Propose directions again or re-enter the direction; not repaired automatically.'],
   ['studio_sources', 'claims', 'id', 'Run extract on the source again (no change to the source text).'],
   ['studio_references', 'analysis', 'id', 'Analyse the reference again (POST /studio/reference/analyse).'],
+  ['studio_references', 'meta', 'id', 'Write the reference\'s record again in the References view (POST /studio/reference/meta); observations come back with a re-analysis.'],
   ['brand_items', 'data', 'id', 'Edit the item in the Brand view and save it again with a reason.'],
   ['bridge_jobs', 'params', 'id', 'Start the sweep again; the old job is history.'],
   ['bridge_jobs', 'result', 'id', 'Advisory: the sweep ran; its summary did not survive.'],
@@ -14856,7 +15103,9 @@ const AXIOM_WORKER = {
             if (sb.imageB64 && env.MIND_DOCS) { const mime = String(sb.mime || 'image/png'); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP.' }, 400); const buf = bufFromB64(sb.imageB64); if (buf.byteLength > 12 * 1024 * 1024) return jsonResp({ error: 'too_large', detail: 'A reference is at most 12 MB.' }, 400); originalBytes = buf.byteLength; key = 'studio/' + p.id + '/refs/' + id + '.' + (mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } }); }
             // a prepared copy (the browser's smaller rendition of an original over the models' 4.5 MB limit) sits beside the original, which is kept exactly
             if (sb.prepB64 && key && env.MIND_DOCS) { const pm = String(sb.prepMime || 'image/jpeg'); if (!/^image\/(png|jpeg|webp)$/.test(pm)) return jsonResp({ error: 'bad_type', detail: 'prepared copy: PNG, JPEG or WebP.' }, 400); const pb = bufFromB64(sb.prepB64); if (pb.byteLength >= 4500000) return jsonResp({ error: 'prep_too_large', detail: 'The prepared copy must be under 4.5 MB.' }, 400); prepKey = 'studio/' + p.id + '/refs/' + id + '-prep.' + (pm === 'image/png' ? 'png' : pm === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(prepKey, pb, { httpMetadata: { contentType: pm } }); }
-            await env.MIND_DB.prepare('INSERT INTO studio_references(id,project,kind,name,purpose,key,note,who,created,campaign,prep_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'image', 20), stStr(sb.name || 'Reference', 120), purpose, key, stStr(sb.note, 300) + (purpose === 'inspiration' ? (sb.note ? ' ' : '') + 'Inspiration only: no logos, claims or exact layouts reused.' : ''), who, now, stStr(sb.campaign != null ? sb.campaign : p.campaign, 40), prepKey).run();
+            // S23: the record may come with the upload (paid or organic, format, channel, approval with its date, likes and dislikes)
+            const m0 = sb.meta && typeof sb.meta === 'object' ? stRefMetaClean(sb.meta, {}) : null; if (m0 && m0.error) return jsonResp(m0, 400);
+            await env.MIND_DB.prepare('INSERT INTO studio_references(id,project,kind,name,purpose,key,note,who,created,campaign,prep_key,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'image', 20), stStr(sb.name || 'Reference', 120), purpose, key, stStr(sb.note, 300) + (purpose === 'inspiration' ? (sb.note ? ' ' : '') + 'Inspiration only: no logos, claims or exact layouts reused.' : ''), who, now, stStr(sb.campaign != null ? sb.campaign : p.campaign, 40), prepKey, m0 ? JSON.stringify(Object.assign(m0.meta, { at: now, who: stStr(who, 60) })) : null).run();
             // the vision pass at upload, so the reference contributes more than its name: what a designer would note in it (a failure is recorded as the limitation it is)
             let analysis = null;
             let analyseJob = null;
@@ -15070,6 +15319,13 @@ const AXIOM_WORKER = {
               }
             }
           }
+          // S23: a mark placed or changed by hand must be one the campaign's policy carries, from this client's own brand kit and, for a
+          // wordmark, this campaign's: HOOF carries its wordmark and never the client logo. Marks left as they were are not re-judged.
+          if (sb.layout && typeof sb.layout === 'object' && Array.isArray(sb.layout.layers) && !sb.restoreFrom) {
+            const prevMarks = {}; ((cur && cur.layout && Array.isArray(cur.layout.layers)) ? cur.layout.layers : []).forEach(l => { if (l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')) prevMarks[String(l.id)] = l; });
+            const touched = sb.layout.layers.filter(l => l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')).filter(l => { const was = prevMarks[String(l.id)]; return !was || was.role !== l.role || String(was.src || '') !== String(l.src || ''); });
+            if (touched.length) { const mp = await stMarkPolicyProblem(env, pair.project, touched); if (mp) return jsonResp(Object.assign({ error: 'mark_policy' }, mp), 409); }
+          }
           // a hand edit keeps what the composition was made from (its plan, medium, master), so an adaptation or an inspection later still knows it
           const carry = cur && cur.context ? ['planIn', 'medium', 'approach', 'how', 'master', 'size', 'visual', 'conceptName', 'frame', 'of', 'basis', 'trace', 'direction', 'creationMode', 'imagery'].reduce((acc, k) => { if (cur.context[k] !== undefined) acc[k] = cur.context[k]; return acc; }, {}) : undefined;
           let patch = { kind: stStr(sb.kind || (sb.image !== undefined ? 'render' : sb.layout ? 'layout' : 'text'), 12), note: heldMoved || lockNotes.length ? stStr((sb.note || 'layout edited') + (heldMoved ? ' (a rule-held mark moved against the campaign rule, deliberately)' : '') + (lockNotes.length ? ' (' + lockNotes.join('; ') + ')' : ''), 300) : sb.note, copy: sb.copy, layout: sb.layout, image: sb.image, mode: sb.mode, checks: sb.checks, context: opId ? Object.assign({}, sb.context || carry || {}, { op: opId }) : (sb.context || carry) };
@@ -15186,6 +15442,35 @@ const AXIOM_WORKER = {
           await stEvent(env, p.id, 'inspection_applied', { eid: ins.eid, asset: pair.asset.id, fixKind: kind, instruction, job, round: ins.round, text: 'Correction applied (' + kind + ', round ' + ins.round + ' of 2): ' + instruction + (job ? ' - running as job ' + job : '') }, who);
           await stBump(env, p.id);
           return jsonResp({ ok: true, job, kind, round: ins.round });
+        }
+        // S23: a reference's record - paid or organic, format, channel, approval with its date, likes and dislikes with evidence,
+        // and the campaign it belongs to - and the team's actions on its observations
+        if (path === '/studio/reference/meta' || path === '/studio/reference/observation') {
+          const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!ref) return jsonResp({ error: 'unknown_reference' }, 404);
+          const p = await stProject(env, ref.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          if (sb.project && stClean(sb.project, 24) !== p.id) return jsonResp({ error: 'cross_project', detail: 'That reference belongs to another project.' }, 403);
+          const prev = pjs(ref.meta, {}) || {};
+          if (path === '/studio/reference/meta') {
+            const r = stRefMetaClean(sb, prev); if (r.error) return jsonResp(r, 400);
+            let campaign = ref.campaign || '';
+            if (sb.campaign !== undefined) {
+              const c = kitSlug(sb.campaign || ''); const kit = (await brandKit(env, p.ns)) || {};
+              if (c && !(kit.campaigns || []).some(x => x.id === c)) return jsonResp({ error: 'unknown_campaign', detail: 'The ' + p.ns + ' kit has no campaign "' + c + '".' }, 400);
+              campaign = c;
+            }
+            const meta = Object.assign(r.meta, { at: Date.now(), who: stStr(who, 60) });
+            await env.MIND_DB.prepare('UPDATE studio_references SET meta=?, campaign=? WHERE id=?').bind(JSON.stringify(meta), campaign, ref.id).run();
+            const said = [meta.context ? meta.context : '', meta.format || '', meta.channel || '', meta.approval ? meta.approval.state + (meta.approval.date ? ' ' + meta.approval.date : '') : '', campaign !== (ref.campaign || '') ? 'campaign ' + (campaign || 'none') : ''].filter(Boolean).join(', ');
+            await stEvent(env, p.id, 'reference_meta', { ref: ref.id, text: 'Record of ' + ref.name + ' updated' + (said ? ': ' + said : '') + '.' }, who);
+            await stBump(env, p.id);
+            return jsonResp({ ok: true, id: ref.id, campaign, meta });
+          }
+          const r = stObsAct(prev, sb, who); if (r.error) return jsonResp(r, r.status || 400);
+          await env.MIND_DB.prepare('UPDATE studio_references SET meta=? WHERE id=?').bind(JSON.stringify(r.meta), ref.id).run();
+          const verb = { add: 'added', correct: 'corrected', retire: 'retired', restore: 'restored', authority: 'set to ' + r.item.authority }[String(sb.action)] || String(sb.action);
+          await stEvent(env, p.id, 'reference_observation', { ref: ref.id, obs: r.item.id, action: String(sb.action), text: 'Observation on ' + ref.name + ' ' + verb + ': ' + stStr(r.item.text, 140) + (sb.why ? ' (' + stStr(sb.why, 140) + ')' : '') }, who);
+          await stBump(env, p.id);
+          return jsonResp({ ok: true, id: ref.id, item: r.item, observations: r.meta.observations });
         }
         // (re)run the vision pass over one reference
         if (path === '/studio/reference/recipe') {

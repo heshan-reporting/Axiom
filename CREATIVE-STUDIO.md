@@ -2282,10 +2282,10 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 2E | Stream read as the documented state machine | done | `studio-s23-worker.mjs` E1-E9 |
 | 3 | Visibly redesigned workspace (library, stage heads, brief, Explore, Copy, Design) with before / after captures | done (canvas capabilities are row 5) | `studio-s23g-browser.mjs` G-B1-G-B4, G-B6-G-B8; captures `tests/shots/s23/before-*` and `after-*` (and `after-light-*`) |
 | 4 | Creative Director: scope, Review / Explore / Conversation, stated cost of each suggestion, guarded apply | done | `studio-s23g-browser.mjs` G-B5; `studio-s20-browser.mjs` W3 (now asserting the model-call and render lines) |
-| 5 | Canvas: elements, context menus, arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets | planned | |
-| 6 | Both creation paths explained; image lifecycle (stored versus displayed) | planned | |
-| 7 | Validation, repair and export agree; render fingerprint | planned | |
-| 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | planned | |
+| 5 | Canvas: elements, context menus, arrange, smart guides, rulers, text auto-fit, colour, crop, pages as assets | done | `studio-s23h-worker.mjs` H-W1-H-W9, `studio-s23h-browser.mjs` H-B1-H-B15 |
+| 6 | Both creation paths explained; image lifecycle (stored versus displayed) | done (live output still unproven: `tools/studio-smoke.py`) | `studio-s23i-browser.mjs` I-B6, I-B7; `studio-s2-worker.mjs` (the reading's `markProblem`) |
+| 7 | Validation, repair and export agree; render fingerprint | done | `studio-s23i-worker.mjs` I-W1; `studio-s23i-browser.mjs` I-B1, I-B2, I-B5 |
+| 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | done | `studio-s23i-worker.mjs` I-W2-I-W7; `studio-s23i-browser.mjs` I-B3, I-B4 |
 | 9 | Every long operation visible and recoverable (the wait inventory, below) | done (two short synchronous calls deferred, named below) | `studio-s23f-worker.mjs` F1-F5, `studio-s23-browser.mjs` F-B1-F-B4 |
 | 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | planned | |
 | 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | planned | |
@@ -2305,6 +2305,11 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | S23-G5 | The readiness line, the checks and the Fix layout note named layers by internal id ("panel, hl, sp, cta"), and the Creative Director's focused-edit messages did too. | the "before" design captures; G-B6 | slice G | fixed |
 | S23-G6 | The Creative Director kept the previous part's scroll position when its part or asset changed (a review opened scrolled to its foot after the conversation). | G-B5 | slice G | fixed |
 | S23-G7 | A suggestion's cost line read "no render" with nothing about the model call that applying it makes. | G-B5 / S20 W3 | slice G | fixed |
+| S23-H1 | `POST /studio/version` took any mark layer a layout carried: a client logo on a HOOF tile (whose policy carries its own wordmark), another client's logo, another campaign's wordmark, or a picture labelled a wordmark were all saved. Nothing in the page could place a mark by hand before slice H, but any full key could post one. | H-W9 failing on `460b646` (200 where 409 is due) | slice H | fixed |
+| S23-I1 | The identity audit (`GET /studio/identity`, `tools/studio-identity.py`) answered each campaign's wordmark as one `{onFile, bytes, mime}`: the variants it had just read from storage - their tones, and which recorded variant's file was gone - never reached the answer, so "HOOF blue, white and black verified against storage" could not be shown, and the client logo's absence from HOOF was not stated. | I-W6 failing on `460b646` (the variant list empty) | slice I | fixed |
+| S23-I2 | Imagery on file and loaded was reported "Imagery drawn" (ok) however much of it a solid panel covered: stored and loaded was taken for visible. | I-B6 | slice I | fixed |
+| S23-I3 | A reference was its picture and one vision pass: no record of where it ran, whether and when it was approved, or what the team liked and disliked; nothing it showed carried an authority, so an inference and a requirement read the same to the models, and a person could not correct one reading without re-running the pass. | I-W2-I-W4 failing on `460b646` (the routes did not exist) | slice I | fixed |
+| S23-I4 | The Brand workspace did not name a reference counted under a campaign only because its project was, nor a learned rule for a campaign the kit no longer has (it reached no prompt and no one was told), and it could not say which references would help. | I-W5 failing on `460b646` | slice I | fixed |
 | S23-E | The stream reader waited for the connection to close after `message_stop` (and then failed the finished answer as idle and paid for it again), accepted a stream that closed after an `end_turn` delta with no `message_stop`, and skipped a data frame that did not parse, so an answer could arrive with a piece missing (the test shows "not a subsidy" arriving as "a subsidy"). | E1, E2, E4, E6 failing on `0049485` (slice A) | slice E | fixed |
 
 ### 46.4 Slice A - the image request is chosen before anything is sent
@@ -2518,3 +2523,180 @@ Director, Design geometry at 1440 x 900, phone, Copy adaptation). The fixture's 
 Limits: the light theme is checked for its tokens, the accent's contrast and the artwork's pixels, and looked at in the
 captures; a full contrast audit of every light-theme component is part of the accessibility run (row 10).
 
+### 46.11 Slice H - a canvas that does what a designer reaches for
+
+Every capability below is a property of a layer drawn by the one renderer, so what is edited is what is measured and
+exported; nothing on the canvas calls a model or renders an image.
+
+- **Pages are ordered assets, never versions.** `studio_assets` gained `ord`, `archived` and `guides`. `POST /studio/page
+  {asset, action duplicate|add|move|delete|restore, to}` (full role; `stPage`) duplicates a page right after itself, adds
+  a page after it with its layout and imagery and new words to write (refused for a painted bitmap, which cannot take new
+  words), moves it, archives it (it leaves the project view, the workflow counts, impact, metrics, production and the
+  export, and keeps its place) and restores it in that place. `stOrderAssets` keeps the order assets were made in and
+  re-fills only the places a reordered family holds, so a project nobody reordered lists exactly as before (S23 found the
+  first version of this grouping families, which broke `studio-p8-worker`'s reading of the newest asset; H-W7 holds it).
+  **The page number a carousel tile draws** (`layout.frame`, "2 / 4") is content, so it follows every page action
+  (`stPageNumbers`): each live page whose drawn number no longer matches its place gets a layout version with the number
+  put right (no render; the tile changed, so a design approval of the old tile no longer stands); a page whose number is
+  painted into its bitmap, or whose layout is locked, keeps it and is named on the thread; a new page is numbered in its
+  first version. Under the canvas the strip numbers the pages of each family in that order, with **Add page**,
+  **Duplicate**, move left and right, **Delete** (it asks, and says the page is archived) and **Deleted pages (n)** with
+  **Restore in its place**; an action that would drop a design approval asks first, naming how many. The page actions
+  are icon buttons (named for screen readers and in their titles): with labels they pushed the save line under the
+  strip at 1440 x 900 and the fitted 4:5 artboard fell to 538 px, under the 560 px the S20 and S23-G tests hold
+  (`studio-s20-browser.mjs` W1, `studio-s23g-browser.mjs` G-B6 caught it; 566 px after).
+- **Guides are kept on the asset**, not in a version (`POST /studio/guides`, at most 40, bounded positions): the signature,
+  the validation and the approvals stand. Rulers in output pixels sit just outside the artwork (View, rulers and guides):
+  drag down from the top ruler for a horizontal guide, across from the left one for a vertical guide, drag a guide off the
+  artwork to remove it; moving layers snap to them.
+- **The Elements panel** (the dock's first tool): text styles (heading, subheading, body, label, quote, big number), shapes,
+  a line and an arrow (the renderer draws arrows), frames (an image frame, a circle and a rounded one - an empty box that
+  takes a dropped picture), the brand colours (palette and campaign accent), the brand assets the campaign's policy
+  carries, from their files (HOOF: its wordmark variants, never the client logo; one mark per role, so another variant
+  swaps the file), this project's uploads (`GET /studio/uploads`, read role) and the icons. A click adds at the centre of
+  the part of the artwork in view; a drag shows a dashed preview and places it where it is dropped. Every element is
+  checked before it becomes a layer (`cleanElement`): a kind the canvas knows, an upload of this project, a mark from the
+  brand-kit file routes, an icon the renderer draws - a drag from another window cannot bring in anything else.
+- **The worker holds the mark policy** (S23-H1): `POST /studio/version` refuses a mark placed or changed by hand (409
+  `mark_policy`, nothing saved) unless the campaign's policy carries it, it is read from the brand kit's route, it belongs
+  to this client and, for a wordmark, to this campaign. A mark left as it was is not re-judged, so a policy changed later
+  does not block unrelated edits.
+- **The clipboard and the desktop are data only** (`readTransfer`): a PNG, JPEG or WebP file is uploaded and placed; plain
+  text (control characters removed, at most 1,000 characters) becomes words the renderer draws; HTML is never read, parsed
+  or inserted - not even its text - and any other file is refused by name. Copying layers also writes a marker on the
+  system clipboard through the copy event, so a paste knows which came last: the Studio's layers or something copied
+  elsewhere; an empty clipboard pastes the Studio's own copy. A dropped picture lands where it is dropped, or fills the
+  frame under it.
+- **The context menu**: right-click, a long press on a touch screen (550 ms, cancelled by 8 px of movement or a second
+  finger), Shift+F10 or the menu key. For a selection: copy, paste, duplicate, delete, copy and paste a style, paint order,
+  align, group and ungroup, lock, hide, rename, edit the words, fit them, reframe and replace an image, zoom to the
+  selection. On the empty canvas: paste, add text here, select all, rulers, reframe the photograph, zoom to fit, the
+  editing steps. An action that cannot run now is shown disabled with the reason; the arrow keys skip it; Escape returns
+  the focus to the layer. The menu is placed outside the stage, whose size containment would otherwise hold a fixed menu
+  inside it.
+- **Copy and paste a style** (Ctrl or Cmd with Alt and C, V): the look of its kind (`STYLE_KEYS`: type, colour, effects,
+  fill, image treatment), never the place, the words, the role or the id; a mark has none and a locked layer takes none,
+  and what was left as it was is named.
+- **Several layers together**: a box with four corners and a turn handle. A corner scales every unlocked layer about the
+  opposite corner (Alt: the centre), their type with them; the turn handle rotates them about the selection's centre
+  (Shift: 15 degree steps). A mark keeps its proportions and is never turned; a mark the campaign rule holds stays put;
+  each gesture is one undo step.
+- **Smart guides**: while moving, the gap to each neighbour in output pixels, and a settle on equal spacing within 0.8%
+  (Alt for neither).
+- **Words fitted to their box**: the largest size at which they neither overflow nor break a word, searched with the
+  renderer's own line layout, never under 2.4% of the width (the feed minimum); a box too small says by how much and
+  changes nothing. "Keep fitted when the words change" refits words typed on the canvas, in the same step.
+- **Colour, brand first**: the palette and the campaign accent, white and near-black, the colours used recently in this
+  browser, any colour from the system picker (committed when it closes), hex, and an eyedropper - the browser's own where
+  it has one, else the next click on the artwork reads that pixel of the composition as drawn.
+- **Reframe by double-click**: any image - a frame, a placed image, a region - as well as the photograph, filled to crop
+  first; Escape puts the crop and the fit back, Enter keeps them.
+- **Zoom**: Shift+2 zooms to the selection and scrolls it into view once the new zoom is laid out (200% with nothing
+  selected); Ctrl or Cmd with + and - steps; on a touch screen two fingers pinch about their midpoint and pan, and the
+  second finger cancels the drag the first one began.
+- **Named history**: every step is named from the two layouts ("Move Chip", "Recolour Chip", "Paste the style of Kicker
+  onto support"), listed under **Steps** beside Undo and Redo; choosing a step goes back to it (later steps stay listed as
+  undone); versions stay in History. Rename from the canvas (F2, the menu) opens the Layers list on that row.
+
+Tests: `studio-s23h-worker.mjs` H-W1-H-W9 (H-W1, H-W3, H-W8 and H-W9 fail on `460b646`); `studio-s23h-browser.mjs`
+H-B1-H-B15 in Chromium, providers mocked. Four older browser tests changed with the behaviour, each stated: the dock has
+six tools (Elements first; `studio-guided-browser.mjs`), Shift+2 with a selection zooms to it (the S17 case now clears the
+selection for 200% and checks the zoom to the selection too), a page of a family shows its number before its title (the S18
+asset-switch case strips it), and the family group keeps its bare name as its accessible name (`studio-browser.mjs`). Limits: the clipboard and drops are driven with synthetic `ClipboardEvent` /
+`DragEvent` and a `DataTransfer` built in the page (the security property lives in `readTransfer`, which every path uses);
+the operating system's clipboard and a drag from the desktop itself are not driven; the browser's own `EyeDropper` is not
+exercised (the fallback is); touch runs in Chromium's touch emulation through CDP; Firefox, WebKit and tablet runs belong
+to slice J.
+
+### 46.12 Slice I - creative quality, the image lifecycle, validation that agrees, and a brand memory that says where it came from
+
+**Both production paths, stated before anything is generated.** The production-mode cards say what each can promise. The
+editable creative: Gemini makes only the imagery for the planned regions; the Studio sets the exact words, the mark from its
+file, the URL and the shapes as live layers, all measured and exported as approved. Full AI: Gemini paints the whole piece
+as one flat image; the mark file goes with the request but the model redraws what it is shown and can misspell or alter it,
+so each painting is read back against the approved words and the mark before it can be approved, nothing in it is editable
+as layers, and when the reading cannot show the identity is right the way out is an editable copy. On a finished creative,
+readiness now carries what the reading found wrong (`baked.markProblem {missing, wrong}`, `baked.wordProblem`); the panel
+then says "identity not shown to match", names the mark the reading did not find (or found drawn wrongly) and the words
+that differ, explains that another painting may fail the same way, and makes **Switch to Editable** the main action.
+
+**Stored is not displayed.** The imagery state (S19's `imageryState`) gained `obscured`: a photograph on file and drawn,
+with 85% or more of it under solid layers (a 24 x 24 sample of the photograph's box against shapes and text plates filled at
+90% opacity or more; gradients, translucent fills, other images and marks do not count), reads "Imagery mostly covered" with
+the share, never "Imagery drawn". The rest of the lifecycle (queued, generating, failed with the last usable kept, loading,
+did not load, hidden, none by choice) was already distinct; a render that fails keeps the previous imagery named as such.
+
+**Repetition measured on what is drawn.** The Board compares every two pieces of different families on the drawn tiles:
+"the same arrangement" when the renderer's measured boxes of words, solid panels and marks share 80% of a 12 x 12 grid of the
+stage, "near-identical pixels" under 4% mean luminance difference at 16 x 20. Pages of a carousel and adaptations of one
+master are not compared (they repeat by design); a tile whose pixels cannot be read is named and compared by arrangement
+only; the panel says that neither measure judges whether the ideas differ. The directions' diversity figures keep their
+existing label: read from what each direction says it would draw, not from rendered images.
+
+**Validation, repair and export agree.** The render fingerprint already covered what slice I was asked to prove: a change
+to a typeface, the crop, a turn, an opacity, the paint order or a mark file's revision leaves the composition unvalidated
+and drops the design approval, while a caption (not drawn) leaves both standing - I-W1 passed on its first run and stays as
+the guard. Repair's invariants are now tested across seven failing layouts in real Chromium: every copy role and mark that
+showed still shows; no words get smaller than 2.2% of the width (or smaller at all if they started under it); a locked
+layer and every word are untouched; the outcome repair reports equals a fresh validation of its result; and the validator
+itself still blocks type under 1.8%, overflow and words the colour of their ground.
+
+**The reference record** (`studio_references.meta`; `POST /studio/reference/meta {id, project?, context paid|organic|both|
+unknown, format, channel, approval {state approved|rejected|pending|unknown, date YYYY-MM-DD, by, evidence}, likes[],
+dislikes[] ({text, evidence}), campaign}`, full role; also accepted as `meta` at upload). Fields sent replace, fields left
+out stay, anything else is dropped; a date that is not a calendar date is 400; another project's reference is 403; a
+campaign the kit does not have is 400. Setting the campaign here is how a reference stops being "scope uncertain".
+
+**Observations** (`meta.observations[]`: `area` logo / url / typography / colour / spacing / composition / hierarchy /
+imagery / panels / words / takeaway / other, `text`, `authority` observed / inferred / preferred / mandatory, `source`
+analysis / team, `status` active / retired / promoted). The vision pass (which now also reads where the URL sits) seeds
+observed items for what it saw and inferred items for its lessons, never preferred or mandatory. `POST
+/studio/reference/observation {id, obs, action add|correct|retire|restore|authority, area, text, authority, why}`: a
+correction keeps the vision pass's wording as `was`; retire and restore keep the item; a preferred or mandatory item, and
+any change of authority, needs its reason. A re-analysis replaces only the pass's untouched items; anything a person wrote
+or touched stays, an area the team corrected is not re-seeded, and a lesson the team set aside does not come back.
+
+**Promotion asks first.** `POST /brand/teach {kind:'rule', campaign, proposal:{observation:{ref, obs}, resolve, rule?}}`
+refuses an inference (409 `unconfirmed`: a person confirms it, with who and where), a reference with no campaign of its own
+(409 `scope_uncertain`) or another campaign's (409 `wrong_campaign`), and - when approved or brand references of the same
+campaign hold active observations about the same thing that say something else - answers 409 `ambiguous` with them named,
+until the person resolves it: `this` (this one takes precedence; theirs are retired as superseded, kept and restorable) or
+`both` (they do not conflict). Without `confirm` it previews (the rule's wording, what it writes, "retrieval memory: no
+model is trained or changed"); with `confirm` and a reason it writes a campaign-scoped learned rule (`engine_fixes`, source
+`teach:brand:campaign:<id>`, its `why` citing the reference and the observation) and marks the observation `promoted`
+with the rule's id.
+
+**What the models read.** A reference's line in every prompt now carries the record and the team's word after the vision
+pass: "Record: ran paid, 4:5, on instagram, approved 2026-09-30 by Dee", likes, "The team disliked (avoid): ...", every
+team item and confirmed item with its authority ("URL [mandatory, the team]: ..."), corrections marked as the team's, and
+what was set aside ("do not take"). I-W7 reads this from the outgoing request.
+
+**The knowledge-gap report.** Readiness gained `scope_uncertain` (a reference whose campaign is only its project's, on a
+client with more than one identity), `rule_outdated` (a learned rule scoped to a campaign the kit no longer has, or has
+switched off: it reaches no prompt) and `wanted[]` - exactly which references would help and why: an approved tile in each
+format the campaign's compositions use that no recorded approved reference covers (the 9:16 HOOF story), an approved tile
+with its approval recorded, one that shows the mark when placement is unobserved, a piece the client turned down with what
+they disliked, and a brand, typography, imagery or composition reference where there is none. The Brand view lists them
+and says that uploaded references are retrieved for the matching campaign and that no model is trained on them.
+
+**The identity audit reads storage** (S23-I1): each campaign lists every wordmark variant the kit records with its tone,
+version, bytes and whether its file is in R2; a variant whose file is gone is named in the gaps (and a missing default
+names the variant standing in); the client logo is reported `carried: false` with the reason on a campaign whose policy is
+the wordmark or none.
+
+**In the References view** (`docs/studio-brandmem.js`, `window.STBrandMem`): under each reference, the record as chips
+(where it ran, format, channel, approval with date and who, "no campaign" when it has none) with likes and dislikes and their
+evidence; **edit the record** (campaign, ran, format, channel, approval, date - checked before anything is sent - by,
+where it was approved, likes and dislikes one per line with the evidence after a bar); **Observations** with area,
+authority chip (inferred in amber, with what it means), source, and per item correct (the vision pass's wording shown
+beside), confirm (an inference; asks who confirmed it), retire (asks why) and restore, **make it a rule** on approved and
+brand references (the preview, the disagreeing references with "This one takes precedence" / "They do not conflict", a
+reason, Teach the rule), and add an observation (a preferred or mandatory one needs its reason).
+
+Tests: `studio-s23i-worker.mjs` I-W1-I-W7 (I-W2-I-W6 fail on `460b646`: the routes did not exist, the variants were
+missing, the gaps were not named; I-W1 passed there and is the fingerprint's guard), the `markProblem` assertions in
+`studio-s2-worker.mjs`, and `studio-s23i-browser.mjs` I-B1-I-B7 in Chromium. The fixture gained `answerWith(re, fn)` so a
+suite can answer one kind of model call (here the vision pass) without changing the shared answers. Limits: the obscured
+measure is geometry from the layout, not pixels (a dark photograph under a 60% plate is not "covered"); repetition compares
+drawn arrangements and pixels, never meaning; whether a live Gemini painting reproduces a mark is unproven here (providers
+are mocked) and is what the owner-run smoke test reads back.

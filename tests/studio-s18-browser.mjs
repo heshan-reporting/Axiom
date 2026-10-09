@@ -121,11 +121,11 @@ await T.t('5. one current review: the correction offered by the latest inspectio
 await T.t('6. switching to another asset while an instruction is in flight: the instruction goes to the asset it was written about, and the composer then names the new asset', async () => {
   await page.ctxB.close(); await openDesign(); await openDirector('Conversation');
   const chips = await page.$$(R + '.st-pagechip'); ok(chips.length >= 2, 'two pieces to switch between');
-  const first = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim();
+  const first = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim().replace(/^\d+\.\s*/, ''); // S23: a page of a family shows its number
   const release = fx.hold(/^\/studio\/job$/);
   await page.fill(R + '.st-composer textarea', 'Tighten the support line'); await page.click(R + '.st-composer button:has-text("Send")'); await sleep(300);
   await page.click(R + '.st-pagechip:not(.on)'); await sleep(500);
-  const second = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim(); ok(second !== first, 'switched: ' + first + ' -> ' + second);
+  const second = (await page.textContent(R + '.st-pagechip.on .st-pagechip-t')).trim().replace(/^\d+\.\s*/, ''); ok(second !== first, 'switched: ' + first + ' -> ' + second);
   release(); await page.waitForFunction(() => { const t = document.querySelector('#studio-root .st-composer textarea'); return t && t.value === ''; }, null, { timeout: 20000 });
   const g = await api('GET', '/studio/get?id=' + P.design); const sent = fx.seen.filter(x => x.path === '/studio/job' && /"stage":"revise"/.test(x.body || '')).pop();
   const aFirst = g.assets.find(x => x.title === first); ok(aFirst && JSON.parse(sent.body).input.asset === aFirst.id, 'the instruction went to the asset it was written about (' + first + ')');

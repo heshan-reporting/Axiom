@@ -110,18 +110,18 @@
   /** A menu at the pointer (or at the selection, from the keyboard): every item says what it does; an item that cannot run now
       is shown disabled with the reason. Arrow keys move, Enter runs, Escape closes; the focus returns where it was. */
   function ContextMenu({ x, y, items, onClose, label }) {
-    const ref = useRef(null); const [i, setI] = useState(-1);
-    const live = items.map((it, k) => (it.sep || it.disabled ? -1 : k)).filter(k => k >= 0);
-    useEffect(() => { const back = document.activeElement; const el = ref.current; if (el) { const first = el.querySelector('[role="menuitem"]:not([aria-disabled="true"])'); if (first) first.focus(); setI(live[0] == null ? -1 : live[0]); }
+    const ref = useRef(null);
+    const enabled = () => Array.from(ref.current ? ref.current.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])') : []);
+    useEffect(() => { const back = document.activeElement; const first = enabled()[0]; if (first) first.focus({ preventScroll: true });
       const away = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-      setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
-      return () => { document.removeEventListener('pointerdown', away, true); try { if (back && back.focus) back.focus({ preventScroll: true }); } catch (e) {} }; }, []);
-    const go = d => { if (!live.length) return; const at = live.indexOf(i); const n = live[(at + d + live.length) % live.length]; setI(n); const el = ref.current && ref.current.querySelectorAll('[role="menuitem"]')[n]; if (el) el.focus(); };
-    const key = e => { e.stopPropagation(); if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); onClose(); } else if (e.key === 'ArrowDown') { e.preventDefault(); go(1); } else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); } else if (e.key === 'Home') { e.preventDefault(); setI(live[0]); go(0); } };
+      const t = setTimeout(() => document.addEventListener('pointerdown', away, true), 0);
+      return () => { clearTimeout(t); document.removeEventListener('pointerdown', away, true); try { if (back && back.focus && document.body.contains(back)) back.focus({ preventScroll: true }); } catch (e) {} }; }, []);
+    const go = d => { const els = enabled(); if (!els.length) return; const at = els.indexOf(document.activeElement); const n = d === 'first' ? els[0] : d === 'last' ? els[els.length - 1] : els[((at < 0 ? -1 : at) + d + els.length) % els.length]; n.focus({ preventScroll: true }); };
+    const key = e => { e.stopPropagation(); if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); onClose(); } else if (e.key === 'ArrowDown') { e.preventDefault(); go(1); } else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1); } else if (e.key === 'Home') { e.preventDefault(); go('first'); } else if (e.key === 'End') { e.preventDefault(); go('last'); } };
     // kept inside the window
-    const st = { left: Math.max(8, Math.min(x, (window.innerWidth || 1200) - 260)) + 'px', top: Math.max(8, Math.min(y, (window.innerHeight || 800) - Math.min(560, items.length * 30 + 20))) + 'px' };
-    return html`<div class="st-ctxmenu" role="menu" aria-label=${label || 'Layer actions'} ref=${ref} style=${st} onKeyDown=${key} onContextMenu=${e => e.preventDefault()} onPointerDown=${e => e.stopPropagation()}>
-      ${items.map((it, k) => it.sep ? html`<div key=${'s' + k} class="st-ctxsep" role="separator"></div>` : html`<button key=${it.id} role="menuitem" class="st-ctxitem" tabIndex=${k === i ? 0 : -1} aria-disabled=${it.disabled ? 'true' : undefined} title=${it.disabled ? it.why || '' : it.title || ''} data-id=${it.id}
+    const st = { left: Math.max(8, Math.min(x, (window.innerWidth || 1200) - 268)) + 'px', top: Math.max(8, Math.min(y, (window.innerHeight || 800) - Math.min(600, items.length * 29 + 20))) + 'px' };
+    return html`<div class="st-ctxmenu" role="menu" aria-label=${label || 'Layer actions'} ref=${ref} style=${st} onKeyDown=${key} onContextMenu=${e => { e.preventDefault(); e.stopPropagation(); }} onPointerDown=${e => e.stopPropagation()}>
+      ${items.map((it, k) => it.sep ? html`<div key=${'s' + k} class="st-ctxsep" role="separator"></div>` : html`<button key=${it.id} role="menuitem" class="st-ctxitem" tabIndex="-1" aria-disabled=${it.disabled ? 'true' : undefined} title=${it.disabled ? it.why || '' : it.title || ''} data-id=${it.id}
         onClick=${() => { if (it.disabled) return; onClose(); it.run(); }}><span>${it.label}</span>${it.disabled && it.why ? html`<span class="st-ctxwhy">${it.why}</span>` : it.keys ? html`<kbd>${it.keys}</kbd>` : null}</button>`)}
     </div>`;
   }
@@ -140,14 +140,14 @@
   /** Everything that can go on the canvas, grouped: click to add it at the centre of what is in view, or drag it onto the
       artwork to place it where it lands (a dashed preview follows the pointer). Brand assets are the marks the campaign's
       policy allows, placed from their files; the client logo is not offered on a campaign that does not carry it. */
-  function ElementsPanel({ kit, campaign, uploads, ro, onAdd, onUploadsRefresh, onPickFile }) {
-    const [q, setQ] = useState('');
+  function ElementsPanel({ kit, ns: ns0, campaign, uploads, ro, onAdd, onUploadsRefresh, onPickFile }) {
+    const [q, setQ] = useState(''); const ns = ns0 || (kit && kit.ns) || '';
     const icons = Object.keys((R && R.ICONS) || {});
     const camp = ((kit && kit.campaigns) || []).find(c => c.id === campaign) || null;
     const policy = (camp && camp.logoPolicy) || (camp && (camp.wordmarkV || (camp.wordmarks || []).length) ? 'wordmark' : 'logo');
     const marks = [];
-    if (policy === 'logo' || policy === 'both') { if (kit && (kit.logoV || kit.hasLogo)) marks.push({ role: 'logo', variant: '', label: 'Client logo' + ((kit.logoVariants || []).length ? ' (default)' : ''), src: '/brand/logo?ns=' + encodeURIComponent(kit.ns || '') + (kit.logoV ? '&v=' + kit.logoV : '') }); ((kit && kit.logoVariants) || []).forEach(x => marks.push({ role: 'logo', variant: x.variant, tone: x.tone, label: 'Client logo, ' + x.variant + (x.tone ? ' (' + x.tone + ')' : ''), src: '/brand/logo?ns=' + encodeURIComponent(kit.ns || '') + '&variant=' + encodeURIComponent(x.variant) + (x.v ? '&v=' + x.v : '') })); }
-    if (camp && (policy === 'wordmark' || policy === 'both')) { (camp.wordmarks || []).forEach(x => marks.push({ role: 'wordmark', variant: x.variant, tone: x.tone, label: (camp.name || camp.id) + ' wordmark, ' + x.variant + (x.tone ? ' (' + x.tone + ')' : ''), src: '/brand/wordmark?ns=' + encodeURIComponent(kit.ns || '') + '&campaign=' + encodeURIComponent(camp.id) + '&variant=' + encodeURIComponent(x.variant) + (x.v ? '&v=' + x.v : '') })); if (!(camp.wordmarks || []).length && camp.wordmarkV) marks.push({ role: 'wordmark', variant: '', label: (camp.name || camp.id) + ' wordmark', src: '/brand/wordmark?ns=' + encodeURIComponent(kit.ns || '') + '&campaign=' + encodeURIComponent(camp.id) + '&v=' + camp.wordmarkV }); }
+    if (policy === 'logo' || policy === 'both') { if (kit && (kit.logoV || kit.hasLogo)) marks.push({ role: 'logo', variant: '', label: 'Client logo' + ((kit.logoVariants || []).length ? ' (default)' : ''), src: '/brand/logo?ns=' + encodeURIComponent(ns) + (kit.logoV ? '&v=' + kit.logoV : '') }); ((kit && kit.logoVariants) || []).forEach(x => marks.push({ role: 'logo', variant: x.variant, tone: x.tone, label: 'Client logo, ' + x.variant + (x.tone ? ' (' + x.tone + ')' : ''), src: '/brand/logo?ns=' + encodeURIComponent(ns) + '&variant=' + encodeURIComponent(x.variant) + (x.v ? '&v=' + x.v : '') })); }
+    if (camp && (policy === 'wordmark' || policy === 'both')) { (camp.wordmarks || []).forEach(x => marks.push({ role: 'wordmark', campaign: camp.id, variant: x.variant, tone: x.tone, label: (camp.name || camp.id) + ' wordmark, ' + x.variant + (x.tone ? ' (' + x.tone + ')' : ''), src: '/brand/wordmark?ns=' + encodeURIComponent(ns) + '&campaign=' + encodeURIComponent(camp.id) + '&variant=' + encodeURIComponent(x.variant) + (x.v ? '&v=' + x.v : '') })); if (!(camp.wordmarks || []).length && camp.wordmarkV) marks.push({ role: 'wordmark', campaign: camp.id, variant: '', label: (camp.name || camp.id) + ' wordmark', src: '/brand/wordmark?ns=' + encodeURIComponent(ns) + '&campaign=' + encodeURIComponent(camp.id) + '&v=' + camp.wordmarkV }); }
     const pal = (kit && kit.palette) || {}; const colours = [pal.primary, pal.secondary, pal.text, pal.bg, camp && camp.accent].filter(c => /^#[0-9a-f]{6}$/i.test(c || '')).filter((c, i, a) => a.indexOf(c) === i);
     const ql = q.trim().toLowerCase(); const m = s => !ql || String(s).toLowerCase().indexOf(ql) >= 0;
     const drag = (kind, o, label) => e => { try { e.dataTransfer.setData('application/x-axiom-element', JSON.stringify({ kind, o })); e.dataTransfer.setData('text/plain', ''); e.dataTransfer.effectAllowed = 'copy'; } catch (x) {} window.dispatchEvent(new CustomEvent('st:element-drag', { detail: { kind, o, label } })); };
@@ -155,7 +155,7 @@
     const item = (kind, o, label, inner, title) => html`<button key=${kind + (o && (o.shape || o.icon || o.style || o.key || o.variant || o.fill) || '')} class="st-el-item" draggable=${!ro} disabled=${!!ro} title=${(title || label) + ': click to add at the centre of the view, or drag it onto the artwork'} aria-label=${'Add ' + label} onClick=${() => onAdd(kind, o)} onDragStart=${drag(kind, o, label)} onDragEnd=${end}>${inner}<span class="st-el-l">${label}</span></button>`;
     const sec = (title, n, body) => html`<section class="st-el-sec" aria-label=${title}><h4>${title}${n != null ? html` <span class="ov-dim">${n}</span>` : null}</h4><div class="st-el-grid">${body}</div></section>`;
     return html`<div class="st-elements" aria-label="Elements">
-      <label class="st-lib-search st-el-search"><${Icon} n="search" size=${14} /><input type="search" value=${q} onInput=${e => setQ(e.target.value)} placeholder="Search elements" aria-label="Search elements" /></label>
+      <label class="st-el-search"><${Icon} n="search" size=${14} /><input type="search" value=${q} onInput=${e => setQ(e.target.value)} placeholder="Search elements" aria-label="Search elements" /></label>
       ${ro ? html`<div class="ov-dim">This key can look but not add.</div>` : null}
       ${sec('Text', null, TEXT_STYLES.filter(([k, l]) => m(l)).map(([k, l, t]) => item('style', { style: k }, l, html`<span class=${'st-el-text ' + k}>${k === 'number' ? '74' : k === 'quote' ? '\u201c\u201d' : 'Aa'}</span>`, t)))}
       ${sec('Shapes', null, SHAPES.filter(([k, l]) => m(l)).map(([k, l]) => item('shape', { shape: k }, l, html`<span class=${'st-el-shape ' + k}></span>`)))}
@@ -208,8 +208,8 @@
   }
 
   /* ------------------------------------------------------------ rulers and guides */
-  /** Rulers along the top and the left of the artwork, in output pixels. Drag from a ruler to make a guide; drag a guide to move
-      it, or back onto its ruler to remove it. Guides are kept on the asset (not in a version) and the canvas snaps to them. */
+  /** Rulers along the top and the left of the artwork, in output pixels. Drag down from the top ruler for a horizontal guide, or
+      across from the left ruler for a vertical one; drag a guide to move it, or off the artwork to remove it. Guides are kept on the asset (not in a version) and the canvas snaps to them. */
   function Rulers({ W, H, guides, onChange, box }) {
     const [drag, setDrag] = useState(null);
     const ticks = (S, n) => Array.from({ length: n + 1 }, (_, i) => i * 100 / n);
@@ -219,8 +219,8 @@
     const up = e => { if (!drag) return; const d = drag; setDrag(null); const pos = Math.round(d.pos * 10) / 10; const off = pos < -2 || pos > 102; let g = guides.slice(); if (d.idx == null) { if (!off) g.push({ a: d.axis, at: pos }); } else if (off) g.splice(d.idx, 1); else g[d.idx] = { a: d.axis, at: pos }; onChange(g); };
     const shown = guides.map((g, i) => drag && drag.idx === i ? { a: g.a, at: drag.pos, i } : Object.assign({ i }, g)).concat(drag && drag.idx == null ? [{ a: drag.axis, at: drag.pos, i: -1 }] : []);
     return html`<div class="st-rulers" onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up}>
-      <div class="st-ruler x" role="slider" aria-label="Horizontal ruler: drag down to make a vertical guide" aria-valuemin="0" aria-valuemax=${W} aria-valuenow="0" onPointerDown=${start('x', null)}>${ticks(W, 10).map(t => html`<span key=${t} style=${{ left: t + '%' }}><i>${Math.round(t / 100 * W)}</i></span>`)}</div>
-      <div class="st-ruler y" role="slider" aria-label="Vertical ruler: drag across to make a horizontal guide" aria-valuemin="0" aria-valuemax=${H} aria-valuenow="0" onPointerDown=${start('y', null)}>${ticks(H, 10).map(t => html`<span key=${t} style=${{ top: t + '%' }}><i>${Math.round(t / 100 * H)}</i></span>`)}</div>
+      <div class="st-ruler x" role="slider" aria-label="Top ruler: drag down onto the artwork to make a horizontal guide" aria-valuemin="0" aria-valuemax=${W} aria-valuenow="0" onPointerDown=${start('y', null)}>${ticks(W, 10).map(t => html`<span key=${t} style=${{ left: t + '%' }}><i>${Math.round(t / 100 * W)}</i></span>`)}</div>
+      <div class="st-ruler y" role="slider" aria-label="Left ruler: drag across onto the artwork to make a vertical guide" aria-valuemin="0" aria-valuemax=${H} aria-valuenow="0" onPointerDown=${start('x', null)}>${ticks(H, 10).map(t => html`<span key=${t} style=${{ top: t + '%' }}><i>${Math.round(t / 100 * H)}</i></span>`)}</div>
       ${shown.map(g => html`<div key=${'g' + g.i} class=${'st-uguide ' + g.a + (g.i === -1 || (drag && drag.idx === g.i) ? ' dragging' : '')} style=${g.a === 'x' ? { left: g.at + '%' } : { top: g.at + '%' }} title=${'Guide at ' + Math.round(g.at / 100 * (g.a === 'x' ? W : H)) + ' px: drag to move, onto the ruler to remove'} onPointerDown=${g.i >= 0 ? start(g.a, g.i) : undefined}><span>${Math.round(g.at / 100 * (g.a === 'x' ? W : H))}</span></div>`)}
     </div>`;
   }

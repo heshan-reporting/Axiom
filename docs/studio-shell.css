@@ -244,8 +244,8 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-le-draft{color:var(--sk-sub);white-space:nowrap}
 #studio-root .st .st-canvas-foot{flex-shrink:0;max-height:34%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-bottom:10px}
 #studio-root .st .st-pagestrip{display:flex;gap:10px;overflow-x:auto;padding:2px 0;scrollbar-width:thin;min-width:0;flex:0 1 auto}
-#studio-root .st .st-canvas-sub{display:flex;align-items:center;gap:12px;min-width:0}
-#studio-root .st .st-canvas-subr{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+#studio-root .st .st-canvas-sub{display:flex;align-items:center;gap:8px 12px;min-width:0;flex-wrap:wrap}
+#studio-root .st .st-canvas-subr{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:2px}
 #studio-root .st .st-canvas-sub .st-comp-info{min-width:0;text-align:right;margin:0;padding:0 6px;border:0;background:none}
 #studio-root .st .st-canvas-sub .st-comp-tag{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
 /* S23: the top issue is essential: it wraps to a second line rather than being cut off */

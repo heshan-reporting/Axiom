@@ -30,7 +30,7 @@ if (mode === 'check' || mode === 'all') {
   check('worker syntax (node --check)', () => { const r = spawnSync(process.execPath, ['--check', 'axiomworkerv4.js'], { cwd: ROOT, encoding: 'utf8' }); return r.status === 0 || r.stderr.slice(0, 200); });
   check('worker is pure ASCII (deploy requirement)', () => { const i = W.search(/[^\x00-\x7F]/); return i < 0 || 'non-ASCII at offset ' + i + ': ' + JSON.stringify(W.slice(i - 20, i + 20)); });
   check('layout rules byte-identical in worker and renderer', () => { const R = fs.readFileSync(path.join(ROOT, 'docs/studio-render.js'), 'utf8'); const cut = s => { const x = (s.split('/* RULES:BEGIN */')[1] || '').split('/* RULES:END */')[0].split('\n').map(l => l.trim()).filter(Boolean).join('\n'); return x.length > 1000 ? x : null; }; const a = cut(W), b = cut(R); return (a && a === b) || 'the RULES blocks differ or are missing'; });
-  for (const f of ['studio.js', 'studio-guided.js', 'studio-editor.js', 'studio-render.js', 'studio-progress.js', 'studio-merge.js', 'ax-ui.js', 'content.js', 'signals.js', 'sources.js', 'sentiment.js', 'narratives.js', 'overview.js', 'scope.js', 'topics.js', 'release.js']) {
+  for (const f of ['studio.js', 'studio-guided.js', 'studio-editor.js', 'studio-canvas.js', 'studio-brandmem.js', 'studio-render.js', 'studio-progress.js', 'studio-merge.js', 'ax-ui.js', 'content.js', 'signals.js', 'sources.js', 'sentiment.js', 'narratives.js', 'overview.js', 'scope.js', 'topics.js', 'release.js']) {
     const p = path.join(ROOT, 'docs', f); if (!fs.existsSync(p)) continue;
     check('docs/' + f + ' parses', () => { new Function(fs.readFileSync(p, 'utf8')); return true; });
   }

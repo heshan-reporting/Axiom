@@ -91,11 +91,12 @@ await T.t('readiness: technical validation does not apply; the painted words and
   ok(/"marks":\{"present"/.test(ib.system), 'the inspector is asked for the marks it can see');
   const ev1 = (await get(P)).thread.filter(e => e.kind === 'inspection').pop(); eq(ev1.marks.missing, ['wordmark']); eq(ev1.baked.verified, false);
   let rd1 = (await assetOf(P, A)).readiness; eq(rd1.baked.verified, false); ok(/wordmark/.test(rd1.baked.why), rd1.baked.why);
+  eq(rd1.baked.markProblem, { missing: ['wordmark'], wrong: [] }, 'S23: the reading names the identity problem, so the page offers the editable path (the exact file) rather than another roll');
   eq((await call('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'looks right to me' })).status, 409);
   // a second inspection reads everything back: now the words and the mark are verified and approval stands
   inspectAnswer = Object.assign({}, inspectAnswer, { identity: 5, marks: { present: ['wordmark'], missing: [], wrong: [] }, issues: [], verdict: 'ship', fix: { kind: 'none', instruction: '' } });
   const i2 = await call('POST', '/studio/job', { project: P, asset: A, stage: 'inspect', input: { asset: A, composed: false }, idem: 's2-ins2' }); const d2 = await run(i2.body.job); eq(d2.state, 'done', d2.error);
-  rd1 = (await assetOf(P, A)).readiness; eq(rd1.baked.verified, true, JSON.stringify(rd1.baked)); eq(rd1.production, true);
+  rd1 = (await assetOf(P, A)).readiness; eq(rd1.baked.verified, true, JSON.stringify(rd1.baked)); eq(rd1.production, true); eq(rd1.baked.markProblem, null, 'S23: no identity problem once the mark is read back');
   const ap = await call('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'every word and the wordmark read back' }); eq(ap.status, 200, JSON.stringify(ap.body));
 });
 await T.t('a revision is a new generated version (regenerate), never a layer edit; the mark goes along again; export carries the bitmap itself', async () => {

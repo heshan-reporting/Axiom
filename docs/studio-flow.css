@@ -71,3 +71,33 @@
 .st td.st-pf-ap{min-width:180px}
 .st td.st-pf-ap > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:2px 0 6px}
 .st td.st-pf-ap .st-lbl{min-width:48px;margin:0}
+
+/* S23 slice I: a reference's record and observations, the references that would help, repetition on the drawn tiles */
+.st .st-ref-mem{margin-top:8px;padding-top:8px;border-top:1px solid var(--st-line);display:flex;flex-direction:column;gap:6px}
+.st .st-ref-rec{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.st .st-ref-said{flex-basis:100%;font-size:12px;color:var(--st-ink-2)}
+.st .st-ref-said b{color:var(--st-ink);font-weight:600;margin-right:4px}
+.st .st-ref-recedit{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--st-line);border-radius:8px;background:var(--st-surface)}
+.st .st-ref-recgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.st .st-ref-recgrid label,.st .st-ref-recedit > label{display:flex;flex-direction:column;gap:3px}
+.st .st-in.st-bad{border-color:var(--st-bad)}
+.st .st-err{color:var(--st-bad);font-size:12px}
+.st .st-err.st-warn{color:var(--st-warn)}
+.st .st-obs-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+.st .st-obs-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.st .st-obs{display:grid;grid-template-columns:96px minmax(0,1fr) auto;grid-template-areas:"area text meta" "area text acts";gap:2px 10px;padding:6px 0;border-bottom:1px solid var(--st-line);font-size:12.5px}
+.st .st-obs-area{grid-area:area;color:var(--st-ink-3);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding-top:2px}
+.st .st-obs-text{grid-area:text;display:flex;flex-direction:column;gap:3px;min-width:0;color:var(--st-ink)}
+.st .st-obs-was{font-size:11.5px}
+.st .st-obs-meta{grid-area:meta;justify-self:end;white-space:nowrap}
+.st .st-obs-acts{grid-area:acts;justify-self:end;display:flex;gap:8px;flex-wrap:wrap}
+.st .st-obs-retired .st-obs-text,.st .st-obs-promoted .st-obs-text{color:var(--st-ink-2)}
+.st .st-obs-teach{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--st-line);border-left:3px solid var(--st-accent);border-radius:8px}
+.st .st-obs-prev{display:flex;flex-direction:column;gap:4px}
+.st .st-obs-add{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.st .st-obs-add .st-in{flex:1 1 180px;min-width:0}
+.st .st-wanted{margin-top:10px;padding:10px;border:1px solid var(--st-line);border-radius:8px}
+.st .st-wanted li{margin:4px 0}
+.st .st-board-rep{margin-top:16px;padding-top:10px;border-top:1px solid var(--st-line);display:flex;flex-direction:column;gap:6px}
+.st .st-fidelity{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;margin-top:6px}
+@media (max-width:700px){.st .st-obs{grid-template-columns:minmax(0,1fr);grid-template-areas:"area" "text" "meta" "acts"}.st .st-obs-meta,.st .st-obs-acts{justify-self:start}}

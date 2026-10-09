@@ -91,7 +91,7 @@ await T.t('Design: the production mode is chosen once the words are ready, its c
   eq((d.brief.production || {}).mode, 'editable', 'the mode is recorded on the project');
   // the canvas and its dock
   await goStep(page, 'Design'); await page.waitForSelector(R + '.st-dock', { timeout: 15000 });
-  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Design', 'Text', 'Images', 'Brand', 'Layers'], 'the five tools (the Creative Director is the right panel)');
+  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Elements', 'Design', 'Text', 'Images', 'Brand', 'Layers'], 'the six tools, Elements first since S23 (the Creative Director is the right panel)');
   // S18: each tool opens its panel beside the canvas (the page does not scroll), and the canvas stays in view
   const y0 = await page.evaluate(() => document.querySelector('#studio-root .st-centre').scrollTop);
   for (const t of ['Brand', 'Text', 'Layers', 'Design', 'Images']) { await tool(page, t); ok(await page.isVisible(R + '.st-library[data-tool="' + t.toLowerCase() + '"]'), t + ' panel open'); }

@@ -154,11 +154,15 @@ await T.t('an unsaved layout is autosaved as a draft for this person only and of
   await shot('draft');
 });
 
-await T.t('zoom by keyboard: Shift+2 doubles, Shift+0 is actual size, Shift+1 fits; the zoom control follows', async () => {
-  await page.click(R + '.st-stage'); await page.evaluate(() => document.activeElement && document.activeElement.blur());
-  await page.keyboard.press('Shift+Digit2'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), '200');
+await T.t('zoom by keyboard: Shift+2 doubles (or, with a selection, zooms to it - S23), Shift+0 is actual size, Shift+1 fits; the zoom control follows', async () => {
+  await page.click(R + '.st-stage'); await page.keyboard.press('Escape'); await sleep(100); await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  await page.keyboard.press('Shift+Digit2'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), '200', 'nothing selected: Shift+2 is 200%');
   await page.keyboard.press('Shift+Digit0'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), 'actual');
   await page.keyboard.press('Shift+Digit1'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), 'fit');
+  // S23: with a layer selected the same key zooms to the selection, as in other design tools
+  if (await page.$(R + L('cta'))) { await page.click(R + L('cta')); await page.keyboard.press('Shift+Digit2'); await sleep(250);
+    ok(await page.inputValue(R + 'select[aria-label="Zoom"]') !== 'fit', 'with a selection Shift+2 zooms to it');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Shift+Digit1'); await sleep(150); eq(await page.inputValue(R + 'select[aria-label="Zoom"]'), 'fit'); }
 });
 
 await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pressed there never reaches the canvas), Ctrl+Shift+] brings a layer to the front, and Alt with a digit moves between steps by the key it is (Option+1 on a Mac types a symbol)', async () => {

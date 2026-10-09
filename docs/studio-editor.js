@@ -53,23 +53,41 @@
   }
 
   /* ------------------------------------------------------------ colour */
+  /** S23: colour, brand first. The client's palette (and the campaign accent) leads, then white and near-black, then the colours
+      used recently in this browser; any other colour from the system picker or as hex; and an eyedropper - the browser's own
+      where it has one, else a click on the artwork reads that pixel of the composition as drawn. */
   function Swatches({ value, palette, onPick, label }) {
     const pal = palette || {}; const ok = c => /^#[0-9a-f]{6}$/i.test(c || '');
-    const list = [pal.primary, pal.secondary, pal.text, pal.bg, '#FFFFFF', '#111418', '#F2B705', '#C9A45C'].filter(ok).filter((c, i, a) => a.findIndex(x => x.toLowerCase() === c.toLowerCase()) === i);
-    const [hex, setHex] = useState(value || '');
+    const CV = window.STCanvas || {};
+    const uniq = list => list.filter(ok).filter((c, i, a) => a.findIndex(x => x.toLowerCase() === c.toLowerCase()) === i);
+    const brand = uniq([pal.primary, pal.secondary, pal.accent, pal.text, pal.bg]);
+    const has = (list, c) => list.some(x => x.toLowerCase() === c.toLowerCase());
+    const neutral = uniq(['#FFFFFF', '#111418']).filter(c => !has(brand, c));
+    const recent = uniq(CV.recentColours ? CV.recentColours() : []).filter(c => !has(brand, c) && !has(neutral, c)).slice(0, 6);
+    const [hex, setHex] = useState(value || ''); const [dropping, setDropping] = useState(false); const nat = useRef(null);
     useEffect(() => { setHex(value || ''); }, [value]);
-    return html`<div class="st-swatches" role="group" aria-label=${label || 'Colour'}>${list.map(c => html`<button key=${c} class=${'st-swatch' + ((value || '').toLowerCase() === c.toLowerCase() ? ' on' : '')} style=${{ background: c }} title=${c} aria-label=${(label || 'Colour') + ' ' + c} onClick=${() => onPick(c)}></button>`)}
-      <input class="st-in st-hex" value=${hex} aria-label=${(label || 'Colour') + ', hex'} placeholder="#RRGGBB" onInput=${e => setHex(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && /^#[0-9a-f]{3,8}$/i.test(hex)) onPick(hex); }} onBlur=${() => { if (hex !== value && /^#[0-9a-f]{3,8}$/i.test(hex)) onPick(hex); }} /></div>`;
+    const pick = c => { const x = String(c || '').toUpperCase(); if (!/^#[0-9A-F]{3,8}$/.test(x)) return; if (CV.pushColour && ok(x)) CV.pushColour(x); onPick(x); };
+    // the system picker commits when it closes (its change event), not on every movement of the cursor
+    const pickRef = useRef(pick); pickRef.current = pick;
+    useEffect(() => { const el = nat.current; if (!el) return; const h = e => pickRef.current(e.target.value); el.addEventListener('change', h); return () => el.removeEventListener('change', h); }, []);
+    const drop = async () => { if (!CV.eyedrop || dropping) return; setDropping(true); try { const c = await CV.eyedrop(); if (c) pick(c); } finally { setDropping(false); } };
+    const sw = (c, kind) => html`<button key=${kind + c} class=${'st-swatch' + ((value || '').toLowerCase() === c.toLowerCase() ? ' on' : '') + (kind === 'b' ? ' brand' : '')} style=${{ background: c }} title=${c + (kind === 'b' ? ' (brand)' : kind === 'r' ? ' (recent)' : '')} aria-label=${(label || 'Colour') + ' ' + c + (kind === 'b' ? ', brand' : kind === 'r' ? ', recent' : '')} onClick=${() => pick(c)}></button>`;
+    return html`<div class="st-swatches" role="group" aria-label=${label || 'Colour'}>
+      ${brand.length ? html`<span class="st-sw-lbl">Brand</span>${brand.map(c => sw(c, 'b'))}` : null}${neutral.map(c => sw(c, 'n'))}
+      ${recent.length ? html`<span class="st-sw-lbl">Recent</span>${recent.map(c => sw(c, 'r'))}` : null}
+      <input ref=${nat} type="color" class="st-sw-native" defaultValue=${ok(value) ? value.toLowerCase() : '#ffffff'} key=${'n' + (value || '')} aria-label=${(label || 'Colour') + ': any colour'} title="Any colour" />
+      ${CV.eyedrop ? html`<button class=${'st-sw-drop' + (dropping ? ' on' : '')} aria-pressed=${dropping} aria-label=${(label || 'Colour') + ': take a colour ' + (typeof window.EyeDropper === 'function' ? 'from the screen' : 'from the artwork')} title=${dropping ? 'Click the artwork (Escape cancels)' : typeof window.EyeDropper === 'function' ? 'Take a colour from anywhere on the screen' : 'Take a colour from the artwork: click the canvas'} onClick=${drop}><${Icon} n="eyedrop" size=${13} /></button>` : null}
+      <input class="st-in st-hex" value=${hex} aria-label=${(label || 'Colour') + ', hex'} placeholder="#RRGGBB" onInput=${e => setHex(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && /^#[0-9a-f]{3,8}$/i.test(hex)) pick(hex); }} onBlur=${() => { if (hex !== value && /^#[0-9a-f]{3,8}$/i.test(hex)) pick(hex); }} /></div>`;
   }
 
   /* ------------------------------------------------------------ the floating toolbar over the selection */
   /** What the selection can do, beside it on the canvas: type for words, fill for shapes, the image's own tools, and for every
       selection duplicate, delete, lock and paint order. "More" opens the Properties tab, where every control lives. */
-  function ContextToolbar({ sel, bbox, layout, ro, stageW: stageW0, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen }) {
+  function ContextToolbar({ sel, bbox, layout, ro, stageW: stageW0, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen, palette }) {
     const stageW = stageW0 || (layout && layout.stage && layout.stage.w) || 1080;
     const [pop, setPop] = useState('');
     if (!sel.length || !bbox || ro) return null;
-    const one = sel.length === 1 ? sel[0] : null; const pal = (layout && layout.palette) || {};
+    const one = sel.length === 1 ? sel[0] : null; const pal = palette || (layout && layout.palette) || {};
     // above the selection, clear of its rotation handle; below it when the selection is at the top of the stage
     const top = bbox.y > 16 ? { bottom: 'calc(' + (100 - bbox.y) + '% + 40px)' } : { top: 'calc(' + Math.min(92, bbox.y + bbox.h) + '% + 14px)' };
     const left = { left: clamp(bbox.x, 0, 70) + '%' };
@@ -136,7 +154,7 @@
         <div class="st-addmenu-h">Text</div>
         <button role="menuitem" onClick=${() => add('heading')}>Heading</button><button role="menuitem" onClick=${() => add('text')}>Body text</button><button role="menuitem" onClick=${() => add('label')}>Label</button>
         <div class="st-addmenu-h">Shapes</div>
-        <div class="st-addmenu-shapes">${[['rect', 'Rectangle'], ['pill', 'Pill'], ['circle', 'Circle'], ['triangle', 'Triangle'], ['rule', 'Line']].map(([k, l]) => html`<button key=${k} role="menuitem" class=${'st-shape-btn ' + k} title=${l} aria-label=${'Add a ' + l.toLowerCase()} onClick=${() => add('shape', { shape: k })}><span></span></button>`)}</div>
+        <div class="st-addmenu-shapes">${[['rect', 'Rectangle'], ['pill', 'Pill'], ['circle', 'Circle'], ['triangle', 'Triangle'], ['rule', 'Line'], ['arrow', 'Arrow']].map(([k, l]) => html`<button key=${k} role="menuitem" class=${'st-shape-btn ' + k} title=${l} aria-label=${'Add a ' + l.toLowerCase()} onClick=${() => add('shape', { shape: k })}><span></span></button>`)}</div>
         <div class="st-addmenu-h">More</div>
         <button role="menuitem" onClick=${() => setOpen('icons')}>Icon...</button><button role="menuitem" onClick=${() => file.current && file.current.click()}>Image from a file...</button>
       </div>` : null}
@@ -156,7 +174,10 @@
       if (st === 'number') return { id: uid('t'), type: 'text', role: 'free', name: 'Big number', text: '74', x: 15, y: 30, w: 50, h: 22, size: 16, weight: 800, color: '#FFFFFF', align: 'left', font: 'display', lineHeight: 1 }; return null; }
     if (kind === 'frame') return { id: uid('m'), type: 'img', role: 'frame', name: o.mask === 'circle' ? 'Circle frame' : o.mask === 'round' ? 'Rounded frame' : 'Image frame', x: 30, y: 30, w: 40, h: o.mask === 'circle' ? 40 * ((layout && layout.stage && layout.stage.w) || 1080) / ((layout && layout.stage && layout.stage.h) || 1080) : 32, fit: 'cover', mask: o.mask === 'circle' ? 'circle' : undefined, radius: o.mask === 'round' ? 4 : undefined };
     if (kind === 'upload') return { id: uid('m'), type: 'img', role: 'image', name: o.name || 'Image', key: o.key, src: o.url, x: 25, y: 25, w: 50, h: 50, fit: 'contain' };
-    if (kind === 'mark') return { id: uid('m'), type: 'img', role: o.role === 'wordmark' ? 'wordmark' : 'logo', name: o.label || o.role, src: o.src, variant: o.variant || undefined, x: 70, y: 86, w: 24, h: 9, fit: 'contain', exact: true };
+    // a mark from the brand kit: the id the worker gives marks ('logo', 'wordmark') when it is free, its campaign named, placed
+    // exactly from its file (the worker refuses a mark the campaign's policy does not carry)
+    if (kind === 'mark') { const role = o.role === 'wordmark' ? 'wordmark' : 'logo'; const free = !((layout && layout.layers) || []).some(l => l.id === role);
+      return { id: free ? role : uid('m'), type: 'img', role, asset: role, campaign: role === 'wordmark' && o.campaign ? o.campaign : undefined, name: o.label || role, src: o.src, variant: o.variant || undefined, x: 70, y: 86, w: 24, h: 9, fit: 'contain', exact: true }; }
     if (kind === 'shape') { const s = o.shape || 'rect'; const line = s === 'rule' || s === 'arrow'; return { id: uid('s'), type: 'shape', role: 'device', name: s === 'rule' ? 'Line' : s.charAt(0).toUpperCase() + s.slice(1), shape: s, x: line ? 30 : 35, y: line ? 48 : 35, w: line ? 40 : 30, h: s === 'rule' ? 0.6 : s === 'arrow' ? 6 : s === 'pill' ? 10 : 30, fill: /^#[0-9a-f]{6}$/i.test(o.fill || '') ? o.fill : prim, radius: s === 'rect' ? 1 : undefined, opacity: 1 }; }
     if (kind === 'icon') return { id: uid('i'), type: 'shape', role: 'device', name: 'Icon: ' + o.icon, shape: 'icon', icon: o.icon, x: 42, y: 42, w: 16, h: 16, fill: '#FFFFFF', strokeWidth: 2 };
     if (kind === 'image') return { id: uid('m'), type: 'img', role: 'image', name: o.name || 'Image', key: o.key, src: o.url, x: 25, y: 25, w: 50, h: 50, fit: 'contain' };
@@ -353,11 +374,11 @@
       the ones it can and reads this list). */
   const SHORTCUTS = [
     ['Selection', [['Click', 'select a layer'], ['Shift+click', 'add to the selection, or take a layer out of it'], ['Drag on the empty stage', 'select every layer the box touches'], [MOD + '+A', 'select every unlocked layer'], ['Escape', 'clear the selection']]],
-    ['Layers', [['Delete or Backspace', 'remove (the approved words are hidden, never deleted)'], [MOD + '+D', 'duplicate'], [MOD + '+C, ' + MOD + '+V', 'copy and paste'], [MOD + '+G, ' + MOD + '+Shift+G', 'group, ungroup'], [MOD + '+], ' + MOD + '+[', 'bring forward, send backward'], [MOD + '+Shift+], ' + MOD + '+Shift+[', 'to the front, to the back'], ['Arrow keys', 'nudge 0.5% (2% with Shift)']]],
+    ['Layers', [['Right-click, press and hold, Shift+F10', 'the actions for the selection'], ['Delete or Backspace', 'remove (the approved words are hidden, never deleted)'], [MOD + '+D', 'duplicate'], [MOD + '+C, ' + MOD + '+V', 'copy and paste (an image or plain text from elsewhere is placed too)'], [MOD + '+Alt+C, ' + MOD + '+Alt+V', 'copy a style, paste it onto the selection'], [MOD + '+G, ' + MOD + '+Shift+G', 'group, ungroup'], [MOD + '+], ' + MOD + '+[', 'bring forward, send backward'], [MOD + '+Shift+], ' + MOD + '+Shift+[', 'to the front, to the back'], ['F2', 'rename'], ['Arrow keys', 'nudge 0.5% (2% with Shift)']]],
     ['Words', [['Enter or double-click', 'edit the words where they sit'], [MOD + '+Enter', 'keep them (leaving the field keeps them too)'], ['Escape', 'put them back']]],
-    ['Gestures', [['Shift with a corner', 'keep the proportions'], ['Alt with a handle', 'resize from the centre'], ['Alt while dragging', 'move without snapping'], ['Shift while rotating', '15 degree steps']]],
+    ['Gestures', [['Shift with a corner', 'keep the proportions'], ['Alt with a handle', 'resize from the centre'], ['Alt while dragging', 'move without snapping or equal spacing'], ['Shift while rotating', '15 degree steps'], ['A corner of several selected', 'scale them together, type with them (Alt: from the centre)'], ['The handle above several selected', 'turn them together about their centre (Shift: 15 degree steps)']]],
     ['History', [[MOD + '+Z', 'undo'], [MOD + '+Shift+Z or ' + MOD + '+Y', 'redo']]],
-    ['View', [['Shift+1', 'fit'], ['Shift+0', 'actual size'], ['Shift+2', '200%'], [MOD + ' with the wheel', 'zoom'], ['Space and drag', 'pan']]],
+    ['View', [['Shift+1', 'fit'], ['Shift+0', 'actual size'], ['Shift+2', 'zoom to the selection (200% with nothing selected)'], [MOD + '+=, ' + MOD + '+-', 'zoom in, zoom out'], [MOD + ' with the wheel', 'zoom'], ['Space and drag', 'pan'], ['Two fingers', 'pinch to zoom, drag to pan'], ['Double-click an image', 'reframe it inside its box']]],
     ['Studio', [['Alt+1 to Alt+7', 'go to a step'], ['?', 'this list']]],
   ];
   /** The shortcuts as a dialog: Escape or ? closes it, and while it is open the canvas takes no key (a Delete pressed here must

@@ -185,3 +185,116 @@
 /* a typeface list on a style card wraps inside the card */
 #studio-root .st .st-var-state > *{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 #studio-root .st .st-qsum-fixed{font-size:12px;font-weight:600;color:var(--sk-ink)}
+
+/* ------------------------------------------------------------------ S23: the canvas's working parts */
+/* the artwork takes every finger (drag, pinch, a long press); the stage around it scrolls as a page does */
+#studio-root .st .st-le{touch-action:none}
+/* distances while moving: the gap to each neighbour in output pixels; equal gaps marked in green */
+#studio-root .st .st-le-dist{position:absolute;pointer-events:none;z-index:7}
+#studio-root .st .st-le-dist.x{height:0;border-top:1px dashed #ff3d8b}
+#studio-root .st .st-le-dist.y{width:0;border-left:1px dashed #ff3d8b}
+#studio-root .st .st-le-dist.eq{border-color:#2fd3a0;border-top-style:solid;border-left-style:solid}
+#studio-root .st .st-le-dist span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:600 10px/1 var(--sk-font);padding:2px 5px;border-radius:4px;background:#ff3d8b;color:#fff;white-space:nowrap}
+#studio-root .st .st-le-dist.eq span{background:#2fd3a0;color:#05261c}
+/* an element dragged onto the artwork shows where it lands; over a frame, the frame it fills */
+#studio-root .st .st-le-ghost{position:absolute;pointer-events:none;z-index:8;border:1.5px dashed var(--sk-accent);background:color-mix(in srgb,var(--sk-accent) 12%,transparent);border-radius:4px;display:grid;place-items:center}
+#studio-root .st .st-le-ghost.onframe{border-style:solid;background:color-mix(in srgb,var(--sk-accent) 24%,transparent)}
+#studio-root .st .st-le-ghost span{font:600 11px/1.2 var(--sk-font);padding:3px 8px;border-radius:999px;background:var(--sk-accent);color:var(--sk-accent-ink);white-space:nowrap;max-width:96%;overflow:hidden;text-overflow:ellipsis}
+/* several layers selected: their box, corner handles that scale them together and the handle that turns them */
+#studio-root .st .st-le-gbox{position:absolute;z-index:6;pointer-events:none;border:1px dashed var(--sk-accent)}
+#studio-root .st .st-le-gh{position:absolute;width:11px;height:11px;border-radius:2px;background:var(--sk-accent);border:1.5px solid #fff;pointer-events:auto;touch-action:none}
+#studio-root .st .st-le-gh.h-nw{left:-6px;top:-6px;cursor:nwse-resize}
+#studio-root .st .st-le-gh.h-ne{right:-6px;top:-6px;cursor:nesw-resize}
+#studio-root .st .st-le-gh.h-sw{left:-6px;bottom:-6px;cursor:nesw-resize}
+#studio-root .st .st-le-gh.h-se{right:-6px;bottom:-6px;cursor:nwse-resize}
+#studio-root .st .st-le-grot{position:absolute;left:calc(50% - 7px);top:-34px;width:14px;height:14px;border-radius:50%;background:var(--sk-accent);border:1.5px solid #fff;cursor:grab;pointer-events:auto;touch-action:none}
+#studio-root .st .st-le-grot::after{content:'';position:absolute;left:50%;top:100%;width:1px;height:20px;background:var(--sk-accent)}
+/* rulers just outside the artwork's top and left edges, in output pixels; guides across it */
+#studio-root .st .st-rulers{position:absolute;inset:0;pointer-events:none;z-index:9}
+#studio-root .st .st-ruler{position:absolute;pointer-events:auto;background:color-mix(in srgb,var(--sk-panel) 94%,transparent);color:var(--sk-quiet);font:500 8.5px/1 var(--sk-font);touch-action:none;user-select:none}
+#studio-root .st .st-ruler.x{left:0;right:0;top:-16px;height:14px;cursor:s-resize;border-bottom:1px solid var(--sk-line-2)}
+#studio-root .st .st-ruler.y{top:0;bottom:0;left:-16px;width:14px;cursor:e-resize;border-right:1px solid var(--sk-line-2)}
+#studio-root .st .st-ruler > span{position:absolute}
+#studio-root .st .st-ruler.x > span{top:0;bottom:0;border-left:1px solid var(--sk-line-2)}
+#studio-root .st .st-ruler.y > span{left:0;right:0;border-top:1px solid var(--sk-line-2)}
+#studio-root .st .st-ruler i{font-style:normal;position:absolute;white-space:nowrap}
+#studio-root .st .st-ruler.x i{left:2px;top:3px}
+#studio-root .st .st-ruler.y i{left:1px;top:2px;font-size:7.5px;transform-origin:0 0;transform:rotate(90deg) translate(0,-12px)}
+#studio-root .st .st-uguide{position:absolute;pointer-events:auto;z-index:9;touch-action:none}
+#studio-root .st .st-uguide.x{top:0;bottom:0;width:7px;margin-left:-3px;cursor:ew-resize;background:linear-gradient(90deg,transparent 3px,#00b7ff 3px,#00b7ff 4px,transparent 4px)}
+#studio-root .st .st-uguide.y{left:0;right:0;height:7px;margin-top:-3px;cursor:ns-resize;background:linear-gradient(180deg,transparent 3px,#00b7ff 3px,#00b7ff 4px,transparent 4px)}
+#studio-root .st .st-uguide span{display:none;position:absolute;font:600 9.5px/1 var(--sk-font);padding:2px 4px;border-radius:3px;background:#00b7ff;color:#00131b;white-space:nowrap}
+#studio-root .st .st-uguide:hover span, #studio-root .st .st-uguide.dragging span{display:block}
+#studio-root .st .st-uguide.x span{top:4px;left:6px}
+#studio-root .st .st-uguide.y span{left:4px;top:6px}
+#studio-root .st .st-le.preview .st-rulers, #studio-root .st .st-le.preview .st-le-gbox{display:none}
+/* the eyedropper waiting for a click on the artwork */
+#studio-root .st .st-le.picking, #studio-root .st .st-le.picking *{cursor:crosshair!important}
+#studio-root .st .st-le-pickhint{position:absolute;left:50%;top:8px;transform:translateX(-50%);z-index:10;pointer-events:none;font:600 11.5px/1.2 var(--sk-font);padding:5px 10px;border-radius:999px;background:var(--sk-raised);color:var(--sk-ink);border:1px solid var(--sk-line)}
+/* the context menu: one list, keyboard first, a reason beside what cannot run */
+#studio-root .st .st-ctxmenu{position:fixed;z-index:120;min-width:230px;max-width:300px;max-height:min(600px,calc(100vh - 16px));overflow:auto;padding:5px;border-radius:10px;background:var(--sk-raised);border:1px solid var(--sk-line-2);box-shadow:var(--sk-sh-2);display:flex;flex-direction:column}
+#studio-root .st .st-ctxitem{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;padding:6px 9px;border-radius:6px;border:0;background:transparent;color:var(--sk-ink);font:500 12.5px/1.25 var(--sk-font);cursor:pointer}
+#studio-root .st .st-ctxitem:hover, #studio-root .st .st-ctxitem:focus{background:var(--sk-soft);outline:none}
+#studio-root .st .st-ctxitem:focus-visible{box-shadow:inset 0 0 0 1.5px var(--sk-accent)}
+#studio-root .st .st-ctxitem[aria-disabled="true"]{color:var(--sk-quiet);cursor:default}
+#studio-root .st .st-ctxitem[aria-disabled="true"]:hover{background:transparent}
+#studio-root .st .st-ctxitem kbd{font:500 10.5px/1 var(--sk-font);color:var(--sk-quiet);background:none;border:0;padding:0;white-space:nowrap}
+#studio-root .st .st-ctxwhy{font-size:10.5px;color:var(--sk-quiet);text-align:right;max-width:130px}
+#studio-root .st .st-ctxsep{height:1px;margin:4px 6px;background:var(--sk-line);flex-shrink:0}
+/* the named steps of this editing session, beside undo and redo */
+#studio-root .st .st-hist-wrap{position:relative;display:inline-flex}
+#studio-root .st .st-hist-pop{position:absolute;left:0;top:calc(100% + 6px);z-index:40;width:290px;max-height:360px;display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:10px;background:var(--sk-raised);border:1px solid var(--sk-line-2);box-shadow:var(--sk-sh-2)}
+#studio-root .st .st-hist-pop-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12px}
+#studio-root .st .st-hist-pop-h .ov-link{margin-left:auto}
+#studio-root .st .st-hist-steps{list-style:none;margin:0;padding:0;overflow:auto;display:flex;flex-direction:column;gap:1px}
+#studio-root .st .st-hist-step{display:flex;justify-content:space-between;gap:8px;width:100%;text-align:left;padding:5px 8px;border-radius:6px;border:0;background:transparent;color:var(--sk-ink-2);font:500 12px/1.3 var(--sk-font);cursor:pointer}
+#studio-root .st .st-hist-step:hover{background:var(--sk-hover)}
+#studio-root .st .st-hist-step.now{background:var(--sk-soft);color:var(--sk-ink);cursor:default}
+#studio-root .st .st-hist-step.future{color:var(--sk-quiet)}
+/* the Elements panel */
+#studio-root .st .st-elements{display:flex;flex-direction:column;gap:12px}
+#studio-root .st .st-el-sec h4{margin:0 0 6px;font:650 10px/1.2 var(--sk-font);letter-spacing:.12em;text-transform:uppercase;color:var(--sk-quiet)}
+#studio-root .st .st-el-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:6px}
+#studio-root .st .st-el-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:66px;padding:7px 4px;border-radius:8px;border:1px solid var(--sk-line);background:var(--sk-bg);color:var(--sk-ink-2);cursor:grab;font:500 10.5px/1.2 var(--sk-font)}
+#studio-root .st .st-el-item:hover{border-color:var(--sk-accent);color:var(--sk-ink)}
+#studio-root .st .st-el-item:focus-visible{outline:2px solid var(--sk-accent);outline-offset:1px}
+#studio-root .st .st-el-item:disabled{cursor:not-allowed;opacity:.55}
+#studio-root .st .st-el-l{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#studio-root .st .st-el-text{font:700 17px/1 var(--sk-display);color:var(--sk-ink)}
+#studio-root .st .st-el-text.label{font:700 10px/1 var(--sk-font);letter-spacing:.12em}
+#studio-root .st .st-el-text.text{font:500 13px/1 var(--sk-font)}
+#studio-root .st .st-el-text.number{font:800 22px/1 var(--sk-display)}
+#studio-root .st .st-el-text.quote{font:italic 600 20px/1 Georgia,serif}
+#studio-root .st .st-el-shape{display:block;width:30px;height:22px;background:var(--sk-accent);border-radius:3px}
+#studio-root .st .st-el-shape.pill{border-radius:999px;height:14px}
+#studio-root .st .st-el-shape.circle{width:24px;height:24px;border-radius:50%}
+#studio-root .st .st-el-shape.triangle{background:none;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:24px solid var(--sk-accent);border-radius:0}
+#studio-root .st .st-el-shape.rule{height:3px;width:34px}
+#studio-root .st .st-el-shape.arrow{position:relative;height:0;width:28px;background:none;border-radius:0;border-top:3px solid var(--sk-accent)}
+#studio-root .st .st-el-shape.arrow::after{content:'';position:absolute;right:-4px;top:-7.5px;border-left:9px solid var(--sk-accent);border-top:6px solid transparent;border-bottom:6px solid transparent}
+#studio-root .st .st-el-frame{display:block;width:30px;height:24px;border:1.5px dashed var(--sk-ink-2);border-radius:2px}
+#studio-root .st .st-el-frame.circle{width:24px;border-radius:50%}
+#studio-root .st .st-el-frame.round{border-radius:7px}
+#studio-root .st .st-el-swatch{display:block;width:28px;height:28px;border-radius:6px;border:1px solid var(--sk-line-2)}
+#studio-root .st .st-el-mark, #studio-root .st .st-el-up{display:grid;place-items:center;width:100%;height:34px;border-radius:5px;background:repeating-conic-gradient(#2a303a 0 25%,#1d222a 0 50%) 0 0/10px 10px;overflow:hidden}
+#studio-root .st .st-el-mark img, #studio-root .st .st-el-up img{max-width:92%;max-height:30px;object-fit:contain}
+#studio-root .st .st-el-ph{display:block;width:60%;height:12px;border-radius:3px;background:var(--sk-line)}
+#studio-root .st .st-el-upload{cursor:pointer;border-style:dashed}
+#studio-root .st .st-el-none{grid-column:1/-1;font-size:11.5px}
+#studio-root .st .st-el-search{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:8px;border:1px solid var(--sk-line);background:var(--sk-bg)}
+#studio-root .st .st-el-search input{flex:1;min-width:0;border:0;background:transparent;color:var(--sk-ink);font:500 12.5px/1.3 var(--sk-font);outline:none}
+#studio-root .st .st-el-foot{font-size:11px}
+/* colour: brand first, white and near-black, recent, any colour, the eyedropper */
+#studio-root .st .st-sw-lbl{font:650 9px/1 var(--sk-font);letter-spacing:.1em;text-transform:uppercase;color:var(--sk-quiet);margin:0 1px 0 3px}
+#studio-root .st .st-swatch.brand{border-color:color-mix(in srgb,var(--sk-ink) 35%,transparent)}
+#studio-root .st .st-sw-native{width:24px;height:22px;padding:0;border:1px solid var(--sk-line-2);border-radius:6px;background:transparent;cursor:pointer}
+#studio-root .st .st-sw-drop{display:grid;place-items:center;width:24px;height:22px;padding:0;border-radius:6px;border:1px solid var(--sk-line-2);background:var(--sk-bg);color:var(--sk-ink-2);cursor:pointer}
+#studio-root .st .st-sw-drop.on{border-color:var(--sk-accent);color:var(--sk-accent)}
+#studio-root .st .st-le-colour{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-basis:100%}
+#studio-root .st .st-le-colour-l{font-size:11.5px;color:var(--sk-sub)}
+#studio-root .st .st-le-fitrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-basis:100%}
+/* pages under the canvas: add, duplicate, move, delete and the deleted ones to restore */
+#studio-root .st .st-pageacts{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;padding-left:4px}
+#studio-root .st .st-pagedel{display:inline-flex;align-items:center;gap:10px;padding:2px 8px;border-radius:8px;border:1px dashed var(--sk-line-2)}
+#studio-root .st .st-pagedel-row{display:inline-flex;gap:6px;align-items:baseline;font-size:11.5px;white-space:nowrap}
+@media (prefers-reduced-motion: reduce){#studio-root .st .st-le-ghost{transition:none}}

@@ -83,6 +83,7 @@ export async function makeStudio(opts) {
     ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: opts.inspect === false ? '0' : undefined,
   };
   const keys = { claude: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_KEY };
+  const custom = []; const answerWith = (re, fn) => { custom.push({ re, fn }); };
   const setProvider = (name, state) => { providers[name] = state; if (name === 'claude') { if (state === 'missing') delete env.ANTHROPIC_API_KEY; else env.ANTHROPIC_API_KEY = keys.claude; } if (name === 'gemini') { if (state === 'missing') delete env.GEMINI_KEY; else env.GEMINI_KEY = keys.gemini; } };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -103,8 +104,10 @@ export async function makeStudio(opts) {
       if (providers.claude === 'slow') await new Promise(r => setTimeout(r, providers.slowMs));
       // S22: 'stream' answers a streamed request as the API does - server-sent events, reasoning first, then the answer in
       // pieces spread over streamMs - so the page can be watched while the model writes
-      if (providers.claude === 'stream' && body.stream) return sseAnswer(JSON.stringify(answerFor(sys, user)), providers.streamMs || 8000, body.model, init && init.signal);
-      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answerFor(sys, user)) }], stop_reason: 'end_turn', model: body.model }), { status: 200 });
+      // a suite may answer a kind of call itself (opt-in, by its system prompt); every other call keeps the shared answers
+      const own = custom.find(c => c.re.test(sys)); const answer = own ? own.fn(sys, user) : answerFor(sys, user);
+      if (providers.claude === 'stream' && body.stream) return sseAnswer(JSON.stringify(answer), providers.streamMs || 8000, body.model, init && init.signal);
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn', model: body.model }), { status: 200 });
     }
     if (u.startsWith('http://127.0.0.1')) return realFetch(url, init);
     return new Response('', { status: 404 });
@@ -159,7 +162,7 @@ export async function makeStudio(opts) {
   function failNext(re, status, body, o2) { const f = { re, status, body, hit: 0, after: !!(o2 && o2.after), abort: !!(o2 && o2.abort), detach: !!(o2 && o2.detach) }; fails.push(f); return f; }
   function hold(re) { let release; const wait = new Promise(r => { release = r; }); const h = { re, wait }; holds.push(h); return () => { release(); holds.splice(holds.indexOf(h), 1); }; }
   async function close() { await browser.close(); server.kill(); globalThis.fetch = realFetch; }
-  return { env, handler, api, calls, providers, setProvider, open, close, hold, failNext, seen, r2, kv, PORT };
+  return { env, handler, api, calls, providers, setProvider, answerWith, open, close, hold, failNext, seen, r2, kv, PORT };
 }
 
 /* ------------------------------------------------------------ a tiny test runner */

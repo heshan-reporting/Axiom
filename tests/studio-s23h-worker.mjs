@@ -1,13 +1,18 @@
 /* S23 slice H on the worker (providers MOCKED): what the canvas reads and writes besides a version.
  *   H-W1 a page is duplicated as a new asset placed right after it in its family, with the same composition; no model call, no
- *        render; the original is untouched; the project lists the family in page order;
+ *        render; the original keeps its words and layers (only the page number drawn on it moves on); the family lists in page order;
  *   H-W2 a page is added after another: the same layout and imagery with new words to write; it is placed after the one asked;
- *   H-W3 pages are reordered without a version: moving one rewrites the family's order and nothing else;
+ *   H-W3 moving a page rewrites the family's order; the only versions written are the page numbers drawn on the tiles;
  *   H-W4 a deleted page is archived (recoverable), leaves the project's assets, the workflow counts and the export, and comes
  *        back in its place when restored; a read key cannot change pages; a page of another project is refused;
  *   H-W5 user guides persist on the asset without a version: the composition signature, the validation and the approvals stand;
  *        bounds are enforced; a read key cannot write them;
- *   H-W6 the project's uploaded images are listed for the Elements panel (this project's only), read role.
+ *   H-W6 the project's uploaded images are listed for the Elements panel (this project's only), read role;
+ *   H-W7 a project nobody reordered lists its assets as they were made; a move re-fills only its own family's places;
+ *   H-W8 the page number drawn on each tile ("2 / 4") follows every page action, as a layout version with no render; a tile whose
+ *        layout is locked keeps its number and is named; the words' approval stands (the design signature includes the layout);
+ *   H-W9 a mark placed by hand must be one the campaign's policy carries, from this client's kit (HOOF: its wordmark, never the
+ *        client logo; another client's or campaign's mark refused); a mark left as it was is not re-judged.
  * Run: node --experimental-sqlite tests/studio-s23h-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 const T = suite('studio-s23h-worker (pages as ordered assets, user guides, uploads)');
@@ -17,13 +22,15 @@ const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'full-key' : k);
 let gemini = 0, claude = 0;
 w.answer(/generativelanguage/, async () => { gemini++; return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: png } }] } }] }), { status: 200 }); });
 w.answer(/api\.anthropic\.com/, async () => { claude++; return new Response(JSON.stringify({ error: { type: 'not_expected' } }), { status: 500 }); });
-const LAYOUT = (hl) => ({ v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial', approach: 'editable', regions: [], layers: [{ id: 'hl', type: 'text', role: 'headline', x: 8, y: 60, w: 80, h: 14, size: 6, color: '#FFFFFF' }], frame: { index: 0, of: 3 }, note: hl });
+const LAYOUT = (hl, i) => ({ v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial', approach: 'editable', regions: [], layers: [{ id: 'hl', type: 'text', role: 'headline', x: 8, y: 60, w: 80, h: 14, size: 6, color: '#FFFFFF' }], frame: { index: i || 0, of: 3 }, note: hl });
 await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel' }] });
 const P = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Carousel pages', brief: { channels: ['instagram'] } })).body.id;
-const mk = async (title, hl) => (await call('POST', '/studio/asset', { project: P, family: 'Carousel', channel: 'instagram', format: '4:5', title, copy: { headline: hl }, layout: LAYOUT(hl), mode: 'composition' })).body.asset.id;
-const A1 = await mk('Frame 1', 'Myth: it is a subsidy');
-const A2 = await mk('Frame 2', 'Fact: it is a credit');
-const A3 = await mk('Frame 3', 'Read the facts');
+const mk = async (title, hl, i) => (await call('POST', '/studio/asset', { project: P, family: 'Carousel', channel: 'instagram', format: '4:5', title, copy: { headline: hl }, layout: LAYOUT(hl, i), mode: 'composition' })).body.asset.id;
+const A1 = await mk('Frame 1', 'Myth: it is a subsidy', 0);
+const A2 = await mk('Frame 2', 'Fact: it is a credit', 1);
+const A3 = await mk('Frame 3', 'Read the facts', 2);
+const curV = a => a.versions.find(v => v.id === a.current);
+const numbers = g => g.assets.filter(a => a.family === 'Carousel').map(a => { const f = curV(a).layout.frame; return a.title + ' ' + (f.index + 1) + '/' + f.of; });
 const get = async () => (await call('GET', '/studio/get?id=' + P, null, 'read-key')).body;
 const order = g => g.assets.filter(a => a.family === 'Carousel').map(a => a.title);
 const page = (body, k) => call('POST', '/studio/page', body, k);
@@ -38,7 +45,10 @@ await T.t('H-W1 a page is duplicated right after itself with the same compositio
   const na = g.assets.find(a => a.id === made.asset); const nv = na.versions.find(v => v.id === na.current); const ov = before.versions.find(v => v.id === before.current);
   eq([nv.copy.headline, JSON.stringify(nv.layout.layers)], [ov.copy.headline, JSON.stringify(ov.layout.layers)], 'the same words and layers');
   ok(/duplicated from Frame 2/.test(nv.note), 'the version says where it came from: ' + nv.note);
-  const after = g.assets.find(a => a.id === A2); eq([after.current, after.versions.length], [before.current, before.versions.length], 'the original is untouched');
+  const after = g.assets.find(a => a.id === A2); const av = curV(after);
+  eq([av.copy.headline, JSON.stringify(av.layout.layers)], [ov.copy.headline, JSON.stringify(ov.layout.layers)], 'the original keeps its words and layers');
+  eq(after.versions.length, before.versions.length + 1, 'one version on the original: its page number'); ok(/page number 2 \/ 4/.test(av.note), av.note);
+  eq(numbers(g), ['Frame 1 1/4', 'Frame 2 2/4', 'Frame 2 (copy) 3/4', 'Frame 3 4/4'], 'every tile draws its place');
   eq([gemini - g0, claude - c0], [0, 0], 'no model call, no render');
 });
 
@@ -51,11 +61,14 @@ await T.t('H-W2 a page is added after another: same layout and imagery, new word
   eq(JSON.stringify(nv.layout.layers.map(l => l.id)), JSON.stringify(['hl']), 'the same layout');
 });
 
-await T.t('H-W3 moving a page rewrites the family order and writes no version', async () => {
-  const g0 = await get(); const v0 = g0.assets.map(a => a.id + ':' + a.versions.length).join(',');
+await T.t('H-W3 moving a page rewrites the family order; the only versions written are the page numbers on the tiles', async () => {
+  const g0 = await get(); const n0 = {}; g0.assets.forEach(a => { n0[a.id] = a.versions.length; });
   const r = await page({ asset: A3, action: 'move', to: 0 }); eq(r.status, 200, JSON.stringify(r.body).slice(0, 200));
   const g = await get(); eq(order(g)[0], 'Frame 3', 'Frame 3 is first: ' + order(g).join(' | '));
-  eq(g.assets.map(a => a.id + ':' + a.versions.length).sort().join(','), v0.split(',').sort().join(','), 'no version written by a move');
+  eq(numbers(g).map(x => x.split(' ').pop()), ['1/5', '2/5', '3/5', '4/5', '5/5'], numbers(g).join(' | '));
+  g.assets.forEach(a => { const added = a.versions.slice(n0[a.id] || 0); ok(added.every(v => /^page number /.test(v.note)), a.title + ': only page numbers: ' + added.map(v => v.note).join(' | ')); });
+  const g1 = await get(); const n1 = g1.assets.map(a => a.versions.length).join(',');
+  eq((await page({ asset: A3, action: 'move', to: 0 })).status, 200); eq((await get()).assets.map(a => a.versions.length).join(','), n1, 'a move to where it already is writes nothing');
   const bad = await page({ asset: A3, action: 'move', to: 99 }); eq(bad.status, 200, 'a position past the end puts it last');
   eq(order(await get()).slice(-1)[0], 'Frame 3');
 });
@@ -113,6 +126,50 @@ await T.t('H-W7 a project nobody reordered lists its assets as they were made; a
   eq((await page({ asset: x3, action: 'move', to: 0 })).status, 200);
   eq(await list(), ['Set 2', 'Single', 'Set 1'], 'the family\'s two places re-filled in its new order; the other family stays where it was');
   ok(x1, 'made');
+});
+
+await T.t('H-W8 page numbers follow every page action; a locked layout keeps its number and is named; the words\' approval stands', async () => {
+  const Q = (await call('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Numbers', brief: {} })).body.id;
+  const mk3 = async (title, i) => (await call('POST', '/studio/asset', { project: Q, family: 'Deck', channel: 'instagram', format: '4:5', title, copy: { headline: title }, layout: LAYOUT(title, i), mode: 'composition' })).body.asset.id;
+  const b1 = await mk3('One', 0), b2 = await mk3('Two', 1), b3 = await mk3('Three', 2);
+  const nums = async () => (await call('GET', '/studio/get?id=' + Q, null, 'read-key')).body.assets.filter(a => a.family === 'Deck').map(a => { const f = curV(a).layout.frame; return a.title + ' ' + (f.index + 1) + '/' + f.of; });
+  await call('POST', '/studio/approve', { asset: b3, part: 'copy', decision: 'approve', reason: 'copy ready' });
+  await call('POST', '/studio/lock', { asset: b1, element: 'layout', locked: true });
+  const r = await page({ asset: b2, action: 'delete' }); eq(r.status, 200);
+  eq(await nums(), ['One 1/3', 'Three 2/2'], 'Three moves to 2 / 2; One keeps 1 / 3 because its layout is locked');
+  const three = (await call('GET', '/studio/get?id=' + Q, null, 'read-key')).body.assets.find(a => a.id === b3);
+  ok(three.approvals && three.approvals.copy, 'the copy approval stands: renumbering changed the tile, not its words');
+  ok(r.body.numbers.kept.some(k => k.asset === b1 && /layout is locked/.test(k.why)), JSON.stringify(r.body.numbers));
+  const ev = (await call('GET', '/studio/get?id=' + Q, null, 'read-key')).body.thread.filter(e => e.kind === 'pages').pop();
+  ok(/Kept the old number on One/.test(ev.text || ''), 'the thread names the tile that kept its number: ' + JSON.stringify(ev).slice(0, 300));
+  await call('POST', '/studio/lock', { asset: b1, element: 'layout', locked: false });
+  eq((await page({ asset: b2, action: 'restore' })).status, 200);
+  eq(await nums(), ['One 1/3', 'Two 2/3', 'Three 3/3'], 'restored: every tile draws its place again');
+});
+
+await T.t('H-W9 a mark placed by hand must be one the campaign policy carries, from this client and campaign; a mark left alone is not re-judged', async () => {
+  await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark' }] });
+  const a = (await get()).assets.find(x => x.id === A1); const v = curV(a);
+  const withMark = (l) => Object.assign({}, v.layout, { layers: v.layout.layers.concat([l]) });
+  const logo = { id: 'logo', type: 'img', role: 'logo', src: '/brand/logo?ns=mca', x: 70, y: 86, w: 20, h: 8, exact: true };
+  const r1 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(logo), note: 'add the logo' });
+  eq(r1.status, 409, JSON.stringify(r1.body).slice(0, 200)); eq(r1.body.error, 'mark_policy'); ok(/never the client logo/.test(r1.body.detail), r1.body.detail);
+  const other = { id: 'wordmark', type: 'img', role: 'wordmark', src: '/brand/wordmark?ns=aep&campaign=hoof', x: 70, y: 86, w: 20, h: 8, exact: true };
+  const r2 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(other), note: 'a wordmark from elsewhere' });
+  eq([r2.status, r2.body.error], [409, 'mark_policy']); ok(/another client/.test(r2.body.detail), r2.body.detail);
+  const wrongCamp = Object.assign({}, other, { src: '/brand/wordmark?ns=mca&campaign=national' });
+  const r3 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(wrongCamp), note: 'another campaign' });
+  eq([r3.status, r3.body.error], [409, 'mark_policy']); ok(/campaign national/.test(r3.body.detail), r3.body.detail);
+  const pic = Object.assign({}, other, { src: '/studio/file?key=studio%2Fx%2Fuploads%2Fa.png' });
+  const r4 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(pic), note: 'a picture called a wordmark' });
+  eq([r4.status, r4.body.error], [409, 'mark_policy']); ok(/from its file in the brand kit/.test(r4.body.detail), r4.body.detail);
+  const good = Object.assign({}, other, { src: '/brand/wordmark?ns=mca&campaign=hoof' });
+  const r5 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(good), note: 'the HOOF wordmark' });
+  eq(r5.status, 200, JSON.stringify(r5.body).slice(0, 200));
+  // the policy changes afterwards; an edit that leaves the mark alone is not refused for it
+  await call('POST', '/brand/kit', { ns: 'mca', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'logo' }] });
+  const v2 = r5.body.version; const moved = Object.assign({}, v2.layout, { layers: v2.layout.layers.map(l => l.id === 'hl' ? Object.assign({}, l, { y: 50 }) : l) });
+  eq((await call('POST', '/studio/version', { asset: A1, project: P, layout: moved, note: 'move the headline' })).status, 200, 'a mark left as it was is not re-judged');
 });
 
 T.done(); w.restore();
