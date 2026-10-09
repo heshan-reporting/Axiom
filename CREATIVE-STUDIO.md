@@ -2287,7 +2287,7 @@ Status: **done** (with its evidence), **in progress**, **planned**, **deferred**
 | 7 | Validation, repair and export agree; render fingerprint | done | `studio-s23i-worker.mjs` I-W1; `studio-s23i-browser.mjs` I-B1, I-B2, I-B5 |
 | 8 | Brand memory: reference metadata, HOOF variants verified, knowledge-gap report | done | `studio-s23i-worker.mjs` I-W2-I-W7; `studio-s23i-browser.mjs` I-B3, I-B4 |
 | 9 | Every long operation visible and recoverable (the wait inventory, below) | done (two short synchronous calls deferred, named below) | `studio-s23f-worker.mjs` F1-F5, `studio-s23-browser.mjs` F-B1-F-B4 |
-| 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | done (Firefox and WebKit run in CI only: this sandbox ships Chromium) | `studio-s23j-browser.mjs` J-B1-J-B8, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`; `tests/shots/s23/axe.json`, `perf.json` |
+| 10 | Error boundaries, offline, budgets measured, axe, three browsers, console guard | done (Firefox and WebKit proven in CI run 97: the core journey passed in all three engines; this sandbox ships Chromium only) | `studio-s23j-browser.mjs` J-B1-J-B8, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`; `tests/shots/s23/axe.json`, `perf.json` |
 | 11 | Evidence package, `tools/studio-smoke.py`, docs, p39 / r17 | done (live model output unproven until the owner runs the smoke test) | `studio-smoke-test.mjs`; the local package `evidence/s23/` (ignored by git); build `2026-10-09.studio-p39`, page `?v=r17` |
 
 ### 46.3 Bug ledger
@@ -2763,8 +2763,9 @@ frames and long tasks stay with `studio-s20-perf-browser.mjs` (unchanged and pas
 draws the composition on the canvas, a layer is nudged and saved as a version the worker holds, Review opens, no page error -
 in Chromium, Firefox and WebKit. `tests/pw.mjs` exports all three and the fixture takes `browser`. An engine that is not
 installed is reported as skipped with the reason and never counted as a pass. In this sandbox Chromium passes and Firefox and
-WebKit are skipped (only Chromium ships here, and `playwright install` is not run); CI now installs all three
-(`npx playwright install --with-deps chromium firefox webkit`), so the first CI run on this branch is where they are proven.
+WebKit are skipped (only Chromium ships here, and `playwright install` is not run); CI installs all three
+(`npx playwright install --with-deps chromium firefox webkit`), and CI run 97 (commit `fc6e961`, 9 October) passed the
+journey in all three engines: 3 passed, 0 failed.
 
 **Captures** (`tests/studio-s23-shots.mjs after`, into the ignored `tests/shots/s23/`): every step at 1920, 1440, 1024, 834
 and 390 wide, plus the states that are not a step - loading (the library read held), failed (an open refused with 500,
@@ -2794,12 +2795,17 @@ Full AI path approves and exports a piece only when its reading verified it.
 failure was `studio-s22-browser.mjs` case A, whose first sample of the processing card read "thinking, 118 characters of
 reasoning so far" without "2 of 4" while the whole suite loaded the machine; run alone it passed twice in a row. The worker
 writes the count with every model-phase update (`phaseCounts`), so the gap is a page-side window between the card's first
-streamed reading and the counts reaching it - not fixed in S23, recorded here as a known timing-dependent case.
+streamed reading and the counts reaching it - not fixed in S23, recorded here as a known timing-dependent case. In CI (run
+97) it passed, and the browser job's one failure was `studio-s23g-browser.mjs` G-B4, red on every CI run since slice G and
+not seen locally: the direction cards rise in one after another (`sk-pop`, 60 ms apart) and the test read their row while
+the third was still settling (312, 312, 313). With the animations slowed through the browser's animation clock the cards
+measure 322, 331, 331 mid-entrance and 312, 312, 312 once finished; the test now waits for the entrances to finish. The
+layout was never wrong; the measurement was early.
 
 **Release**: worker build `2026-10-09.studio-p39`, page assets `?v=r17` (all fifteen references in `docs/index.html`).
 
 **Not proven here, stated plainly**: live model output (what a real Claude and Gemini make of these prompts, and whether a
-real painting reproduces a mark) - the smoke test is how; Firefox and WebKit - CI; the operating system's clipboard and a
+real painting reproduces a mark) - the smoke test is how; the operating system's clipboard and a
 drag from the desktop (the paste path is tested with synthetic clipboard events); performance on a person's laptop and over a
 real network (the figures above are local and headless).
 

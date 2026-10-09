@@ -142,6 +142,9 @@ await T.t('G-B4 Explore is one set of direction cards side by side, each with it
   await openProject(page, PFX + ' at copy'); await phase(page, 'Explore');
   await page.waitForSelector(R + '.st-dcard', { timeout: 15000 });
   eq(await page.$(R + '.st-dstrip'), null, 'no strip of the same previews above the cards');
+  // the cards rise in one after another (sk-pop, 60 ms apart): measured mid-entrance a card still carries part of its
+  // translateY (CI caught 312,312,313), so the row is read once every entrance has finished
+  await page.evaluate(async () => { const els = Array.from(document.querySelectorAll('#studio-root .st-dgrid[role="list"] > .st-dcard')); await Promise.all(els.flatMap(e => e.getAnimations()).map(a => a.finished.catch(() => {}))); });
   const cards = await page.$$eval(R + '.st-dgrid[role="list"] > .st-dcard', c => c.map(x => ({ top: Math.round(x.getBoundingClientRect().top), art: !!x.querySelector('.st-dcard-art canvas'), title: (x.querySelector('h4') || {}).textContent })));
   ok(cards.length >= 2, 'cards: ' + cards.length);
   ok(cards.every(c => c.art && c.title), 'every card carries its own sketch and title');
