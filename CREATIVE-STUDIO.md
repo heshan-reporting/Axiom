@@ -2860,7 +2860,7 @@ Written at the start of S24; the last column is the state at the end of S24 (bui
 | UI | One Design toolbar row, one zoom control; no truncation without a way to read it; no model ids or "fallback fonts" in working views; no layer ids or saliency jargon in readiness; stage heads say whether AI runs; Checks names measured / AI opinion / person; phone Copy opens on the words; Creative Director target line, real scores, inspected version, ship is not approval | partial (S18-S23) | **implemented and proven** for the items listed; Creative Director items were already in place (S18-S23) and are kept | `studio-s24-browser.mjs` U1-U9; matched captures `tests/shots/s24/` |
 | Gen | Repair measured after fonts and images settle, never success by the repair's return value; image lifecycle states told apart | partial (S19, S23-I) | **implemented and proven** for repair (D1, D2); the lifecycle states are S19's `imageryState` (queued, generating, failed with the last usable kept, on file and loading, did not load, hidden, none by choice, drawn), unchanged | D1, D2 |
 | Ops | Long requests that are not jobs (brief-field suggestions, artwork description, reference analysis from the inventory, link reading) acknowledged at once, elapsed, n of N where countable, Cancel that says what it cannot stop, a dropped connection reported; the closed-tab window stated | partial (S23-F covered jobs) | **implemented and proven** | O1, O2 |
-| QA | Page-error guard over every S24 journey; Chromium / Firefox / WebKit; axe; performance | partial (S23-J) | **partial**: the S24 journeys run in Chromium with a page-error guard (G1); the S23 cross-browser, axe and performance harnesses were re-run (47.4); Firefox and WebKit are not installed in this sandbox, so those engines are skipped, never passed | 47.4 |
+| QA | Page-error guard over every S24 journey; Chromium / Firefox / WebKit; axe; performance | partial (S23-J) | **implemented and proven** for the guard (G1, attached before navigation), axe and performance (re-run, 47.8) and the core journey in all three engines (CI: Chromium, Firefox 142, WebKit 26); **partial** in that the S24 journeys themselves run in Chromium only | G1, 47.8 |
 
 ### 47.3 Bug ledger
 
@@ -2958,11 +2958,33 @@ charged), a dropped connection reported as such. Applied to brief-field suggesti
 from the inventory and link reading (Analyse box and wizard). The activity panel states the closed-tab window (about 32
 minutes: a 2-minute claim, then the next tick at 7 or 37 past the hour). Tests O1, O2.
 
+Found by the full suite after the slices above, each failing first in the named harness:
+
+**R1 A render that used up its image attempts offered no Retry.** *Symptom*: after S24-02 a render that exhausted its four
+requests failed `image_attempts_exhausted`, which the island did not explain and offered no Retry for. *Reproduction*: journey
+6 in `studio-journey-browser.mjs` (and journey 8 behind it). *Fix*: `explain()` says the image provider kept failing and that
+Retry starts a new render job, a new paid attempt with its own cap; the failed card offers Retry for that reason.
+
+**R2 The activity label named the image model.** *Symptom*: the progress label read "request 1 of 4 to <model id>", a model
+identifier in a working view, and lost the words the activity harness reads. *Reproduction*: `studio-activity-browser.mjs`
+(failed in CI run 103). *Fix*: the worker's label and `STProgress` name the work ("request 1 of 4: the image model is making
+the background at 2K; no progress until it answers", "(a fallback model)", "(trying again)"); the model stays in the
+activity's fields for History and diagnostics.
+
+**R3 The canvas foot moved under the pointer.** *Symptom*: the line under the canvas grew a row when the measurement text
+changed length, moving the layer a test (or a person) was about to click. *Reproduction*: S19 C2 (failed in CI run 103).
+*Fix*: the page strip is top-aligned and the measurement has a line of its own, so the foot keeps its height.
+
+**R4 The page-error guard was attached after the first load.** *Symptom*: an error thrown while the page first loaded escaped
+the guard, and a 404 from `/brief/daily` that the page handles raced the guard (J-B8). *Fix*: the fixture's `onPage` attaches
+the guards before navigation; the expected faults are named by route (the CDN fonts, `/trends` and `/gdelt` 502 in the
+sandbox, `/brief/daily` 404 before a brief exists), everything else fails the case.
+
 ### 47.4 Evidence
 
 - Worker reproductions: `tests/studio-s24-worker.mjs` **0 of 18 on `2e382a7`**, **19 of 19 now** (04c added after slice 1).
-- Browser: `tests/studio-s24-browser.mjs` **0 of 9 UI cases on `2e382a7`** (log in `evidence/s24/logs/`), **all passing now**
-  (U1-U9, D1-D2, O1-O2, G1).
+- Browser: `tests/studio-s24-browser.mjs` **1 of 14 on `2e382a7`** (only G1, the error guard, passed; log in
+  `evidence/s24/logs/`), **14 of 14 now** (U1-U9, D1-D2, O1-O2, G1).
 - Matched captures: `tests/studio-s24-shots.mjs before|after` at 1440, 1920, 1024, 834 and 390 (and light at 1440), written
   to the ignored `tests/shots/s24/`; the private package `evidence/s24/index.html` puts them side by side.
 - Full suite figures, accessibility and performance: 47.8 (filled from the final run).
@@ -2990,5 +3012,6 @@ deployed first (`tools/deploy-worker.sh` from the laptop).
 ### 47.7 Known limits
 
 - A provider request already sent cannot be recalled; it may complete and be billed after a cancel (said in the UI).
-- Firefox and WebKit are not installed here; the cross-browser harness skips them and says so.
+- Firefox and WebKit are not installed in this sandbox; the cross-browser harness skips them here and says so, and runs them
+  in CI (the core journey only; the S24 journeys are Chromium).
 - The Studio is not claimed to be bug-free: the harnesses prove the cases they name.

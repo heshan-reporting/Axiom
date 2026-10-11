@@ -2690,7 +2690,7 @@ is idempotent (`rule_exists`); contradictions are named (`stRuleConflicts`), nev
 compare-and-swap (`/studio/reference/meta|observation` with `rev`). **S24-06** a mark source must be a canonical identity
 (`stMarkSourceProblem`: this worker's brand route, this client and campaign, a recorded variant, a file in storage) on create,
 edit and every version write (`stMarkSanitize`); an invalid legacy mark restores hidden with the reason (`markSources` in
-readiness). **The workspace** (`tests/studio-s24-browser.mjs`, 0 of 9 UI cases on `2e382a7`): Design has **one toolbar row**
+readiness). **The workspace** (`tests/studio-s24-browser.mjs`, 1 of 14 on `2e382a7`, 14 of 14 now): Design has **one toolbar row**
 - the Design views, the editor's tools (icon Undo / Redo / Steps, Add, an **Arrange** menu with align, spread, order and group
 when something is selected; `arrange(page, label)` in `tests/studio-fixture.mjs`), zoom (-, the level with Fit, +), one
 **View** menu (guides, safe area, rulers, grid, resize scales type, checkerboard; the editor portals its options into it through
@@ -2705,7 +2705,11 @@ version is measured again - only that may say Fixed (D1, D2). **Long requests th
 operations line (`OpsLine`; `window.STKit.runOp`; `AXUI.call(path, body, {signal})`): acknowledged, elapsed, n of N, Cancel
 that says a sent model call may still finish and be charged, a dropped connection named - brief-field suggestions, artwork
 description, reference analysis from the inventory, link reading. The activity panel states the closed-tab window (about 32
-minutes). Matched captures: `tests/studio-s24-shots.mjs before|after` into the ignored `tests/shots/s24/`.
+minutes). A render that used up its image attempts (`image_attempts_exhausted`) is explained and offers Retry (a new job
+with its own cap); the activity label names the work, never the image model's id. **Test guards attach before navigation**:
+`fx.open({onPage})` (`tests/studio-fixture.mjs`) runs `onPage(page)` before `goto`, and a harness that collects page errors names its expected faults by
+route (CDN fonts, `/trends` and `/gdelt` 502 in the sandbox, `/brief/daily` 404). Matched captures: `tests/studio-s24-shots.mjs
+before|after` into the ignored `tests/shots/s24/`.
 
 Phase 1, the ground:
 
