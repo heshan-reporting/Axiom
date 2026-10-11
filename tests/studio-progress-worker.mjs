@@ -44,7 +44,7 @@ await T.t('a render job reports its phase while the image model is working: the 
   eq(j.state, 'done', j.error);
   const mid = seen.gemini.pop(); ok(mid && mid.state === 'running', 'the mock saw the job running');
   const a = mid.progress.activity || {};
-  eq(a.phase, 'generating', JSON.stringify(a)); ok(/image model is making the background image at 2K/.test(a.label), 'the label says what is being made: ' + a.label);
+  eq(a.phase, 'generating', JSON.stringify(a)); ok(/^request 1 of 4 to the image model \(gemini-3-pro-image\) for the background image at 2K/.test(a.label), 'the label says which request is in flight, to which model, and what is being made (S24): ' + a.label); eq([a.request, a.of, a.model], [1, 4, 'gemini-3-pro-image']);
   ok(a.startedAt > 0 && a.at >= a.startedAt, 'started and last-update times'); eq(a.size, '2K');
   const fin = (await call('GET', '/studio/job?id=' + j0.id, null, 'read-key')).body.job; const fa = fin.progress.activity;
   eq(fa.phase, 'done'); eq(fa.label, 'finished'); ok(fa.endedAt >= fa.startedAt, 'an end time'); ok(fin.progress.compiled || true, 'the rest of the progress record is kept');

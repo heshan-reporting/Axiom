@@ -18,6 +18,7 @@
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
 const T = suite('studio-s23i-worker (render fingerprint, reference records and observations, promotion guard, gap report, identity audit)');
+const PNG2 = Buffer.from('89504e470d0a1a0a0000000d494844520000001000000010080200000090916836000000134944415478016360f8cfc0c0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000100000001008020000009091683600000013494441547801636060f8cfc0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'full-key' : k);
@@ -40,7 +41,7 @@ const curOf = a => a.versions.find(v => v.id === a.current);
 let TILE = null;
 
 await T.t('I-W1 the render fingerprint: typeface, crop, turn, opacity, paint order and the mark file\'s revision unvalidate the composition and drop its design approval; a caption change does not', async () => {
-  const wm = (await kitNow()).campaigns.find(c => c.id === 'hoof').wordmarks.find(x => x.variant === 'white');
+  const wm = (await kitNow()).campaigns.find(c => c.id === 'hoof').wordmarks.find(x => x.variant === 'white'); let wm2 = null;
   const base = { v: 5, format: '4:5', stage: { w: 1080, h: 1350 }, medium: 'editorial', approach: 'editable', bg: '#0E3A44', regions: [], layers: [
     { id: 'band', type: 'shape', role: 'device', shape: 'rect', x: 0, y: 70, w: 100, h: 30, fill: '#F2B705', opacity: 1 },
     { id: 'headline', type: 'text', role: 'headline', x: 8, y: 74, w: 84, h: 12, size: 6, weight: 800, color: '#111418' },
@@ -65,8 +66,10 @@ await T.t('I-W1 the render fingerprint: typeface, crop, turn, opacity, paint ord
     ['turn', (L) => { L.layers.find(l => l.id === 'band').rotate = 4; }],
     ['opacity', (L) => { L.layers.find(l => l.id === 'band').opacity = 0.6; }],
     ['paint order', (L) => { L.layers = [L.layers[1], L.layers[0], L.layers[2]]; }],
-    ['mark revision', (L) => { const m = L.layers.find(l => l.id === 'wordmark'); m.src = m.src.replace(/&v=.*/, '&v=' + (Number(wm.v) + 1)); }],
-  ]) { const r = await change(label, fn); ok(r.t !== 'passed', label + ': the old measurement does not stand (' + r.t + ')'); ok(!r.design, label + ': the design approval of the old tile does not stand'); }
+    // S24: a mark is drawn only from a file in storage, so the new revision is uploaded first (a revision that does not exist is refused)
+    ['mark revision', (L) => { const m = L.layers.find(l => l.id === 'wordmark'); m.src = m.src.replace(/&v=.*/, '&v=' + wm2.v); }],
+  ]) { if (label === 'mark revision') { await call('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkVariant: 'white', wordmarkTone: 'light', wordmarkB64: PNG2, wordmarkMime: 'image/png', wordmarkDefault: true }); wm2 = (await kitNow()).campaigns.find(c => c.id === 'hoof').wordmarks.find(x => x.variant === 'white'); ok(wm2.v !== wm.v, 'a new revision of the white wordmark: ' + wm.v + ' -> ' + wm2.v); }
+    const r = await change(label, fn); ok(r.t !== 'passed', label + ': the old measurement does not stand (' + r.t + ')'); ok(!r.design, label + ': the design approval of the old tile does not stand'); }
   const c = await change('caption', (L, copy) => { copy.caption = 'A second caption'; });
   eq([c.t, c.design], ['passed', true], 'a caption is not drawn: the measurement and the design approval stand');
 });

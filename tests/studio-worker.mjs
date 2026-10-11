@@ -161,7 +161,7 @@ await t('a runner that stopped leaves an expired lease; the cron claims and fini
   const cron = await mod.__studioCron(env); ok(cron.ran >= 1 && cron.done >= 1, JSON.stringify(cron));
   eq((await req('GET', '/studio/job?id=' + k.d.job.id)).d.job.state, 'done');
 });
-await t('retries are bounded and tell transient from invalid: 503 requeues up to three attempts then fails; 400 fails at once; cancel stops a queued job and notes an in-flight one', async () => {
+await t('retries are bounded and tell transient from invalid: 503 requeues (each attempt continuing the model chain) until the policy\'s requests are spent, then fails; 400 fails at once; cancel stops a queued job and says what was in flight', async () => {
   gemini = '503';
   const j = await req('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'x' }, idem: 'flaky' });
   let s = await req('POST', '/studio/job/step', { id: j.d.job.id }); eq(s.d.job.state, 'queued', 'after a 503: ' + s.d.job.error); eq(s.d.job.attempts, 1); ok(/will retry/.test(s.d.job.error), s.d.job.error);
@@ -174,7 +174,8 @@ await t('retries are bounded and tell transient from invalid: 503 requeues up to
   gemini = 'ok';
   const c = await req('POST', '/studio/job', { project: P, stage: 'echo', idem: 'cancel-me' }); const cc = await req('POST', '/studio/job/cancel', { id: c.d.job.id }); eq(cc.d.job.state, 'cancelled'); ok(/before it ran/.test(cc.d.job.error));
   const d = await req('POST', '/studio/job', { project: P, stage: 'echo', idem: 'cancel-running' }); db.prepare("UPDATE studio_jobs SET state='running', attempts=1, lease_until=? WHERE id=?").run(Date.now() + 60000, d.d.job.id);
-  const dc = await req('POST', '/studio/job/cancel', { id: d.d.job.id }); eq(dc.d.job.state, 'cancelled'); ok(/may still complete and cost/.test(dc.d.job.error));
+  // S24: the cancel says what it found in flight - here nothing had been sent, so nothing can still complete and cost
+  const dc = await req('POST', '/studio/job/cancel', { id: d.d.job.id }); eq(dc.d.job.state, 'cancelled'); ok(/no further request will start; nothing was in flight/.test(dc.d.job.error), dc.d.job.error); eq([dc.d.job.cancel.further, dc.d.job.cancel.inFlight], ['none', 0]);
   eq((await req('POST', '/studio/job/step', { id: d.d.job.id })).d.job.state, 'cancelled', 'a cancelled job is never run');
 });
 await t('legacy access: release packs and content sets list as read-only projects, open as project views, and originals are unchanged; import is explicit and idempotent', async () => {

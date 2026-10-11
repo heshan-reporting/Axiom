@@ -75,8 +75,14 @@ ok(rep.reserved.calls <= 30 && seen.claude - c1 <= rep.reserved.calls, 'the call
 ok(fs.existsSync(path.join(run.out, 'index.html')), 'the private page is written to --out');
 
 const g2 = seen.gemini, i2 = seen.inspect || 0; const held = await runPy(['--approve-calls', '40', '--approve-renders', '1', '--cases', 'hoof']);
-ok(seen.gemini === g2 && /cancelled: outside the approved budget|cannot cover/.test(held.so), 'a render the cap cannot cover at its worst case (3 attempts) is cancelled, never painted: ' + held.so.slice(-400));
-const fin = await runPy(['--approve-calls', '40', '--approve-renders', '2', '--reserve-attempts', '1', '--cases', 'hoof']);
+ok(seen.gemini === g2 && /cancelled: outside the approved budget|cannot cover/.test(held.so), 'a render the cap cannot cover at its worst case (the policy\'s image requests per job) is cancelled, never painted: ' + held.so.slice(-400));
+// S24: the reservation is the worker's published policy, and the worker holds the same cap as an allowance
+const pol = (await api('GET', '/studio/budget')).policy;
+ok(pol && pol.image && pol.image.requestsPerJob === 4 && pol.text.perLogicalCall === 3, 'the worker publishes its attempt policy: ' + JSON.stringify(pol && pol.image));
+const heldRep = JSON.parse(fs.readFileSync(path.join(held.out, 'smoke.json'), 'utf8'));
+ok(heldRep.reserved.allowance && heldRep.meta.allowance && heldRep.meta.allowance.calls.cap === 40 && heldRep.meta.allowance.images.cap === 1 && heldRep.meta.allowance.revoked, 'the run carried a server-side allowance with exactly the approved caps, withdrawn at the end: ' + JSON.stringify(heldRep.meta.allowance));
+ok(heldRep.meta.allowance.calls.used <= heldRep.reserved.calls, 'the worker spent no more than the tool reserved: ' + heldRep.meta.allowance.calls.used + ' of ' + heldRep.reserved.calls);
+const fin = await runPy(['--approve-calls', '40', '--approve-renders', '4', '--cases', 'hoof']);
 const fr = JSON.parse(fs.readFileSync(path.join(fin.out, 'smoke.json'), 'utf8')).cases[0].finishedResult || {};
 ok(seen.gemini - g2 === 1 && (seen.inspect || 0) > i2, 'the Full AI path painted one piece and read it back: ' + JSON.stringify(fr));
 ok(fr.painted === true && JSON.stringify(fr.marksSent) === '["wordmark"]', 'the HOOF wordmark file went with the request, never the MCA logo');

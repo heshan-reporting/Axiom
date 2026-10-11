@@ -61,7 +61,7 @@ const box = (rep, id) => rep.boxes.find(b => b.id === id);
 // the HOOF reconstruction with its headline really on three lines (as Chromium measured it in studio-layout-browser.mjs)
 const hoofTruth = rep => { const b = box(rep, 'headline'); b.lines = 3; b.contentH = 247; b.h = 247; b.overflowH = true; };
 // the repaired geometry (from the renderer's repair of the same reconstruction): boxes fitted, the column restacked
-const REPAIRED = JSON.parse(JSON.stringify(HOOF_REPRO));
+let REPAIRED = JSON.parse(JSON.stringify(HOOF_REPRO)); let HOOF_LAYOUT = HOOF_REPRO;
 Object.assign(REPAIRED.layers.find(l => l.id === 'kicker'), { y: 52.4 }); Object.assign(REPAIRED.layers.find(l => l.id === 'rule'), { y: 57.1 });
 Object.assign(REPAIRED.layers.find(l => l.id === 'headline'), { y: 58.4, h: 18.6 }); Object.assign(REPAIRED.layers.find(l => l.id === 'support'), { y: 78.8, h: 6.4 });
 Object.assign(REPAIRED.layers.find(l => l.id === 'cta'), { y: 87, h: 5.4 });
@@ -70,8 +70,12 @@ Object.assign(REPAIRED.layers.find(l => l.id === 'wordmark'), { src: '/brand/wor
 console.log('studio-p9-worker harness (validation re-judged by the worker, readiness, approval and export gates, inconsistent inspections, painted words, figure checks, wordmark variants, region-gone branch, zero-cost repair)');
 await req('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark' }, { id: 'national', name: 'Australian mining' }],
   facts: [{ text: 'The fuel excise is 50.8 cents per litre', source: 'ATO', status: 'approved', campaign: 'hoof' }, { text: 'Mining employs 290,000 Australians', source: 'ABS', status: 'approved', campaign: 'national' }, { text: 'Pending: 99,000 farms', source: 'draft', status: 'pending' }] });
+// S24: a mark is drawn only from a file the kit holds, so the reconstruction's wordmark variants are uploaded first and the
+// fixture's placeholder revisions (b1, w1, k1) are pointed at the revisions the kit actually wrote
+const vs = {}; { for (const [variant, tone, fill, tag] of [['blue', 'colour', 11, 'b1'], ['white', 'light', 12, 'w1'], ['black', 'dark', 13, 'k1']]) { const r = await req('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkVariant: variant, wordmarkTone: tone, wordmarkB64: png(fill), wordmarkMime: 'image/png', wordmarkDefault: variant === 'blue' }); if (r.status !== 200) throw new Error('seeding the ' + variant + ' wordmark: ' + JSON.stringify(r.d)); const k = (await req('GET', '/brand/kit?ns=mca')).d; const c = ((k.kit || k).campaigns || []).find(x => x.id === 'hoof'); vs[tag] = (c.wordmarks || []).find(w => w.variant === variant).v; }
+  const remap = L => JSON.parse(JSON.stringify(L).replace(/v=(b1|w1|k1)/g, (m, t) => 'v=' + vs[t])); HOOF_LAYOUT = remap(HOOF_REPRO); REPAIRED = remap(REPAIRED); }
 const P = (await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'HOOF readiness', brief: { objective: 'answer the subsidy framing', message: 'not a subsidy; costs farmers $9.6 billion', channels: ['instagram'] } })).d.id;
-const A = (await req('POST', '/studio/asset', { project: P, family: 'HOOF', channel: 'instagram', format: '4:5', title: 'HOOF tile', copy: HOOF_COPY, layout: HOOF_REPRO, mode: 'composition', image: { key: 'studio/fixture/photo.png', url: '/studio/file?key=studio/fixture/photo.png' } })).d.asset.id;
+const A = (await req('POST', '/studio/asset', { project: P, family: 'HOOF', channel: 'instagram', format: '4:5', title: 'HOOF tile', copy: HOOF_COPY, layout: HOOF_LAYOUT, mode: 'composition', image: { key: 'studio/fixture/photo.png', url: '/studio/file?key=studio/fixture/photo.png' } })).d.asset.id;
 r2.set('studio/fixture/photo.png', { v: Buffer.from(png(5), 'base64'), o: { httpMetadata: { contentType: 'image/png' } } });
 
 await t('a new composition is "not validated" until it is measured: the reason says so, design approval is refused with 409 and nothing is assumed to pass', async () => {
@@ -169,7 +173,7 @@ await t('export takes only compositions whose technical validation passes for ex
 });
 
 await t('artwork mode: painted words pass geometry but are not verified until an inspection of the composed tile reads every one back; a missing word keeps approval waiting', async () => {
-  const L = { v: 5, format: '1:1', stage: { w: 1080, h: 1080 }, approach: 'artwork', baked: ['headline', 'support'], regions: [], layers: [{ id: 'wordmark', type: 'img', role: 'wordmark', x: 72, y: 86, w: 24, h: 8, src: '/brand/wordmark?ns=mca&campaign=hoof' }] };
+  const L = { v: 5, format: '1:1', stage: { w: 1080, h: 1080 }, approach: 'artwork', baked: ['headline', 'support'], regions: [], layers: [{ id: 'wordmark', type: 'img', role: 'wordmark', x: 72, y: 86, w: 24, h: 8, src: '/brand/wordmark?ns=mca&campaign=hoof&variant=white&v=' + vs.w1 }] };
   const B = (await req('POST', '/studio/asset', { project: P, family: 'HOOF', channel: 'instagram', format: '1:1', title: 'Painted', copy: { headline: 'Hands off our fuel', support: 'Not a subsidy' }, layout: L, mode: 'artwork', image: { key: 'studio/fixture/photo.png' } })).d.asset.id;
   const r = await measure(P, B); eq(r.d.validation.ok, true, JSON.stringify(r.d.validation.issues)); ok(r.d.validation.issues.some(i => i.code === 'baked_text'), 'the painted words are named as outside geometry');
   const rd = await readiness(B); eq(rd.technical, 'passed'); eq(rd.baked.verified, false); eq(rd.production, false);

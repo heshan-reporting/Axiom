@@ -51,5 +51,14 @@ eq(think.streamText, 'thinking, 900 characters of reasoning so far', 'before the
 eq(Math.round(think.quiet), 25, 'and how long since the model last sent anything');
 eq(S.job({ id: 'a3', stage: 'analyse', state: 'running', created: now, attempts: 1, progress: { activity: { phase: 'knowledge', thinking: 50, written: 9 } } }, now).streaming, false, 'counts left from a model call do not show in a later phase');
 eq(S.job(Object.assign({}, reading, { state: 'done' }), now).streaming, false, 'a finished job is not streaming');
+// S24: a render names the request in flight against its policy, and a finished one says what it sent and what never answered
+const req2 = S.job({ id: 'q1', stage: 'render', state: 'running', created: now - 9000, attempts: 1, caps: { image: 4 }, requests: [{ n: 1, kind: 'image', model: 'gemini-3-pro-image', outcome: 'http_404' }], progress: { activity: { phase: 'generating', label: 'request 2 of 4 to the image model (gemini-3.1-flash-image, a fallback)', request: 2, of: 4, model: 'gemini-3.1-flash-image', fallback: true, startedAt: now - 9000, at: now - 1000 } } }, now);
+eq(req2.requestText, 'request 2 of 4 to gemini-3.1-flash-image (a fallback model)', 'the request in flight, its model and that it is a fallback');
+eq(req2.percent, null, 'and still no share invented for an image call');
+const sent = S.job({ id: 'q2', stage: 'render', state: 'failed', created: now - 9000, attempts: 2, caps: { image: 4 }, requests: [{ outcome: 'http_503' }, { outcome: 'unknown' }, { outcome: 'http_503' }, { outcome: 'http_503' }] }, now);
+eq(sent.requestText, '4 requests sent of the 4 the policy allows; 1 with no answer (may still have been processed and billed)', 'what a finished render sent, against its cap, and what is unknown');
+const can = S.job({ id: 'q3', stage: 'render', state: 'cancelled', created: now - 9000, cancel: { requested: now - 100, by: 'Hesh', further: 'none', inFlight: 1, models: ['gemini-3-pro-image'], wasRunning: true } }, now);
+eq(can.cancelText, 'Cancel requested by Hesh. No further request will start. 1 request already sent could not be recalled (gemini-3-pro-image): it may still complete and be billed; nothing from it is filed.', 'a cancel said as its three facts');
+eq(S.job({ id: 'q4', stage: 'copy', state: 'cancelled', created: now, cancel: { requested: now, further: 'none', inFlight: 0, wasRunning: false } }, now).cancelText, 'Cancel requested. No further request will start. Nothing had been sent.', 'a cancel before anything was sent says so');
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

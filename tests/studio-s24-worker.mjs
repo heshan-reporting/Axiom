@@ -283,6 +283,15 @@ await T.t('04b a person\'s correction of where the mark sits outranks the vision
   ok(!/bottom right/.test(line) || /superseded/i.test(line), 'the vision pass\'s corner is not presented as current: ' + line.slice(0, 400));
 });
 
+await T.t('04c placement evidence speaks for the format being made: a story-format reference outweighs a square one for a story tile, and the other way round', async () => {
+  const an = c => ({ summary: 's', logo: 'x', mark: { present: true, kind: 'logo', corner: c } });
+  const rows = [{ id: 'rs', name: 'Story tile', purpose: 'approved', analysis: an('tl'), meta: { format: '9:16', approval: { state: 'approved' } } }, { id: 'rq', name: 'Square tile', purpose: 'approved', analysis: an('br'), meta: { format: '1:1', approval: { state: 'approved' } } }];
+  const pe = w.mod.__test.stPlacementEvidence;
+  eq(pe(rows, {}, '', { format: '9:16' }).corner, 'tl', 'for a story, the story reference');
+  eq(pe(rows, {}, '', { format: '1:1' }).corner, 'br', 'for a square, the square reference');
+  ok(pe(rows, {}, '', { format: '9:16' }).evidence.find(e => e.ref === 'rs').sameFormat, 'the evidence says which row matched the format');
+});
+
 // ------------------------------------------------------------------------------------------------ S24-05 observation lifecycle
 const fixesFor = async (ns, campaign) => (await w.env.MIND_DB.prepare("SELECT id, rule, active, source, why FROM engine_fixes WHERE ns=? AND source LIKE ? ORDER BY created").bind(ns, '%:campaign:' + campaign).all()).results || [];
 await T.t('05a retire, restore, correct and promote again cannot leave two active rules: each step that touches a rule asks, and supersession is explicit with its provenance', async () => {

@@ -37,9 +37,17 @@
     const streaming = running && a.phase === 'model' && (thinking > 0 || written > 0 || Number(a.streamAt) > 0);
     const streamText = !streaming ? '' : written ? thou(written) + ' characters of the answer written' : thinking ? 'thinking, ' + thou(thinking) + ' characters of reasoning so far' : 'the model has started';
     const quiet = streaming && Number(a.streamAt) > 0 ? Math.max(0, (now - Number(a.streamAt)) / 1000) : 0;
+    // S24: what the job has sent, from the worker's own record of each request (an image job counts against its policy cap), and a
+    // cancel said as its three facts: asked for; no further request will start; what was already sent and cannot be recalled
+    const reqs = Array.isArray(j.requests) ? j.requests : []; const capImg = j.caps && j.caps.image ? j.caps.image : 0;
+    const unknown = reqs.filter(r => r.outcome === 'unknown' || r.outcome === 'abandoned').length;
+    const requestText = running && a.request ? 'request ' + a.request + (a.of ? ' of ' + a.of : '') + (a.model ? ' to ' + a.model : '') + (a.fallback ? ' (a fallback model)' : '') + (a.retry ? ', trying again' : '')
+      : reqs.length ? reqs.length + ' request' + (reqs.length === 1 ? '' : 's') + ' sent' + (capImg && j.stage === 'render' ? ' of the ' + capImg + ' the policy allows' : '') + (unknown ? '; ' + unknown + ' with no answer (may still have been processed and billed)' : '') : '';
+    const c = j.cancel || null;
+    const cancelText = j.state === 'cancelled' && c ? 'Cancel requested' + (c.by ? ' by ' + c.by : '') + '. No further request will start.' + (c.inFlight ? ' ' + c.inFlight + ' request' + (c.inFlight === 1 ? '' : 's') + ' already sent could not be recalled' + (c.models && c.models.length ? ' (' + c.models.join(', ') + ')' : '') + ': it may still complete and be billed; nothing from it is filed.' : c.wasRunning ? ' Nothing was in flight.' : ' Nothing had been sent.') : '';
     return { title: names[j.stage] || j.stage || 'Job', label, phaseText, phase: a.phase || (running ? 'working' : j.state), running, queued, terminal, completed, total, percent: pct,
       elapsed, time: fmt(elapsed), typical: running || queued ? typical(dur) : '', lastAt, attempt: Math.max(1, (Number(j.attempts) || 0) + (running ? 0 : 0)),
-      slow: running && now - lastAt > 90000, model: a.model || '', streaming, thinking, written, streamText, quiet };
+      slow: running && now - lastAt > 90000, model: a.model || '', streaming, thinking, written, streamText, quiet, requestText, cancelText, requests: reqs.length, unknown };
   }
   /** The jobs worth showing: a failure that has a live or finished retry is history, not a second thing to act on. */
   function jobsForDisplay(jobs) {

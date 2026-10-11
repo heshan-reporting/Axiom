@@ -163,6 +163,10 @@ await T.t('H-W9 a mark placed by hand must be one the campaign policy carries, f
   const pic = Object.assign({}, other, { src: '/studio/file?key=studio%2Fx%2Fuploads%2Fa.png' });
   const r4 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(pic), note: 'a picture called a wordmark' });
   eq([r4.status, r4.body.error], [409, 'mark_policy']); ok(/from its file in the brand kit/.test(r4.body.detail), r4.body.detail);
+  // S24: the mark must be a file the kit holds: the HOOF wordmark is uploaded, then placed
+  await call('POST', '/brand/kit', { ns: 'mca', wordmarkB64: png, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
+  const missing = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(Object.assign({}, other, { src: '/brand/wordmark?ns=mca&campaign=hoof&variant=blue' })), note: 'a variant never uploaded' });
+  eq([missing.status, missing.body.error], [409, 'mark_policy'], 'a variant the kit does not hold is refused: ' + JSON.stringify(missing.body).slice(0, 160));
   const good = Object.assign({}, other, { src: '/brand/wordmark?ns=mca&campaign=hoof' });
   const r5 = await call('POST', '/studio/version', { asset: A1, project: P, layout: withMark(good), note: 'the HOOF wordmark' });
   eq(r5.status, 200, JSON.stringify(r5.body).slice(0, 200));

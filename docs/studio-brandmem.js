@@ -77,17 +77,19 @@
     const [edit, setEdit] = useState(null); const [text, setText] = useState(''); const [why, setWhy] = useState('');
     const [adding, setAdding] = useState(false); const [add, setAdd] = useState({ area: 'url', text: '', authority: 'observed', why: '' });
     const [teach, setTeach] = useState(null); const [showOld, setShowOld] = useState(false);
-    useEffect(() => { setEdit(null); setTeach(null); }, [r.id]);
+    // S24: an observation that is a rule's evidence asks before it changes: the server answers with the choices, shown here
+    const [choice, setChoice] = useState(null);
+    useEffect(() => { setEdit(null); setTeach(null); setChoice(null); }, [r.id]);
     const camp = (campaigns || []).find(c => c.id === r.campaign);
     const active = obs.filter(o => o.status === 'active'), promoted = obs.filter(o => o.status === 'promoted'), retired = obs.filter(o => o.status === 'retired');
-    const act = async (o, body) => { const ok = await onObs(r.id, Object.assign({ obs: o ? o.id : undefined }, body)); if (ok) { setEdit(null); setText(''); setWhy(''); } return ok; };
+    const act = async (o, body) => { const ok = await onObs(r.id, Object.assign({ obs: o ? o.id : undefined }, body)); if (ok && ok.choice) { setChoice({ o, body, c: ok.choice, why: body.why || '' }); return false; } if (ok) { setEdit(null); setText(''); setWhy(''); setChoice(null); } return ok; };
     const ask = (q, d) => { const v = window.prompt(q, d || ''); return v == null ? null : v.trim(); };
     const startTeach = async o => {
       if (!r.campaign) { setTeach({ o, error: 'This reference carries no campaign of its own: set its campaign in the record first, so the rule is taught to the right identity.' }); return; }
       const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: o.id } } });
       setTeach(Object.assign({ o, resolve: '', reason: '' }, res));
     };
-    const confirmTeach = async () => { const t = teach; if (!t.reason || t.reason.length < 4) return; const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: t.o.id }, resolve: t.resolve || undefined }, confirm: true, reason: t.reason }); if (res && res.written) setTeach(null); else setTeach(Object.assign({}, t, res)); };
+    const confirmTeach = async () => { const t = teach; if (!t.reason || t.reason.length < 4) return; const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: t.o.id }, resolve: t.resolve || undefined, supersede: t.supersede || undefined, keepBoth: t.keepBoth || undefined }, confirm: true, reason: t.reason }); if (res && (res.written || res.existing)) setTeach(null); else setTeach(Object.assign({}, t, res)); };
     const row = o => html`<li key=${o.id} class=${'st-obs st-obs-' + o.status}>
       <span class="st-obs-area">${AREA_WORD[o.area] || o.area}</span>
       <span class="st-obs-text">${edit === o.id ? html`<input class="st-in" value=${text} onInput=${e => setText(e.target.value)} aria-label=${'Correct the ' + (AREA_WORD[o.area] || o.area).toLowerCase() + ' observation'} />` : o.text}
@@ -102,6 +104,10 @@
           ${o.authority === 'inferred' ? html` <button class="ov-link" disabled=${!!busy} title="Confirm what the vision pass concluded: it becomes an observation, and may then be taught as a rule" onClick=${() => { const w = ask('Who confirmed it, and where? (an inference is confirmed only with a reason)'); if (w) act(o, { action: 'authority', authority: 'observed', why: w }); }}>confirm</button>` : null}
           <button class="ov-link" disabled=${!!busy} onClick=${() => { const w = ask('Why is it set aside? (kept, and restorable)'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>
           ${r.purpose === 'approved' || r.purpose === 'brand' ? html` <button class="ov-link" disabled=${!!busy} title="Teach it as a standing rule of this reference's campaign: a preview first, then your reason" onClick=${() => startTeach(o)}>make it a rule</button>` : null}`)
+        : o.status === 'promoted' ? (edit === o.id
+          ? html`<button class="ov-link" disabled=${!!busy || !text.trim() || !why.trim()} title="Replaces the rule: the corrected wording becomes the rule; the old one is switched off and kept" onClick=${() => act(o, { action: 'correct', text: text.trim(), why: why.trim(), rule: 'supersede' })}>replace the rule</button> <button class="ov-link" onClick=${() => setEdit(null)}>cancel</button>`
+          : html`<button class="ov-link" title="This is a rule's evidence: correcting it replaces the rule (you will be asked why)" onClick=${() => { setEdit(o.id); setText(o.text); setWhy(''); }}>correct</button>
+            <button class="ov-link" disabled=${!!busy} onClick=${() => { const w = ask('Why is it set aside? You will then choose what happens to its rule.'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>`)
         : o.status === 'retired' ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => act(o, { action: 'restore' })}>restore</button>` : null}</span>`}
     </li>`;
     return html`<div class="st-obs-wrap" aria-label=${'Observations on ' + r.name}>
@@ -109,13 +115,21 @@
       ${active.length ? html`<ul class="st-obs-list">${active.map(row)}</ul>` : html`<div class="ov-dim">${obs.length ? 'None active.' : 'None yet: they come from the vision pass (Analyse) or from the team.'}</div>`}
       ${promoted.length ? html`<ul class="st-obs-list">${promoted.map(row)}</ul>` : null}
       ${retired.length ? html`<button class="st-tools-toggle" aria-expanded=${showOld} onClick=${() => setShowOld(!showOld)}><span class="st-lbl">Set aside (${retired.length})</span><span aria-hidden="true">${showOld ? '-' : '+'}</span></button>${showOld ? html`<ul class="st-obs-list">${retired.map(row)}</ul>` : null}` : null}
+      ${choice ? html`<div class="st-obs-teach" role="group" aria-label="What happens to the rule">
+        <div class="st-err st-warn" role="alert">${choice.c.detail}</div>
+        <input class="st-in" value=${choice.why} onInput=${e => setChoice(Object.assign({}, choice, { why: e.target.value }))} placeholder="Why (who confirmed it, where)" aria-label="Why" />
+        <div class="st-nd-row">${(choice.c.options || []).map(op => html`<button key=${op.rule} class="btn sm" disabled=${!!busy || !choice.why.trim()} title=${op.what} onClick=${() => act(choice.o, Object.assign({}, choice.body, { rule: op.rule, why: choice.why.trim() }))}>${op.rule === 'keep' ? 'Keep the rule' : op.rule === 'retire' ? 'Retire the rule too' : 'Replace the rule'}</button>`)}<button class="btn sm ghost" onClick=${() => setChoice(null)}>Cancel</button></div>
+        <ul class="st-ul ov-dim">${(choice.c.options || []).map(op => html`<li key=${op.rule}>${op.what}</li>`)}</ul>
+      </div>` : null}
       ${teach ? html`<div class="st-obs-teach" role="group" aria-label="Teach it as a rule">
-        ${teach.error && !teach.preview ? html`<div class=${'st-err' + (teach.code === 'ambiguous' ? ' st-warn' : '')} role="alert">${teach.error}</div>` : null}
+        ${teach.existing ? html`<div class="ov-dim" role="status">${teach.note || 'This observation already stands as a rule; nothing new was written.'}</div>` : null}
+        ${teach.error && !teach.preview ? html`<div class=${'st-err' + (teach.code === 'ambiguous' || teach.code === 'rule_exists' ? ' st-warn' : '')} role="alert">${teach.error}</div>` : null}
+        ${teach.code === 'rule_exists' && (teach.rules || []).length ? html`<div class="st-seg" role="radiogroup" aria-label="An active rule says otherwise">${teach.rules.map(x => html`<button key=${x.id} role="radio" aria-checked=${teach.supersede === x.id} class=${'st-segbtn' + (teach.supersede === x.id ? ' on' : '')} onClick=${() => setTeach(Object.assign({}, teach, { supersede: x.id, keepBoth: false }))}>Replace "${x.rule}"</button>`)}<button role="radio" aria-checked=${!!teach.keepBoth} class=${'st-segbtn' + (teach.keepBoth ? ' on' : '')} onClick=${() => setTeach(Object.assign({}, teach, { keepBoth: true, supersede: '' }))}>Keep both (stays named as a contradiction)</button></div>` : null}
         ${(teach.others || []).length ? html`<div><b>Other ${camp ? camp.name : ''} references say something different:</b><ul class="st-ul">${teach.others.map(x => html`<li key=${x.obs}>${x.name}: "${x.text}" <span class="ov-dim">(${x.authority})</span></li>`)}</ul>
           <div class="st-seg" role="radiogroup" aria-label="Resolve the disagreement"><button role="radio" aria-checked=${teach.resolve === 'this'} class=${'st-segbtn' + (teach.resolve === 'this' ? ' on' : '')} onClick=${() => setTeach(Object.assign({}, teach, { resolve: 'this' }))}>This one takes precedence</button><button role="radio" aria-checked=${teach.resolve === 'both'} class=${'st-segbtn' + (teach.resolve === 'both' ? ' on' : '')} onClick=${() => setTeach(Object.assign({}, teach, { resolve: 'both' }))}>They do not conflict</button></div></div>` : null}
         ${teach.preview ? html`<div class="st-obs-prev"><div><b>Rule</b> ${teach.preview.fix.rule}</div><div class="ov-dim">${(teach.preview.writes || []).join('; ')}. ${teach.preview.note || ''}</div></div>` : null}
         ${teach.preview || (teach.others || []).length ? html`<div class="st-nd-row"><input class="st-in" value=${teach.reason || ''} onInput=${e => setTeach(Object.assign({}, teach, { reason: e.target.value }))} placeholder="Why it is a rule: who confirmed it, from what" aria-label="Why it is taught" />
-          <button class="btn sm" disabled=${!!busy || !(teach.reason || '').trim() || ((teach.others || []).length && !teach.resolve)} onClick=${teach.preview ? confirmTeach : async () => { const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: teach.o.id }, resolve: teach.resolve } }); setTeach(Object.assign({}, teach, res)); }}>${teach.preview ? 'Teach the rule' : 'Preview'}</button></div>` : null}
+          <button class="btn sm" disabled=${!!busy || !(teach.reason || '').trim() || ((teach.others || []).length && !teach.resolve)} onClick=${teach.preview ? confirmTeach : async () => { const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: teach.o.id }, resolve: teach.resolve } }); setTeach(Object.assign({}, teach, res)); }}>${teach.preview ? 'Teach the rule' : 'Preview'}</button></div>` : teach.code === 'rule_exists' ? html`<div class="st-nd-row"><input class="st-in" value=${teach.reason || ''} onInput=${e => setTeach(Object.assign({}, teach, { reason: e.target.value }))} placeholder="Why (who confirmed it, from what)" aria-label="Why it is taught" /><button class="btn sm" disabled=${!!busy || !(teach.reason || '').trim() || !(teach.supersede || teach.keepBoth)} onClick=${confirmTeach}>Teach the rule</button></div>` : null}
         <button class="ov-link" onClick=${() => setTeach(null)}>close</button>
       </div>` : null}
       ${ro ? null : adding ? html`<div class="st-obs-add" role="group" aria-label="Add an observation">
