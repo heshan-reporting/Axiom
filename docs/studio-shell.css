@@ -680,3 +680,11 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvasbar .st-cropbar-t .ov-dim{display:none}
 /* while reframing (a mode that ends with Apply or Cancel) the Design views step aside, so the bar keeps one row */
 #studio-root .st .st-canvasbar:has(.st-cropbar) .st-designtabs{display:none}
+/* the page strip stays where it is when the foot beside it grows (a save line appears as an edit commits): a press that
+   began on a page chip ends on it, so the click is never lost to a shift */
+#studio-root .st .st-canvas-sub{align-items:flex-start}
+/* the measurement takes a line of its own and the save line keeps the same height clean or dirty (the help button is on it in
+   both states), so committing an edit does not change the foot's height or move the page strip under the pointer */
+#studio-root .st .st-le-foot .st-le-val{flex:1 1 100%}
+#studio-root .st .st-le-foot{row-gap:4px;align-items:center}
+#studio-root .st .st-le-foot > .btn, #studio-root .st .st-le-foot > .st-iconbtn{min-height:28px;height:28px}

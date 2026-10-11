@@ -53,7 +53,8 @@ eq(S.job({ id: 'a3', stage: 'analyse', state: 'running', created: now, attempts:
 eq(S.job(Object.assign({}, reading, { state: 'done' }), now).streaming, false, 'a finished job is not streaming');
 // S24: a render names the request in flight against its policy, and a finished one says what it sent and what never answered
 const req2 = S.job({ id: 'q1', stage: 'render', state: 'running', created: now - 9000, attempts: 1, caps: { image: 4 }, requests: [{ n: 1, kind: 'image', model: 'gemini-3-pro-image', outcome: 'http_404' }], progress: { activity: { phase: 'generating', label: 'request 2 of 4 to the image model (gemini-3.1-flash-image, a fallback)', request: 2, of: 4, model: 'gemini-3.1-flash-image', fallback: true, startedAt: now - 9000, at: now - 1000 } } }, now);
-eq(req2.requestText, 'request 2 of 4 to gemini-3.1-flash-image (a fallback model)', 'the request in flight, its model and that it is a fallback');
+eq(req2.requestText, 'request 2 of 4 to the image model (a fallback model)', 'the request in flight and that it is a fallback (S24: the model id stays in the record, out of the working view)');
+eq(req2.model, 'gemini-3.1-flash-image', 'the model is still in the record');
 eq(req2.percent, null, 'and still no share invented for an image call');
 const sent = S.job({ id: 'q2', stage: 'render', state: 'failed', created: now - 9000, attempts: 2, caps: { image: 4 }, requests: [{ outcome: 'http_503' }, { outcome: 'unknown' }, { outcome: 'http_503' }, { outcome: 'http_503' }] }, now);
 eq(sent.requestText, '4 requests sent of the 4 the policy allows; 1 with no answer (may still have been processed and billed)', 'what a finished render sent, against its cap, and what is unknown');

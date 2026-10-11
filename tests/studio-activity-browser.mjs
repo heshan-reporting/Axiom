@@ -23,7 +23,7 @@ await T.t('a slow image generation is visible while it runs: the panel is live, 
   await page.waitForSelector(R + '.st-workspace-activity.live', { timeout: 20000 });
   // S19: in Design the activity is one line over the canvas (the phase, the time, Cancel); details open the panel
   const NOW = '#studio-root .st-work-now, #studio-root .st-work-line';
-  await page.waitForFunction(sel => /image model is making the background image at 1K/.test((document.querySelector(sel) || {}).textContent || ''), NOW, { timeout: 15000 });
+  await page.waitForFunction(sel => /image model is making the background image at 1K/.test((document.querySelector(sel) || {}).textContent || ''), NOW, { timeout: 15000 }).catch(async () => { throw new Error('the line never named the image work: ' + String(await page.textContent(NOW).catch(() => '(none)')).replace(/\s+/g, ' ').slice(0, 300) + ' | jobs ' + JSON.stringify(((await api('GET', '/studio/get?id=' + P)).jobs || []).map(j => [j.stage, j.state, j.attempts, String(j.error || '').slice(0, 200), ((j.progress || {}).activity || {}).label]))); });
   const now = await page.textContent(NOW); ok(/image model is making/.test(now) && /\d+ s/.test(now), 'the summary says what runs and for how long: ' + now);
   const line = await page.$(R + '.st-work-line'); if (line) { const h = await line.evaluate(el => el.getBoundingClientRect().height); ok(h <= 40, 'the compact line is one thin line over the canvas: ' + h + 'px'); ok(await page.$(R + '.st-work-line button:has-text("Cancel")'), 'Cancel is on the line'); }
   ok(/1 running/.test(await page.textContent(R + '.st-activity.on')), 'the header chip counts it');

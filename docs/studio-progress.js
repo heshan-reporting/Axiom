@@ -41,7 +41,7 @@
     // cancel said as its three facts: asked for; no further request will start; what was already sent and cannot be recalled
     const reqs = Array.isArray(j.requests) ? j.requests : []; const capImg = j.caps && j.caps.image ? j.caps.image : 0;
     const unknown = reqs.filter(r => r.outcome === 'unknown' || r.outcome === 'abandoned').length;
-    const requestText = running && a.request ? 'request ' + a.request + (a.of ? ' of ' + a.of : '') + (a.model ? ' to ' + a.model : '') + (a.fallback ? ' (a fallback model)' : '') + (a.retry ? ', trying again' : '')
+    const requestText = running && a.request ? 'request ' + a.request + (a.of ? ' of ' + a.of : '') + ' to the image model' + (a.fallback ? ' (a fallback model)' : '') + (a.retry ? ', trying again' : '')
       : reqs.length ? reqs.length + ' request' + (reqs.length === 1 ? '' : 's') + ' sent' + (capImg && j.stage === 'render' ? ' of the ' + capImg + ' the policy allows' : '') + (unknown ? '; ' + unknown + ' with no answer (may still have been processed and billed)' : '') : '';
     const c = j.cancel || null;
     const cancelText = j.state === 'cancelled' && c ? 'Cancel requested' + (c.by ? ' by ' + c.by : '') + '. No further request will start.' + (c.inFlight ? ' ' + c.inFlight + ' request' + (c.inFlight === 1 ? '' : 's') + ' already sent could not be recalled' + (c.models && c.models.length ? ' (' + c.models.join(', ') + ')' : '') + ': it may still complete and be billed; nothing from it is filed.' : c.wasRunning ? ' Nothing was in flight.' : ' Nothing had been sent.') : '';

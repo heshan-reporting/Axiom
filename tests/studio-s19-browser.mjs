@@ -138,7 +138,7 @@ await T.t('C2. switching asset in the middle of typing on the canvas keeps the w
   const [A, B] = await assets(PD);
   await typeHeadline('Words still being typed', true);
   await page.click(R + '.st-pagechip:has-text("' + B.title + '")');
-  await page.waitForFunction(t => (document.querySelector('#studio-root .st-asset-title') || {}).textContent === t, B.title, { timeout: 10000 });
+  await page.waitForFunction(t => (document.querySelector('#studio-root .st-asset-title') || {}).textContent === t, B.title, { timeout: 10000 }).catch(async e => { await page.screenshot({ path: 'tests/shots/fail-s19-c2.png' }).catch(() => {}); throw new Error('the asset did not switch: title ' + JSON.stringify(await page.evaluate(() => Array.from(document.querySelectorAll('#studio-root .st-asset-title')).map(x => x.textContent))) + ', active ' + await page.evaluate(() => document.activeElement && document.activeElement.className)); });
   await sleep(1500);
   const d = await draftOf(A.id); ok(d && d.copy && d.copy.headline === 'Words still being typed', 'the open text edit reached the recovery draft: ' + JSON.stringify(d && d.copy));
   await page.click(R + '.st-pagechip:has-text("' + A.title + '")');
