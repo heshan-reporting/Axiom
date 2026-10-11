@@ -2857,7 +2857,7 @@ Written at the start of S24; the last column is the state at the end of S24 (bui
 | S24-04 | Purpose separate from approval; rejected is "avoid"; precedence rules > confirmed corrections > preferences > observations > inferences; the original analysis kept as superseded; one resolved record for prompts, image references, placement, readiness and the UI; format-specific placement | missing | **implemented and proven** | 04a, 04b, 04c |
 | S24-05 | Durable observation-to-rule links; retiring evidence vs the rule; explicit supersede with provenance; idempotent promotion; contradictions detected, never deleted; concurrent edits safe | partial (S23-I) | **implemented and proven** | 05a-05c |
 | S24-06 | Canonical mark identities (origin, path, client, campaign, variant, revision, file) on create, edit, duplicate, restore, import and AI plans; invalid legacy marks explained | partial (S23-H) | **implemented and proven** | 06, 06b |
-| UI | One Design toolbar row, one zoom control; no truncation without a way to read it; no model ids or "fallback fonts" in working views; no layer ids or saliency jargon in readiness; stage heads say whether AI runs; Checks names measured / AI opinion / person; phone Copy opens on the words; Creative Director target line, real scores, inspected version, ship is not approval | partial (S18-S23) | **implemented and proven** for the items listed; Creative Director items were already in place (S18-S23) and are kept | `studio-s24-browser.mjs` U1-U9; matched captures `tests/shots/s24/` |
+| UI | One Design toolbar row, one zoom control; no truncation without a way to read it; no model ids or "fallback fonts" in working views; no layer ids or saliency jargon in readiness; stage heads say whether AI runs; Checks names measured / AI opinion / person; phone Copy opens on the words; Creative Director target line, real scores, inspected version, ship is not approval | partial (S18-S23) | **implemented and proven** for the items listed (one row from a 926 px canvas column up, with a selection and the main action; under 780 px the bar wraps by design); Creative Director items were already in place (S18-S23) and are kept | `studio-s24-browser.mjs` U1-U10; matched captures `tests/shots/s24/` |
 | Gen | Repair measured after fonts and images settle, never success by the repair's return value; image lifecycle states told apart | partial (S19, S23-I) | **implemented and proven** for repair (D1, D2); the lifecycle states are S19's `imageryState` (queued, generating, failed with the last usable kept, on file and loading, did not load, hidden, none by choice, drawn), unchanged | D1, D2 |
 | Ops | Long requests that are not jobs (brief-field suggestions, artwork description, reference analysis from the inventory, link reading) acknowledged at once, elapsed, n of N where countable, Cancel that says what it cannot stop, a dropped connection reported; the closed-tab window stated | partial (S23-F covered jobs) | **implemented and proven** | O1, O2 |
 | QA | Page-error guard over every S24 journey; Chromium / Firefox / WebKit; axe; performance | partial (S23-J) | **implemented and proven** for the guard (G1, attached before navigation), axe and performance (re-run, 47.8) and the core journey in all three engines (CI: Chromium, Firefox 142, WebKit 26); **partial** in that the S24 journeys themselves run in Chromium only | G1, 47.8 |
@@ -2980,11 +2980,21 @@ the guard, and a 404 from `/brief/daily` that the page handles raced the guard (
 the guards before navigation; the expected faults are named by route (the CDN fonts, `/trends` and `/gdelt` 502 in the
 sandbox, `/brief/daily` 404 before a brief exists), everything else fails the case.
 
+**R5 The one toolbar row wrapped once a layer was selected, and the colour swatch was squeezed.** *Symptom*: the after
+captures showed the Design bar on two lines at 1440 x 900 (inspector open) and at 1024 x 768 as soon as a layer was selected,
+and the floating text toolbar's colour swatch drawn as a sliver. *Reproduction*: U10 in `studio-s24-browser.mjs` (2 rows, 72
+px at 1440, then at 1024). U1 had passed because its fixture turns the inspection stage off (`STUDIO_INSPECT=0`), where Design
+shows no main action; with it on, "Continue to Review" (128 px) is in the bar too, and a selection adds Arrange: about 1,021 px
+of controls in a 982 px column. The swatch had no `flex-shrink: 0` and gave way once the font button stopped shrinking (U4).
+*Fix*: in a canvas column under 1120 px, Arrange and View show their icons (the names stay in the markup for screen readers and
+in the tooltips); under 1000 px Add does too, the zoom select narrows and the gaps close; nothing in the floating bar shrinks
+(it scrolls when it must). *Limits*: under 780 px the bar wraps by design (phone and narrow tablet).
+
 ### 47.4 Evidence
 
 - Worker reproductions: `tests/studio-s24-worker.mjs` **0 of 18 on `2e382a7`**, **19 of 19 now** (04c added after slice 1).
 - Browser: `tests/studio-s24-browser.mjs` **1 of 14 on `2e382a7`** (only G1, the error guard, passed; log in
-  `evidence/s24/logs/`), **14 of 14 now** (U1-U9, D1-D2, O1-O2, G1).
+  `evidence/s24/logs/`), **15 of 15 now** (U1-U10, D1-D2, O1-O2, G1; U10 was added after the after captures found R5).
 - Matched captures: `tests/studio-s24-shots.mjs before|after` at 1440, 1920, 1024, 834 and 390 (and light at 1440), written
   to the ignored `tests/shots/s24/`; the private package `evidence/s24/index.html` puts them side by side.
 - Full suite figures, accessibility and performance: 47.8 (filled from the final run).

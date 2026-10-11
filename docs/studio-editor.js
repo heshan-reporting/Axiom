@@ -148,7 +148,7 @@
     const icons = Object.keys((R && R.ICONS) || {});
     const add = (k, o) => { onAdd(k, o); setOpen(''); };
     return html`<span class="st-addmenu" ref=${ref}>
-      <button class=${'btn sm' + (open ? ' on' : ' ghost')} aria-expanded=${!!open} aria-haspopup="menu" onClick=${() => setOpen(open ? '' : 'main')}><${Icon} n="plus" size=${14} /> Add</button>
+      <button class=${'btn sm' + (open ? ' on' : ' ghost')} aria-expanded=${!!open} aria-haspopup="menu" title="Add text, a shape, an icon or an image" onClick=${() => setOpen(open ? '' : 'main')}><${Icon} n="plus" size=${14} /><span class="st-cb-lbl">Add</span></button>
       <input ref=${file} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label="Image to place" onChange=${e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) onImage(f); setOpen(''); }} />
       ${open === 'main' ? html`<div class="st-addmenu-pop" role="menu">
         <div class="st-addmenu-h">Text</div>

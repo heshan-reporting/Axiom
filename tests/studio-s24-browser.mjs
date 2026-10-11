@@ -224,5 +224,27 @@ await T.t('O2. a long request that loses its connection is reported as dropped (
 });
 
 await close();
+// U10: the cases above run with the inspection stage off (STUDIO_INSPECT=0), where Design shows no main action; with it on (as a
+// person sees it) the bar also carries "Continue to Review" - the after captures showed that bar wrapping to a second line at
+// 1440 once a layer was selected, and the floating toolbar's colour swatch squeezed to a sliver beside the font button
+const fx2 = await makeStudio({ port: (Number(process.env.S24_PORT) || 8896) + 7 });
+await seedStages(fx2, { only: ['design'], prefix: 'S24 W' });
+await T.t('U10. with the main action in the bar, a selection still leaves one row at 1440 and 1024, and the floating toolbar keeps its colour swatch round', async () => {
+  for (const sz of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+    page = await fx2.open({ viewport: sz, quiet: true, onPage: pg => { pg.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text() + ' [' + ((m.location() || {}).url || '') + ']'); }); } }); page.on('dialog', d => d.accept());
+    const row = R + '.st-lib tbody tr:has-text("S24 W at design"), ' + R + '.st-libcard:has-text("S24 W at design")';
+    await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
+    await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+    const asset = page.locator(R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
+    await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(900);
+    if (sz.width === 1440) ok(await page.isVisible(R + '.st-canvasbar .st-primary'), 'the main action is in the bar (inspection on)');
+    await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await sleep(400);
+    const m = await bar(); ok(m.rows === 1 && m.h <= 48, 'one row with the main action and a selection at ' + sz.width + ' (' + m.rows + ' rows, ' + m.h + 'px): ' + m.names.join(' | ')); eq(m.out, [], 'nothing past the bar at ' + sz.width);
+    ok(await page.isVisible(R + '.st-le-arrange > summary') && /Arrange/.test(await page.getAttribute(R + '.st-le-arrange > summary', 'title') + await page.textContent(R + '.st-le-arrange > summary')), 'Arrange keeps its name (title and text for a screen reader) when shown as an icon');
+    const sw = await page.$eval(R + '.st-fbar-swatch', e => { const q = e.getBoundingClientRect(); return { w: Math.round(q.width), h: Math.round(q.height) }; });
+    ok(sw.w >= 18 && Math.abs(sw.w - sw.h) <= 2, 'the text colour swatch is a round 22px control, not a sliver: ' + JSON.stringify(sw));
+    await close();
+  }
+});
 await T.t('G1. no page in any of these journeys threw an uncaught error or logged an unexpected console error', async () => { eq(pageErrors, [], 'uncaught page errors'); eq(consoleErrors.filter(m => !EXPECTED.some(re => re.test(m))), [], 'unexpected console errors'); });
-const r = T.done(); await fx.close(); process.exit(r.fail ? 1 : 0);
+const r = T.done(); await fx.close(); await fx2.close(); process.exit(r.fail ? 1 : 0);

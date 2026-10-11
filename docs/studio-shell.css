@@ -688,3 +688,17 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-le-foot .st-le-val{flex:1 1 100%}
 #studio-root .st .st-le-foot{row-gap:4px;align-items:center}
 #studio-root .st .st-le-foot > .btn, #studio-root .st .st-le-foot > .st-iconbtn{min-height:28px;height:28px}
+
+/* S24 U10: with a selection and the main action the bar must still be one row in a canvas column of about 980px (1440 with the
+   inspector open); under 1120px Arrange and View show their icons only - the names stay in the markup for screen readers and
+   in the tooltips */
+#studio-root .st .st-canvasbar .st-le-arrange>summary, #studio-root .st .st-canvasbar .st-viewmenu>summary{display:inline-flex;align-items:center;gap:5px}
+@container stcanvas (max-width: 1120px){
+  #studio-root .st .st-canvasbar .st-cb-lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+  #studio-root .st .st-canvasbar .st-le-arrange>summary, #studio-root .st .st-canvasbar .st-viewmenu>summary{padding:4px 7px;min-width:28px;justify-content:center}
+}
+@container stcanvas (max-width: 1000px){
+  #studio-root .st .st-canvasbar{gap:4px}
+  #studio-root .st .st-canvasbar .st-addmenu>.btn{padding:4px 7px;min-width:28px;justify-content:center}
+  #studio-root .st .st-canvasbar .st-zoom .st-sel{width:64px}
+}
