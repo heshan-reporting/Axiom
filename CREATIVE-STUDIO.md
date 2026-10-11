@@ -2825,3 +2825,39 @@ real painting reproduces a mark) - the smoke test is how; the operating system's
 drag from the desktop (the paste path is tested with synthetic clipboard events); performance on a person's laptop and over a
 real network (the figures above are local and headless).
 
+
+## 47. S24 - fix verified defects, finish the professional workflow, prove the result
+
+The working record of S24: baseline, requirement matrix, bug ledger and evidence, updated with every slice. An item is
+**done** only with the test or capture that proves it.
+
+### 47.1 Baseline (verified 11 October 2026)
+
+- `HEAD` = `origin/main` = `2e382a7` (S23 and the r18 release fixes), worker build `2026-10-09.studio-p39`, page
+  `?v=r18`. The working branch `claude/peaceful-gates-g1t4ss` equals `main` and carries S24; nothing is merged or deployed
+  without the owner's approval, no production record is touched and no paid provider call is made (every harness mocks
+  Claude and Gemini).
+- The six reported defects are reproduced by `tests/studio-s24-worker.mjs` before any change: **0 passed, 18 failed** on
+  `2e382a7` (the log is kept in the private evidence folder, `evidence/s24/logs/s24-worker-before-2e382a7.log`). Highlights:
+  a cancelled render with a held first request and a 503 sent 9 image requests (8 after the cancel); a cancel during the
+  retry delay took 6.3 s to stop; `/studio/budget` published no image policy; a reference record change left advice
+  `outdated: false`; two client-rejected "approved" references outvoted an approved one on placement (`br` over `tl`);
+  `https://untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof` was saved as a mark (200).
+
+### 47.2 Requirement matrix
+
+**implemented and proven** (test named), **partial** (what is missing), **missing**, **deferred** (with the reason).
+Written at the start of S24 and updated as the slices land.
+
+| Area | Requirement | State at baseline | State now | Evidence |
+|---|---|---|---|---|
+| S24-01 | Cancellation checked before every provider request, retry and fallback; abortable backoff; no attempt after a cancel is observed; fencing kept; cancel distinguishes requested / no further attempts / already submitted | missing | in progress | `studio-s24-worker.mjs` 01a-01d |
+| S24-02 | One end-to-end attempt policy; image attempts, retries, fallbacks and outcomes recorded; separate text and image budgets; a server-side live-test allowance before every dispatch (child jobs, concurrent runners); the smoke tool reserves what can actually run; unknown outcomes recorded; progress shows the attempt and the fallback | missing (the text ledger existed; images were uncounted) | in progress | 02a-02f, `studio-smoke-test.mjs` |
+| S24-03 | Suggestion cache and generation context built from one dependency definition, covering the reference record, observations, artwork descriptions and example classifications; explains what changed; irrelevant metadata does not invalidate; late-result protection kept | partial (S23-C: version, kit, rules, analyses) | in progress | 03 |
+| S24-04 | Purpose separate from approval; rejected is "avoid"; precedence rules > confirmed corrections > preferences > observations > inferences; original analysis kept as superseded; one resolved evidence set for prompts, image references, placement, readiness and the UI | missing | in progress | 04a, 04b |
+| S24-05 | Durable observation-to-rule links; retiring evidence vs the rule; explicit supersede with provenance; idempotent promotion; contradictions detected, never deleted; concurrent edits safe | partial (S23-I promotion guard) | in progress | 05a-05c |
+| S24-06 | Canonical internal mark identities checked for origin, path, client, campaign, variant, revision and file; consistent across create, edit, duplicate, restore, import and AI plans; invalid legacy marks explained | partial (S23-H path and query only) | in progress | 06, 06b |
+| UI | Stage heads (decision, done, blocked, one next action, what it changes, AI or not); one Design toolbar; no truncation; no model ids or internal ids in working views; Creative Director target line, real scores, inspected version, ship is not approval; deterministic vs AI vs human kept apart; phone Copy; matched captures | partial (S18-S23) | planned | slice 4 |
+| Gen | Image lifecycle requested -> queued -> generating -> received -> stored -> decoded -> placed -> visible -> validated -> exported; missing / failed / decode failed / cropped / covered / not required told apart; repair measured after fonts and images settle, undoable, never success by return value | partial (S19, S23-I) | planned | slice 5 |
+| Ops | Operation inventory incl. brief-field suggestions, artwork description, URL reading; acknowledged at once, named stages, elapsed, cancel, recovery, reconnection; percentages only with a denominator; the 32-minute no-tab limit addressed | partial (S23-F) | planned | slice 5 |
+| QA | Console / page-error guard attached before navigation in every suite, expected failures by exact test and route; seeded editing; two tabs, double actions, offline, cancellation; Chromium / Firefox / WebKit at three widths, both themes, reduced motion, keyboard; axe; honest performance | partial (S23-J) | planned | slice 6 |
