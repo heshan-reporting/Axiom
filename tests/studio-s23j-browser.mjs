@@ -26,15 +26,22 @@ const AXE = fs.readFileSync(new URL('../node_modules/axe-core/axe.min.js', impor
 // the console guard: everything a page reports is kept; only the faults a test injects by name are allowed
 // fonts.googleapis.com: the fixture aborts every request to a host other than the worker, so the page's Google Fonts
 // stylesheet fails here by design (the page falls back to its system fonts and says so)
-const ALLOWED = [/fonts\.googleapis\.com/, /fault injected into the director panel \(test\)/, /The above error occurred in/, /status of 50[03]/, /net::ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError/, /React will try to recreate this component tree/];
+// /brief/daily 404: the AXIOM front page asks for today's brief while the page loads; the fixture holds none, so the worker
+// answers 404 no_brief, which the front page shows as "none yet" - an empty state, named here by its route
+// the AXIOM page around the Studio, as it loads: its CDN scripts (chart.js, gsap, tailwind) are aborted by the fixture (no host but
+// the worker is reachable), and its front-page feeds (trends, GDELT) answer 502 because their upstreams are out of reach here;
+// both are named by host or route, and none is a Studio request
+const ALLOWED = [/net::ERR_FAILED \[https:\/\/(cdn\.jsdelivr\.net|cdn\.tailwindcss\.com|unpkg\.com)\//, /status of 502 \(Bad Gateway\) \[[^\]]*\/(trends|gdelt)\?/, /status of 404 \(Not Found\) \[[^\]]*\/brief\/daily\]/, /fonts\.googleapis\.com/, /fault injected into the director panel \(test\)/, /The above error occurred in/, /status of 50[03]/, /net::ERR_INTERNET_DISCONNECTED|Failed to fetch|NetworkError/, /React will try to recreate this component tree/];
 const reported = [];
 let page;
 const fresh = async o => {
   if (page) await page.ctxB.close().catch(() => {});
-  page = await fx.open(Object.assign({ viewport: { width: 1440, height: 900 }, quiet: true }, o || {}));
-  page.on('console', m => { if (m.type() === 'error') reported.push('console: ' + m.text() + ' [' + ((m.location() || {}).url || '') + ']'); });
-  page.on('pageerror', e => reported.push('pageerror: ' + e.message));
-  await page.addInitScript(() => { window.addEventListener('unhandledrejection', e => console.error('unhandledrejection: ' + String((e.reason && e.reason.message) || e.reason))); });
+  // S24: the guard is attached before the page loads (onPage), so a fault reported while it loads is never missed by a race
+  page = await fx.open(Object.assign({ viewport: { width: 1440, height: 900 }, quiet: true, onPage: async pg => {
+    pg.on('console', m => { if (m.type() === 'error') reported.push('console: ' + m.text() + ' [' + ((m.location() || {}).url || '') + ']'); });
+    pg.on('pageerror', e => reported.push('pageerror: ' + e.message));
+    await pg.addInitScript(() => { window.addEventListener('unhandledrejection', e => console.error('unhandledrejection: ' + String((e.reason && e.reason.message) || e.reason))); });
+  } }, o || {}));
   return page;
 };
 const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + name + '")') + ')');

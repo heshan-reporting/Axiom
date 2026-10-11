@@ -49,7 +49,7 @@
 #studio-root .st .st-fbar-btn:hover:not(:disabled){background:var(--sk-panel);color:var(--sk-ink)}
 #studio-root .st .st-fbar-btn.on{background:var(--sk-soft);color:var(--sk-accent)}
 #studio-root .st .st-fbar-btn:disabled{opacity:.4;cursor:not-allowed}
-#studio-root .st .st-fbar-font{max-width:150px;overflow:hidden;text-overflow:ellipsis;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--sk-line);background:var(--sk-panel);color:var(--sk-ink);font:600 12px/1 var(--sk-font);cursor:pointer}
+#studio-root .st .st-fbar-font{flex-shrink:0;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--sk-line);background:var(--sk-panel);color:var(--sk-ink);font:600 12px/1 var(--sk-font);cursor:pointer}
 #studio-root .st .st-fbar-val{min-width:30px;text-align:center;font:600 12px/1 var(--sk-mono, monospace);color:var(--sk-ink)}
 #studio-root .st .st-fbar-swatch{width:22px;height:22px;margin:0 4px;border-radius:50%;border:2px solid var(--sk-line-2);cursor:pointer}
 #studio-root .st .st-fbar-sep{width:1px;height:18px;margin:0 4px;background:var(--sk-line)}

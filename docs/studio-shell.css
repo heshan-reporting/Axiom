@@ -560,3 +560,123 @@ body.in-studio #studio-root{height:100%}
   /* what is scrolled to, or focused, stops above the inspector opener fixed at the foot of the window */
   #studio-root .st .st-centre, #studio-root .st .st-refine, #studio-root .st .st-canvas-col{scroll-padding-bottom:84px}
 }
+
+/* ---------------------------------------------------------------------------------------- S24: one toolbar, nothing cut off */
+/* the canvas has one tool row: the Design views, the editor's tools, zoom, View, Preview, full screen, More, the main action */
+#studio-root .st .st-canvas-col{container-type:inline-size;container-name:stcanvas}
+#studio-root .st .st-canvasbar{position:relative;z-index:25;flex-wrap:wrap;row-gap:4px;gap:6px;backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--sk-panel)}
+#studio-root .st .st-canvasbar-l{flex:0 0 auto;overflow:visible}
+#studio-root .st .st-cb-spacer{flex:1 1 0;min-width:2px}
+/* the editor's tools never shrink under their content: when a row cannot hold everything (crop mode on a narrow column) the bar
+   takes a second line rather than letting one group draw over another */
+#studio-root .st .st-canvasbar .st-edtools{flex:0 0 auto;display:flex;align-items:center}
+#studio-root .st .st-canvasbar .st-le-toolbar{display:flex;align-items:center;min-width:0}
+#studio-root .st .st-canvasbar .st-le-tools{background:none;border:0;padding:0;border-radius:0;flex-wrap:nowrap;overflow:visible;gap:2px}
+#studio-root .st .st-canvasbar .st-le-tools .st-le-spacer{display:none}
+#studio-root .st .st-canvasbar .st-le-hint-inline{font-size:11px;color:var(--sk-sub);white-space:nowrap}
+#studio-root .st .st-tbi{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:3px 6px!important}
+#studio-root .st .st-tbi-n{font:650 10px/1 var(--sk-font);color:var(--sk-sub)}
+#studio-root .st .st-canvasbar-c{gap:2px}
+#studio-root .st .st-canvasbar .st-zoom .st-sel{width:78px}
+#studio-root .st .st-ednotice:empty{display:none}
+#studio-root .st .st-ednotice .st-le-restore{margin:0}
+/* Arrange: align, spread, order and group the selection, one menu instead of a second row */
+#studio-root .st .st-le-arrange{position:relative;flex-shrink:0}
+#studio-root .st .st-le-arrange>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+#studio-root .st .st-le-arrange>summary::-webkit-details-marker{display:none}
+#studio-root .st .st-le-arrange[open]>summary{background:var(--sk-soft);color:var(--sk-ink)}
+#studio-root .st .st-le-arrpop{position:absolute;left:0;top:calc(100% + 6px);z-index:40;display:flex;flex-direction:column;gap:10px;min-width:264px;padding:12px;background:var(--sk-raised);border:1px solid var(--sk-line);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+#studio-root .st .st-le-arrsec{display:flex;flex-direction:column;gap:5px}
+#studio-root .st .st-le-arrsec .st-le-glbl{padding:0}
+#studio-root .st .st-le-arrgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px}
+#studio-root .st .st-le-arrrow{display:flex;flex-wrap:wrap;gap:4px}
+#studio-root .st .st-le-arrpop .btn.sm{justify-content:center}
+#studio-root .st .st-viewmenu{position:relative}
+#studio-root .st .st-viewmenu .st-viewslot{display:contents}
+#studio-root .st .st-viewmenu .st-le-viewpop{right:0;left:auto}
+/* a narrow canvas column (a tablet, a phone): the one toolbar wraps onto a second line rather than hiding a tool or scrolling a
+   menu out of reach; the selection hint folds away first */
+@container stcanvas (max-width: 1180px){
+  #studio-root .st .st-canvasbar .st-le-hint-inline{display:none}
+}
+@container stcanvas (max-width: 780px){
+  #studio-root .st .st-canvasbar{flex-wrap:wrap;row-gap:4px}
+  #studio-root .st .st-canvasbar .st-cb-spacer{display:none}
+  #studio-root .st .st-canvasbar-l{flex:1 0 100%}
+}
+/* the composition's facts under the canvas, in full: they wrap, never end in an ellipsis */
+#studio-root .st .st-canvas-sub .st-comp-info{flex-wrap:wrap;white-space:normal;justify-content:flex-end;row-gap:2px;text-align:right}
+#studio-root .st .st-canvas-sub .st-comp-info .st-comp-tag{white-space:normal;overflow:visible;text-overflow:clip}
+#studio-root .st .st-comp-facts{font-size:11px;color:var(--sk-ink-2)}
+#studio-root .st .st-comp-facts b{font-weight:650;color:var(--sk-ink)}
+#studio-root .st .st-le-foot .st-le-val{white-space:normal;overflow:visible;text-overflow:clip}
+@media (max-width:700px){#studio-root .st .st-canvas-sub .st-comp-info{justify-content:flex-start;text-align:left}}
+/* the three judges of a composition are named as what they are */
+#studio-root .st .st-judge{display:inline-block;margin-right:6px;padding:0 6px;border-radius:4px;border:1px solid var(--sk-line);font:650 9.5px/1.7 var(--sk-font);letter-spacing:.08em;text-transform:uppercase;color:var(--sk-sub);vertical-align:1px}
+#studio-root .st .st-judge.measured{border-color:color-mix(in srgb,var(--sk-ok) 45%,var(--sk-line))}
+#studio-root .st .st-judge.ai{border-color:color-mix(in srgb,var(--sk-warn) 50%,var(--sk-line))}
+#studio-root .st .st-judge.human{border-color:color-mix(in srgb,var(--sk-accent) 55%,var(--sk-line))}
+/* the project's name: a button that opens its facts in full */
+#studio-root .st .st-ptitle-wrap{position:relative;min-width:0;display:inline-flex}
+#studio-root .st button.st-ptitle{border:0;background:none;padding:0;cursor:pointer;text-align:left;max-width:100%}
+#studio-root .st button.st-ptitle:hover, #studio-root .st button.st-ptitle[aria-expanded="true"]{text-decoration:underline;text-underline-offset:3px}
+#studio-root .st .st-projinfo{position:absolute;left:0;top:calc(100% + 8px);z-index:60;min-width:280px;max-width:min(440px,90vw);padding:12px 14px;background:var(--sk-raised);border:1px solid var(--sk-line);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35)}
+#studio-root .st .st-projinfo dl{display:grid;grid-template-columns:76px minmax(0,1fr);gap:5px 10px;margin:0;font-size:12.5px}
+#studio-root .st .st-projinfo dl > div{display:contents}
+#studio-root .st .st-projinfo dt{color:var(--sk-sub);font:650 10px/1.8 var(--sk-font);letter-spacing:.08em;text-transform:uppercase}
+#studio-root .st .st-projinfo dd{margin:0;min-width:0;overflow-wrap:anywhere}
+/* the stage head says what AI work the step runs, or that it runs none */
+#studio-root .st .st-pl-ai{color:var(--sk-ink-2)}
+#studio-root .st .st-five-wrap>summary{list-style:none;cursor:pointer}
+#studio-root .st .st-five-wrap>summary::-webkit-details-marker{display:none}
+@media (max-width:700px){
+  #studio-root .st .st-five-wrap>summary{display:flex;align-items:baseline;gap:8px;padding:8px 10px;border:1px solid var(--sk-line);border-radius:8px;font-size:12.5px}
+  #studio-root .st .st-five-wrap>summary .st-five-more{margin-left:auto;color:var(--sk-accent);font-size:11.5px;white-space:nowrap}
+  #studio-root .st .st-five-wrap[open]>summary .st-five-more{display:none}
+  #studio-root .st .st-five-wrap[open]>summary{border-bottom-left-radius:0;border-bottom-right-radius:0}
+}
+/* a step's label is never cut to "B..": on a window too narrow for every label, the other steps show their number and the
+   current one its name; each keeps its full name for screen readers and in its title */
+@media (max-width:1100px){
+  #studio-root .st .st-step:not(.on) .st-step-l{display:inline-block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  #studio-root .st .st-step:not(.on) .st-step-meta{display:none}
+  #studio-root .st .st-step.on .st-step-l{overflow:visible;text-overflow:clip}
+}
+/* Properties, shorter: label and value pairs in two columns with compact fields; the colour, the fit row and notes span both */
+#studio-root .st .st-inspector .st-le-type{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;align-items:center;padding:10px 2px;border:0;border-top:1px solid var(--sk-line);border-radius:0}
+#studio-root .st .st-inspector .st-le-type > .st-lbl, #studio-root .st .st-inspector .st-le-type > .st-le-colour, #studio-root .st .st-inspector .st-le-type > .st-le-fitrow, #studio-root .st .st-inspector .st-le-type > .ov-dim, #studio-root .st .st-inspector .st-le-type > div:not([class]){grid-column:1 / -1}
+#studio-root .st .st-inspector .st-le-type > label{display:flex;align-items:center;gap:6px;min-width:0;font-size:11.5px;color:var(--sk-sub);white-space:nowrap}
+#studio-root .st .st-inspector .st-le-type > label .st-in, #studio-root .st .st-inspector .st-le-type > label .st-sel{flex:1 1 auto;min-width:0;width:auto;height:28px;min-height:28px;padding:2px 6px;font-size:12px}
+#studio-root .st .st-inspector .st-le-type > label .st-sel{padding-right:22px}
+#studio-root .st .st-inspector .st-le-fitrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+#studio-root .st .st-inspector .st-le-fitrow .btn.sm{min-height:26px;padding:3px 9px}
+/* S24: a long request that is not a job: one line each while it runs (what, how long, n of N), Cancel, and how it ended */
+#studio-root .st .st-ops{display:flex;flex-direction:column;gap:4px;margin:0 0 6px}
+#studio-root .st .st-op{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 10px;border:1px solid var(--sk-line);border-radius:8px;background:var(--sk-panel);font-size:12px}
+#studio-root .st .st-op.dropped, #studio-root .st .st-op.failed{border-color:var(--sk-bad)}
+#studio-root .st .st-op.cancelled{border-color:color-mix(in srgb,var(--sk-warn) 55%,var(--sk-line))}
+#studio-root .st .st-op .btn.sm{margin-left:auto;min-height:24px;padding:2px 9px}
+/* a step's name is never cut: the label does not shrink; on a window too narrow for every note, only the current step shows
+   its note and the others keep theirs for screen readers (and in the button's title) */
+#studio-root .st .st-step-l{flex-shrink:0;overflow:visible;text-overflow:clip}
+#studio-root .st .st-step.on .st-step-note{overflow:visible;text-overflow:clip}
+@media (max-width:1760px){
+  #studio-root .st .st-step:not(.on) .st-step-meta{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+}
+#studio-root .st button.st-ptitle > b{font:inherit;color:inherit}
+#studio-root .st .st-canvasbar{gap:4px}
+#studio-root .st .st-canvasbar .st-designtabs .st-subtab{padding:4px 7px!important}
+#studio-root .st .st-canvasbar .st-dstep > summary{display:inline-flex;align-items:center;gap:4px;min-width:28px;justify-content:center}
+/* the facts under the canvas read as one sentence that wraps (imagery state, piece, format, size, version, kind of composition),
+   not three stacked rows that take height from the artboard */
+#studio-root .st .st-canvas-sub .st-comp-info{display:block;text-align:right;line-height:1.5}
+#studio-root .st .st-canvas-sub .st-comp-info > *{display:inline}
+#studio-root .st .st-canvas-sub .st-comp-info .st-imgstate{display:inline-flex;margin-right:6px;vertical-align:1px}
+#studio-root .st .st-canvas-sub .st-comp-info .st-comp-tag{text-transform:none;letter-spacing:0;font-size:11px;color:var(--sk-sub)}
+#studio-root .st .st-canvas-sub .st-comp-info .st-comp-tag::before{content:" \00b7  "}
+@media (max-width:700px){#studio-root .st .st-canvas-sub .st-comp-info{text-align:left}}
+/* reframing in the one bar: the mode, Apply and Cancel; the how-to stays in the label's title, so the bar keeps one row */
+#studio-root .st .st-canvasbar .st-cropbar{flex:0 0 auto;min-width:0;padding:0 2px 0 8px}
+#studio-root .st .st-canvasbar .st-cropbar-t .ov-dim{display:none}
+/* while reframing (a mode that ends with Apply or Cancel) the Design views step aside, so the bar keeps one row */
+#studio-root .st .st-canvasbar:has(.st-cropbar) .st-designtabs{display:none}

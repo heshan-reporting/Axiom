@@ -146,7 +146,7 @@
     if (text && text.trim().length >= 20) { const r = await call('/studio/source', { project: pid, kind: 'analyse:' + (kind || 'brief'), name: (text.trim().split('\n').map(x => x.replace(/^#+\s*/, '').trim()).filter(Boolean)[0] || 'Brief').slice(0, 80), text: text.trim(), provenance: 'pasted' }); ids.push(r.id); }
     for (const it of items || []) {
       try {
-        if (it.type === 'url') ids.push((await call('/studio/source/url', { project: pid, url: it.url })).id);
+        if (it.type === 'url') { const run = (window.STKit && window.STKit.runOp) || ((l, f) => f({})); ids.push((await run('Reading the link ' + String(it.url).replace(/^https?:\/\//, '').slice(0, 60), ({ signal }) => call('/studio/source/url', { project: pid, url: it.url }, signal ? { signal } : undefined))).id); }
         else if (it.type === 'file') ids.push((await call('/studio/source', { project: pid, name: it.label, fileB64: it.b64, mime: it.mime, provenance: 'upload: ' + it.label })).id);
         else if (it.type === 'item') ids.push((await call('/studio/source/item', { project: pid, type: it.item, id: it.id })).id);
         else if (it.text && it.text.trim().length >= 20) ids.push((await call('/studio/source', { project: pid, kind: 'analyse:' + (it.type === 'campaign' ? 'brief' : it.type === 'note' ? 'note' : it.kind || 'upload'), name: it.label.slice(0, 80), text: it.text, provenance: it.type === 'campaign' ? 'campaign ' + it.campaign : it.type === 'note' ? 'note' : 'upload' })).id);

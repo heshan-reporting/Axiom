@@ -100,7 +100,7 @@
     return html`<div class="st-fbar" role="toolbar" aria-label="Selection tools" style=${Object.assign({}, top, left)} onPointerDown=${e => e.stopPropagation()}>
       ${mark ? html`<span class="st-fbar-note">${one.role}: placed from its file${one.rule && one.rule.mandatory ? ', held by the campaign rule' : ''}</span>` : null}
       ${textAll && !locked ? html`
-        ${text ? html`<button class="st-fbar-font" onClick=${() => onFontOpen()} title="Font" aria-label=${'Font: ' + (fam || 'brand font')}>${fam || 'Brand font'}</button>` : null}
+        ${text ? html`<button class="st-fbar-font" onClick=${() => onFontOpen()} title=${'Font: ' + (fam || 'the brand font for this role')} aria-label=${'Font: ' + (fam || 'brand font')}>${fam || 'Brand font'}</button>` : null}
         ${tb('Smaller type', 'minus', () => onPatchEach(l => ({ size: r1(Math.max(1.2, l.size - 0.4)) })))}
         <span class="st-fbar-val" aria-label="Type size" title=${text ? one.size + '% of the width' : ''}>${text ? Math.round(one.size * stageW / 100) + ' px' : '-'}</span>
         ${tb('Larger type', 'plus', () => onPatchEach(l => ({ size: r1(Math.min(20, l.size + 0.4)) })))}

@@ -2847,17 +2847,148 @@ The working record of S24: baseline, requirement matrix, bug ledger and evidence
 ### 47.2 Requirement matrix
 
 **implemented and proven** (test named), **partial** (what is missing), **missing**, **deferred** (with the reason).
-Written at the start of S24 and updated as the slices land.
+Written at the start of S24; the last column is the state at the end of S24 (build `2026-10-11.studio-p40`, page `?v=r19`).
 
-| Area | Requirement | State at baseline | State now | Evidence |
+| Area | Requirement | At baseline | Now | Evidence |
 |---|---|---|---|---|
-| S24-01 | Cancellation checked before every provider request, retry and fallback; abortable backoff; no attempt after a cancel is observed; fencing kept; cancel distinguishes requested / no further attempts / already submitted | missing | in progress | `studio-s24-worker.mjs` 01a-01d |
-| S24-02 | One end-to-end attempt policy; image attempts, retries, fallbacks and outcomes recorded; separate text and image budgets; a server-side live-test allowance before every dispatch (child jobs, concurrent runners); the smoke tool reserves what can actually run; unknown outcomes recorded; progress shows the attempt and the fallback | missing (the text ledger existed; images were uncounted) | in progress | 02a-02f, `studio-smoke-test.mjs` |
-| S24-03 | Suggestion cache and generation context built from one dependency definition, covering the reference record, observations, artwork descriptions and example classifications; explains what changed; irrelevant metadata does not invalidate; late-result protection kept | partial (S23-C: version, kit, rules, analyses) | in progress | 03 |
-| S24-04 | Purpose separate from approval; rejected is "avoid"; precedence rules > confirmed corrections > preferences > observations > inferences; original analysis kept as superseded; one resolved evidence set for prompts, image references, placement, readiness and the UI | missing | in progress | 04a, 04b |
-| S24-05 | Durable observation-to-rule links; retiring evidence vs the rule; explicit supersede with provenance; idempotent promotion; contradictions detected, never deleted; concurrent edits safe | partial (S23-I promotion guard) | in progress | 05a-05c |
-| S24-06 | Canonical internal mark identities checked for origin, path, client, campaign, variant, revision and file; consistent across create, edit, duplicate, restore, import and AI plans; invalid legacy marks explained | partial (S23-H path and query only) | in progress | 06, 06b |
-| UI | Stage heads (decision, done, blocked, one next action, what it changes, AI or not); one Design toolbar; no truncation; no model ids or internal ids in working views; Creative Director target line, real scores, inspected version, ship is not approval; deterministic vs AI vs human kept apart; phone Copy; matched captures | partial (S18-S23) | planned | slice 4 |
-| Gen | Image lifecycle requested -> queued -> generating -> received -> stored -> decoded -> placed -> visible -> validated -> exported; missing / failed / decode failed / cropped / covered / not required told apart; repair measured after fonts and images settle, undoable, never success by return value | partial (S19, S23-I) | planned | slice 5 |
-| Ops | Operation inventory incl. brief-field suggestions, artwork description, URL reading; acknowledged at once, named stages, elapsed, cancel, recovery, reconnection; percentages only with a denominator; the 32-minute no-tab limit addressed | partial (S23-F) | planned | slice 5 |
-| QA | Console / page-error guard attached before navigation in every suite, expected failures by exact test and route; seeded editing; two tabs, double actions, offline, cancellation; Chromium / Firefox / WebKit at three widths, both themes, reduced motion, keyboard; axe; honest performance | partial (S23-J) | planned | slice 6 |
+| S24-01 | Cancellation checked before every provider request, retry and fallback; abortable backoff; no attempt after a cancel is observed; fencing kept; cancel distinguishes requested / no further attempts / already submitted | missing | **implemented and proven** | `studio-s24-worker.mjs` 01a-01d |
+| S24-02 | One end-to-end attempt policy; image attempts, retries, fallbacks and outcomes recorded; separate text and image budgets; a server-side live-test allowance before every dispatch (child jobs, concurrent runners); the smoke tool reserves what can actually run; unknown outcomes recorded; progress shows the attempt and the fallback | missing (text ledger only; images uncounted) | **implemented and proven** (mocked providers) | 02a-02f, `studio-smoke-test.mjs` |
+| S24-03 | Suggestion cache and generation context from one dependency definition (reference record, observations, artwork descriptions, example classifications); says what changed; irrelevant metadata does not invalidate; late-result protection kept | partial (S23-C) | **implemented and proven** | 03 |
+| S24-04 | Purpose separate from approval; rejected is "avoid"; precedence rules > confirmed corrections > preferences > observations > inferences; the original analysis kept as superseded; one resolved record for prompts, image references, placement, readiness and the UI; format-specific placement | missing | **implemented and proven** | 04a, 04b, 04c |
+| S24-05 | Durable observation-to-rule links; retiring evidence vs the rule; explicit supersede with provenance; idempotent promotion; contradictions detected, never deleted; concurrent edits safe | partial (S23-I) | **implemented and proven** | 05a-05c |
+| S24-06 | Canonical mark identities (origin, path, client, campaign, variant, revision, file) on create, edit, duplicate, restore, import and AI plans; invalid legacy marks explained | partial (S23-H) | **implemented and proven** | 06, 06b |
+| UI | One Design toolbar row, one zoom control; no truncation without a way to read it; no model ids or "fallback fonts" in working views; no layer ids or saliency jargon in readiness; stage heads say whether AI runs; Checks names measured / AI opinion / person; phone Copy opens on the words; Creative Director target line, real scores, inspected version, ship is not approval | partial (S18-S23) | **implemented and proven** for the items listed; Creative Director items were already in place (S18-S23) and are kept | `studio-s24-browser.mjs` U1-U9; matched captures `tests/shots/s24/` |
+| Gen | Repair measured after fonts and images settle, never success by the repair's return value; image lifecycle states told apart | partial (S19, S23-I) | **implemented and proven** for repair (D1, D2); the lifecycle states are S19's `imageryState` (queued, generating, failed with the last usable kept, on file and loading, did not load, hidden, none by choice, drawn), unchanged | D1, D2 |
+| Ops | Long requests that are not jobs (brief-field suggestions, artwork description, reference analysis from the inventory, link reading) acknowledged at once, elapsed, n of N where countable, Cancel that says what it cannot stop, a dropped connection reported; the closed-tab window stated | partial (S23-F covered jobs) | **implemented and proven** | O1, O2 |
+| QA | Page-error guard over every S24 journey; Chromium / Firefox / WebKit; axe; performance | partial (S23-J) | **partial**: the S24 journeys run in Chromium with a page-error guard (G1); the S23 cross-browser, axe and performance harnesses were re-run (47.4); Firefox and WebKit are not installed in this sandbox, so those engines are skipped, never passed | 47.4 |
+
+### 47.3 Bug ledger
+
+Each entry: the symptom, how it was reproduced, the root cause, the fix, the test that failed before and passes now, and
+what it still does not do.
+
+**S24-01 Cancelling a render did not stop its retries.** *Symptom*: a render cancelled while its first request was out
+went on to send eight more image requests; a cancel during the retry delay took 6.3 s to take effect. *Reproduction*: 01a-01d
+(a held request answered 503, a cancel in the delay, a cancel while the fallback was chosen, a cancel while the mark file was
+read). *Root cause*: the image chain in `nanoRender` looped over models and retries without consulting the job; the job's
+fence was checked only when the stage finished, and the backoff was a plain `setTimeout`. *Fix*: one dispatch gate
+(`stDispatchOpen`) before every request (ownership, the job's cap, the project's allowance, the day's budget), an abortable
+delay, a cancel watch that polls ownership and trips an `AbortController`, and a cancel answer that names what was requested,
+that no further attempts will be made, and which request was already sent and cannot be recalled. *Limits*: a request already
+with the provider runs to completion there and may be billed; the Studio says so and records it as `abandoned`.
+
+**S24-02 Retries could spend past what was reserved, and images were not counted.** *Symptom*: nested retries (per model, per
+attempt, per job attempt) multiplied; `/studio/budget` counted text only; the smoke tool reserved by guess. *Reproduction*:
+02a-02f. *Root cause*: no single policy; the ledger had no image scope; no server-side cap for a live test. *Fix*:
+`stImagePolicy` (4 requests a job, 2 tries per model, 2 per attempt, a later attempt continuing the chain), every request a
+`studio_dispatch` row with its outcome (ok, http_N, malformed, no_image, unknown, abandoned), the `studio_image` ledger beside
+`studio`, the policy published on `/studio/budget`, live-test allowances (`POST /studio/allowance`, `/studio/allowance/revoke`,
+carried by projects) checked before every dispatch including child jobs and concurrent runners; `tools/studio-smoke.py`
+reserves the published worst case per job and runs inside its own allowance. *Limits*: proven with mocked providers only; the
+live smoke test is the owner's (47.6).
+
+**S24-03 Advice did not go stale when what it was made from changed.** *Symptom*: editing a reference's record, an artwork
+description or an example's classification left suggestions marked current. *Reproduction*: 03. *Root cause*: the suggestion
+fingerprint was assembled separately from the generation context and missed those inputs. *Fix*: `stSuggestFingerprint` is
+built from the same resolved records the context uses and names what changed; saving an unchanged record does not outdate
+advice. *Limits*: a change to something the context does not read (a note field) is deliberately ignored.
+
+**S24-04 A rejected reference voted on placement and reached the image model as a constraint.** *Symptom*: two
+client-rejected references marked "approved" outvoted an approved one (`br` over `tl`). *Reproduction*: 04a-04c. *Root
+cause*: purpose and approval were one field; no precedence between a person's correction and the vision pass. *Fix*:
+`stRefEffective` resolves each reference once (stance, precedence, superseded analysis, retired evidence, mark) and the prompt
+line, the reference pack (an AVOID group), the image references, placement evidence (weighted by format) and readiness all read
+it. *Limits*: placement remains evidence with a confidence unless a person teaches a rule.
+
+**S24-05 Rule lifecycle could leave two active rules.** *Symptom*: retire, restore, correct and promote again produced two
+active rules from one observation. *Reproduction*: 05a-05c. *Root cause*: promotion was not idempotent and retiring evidence
+did not ask about the rule built on it. *Fix*: rules keep their `origin`; each step that touches a rule asks (keep or retire,
+supersede with provenance); promotion answers `rule_exists`; contradictions are named in readiness (`stRuleConflicts`), never
+deleted; reference records are written by compare-and-swap (`rev`). *Limits*: resolving a contradiction is a person's choice.
+
+**S24-06 A mark could point anywhere.** *Symptom*: `https://untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof` was saved
+as a mark. *Reproduction*: 06, 06b. *Root cause*: the check looked at the path and the query only. *Fix*:
+`stMarkSourceProblem` requires a canonical identity (this worker, the brand route, this client and campaign, a recorded variant,
+a file in storage) on create, edit and every version write (`stMarkSanitize`); an old version with an invalid source restores
+with the mark hidden and the reason, and readiness reports it (`markSources`). *Limits*: no claim of credential leakage is made
+from this finding; it was not demonstrated.
+
+**U1 Two tool rows and two Fit controls in Design.** *Symptom*: the canvas bar, then the editor's row (which wrapped to a
+third line with a selection); a zoom select with Fit and a separate Fit button. *Reproduction*: U1 measures the rows and the
+controls at 1440, 1920 and 1024 (fails on `2e382a7`: "the editor tools sit inside the canvas toolbar, not in a row of their
+own: 1 !== 0"). *Root cause*: the editor portalled its tools into a slot of their own under the bar. *Fix*: one bar - Design
+views, the editor's tools (icon Undo / Redo / Steps, Add, **Arrange** menu with align, spread, order and group when something is
+selected), zoom (-, the level with Fit in it, +), one **View** menu (guides, safe area, rulers, grid, how resize treats type,
+checkerboard), Preview, full screen, More, the one main action; the bar wraps rather than overlaps when a narrow column cannot
+hold it. A pre-existing defect found on the way: the bar's menus were painted under the stage (the stage's containment made
+its own stacking context), so a View or More menu opened over the canvas could not be clicked; the bar is now raised above it.
+
+**U2 Model identifiers and "fallback fonts" in working views.** *Fix*: the facts under the canvas say the imagery and its
+resolution ("imagery 2K", "from a substitute image model"); the model is named in History (What the Studio used) and the
+Creative Director's Diagnostics; a font that did not load is a finding in Checks. Also removed from the brief analysis and the
+direction cards. Test U2.
+
+**U3 Layer ids and saliency jargon in the readiness line.** *Fix*: `plainIssue()` names layers as the Layers list does, says
+a role in full and a subject estimate as an estimate; the rules' own records keep their ids. Test U3.
+
+**U4 / U9 Labels cut off with no way to read them.** *Fix*: the asset's facts are written in full under the canvas; the
+measurement line wraps; the project name is a button that opens its facts in full (Escape closes); a step's name never
+shrinks, and on a window too narrow for every note only the current step shows its note (the others keep it for screen
+readers). Tests U4, U9 (834 and 1600).
+
+**U5 Stage heads did not say whether AI runs.** *Fix*: each stage head has an AI line ("Analyse: 1 model call", "Selecting:
+none", "Writing the copy: 1 model call, no render", "None: the checks are measured ..."); Design's step popover carries it.
+Test U5.
+
+**U6 Phone Copy buried the words under four status cards.** *Fix*: under 700 px the status folds to one line that says what
+is missing, and opens on request. Test U6.
+
+**U7 Checks did not say who judges.** *Fix*: Measured (technical validation), AI opinion (Creative Director), Person
+(approval). Test U7.
+
+**D1 "Fixed" said because the repair returned.** *Symptom*: Fix layout reported the repair function's own verdict.
+*Reproduction*: D1 replaces the repair with one that claims a complete fix while it pushes the headline off the stage; on
+`2e382a7` the note reads "Fixed". *Fix*: Fix layout runs only once the composition's images and fonts have loaded; a saved fix
+reads "Checking the fix" until the saved version itself is measured again with its images and fonts, and only that measurement
+may say Fixed (or Partly fixed, naming what still blocks). Tests D1, D2.
+
+**O1 / O2 Long requests that are not jobs were silent.** *Fix*: `runOp()` and the operations line: acknowledged at once,
+elapsed seconds, n of N for loops, Cancel (aborts the browser's wait and says a model call already sent may still finish and be
+charged), a dropped connection reported as such. Applied to brief-field suggestions, artwork description, reference analysis
+from the inventory and link reading (Analyse box and wizard). The activity panel states the closed-tab window (about 32
+minutes: a 2-minute claim, then the next tick at 7 or 37 past the hour). Tests O1, O2.
+
+### 47.4 Evidence
+
+- Worker reproductions: `tests/studio-s24-worker.mjs` **0 of 18 on `2e382a7`**, **19 of 19 now** (04c added after slice 1).
+- Browser: `tests/studio-s24-browser.mjs` **0 of 9 UI cases on `2e382a7`** (log in `evidence/s24/logs/`), **all passing now**
+  (U1-U9, D1-D2, O1-O2, G1).
+- Matched captures: `tests/studio-s24-shots.mjs before|after` at 1440, 1920, 1024, 834 and 390 (and light at 1440), written
+  to the ignored `tests/shots/s24/`; the private package `evidence/s24/index.html` puts them side by side.
+- Full suite figures, accessibility and performance: 47.8 (filled from the final run).
+
+### 47.5 What is mocked, what is live, what is unverified
+
+Every figure in this section comes from harnesses with Claude and Gemini **mocked**. Nothing in S24 called a paid provider.
+Live behaviour of the attempt policy, the allowances and the cancellation against the real providers is **unverified** until
+the owner runs the smoke test (47.6). The worker is not deployed from this session; `main` is not merged.
+
+### 47.6 The owner-run smoke test (capped)
+
+```
+python3 tools/studio-smoke.py --key $AXIOM_KEY                                   # estimate only; nothing runs
+python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 30                 # editable path, no images
+python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 60 --approve-renders 6 --size 1K --cases hoof,mca,synth
+```
+
+The tool reads the published attempt policy from `/studio/budget`, reserves each job at its worst case (every retry,
+fallback and job attempt, a render with its inspection), creates a live-test allowance with exactly the approved calls and
+images so the worker refuses anything past it on its own side, cancels anything queued it will not run, reads the ledger
+before and after, writes `smoke/` (ignored by git) and archives its projects unless `--keep`. It needs the p40 worker
+deployed first (`tools/deploy-worker.sh` from the laptop).
+
+### 47.7 Known limits
+
+- A provider request already sent cannot be recalled; it may complete and be billed after a cancel (said in the UI).
+- Firefox and WebKit are not installed here; the cross-browser harness skips them and says so.
+- The Studio is not claimed to be bug-free: the harnesses prove the cases they name.

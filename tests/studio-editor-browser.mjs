@@ -3,7 +3,7 @@
  * layout editor's canvas shortcuts (arrow keys, Ctrl+Z) never take a key typed into one of its fields. Each case was
  * written to fail on build studio-p24-r2 and pass after the fix. Providers MOCKED.
  * Run: node --experimental-sqlite tests/studio-editor-browser.mjs */
-import { makeStudio, runner, eq, ok, place, tool } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, place, tool, arrange } from './studio-fixture.mjs';
 const fx = await makeStudio({ port: 8795, inspect: false });
 const T = runner('studio-editor-browser (Measure again retries a failed filing; fields keep their keys from the canvas shortcuts)');
 const R = '#studio-root ';
@@ -144,13 +144,13 @@ await T.t('locks hold in every canvas command: a locked layer is not reordered o
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer support"]'); await tool(page, 'Layers');
   const order = () => page.$$eval(R + '.st-le-list .st-le-item', els => els.map(e => e.textContent.trim().split(' ')[0]));
   const o0 = await order();
-  await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await page.click(R + '.st-le-tools button:has-text("To front")'); await page.waitForTimeout(100);
+  await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await arrange(page, 'To front'); await page.waitForTimeout(100);
   eq(await order(), o0, 'a locked layer is not brought to the front');
   ok(await page.isDisabled(R + '.st-le-tools button:has-text("Group")'), 'nothing to group with one layer');
   // the floating toolbar sits over the layer above the selection, so the second layer is added from the Layers list (Shift adds
   // there as on the canvas) - what a designer does when the toolbar covers the layer they want
   const row = role => R + '.st-le-list button.st-layer-pick[title^="' + role + ' "]';
-  await page.click(row('headline'), { modifiers: ['Shift'] }); await page.click(R + '.st-le-tools button:has-text("Group")'); await page.waitForTimeout(100);
+  await page.click(row('headline'), { modifiers: ['Shift'] }); await arrange(page, 'Group'); await page.waitForTimeout(100);
   const grouped = await page.$$eval(R + '.st-le-layer', els => els.filter(e => /grouped/.test(e.textContent)).map(e => e.getAttribute('aria-label')));
   ok(grouped.indexOf('Layer support') < 0, 'a locked layer is not grouped (' + grouped.join(', ') + ')');
   // the rule-held mark has no drag handle and says why
@@ -178,6 +178,8 @@ await T.t('Fix layout reports an outcome (complete, partial or blocked), offers 
   await page.waitForSelector(R + '.st-readystrip .btn:has-text("Fix layout")', { timeout: 30000 });
   const n0 = (await api('GET', '/studio/get?id=' + pr.id)).assets[0].versions.length;
   await page.click(R + '.st-readystrip .btn:has-text("Fix layout")'); await page.waitForSelector(R + '.st-repair-note', { timeout: 30000 });
+  // S24: a saved fix is measured again before it is called anything; wait for that measurement
+  await page.waitForSelector(R + '.st-repair-note:not([data-outcome="verifying"])', { timeout: 30000 });
   const note = await page.textContent(R + '.st-repair-note'); ok(/^(Fixed|Partly fixed|Blocked)/.test(note.trim()), 'the outcome is named first: ' + note.replace(/\s+/g, ' ').slice(0, 160));
   ok(/\d+ blocking before/.test(note) && /after/.test(note), 'before and after counts are given: ' + note.replace(/\s+/g, ' ').slice(0, 200));
   const n1 = (await api('GET', '/studio/get?id=' + pr.id)).assets[0].versions.length; eq(n1, n0 + 1, 'one layout version was saved');

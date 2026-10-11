@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
-import { pngSolid, place, tool } from './studio-fixture.mjs';
+import { pngSolid, place, tool, arrange } from './studio-fixture.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 const PORT = 8776, W = 'https://newsaus.heshan-998.workers.dev';
@@ -186,7 +186,9 @@ await t('the sources view shows the ledger tied to passages, with what the sourc
 await t('the asset preview is drawn by the one renderer; the checks read the ledger; a headline edit makes a text version that changes the preview with no image-model call and keeps the image', async () => {
   await openAsset(page, 'Facebook post'); await tool(page, 'Text');
   await page.waitForSelector(R + '.st-stage canvas');
-  await page.waitForFunction(() => /gemini-3-pro-image/.test(document.querySelector('#studio-root .st-comp-tag').textContent));
+  // S24: the working view states the imagery and its resolution; the model is named in History, never on the canvas
+  await page.waitForFunction(() => /imagery 2K/.test(document.querySelector('#studio-root .st-comp-tag').textContent));
+  ok(!/gemini-/.test(await page.textContent(R + '.st-comp-info')), 'no model identifier under the canvas');
   ok(/editable composition, teal fact panel/.test(await page.textContent(R + '.st-comp-tag')));
   ok(/kit logo placed exactly/.test(await page.textContent(R + '#st-tab-properties')), 'the layout line names the exact logo');
   const checks = (await page.textContent(R + '.st-checks')).replace(/\s+/g, ' '); ok(/matches source \$74 billion matches the source, p3, 2023-24/.test(checks), checks);
@@ -200,7 +202,7 @@ await t('the asset preview is drawn by the one renderer; the checks read the led
   const after = await canvasPng(page);
   ok(before && after && before !== after, 'the preview changed with the headline');
   eq(calls.gemini, g0, 'no image-model call for a text change');
-  ok(/gemini-3-pro-image/.test(await page.textContent(R + '.st-comp-tag')), 'the background is still the rendered one');
+  ok(/imagery 2K/.test(await page.textContent(R + '.st-comp-tag')) && /Imagery drawn/.test(await page.textContent(R + '.st-comp-info')), 'the background is still the rendered one');
   const c2 = (await page.textContent(R + '.st-checks')).replace(/\s+/g, ' '); ok(!/banned term subsidy/.test(c2), '"not a subsidy" is a negation, allowed: ' + c2);
   await shot(page, 'studio-asset');
 });
@@ -535,31 +537,31 @@ await t('P13: the canvas undoes and redoes, aligns, reorders, groups and moves a
   const layerOf = async role => (await page.$eval(R + '.st-le-layer[aria-label="Layer ' + role + '"]', el => ({ left: el.style.left, top: el.style.top })));
   const h0 = await layerOf('headline');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
-  await page.click(R + '.st-le-tools button:has-text("Align left")');
+  await arrange(page, 'Align left');
   const h1 = await layerOf('headline'); eq(h1.left, '3%', 'one layer aligns to the stage margin');
   await page.click(R + '.st-le-tools button:has-text("Undo")'); eq((await layerOf('headline')).left, h0.left, 'undo restores it');
   await page.click(R + '.st-le-tools button:has-text("Redo")'); eq((await layerOf('headline')).left, '3%', 'redo applies it again');
   await page.focus(R + '.st-le-layer[aria-label="Layer headline"]'); await page.keyboard.press('Control+z'); eq((await layerOf('headline')).left, h0.left, 'Ctrl+Z undoes from the keyboard');
   // select headline and support together (Shift-click), group them, then move the group with the keyboard
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-layer[aria-label="Layer support"]', { modifiers: ['Shift'] });
-  await page.click(R + '.st-le-tools button:has-text("Group")');
+  await arrange(page, 'Group');
   const s0 = await layerOf('support'); const hA = await layerOf('headline');
   await page.click(R + '.st-le-layer[aria-label="Layer support"]'); await page.keyboard.press('Shift+ArrowUp');
   const s1 = await layerOf('support'), hB = await layerOf('headline');
   ok(parseFloat(s1.top) === Math.round((parseFloat(s0.top) - 2) * 10) / 10 && parseFloat(hB.top) === Math.round((parseFloat(hA.top) - 2) * 10) / 10, 'the grouped layers moved together: ' + JSON.stringify([s0, s1, hA, hB]));
   // reorder: the list runs front to back
-  await tool(page, 'Layers'); const order0 = await texts(page, R + '.st-le-item'); await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.click(R + '.st-le-tools button:has-text("To back")');
+  await tool(page, 'Layers'); const order0 = await texts(page, R + '.st-le-item'); await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await arrange(page, 'To back');
   const order1 = await texts(page, R + '.st-le-item'); ok(/headline|support/.test(order1[order1.length - 1]) && /headline|support/.test(order1[order1.length - 2]) && JSON.stringify(order0) !== JSON.stringify(order1), 'the headline and its group are now at the back: ' + order1.join(' | '));
-  await page.click(R + '.st-le-tools button:has-text("To front")');
+  await arrange(page, 'To front');
   // typography of one text layer
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]'); await page.waitForSelector(R + '.st-le-type');
   await page.fill(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', '5.2'); await page.press(R + '.st-le-type input[aria-label="Type size, per cent of the width"]', 'Enter');
   await page.selectOption(R + '.st-le-type select[aria-label="Text alignment"]', 'center');
   // S18: guides are off until asked for (remembered per browser); the Guides button draws them, and off removes them
   eq(await page.$(R + '.st-le-guide'), null, 'no guide drawn by default');
-  await page.click(R + '.st-canvasbar button:has-text("Guides")'); await page.waitForSelector(R + '.st-le-guide', { timeout: 5000 });
+  await page.click(R + '.st-viewmenu > summary'); await page.check(R + '.st-viewmenu input[aria-label="Guides"]'); await page.click(R + '.st-viewmenu > summary'); await page.waitForSelector(R + '.st-le-guide', { timeout: 5000 });
   ok(await page.$(R + '.st-le-guide'), 'the 3% guide is drawn');
-  await page.click(R + '.st-canvasbar button:has-text("Guides")'); await page.waitForFunction(() => !document.querySelector('#studio-root .st-le-guide'), null, { timeout: 5000 });
+  await page.click(R + '.st-viewmenu > summary'); await page.uncheck(R + '.st-viewmenu input[aria-label="Guides"]'); await page.click(R + '.st-viewmenu > summary'); await page.waitForFunction(() => !document.querySelector('#studio-root .st-le-guide'), null, { timeout: 5000 });
   await page.waitForSelector(R + '.st-le-val'); ok(/Measured at 1080x1080/.test(await page.textContent(R + '.st-le-val')), 'measured at the output size while editing');
   await page.click(R + '.st-le-foot .btn:has-text("Save layout")');
   await page.waitForFunction(v => new RegExp('v' + (v + 1) + ' of').test(document.querySelector('#studio-root .st-asset-head').textContent), vBefore, { timeout: 15000 });
@@ -641,7 +643,7 @@ await t('P20: the canvas resizes a text box without changing its type, sets line
   const latest = () => JSON.parse(env.MIND_DB.db.prepare("SELECT v.layout FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 1").get().layout);
   const L0 = latest(); const hl0 = L0.layers.find(l => l.role === 'headline');
   await page.waitForSelector(R + '.st-le-tools');
-  ok(!(await page.isChecked(R + '.st-le-tools input[aria-label="Resize scales type"]')), 'resizing the box leaves the type alone by default');
+  ok(!(await page.isChecked(R + '.st-le-viewpop input[aria-label="Resize scales type"]')), 'resizing the box leaves the type alone by default');
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
   await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
   const hb = await page.$(R + '.st-le-layer[aria-label="Layer headline"] .st-le-h'); const bb = await hb.boundingBox();

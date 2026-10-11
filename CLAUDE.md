@@ -2671,6 +2671,42 @@ cancels what it will not run, reads `/studio/budget` before and after, and write
 `studio-s23g/h/i/j-browser.mjs`, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`, `studio-smoke-test.mjs`;
 captures `tests/studio-s23-shots.mjs before|after` into the ignored `tests/shots/s23/`.
 
+**Verified defects fixed, the workflow finished, the result proven (S24; build `2026-10-11.studio-p40`, page `?v=r19`;
+`CREATIVE-STUDIO.md` s.47 holds the matrix, the bug ledger and the evidence).** Each defect reproduced by a failing test
+first (`tests/studio-s24-worker.mjs`: 0 of 18 on `2e382a7`). **S24-01** every provider request of a job passes one gate
+(`stDispatchOpen`: ownership, the job's cap, the project's allowance, the day's budget) before every request, retry and
+fallback; the backoff is abortable and a cancel watch trips an `AbortController`; a cancel names what was requested, that no
+further attempts follow, and the request already sent that cannot be recalled. **S24-02** one image attempt policy
+(`stImagePolicy`: 4 requests a job, 2 tries per model, 2 per attempt, a later job attempt continuing the chain), every request a
+`studio_dispatch` row (ok, http_N, malformed, no_image, unknown, abandoned), the ledger scope `studio_image` beside `studio`,
+the policy on `/studio/budget`, live-test allowances (`POST /studio/allowance`, `/studio/allowance/revoke`, `allowance` on a
+project) enforced before every dispatch, child jobs and concurrent runners included; `tools/studio-smoke.py` reserves the
+published worst case and runs inside its own allowance. **S24-03** the suggestion fingerprint is built from the same resolved
+records as the context and names what changed. **S24-04** `stRefEffective` resolves each reference once - purpose apart from
+approval (rejected = AVOID, never placement evidence, never an image constraint), a person's correction above the vision pass
+(kept as superseded), placement weighted by format - and prompts, the pack, image references, placement and readiness read it.
+**S24-05** rules keep their `origin`; retiring or correcting evidence asks (keep / retire, supersede with provenance); promotion
+is idempotent (`rule_exists`); contradictions are named (`stRuleConflicts`), never deleted; reference records are written by
+compare-and-swap (`/studio/reference/meta|observation` with `rev`). **S24-06** a mark source must be a canonical identity
+(`stMarkSourceProblem`: this worker's brand route, this client and campaign, a recorded variant, a file in storage) on create,
+edit and every version write (`stMarkSanitize`); an invalid legacy mark restores hidden with the reason (`markSources` in
+readiness). **The workspace** (`tests/studio-s24-browser.mjs`, 0 of 9 UI cases on `2e382a7`): Design has **one toolbar row**
+- the Design views, the editor's tools (icon Undo / Redo / Steps, Add, an **Arrange** menu with align, spread, order and group
+when something is selected; `arrange(page, label)` in `tests/studio-fixture.mjs`), zoom (-, the level with Fit, +), one
+**View** menu (guides, safe area, rulers, grid, resize scales type, checkerboard; the editor portals its options into it through
+`viewSlot`), Preview, full screen, More, the main action; the restore banner goes to `noticeSlot` under the bar; the bar wraps
+rather than overlaps and sits above the stage (its menus were painted under the stage before). Working views carry no model id
+and no "fallback fonts" (`compTag`: "imagery 2K"; History names the model); `plainIssue()` says findings with layer names and a
+subject estimate as an estimate; the asset's facts are under the canvas in full (`.st-comp-info.st-asset-head`); the project name
+is a button that opens its facts (`ProjTitle`); step names never shrink; stage heads carry an **AI** line (`STAGES[].ai`); Checks
+names Measured / AI opinion / Person; on a phone the stage status folds to its missing item (`useNarrow`). **Fix layout is
+measured, not believed**: it runs once the images and fonts have loaded, and a saved fix reads "Checking the fix" until the saved
+version is measured again - only that may say Fixed (D1, D2). **Long requests that are not jobs** go through `runOp()` and the
+operations line (`OpsLine`; `window.STKit.runOp`; `AXUI.call(path, body, {signal})`): acknowledged, elapsed, n of N, Cancel
+that says a sent model call may still finish and be charged, a dropped connection named - brief-field suggestions, artwork
+description, reference analysis from the inventory, link reading. The activity panel states the closed-tab window (about 32
+minutes). Matched captures: `tests/studio-s24-shots.mjs before|after` into the ignored `tests/shots/s24/`.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

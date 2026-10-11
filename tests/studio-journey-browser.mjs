@@ -256,11 +256,12 @@ await T.t('6. a provider outage: the set is kept, the failure is explained with 
   fx.setProvider('gemini', 'down');
   const prod0 = env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_events WHERE kind='production'").get().n;
   await produce(page, 'editable');
-  await page.waitForFunction(() => /provider is busy/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 60000 });
+  // S24: the render ends when it has sent every request its policy allows; the notice names that (it used to read "busy")
+  await page.waitForFunction(() => /provider is busy|image provider kept failing/.test((document.querySelector('#studio-root .st-notice') || {}).textContent || ''), null, { timeout: 60000 });
   let d = await settle(pr.id);
   eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_events WHERE kind='production'").get().n - prod0, 1, 'one production');
   eq(d.assets.length, 1, 'the composition was made and kept'); const rj = d.jobs.find(j => j.stage === 'render'); eq([rj.state, rj.attempts], ['failed', 3], 'three attempts, then failed');
-  ok(/Your work is kept/.test(await page.textContent(R + '.st-notice')) && await page.$(R + '.st-notice button:has-text("Retry render")'), 'the notice explains and offers Retry');
+  { const nt = await page.textContent(R + '.st-notice').catch(() => '(no notice)'); ok(/Your work is kept/.test(nt) && await page.$(R + '.st-notice button:has-text("Retry render")'), 'the notice explains and offers Retry: ' + String(nt).replace(/\s+/g, ' ').slice(0, 300)); }
   ok(/failed/.test(await page.textContent(R + '.st-workspace-activity')), 'the failed job is visible beside the work (the activity panel)');
   await shot(page, 'provider-down');
   fx.setProvider('gemini', 'ok'); const g0 = calls.gemini;
@@ -347,10 +348,10 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-under', { timeout: 60000 });
   // to a composition (by mouse: the steps are covered above), then the keyboard again
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page); await markCopyReady(page); await produce(page, 'editable');
-  const pr = await latest('mca'); await settle(pr.id);
+  const pr = await latest('mca'); const d8 = await settle(pr.id);
   await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Alt+4');
   await page.waitForSelector(R + '.st-asset', { timeout: 15000 });
-  await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
+  await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 }).catch(async e => { throw new Error('the composition never read as passed: ' + String(await page.textContent(R + '.st-ready').catch(() => '(no readiness)')).replace(/\s+/g, ' ').slice(0, 300) + ' | jobs ' + JSON.stringify((d8.jobs || []).map(j => [j.stage, j.state, j.attempts, String(j.error || '').slice(0, 160)]))); });
   // stages by keyboard: Alt+1 to Alt+5, focus lands on the stage heading (its editorial headline)
   await page.focus('#studio-root .st-head .st-back'); await page.keyboard.press('Escape');
   await page.evaluate(() => document.activeElement.blur());

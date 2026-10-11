@@ -9,7 +9,7 @@
  * (1920 x 1080) size go to tests/shots/s11-after-*.png (ignored by git).
  * Run: node --experimental-sqlite tests/studio-s11-browser.mjs */
 import fs from 'node:fs';
-import { makeStudio, runner, eq, ok, pngGradient, pngSolid, place, tool } from './studio-fixture.mjs';
+import { makeStudio, runner, eq, ok, pngGradient, pngSolid, place, tool, arrange } from './studio-fixture.mjs';
 import { HOOF_STRADDLE, HOOF_STRADDLE_COPY } from './fixtures/studio-layouts.mjs';
 const fx = await makeStudio({ port: 8819, inspect: false });
 const { api, r2 } = fx;
@@ -77,7 +77,7 @@ await T.t('selecting the wordmark in Layers opens Properties: the per-pixel figu
 await T.t('Fix layout moves the wordmark down into the footer (same file, same width) and says Fixed because the complete validation of the result passes; the worker then holds a passing measurement, the state is Needs review (type warnings remain, nothing blocks), and a reload comes back to the same asset and state', async () => {
   const before = (await cur(A)).v;
   await page.click(R + '.st-readystrip .btn:has-text("Fix layout")');
-  await page.waitForSelector(R + '.st-repair-note[data-outcome]', { timeout: 30000 });
+  await page.waitForSelector(R + '.st-repair-note[data-outcome]:not([data-outcome="verifying"])', { timeout: 30000 });   // S24: settled by measuring the saved version
   const outcome = await page.$eval(R + '.st-repair-note', el => el.dataset.outcome); const note = await page.textContent(R + '.st-repair-note');
   eq(outcome, 'complete', note.replace(/\s+/g, ' ').slice(0, 300)); ok(/^Fixed/.test(note.trim()) && !/Still blocking/.test(note) && /moved the wordmark/.test(note), note.replace(/\s+/g, ' ').slice(0, 300));
   const { v } = await cur(A); ok(v.id !== before.id && v.kind === 'layout', 'a layout version'); const w2 = v.layout.layers.find(l => l.id === 'wordmark'); const w1 = before.layout.layers.find(l => l.id === 'wordmark');
@@ -127,11 +127,11 @@ await T.t('a 9:16 story aligns a single layer to its own insets - top 14%, botto
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"][data-ink]', { timeout: 20000 }); await wait(400);
   await page.click(R + '.st-le-layer[aria-label="Layer headline"]');
   const geom = async () => page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => ({ top: parseFloat(el.style.top), left: parseFloat(el.style.left), h: parseFloat(el.style.height), w: parseFloat(el.style.width) }));
-  await page.click(R + '.st-le-tools button:has-text("Align top")'); await wait(300); const g1 = await geom();
+  await arrange(page, 'Align top'); await wait(300); const g1 = await geom();
   ok(Math.abs(g1.top - 14) < 0.9, 'the ink top sits on the story\'s top inset (14%), not 3%: ' + g1.top.toFixed(1));
-  await page.click(R + '.st-le-tools button:has-text("Align bottom")'); await wait(300); const g2 = await geom();
+  await arrange(page, 'Align bottom'); await wait(300); const g2 = await geom();
   ok(Math.abs(g2.top + g2.h - 80) < 0.9, 'the ink bottom sits on the bottom inset (80%), not 97%: ' + (g2.top + g2.h).toFixed(1));
-  await page.click(R + '.st-le-tools button:has-text("Align left")'); await wait(300); const g3 = await geom();
+  await arrange(page, 'Align left'); await wait(300); const g3 = await geom();
   ok(Math.abs(g3.left - 6) < 0.9, 'the ink left sits on the side inset (6%): ' + g3.left.toFixed(1));
   ok(await page.$(R + '#st-tab-properties .st-le-type[aria-label="Typography"]'), 'the type panel is in Properties while editing');
   { const dz = await page.$(R + '.st-le-foot .btn:has-text("Discard changes")'); if (dz) { await dz.click(); await wait(300); } }
@@ -161,7 +161,7 @@ await T.t('a render filed on the type-only Story (the ground that hides it still
   await p3.waitForSelector(R + '.st-assetpick:has-text("Story")', { timeout: 20000 }); await p3.click(R + '.st-assetpick:has-text("Story")');
   await p3.waitForSelector(R + '.st-stage canvas', { timeout: 20000 });
   await p3.waitForSelector(R + '.st-remedy-hidden', { timeout: 30000 });
-  const rem = await p3.textContent(R + '.st-remedy-hidden'); ok(/Imagery on file but not shown/.test(rem) && /type-only/.test(rem) && /gemini-3-pro-image/.test(rem), rem.replace(/\s+/g, ' ').slice(0, 240));
+  const rem = await p3.textContent(R + '.st-remedy-hidden'); ok(/Imagery on file but not shown/.test(rem) && /type-only/.test(rem) && /2K/.test(rem) && !/gemini-/.test(rem), 'the remedy names the render by its resolution, not by a model id (S24): ' + rem.replace(/\s+/g, ' ').slice(0, 240));
   ok(/IMAGERY HIDDEN/.test(await p3.textContent(R + '.st-comp-info .st-comp-tag')), 'the composition facts under the stage say the imagery is hidden');
   ok(await p3.$(R + '.st-canvas-foot .st-hidden-imagery'), 'the note under the stage (S18: nothing is written over the artwork)');
   // before: the canvas shows the green ground at the top-left (the photograph is cream)
@@ -210,7 +210,7 @@ await T.t('a fix that cannot clear what blocks says so once: the outcome, a comp
   else ok(!/Layout variations/.test(varTxt), 'no variations to offer, so no button: ' + varTxt);
   await p4.click(R + '.st-repair-acts button:has-text("Move it by hand")'); await p4.waitForSelector(R + '.st-le-layer', { timeout: 10000 });
   { const dz = await p4.$(R + '.st-le-foot .btn:has-text("Discard changes")'); if (dz) { await dz.click(); await wait(300); } }
-  const props = await p4.textContent(R + '.st-props-none'); eq((props.match(/gemini-3-pro-image/g) || []).length, 1, 'Properties states the imagery once, in the composition line, not again in the facts: ' + props.replace(/\s+/g, ' ').slice(0, 200));
+  const props = await p4.textContent(R + '.st-props-none'); eq((props.match(/imagery 2K/g) || []).length, 1, 'Properties states the imagery once, in the composition line, not again in the facts: ' + props.replace(/\s+/g, ' ').slice(0, 200));
   ok(!p4.errors.length, 'no page errors: ' + p4.errors.join(' | ')); await shot(p4, 'blocked-fix-1366'); await p4.ctxB.close();
 });
 

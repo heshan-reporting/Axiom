@@ -15,8 +15,10 @@
   const base = () => (typeof csBase === 'function' ? csBase() : String(window.WORKER_URL || '').replace(/\/+$/, ''));
   const hdrs = () => (typeof axHeaders === 'function' ? axHeaders() : { 'Content-Type': 'application/json' });
   const scrub = s => (typeof axScrub === 'function' ? axScrub(s) : String(s || ''));
-  async function call(path, body) {
-    const r = await fetch(base() + path, body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() });
+  // o.signal (an AbortController's) lets a caller stop waiting; the request may still complete on the worker
+  async function call(path, body, o) {
+    const sig = o && o.signal ? { signal: o.signal } : {};
+    const r = await fetch(base() + path, Object.assign(body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() }, sig));
     let d = {}; try { d = await r.json(); } catch (e) {}
     if (!r.ok || d.error) { const e = new Error(scrub(d.detail || d.error || ('HTTP ' + r.status))); e.code = d.error || ''; e.status = r.status; e.body = d; e.requestId = d.requestId || (r.headers && r.headers.get ? r.headers.get('X-Request-Id') : '') || ''; throw e; }
     return d;
