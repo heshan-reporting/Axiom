@@ -3024,4 +3024,30 @@ deployed first (`tools/deploy-worker.sh` from the laptop).
 - A provider request already sent cannot be recalled; it may complete and be billed after a cancel (said in the UI).
 - Firefox and WebKit are not installed in this sandbox; the cross-browser harness skips them here and says so, and runs them
   in CI (the core journey only; the S24 journeys are Chromium).
+- **An intermittent failure is open**: `studio-s22-browser.mjs` case A (the reading card counts "2 of 4" while the model
+  writes) failed in 3 of about 30 runs on this branch - the full local run, one isolated run straight after it, and CI run 107 -
+  always on the first streamed sample ("thinking, 118 characters of reasoning so far"), and never in isolated runs under added
+  load (0 of 20). It passed 5 of 5 isolated runs on the baseline; the baseline's own CI runs failed intermittently in other
+  harnesses (`studio-browser`, `studio-s23`, `studio-s23g`). Every progress write of the reading carries the count, so the cause
+  is not established; the harness now names the sample that lacks it, for the next occurrence. Not claimed fixed.
+- At 1024 x 768 the facts under the canvas are written in full (U4) and take four lines, so the Design artboard is 416 px tall
+  against 434 px before S24, when they were cut to an ellipsis; at 1440 x 900 it is 565 px (W1 asks at least 560).
 - The Studio is not claimed to be bug-free: the harnesses prove the cases they name.
+
+### 47.8 Final figures (11 October 2026, build `2026-10-11.studio-p40`, page `?v=r19`)
+
+| Run | Result | Where |
+|---|---|---|
+| `node tests/run.mjs check` | 24 of 24 | local |
+| `node tests/run.mjs backend` | 64 of 64 | local; CI run 108 |
+| `node tests/run.mjs browser` | 49 of 50 locally (the open `studio-s22-browser` A, 47.7); 50 of 50 in CI runs 106 and 108 | local; CI |
+| `studio-s24-worker.mjs` (S24-01..06) | 0 of 18 on `2e382a7`; 19 of 19 now | local; CI |
+| `studio-s24-browser.mjs` (U1-U10, D1-D2, O1-O2, G1) | 1 of 14 on `2e382a7`; 15 of 15 now | local; CI |
+| `studio-xbrowser-browser.mjs` (core journey) | 3 of 3: Chromium, Firefox 142.0.1, WebKit 26.0 | CI runs 103-108 (here: Chromium only, the others skipped and said so) |
+| axe-core 4.10.2 (library, brief, brand, design, review) | no serious or critical finding; moderate: `landmark-complementary-is-top-level`, `landmark-unique` (brief); minor: `aria-allowed-role` (design) | `studio-s23j-browser.mjs` |
+| Performance (`studio-s23-perf-browser.mjs`, this sandbox, providers mocked) | cold interactive median 436 ms (budget 2,500); stage transitions p50 47 ms, p95 87 ms (budget 150); over 200 actions heap -0.2 MB, DOM nodes -369, listeners 0, object URLs 0 | local |
+| Canvas performance (`studio-s19-perf`, `studio-s20-perf`) | within their budgets (3 of 3, 4 of 4) | local; CI |
+| Matched captures | before (`2e382a7`) and after at 1440, 1920, 1024, 834 and 390, after in light at 1440; per capture the artboard, the composer and side scroll measured | `tests/shots/s24/`, `evidence/s24/index.html` (private) |
+
+Nothing in these figures called a paid provider. What they prove is the behaviour of this code with Claude and Gemini mocked;
+live behaviour is the owner's smoke test (47.6), after the p40 worker is deployed from the laptop.
