@@ -31,7 +31,8 @@ await T.t('A. while the model writes, the card counts 2 of 4 steps and the chara
   const streamed = seen.filter(x => x.written != null);
   ok(streamed.length, 'the card showed the answer as it arrived: ' + JSON.stringify(seen.slice(-3)));
   ok(streamed.some(x => /characters of (the answer written|reasoning so far)/.test(x.text)), 'in characters: ' + streamed[0].text.slice(0, 260));
-  ok(streamed.every(x => /2 of 4/.test(x.text)), 'two of the four steps are counted finished while the model writes: ' + streamed[0].text.slice(0, 260));
+  const uncounted = streamed.filter(x => !/2 of 4/.test(x.text));
+  ok(!uncounted.length, 'two of the four steps are counted finished while the model writes (' + uncounted.length + ' of ' + streamed.length + ' samples without; first at ' + streamed.indexOf(uncounted[0]) + '): ' + (uncounted[0] ? JSON.stringify(uncounted[0]).slice(0, 700) : ''));
   ok(!seen.some(x => /no share is shown until it answers/.test(x.text)), 'the card no longer says nothing can be shown');
   const values = streamed.map(x => x.written + x.thinking).filter((v, i, a) => a.indexOf(v) === i);
   ok(values.length >= 2 && values[values.length - 1] > values[0], 'the count grew while it ran: ' + JSON.stringify(values));
