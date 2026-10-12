@@ -107,6 +107,35 @@ await T.t('the development switch opens only a local origin: AXIOM_DEV_OPEN=1 on
   const z = await workerEnv({ keys: null, origin: 'http://localhost:8787', env: SECRETS });
   eq((await z.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, null, ip())).status, 503, 'local without the switch stays closed'); z.restore();
 });
+/* guest keys: a separate secret for shareable sign-in links, so testers can be added and removed without rewriting
+   AXIOM_KEYS (which cannot be read back from Cloudflare) */
+await T.t('AXIOM_GUEST_KEYS: a guest key opens with its own role beside the main roster, which keeps working', async () => {
+  const x = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: JSON.stringify({ 'guest-full-0001': { n: 'Testers', r: 'full' }, 'guest-read-0001': { n: 'Viewers', r: 'read' } }) }, SECRETS) });
+  const a = await x.call('POST', '/studio/project', { ns: 'mca', title: 'guest' }, 'guest-full-0001', ip()); ok(a.status === 200 || a.status === 201, 'a full guest key writes: ' + a.status + ' ' + a.text.slice(0, 100));
+  const b = await x.call('POST', '/studio/project', { ns: 'mca', title: 'guest' }, 'guest-read-0001', ip()); eq([b.status, b.body.error], [403, 'read_only'], 'a read guest key is read-only');
+  ok((await x.call('GET', '/studio/list?ns=mca', null, 'guest-read-0001', ip())).status === 200, 'a read guest key reads');
+  ok((await x.call('POST', '/studio/project', { ns: 'mca', title: 'main' }, 'full-key', ip())).status < 300, 'the main roster still opens');
+  eq((await x.call('GET', '/allnews', null, 'guest-nope-0001', ip())).status, 401, 'an unknown key is still refused'); x.restore();
+});
+await T.t('AXIOM_GUEST_KEYS: an entry past its "until" is refused and says the link has expired; nothing reaches a provider', async () => {
+  const x = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: JSON.stringify({ 'guest-old-00001': { n: 'Old testers', r: 'full', until: '2020-01-01' }, 'guest-new-00001': { n: 'Testers', r: 'full', until: '2999-01-01' } }) }, SECRETS) });
+  const r = await x.call('POST', '/whatsapp', { to: '+61400000000', text: 'x' }, 'guest-old-00001', ip());
+  eq([r.status, r.body.error], [401, 'link_expired']); ok(/expired/.test(r.body.detail), r.body.detail); eq(x.outbound.length, 0, 'nothing sent');
+  ok((await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-new-00001', ip())).status < 300, 'a key before its date opens'); x.restore();
+});
+await T.t('AXIOM_GUEST_KEYS: a broken guest list refuses every guest key and never closes the main roster', async () => {
+  for (const bad of ['not json', JSON.stringify({ 'guest-bad-00001': { n: 'Typo', r: 'admin' } }), JSON.stringify({ 'guest-bad-00001': { n: 'Bad date', r: 'full', until: 'next week' } }), JSON.stringify({ 'short': { n: 'Short', r: 'full' } })]) {
+    const x = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: bad }, SECRETS) });
+    eq((await x.call('GET', '/allnews', null, 'guest-bad-00001', ip())).status, 401, 'guest refused: ' + bad.slice(0, 40));
+    const m = await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'full-key', ip()); ok(m.status < 300, 'the main roster still opens with a broken guest list: ' + m.status + ' ' + m.text.slice(0, 80)); x.restore();
+  }
+});
+await T.t('AXIOM_GUEST_KEYS alone configures the worker: guests open, no key is 401 (not 503), nothing else opens', async () => {
+  const x = await workerEnv({ keys: null, env: Object.assign({ AXIOM_GUEST_KEYS: JSON.stringify({ 'guest-only-0001': { n: 'Testers', r: 'read' } }) }, SECRETS) });
+  ok((await x.call('GET', '/allnews', null, 'guest-only-0001', ip())).status === 200, 'the guest reads');
+  eq((await x.call('GET', '/allnews', null, null, ip())).status, 401, 'no key: 401');
+  eq((await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-only-0001', ip())).status, 403, 'read stays read'); x.restore();
+});
 await T.t('a user-supplied URL to a private, local or credentialed address is refused before any fetch', async () => {
   for (const u of ['http://127.0.0.1/x', 'http://localhost:8080/', 'http://10.0.0.5/', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/', 'https://user:pass@example.com/', 'http://192.168.1.1/', 'file:///etc/passwd', 'https://example.internal/']) {
     const n0 = w.outbound.length; const r = await w.call('GET', '/fetchurl?url=' + encodeURIComponent(u), null, 'full-key', ip());

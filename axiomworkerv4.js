@@ -13191,18 +13191,30 @@ function ctEq(a, b) {
 /* The roster is validated as a whole: every entry must be an object whose role is exactly "read" or "full". A typo
  * ("admin", "Full", a missing r) used to mean full access; now it closes the worker until the roster is fixed, and
  * the answer says which entry is wrong (by position and name, never by key). */
-function axRoster(env) {
-  if (!env.AXIOM_KEYS) return { roster: null, problem: '' };
-  let roster; try { roster = JSON.parse(env.AXIOM_KEYS); } catch (e) { return { roster: null, problem: 'AXIOM_KEYS is not valid JSON' }; }
-  if (!roster || typeof roster !== 'object' || Array.isArray(roster)) return { roster: null, problem: 'AXIOM_KEYS is not a JSON object of keys' };
+function axRosterParse(raw, label, guest) {
+  let roster; try { roster = JSON.parse(raw); } catch (e) { return { roster: null, problem: label + ' is not valid JSON' }; }
+  if (!roster || typeof roster !== 'object' || Array.isArray(roster)) return { roster: null, problem: label + ' is not a JSON object of keys' };
   const keys = Object.keys(roster); let i = 0;
   for (const k of keys) {
     i++; const who = roster[k];
     if (!k || k.length < 8) return { roster: null, problem: 'entry ' + i + ' has a key shorter than 8 characters' };
     if (!who || typeof who !== 'object') return { roster: null, problem: 'entry ' + i + ' is not an object like {"n":"Name","r":"read"}' };
     if (who.r !== 'read' && who.r !== 'full') return { roster: null, problem: 'entry ' + i + ' (' + String(who.n || 'unnamed').slice(0, 30) + ') has role ' + JSON.stringify(who.r === undefined ? null : who.r) + '; the role must be "read" or "full"' };
+    // a guest entry may end on its own: "until" is a date (midnight UTC at its start) or a date and time
+    if (guest && who.until !== undefined && !(typeof who.until === 'string' && isFinite(Date.parse(who.until)))) return { roster: null, problem: 'entry ' + i + ' has an "until" that is not a date like "2026-10-31"' };
   }
   return { roster: keys.length ? roster : null, problem: '' };
+}
+function axRoster(env) {
+  if (!env.AXIOM_KEYS) return { roster: null, problem: '' };
+  return axRosterParse(env.AXIOM_KEYS, 'AXIOM_KEYS', false);
+}
+/* Guest keys (AXIOM_GUEST_KEYS): a separate secret for shareable sign-in links, same shape as AXIOM_KEYS plus an optional
+ * "until". It is its own list so testers can be added or removed without rewriting AXIOM_KEYS, which Cloudflare cannot show
+ * back. A broken guest list refuses every guest key and never closes the main roster. */
+function axGuests(env) {
+  if (!env.AXIOM_GUEST_KEYS) return { roster: null, problem: '' };
+  return axRosterParse(env.AXIOM_GUEST_KEYS, 'AXIOM_GUEST_KEYS', true);
 }
 /* Development without keys is possible only on purpose and only locally: AXIOM_DEV_OPEN=1 AND a localhost origin.
  * A deployed worker (any workers.dev or custom hostname) with no keys is closed, whatever the variable says. */
@@ -13220,11 +13232,18 @@ function axAuth(req, env) {
     if (env.AXIOM_ACCESS_KEY && supplied && ctEq(supplied, env.AXIOM_ACCESS_KEY)) return { configured: true, ok: true, role: 'full', name: 'admin', rosterProblem: problem };
     return { configured: true, ok: false, role: null, name: '', misconfigured: true, problem };
   }
-  const configured = !!(env.AXIOM_ACCESS_KEY || roster);
+  const guests = axGuests(env);
+  const configured = !!(env.AXIOM_ACCESS_KEY || roster || guests.roster || guests.problem);
   if (!configured) return axDevOpen(req, env) ? { configured: false, dev: true, ok: true, role: 'full', name: 'dev-open' } : { configured: false, ok: false, role: null, name: '' };
   if (!supplied) return { configured: true, ok: false, role: null, name: '' };
   if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) return { configured: true, ok: true, role: 'full', name: 'admin' };
   if (roster) for (const k of Object.keys(roster)) { if (ctEq(supplied, k)) return { configured: true, ok: true, role: roster[k].r, name: String(roster[k].n || 'user').slice(0, 40) }; }
+  if (guests.roster) for (const k of Object.keys(guests.roster)) {
+    if (!ctEq(supplied, k)) continue;
+    const g = guests.roster[k];
+    if (g.until !== undefined && Date.now() >= Date.parse(g.until)) return { configured: true, ok: false, role: null, name: '', expired: true };
+    return { configured: true, ok: true, role: g.r, name: String(g.n || 'guest').slice(0, 40), guest: true };
+  }
   return { configured: true, ok: false, role: null, name: '' };
 }
 /* THE ROUTE POLICY - deny by default. Every request is one of:
@@ -14023,6 +14042,7 @@ const AXIOM_WORKER = {
         if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
         else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
       }
+      if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
     }

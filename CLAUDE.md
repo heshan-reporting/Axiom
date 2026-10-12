@@ -3017,9 +3017,15 @@ full-access key (it also opens beside a broken roster, so the roster can be
 repaired). `AXIOM_KEYS` is JSON of per-person keys:
 `{"key1":{"n":"Heshan","r":"full"},"key2":{"n":"Steve","r":"read"}}` - every
 entry must say `"r":"read"` or `"r":"full"`; anything else closes the roster
-(`401 auth_misconfigured`), never full access. With neither secret the worker
-is **closed** (`503 auth_not_configured`); `AXIOM_DEV_OPEN=1` opens only a
-localhost origin. `axRoutePolicy(path, method, query)` decides every request,
+(`401 auth_misconfigured`), never full access. **Guest keys** for shareable
+sign-in links live in a third secret, `AXIOM_GUEST_KEYS`, same shape plus an
+optional `"until":"2026-10-31"` (midnight UTC at the start of that day, or a
+date and time) after which the key answers `401 link_expired`; it is its own
+list so testers are added or removed without rewriting `AXIOM_KEYS`, which
+Cloudflare cannot show back, and a broken guest list refuses every guest key
+but never closes the main roster (`axGuests`, `axRosterParse`). With no secret
+at all the worker is **closed** (`503 auth_not_configured`); `AXIOM_DEV_OPEN=1`
+opens only a localhost origin. `axRoutePolicy(path, method, query)` decides every request,
 deny by default: `/` and `/archive/stats` are public; `/review/*` and `/sifa/*`
 use their own tokens; every non-GET is full; GETs that act (`/collect`,
 `/fetchurl`, `/integrity`, probes `?probe=1`, live reads `?live=1`, bridge
