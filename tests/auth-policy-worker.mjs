@@ -136,6 +136,23 @@ await T.t('AXIOM_GUEST_KEYS alone configures the worker: guests open, no key is 
   eq((await x.call('GET', '/allnews', null, null, ip())).status, 401, 'no key: 401');
   eq((await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-only-0001', ip())).status, 403, 'read stays read'); x.restore();
 });
+/* public mode: AXIOM_PUBLIC opens keyless requests with its role until AXIOM_PUBLIC_UNTIL; supplied keys are still checked */
+await T.t('AXIOM_PUBLIC: no key gets the public role, a wrong key is still refused, and anything but read or full opens nothing', async () => {
+  const x = await workerEnv({ env: Object.assign({ AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2999-01-01' }, SECRETS) });
+  const a = await x.call('POST', '/studio/project', { ns: 'mca', title: 'public' }, null, ip()); ok(a.status === 200 || a.status === 201, 'no key writes in full public mode: ' + a.status + ' ' + a.text.slice(0, 100));
+  eq((await x.call('GET', '/allnews', null, 'wrong-key-0001', ip())).status, 401, 'a wrong key is still refused');
+  ok((await x.call('POST', '/studio/project', { ns: 'mca', title: 'k' }, 'full-key', ip())).status < 300, 'keys keep working'); x.restore();
+  const r = await workerEnv({ keys: null, env: Object.assign({ AXIOM_PUBLIC: 'read' }, SECRETS) });
+  eq((await r.call('GET', '/allnews', null, null, ip())).status, 200, 'read public mode reads with no key and no roster');
+  eq((await r.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, null, ip())).body.error, 'read_only', 'read public mode is read-only'); r.restore();
+  const e = await workerEnv({ env: Object.assign({ AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2020-01-01' }, SECRETS) });
+  const ex = await e.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, null, ip()); eq([ex.status, ex.body.error], [401, 'link_expired'], 'after the date no key is refused');
+  ok((await e.call('POST', '/studio/project', { ns: 'mca', title: 'k' }, 'full-key', ip())).status < 300, 'keys still work after the date'); e.restore();
+  for (const bad of [{ AXIOM_PUBLIC: 'yes' }, { AXIOM_PUBLIC: 'admin' }, { AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: 'next week' }]) {
+    const b = await workerEnv({ env: Object.assign(bad, SECRETS) });
+    eq((await b.call('GET', '/allnews', null, null, ip())).status, 401, 'opens nothing: ' + JSON.stringify(bad)); b.restore();
+  }
+});
 await T.t('a user-supplied URL to a private, local or credentialed address is refused before any fetch', async () => {
   for (const u of ['http://127.0.0.1/x', 'http://localhost:8080/', 'http://10.0.0.5/', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/', 'https://user:pass@example.com/', 'http://192.168.1.1/', 'file:///etc/passwd', 'https://example.internal/']) {
     const n0 = w.outbound.length; const r = await w.call('GET', '/fetchurl?url=' + encodeURIComponent(u), null, 'full-key', ip());

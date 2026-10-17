@@ -13216,6 +13216,19 @@ function axGuests(env) {
   if (!env.AXIOM_GUEST_KEYS) return { roster: null, problem: '' };
   return axRosterParse(env.AXIOM_GUEST_KEYS, 'AXIOM_GUEST_KEYS', true);
 }
+/* Public mode: AXIOM_PUBLIC "read" or "full" lets requests with no key in with that role; AXIOM_PUBLIC_UNTIL (a date, or a
+ * date and time; a bare date is midnight UTC at its start) ends it. Any other value of AXIOM_PUBLIC, or an UNTIL that does
+ * not parse, opens nothing. Off unless set; unset the var (or let the date pass) to close the worker again. */
+function axPublic(env) {
+  const v = String(env.AXIOM_PUBLIC || '').trim().toLowerCase();
+  if (!v || v === '0' || v === 'off') return { role: null, problem: '' };
+  if (v !== 'read' && v !== 'full') return { role: null, problem: 'AXIOM_PUBLIC must be read or full' };
+  const u = env.AXIOM_PUBLIC_UNTIL;
+  if (u === undefined || u === null || u === '') return { role: v, ended: false };
+  const t = Date.parse(String(u));
+  if (!isFinite(t)) return { role: null, problem: 'AXIOM_PUBLIC_UNTIL is not a date' };
+  return { role: v, ended: Date.now() >= t };
+}
 /* Development without keys is possible only on purpose and only locally: AXIOM_DEV_OPEN=1 AND a localhost origin.
  * A deployed worker (any workers.dev or custom hostname) with no keys is closed, whatever the variable says. */
 function axDevOpen(req, env) {
@@ -13233,9 +13246,15 @@ function axAuth(req, env) {
     return { configured: true, ok: false, role: null, name: '', misconfigured: true, problem };
   }
   const guests = axGuests(env);
-  const configured = !!(env.AXIOM_ACCESS_KEY || roster || guests.roster || guests.problem);
+  // public mode (AXIOM_PUBLIC = read | full, optional AXIOM_PUBLIC_UNTIL date): a request with NO key gets that role until the
+  // date; a key that is supplied is still checked, so a wrong key is still refused. Anything else in the var opens nothing.
+  const pub = axPublic(env);
+  const configured = !!(env.AXIOM_ACCESS_KEY || roster || guests.roster || guests.problem || pub.role || pub.problem);
   if (!configured) return axDevOpen(req, env) ? { configured: false, dev: true, ok: true, role: 'full', name: 'dev-open' } : { configured: false, ok: false, role: null, name: '' };
-  if (!supplied) return { configured: true, ok: false, role: null, name: '' };
+  if (!supplied) {
+    if (pub.role && !pub.ended) return { configured: true, ok: true, role: pub.role, name: 'public', public: true };
+    return { configured: true, ok: false, role: null, name: '', expired: !!pub.ended, publicEnded: !!pub.ended };
+  }
   if (env.AXIOM_ACCESS_KEY && ctEq(supplied, env.AXIOM_ACCESS_KEY)) return { configured: true, ok: true, role: 'full', name: 'admin' };
   if (roster) for (const k of Object.keys(roster)) { if (ctEq(supplied, k)) return { configured: true, ok: true, role: roster[k].r, name: String(roster[k].n || 'user').slice(0, 40) }; }
   if (guests.roster) for (const k of Object.keys(guests.roster)) {
@@ -14042,7 +14061,7 @@ const AXIOM_WORKER = {
         if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
         else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
       }
-      if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
+      if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: auth.publicEnded ? 'Open access to AXIOM has ended. Ask whoever sent the link for a sign-in link.' : 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
     }

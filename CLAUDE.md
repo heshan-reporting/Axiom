@@ -3023,7 +3023,10 @@ optional `"until":"2026-10-31"` (midnight UTC at the start of that day, or a
 date and time) after which the key answers `401 link_expired`; it is its own
 list so testers are added or removed without rewriting `AXIOM_KEYS`, which
 Cloudflare cannot show back, and a broken guest list refuses every guest key
-but never closes the main roster (`axGuests`, `axRosterParse`). With no secret
+but never closes the main roster (`axGuests`, `axRosterParse`). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
+(optional `AXIOM_PUBLIC_UNTIL`, a date): a request with no key gets that role until the date
+(`axPublic`); a supplied key is still checked, a wrong one still 401; any other value opens
+nothing; after the date keyless requests answer `401 link_expired`. Off unless set. With no secret
 at all the worker is **closed** (`503 auth_not_configured`); `AXIOM_DEV_OPEN=1`
 opens only a localhost origin. `axRoutePolicy(path, method, query)` decides every request,
 deny by default: `/` and `/archive/stats` are public; `/review/*` and `/sifa/*`
