@@ -424,6 +424,14 @@ html.gsap .view.on>*{animation:none}
 .wi-d{font-size:11px;color:var(--t2);margin-top:3px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .wi-time{font-family:var(--fm);font-size:9.5px;color:var(--t3);flex-shrink:0;padding-top:3px;white-space:nowrap}
 .wi-sig{display:flex;align-items:center;gap:4px;flex-shrink:0;padding-top:5px}
+.wi-read{font-family:var(--fm);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ac);border:1px solid rgba(255,255,255,.14);border-radius:6px;padding:2px 7px;flex-shrink:0;align-self:flex-start;cursor:pointer}
+.wi-read:hover,.wi-read:focus-visible{border-color:var(--ac);outline:none}
+.wi-ft{margin:-4px 0 10px 102px;padding:10px 14px;border-left:2px solid var(--ac);font-size:13px;line-height:1.55;color:var(--t1)}
+.wi-ft p{margin:0 0 8px}
+.wi-ft mark{background:rgba(93,212,229,.22);color:inherit;padding:0 2px;border-radius:2px}
+.wi-ft-h{font-family:var(--fm);font-size:10px;letter-spacing:.04em;color:var(--t3);margin-bottom:8px}
+.wi-ft-n{font-size:11.5px;color:var(--t3)}
+@media (max-width:700px){.wi-ft{margin-left:0}}
 .wi-sig b{width:7px;height:7px;border-radius:50%;display:block}
 .wi-sig i{width:6px;height:6px;border-radius:2px;display:block}
 
@@ -1940,6 +1948,7 @@ body.kiosk .kprog{display:block}
 .ov-brief-body{background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:8px;padding:14px 18px 8px;margin-top:4px}
 .ov-brief-h{margin:0 0 6px;font-size:17px;line-height:1.3;color:var(--t0);font-weight:600}
 .ov-brief-sum{margin:0 0 12px;font-size:13.5px;line-height:1.55;color:var(--t1);max-width:900px}
+.ov-brief-scope{margin:0 0 10px;padding:6px 10px;border-left:2px solid var(--x-ac-hi,var(--ac));font-size:12px;color:var(--t2)}
 .ov-brief-sec{margin:6px 0 12px}
 .ov-bul-t{display:block;font-family:var(--fm);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin:4px 0 4px}
 .ov-bul ul,.ov-changed{margin:0;padding-left:18px;font-size:12.5px;line-height:1.5;color:var(--t1)}
@@ -3932,7 +3941,7 @@ async function loadCore(){
     state.feedsTotal=d.feeds||state.feedsTotal||0;
     state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
     clientEnrich();
-    renderKpiStories();renderNarrative();renderParties();renderWire();renderNews();renderTicker();renderClusters();
+    renderKpiStories();renderNarrative();renderParties();renderWire();if(NEWS_SEARCH)loadNews(true);else renderNews();renderTicker();renderClusters();
     if(!state.analysis||state.analysis._local)renderAnalysisLocal();
     computeFlags();
     updateCtxBadge();renderStatus(d.generated);
@@ -4960,6 +4969,9 @@ function openMonitor(i){
 
 /* ── NEWSROOM ── */
 let NEWS_WINDOW=72,NEWS_LAST=[];
+/* the search the Newsroom is showing ({q, items}); null shows the general feed. The five-minute refresh re-runs it
+   quietly instead of drawing the general feed over it while the term is still in the box. */
+let NEWS_SEARCH=null;
 function newsWindowFilter(items){
   const cut=Date.now()-NEWS_WINDOW*3600e3;
   return items.filter(it=>{const t=Date.parse(it.date)||0;return !t||t>=cut;});
@@ -4977,21 +4989,22 @@ function rowSignal(it){
   return '<span class="wi-sig"><b style="background:'+tcol+'" title="headline tone"></b>'+pd+'</span>';
 }
 function renderNews(list){
-  const items=newsWindowFilter(list||state.news);
+  const base=NEWS_SEARCH?NEWS_SEARCH.items:state.news;
+  const items=newsWindowFilter(list||base);
   NEWS_LAST=items;
-  const srcs={};state.news.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
-  $('news-count').textContent=Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
+  const srcs={};base.forEach(n=>{srcs[n.src]=(srcs[n.src]||0)+1;});
+  $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
       '<button class="chip" onclick="filterSrc(\''+esc(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
-  $('news-list').innerHTML=items.length?items.slice(0,60).map(it=>
-    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span></a>').join('')
+  $('news-list').innerHTML=items.length?items.slice(0,60).map((it,i)=>
+    '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
     :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
 }
 function filterSrc(src,btn){
   document.querySelectorAll('#news-chips .chip').forEach(b=>b.classList.remove('on'));
   if(btn)btn.classList.add('on');
-  renderNews(src?state.news.filter(n=>n.src===src):null);
+  renderNews(src?(NEWS_SEARCH?NEWS_SEARCH.items:state.news).filter(n=>n.src===src):null);
 }
 function exportNewsCSV(){
   const rows=[['date','source','title','tone','parties','link']].concat(NEWS_LAST.map(it=>{
@@ -5006,9 +5019,9 @@ function exportNewsCSV(){
   document.body.appendChild(a);a.click();a.remove();
   toast('Exported '+NEWS_LAST.length+' stories to CSV');
 }
-async function loadNews(){
-  const q=$('news-q').value.trim();
-  $('news-list').innerHTML='<div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div>';
+async function loadNews(quiet){
+  const q=quiet&&NEWS_SEARCH?NEWS_SEARCH.q:$('news-q').value.trim();
+  if(!quiet)$('news-list').innerHTML='<div class="skel" style="height:56px;margin-bottom:8px"></div><div class="skel" style="height:56px"></div>';
   try{
     if(q){
       // Topical search: registry feeds + the full Google News AU index, merged.
@@ -5024,15 +5037,60 @@ async function loadNews(){
         if(seen.has(k))return false;seen.add(k);return true;});
       items.sort((x,y)=>(Date.parse(y.date)||0)-(Date.parse(x.date)||0));
       if(!items.length&&a.status==='rejected')throw new Error(a.reason&&a.reason.message||'Search failed');
-      renderNews(items);
+      NEWS_SEARCH={q,items};
+      renderNews();
     }else{
+      NEWS_SEARCH=null;
       const d=await api('/allnews?max=110');
       state.news=d.items||[];
       state.feedsTotal=d.feeds||state.feedsTotal||0;
       state.feedsLive=(d.sources||[]).length||state.feedsLive||0;
       renderNews();renderNarrative();renderParties();renderWire();renderKpiStories();
     }
-  }catch(e){$('news-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
+  }catch(e){if(!quiet)$('news-list').innerHTML='<div class="err">'+esc(e.message)+'</div>';}
+}
+/* Read: the article's text through the worker's full-text reader (/fulltext), which tries only routes a publisher
+   serves publicly (the page, its AMP copy, Google's AMP cache, the Wayback Machine; never a login). With a search
+   running, the paragraphs that mention the search words come first and are marked. */
+const FT_WHERE={direct:'the publisher\'s page',amp:'the publisher\'s AMP page',ampcache:'Google\'s AMP cache',wayback:'the Wayback Machine',archiveph:'archive.today',render:'a browser render',wp:'the publisher\'s feed'};
+function newsReadTerms(){
+  const q=NEWS_SEARCH?NEWS_SEARCH.q:'';
+  return q.toLowerCase().split(/[^a-z0-9$%.'-]+/).filter(w=>w.length>2&&!/^(the|and|for|with|from|that|this|are|was)$/.test(w));
+}
+function newsReadHtml(ft,it){
+  const terms=newsReadTerms();
+  const paras=String(ft.text||'').split(/\n{2,}|\n(?=[A-Z"'])/).map(p=>p.trim()).filter(p=>p.length>30);
+  const hit=p=>terms.some(t=>p.toLowerCase().indexOf(t)>=0);
+  const mark=p=>{let h=esc(p);terms.forEach(t=>{h=h.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');});return h;};
+  const hits=terms.length?paras.filter(hit):[];
+  const shown=hits.length?hits.slice(0,8):paras.slice(0,4);
+  const where=FT_WHERE[ft.method]||ft.method||'a public route';
+  const head=hits.length?hits.length+' paragraph'+(hits.length===1?'':'s')+' mention "'+esc(NEWS_SEARCH.q)+'"':terms.length?'No paragraph mentions "'+esc(NEWS_SEARCH.q)+'"; the opening of the article':'The opening of the article';
+  return '<div class="wi-ft-h">'+head+' · read via '+esc(where)+(ft.chars?' · '+Math.round(ft.chars/5.5)+' words in all':'')+'</div>'+
+    shown.map(p=>'<p>'+mark(p)+'</p>').join('')+
+    (paras.length>shown.length?'<button class="btn sm ghost" onclick="this.parentNode.dataset.all=1;this.parentNode.innerHTML=newsReadAll(this.parentNode.dataset.i)">Show the whole article ('+paras.length+' paragraphs)</button> ':'')+
+    '<a class="btn sm ghost" href="'+esc(ft.final||it.link)+'" target="_blank" rel="noopener">Open the original</a>';
+}
+const NEWS_FT={};
+function newsReadAll(i){const ft=NEWS_FT[i];if(!ft)return '';const paras=String(ft.text||'').split(/\n{2,}|\n(?=[A-Z"'])/).map(p=>p.trim()).filter(p=>p.length>30);
+  return '<div class="wi-ft-h">The whole article · read via '+esc(FT_WHERE[ft.method]||ft.method)+'</div>'+paras.map(p=>'<p>'+esc(p)+'</p>').join('')+'<a class="btn sm ghost" href="'+esc(ft.final||'#')+'" target="_blank" rel="noopener">Open the original</a>';}
+async function newsRead(ev,i,harder){
+  if(ev){ev.preventDefault();ev.stopPropagation();}
+  const it=NEWS_LAST[i];if(!it||!it.link)return;
+  const row=document.querySelectorAll('#news-list .wi')[i];if(!row)return;
+  let box=row.nextElementSibling&&row.nextElementSibling.classList.contains('wi-ft')?row.nextElementSibling:null;
+  if(box&&!harder){box.remove();return;}
+  if(!box){box=document.createElement('div');box.className='wi-ft';box.dataset.i=i;row.after(box);}
+  box.innerHTML='<div class="wi-ft-h">'+(harder?'Trying the archives as well (up to a minute)...':'Reading the article...')+'</div>';
+  try{
+    const ft=await api('/fulltext?url='+encodeURIComponent(it.link)+(harder?'':'&light=1'));
+    if(ft.ok&&ft.text){NEWS_FT[i]=ft;box.innerHTML=newsReadHtml(ft,it);return;}
+    box.innerHTML='<div class="wi-ft-h">'+(ft.paywall?'Subscriber-only: the publisher does not make this article\'s text public':'The text could not be read from any public route')+'.</div>'+
+      (it.desc?'<p>'+esc(it.desc)+'</p>':'')+
+      '<p class="wi-ft-n">Axiom reads only what a publisher serves publicly (its page, its AMP copy, archived copies); it never uses a subscription login.</p>'+
+      (harder?'':'<button class="btn sm ghost" onclick="newsRead(null,'+i+',true)">Try the archives as well</button> ')+
+      '<a class="btn sm ghost" href="'+esc(it.link)+'" target="_blank" rel="noopener">Open the original</a>';
+  }catch(e){box.innerHTML='<div class="err">Could not read it: '+esc(e.message)+'</div>';}
 }
 
 /* ── PULSE ── */

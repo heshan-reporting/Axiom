@@ -155,6 +155,21 @@ await t('the daily brief sits at the top: headline, summary, what changed with e
   await page.click(R + '.ov-brief button:has-text("Fold")'); await page.waitForFunction(() => !document.querySelector('#overview-root .ov-brief-body'));
   await page.click(R + '.ov-brief button:has-text("Unfold")'); await page.waitForSelector(R + '.ov-brief-body');
 });
+/* ClickUp "What Changed - Filters" (Kai, 23 October): choosing a client in the scope bar changed nothing in the brief */
+await t('the brief follows the client chosen in the scope bar: By client and Narratives narrow to it and the page says what stays whole', async () => {
+  await page.evaluate(() => window.AXUI.setScope({ ns: 'pca' }));
+  await page.waitForSelector(R + '.ov-brief-scope');
+  const note = await page.textContent(R + '.ov-brief-scope');
+  ok(/Showing Property Council only/.test(note) && /nothing written for this client today/.test(note) && /cover the whole day for every client/.test(note), note);
+  ok(!(await page.$(R + '.ov-clients')), 'the Minerals Council row is not shown under Property Council');
+  ok(!/Narratives to watch/.test(await page.textContent(R + '.ov-brief-body')), 'the MCA narrative is not shown under Property Council');
+  await page.evaluate(() => window.AXUI.setScope({ ns: 'mca' }));
+  await page.waitForSelector(R + '.ov-brief-scope:has-text("Showing Minerals Council of Australia only")');
+  ok(/Minerals Council of Australia/.test(await page.textContent(R + '.ov-clients')), 'its own row is shown');
+  ok(/Narratives to watch/.test(await page.textContent(R + '.ov-brief-body')), 'and its narrative');
+  await page.evaluate(() => window.AXUI.setScope({ ns: '' }));
+  await page.waitForFunction(() => !document.querySelector('#overview-root .ov-brief-scope'));
+});
 await page.close();
 await t('a read-only key reads the same page', async () => {
   const p2 = await open('read');

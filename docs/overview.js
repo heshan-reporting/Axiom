@@ -139,7 +139,7 @@
   const Bul = ({ title, items }) => (items && items.length ? html`<div class="ov-bul"><span class="ov-bul-t">${title}</span><ul>${items.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null);
   /* The day's brief: what the director reads first. Written by Claude from what the other
      sections hold, once a morning by the cron or on demand here after the queues are drained. */
-  function Brief({ days }) {
+  function Brief({ days, scopeNs, scopeName }) {
     const [b, setB] = useState(null);
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
@@ -159,7 +159,11 @@
     };
     const copy = async () => { try { await navigator.clipboard.writeText(b.md || ''); toastMsg('Brief copied as Markdown'); } catch (e) { toastMsg('Copy failed', true); } };
     const w = canWrite();
-    const br = b && b.brief;
+    /* The brief is written once a day for every client. With a client chosen in the scope bar, its by-client part and
+       its narratives narrow to that client and the page says so; the day-wide parts (what changed, risks, actions) stay
+       whole, since the brief does not tie them to one client. */
+    const br0 = b && b.brief;
+    const br = br0 && scopeNs ? Object.assign({}, br0, { clients: br0.clients.filter(c => c.ns === scopeNs), narratives: br0.narratives.filter(n => !n.client || (scopeName && n.client === scopeName)) }) : br0;
     return html`<div class="ov-brief">
       <div class="ov-sechead">
         <span class="ov-title">${b ? (b.isToday ? 'Today\'s brief' : 'Latest brief') : 'Daily brief'}</span>
@@ -170,6 +174,7 @@
         </span>
       </div>
       ${note ? html`<div class="ov-empty">${note}</div>` : null}
+      ${br && open && scopeNs ? html`<div class="ov-brief-scope">Showing ${scopeName || scopeNs} only in By client and Narratives${br.clients.length ? '' : ' (the brief has nothing written for this client today)'}. What changed, risks and actions cover the whole day for every client.</div>` : null}
       ${br && open ? html`<div class="ov-brief-body">
         <h3 class="ov-brief-h">${br.headline}</h3>
         <p class="ov-brief-sum">${br.summary}</p>
@@ -220,7 +225,7 @@
         <span class="ov-dim">${d.errors && d.errors.length ? d.errors.length + ' part' + (d.errors.length === 1 ? '' : 's') + ' failed: ' + d.errors.join('; ') : ''}</span>
         <button class="btn sm ghost" disabled=${busy} onClick=${load}>${busy ? 'Reading...' : 'Refresh'}</button>
       </div>
-      <${Brief} days=${days} />
+      <${Brief} days=${days} scopeNs=${sc.ns} scopeName=${sc.ns ? ((d.issues.find(i => i.ns === sc.ns) || {}).client || '') : ''} />
       <${Alerts} a=${scoped.alerts} />
       <${Narratives} n=${scoped.narratives} hours=${d.hours} />
       <${Movers} s=${d.sentiment} days=${d.days} />
