@@ -490,9 +490,21 @@ archive item it came from; nothing is a model's impression of the whole.
   register; rows mentioning nothing are marked in `sent_items` with model
   `none` so they are never looked at again; the rest are ordered by client
   issue tags, client mentions and engagement, and the top `SENT_PER_TICK` =
-  80 go to Claude in batches of `SENT_BATCH` = 20 (`sentClassify`, model
-  `SENTIMENT_MODEL` or Opus 5.5 (`claude-opus-5-5`) by the operator's choice, one retry on
-  invalid JSON). For each text
+  80 go to Claude in batches of `SENT_BATCH` = 20 texts and at most
+  `SENT_BATCH_MENTIONS` = 40 entity mentions (`sentBatches`; `sentClassify`,
+  model `SENTIMENT_MODEL` or Opus 5.5 (`claude-opus-5-5`) by the operator's
+  choice). The answer's budget is sized by the mentions (`sentMaxTok`: 300 +
+  60 a text + 90 a mention, at most 8000; it was 400 + 140 a text, which 20
+  texts naming 46 entities overran, so the JSON was cut off and the
+  same-sized retry was cut off again) and asked for compactly. An answer that
+  does not parse: prose is asked once more for the JSON alone; an answer cut
+  off (`stop_reason` max_tokens, read through `claudeMsg`'s `acct.info`), a
+  timeout or a refusal is never asked again at the same size - the batch is
+  judged again as two halves, once, so the texts that can be judged are (at
+  most five calls a batch). What stays unjudged is named in the run's errors
+  and counted in KV `sent_fail` (72h); a row left unjudged
+  `SENT_FAIL_MAX` = 2 times goes last and is then set aside (`setAside`), so
+  one text cannot cost calls on every run. For each text
   and each entity mentioned the model returns stance -1/0/1, intensity 1-3,
   sarcasm and a twelve-word `why`; for the text an overall tone -1..1 and a
   type news/opinion/question. Writes: `sent_items(item, kind, platform, src,
@@ -508,7 +520,7 @@ archive item it came from; nothing is a model's impression of the whole.
   worker-side) the console tails - but a job the worker runs after an HTTP
   response lives about 30 seconds and one Sonnet call on twenty texts can
   take longer, so **Classify now** in the app does not use it: it loops
-  `POST /sentiment/step {limit<=20}` (one Claude call, synchronously, inside
+  `POST /sentiment/step {limit<=20}` (one batch, synchronously, inside
   the request; returns the run's counts, its log lines and the remaining
   `backlog`) up to five times and stops when nothing waits; **Classify all
   waiting** loops it until the backlog is empty, the budget or the account

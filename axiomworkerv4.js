@@ -5895,6 +5895,8 @@ let SENT_READY = false;
 const SENT_KINDS = ['news', 'sig_thread', 'sig_comment', 'reddit_thread', 'reddit_comment', 'comments', 'forum', 'transcript'];
 const SENT_PER_TICK = 80;      // rows classified per cron tick
 const SENT_BATCH = 20;         // texts per Claude call
+const SENT_BATCH_MENTIONS = 40; // entity mentions per Claude call: the answer grows with the mentions, not the texts
+const SENT_FAIL_MAX = 2;       // a row left unjudged this many times is set aside, so one text cannot cost calls on every run
 const SENT_SCAN = 400;         // newest unclassified rows looked at per run
 const SENT_WINDOW_H = 72;      // rows older than this are left alone
 const SENT_MODEL = 'claude-opus-5-5';   // the operator's choice: judgement and naming on Opus; SENTIMENT_MODEL / NARRATIVE_MODEL override (claude-sonnet-4-6 is about a fifth of the price, claude-haiku-4-5-20251001 a fiftieth)
@@ -6148,22 +6150,74 @@ async function sentBudget(env) {
   const u = await aiUsage(env, 'sentiment');
   return { used: u.reserved, cap: u.cap, left: u.left, confirmed: u.confirmed, failed: u.failed, retries: u.retries, model: env.SENTIMENT_MODEL || SENT_MODEL };
 }
-const SENT_SYS = 'You read Australian political text and judge how its author regards the entities named under it. For each text and each entity listed, give stance: -1 when the text is critical, hostile, mocking, or blames the entity; 1 when it praises, supports, defends or credits it; 0 when it merely mentions or reports it without a view. Judge the author\'s view, not the events: a report of an attack on X is 0 unless the reporter\'s own framing takes a side. For a topic entity the stance is for or against the thing itself. Sarcasm inverts the literal words; mark it. intensity: 1 mild, 2 clear, 3 strong or abusive. Also give the text\'s overall tone from -1 (hostile, angry, despairing) to 1 (warm, approving) as a number with one decimal, and its type: news (reporting), opinion (a view, a comment) or question. Reply with strict JSON only, no prose: {"items":[{"n":1,"tone":-0.6,"type":"opinion","entities":[{"id":"alp","stance":-1,"intensity":2,"sarcasm":false,"why":"calls the policy a rort"}]}]}. why: at most twelve words, the phrase that decided it. Every text and every listed entity must appear.';
-async function sentClassify(env, batch, matcher, log) {
-  const ids = Array.from(new Set(batch.flatMap(b => b.entities)));
+const SENT_SYS = 'You read Australian political text and judge how its author regards the entities named under it. For each text and each entity listed, give stance: -1 when the text is critical, hostile, mocking, or blames the entity; 1 when it praises, supports, defends or credits it; 0 when it merely mentions or reports it without a view. Judge the author\'s view, not the events: a report of an attack on X is 0 unless the reporter\'s own framing takes a side. For a topic entity the stance is for or against the thing itself. Sarcasm inverts the literal words; mark it. intensity: 1 mild, 2 clear, 3 strong or abusive. Also give the text\'s overall tone from -1 (hostile, angry, despairing) to 1 (warm, approving) as a number with one decimal, and its type: news (reporting), opinion (a view, a comment) or question. Reply with strict JSON only, no prose: {"items":[{"n":1,"tone":-0.6,"type":"opinion","entities":[{"id":"alp","stance":-1,"intensity":2,"sarcasm":false,"why":"calls the policy a rort"}]}]}. why: at most twelve words, the phrase that decided it. Every text and every listed entity must appear. Write the JSON compactly on one line: no indentation, no line breaks, no code fences.';
+/** Texts in batches of at most SENT_BATCH texts and SENT_BATCH_MENTIONS entity mentions. */
+function sentBatches(take) {
+  const out = []; let cur = [], m = 0;
+  take.forEach(r => { const k = r.entities.length; if (cur.length && (cur.length >= SENT_BATCH || m + k > SENT_BATCH_MENTIONS)) { out.push(cur); cur = []; m = 0; } cur.push(r); m += k; });
+  if (cur.length) out.push(cur);
+  return out;
+}
+/** The answer's token budget, from what it has to hold: a wrapper per text and a verdict per entity mention (about
+ *  40-55 tokens each as written; 90 leaves room). It was 400 + 140 per text, which twenty texts naming 46 entities
+ *  overran, so the JSON was cut off and the same-sized retry was cut off again. Only tokens written are paid for. */
+function sentMaxTok(part) { const m = part.reduce((a, x) => a + x.entities.length, 0); return Math.min(8000, 300 + part.length * 60 + m * 90); }
+/** One question to the classifier about `part`. Never throws except on a spent budget (st.stop is set instead). */
+async function sentAsk(env, part, matcher, nudge, st) {
+  if (st.calls >= st.left) { st.stop = 'daily budget of ' + st.cap + ' Claude calls reached'; return { stop: true }; }
+  const ids = Array.from(new Set(part.flatMap(b => b.entities)));
   const gloss = ids.map(id => { const e = matcher.byId[id]; return e ? id + ': ' + e.name + ' (' + e.kind + (e.role ? ', ' + e.role : '') + ')' : id; }).join('\n');
-  const texts = batch.map((b, i) => '[' + (i + 1) + '] ' + b.kind.replace('_', ' ') + ', ' + b.platform + ', ' + new Date(b.ts).toISOString().slice(0, 10) + '; mentions: ' + b.entities.join(', ') + '\n' + b.text.replace(/\s+/g, ' ')).join('\n\n');
+  const texts = part.map((b, i) => '[' + (i + 1) + '] ' + b.kind.replace('_', ' ') + ', ' + b.platform + ', ' + new Date(b.ts).toISOString().slice(0, 10) + '; mentions: ' + b.entities.join(', ') + '\n' + b.text.replace(/\s+/g, ' ')).join('\n\n');
   const user = 'ENTITIES\n' + gloss + '\n\nTEXTS\n' + texts;
-  let txt = '', parsed = null;
-  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    txt = await claudeMsg(env, SENT_SYS + (attempt ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, 400 + batch.length * 140, 45000, env.SENTIMENT_MODEL || SENT_MODEL, { scope: 'sentiment', retry: attempt > 0 });
-    parsed = relJson(txt);
-    if (!parsed || !Array.isArray(parsed.items)) parsed = null;
+  const maxTok = sentMaxTok(part), info = {};
+  st.calls++;
+  let txt = '';
+  try { txt = await claudeMsg(env, SENT_SYS + (nudge ? ' Your previous answer was not valid JSON; answer with the JSON object only.' : ''), user, maxTok, Math.min(120000, 30000 + maxTok * 12), st.model, { scope: 'sentiment', retry: st.calls > 1, info }); }
+  catch (e) {
+    const m = String((e && e.message) || e).slice(0, 160);
+    if (/budget_exhausted/.test(m)) { st.stop = m; return { stop: true }; }
+    if (/timeout|timed out|abort/i.test(m)) return { why: 'the classifier timed out', split: true };   // a smaller part writes a shorter answer
+    if (/^refusal/.test(m)) return { why: m, split: true };                                         // a smaller part isolates the text it declined
+    return { why: m };                                                                               // provider trouble: neither a retry nor a split helps now
   }
-  if (!parsed) throw new Error('classifier answered without valid JSON');
-  const out = [];
-  parsed.items.forEach(it => {
-    const n = parseInt(it.n, 10); const b = batch[n - 1]; if (!b) return;
+  const parsed = relJson(txt);
+  if (parsed && Array.isArray(parsed.items)) return { items: parsed.items };
+  if (info.stop === 'max_tokens') return { why: 'the classifier answer was cut off at ' + maxTok + ' tokens', split: true };   // the same size would be cut off again
+  return { why: 'the classifier answered without valid JSON', retry: true, split: true };
+}
+/** Judge `part`: a prose answer is asked again once for the JSON alone; an answer still unusable is split into two
+ *  halves once, so the texts that can be judged are judged. At most five calls for a batch; what stays unjudged is
+ *  counted and named, never thrown away silently. */
+async function sentJudge(env, part, matcher, log, st, res, depth, nudge) {
+  if (st.stop) { res.unjudged.push(...part); return; }
+  let a = await sentAsk(env, part, matcher, nudge, st);
+  if (!a.items && a.retry && !nudge && !a.stop) { await log('info', a.why + '; asking once more for the JSON alone'); nudge = true; a = await sentAsk(env, part, matcher, true, st); }
+  if (a.items) {
+    const v = sentVerdicts(part, a.items), got = new Set(v.map(x => x.b));
+    res.verdicts.push(...v);
+    part.forEach(b => { if (!got.has(b)) { res.unjudged.push(b); if (!res.why) res.why = 'the classifier left some texts out of its answer'; } });
+    return;
+  }
+  if (a.stop) { res.unjudged.push(...part); return; }
+  if (a.split && part.length > 1 && depth < 1) {
+    const h = Math.ceil(part.length / 2);
+    await log('info', a.why + '; judging the ' + part.length + ' texts again as two halves of ' + h + ' and ' + (part.length - h));
+    await sentJudge(env, part.slice(0, h), matcher, log, st, res, depth + 1, nudge);
+    await sentJudge(env, part.slice(h), matcher, log, st, res, depth + 1, nudge);
+    return;
+  }
+  res.unjudged.push(...part); if (!res.why) res.why = a.why;
+}
+async function sentClassify(env, batch, matcher, log, budgetLeft, budgetCap) {
+  const st = { calls: 0, left: budgetLeft == null ? Infinity : budgetLeft, cap: budgetCap, stop: '', model: env.SENTIMENT_MODEL || SENT_MODEL };
+  const res = { verdicts: [], unjudged: [], why: '' };
+  await sentJudge(env, batch, matcher, log || (async () => {}), st, res, 0, false);
+  return { verdicts: res.verdicts, unjudged: res.unjudged, why: res.why, calls: st.calls, stop: st.stop };
+}
+function sentVerdicts(batch, items) {
+  const out = [], seen = new Set();
+  items.forEach(it => {
+    const n = parseInt(it.n, 10); const b = batch[n - 1]; if (!b || seen.has(b)) return; seen.add(b);
     const tone = Math.max(-1, Math.min(1, Number(it.tone) || 0));
     const type = /^(news|opinion|question)$/.test(String(it.type || '')) ? String(it.type) : 'opinion';
     const ents = (Array.isArray(it.entities) ? it.entities : []).map(e => ({ id: String(e.id || ''), stance: Math.max(-1, Math.min(1, Math.round(Number(e.stance) || 0))), intensity: Math.max(1, Math.min(3, Math.round(Number(e.intensity) || 1))), sarcasm: !!e.sarcasm, why: String(e.why || '').slice(0, 160) })).filter(e => b.entities.indexOf(e.id) >= 0);
@@ -6204,18 +6258,29 @@ async function sentimentRun(env, opts) {
   });
   out.matched = cands.length;
   for (let i = 0; i < markers.length; i += 100) { try { await env.MIND_DB.batch(markers.slice(i, i + 100)); out.skipped += Math.min(100, markers.length - i); } catch (e) {} }
-  cands.sort((a, b2) => (b2.weight - a.weight) || (b2.ts - a.ts));
-  const take = cands.slice(0, limit);
-  const callsNeeded = Math.ceil(take.length / SENT_BATCH);
-  await log('info', out.scanned + ' rows of the last ' + hours + 'h without a verdict; ' + out.matched + ' mention an entity; classifying ' + take.length + ' in ' + callsNeeded + ' call' + (callsNeeded === 1 ? '' : 's') + ' (' + budget.used + ' of ' + budget.cap + ' calls used today, ' + budget.model + ')');
+  // rows the classifier failed on before go last, and after SENT_FAIL_MAX failures are set aside (KV sent_fail, 72h)
+  let fails = {}; try { fails = JSON.parse(await kvGet(env.AXIOM_KV, 'sent_fail') || '{}') || {}; } catch (e) { fails = {}; }
+  let failsChanged = false;
+  const ready = cands.filter(c => (fails[c.id] || 0) < SENT_FAIL_MAX); out.setAside = cands.length - ready.length;
+  ready.sort((a, b2) => ((fails[a.id] || 0) - (fails[b2.id] || 0)) || (b2.weight - a.weight) || (b2.ts - a.ts));
+  const take = ready.slice(0, limit);
+  const batches = sentBatches(take);
+  await log('info', out.scanned + ' rows of the last ' + hours + 'h without a verdict; ' + out.matched + ' mention an entity; classifying ' + take.length + ' in ' + batches.length + ' call' + (batches.length === 1 ? '' : 's') + ' (' + budget.used + ' of ' + budget.cap + ' calls used today, ' + budget.model + ')' + (out.setAside ? '; ' + out.setAside + ' set aside after ' + SENT_FAIL_MAX + ' failed attempts' : ''));
   if (!take.length) { await kvPut(env.AXIOM_KV, 'sent_last', jsonFit(Object.assign({ at: now }, out), 4000), 7 * 86400); return out; }
-  for (let i = 0; i < take.length; i += SENT_BATCH) {
-    if (out.calls >= budget.left) { out.errors.push('daily budget of ' + budget.cap + ' Claude calls reached; ' + (take.length - i) + ' rows wait for tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
-    const batch = take.slice(i, i + SENT_BATCH);
-    await log('cmd', 'claude ' + budget.model + ' batch ' + (i / SENT_BATCH + 1) + ': ' + batch.length + ' texts, ' + batch.reduce((a, x) => a + x.entities.length, 0) + ' entity mentions');
-    let verdicts;
-    try { verdicts = await sentClassify(env, batch, matcher, log); out.calls++; }   // each provider call is reserved and settled inside claudeMsg
-    catch (e) { const m = String((e && e.message) || e).slice(0, 160); if (/budget_exhausted/.test(m)) { out.errors.push(m); await log('err', m); break; } out.calls++; out.errors.push(m); await log('err', m); continue; }
+  for (let i = 0, done = 0; i < batches.length; done += batches[i].length, i++) {
+    if (out.calls >= budget.left) { out.errors.push('daily budget of ' + budget.cap + ' Claude calls reached; ' + (take.length - done) + ' rows wait for tomorrow'); await log('err', out.errors[out.errors.length - 1]); break; }
+    const batch = batches[i];
+    await log('cmd', 'claude ' + budget.model + ' batch ' + (i + 1) + ': ' + batch.length + ' texts, ' + batch.reduce((a, x) => a + x.entities.length, 0) + ' entity mentions');
+    // each provider call is reserved and settled inside claudeMsg; a batch that does not parse is split, and what parses is kept
+    const res = await sentClassify(env, batch, matcher, log, budget.left - out.calls, budget.cap);
+    out.calls += res.calls;
+    const verdicts = res.verdicts;
+    if (res.unjudged.length) {
+      const m = res.unjudged.length + ' of ' + batch.length + ' texts left for the next run: ' + (res.stop || res.why);
+      out.errors.push(m); await log('err', m);
+      if (!res.stop) res.unjudged.forEach(r => { fails[r.id] = (fails[r.id] || 0) + 1; failsChanged = true; });
+    }
+    verdicts.forEach(v => { if (fails[v.b.id]) { delete fails[v.b.id]; failsChanged = true; } });
     const stmts = [];
     let neg = 0, neu = 0, pos = 0;
     verdicts.forEach(v => {
@@ -6230,8 +6295,10 @@ async function sentimentRun(env, opts) {
     for (let j = 0; j < stmts.length; j += 100) { try { await env.MIND_DB.batch(stmts.slice(j, j + 100)); } catch (e) { out.errors.push('write failed: ' + String((e && e.message) || e).slice(0, 100)); } }
     out.byStance.neg += neg; out.byStance.neu += neu; out.byStance.pos += pos;
     const avg = verdicts.length ? (verdicts.reduce((a, v) => a + v.tone, 0) / verdicts.length).toFixed(2) : '0';
-    await log('out', verdicts.length + ' verdicts: ' + neg + ' critical, ' + neu + ' neutral, ' + pos + ' supportive mentions; tone ' + avg + ' on average');
+    if (verdicts.length) await log('out', verdicts.length + ' verdicts: ' + neg + ' critical, ' + neu + ' neutral, ' + pos + ' supportive mentions; tone ' + avg + ' on average');
+    if (res.stop) break;
   }
+  if (failsChanged) { const keep = Object.keys(fails).slice(-2000); const o = {}; keep.forEach(k => { o[k] = fails[k]; }); await kvPut(env.AXIOM_KV, 'sent_fail', JSON.stringify(o), SENT_WINDOW_H * 3600); }
   out.budget = await sentBudget(env);
   await log('info', out.classified + ' rows classified, ' + out.mentions + ' entity stances recorded, ' + out.skipped + ' rows marked as mentioning nothing');
   out.summary = out.classified + ' rows judged in ' + out.calls + ' call' + (out.calls === 1 ? '' : 's') + ': ' + out.byStance.neg + ' critical, ' + out.byStance.neu + ' neutral, ' + out.byStance.pos + ' supportive mentions; ' + out.skipped + ' rows mention no one' + (out.errors.length ? '; ' + out.errors.length + ' error' + (out.errors.length === 1 ? '' : 's') : '');
@@ -13723,6 +13790,8 @@ async function claudeMsg(env, system, user, maxTok, timeoutMs, model, acct) {
   });
   const d = await r.json().catch(() => ({}));
   await settle(r.ok && !d.error, d.usage);
+  // acct.info (optional) receives why the answer ended, so a caller can tell an answer cut off at max_tokens from one that is not JSON
+  if (acct && acct.info) { acct.info.stop = String(d.stop_reason || ''); acct.info.outTok = d.usage ? d.usage.output_tokens : null; }
   if (d.error) throw new Error(String(d.error.message || 'anthropic_error').slice(0, 160));
   const text = (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
   if (d.stop_reason === 'refusal') throw new Error('refusal: the model declined this request' + (text ? ' - "' + llmExcerpt(text).slice(0, 160) + '"' : ''));
@@ -16131,7 +16200,7 @@ const AXIOM_WORKER = {
     //    GET  /sentiment/series?entity=&days=&bucket=day|hour&platform=&region=   over time (read)
     //    GET  /sentiment/topics?days=&platform=&region=   tone by client issue with the entities inside (read)
     //    GET  /sentiment/items?entity=&stance=&issue=&platform=&region=&days=&limit=   the evidence rows (read)
-    //    POST /sentiment/step {limit<=20,hours,platform}   one Claude call inside the request; the app loops it (full)
+    //    POST /sentiment/step {limit<=20,hours,platform}   one batch inside the request; the app loops it (full)
     //    POST /sentiment/run {limit,hours,platform}   classify now, as a job the console tails (full)
     if (path.startsWith('/entities') || path.startsWith('/sentiment/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
@@ -16187,8 +16256,9 @@ const AXIOM_WORKER = {
           return jsonResp({ ok: true, job: job.id, id: job.id, where: 'worker', note: 'Classifying in the worker. Tail /bridge/job?id=' + job.id });
         }
         if (path === '/sentiment/step') {
-          // One Claude call, synchronously, inside the request. The app loops these, so a run started
-          // from the app never depends on the worker outliving the response (about 30 seconds).
+          // One batch of up to twenty texts (one call, two when they name more than forty entities; a batch whose
+          // answer does not parse is judged again as two halves), synchronously, inside the request. The app loops
+          // these, so a run started from the app never depends on the worker outliving the response (about 30 seconds).
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'not_configured', detail: 'Set ANTHROPIC_API_KEY on the worker: the classifier is Claude.' }, 501);
           const lines = []; let ln = 0; const log = async (k, t) => { lines.push({ id: ++ln, ts: Date.now(), kind: k, text: String(t) }); };
           const out = await sentimentRun(env, { limit: Math.min(Math.max(parseInt(nb.limit, 10) || SENT_BATCH, 1), SENT_BATCH), hours: parseInt(nb.hours, 10) || SENT_WINDOW_H, platform: String(nb.platform || '').slice(0, 20), log });

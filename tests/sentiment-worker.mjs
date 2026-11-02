@@ -21,14 +21,17 @@ const ctx = { waits: [], waitUntil(p) { this.waits.push(p); } };
 async function drain() { for (let i = 0; i < 6 && ctx.waits.length; i++) { const w = ctx.waits.splice(0); await Promise.allSettled(w); } }
 
 /* the stub Claude: judges each text by a few words, one JSON answer */
-const claude = { calls: [], garbageFor: /GARBAGE/ , garbageLeft: 0 };
+/* charsPerToken (0 = off) cuts an answer longer than its max_tokens the way the API does (stop_reason max_tokens);
+ * cutNext cuts the next answers regardless */
+const claude = { calls: [], garbageFor: /GARBAGE/ , garbageLeft: 0, charsPerToken: 0, cutNext: 0 };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('api.anthropic.com') >= 0) {
     const body = JSON.parse(init.body); const user = body.messages[0].content;
-    claude.calls.push({ model: body.model, system: body.system, user });
-    if (claude.garbageLeft > 0 && claude.garbageFor.test(user)) { claude.garbageLeft--; return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Sorry, here is my thinking without JSON' }] }), { status: 200 }); }
     const texts = Array.from(user.matchAll(/\[(\d+)\] ([^\n]*)\n([^\n]*)/g)).map(m => ({ n: Number(m[1]), head: m[2], text: m[3] }));
+    const call = { model: body.model, system: body.system, user, max: body.max_tokens, texts: texts.length, mentions: texts.reduce((a, x) => a + (((x.head.match(/mentions: (.*)$/) || [])[1] || '').split(',').filter(s => s.trim()).length), 0), cut: false };
+    claude.calls.push(call);
+    if (claude.garbageLeft > 0 && claude.garbageFor.test(user)) { claude.garbageLeft--; return new Response(JSON.stringify({ content: [{ type: 'text', text: 'Sorry, here is my thinking without JSON' }] }), { status: 200 }); }
     const items = texts.map(t => {
       const ids = ((t.head.match(/mentions: (.*)$/) || [])[1] || '').split(',').map(s => s.trim()).filter(Boolean);
       const neg = /rort|disgrace|shameful|rubbish|lie|corporate welfare|hopeless|sell.?out/i.test(t.text), pos = /good on|welcome|fair enough|credit to|jobs for|well done|backs/i.test(t.text);
@@ -36,7 +39,10 @@ globalThis.fetch = async (url, init) => {
       const stance = news ? 0 : neg ? -1 : pos ? 1 : 0;
       return { n: t.n, tone: news ? -0.1 : neg ? -0.7 : pos ? 0.6 : 0, type: news ? 'news' : 'opinion', entities: ids.map(id => ({ id, stance: id === 'hoof' && neg ? 1 : stance, intensity: neg ? 2 : 1, sarcasm: /yeah right/i.test(t.text), why: neg ? 'calls it a rort' : pos ? 'says good on them' : 'reports it' })) };
     });
-    return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ items }) }] }), { status: 200 });
+    let text = JSON.stringify({ items }), stop = 'end_turn';
+    if (claude.cutNext > 0) { claude.cutNext--; text = text.slice(0, Math.floor(text.length / 2)); stop = 'max_tokens'; call.cut = true; }
+    else if (claude.charsPerToken && Math.ceil(text.length / claude.charsPerToken) > body.max_tokens) { text = text.slice(0, Math.floor(body.max_tokens * claude.charsPerToken)); stop = 'max_tokens'; call.cut = true; }
+    return new Response(JSON.stringify({ content: [{ type: 'text', text }], stop_reason: stop, usage: { input_tokens: 100, output_tokens: 50 } }), { status: 200 });
   }
   return new Response('', { status: 404 });
 };
@@ -225,6 +231,49 @@ await t('POST /sentiment/step does one Claude call inside the request and report
   const s = await req('POST', '/sentiment/step', { limit: 50 });
   eq(s.status, 200); eq(s.d.ok, true); ok(s.d.calls <= 1, 'at most one call: ' + s.d.calls); ok(Array.isArray(s.d.lines) && s.d.lines.length >= 1 && s.d.lines[0].kind === 'info', JSON.stringify(s.d.lines)); ok(typeof s.d.backlog === 'number');
   eq((await req('POST', '/sentiment/step', {}, 'read-key')).status, 403);
+});
+async function runJob() { const r = await req('POST', '/sentiment/run', { limit: 100 }); await drain(); return (await req('GET', '/bridge/job?id=' + r.d.job, null, 'read-key')).d; }
+await t('twenty texts naming eighty entities are all judged: batches close at forty mentions and each answer has room', async () => {
+  // the 8 November failure: one batch of 20 texts and 46 mentions got 3,200 tokens, the JSON was cut off and the
+  // same-sized retry was cut off again. The stub's verdicts are short; 1.5 characters a token stands in for full whys.
+  claude.charsPerToken = 1.5;
+  for (let k = 0; k < 20; k++) put('reddit_comment', 'reddit', 'Comment on: dense', 'Albanese, Chalmers and the Greens are a disgrace on fuel tax credits, comment ' + k, 'x:rcmt:dense' + k, { sub: 'australia', thread: 'td', issues: ['ftc'] }, 1 * H, 0);
+  const before = claude.calls.length;
+  const j = await runJob(); claude.charsPerToken = 0;
+  const calls = claude.calls.slice(before);
+  eq(j.result.classified, 20, JSON.stringify(j.result)); eq(j.result.ok, true);
+  ok(calls.every(c => !c.cut), 'no answer was cut off: ' + JSON.stringify(calls.map(c => [c.texts, c.mentions, c.max, c.cut])));
+  ok(calls.every(c => c.mentions <= 40 && c.texts <= 20), 'batches close at forty mentions: ' + JSON.stringify(calls.map(c => [c.texts, c.mentions])));
+  eq(calls.length, 2); ok(/Write the JSON compactly on one line/.test(calls[0].system), 'compact JSON is asked for');
+  eq(row("SELECT COUNT(*) n FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE a.url LIKE 'x:rcmt:dense%' AND s.model<>'none'").n, 20);
+});
+await t('an answer cut off anyway is judged again as two halves, never asked again at the same size', async () => {
+  claude.cutNext = 1;
+  for (let k = 0; k < 6; k++) put('reddit_comment', 'reddit', 'Comment on: cut', 'Good on the Minerals Council, well done, comment ' + k, 'x:rcmt:cut' + k, { sub: 'australia', thread: 'tc', issues: ['mining'] }, 1 * H, 0);
+  const before = claude.calls.length;
+  const j = await runJob();
+  const calls = claude.calls.slice(before);
+  eq(calls.map(c => c.texts), [6, 3, 3], 'split, not retried whole'); ok(calls[0].cut && !calls[1].cut && !calls[2].cut);
+  eq(j.result.classified, 6); eq(j.result.calls, 3); eq(j.result.errors, []);
+  ok(j.lines.some(l => /cut off at \d+ tokens; judging the 6 texts again as two halves of 3 and 3/.test(l.text)), j.lines.map(l => l.text).join(' | '));
+});
+await t('a text the classifier will not answer for loses only its half, and after two failures it is set aside', async () => {
+  claude.garbageLeft = 100;
+  for (let k = 0; k < 5; k++) put('reddit_comment', 'reddit', 'Comment on: gb', 'Chalmers is hopeless, comment ' + k, 'x:rcmt:gb' + k, { sub: 'australia', thread: 'tg', issues: ['econ'] }, 1 * H, 0);
+  put('reddit_comment', 'reddit', 'Comment on: gb', 'GARBAGE Chalmers said things', 'x:rcmt:gbX', { sub: 'australia', thread: 'tg', issues: ['econ'] }, 1 * H, 0);
+  let before = claude.calls.length;
+  const a = await runJob();
+  eq(claude.calls.length - before, 4, 'whole, once more for the JSON, then two halves');
+  eq(a.result.classified, 3); ok(/^3 of 6 texts left for the next run: the classifier answered without valid JSON/.test(a.result.errors[0]), JSON.stringify(a.result.errors));
+  before = claude.calls.length;
+  const b = await runJob();
+  ok(b.result.classified >= 1 && claude.calls.length - before <= 4, JSON.stringify([b.result, claude.calls.length - before]));
+  before = claude.calls.length;
+  const c = await runJob();
+  eq(claude.calls.length - before, 0, 'a row that failed twice costs nothing more'); ok(c.result.setAside >= 1, JSON.stringify(c.result));
+  ok(c.lines.some(l => /set aside after 2 failed attempts/.test(l.text)), c.lines.map(l => l.text).join(' | '));
+  eq(row("SELECT COUNT(*) n FROM sent_items s JOIN arc_items a ON a.id=s.item WHERE a.url='x:rcmt:gbX'").n, 0, 'the GARBAGE row was never filed as judged');
+  claude.garbageLeft = 0;
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
