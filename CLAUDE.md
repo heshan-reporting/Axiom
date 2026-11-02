@@ -740,7 +740,13 @@ the view holding it) - answered in tables, not cards.
   dead / failing / untried, rows judged and placed today, the social
   platforms from KV `social_last`). Every part fails soft and is named in
   `errors`. In the island each row carries the client and issue and a link
-  that opens the evidence.
+  that opens the evidence. Rows that belong to a client (the brief's By client
+  rows, open alerts, moving narratives with a client, the latest rows) carry
+  **draft in Studio** (Kai, ClickUp, 30 October 2026): `AXUI.goto('studio', {ns,
+  intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
+  contract, which the wizard opens as a response to a situation; nothing is made
+  until the project is created; hidden for read-only keys. Studio scripts load
+  with `?v=r20` since.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take

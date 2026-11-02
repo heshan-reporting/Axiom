@@ -30,6 +30,12 @@
   }
   const Empty = ({ children }) => html`<div class="ov-empty">${children}</div>`;
   const Link = ({ onClick, children, title }) => html`<button class="ov-link" onClick=${onClick} title=${title || ''}>${children}</button>`;
+  /* Draft in Studio (Kai, ClickUp, 30 October): any row that belongs to a client opens the Studio's intake on that client
+     with the row as the brief - the same hand-off the Sentinel uses. Nothing is produced (or spent) until the person
+     creates the project there. Read-only keys do not see it. */
+  const toStudio = (ns, text) => { window.AXUI.goto('studio', { ns: ns || '', intake: 'brief', deliverable: 'set', text: text, from: 'overview' }); toastMsg('Brief loaded in the Studio - review it and create the project'); };
+  const Draft = ({ ns, text }) => (canWrite() ? html`<${Link} onClick=${() => toStudio(ns, text)} title="Open the Creative Studio on this client with this as the brief (nothing is generated until you create the project)">draft in Studio</${Link}>` : null);
+  const lines = (title, xs) => (xs && xs.length ? '\n\n' + title + ':\n' + xs.map(x => '- ' + x).join('\n') : '');
   function Split({ s }) {
     if (!s || !s.judged) return html`<span class="ov-dim">unjudged</span>`;
     const neg = pct(s.neg, s.judged), pos = pct(s.pos, s.judged);
@@ -45,7 +51,7 @@
         <td class="num"><b>${r.ratio}x</b><span class="ov-dim"> baseline</span></td>
         <td class="num">${r.hot}<span class="ov-dim"> stories, ${r.srcs} outlets</span></td>
         <td class="ov-dim">${r.open ? 'awaiting acknowledgement' : r.drafted ? 'drafted' : 'acknowledged'}</td>
-        <td class="ov-go"><${Link} onClick=${() => goto('sentinel', { id: r.id })}>open</${Link}></td>
+        <td class="ov-go"><${Link} onClick=${() => goto('sentinel', { id: r.id })}>open</${Link}> <${Draft} ns=${r.ns} text=${'BREAKING - ' + r.label + ' is spiking (' + r.ratio + 'x its usual coverage, ' + r.hot + ' stories across ' + r.srcs + ' outlets).\n\nWrite rapid-response social copy for ' + (r.client || r.ns) + ' on this.'} /></td>
       </tr>`)}</tbody></table>`}
     </${Sec}>`;
   }
@@ -62,7 +68,7 @@
           <td><${Split} s=${x.sentiment} /></td>
           <td class="ov-dim">${(PLAT[x.first_platform] || x.first_platform || '?') + (x.first_channel ? ' ' + x.first_channel : '')}, ${ago(x.first_ts)} ago</td>
           <td><span class=${'nr-status ' + x.status}>${x.status}</span></td>
-          <td class="ov-go"><${Link} onClick=${() => goto('narratives', { id: x.id })}>rows</${Link}></td>
+          <td class="ov-go"><${Link} onClick=${() => goto('narratives', { id: x.id })}>rows</${Link}>${x.ns && x.label ? html` <${Draft} ns=${x.ns} text=${'A narrative is moving: "' + x.label + '" (' + x.n24 + ' rows today against ' + x.nprev + ' the day before; ' + (SIDE[x.side] || x.side) + ' toward ' + (x.client || x.ns) + ').' + (x.claim ? '\n\nThe claim: ' + x.claim : '') + (x.counter_claim ? '\nThe counter-claim: ' + x.counter_claim : '') + (x.proponents ? '\nCarried by: ' + x.proponents : '') + '\n\nWrite social copy for ' + (x.client || x.ns) + ' that answers it.'} />` : null}</td>
         </tr>`)}</tbody></table>`}
       ${n.fading.length ? html`<div class="ov-foot">Fading: ${n.fading.map((x, i) => html`<span key=${x.id}>${i ? ', ' : ''}<${Link} onClick=${() => goto('narratives', { id: x.id })}>${x.label || 'unnamed'}</${Link}> (${x.n})</span>`)}</div>` : null}
     </${Sec}>`;
@@ -120,12 +126,14 @@
   function Latest({ rows, hours }) {
     const issues = typeof AX_ISSUES !== 'undefined' && Array.isArray(AX_ISSUES) ? AX_ISSUES : [];
     const lbl = id => { const i = issues.find(x => x.id === id); return i ? (i.label || id) : id; };
+    /* the row's client: the scope's client when it owns one of the row's issues, else the first issue's owner (cmm's shared issues last) */
+    const nsOf = r => { const owners = (r.issues || []).map(id => (issues.find(x => x.id === id) || {}).ns).filter(Boolean); const sc = (window.AXUI && AXUI.scope && AXUI.scope().ns) || ''; return owners.indexOf(sc) >= 0 ? sc : (owners.find(n => n !== 'cmm') || owners[0] || ''); };
     return html`<${Sec} title="Latest on our issues" count=${rows.length || null} why="Newest first, Australian Eastern">
       ${!rows.length ? html`<${Empty}>Nothing tagged with a client issue in the last ${hours} hours.</${Empty}>` : html`<div class="ov-latest">${rows.map(r => html`<div key=${r.id} class="ov-row">
         <span class="ov-when" title=${aest(r.ts)}>${ago(r.ts)}</span>
         <span class="ov-chan">${PLAT[r.platform] || r.platform}${r.channel && r.channel !== r.platform ? html`<i> ${r.channel}</i>` : null}</span>
         <span class="ov-tx">${r.url ? html`<a href=${r.url} target="_blank" rel="noopener">${r.title}</a>` : r.title}</span>
-        <span class="ov-tags">${r.issues.map(i => html`<em key=${i}>${lbl(i)}</em>`)}${r.tone != null && r.tone !== 0 ? html`<span class=${'sn-st ' + (r.tone < 0 ? 'neg' : 'pos')}>${r.tone < 0 ? 'hostile' : 'warm'}</span>` : null}${r.comments ? html`<span class="ov-dim">${fmtN(r.comments)} comments</span>` : null}</span>
+        <span class="ov-tags">${r.issues.map(i => html`<em key=${i}>${lbl(i)}</em>`)}${r.tone != null && r.tone !== 0 ? html`<span class=${'sn-st ' + (r.tone < 0 ? 'neg' : 'pos')}>${r.tone < 0 ? 'hostile' : 'warm'}</span>` : null}${r.comments ? html`<span class="ov-dim">${fmtN(r.comments)} comments</span>` : null}${nsOf(r) ? html` <${Draft} ns=${nsOf(r)} text=${(PLAT[r.platform] || r.platform) + (r.channel && r.channel !== r.platform ? ' (' + r.channel + ')' : '') + ': ' + r.title + (r.url ? '\n' + r.url : '') + '\n\nOn ' + r.issues.map(lbl).join(', ') + '. Write social copy for the client on this.'} />` : null}</span>
       </div>`)}</div>`}
     </${Sec}>`;
   }
@@ -183,7 +191,7 @@
           <td class="ov-lbl"><b>${c.client}</b><div class="ov-dim">${c.ns}</div></td>
           <td>${c.read} <${Ev} ids=${c.evidence} />
             <div class="ov-cols3"><${Bul} title="Watch" items=${c.watch} /><${Bul} title="Risks" items=${c.risks} /><${Bul} title="Openings" items=${c.openings} /></div></td>
-          <td class="ov-acts"><${Bul} title="Actions" items=${c.actions} /></td>
+          <td class="ov-acts"><${Bul} title="Actions" items=${c.actions} /><${Draft} ns=${c.ns} text=${'Today\'s brief for ' + c.client + ' (' + b.day + '): ' + c.read + lines('Watch', c.watch) + lines('Risks', c.risks) + lines('Openings', c.openings) + lines('Actions', c.actions) + '\n\nWrite social copy for ' + c.client + ' on the opening that serves them best.'} /></td>
         </tr>`)}</tbody></table></div>` : null}
         <div class="ov-cols">
           ${br.narratives.length ? html`<table class="ov-table"><thead><tr><th>Narratives to watch</th><th class="num">Rows</th><th>Toward client</th><th>Why it matters</th><th></th></tr></thead><tbody>${br.narratives.map(n => html`<tr key=${n.id}>

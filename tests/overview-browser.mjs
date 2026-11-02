@@ -170,11 +170,31 @@ await t('the brief follows the client chosen in the scope bar: By client and Nar
   await page.evaluate(() => window.AXUI.setScope({ ns: '' }));
   await page.waitForFunction(() => !document.querySelector('#overview-root .ov-brief-scope'));
 });
+/* ClickUp "Add Creative Studio button from What Changed that pulls in client relevant information" (Kai, 30 October) */
+await t('draft in Studio: a client row of the brief, an alert, a narrative and a latest row each open the Studio intake on that client with the row as the brief', async () => {
+  // the hand-off is recorded at AXUI.goto (looked up when the button is pressed) and not forwarded, so the page stays here
+  await page.evaluate(() => { window.__goto = []; const g = window.AXUI.goto; window.AXUI.goto = (v, p) => { window.__goto.push([v, p]); if (v !== 'studio') g(v, p); }; });
+  const last = () => page.evaluate(() => window.__goto[window.__goto.length - 1]);
+  await page.click(R + '.ov-clients .ov-acts button:has-text("draft in Studio")');
+  let [v, p] = await last();
+  eq([v, p.ns, p.intake, p.deliverable, p.from], ['studio', 'mca', 'brief', 'set', 'overview']);
+  ok(/Today's brief for Minerals Council of Australia/.test(p.text) && /hostile narrative on the credit/.test(p.text) && /Openings:\n- regional jobs counter-narrative/.test(p.text) && /Actions:\n- acknowledge the alert/.test(p.text), p.text);
+  await page.click(R + '.ov-sec:nth-of-type(1) tr.hot button:has-text("draft in Studio")');
+  [v, p] = await last(); ok(p.ns === 'mca' && /Fuel tax credits is spiking \(3\.4x/.test(p.text) && /9 stories across 5 outlets/.test(p.text), JSON.stringify(p));
+  await page.click(R + '.ov-sec:nth-of-type(2) tbody tr:first-child button:has-text("draft in Studio")');
+  [v, p] = await last(); ok(p.ns === 'mca' && /subsidy for billionaire miners/.test(p.text) && /The claim: The fuel tax credit is a subsidy\./.test(p.text) && /counter-claim: It refunds a road tax/.test(p.text), p.text);
+  eq(await page.$$eval(R + '.ov-sec:nth-of-type(2) tbody tr:nth-child(2) button', bs => bs.map(b => b.textContent)), ['rows'], 'an unnamed narrative with no client offers no draft');
+  await page.click(R + '.ov-latest .ov-row:has-text("Is the diesel rebate a rort?") button:has-text("draft in Studio")');
+  [v, p] = await last(); ok(p.ns === 'mca' && /Reddit \(r\/australia\): Is the diesel rebate a rort\?/.test(p.text) && /reddit\.com\/r\/australia\/comments\/t1/.test(p.text) && /On Fuel tax credits/.test(p.text), p.text);
+  await page.click(R + '.ov-latest .ov-row:has-text("Chalmers on the surplus") button:has-text("draft in Studio")');
+  [v, p] = await last(); eq(p.ns, 'cmm', 'a shared-issue row goes to Curious Minds');
+});
 await page.close();
 await t('a read-only key reads the same page', async () => {
   const p2 = await open('read');
   eq((await texts(p2, R + '.ov-title')).length, 7);
   ok(!(await p2.$(R + '.ov-brief button:has-text("brief")')), 'a read key cannot write the brief'); ok(await p2.$(R + '.ov-brief button:has-text("Download .md")'), 'but can save it');
+  ok(!(await p2.$(R + 'button:has-text("draft in Studio")')), 'a read key is not offered the Studio');
   await p2.close();
 });
 await browser.close(); server.kill();
