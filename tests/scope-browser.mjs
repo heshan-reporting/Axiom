@@ -129,6 +129,28 @@ await t('the scope survives a reload and Clear resets every view', async () => {
   await page.waitForFunction(() => document.querySelectorAll('#overview-root .ov-sec:nth-of-type(1) tbody tr').length === 2);
   eq(JSON.parse(await page.evaluate(() => localStorage.getItem('ax_scope'))).days, 0);
 });
+/* Kai, 20 October: "when you select an option on the filter and then go to change it, the other options are there, but
+   aren't visible". A chosen filter gets a translucent accent ground (select.on); the open list's options inherited it,
+   which a light native popup shows as near-white behind near-white text. Every option needs an opaque ground its text
+   reads on, whether the select is chosen or not. */
+await t('a chosen filter\'s options stay readable: every option has an opaque ground and its text reads on it', async () => {
+  await page.selectOption(S + 'select[aria-label="Client"]', 'mca');
+  await page.waitForSelector(S + 'select[aria-label="Client"].on');
+  const bad = await page.evaluate(() => {
+    const rgb = s => (s.match(/[\d.]+/g) || []).map(Number);
+    const lum = c => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+    const out = [];
+    document.querySelectorAll('#scope-root select option').forEach(o => {
+      const cs = getComputedStyle(o), bg = rgb(cs.backgroundColor), fg = rgb(cs.color);
+      const alpha = bg.length > 3 ? bg[3] : 1;
+      const a = lum(bg), b = lum(fg), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      if (alpha < 1 || ratio < 4.5) out.push(o.textContent + ' bg ' + cs.backgroundColor + ' fg ' + cs.color + ' ratio ' + ratio.toFixed(2));
+    });
+    return out;
+  });
+  eq(bad, [], 'unreadable options');
+  await page.selectOption(S + 'select[aria-label="Client"]', '');
+});
 await browser.close(); server.kill();
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -1986,6 +1986,9 @@ body.kiosk .kprog{display:block}
 .scope-bar select{font:inherit;font-size:12px;color:var(--t1);background:var(--x-bg2);border:1px solid var(--x-line1);border-radius:4px;padding:3px 6px;max-width:230px}
 .scope-bar select.on{color:var(--t0);border-color:var(--x-ac-line);background:var(--x-ac-dim)}
 .scope-bar select:disabled{opacity:.6}
+/* An open dropdown is drawn by the system, often light; options inherit the select's translucent ground (select.on) or
+   none at all, behind near-white text, so the choices vanish (Kai, 20 Oct). Every option gets an opaque ground. */
+select option,select optgroup{background-color:var(--x-bg2);color:var(--t1)}
 .scope-clear{font:inherit;font-size:11.5px;color:var(--x-ac-hi);background:none;border:0;padding:0 4px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
 .scope-hint{font-size:11px;color:var(--t3);margin-left:4px}
 .ov-scoped{color:var(--x-ac-hi)}
