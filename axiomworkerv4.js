@@ -1872,7 +1872,7 @@ const AU_RX = new RegExp([
   // brands and mastheads
   'woolworths|\\bwoolies\\b|\\bcoles\\b|bunnings|\\bqantas\\b|\\btelstra\\b|\\boptus\\b|\\bwestpac\\b|commbank|commonwealth bank|\\bafr\\b|abc\\.net\\.au|abc news australia|sydney morning herald|news\\.com\\.au|sky news australia|the australian\\b|guardian australia|newspoll|crikey|9news\\.com\\.au|7news\\.com\\.au',
   // our clients and their opponents, by their own names
-  'minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line',
+  'minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\\bepbc\\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\\bssaa\\b|shooting industry foundation|national firearms agreement|gun control australia|\\bbrumb(y|ies)\\b',
   // the vernacular
   '\\bservo\\b|\\barvo\\b|\\bmaccas\\b|\\bbogan\\b|\\btradies?\\b|\\butes?\\b|fair dinkum',
 ].join('|'), 'i');
@@ -1882,7 +1882,7 @@ const AU_SUB_RX = /^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|can
 // English elsewhere, and AU_RX contains those very terms, so folding the query
 // into the checked text passed every American hit. A query vouches for a thread
 // only when the query itself names Australia.
-const AU_QUERY_RX = /austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v\/line|duck hunting/i;
+const AU_QUERY_RX = /austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v\/line|duck hunting|shooters union|national firearms agreement|brumby/i;
 /** Is this thread about Australia? Watched sub, Australian-looking sub, a marker
  *  in its own text, or a search term that itself names Australia. */
 function auRelevant(sub, text, q) {
@@ -6009,6 +6009,13 @@ const ENTITY_SEED = [
   ['t_rates', 'topic', 'Interest rates', 'interest rate|rate cut|rate rise|rate hike|cash rate', '', 'Public mood', 'neutral', ''],
   ['t_ducks', 'topic', 'Duck hunting', 'duck hunting|duck season|duck shooting', '', 'Victorian debate', 'client', 'vicnats'],
   ['t_vline', 'topic', 'Regional rail', 'V/Line|regional rail|country trains', '', 'Victorian debate', 'client', 'vicnats'],
+  // firearms clients (SIFA, Shooters Union), their opponents and the debate
+  ['sifa_org', 'org', 'Shooting Industry Foundation of Australia', 'Shooting Industry Foundation|SIFA', '', 'Firearms industry body', 'client', 'guns'],
+  ['shooters_union', 'org', 'Shooters Union Australia', 'Shooters Union', '', 'Firearms owners lobby', 'client', 'guns'],
+  ['ssaa', 'org', 'Sporting Shooters Association of Australia', 'Sporting Shooters Association|SSAA', '', 'Firearms owners association', 'neutral', 'guns'],
+  ['gca', 'org', 'Gun Control Australia', 'Gun Control Australia', '', 'Gun control advocates', 'opponent', 'guns'],
+  ['t_buyback', 'topic', 'Gun buyback', 'gun buyback|firearms buyback|firearm buyback', '', 'Firearms debate', 'client', 'guns'],
+  ['t_gunlaws', 'topic', 'Gun laws', 'gun law|firearms law|firearm law|gun reform|firearms reform|National Firearms Agreement|firearms registry', '', 'Firearms debate', 'client', 'guns'],
 ];
 async function ensureSentiment(env) {
   if (!env.MIND_DB) return false;
@@ -13388,6 +13395,14 @@ const CLIENT_ISSUES = [
     rx: /pharmacy guild|community pharmac(y|ies)|60-?day dispensing|pharmacist prescrib|dispensing fee/i,
     wide: /pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic/i,
     q: ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'] },
+  { ns: 'guns', client: 'Firearms clients (SIFA, Shooters Union)', id: 'firearms', label: 'Firearms laws and buyback',
+    rx: /gun (laws?|reform|control|buy-?back|registry|register|ban|amnesty)|firearms? (laws?|act|reform|registry|register|amnesty|licen[cs]es?|ban|buy-?back)|national firearms agreement|semi-?automatic (ban|rifles?|weapons?)|shooters union/i,
+    wide: /firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?/i,
+    q: ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia'] },
+  { ns: 'guns', client: 'Firearms clients (SIFA, Shooters Union)', id: 'hunting', label: 'Hunting and pest control',
+    rx: /recreational hunting|hunting (ban|licen[cs]e|permit|season)|duck (hunting|season)|(deer|pig|fox|cat|goat|brumby) (cull|culling)|feral (deer|pigs?|cats?|foxes|goats|animals?) (cull|control|plague|problem)/i,
+    wide: /(recreational|deer|duck|pig|game|bow|spotlight|sambar) hunting|hunting (licen[cs]es?|permits?|season|ban|clubs?|trips?|rights)|duck (season|shooting)|deer (cull|culling|stalking|management)|feral (deer|pigs?|cats?|foxes|goats|horses|animals?)|pest animals?|\bbrumb(y|ies)\b|aerial (cull|culling|shooting)|game council|1080 bait/i,
+    q: ['recreational hunting australia', 'feral deer cull', 'duck hunting victoria', 'brumby cull', 'feral cats australia'] },
   { ns: 'cmm', client: 'Curious Minds (shared)', id: 'col', label: 'Cost of living', map: 'i_col',
     rx: /cost of living|inflation|interest rates?|rba (decision|hold|cut|rise|board)/i,
     wide: /cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budget|petrol price|\bcpi\b|price gouging|bill relief|insurance premium|childcare (cost|fee)/i,

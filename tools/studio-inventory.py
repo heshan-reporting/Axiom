@@ -20,7 +20,7 @@ Usage:
 import argparse, json, os, sys, urllib.error, urllib.request
 
 WORKER = 'https://newsaus.heshan-998.workers.dev'
-NS = ['mca', 'aep', 'vicnats', 'pca', 'mba', 'pharm', 'cmm']
+NS = ['mca', 'aep', 'vicnats', 'pca', 'mba', 'pharm', 'guns', 'cmm']
 
 
 def get(worker, key, path):

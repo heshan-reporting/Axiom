@@ -13,6 +13,7 @@ NS_RULES = [
     (re.compile(r'nationals|mckenzie|nfrv', re.I), 'vicnats'),
     (re.compile(r'property council', re.I), 'pca'),
     (re.compile(r'master ?builders|level the site|\bmba\b', re.I), 'mba'),
+    (re.compile(r'shooters union|stop the buyback|\bsifa\b|shooting industry', re.I), 'guns'),
 ]
 def ns_for(account, campaign=''):
     hay = (account or '') + ' ' + (campaign or '')

@@ -262,7 +262,7 @@ def describe(kind, res):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('folder')
-    ap.add_argument('--ns', required=True, help='client namespace: mca, aep, vicnats, pca, mba, pharm, cmm')
+    ap.add_argument('--ns', required=True, help='client namespace: mca, aep, vicnats, pca, mba, pharm, guns, cmm')
     ap.add_argument('--key', default=os.environ.get('AXIOM_KEY', ''))
     ap.add_argument('--mind-ns', default='', help="namespace the documents are filed under when it differs from --ns: '<ns>_creative' is the creative shelf that only the Content Desk, Release Desk, Ad Lab and Studio retrieve (the kit, rules and artwork still go to --ns)")
     ap.add_argument('--worker', default=WORKER)

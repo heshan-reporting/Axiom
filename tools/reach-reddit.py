@@ -58,6 +58,8 @@ ISSUES = [
     ('housing', re.compile(r'\bhousing\b|home ?buyers?|first home|\brents?\b|\brental\b|planning (reform|law|scheme|minister|approval|system)|build-?to-?rent|negative gearing|capital gains (tax )?discount|property (market|prices|council|developer|investor)|apartments?|\bmortgages?\b|housing (accord|target|australia future fund)|social housing|affordable housing|stamp duty|developer contributions|\bnimby\b|granny flat|rezoning|density|homelessness|construction of homes', re.I)),
     ('construction', re.compile(r'construction (industry|sector|union|cost|worker|site|company|firm|jobs)|\bcfmeu\b|building (industry|code|approvals|commission|sector|costs?|company|site)|tradies?|master builders|industrial relations|enterprise agreement|same job,? same pay|wage theft|right of entry|apprentic|subcontractor|builder (collapse|insolvenc)|insolvenc|infrastructure (project|spend|pipeline|cost)|big build|cost overrun|\bcbus\b|\bawu\b|\betu\b|labour shortage|building materials?', re.I)),
     ('pharmacy', re.compile(r'pharmac(y|ies|ist|ists|eutical)|\bchemist\b|chemist warehouse|\bpbs\b|pharmaceutical benefits|60-?day dispensing|dispensing (fee|error|incentive)|scope of practice|prescription (cost|price|charge|fee)|co-?payment|medicine (shortage|price|cost)|vaccination (at|in) pharmac|pharmacy (owner|ownership|location rules|agreement)|community pharmacy agreement|\b[78]cpa\b|opioid dependence|repeat prescription|\bgp\b (visit|shortage|bulk billing)|bulk billing|urgent care clinic', re.I)),
+    ('firearms', re.compile(r'firearms?|\bguns? (laws?|owners?|ownership|control|lobby|buy-?backs?|registry|register|licen[cs]es?|shops?|clubs?|amnesty|reform)|(gun|firearms?|weapons?) buy-?backs?|national firearms agreement|shooters (union|party)|sporting shooters|\bssaa\b|shooting industry|\bsifa\b|ammunition|\brifles?\b|shotguns?|semi-?automatic|pistol clubs?|shooting (clubs?|ranges?|sports?)|gun control australia|licensed (firearm|gun) owners?', re.I)),
+    ('hunting', re.compile(r'(recreational|deer|duck|pig|game|bow|spotlight|sambar) hunting|hunting (licen[cs]es?|permits?|season|ban|clubs?|trips?|rights)|duck (season|shooting)|deer (cull|culling|stalking|management)|feral (deer|pigs?|cats?|foxes|goats|horses|animals?)|pest animals?|\bbrumb(y|ies)\b|aerial (cull|culling|shooting)|game council|1080 bait', re.I)),
     ('col', re.compile(r'cost[- ]of[- ]living|inflation|interest rates?|\brba\b|reserve bank|rate (rise|cut|hold|hike)|cash rate|grocer(y|ies)|supermarkets?|\bcoles\b|woolworths|\bwages?\b|household budget|petrol price|\bcpi\b|price gouging|bill relief|insurance premium|childcare (cost|fee)', re.I)),
     ('econ', re.compile(r'\beconomy\b|economic (growth|outlook|data|policy|reform)|\bgdp\b|recession|unemployment|jobless|productivity|\bbudget\b|deficit|surplus|treasury|tax (reform|cuts?|hike|policy|system|break)|income tax|company tax|\bgst\b|superannuation|super (tax|cap|change)|tariffs?|trade (war|deal)|\basx\b|australian dollar|cost base|business (confidence|investment)', re.I)),
     ('gov', re.compile(r'newspoll|resolve poll|essential poll|primary vote|two-?party|approval rating|preferred (pm|prime minister)|by-?election|leadership (spill|challenge)|question time|prime minister|albanese|sussan ley|\bdutton\b|treasurer|chalmers|\bcanberra\b|federal (government|election|budget|parliament|labor|minister|court)|\bcoalition\b|\bnationals\b|\bgreens\b|\bsenate\b|crossbench|\bteals?\b|one nation|\bhanson\b|preselection|lobby(ing|ist)|donations? disclosure', re.I)),
@@ -67,7 +69,7 @@ ISSUES = [
 # both mirrored from the worker's CLIENT_ISSUES (ns and q).
 ISSUE_NS = {'ftc': 'mca', 'cm': 'mca', 'mining': 'mca', 'gas': 'aep', 'energy': 'aep',
             'vicelection': 'vicnats', 'regional': 'vicnats', 'housing': 'pca', 'construction': 'mba',
-            'pharmacy': 'pharm', 'col': 'cmm', 'econ': 'cmm', 'gov': 'cmm', 'activism': 'cmm'}
+            'pharmacy': 'pharm', 'firearms': 'guns', 'hunting': 'guns', 'col': 'cmm', 'econ': 'cmm', 'gov': 'cmm', 'activism': 'cmm'}
 ISSUE_Q = {
     'ftc': ['fuel tax credit', 'diesel rebate', 'fuel excise', 'hands off our fuel'],
     'cm': ['critical minerals', 'rare earths', 'lithium mine', 'nickel industry', 'critical minerals strategic reserve'],
@@ -79,6 +81,8 @@ ISSUE_Q = {
     'housing': ['housing crisis', 'housing supply', 'negative gearing', 'planning reform', 'build to rent', 'rental crisis'],
     'construction': ['cfmeu', 'construction costs', 'building approvals', 'tradies shortage', 'construction insolvency', 'master builders'],
     'pharmacy': ['pharmacy guild', '60 day dispensing', 'pharmacist prescribing', 'chemist warehouse', 'pbs co-payment', 'bulk billing'],
+    'firearms': ['gun laws australia', 'gun buyback australia', 'nsw gun buyback', 'shooters union', 'national firearms agreement', 'firearms registry australia'],
+    'hunting': ['recreational hunting australia', 'feral deer cull', 'duck hunting victoria', 'brumby cull', 'feral cats australia'],
     'col': ['cost of living', 'interest rates', 'grocery prices', 'energy bill relief'],
     'econ': ['tax reform', 'productivity commission', 'federal budget', 'unemployment rate'],
     'gov': ['newspoll', 'federal election', 'question time', 'political donations'],
@@ -137,7 +141,7 @@ AU_RX = re.compile(
     # brands and mastheads
     r'|woolworths|\bwoolies\b|\bcoles\b|bunnings|\bqantas\b|\btelstra\b|\boptus\b|\bwestpac\b|commbank|commonwealth bank|\bafr\b|abc\.net\.au|abc news australia|sydney morning herald|news\.com\.au|sky news australia|the australian\b|guardian australia|newspoll|crikey|9news\.com\.au|7news\.com\.au'
     # our clients and their opponents, by their own names
-    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line'
+    r'|minerals council|pharmacy guild|master builders|lock the gate|rising tide (blockade|protest|activists?|newcastle)|market forces (campaign|report|activists?)|hands off our fuel|fuel tax credits?|60.day dispensing|safeguard mechanism|nature positive|\bepbc\b|same job,? same pay|chemist warehouse|v/line|shooters union|sporting shooters association|\bssaa\b|shooting industry foundation|national firearms agreement|gun control australia|\bbrumb(y|ies)\b'
     # the vernacular
     r'|\bservo\b|\barvo\b|\bmaccas\b|\bbogan\b|\btradies?\b|\butes?\b|fair dinkum', re.I)
 AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelaide|canberra|hobart|darwin|queensland|tasmania|nsw|qld|geelong|goldcoast|wollongong)', re.I)
@@ -146,7 +150,7 @@ AU_SUB_RX = re.compile(r'^(aus|australi|straya|melb|sydney|perth|brisbane|adelai
 # English elsewhere, and AU_RX contains those very terms, so folding the query
 # into the checked text passed every American hit. A query vouches for a thread
 # only when the query itself names Australia.
-AU_QUERY_RX = re.compile(r'austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v/line|duck hunting', re.I)
+AU_QUERY_RX = re.compile(r'austral|aussie|\bauspol\b|\bnsw\b|\bqld\b|queensland|victoria|tasmania|canberra|adelaide|hobart|brisbane|sydney|melbourne|\bperth\b|gippsland|pilbara|beetaloo|north ?west shelf|jacinta allan|\bcfmeu\b|newspoll|pharmacy guild|chemist warehouse|hands off our fuel|minerals council|master builders|lock the gate|v/line|duck hunting|shooters union|national firearms agreement|brumby', re.I)
 
 
 def au_relevant(sub, text, watched=(), q=''):

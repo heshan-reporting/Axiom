@@ -45,8 +45,13 @@ Ad Lab and Studio record approved/killed verdicts to the Mind as
 each client namespace to the issues they own (mca: fuel tax credits / critical
 minerals / mining and resources; aep: gas / energy and climate; vicnats: VIC
 election + regional Victoria; pca: housing; mba: construction and IR; pharm:
-community pharmacy; cmm: cost of living / economy and tax / federal politics /
-activist campaigns). Each issue carries three things and the difference
+community pharmacy; guns: firearms laws and buyback / hunting and pest control,
+for SIFA and Shooters Union together, at Kai's request on 20 October 2026; cmm:
+cost of living / economy and tax / federal politics / activist campaigns). The
+`guns` client also has register entities (SIFA, Shooters Union, SSAA, Gun Control
+Australia as opponent, gun buyback and gun laws topics) and Australian-only markers
+in the gate (Shooters Union, SSAA, National Firearms Agreement, brumby);
+`tests/firearms-client-worker.mjs`. Each issue carries three things and the difference
 matters: `rx` is the **tight** Sentinel trigger (what counts as a spike),
 `wide` is the **broad** collection matcher used by `issueTag()` everywhere
 rows are tagged (Reddit threads and comments, Meta comments, the Command
