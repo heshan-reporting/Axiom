@@ -123,6 +123,8 @@ await t('the chat revises every piece and shows the remembered rule', async () =
   eq(rev.body.n, null); eq(rev.body.remember, 'auto'); eq(rev.body.instruction, 'Always write per cent instead of the % sign');
   ok(/Remembered for MCA: Write per cent in body copy/.test(await page.textContent('.cd-remember')), await page.textContent('.cd-remember'));
   eq(await page.$$eval('.cd-piece .rel-chk.warn', els => els.length), 0, 'no more flags after the revise');
+  // the header's count comes from a second request after the revise answers; wait for it rather than read it at once
+  await page.waitForFunction(() => /2 corrections in force/.test((document.querySelector('.cd-head') || {}).textContent || ''), null, { timeout: 10000 }).catch(() => {});
   ok(/2 corrections in force/.test(await page.textContent('.cd-head')), 'header refreshed the count');
   ok(/1 edit/.test(await page.textContent('.cd-piece')), 'edit count chip');
 });
