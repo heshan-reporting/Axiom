@@ -40,23 +40,44 @@ def num(v):
     except Exception:
         return 0.0
 
+def sm_split(line):
+    """One row of Supermetrics' compressed table: comma-separated; a quoted value keeps its commas and uses
+    backslash escapes (\\n is a line break, \\" a quote); an unquoted null is None."""
+    out, i, n = [], 0, len(line)
+    while True:
+        if i < n and line[i] == '"':
+            i += 1; buf = []
+            while i < n:
+                ch = line[i]
+                if ch == '\\' and i + 1 < n:
+                    nx = line[i + 1]; buf.append({'n': '\n', 't': '\t', 'r': '\r'}.get(nx, nx)); i += 2; continue
+                if ch == '"':
+                    i += 1; break
+                buf.append(ch); i += 1
+            out.append(''.join(buf))
+            j = line.find(',', i)
+        else:
+            j = line.find(',', i)
+            tok = line[i:] if j < 0 else line[i:j]
+            out.append(None if tok == 'null' else tok)
+        if j < 0:
+            return out
+        i = j + 1
+
 def load(path):
-    import csv, io
     d = json.load(open(path))
     data = d['data'] if 'data' in d and isinstance(d['data'], dict) else d
     rows = data.get('data') or []
     ids = data.get('requested_field_ids') or []
     if isinstance(rows, str):
-        # compressed text: lines like "  - [14,]: v1,v2,\"quoted\",..."
-        parsed = []
-        for line in rows.split('\n'):
-            line = line.strip()
-            if not line.startswith('- ['):
-                continue
-            payload = line.split(']: ', 1)[1] if ']: ' in line else ''
-            # compressed rows escape embedded quotes with a backslash (e.g. Post: \"Right now\")
-            parsed.append(next(csv.reader(io.StringIO(payload), escapechar='\\', doublequote=False)))
-        rows = parsed
+        lines = rows.split('\n')
+        if lines and lines[0].startswith('[') and '{' in lines[0]:
+            # "[55]{id,id,...}:" then one row a line, indented; no display-name row
+            if not ids:
+                ids = lines[0][lines[0].index('{') + 1:lines[0].rindex('}')].split(',')
+            return ids, [sm_split(l[2:] if l.startswith('  ') else l.strip()) for l in lines[1:] if l.strip()]
+        # older layout: lines like "  - [14,]: v1,v2,\"quoted\",..." with the display-name row first
+        rows = [sm_split(l.strip().split(']: ', 1)[1]) for l in lines if l.strip().startswith('- [') and ']: ' in l]
     if not rows:
         return ids, []
     return ids, rows[1:]  # drop display-name header row
