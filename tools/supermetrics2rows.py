@@ -12,7 +12,8 @@ NS_RULES = [
     (re.compile(r'energy producers', re.I), 'aep'),
     (re.compile(r'nationals|mckenzie|nfrv', re.I), 'vicnats'),
     (re.compile(r'property council', re.I), 'pca'),
-    (re.compile(r'master ?builders|level the site|\bmba\b', re.I), 'mba'),
+    (re.compile(r'master ?builders|level the site|\bmba\b|\blts\b', re.I), 'mba'),
+    (re.compile(r'pharmacy guild|\bpga\b', re.I), 'pharm'),
     (re.compile(r'shooters union|stop the buyback|\bsifa\b|shooting industry', re.I), 'guns'),
 ]
 def ns_for(account, campaign=''):
