@@ -3420,3 +3420,20 @@ reference's green was its example, so the accent stays the client's own (`--st-c
 - The picker sets solid colours; opacity stays in Effects. The Spacing box model has no padding ring, since layers carry no
   padding of their own.
 - The estimate rests on the stage's history; a stage that has run fewer than twice uses a stated rough guess per stage.
+
+### 53.4 Runs
+
+Providers mocked, in this sandbox, Chromium only (Firefox and WebKit are not installed here; CI runs all three):
+
+- `node tests/run.mjs all`: 157 of 157 (checks, every backend harness, every browser harness), including the new
+  `tests/studio-c-browser.mjs` (8: the seven stages, the rail and Add item, the formats and the measured zoom, Spacing and Size,
+  the colour picker's measured contrast, the version strip, the estimate on a slow render) and the estimate cases in
+  `tests/studio-progress-test.mjs` (49).
+- Found and fixed on the way, each by a harness that failed first: S19 C2 (a page chip clicked while typing on the canvas missed,
+  because the save line beside it grew and the row moved under the pointer; the row's items now sit at its bottom edge), S23g
+  G-B6 (the crop bar made the toolbar two rows; the formats step aside while reframing), S23j J-B6 (axe: the stage number in a
+  head lacked contrast on the new palette; it is now the accent with its own ink).
+- Measured: the canvas toolbar is one row at 1024, 1440 and 1920 with a selection; the fitted 4:5 artboard at 1440 x 900 with the
+  inspector open is 581 px.
+
+Not run: the live worker or any live provider. Nothing is deployed; the page goes live when the branch is merged to main.
