@@ -250,7 +250,7 @@ await t('approvals per component with reasons; a copy edit drops the copy approv
   const ex = await page.evaluate(() => window.__studioLastExport);
   ok(ex.files.some(f => /Facebook_post-v\d\.png/.test(f)) && ex.files.indexOf('copy-sheet.txt') >= 0 && ex.files.indexOf('manifest.json') >= 0, JSON.stringify(ex.files));
   ok(ex.manifest && ex.manifest.export && ex.manifest.included.length === 1 && ex.manifest.included[0].exportKey, 'the export stage recorded the browser-rendered PNG: ' + JSON.stringify(ex.manifest).slice(0, 300));
-  ok(Array.from(r2.keys()).some(k => /-export\.png$/.test(k)), 'the composition PNG is in R2');
+  ok(Array.from(r2.keys()).some(k => /-export(-[0-9a-f]{16})?\.png$/.test(k)), 'the composition PNG is in R2 (S28: a measured one under its own hash)');
   ok(/Bundle ready/.test(await page.textContent(R + '.st-exportstage')) && await page.$(R + '.st-exportstage a[download]'), 'the download link is shown');
   ok(/1080 x 1080/.test(await page.textContent(R + '.st-export-files')) && /native size/.test(await page.textContent(R + '.st-export-files')), 'the exported PNG is at the native size');
   await page.click(R + '.st-exportstage button:has-text("Send to ClickUp")');
@@ -759,7 +759,7 @@ await t('P8: with two campaigns the wizard assumes none until the team chooses; 
   // the inspections that ran in this session saw the composed tile the browser saved before they ran
   const ins = env.MIND_DB.db.prepare("SELECT data FROM studio_events WHERE kind='inspection'").all().map(r => JSON.parse(r.data)).filter(d => d.scores);
   ok(ins.length && ins.every(d => d.composed === true), 'every inspection read the composed export: ' + JSON.stringify(ins.map(d => d.composed)));
-  ok(Array.from(r2.keys()).some(k => /-export\.png$/.test(k)), 'the composed PNG was saved');
+  ok(Array.from(r2.keys()).some(k => /-export(-[0-9a-f]{16})?\.png$/.test(k)), 'the composed PNG was saved (S28: a measured one under its own hash)');
   await shot(pg, 'studio-brief'); await pg.close();
 });
 await browser.close(); server.kill();
