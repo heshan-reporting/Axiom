@@ -13334,7 +13334,12 @@ function axAuth(req, env) {
   if (guests.roster) for (const k of Object.keys(guests.roster)) {
     if (!ctEq(supplied, k)) continue;
     const g = guests.roster[k];
-    if (g.until !== undefined && Date.now() >= Date.parse(g.until)) return { configured: true, ok: false, role: null, name: '', expired: true };
+    if (g.until !== undefined && Date.now() >= Date.parse(g.until)) {
+      // a known key past its date, while open access is on, gets exactly what no key would: the public role. Without this a
+      // browser that kept an old sign-in link is shut out of an open worker (3 November 2026). A wrong key is still refused.
+      if (pub.role && !pub.ended) return { configured: true, ok: true, role: pub.role, name: 'public', public: true, keyExpired: true };
+      return { configured: true, ok: false, role: null, name: '', expired: true };
+    }
     return { configured: true, ok: true, role: g.r, name: String(g.n || 'guest').slice(0, 40), guest: true };
   }
   return { configured: true, ok: false, role: null, name: '' };

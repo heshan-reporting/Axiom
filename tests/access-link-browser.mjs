@@ -45,4 +45,26 @@ await T.t('a link without a key leaves the stored key alone; a malformed key is 
   await page.ctxB.close();
 });
 
+await T.t('a browser holding an expired sign-in key: the library says the link has ended; with open access on it simply opens', async () => {
+  const saved = { g: fx.env.AXIOM_GUEST_KEYS, p: fx.env.AXIOM_PUBLIC, u: fx.env.AXIOM_PUBLIC_UNTIL };
+  fx.env.AXIOM_GUEST_KEYS = JSON.stringify({ 'guest-old-00001': { n: 'Kai', r: 'full', until: '2020-01-01' } });
+  delete fx.env.AXIOM_PUBLIC; delete fx.env.AXIOM_PUBLIC_UNTIL;
+  try {
+    const page = await fx.open({ go: false });
+    await page.goto(base + '?l=5#k=guest-old-00001&v=studio', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#studio-root .st-lib-fail', { timeout: 15000 });
+    const t1 = await page.textContent('#studio-root .st-lib-fail');
+    ok(/Your sign-in link has ended/.test(t1) && /Ask whoever sent the link for a new one/.test(t1), t1);
+    ok(!/did not answer/.test(t1), 'not "the worker did not answer": it answered, and said why');
+    fx.env.AXIOM_PUBLIC = 'read'; fx.env.AXIOM_PUBLIC_UNTIL = '2999-01-01';
+    await page.click('#studio-root .st-lib-fail button');
+    await page.waitForFunction(() => !document.querySelector('#studio-root .st-lib-fail') && /Projects for/.test(document.querySelector('#studio-root').textContent), null, { timeout: 15000 });
+    await page.ctxB.close();
+  } finally {
+    if (saved.g === undefined) delete fx.env.AXIOM_GUEST_KEYS; else fx.env.AXIOM_GUEST_KEYS = saved.g;
+    if (saved.p === undefined) delete fx.env.AXIOM_PUBLIC; else fx.env.AXIOM_PUBLIC = saved.p;
+    if (saved.u === undefined) delete fx.env.AXIOM_PUBLIC_UNTIL; else fx.env.AXIOM_PUBLIC_UNTIL = saved.u;
+  }
+});
+
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

@@ -136,6 +136,17 @@ await T.t('AXIOM_GUEST_KEYS alone configures the worker: guests open, no key is 
   eq((await x.call('GET', '/allnews', null, null, ip())).status, 401, 'no key: 401');
   eq((await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-only-0001', ip())).status, 403, 'read stays read'); x.restore();
 });
+/* 3 November 2026: Laura's browser kept a sign-in key that had passed its date, so every request carried it and was refused
+ * link_expired while open access was on and the same request with no key would have been let in */
+await T.t('an expired guest key is let in as the public role while open access is on; a wrong key is still refused', async () => {
+  const g = JSON.stringify({ 'guest-old-00001': { n: 'Kai', r: 'full', until: '2020-01-01' } });
+  const x = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: g, AXIOM_PUBLIC: 'read', AXIOM_PUBLIC_UNTIL: '2999-01-01' }, SECRETS) });
+  const a = await x.call('GET', '/studio/list?ns=pca', null, 'guest-old-00001', ip()); eq(a.status, 200, 'the library opens: ' + a.text.slice(0, 120));
+  const w = await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-old-00001', ip()); eq([w.status, w.body.error], [403, 'read_only'], 'with the public role, not the key\'s old one');
+  eq((await x.call('GET', '/allnews', null, 'guest-nope-0001', ip())).status, 401, 'an unknown key is still refused'); x.restore();
+  const ended = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: g, AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2020-01-01' }, SECRETS) });
+  const e = await ended.call('GET', '/studio/list?ns=pca', null, 'guest-old-00001', ip()); eq([e.status, e.body.error], [401, 'link_expired'], 'with open access ended the key is refused as before'); ended.restore();
+});
 /* public mode: AXIOM_PUBLIC opens keyless requests with its role until AXIOM_PUBLIC_UNTIL; supplied keys are still checked */
 await T.t('AXIOM_PUBLIC: no key gets the public role, a wrong key is still refused, and anything but read or full opens nothing', async () => {
   const x = await workerEnv({ env: Object.assign({ AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2999-01-01' }, SECRETS) });

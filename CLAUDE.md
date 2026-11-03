@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r20` since.
+  with `?v=r21` since the expired-link message (3 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -3046,7 +3046,16 @@ optional `"until":"2026-10-31"` (midnight UTC at the start of that day, or a
 date and time) after which the key answers `401 link_expired`; it is its own
 list so testers are added or removed without rewriting `AXIOM_KEYS`, which
 Cloudflare cannot show back, and a broken guest list refuses every guest key
-but never closes the main roster (`axGuests`, `axRosterParse`). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
+but never closes the main roster (`axGuests`, `axRosterParse`). A guest key past its
+date answers `401 link_expired` ("Your sign-in link has ended" in the Studio), except while
+public mode is open, when it gets the public role, exactly what no key would (3 November
+2026: Laura's browser kept an old link and was shut out of an open worker); an unknown key
+is still 401. **Guest links are made on the Mac** with `python3 tools/guest-link.py add
+<name> [--until DATE | --days 30] [--read]` (also `renew`, `link`, `remove`, `list`): the
+key is made there, the list is kept in `~/.axiom-guests.json` (600) and written whole to the
+secret each time; it stops when the worker has guest keys but the Mac has no list, since
+writing would end every old link (`--fresh` does that on purpose). Harness:
+`tests/guest-link-test.py` (10, a stub in place of wrangler). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
 (optional `AXIOM_PUBLIC_UNTIL`, a date): a request with no key gets that role until the date
 (`axPublic`); a supplied key is still checked, a wrong one still 401; any other value opens
 nothing; after the date keyless requests answer `401 link_expired`. Off unless set. With no secret
@@ -3065,7 +3074,7 @@ the key is never sent to a server, never in a referrer and never left in the
 history; `#v=<view>` opens that view. Keys are `[A-Za-z0-9_-]{8,}`; anything
 else is ignored. The link is the key: send it privately, and make each
 person their own roster entry so a leaked link is one entry to remove.
-Harness: `tests/access-link-browser.mjs` (3).
+Harness: `tests/access-link-browser.mjs` (4).
 URLs a person supplies (`/fetchurl`, the forum readers) are fetched only when
 `axUrlProblem` finds a public http(s) address (no private, local, credentialed
 or non-default-port host; redirects rechecked by hand).
