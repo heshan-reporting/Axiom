@@ -3107,6 +3107,15 @@ in what happens when an earlier decision moves (F4) and in what the panels say (
 ### 48.5 Runs
 
 Backend (`node tests/run.mjs check`, `backend`): 24 of 24 checks, 68 of 68 harnesses, including the new `studio-s25-worker` (9),
-`deploy-verify-test` (7) and `guest-link-test` (10). Browser: see the summary in the session report; the new
-`studio-s25-browser` (6) and `studio-s22-browser` (A, B and the new C) are in it. Nothing here is claimed bug-free: the harnesses
-prove the cases they name.
+`deploy-verify-test` (7) and `guest-link-test` (10).
+
+Browser (`node tests/run.mjs browser`, Chromium only - Firefox and WebKit are not installed here): 47 of 52 on the first run.
+Three failures were the harnesses reading S25's own interface changes - `studio-browser` counted every link on a photograph
+suggestion (the new Dismiss link doubled it), `studio-s17-browser` looked for a button wording S25 had changed (restored for that
+case), `studio-s19-browser` I took the word "verdict" in the new note for a review being present - and after the fixes they pass
+26 of 26, 8 of 8 and 16 of 16. The other two, `studio-s20-browser` W1 and `studio-s23g-browser` G-B6, measure the fitted 4:5
+Design artboard at 1440 x 900 as 548 px against a 560 px floor; both fail identically on the baseline `908a03d` in this
+environment (run from a worktree of that commit), so they are not S25's; S24 recorded 565 px where it ran, and the cause here
+(fonts the sandbox does not load are a candidate) is not established. The new `studio-s25-browser` passed 6 of 6 in the suite and
+fails 6 of 6 on the old code; `studio-s22-browser` passed A, B and C. Nothing here is claimed bug-free: the harnesses prove the
+cases they name.
