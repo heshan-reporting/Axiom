@@ -3292,3 +3292,11 @@ size or the stage's (`p8`, `p9`, `p11`, `s11`); `auth-policy-worker` asserts the
 Nothing ran against a live model, image provider, the live worker or Cloudflare. Vectorize `deleteByIds` is exercised against the
 fixture's in-memory index only. Drafts saved before S28 under display names are orphaned (not shown to anyone); the browser's own
 working copy still restores an unsaved edit. The per-person cap counts requests, not money.
+
+### 51.5 Runs
+
+`node tests/run.mjs all` on `2a501ac` (providers mocked): 152 of 154 - the 24 checks, every backend harness, and every browser
+harness but two that still expected the old export rules: `studio-browser` (two checks looked for a key ending `-export.png`) and
+`studio-review-browser` (its tile was a 4 x 4 PNG standing in for a 1080 x 1080 composition, now refused by the size check). Both
+were adjusted in the two commits that follow and pass alone, 26 of 26 and 5 of 5. The new harnesses: `studio-ready-worker` 10,
+`studio-ready2-worker` 8, `studio-ready-browser` 8, `studio-test-kit-test` 4, `guest-link-test` 11.
