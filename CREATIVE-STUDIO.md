@@ -3300,3 +3300,62 @@ harness but two that still expected the old export rules: `studio-browser` (two 
 `studio-review-browser` (its tile was a 4 x 4 PNG standing in for a 1080 x 1080 composition, now refused by the size check). Both
 were adjusted in the two commits that follow and pass alone, 26 of 26 and 5 of 5. The new harnesses: `studio-ready-worker` 10,
 `studio-ready2-worker` 8, `studio-ready-browser` 8, `studio-test-kit-test` 4, `guest-link-test` 11.
+
+## 52. The p43 audit, closed (build `2026-11-06.studio-p44`, page `?v=r27`)
+
+An external audit of `c40397d` (3 November 2026) judged the Studio not ready for broad testing on three findings. Each was
+reproduced by a case in `tests/studio-p44-worker.mjs` that fails on `c40397d` (11 of 11 failed) and passes now. Two independent
+reviewers ran over the work: a security review of every route a full guest key can call, which found more than the audit named
+(52.1, G4 to G8), and a code review of the fixes, which found two follow-ups (52.1, R1 and R2).
+
+### 52.1 Findings ledger
+
+| Id | Severity | What was wrong | Fix | Test |
+|---|---|---|---|---|
+| G1 | high (audit) | `/studio/remember`, `/studio/approve` and `/studio/import` were open to a full guest key on live work: a guest could teach a live client rule, file a WIN or LOSS and a brand proposal, or import a live client's earlier work as a live project (and take the agency's one import slot). | `axGuestGuard` before any route: a guest writes test work only (`guest_live_project`); a guest import of a live client's work is refused. | A1 live project, A1 import |
+| G2 | high (audit) | A measured export was accepted by its signature and IHDR alone; 0 x 0 passed the size check. | `stPngCheck`: every chunk whole with its CRC, IHDR first and legal, palette where needed, IDAT consecutive, IEND last with nothing after it, the stage size checked before inflating, the image data inflated (`DecompressionStream`) to exactly its stated size with a legal filter on every row. `stValidationSubmit` requires the stage size; `/studio/render/save` applies the same to a PNG. | A2 (ten malformed kinds, a wrong size, RGB and RGBA) |
+| G3 | medium (audit) | `engineRetract` marked an outcome withdrawn even when the vector deletion failed; the document stayed retrievable while the answer said retracted. | The document is marked `retracting` first and `mindDropRetracted` leaves it out of `mindRetrieve` and `/mind/query` from then on; the outcome records `retract` done or pending with the error; `/studio/approve` answers `retraction_pending`; `mindRetractPending` finishes it each tick; identical text refiled makes a new document. | A3 |
+| G4 | high (security review) | The S28 guard read `body.ns` first; the `/brand` handlers read the address first. `POST /brand/kit?ns=mca` with `{ns:'synthdemo'}` wrote the MCA kit. | The guard reads each route's namespace as its handler does. | A1 address |
+| G5 | high (security review) | `/engine/fix/update` and `/delete` act by id with no namespace; a guest naming `synthdemo` changed any client's rule. `scope:'all'` from `synthdemo` reached every client. | The rule's own row decides; every-client rules are refused to a guest. | A1 rules |
+| G6 | high (security review) | Unguarded live-memory writers: `/engine/outcome`, `/engine/artwork` and `/describe`, `/mind/ingest`, `/content/*`, `/studio/campaign/create`; and every other AXIOM write, acting reads included. | Memory routes need a test namespace; everything else is `guest_scope` (`/mind/query` stays open). | A1 memory, A1 elsewhere |
+| G7 | high (security review) | A test project filed a WIN through `/studio/text/verdict`, and a reference observation there could supersede or switch off a live rule. | Neither touches client memory from a test project. | A1 test project files nothing (with a live-project control) |
+| G8 | medium (security review) | The brand workspace, inventory, identity audit, teach evidence, recorded decisions and brief suggestions read every project of a client, test projects included. | `stLiveSql` leaves test projects out for a live client; `brTeachObservation` refuses a test project's reference (`test_reference`). | A1 client-wide reads |
+| R1 | medium (code review) | Withdrawals the S28 build left half-done (withdrawn, deletion failed, no retract state) were never finished. | `mindRetractPending` picks them up. | A3 half-done |
+| R2 | low (code review) | With `STUDIO_GUEST_TEST=0` alone a guest's projects were live, and the new guard then refused every write to them. | A guest's project is live only with both `STUDIO_GUEST_TEST=0` and `STUDIO_GUEST_LIVE=1`. | A1 the flag |
+
+A guest reads a live project as before; `/studio/get` marks it `readOnly` with `readOnlyWhy: 'guest_live'`, and the island's chip
+says "live client work, read-only for a guest link" (the job pump already leaves read-only projects alone, so a guest's browser never
+steps an agency job). A backstop holds anything a route resolves later: in a guest's Studio write `stProject` answers nothing for a
+live project and the request is answered `guest_live_project`. The guard resolves every Studio write route first, so no test reaches
+the backstop; `/studio/direction/choose` now stops on a missing project rather than writing on. Opened only on purpose:
+`STUDIO_GUEST_BRAND=1` (live memory), `STUDIO_GUEST_LIVE=1` (live projects), `AXIOM_GUEST_WRITE=any` (the rest of AXIOM).
+
+Older harnesses that filed fake PNGs (a signature and filler) now file real ones from `tests/png.mjs` (`p2`, `p8`, `p9`, `p11`,
+`s11`, `studio-ready-worker`).
+
+### 52.2 Not changed, said plainly
+
+- Per-key client scope (51.3 D1) is still not built: a guest link reads every client's projects. Treat guest links as internal-only
+  until it is.
+- The browser's pixel figures (contrast, ink readability) are still taken as reported; the worker now checks the PNG is whole and
+  the composition's size, not what it shows.
+- References and uploads keep the S28 byte sniffing; only the measured export is decoded.
+- `npm audit` reports three high advisories, all in `miniflare` (a dev dependency used only by `workerd-deploy-test`; nothing of it
+  ships). Its suggested fix is a downgrade, so it was left.
+
+### 52.3 Runs
+
+Providers mocked, in this sandbox:
+
+- `tests/studio-p44-worker.mjs`: 0 of 11 on `c40397d`; 11 of 11 with the fixes; 13 of 13 with the review's two follow-ups (both
+  failed first).
+- `node tests/run.mjs check`: 24 of 24. Backend: 75 of 75, before and after the review fixes.
+- Browser: 56 of 56 on the first fix commit. `studio-s17-browser` (8), `studio-s25-browser` (6) and `studio-s26-browser` (4), which
+  choose directions, again after the `/studio/direction/choose` change. The cross-engine harnesses ran Chromium only here (Firefox
+  and WebKit are not installed in this sandbox); CI runs all three.
+- The code review ran `stPngCheck` on real Chromium `canvas.toBlob` output (1080 x 1920, 1080 x 1350 and 1080 x 1080, RGBA and
+  opaque, 77 to 517 IDAT chunks): every one passes, in 20 to 120 ms under Node. It also checked `DecompressionStream('deflate')` in
+  workerd (miniflare, compatibility date 2025-01-01).
+
+Not run: anything against the live worker, a live model or image provider, Cloudflare's real Vectorize, or Firefox and WebKit
+canvas output. The p44 worker is not deployed; `tools/deploy-worker.sh` from the Mac when the branch is merged.

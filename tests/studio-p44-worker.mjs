@@ -189,5 +189,29 @@ await T.t('A3 a withdrawal whose vector deletion fails is pending, not retracted
   } finally { w.env.MIND_VECTORS.deleteByIds = real; w.env.MIND_VECTORS.query = realQuery; }
 });
 
+await T.t('A3 a withdrawal the S28 build left half-done (withdrawn, its deletion failed, no retract state) is finished by the tick', async () => {
+  const P = await project('Legacy retraction'); const a = await asset(P.id, 'copy');
+  eq((await call('POST', '/studio/approve', { asset: a.id, part: 'copy', decision: 'approve', reason: 'Right for the campaign' })).status, 200);
+  const o = (await rows("SELECT * FROM engine_outcomes WHERE surface='studio' AND ref LIKE ?", a.id + '%'))[0]; ok(o && o.doc, 'filed');
+  // the state c40397d left when Vectorize refused: the outcome withdrawn, no retract state, the document complete with its vectors
+  await db.prepare('UPDATE engine_outcomes SET withdrawn=?, retract=NULL WHERE id=?').bind(Date.now(), o.id).run();
+  eq((await rows('SELECT status FROM mind_docs WHERE id=?', o.doc))[0].status, 'complete');
+  { let waited = null; await w.mod.default.scheduled({}, w.env, { waitUntil: p => { waited = p; } }); await waited; }
+  eq((await rows('SELECT status FROM mind_docs WHERE id=?', o.doc))[0].status, 'retracted', 'finished');
+  ok(!Array.from(w.vectors.keys()).some(k => k.indexOf(o.doc + '_') === 0), 'its vectors are gone');
+  eq((await rows('SELECT retract FROM engine_outcomes WHERE id=?', o.id))[0].retract, 'done');
+});
+
+await T.t('A1 with STUDIO_GUEST_TEST=0 alone a guest still gets a project it can work in (a test project); only STUDIO_GUEST_LIVE=1 as well makes it live', async () => {
+  w.env.STUDIO_GUEST_TEST = '0';
+  try {
+    const p1 = await project('Guest with the flag off', {}, GUEST); eq(p1.test, true, 'still a test project');
+    eq((await call('POST', '/studio/asset', { project: p1.id, family: 'F', channel: 'facebook', format: '1:1', title: 'Mine', copy: { headline: 'Two more crossings' }, mode: 'copy' }, GUEST)).status, 200, 'and the guest can work in it');
+    w.env.STUDIO_GUEST_LIVE = '1';
+    const p2 = await project('Guest live on purpose', {}, GUEST); eq(p2.test, false, 'both switches: a live project, on purpose');
+    eq((await call('POST', '/studio/asset', { project: p2.id, family: 'F', channel: 'facebook', format: '1:1', title: 'Mine', copy: { headline: 'x' }, mode: 'copy' }, GUEST)).status, 200, 'which the guest may then write');
+  } finally { delete w.env.STUDIO_GUEST_TEST; delete w.env.STUDIO_GUEST_LIVE; }
+});
+
 w.restore();
 T.done();

@@ -2796,7 +2796,7 @@ filed once and taken back: a final verdict (a design decision, the copy decision
 LOSS per asset, version and part (`engine_outcomes.doc`, `withdrawn`); the "ready for design" tick is a hand-off that files nothing; a
 withdrawal or a reversed verdict retracts the document (`engineRetract`, `mindRetract`: vectors deleted, `mind_docs.status`
 `retracted`); readers of outcomes leave withdrawn ones out. **Test projects** (`studio_projects.test`: asked for, a namespace in
-`ST_TEST_NS`/`STUDIO_TEST_NS` such as `synthdemo`, or made by a guest key unless `STUDIO_GUEST_TEST=0`) file nothing in a client's
+`ST_TEST_NS`/`STUDIO_TEST_NS` such as `synthdemo`, or made by a guest key unless both `STUDIO_GUEST_TEST=0` and `STUDIO_GUEST_LIVE=1`) file nothing in a client's
 memory (outcomes, `studio_intel_log`, brand proposals, `/studio/remember` is 409 `test_project`), are left out of `/studio/metrics`
 unless `tests=1`, carry a badge, filter in the library (`/studio/list?tests=only|hide`) and are archived together (`POST
 /studio/project/archive-tests {ns}`). A guest key cannot change a live client's kit, taught rules, brand items or corrections
@@ -2829,7 +2829,8 @@ earlier work, whose one import slot is the agency's) or `guest_scope` (anything 
 stays open). Backstop: in a guest's Studio write `env` is `Object.create(env, {__guestGate})`, `stProject` answers null for a live
 project and the request wrapper turns the answer into `guest_live_project` (`AX_GUEST_GATES`). `/studio/get` marks a live project
 `readOnly` with `readOnlyWhy: 'guest_live'` for a guest (the island's chip says so). Opened only on purpose: `STUDIO_GUEST_BRAND=1`,
-`STUDIO_GUEST_LIVE=1`, `AXIOM_GUEST_WRITE=any`. For everyone, a test project now files nothing by any route (kit text verdicts too; a
+`STUDIO_GUEST_LIVE=1`, `AXIOM_GUEST_WRITE=any`; a guest's own projects are live only with both `STUDIO_GUEST_TEST=0` and
+`STUDIO_GUEST_LIVE=1`, so a guest never gets a project it cannot work in. For everyone, a test project now files nothing by any route (kit text verdicts too; a
 reference observation there changes no live rule; `brTeachObservation` refuses its references, `test_reference`), and the client-wide
 reads (brand workspace, inventory, identity audit, teach evidence, recorded decisions, brief suggestions) leave test projects out
 (`stLiveSql`). A measured export is a PNG by its structure: `stPngCheck(buf, want)` (every chunk whole with its CRC, IHDR first and
@@ -2839,7 +2840,8 @@ required, 0 x 0 refused: `bad_png` / `image_size` 422) and `/studio/render/save`
 gone: `mindRetract` marks the document `retracting` first (`mindDropRetracted` leaves it out of `mindRetrieve` and `/mind/query` from
 then on), deletes the vectors, then `retracted`; a failed deletion stays pending (`engine_outcomes.retract` / `retract_err`,
 `/studio/approve` answers `learned: 'retraction_pending'` and `retract {done, pending, detail}`) and `mindRetractPending` finishes it
-each tick; refiling identical text never revives a retracted document. Harnesses: `tests/studio-p44-worker.mjs` (11);
+each tick, and the withdrawals the S28 build left half-done (withdrawn, no retract state, the document not retracted); refiling
+identical text never revives a retracted document. Harnesses: `tests/studio-p44-worker.mjs` (13);
 `tests/png.mjs` builds whole PNGs (and broken ones) for every harness that files a measurement.
 
 Phase 1, the ground:

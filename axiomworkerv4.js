@@ -3653,7 +3653,8 @@ async function mindRetract(env, docId) {
 /** p44: finish the retractions a failed deletion left pending (every tick, a few at a time; never gated, it spends nothing). */
 async function mindRetractPending(env, limit) {
   if (!env.MIND_DB) return { tried: 0, done: 0 };
-  let rows = []; try { rows = (await env.MIND_DB.prepare("SELECT id, doc FROM engine_outcomes WHERE retract='pending' ORDER BY withdrawn LIMIT ?").bind(limit || 20).all()).results || []; } catch (e) { return { tried: 0, done: 0 }; }
+  // pending ones, and those the S28 build left half-done: withdrawn, no retract state, the document not retracted (its deletion failed)
+  let rows = []; try { rows = (await env.MIND_DB.prepare("SELECT o.id, o.doc FROM engine_outcomes o LEFT JOIN mind_docs d ON d.id=o.doc WHERE o.retract='pending' OR (COALESCE(o.withdrawn,0)>0 AND o.retract IS NULL AND COALESCE(o.doc,'')<>'' AND d.id IS NOT NULL AND COALESCE(d.status,'')<>'retracted') ORDER BY o.withdrawn LIMIT ?").bind(limit || 20).all()).results || []; } catch (e) { return { tried: 0, done: 0 }; }
   let done = 0;
   for (const r of rows) {
     let m = { ok: true }; if (r.doc) { try { m = await mindRetract(env, r.doc); } catch (e) { m = { ok: false, error: String((e && e.message) || e).slice(0, 200) }; } }
@@ -15869,7 +15870,9 @@ const AXIOM_WORKER = {
           // S24: a project made for a capped live test carries its allowance from the start, so nothing it runs can spend past it
           let alId = ''; if (sb.allowance) { const al = stAllowanceView(await stAllowanceRow(env, sb.allowance)); if (!al) return jsonResp({ error: 'unknown_allowance', detail: 'No allowance ' + stClean(sb.allowance, 30) + '.' }, 404); if (al.revoked || al.expired) return jsonResp({ error: 'allowance_inactive', detail: 'The allowance "' + al.label + '" is ' + (al.revoked ? 'withdrawn' : 'out of time') + '.' }, 409); alId = al.id; }
           // S28: a test project files nothing in the client's memory; a guest's projects are test projects (STUDIO_GUEST_TEST=0 lifts it)
-          const testP = sb.test === true || stTestNs(env, ns) || (!!auth.guest && String(env.STUDIO_GUEST_TEST || '1') !== '0');
+          // p44: a guest never gets a project it cannot work in - its projects are live only when both STUDIO_GUEST_TEST=0 and
+          // STUDIO_GUEST_LIVE=1 say so (the guard keeps a guest out of live projects otherwise)
+          const testP = sb.test === true || stTestNs(env, ns) || (!!auth.guest && !(String(env.STUDIO_GUEST_TEST || '1') === '0' && String(env.STUDIO_GUEST_LIVE || '') === '1'));
           await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated,allowance,test) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
             .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now, alId || null, testP ? 1 : 0).run();
           await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' + (testP ? ' A test project: nothing it decides is filed in the client\'s memory.' : '') }, who);
@@ -16168,7 +16171,7 @@ const AXIOM_WORKER = {
         }
         if (path === '/studio/direction/choose') {
           const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
-          { const pr0 = await stProject(env, d.project); if (pr0 && stWfOn(pr0)) { const g = await stWfGate(env, pr0, 'choose'); if (g) return jsonResp({ ok: false, error: g.error, detail: g.detail, step: g.step, need: g.need }, g.status); const dd0 = pjs(d.data, {}); if (dd0.basis && !stWfItemCurrent(pr0, { id: d.id }, dd0.basis)) return jsonResp({ ok: false, error: 'direction_earlier', detail: 'This direction was built on an earlier objective, message or strategy. Keep the existing directions under the current choice, or choose one built on it.' }, 409); } }
+          { const pr0 = await stProject(env, d.project); if (!pr0) return jsonResp({ error: 'unknown_project' }, 404); if (stWfOn(pr0)) { const g = await stWfGate(env, pr0, 'choose'); if (g) return jsonResp({ ok: false, error: g.error, detail: g.detail, step: g.step, need: g.need }, g.status); const dd0 = pjs(d.data, {}); if (dd0.basis && !stWfItemCurrent(pr0, { id: d.id }, dd0.basis)) return jsonResp({ ok: false, error: 'direction_earlier', detail: 'This direction was built on an earlier objective, message or strategy. Keep the existing directions under the current choice, or choose one built on it.' }, 409); } }
           // 3 November 2026: choosing another direction after copy was written from the first one used to happen silently. A guided
           // project now names the pieces it leaves written from another direction and asks first: update (they are marked for a
           // rewrite from the new one in Copy; nothing is regenerated by itself), keep (they stay current under the new choice), or
