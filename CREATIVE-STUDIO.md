@@ -3211,3 +3211,27 @@ switches and reloads (`studio-s19/s20-browser`, `studio-merge-test`).
 Deferred, with the reason: the repeated `.st-canvas-sub .st-comp-info` overrides across `studio-shell.css` (four blocks) and
 `studio-polish.css` (P3, no visible defect; S26 changed this area and a consolidation should land with a pixel comparison of its
 own); an exhaustive guided-versus-classic parity audit beyond the direction change (S26) and the dialogs here.
+
+### 50.3 Runs
+
+| | Baseline `94210a3` | After `410aff0` |
+|---|---|---|
+| `node tests/run.mjs check` | 24 of 24 | 24 of 24 |
+| `backend` | 70 of 70 | 71 of 71 (`studio-explain-test` added) |
+| `browser` (Chromium) | 53 of 53 | 55 of 55 (`studio-s26-xbrowser-browser` since `af1cdfa`, `studio-s27-browser` added) |
+| Firefox and WebKit | CI run 136: both cross-engine harnesses 3 of 3 | CI run 137 on `410aff0`: in progress when this was written |
+| Sweep: sideways scroll, 390 to 1920 px, both roles | none | none |
+| Sweep: axe serious or critical | Explore (2 rules), Copy (1 rule), at every width | none in any view, width or role |
+| Cold open, median | 420 ms | 422 ms |
+| Phase switch, p95 | 91 ms | 106 ms (target 150 ms) |
+| 50-layer drag, frame p95 / long tasks | 16.8 ms / 0 | 16.7 ms / 0 |
+| Pointer to frame, p95 | 17.1 / 18.4 ms | 15.8 / 17.4 ms |
+| Heap over 200 actions | +0.3 MB | -0.5 MB |
+
+The first full browser run with the S27 page was 52 of 55: `studio-browser`, `studio-guided-browser` and `studio-modes-browser`
+needed the adaptations in 50.2 (F27-4), after which they passed alone (26 of 26, 6 of 6, 4 of 4) and the whole suite passed on
+the committed code. Screenshots: 80 matched before / after pairs (16 states, five sizes); 78 differ by under 0.5% of their pixels;
+the Copy pair at 1920 differs only by the "Just finished" activity card, which shows for two minutes after a job and was inside
+that window for the before capture. The loading and failed states exist only in the after set: the before run reached its time
+limit before them. Nothing here ran against a live model, image provider, the live worker or Cloudflare; nothing is claimed
+bug-free.
