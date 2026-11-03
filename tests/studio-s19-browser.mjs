@@ -252,7 +252,8 @@ await T.t('I. a review\'s finding and its correction name the element; "select i
   await page.ctxB.close(); await openDesign('S19 E at design');
   await place(page, 'creative director'); await page.click(R + '.st-cd-tab:has-text("Review")'); await page.waitForSelector(R + '.st-cd-review', { timeout: 10000 });
   const txt = (await page.textContent(R + '.st-cd-review')).replace(/\s+/g, ' ');
-  if (!/verdict/.test(txt)) { ok(true, 'no review on this seed: skipped'); return; }
+  // a review is present when its verdict chip is (the word alone also appears in the note on what a verdict is, S25)
+  if (!(await page.$(R + '.st-cd-review .st-cd-verdict'))) { ok(true, 'no review on this seed: skipped'); return; }
   ok(/on support/.test(txt), 'the finding names its element: ' + txt.slice(0, 300));
   ok(!/ghost-layer/.test(txt), 'an invented element is not shown');
   ok(/Changes/.test(txt) && /Keeps the words, the photograph and the marks/.test(txt) && /Needs no render/.test(txt), 'the correction says what it changes, keeps and needs');
