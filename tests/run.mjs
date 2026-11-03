@@ -16,7 +16,10 @@ const run = (name, cmd, args, timeoutMs) => {
   const out = (r.stdout || '') + (r.stderr || ''); const m = out.match(/(\d+) passed, (\d+) failed/g); const last = m ? m[m.length - 1] : '';
   const ok = r.status === 0 && !/[1-9]\d* failed/.test(last);
   // RC (Q3): a harness that skipped part of its work (an engine or runtime not installed) is reported as such, never as a plain pass
-  const sk = out.match(/skipped[^\n]{0,80}|\bSKIP\b[^\n]{0,80}/i); const skipped = sk ? sk[0].replace(/\s+/g, ' ').trim() : '';
+  // only the harnesses' own skip lines count ("  skip firefox: ...", "  SKIP miniflare ...") or a skip stated in the summary line
+  // ("(skipped, not installed: ...)"); a test whose name contains the word ("skip ahead", "already in force skipped") does not
+  const sk = out.match(/^[ \t]*(?:skip|SKIP)\b[^\n]{0,80}/m) || (((out.match(/^.*\d+ passed, \d+ failed.*$/gm) || []).pop() || '').match(/\([^)]*skipped[^)]*\)/i) || null);
+  const skipped = sk ? sk[0].replace(/\s+/g, ' ').trim() : '';
   results.push({ name, ok, skipped, summary: last || (r.error ? String(r.error.message) : 'exit ' + r.status), ms: Date.now() - t0 });
   console.log((ok ? (skipped ? '  ok*  ' : '  ok   ') : '  FAIL ') + name + '  ' + (last || 'exit ' + r.status) + (skipped ? '  [' + skipped + ']' : '') + '  (' + Math.round((Date.now() - t0) / 1000) + 's)');
   if (!ok) { const L = out.split('\n'); const keep = []; L.forEach((l, i) => { if (/FAIL|Error/.test(l)) for (let j = i; j < Math.min(L.length, i + 4); j++) if (keep.indexOf(j) < 0) keep.push(j); }); console.log(keep.slice(0, 40).map(j => '       ' + L[j].slice(0, 260)).join('\n')); }
