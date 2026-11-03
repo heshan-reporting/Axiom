@@ -376,7 +376,7 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-body:not(.design) .st-inspector.open{transform:none}
 }
 /* RC (U1, U2): up to 1340 px the tool panel overlays the canvas rather than taking a column beside the inspector (which left
-   the canvas 440-600 px wide and its toolbar on two rows; at 1366 the column stays and the compact bar fits one row); the overlay sits above the canvas bar (z 25), so its title and close
+   the canvas 440-600 px wide and its toolbar on two rows; at 1366 the column stays and the compact bar fits one row); the overlay sits above the canvas bar (z 35), so its title and close
    are never covered, and it closes on Escape */
 @media (max-width:1340px){
   #studio-root .st .st-design.has-library{grid-template-columns:64px minmax(0,1fr)}
