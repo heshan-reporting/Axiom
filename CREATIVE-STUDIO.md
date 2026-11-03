@@ -3152,3 +3152,15 @@ what it cannot is said plainly.
   `studio-s26-xbrowser-browser` (the classic direction dialog, a dismissal kept by the worker, the 4:5 artboard at 1440 x 900)
   run in all three; an engine that is not installed is skipped, never counted as a pass. CI run 133 (`20164e9`, the S25 head)
   downloaded Firefox 142 and WebKit 26 and passed 52 of 52 browser harnesses.
+
+### 49.3 Runs
+
+- Here (Chromium only): `node tests/run.mjs check` 24 of 24; `backend` 70 of 70, including `studio-s26-worker` (4),
+  `deploy-verify-test` (7) and `workerd-deploy-test` (3, workerd through miniflare); `browser` 53 of 53, including
+  `studio-s20-browser` W1 and `studio-s23g-browser` G-B6 (which failed at 548 px before) and `studio-s26-browser` (4); and
+  `studio-s26-xbrowser-browser` in Chromium (artboard 615 px for its composition; Firefox and WebKit skipped, not installed).
+- The new worker and browser cases fail on `20164e9` (S25) and pass now: `studio-s26-worker` 0 of 3 before (the dismissal case
+  was added after), `studio-s26-browser` 0 of 4 before.
+- CI, `a34d185`: checks and backend 70 of 70, with `workerd-deploy-test` 3 of 3 on the GitHub runner. The browser job (Chromium,
+  Firefox and WebKit) is recorded in the session report.
+- Nothing here ran against a live model, image provider or Cloudflare account; nothing is claimed bug-free.
