@@ -4013,12 +4013,15 @@
        does not end the job - it lives in the worker - so the job is read again and stepping carries on; a runner that
        stopped hands the job back when its lease runs out (two minutes) and the next step takes it. An answer from the
        worker that is an error is shown as before. */
-    const runJob = useCallback(async (id, label) => {
+    /* RC (U10): a job the tab steps on its own (pump: a queued render, an inspection) is background work - it never takes the
+       shared busy label, so it never disables, or re-enables, the person's own buttons; its progress is on the activity line */
+    const runJob = useCallback(async (id, label, o) => {
+      const bg = !!(o && o.background);
       if (stepping.current.has(id)) return null; stepping.current.add(id);
       try {
         let waits = 0, lost = 0;
         for (let i = 0; i < 400; i++) {
-          if (label) setBusy(label);
+          if (label && !bg) setBusy(label);
           let j;
           try { j = (await call('/studio/job/step', { id })).job; if (!j) { const cut = new Error('the step answer was cut off'); cut.code = 'answer_cut'; throw cut; } if (lost) linkTo(null); lost = 0; }
           catch (e) {
@@ -4038,7 +4041,7 @@
           if (j.note && /waiting for the step before/.test(j.note)) { if (++waits >= 4) return j; await sleep(2500); continue; }
           await sleep(j.note && /another runner/.test(j.note) ? 3000 : 600);
         }
-      } finally { stepping.current.delete(id); setBusy(''); if (linkRef.current && linkRef.current.id === id) linkTo(null); }
+      } finally { stepping.current.delete(id); if (!bg) setBusy(''); if (linkRef.current && linkRef.current.id === id) linkTo(null); }
       return null;
     }, [reload]);
     runJobRef.current = runJob;
@@ -4069,7 +4072,7 @@
         const st = {}; (cur.jobs || []).forEach(j => { st[j.id] = j.state; });
         const jobs = (cur.jobs || []).filter(j => j.state === 'queued' && !stepping.current.has(j.id) && !seen.has(j.id) && !(j.after && (st[j.after] === 'queued' || st[j.after] === 'running'))).sort((x, y) => x.created - y.created);
         if (!jobs.length) break;
-        for (const j of jobs) { seen.add(j.id); if (pidRef.current !== j.project) return; if (j.stage === 'inspect') { const ia = (cur.assets || []).find(x => x.id === j.asset); const iv = ia && current(ia); if (!(iv && iv.mode === 'finished')) await composeExport(cur, j.asset, (j.input || {}).version); } await runJob(j.id, (j.stage === 'render' ? 'Rendering ' + ((j.input || {}).finished ? 'the finished creative (words and mark painted)' : ((j.input || {}).approach === 'artwork') ? 'the hybrid artwork' : (j.input || {}).region && (j.input || {}).region !== 'bg' ? 'the ' + (j.input || {}).regionRole + ' image' : 'the background') + ' at ' + ((j.input || {}).size || '2K') : j.stage === 'inspect' ? 'The Creative Director inspects the result' : 'Running ' + j.stage) + (cur.assets || []).filter(x => x.id === j.asset).map(x => ' for ' + x.title).join('')); }
+        for (const j of jobs) { seen.add(j.id); if (pidRef.current !== j.project) return; if (j.stage === 'inspect') { const ia = (cur.assets || []).find(x => x.id === j.asset); const iv = ia && current(ia); if (!(iv && iv.mode === 'finished')) await composeExport(cur, j.asset, (j.input || {}).version); } await runJob(j.id, (j.stage === 'render' ? 'Rendering ' + ((j.input || {}).finished ? 'the finished creative (words and mark painted)' : ((j.input || {}).approach === 'artwork') ? 'the hybrid artwork' : (j.input || {}).region && (j.input || {}).region !== 'bg' ? 'the ' + (j.input || {}).regionRole + ' image' : 'the background') + ' at ' + ((j.input || {}).size || '2K') : j.stage === 'inspect' ? 'The Creative Director inspects the result' : 'Running ' + j.stage) + (cur.assets || []).filter(x => x.id === j.asset).map(x => ' for ' + x.title).join(''), { background: true }); }
         cur = await reload();
       }
     }, [runJob, reload, composeExport]);

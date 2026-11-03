@@ -7,6 +7,7 @@
  *          panel's title and close never covered; up to 1340 px it overlays the canvas, closes on Escape and gives the focus
  *          back; nothing under the canvas prints over anything else
  *   K2     "Produce N as variants" asks for the campaign when the kit has two and none is chosen; nothing is produced
+ *   U10    a job the open tab steps in the background never disables the person's own actions; a click during it starts its job
  * Run: node --experimental-sqlite tests/studio-rc-browser.mjs   (RC_PORT picks the static server's port, default 8934) */
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -147,6 +148,31 @@ await T.t('K2: with two campaigns in the kit and none chosen, "Produce 2 as vari
     eq(after, before, 'no copy job was asked for');
     eq((await fx.api('GET', '/studio/get?id=' + P)).assets.length, 0, 'nothing produced');
   } finally { await page.ctxB.close(); }
+});
+
+await T.t('U10: a job the open tab steps in the background (a render) never disables the person\'s own actions: "Explore variations" stays enabled while the render runs, and a click on it starts its job', async () => {
+  // found by the release gate (studio-browser, about one run in three): each background step set the shared busy label, which
+  // disabled every Art direction button for the length of the step, so a click landing then did nothing and said nothing
+  const P = (await fx.api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'RC background', brief: { channels: ['instagram'], deliverable: 'set', campaignConfirmed: true, objective: 'o', message: 'm' } })).id;
+  const A = (await fx.api('POST', '/studio/asset', { project: P, family: 'Set', channel: 'instagram', format: '1:1', title: 'Background tile', mode: 'composition', copy: { headline: 'Hands off our fuel', support: 'Not a subsidy.', cta: 'Sign' } })).asset;
+  fx.providers.slowMs = 6000; fx.setProvider('gemini', 'slow');
+  const q = await fx.api('POST', '/studio/imagery', { asset: A.id, size: '1K' }); ok(q && !q.error, 'the imagery is queued: ' + JSON.stringify(q).slice(0, 200));
+  const page = await fx.open({ viewport: { width: 1600, height: 1000 } });
+  const jobsOf = async stage => ((await fx.api('GET', '/studio/get?id=' + P)).jobs || []).filter(j => j.stage === stage);
+  try {
+    await openProject(page, 'RC background');
+    await page.waitForSelector(R + '.st-canvasbar', { timeout: 20000 });
+    const dock = page.locator(R + '.st-dock-btn:has-text("Images")').first(); if ((await dock.getAttribute('aria-pressed')) !== 'true') await dock.click();
+    await page.waitForSelector(R + '.st-ad-actions', { timeout: 15000 });
+    let running = false; for (let i = 0; i < 60 && !running; i++) { running = (await jobsOf('render')).some(j => j.state === 'running'); if (!running) await new Promise(r => setTimeout(r, 150)); }
+    ok(running, 'the tab is stepping the render');
+    await new Promise(r => setTimeout(r, 400));
+    const btn = page.locator(R + '.st-ad-actions button:has-text("Explore variations")');
+    eq(await btn.isDisabled(), false, 'the person\'s action stays enabled while a background render is stepped');
+    await btn.click({ timeout: 3000 });
+    let made = 0; for (let i = 0; i < 40 && !made; i++) { made = (await jobsOf('concepts')).length; if (!made) await new Promise(r => setTimeout(r, 150)); }
+    ok(made, 'the click started its own job while the render was still running');
+  } finally { fx.setProvider('gemini', 'ok'); fx.providers.slowMs = 1500; await page.ctxB.close(); }
 });
 
 bridge.close(); await fx.close();

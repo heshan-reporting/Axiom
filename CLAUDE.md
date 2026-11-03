@@ -2898,13 +2898,14 @@ A measurement is filed with its PNG or refused (`png_required`), and the worker 
 as variants" asks for the campaign instead of acknowledging the gate; an explicit Standalone is a decision, scoped to client-wide
 facts at production and on recheck; the reading proposes campaign candidates and asks when they are close (`campaign.candidates`,
 `ambiguous`, `question`); facts and Mind passages reach the model labelled with campaign and approval. Photographic media are one
-family for look-alike directions, and compositional look-alikes get the one replanning round. Up to 1340 px the Design tool panel
+family for look-alike directions, and compositional look-alikes get the one replanning round. A job the open tab steps in the background (a queued
+render, an inspection) never takes the shared busy label, so it never disables the person's own actions (U10). Up to 1340 px the Design tool panel
 overlays the canvas above its bar, closes on Escape and returns the focus; the bar is one row from 1024 to 1920 with any panel
 open; nothing under the canvas overprints. Every project the demo, showcase, golden and smoke tools make is `test: true`.
 `tests/studio-a11y-browser.mjs` is the enforcing accessibility gate (both roles, three widths, light, panels, dialogs, wizard,
 review page); `run.mjs` reports skipped parts separately; `makeStudio` refuses a port already in use. Harnesses:
-`studio-rc-seed-worker` (8), `studio-rc-security-worker` (13), `studio-rc-brief-worker` (5), `studio-rc-creative-worker` (2),
-`studio-rc-browser` (4), `studio-a11y-browser` (10). Open after this release: U6-U8, Q2, S7 and P1 (measured, change proposed).
+`studio-rc-seed-worker` (8), `studio-rc-security-worker` (13), `studio-rc-brief-worker` (5), `studio-rc-creative-worker` (3),
+`studio-rc-browser` (5), `studio-a11y-browser` (10). Open after this release: U6-U8, Q2, S7 and P1 (measured, change proposed).
 
 Phase 1, the ground:
 
