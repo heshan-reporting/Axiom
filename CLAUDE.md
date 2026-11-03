@@ -2776,7 +2776,9 @@ was 548 px here, now 592), and the readiness line no longer names the same layer
 Manrope) are served from `docs/vendor/fonts/` (OFL, from @fontsource-variable 5.3.0), not Google Fonts. `tests/workerd-deploy-
 test.mjs` runs the stamped module in **workerd** (Cloudflare's runtime, through `miniflare`, a pinned dev dependency) and the
 deploy verifier against it over HTTP, plus the S26 routes on workerd's D1; it says SKIP when miniflare is missing. Harnesses:
-`studio-s26-worker.mjs` (4), `studio-s26-browser.mjs` (4), `deploy-verify-test.mjs` (7), `workerd-deploy-test.mjs` (3).
+`studio-s26-worker.mjs` (4), `studio-s26-browser.mjs` (4), `studio-s26-xbrowser-browser.mjs` (the classic direction dialog, a
+dismissal and the artboard in Chromium, Firefox and WebKit; an engine not installed is skipped, never passed),
+`deploy-verify-test.mjs` (7), `workerd-deploy-test.mjs` (3).
 
 Phase 1, the ground:
 

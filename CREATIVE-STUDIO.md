@@ -3148,4 +3148,7 @@ what it cannot is said plainly.
   S26 routes on workerd's D1. The upload to Cloudflare itself (the Workers API, `keep_bindings`) is proven only by the owner's next
   `tools/deploy-worker.sh`, which stops with the reason unless the live worker answers the new token.
 - **Firefox and WebKit**: Playwright's browser downloads are refused by this sandbox's network policy. CI installs Chromium,
-  Firefox and WebKit on every push and runs the browser suite, including `studio-xbrowser-browser` (the core journey in all three).
+  Firefox and WebKit on every push and runs the browser suite: `studio-xbrowser-browser` (the core journey) and, new here,
+  `studio-s26-xbrowser-browser` (the classic direction dialog, a dismissal kept by the worker, the 4:5 artboard at 1440 x 900)
+  run in all three; an engine that is not installed is skipped, never counted as a pass. CI run 133 (`20164e9`, the S25 head)
+  downloaded Firefox 142 and WebKit 26 and passed 52 of 52 browser harnesses.
