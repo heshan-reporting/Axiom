@@ -4,6 +4,7 @@
  * at high effort that can write for minutes; it now streams, and the page shows it:
  *   A. while the model writes, the card counts the steps finished (2 of 4, not 1 of 4) and the characters that have
  *      arrived, and the count grows; the understanding opens when the answer is complete;
+ *   C. the intermittent failure of A (47.7) reproduced: its sampler read two renders; A now takes one snapshot per sample;
  *   B. a connection that drops while the step runs (a proxy, a network change) does not end the job: the job lives in the
  *      worker, so the page reads it again, waits while the runner finishes, and opens the understanding - no "could not be
  *      stepped" and no second attempt.
@@ -23,8 +24,10 @@ await T.t('A. while the model writes, the card counts 2 of 4 steps and the chara
   let done = false; made.then(() => { done = true; }, () => { done = true; });
   const seen = [];
   for (let i = 0; i < 120 && !done; i++) {
-    const c = await page.$(R + '.st-proc');
-    if (c) { const s = await page.$(R + '.st-proc-stream'); seen.push({ text: (await c.textContent()).replace(/\s+/g, ' '), written: s ? Number(await s.getAttribute('data-written')) : null, thinking: s ? Number(await s.getAttribute('data-thinking')) : null }); }
+    // one snapshot of one card per sample (3 November 2026): the text and the streamed counts are read in the same task, from
+    // the same card; reading them in two awaits could pair the text of one render with the counts of the next (case C)
+    const snap = await page.evaluate(sel => { const c = document.querySelector(sel + '.st-proc'); if (!c) return null; const s = c.querySelector('.st-proc-stream'); return { text: c.textContent.replace(/\s+/g, ' '), written: s ? Number(s.getAttribute('data-written')) : null, thinking: s ? Number(s.getAttribute('data-thinking')) : null }; }, R);
+    if (snap) seen.push(snap);
     await sleep(300);
   }
   await made;
@@ -60,4 +63,36 @@ await T.t('B. a connection that drops while the step runs does not end the job: 
 });
 
 fx.setProvider('claude', 'ok');
+/* C. The intermittent failure of case A (CREATIVE-STUDIO.md 47.7: 3 of about 30 runs, always on the first streamed sample)
+ * reproduced deterministically. The worker writes the count with every progress record (2 of 4 while the model streams), and
+ * the card renders it with the streamed figures; but the old sampler read the card's text and then, in a second await, the
+ * stream figures from anywhere on the page. When the card moved from "Matching client knowledge (1 of 4)" to the model step
+ * between those two reads, the sample paired the earlier text with the new figures: no "2 of 4", thinking 118 - the recorded
+ * signature. Here the card is rendered in the two states with a render between the reads; the old sampler produces that
+ * sample every time, and the snapshot sampler (one read of one card per sample, used by case A now) never does. */
+await T.t('C. the case-A failure reproduced: two reads around a render pair the old text with the new counts; one snapshot never does', async () => {
+  const page = await fx.open({ viewport: { width: 1440, height: 900 } });
+  await page.evaluate(() => {
+    const host = document.createElement('div'); host.id = 't-card'; host.setAttribute('data-test', 'case-c'); document.body.appendChild(host);
+    const root = ReactDOM.createRoot(host); const H = window.STKit.html, Card = window.STFlow.ProcessingCard;
+    const job = phase => ({ id: 'jc', stage: 'analyse', state: 'running', attempts: 1, created: Date.now() - 6000, progress: { activity: phase === 'knowledge'
+      ? { phase: 'knowledge', step: 'knowledge', label: 'Matching client knowledge', completed: 1, total: 4, startedAt: Date.now() - 6000, at: Date.now() }
+      : { phase: 'model', step: 'model', label: 'thinking: 118 characters of reasoning so far', completed: 2, total: 4, thinking: 118, written: 0, streamAt: Date.now(), startedAt: Date.now() - 6000, at: Date.now() } } });
+    window.__caseC = phase => ReactDOM.flushSync(() => root.render(H`<${Card} job=${job(phase)} kind="analyse" now=${Date.now()} />`));
+    window.__caseC('knowledge');
+  });
+  // the old sampler: the card's text, then (a render lands) the stream figures, in two reads
+  const text = (await page.textContent('#t-card .st-proc')).replace(/\s+/g, ' ');
+  await page.evaluate(() => window.__caseC('model'));
+  const sp = await page.$('#t-card .st-proc-stream'); const old = { text, thinking: sp ? Number(await sp.getAttribute('data-thinking')) : null };
+  ok(!/2 of 4/.test(old.text) && /1 of 4/.test(old.text) && old.thinking === 118, 'two reads around one render give the recorded failure, every time: ' + JSON.stringify(old).slice(0, 300));
+  // the snapshot sampler, for both renders: each sample is one card in one state
+  const snapAt = () => page.evaluate(() => { const c = document.querySelector('#t-card .st-proc'); const s = c.querySelector('.st-proc-stream'); return { text: c.textContent.replace(/\s+/g, ' '), thinking: s ? Number(s.getAttribute('data-thinking')) : null }; });
+  await page.evaluate(() => window.__caseC('knowledge')); const a = await snapAt();
+  await page.evaluate(() => window.__caseC('model')); const b = await snapAt();
+  ok(a.thinking === null && /1 of 4/.test(a.text), 'before the model streams: 1 of 4, no stream figures - ' + a.text.slice(0, 160));
+  ok(b.thinking === 118 && /2 of 4/.test(b.text) && /118 characters of reasoning/.test(b.text), 'while it streams: 2 of 4 with the figures, in the same render - ' + b.text.slice(0, 200));
+  await page.ctxB.close();
+});
+
 const res = T.done(); await fx.close(); process.exit(res.fail ? 1 : 0);

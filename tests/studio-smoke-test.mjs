@@ -49,6 +49,7 @@ const server = http.createServer(async (rq, rs) => { const chunks = []; for awai
 await new Promise(r => server.listen(0, '127.0.0.1', r)); const BASE = 'http://127.0.0.1:' + server.address().port;
 const api = async (m, p, b) => (await realFetch(BASE + p, { method: m, headers: { 'Content-Type': 'application/json', 'X-Axiom-Key': 'full-key' }, body: b ? JSON.stringify(b) : undefined })).json();
 let pass = 0, fail = 0; const ok = (v, m) => { if (v) { pass++; console.log('  ok   ' + m); } else { fail++; console.log('  FAIL ' + m); } };
+const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m + ' (' + JSON.stringify(a) + ')');
 console.log('studio-smoke-test (tools/studio-smoke.py: the cap holds at the worst case, both paths, several formats, validation and export, separation)');
 await api('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark', cta: 'handsoffourfuel.com.au' }, { id: 'national', name: 'Australian mining', logoPolicy: 'logo' }], facts: [{ text: 'The credit is used by more than 150,000 businesses', source: 'MCA', status: 'approved' }], logoB64: MARK, logoMime: 'image/png' });
 await api('POST', '/brand/kit', { ns: 'mca', wordmarkB64: MARK, wordmarkMime: 'image/png', wordmarkCampaign: 'hoof' });
@@ -59,22 +60,33 @@ const dry = await runPy([]);
 ok(dry.code === 0 && /reserved at worst/.test(dry.so) && /Nothing was run/.test(dry.so), 'without approval: the worst-case estimate and nothing else - ' + (dry.so + dry.se).slice(-300));
 ok(seen.claude === 0 && (await projects('mca')).length === 0, 'no project, no model call');
 
-const c0 = seen.claude; const tight = await runPy(['--approve-calls', '4', '--cases', 'hoof']);
+// 3 November 2026: the HOOF and MCA cases write into the real MCA namespace, so they run only when the owner says so
+const refused = await runPy(['--approve-calls', '4', '--cases', 'hoof']);
+ok(refused.code !== 0 && /real client namespace mca/.test(refused.so + refused.se) && /--allow-client mca/.test(refused.so + refused.se), 'a client case without --allow-client is refused before anything runs: ' + (refused.so + refused.se).slice(-300));
+ok(seen.claude === 0 && (await projects('mca')).length === 0, 'and nothing was created or called');
+const c0 = seen.claude; const tight = await runPy(['--approve-calls', '4', '--cases', 'hoof', '--allow-client', 'mca']);
 ok(tight.code === 1 && /cannot cover copy at its worst case/.test(tight.so), 'a cap that cannot cover the next job at its worst case stops before it: ' + tight.so.slice(-300));
 ok(seen.claude - c0 === 1, 'only the job the cap covered ran (one call): ' + (seen.claude - c0));
 
-const c1 = seen.claude, g1 = seen.gemini; const run = await runPy(['--approve-calls', '30']);
+// a project of the client's own, made by a person: no smoke run may touch it
+const realP = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Real client work', brief: {} });
+const c1 = seen.claude, g1 = seen.gemini; const run = await runPy(['--approve-calls', '30', '--cases', 'hoof,mca,synth', '--allow-client', 'mca']);
 const rep = JSON.parse(fs.readFileSync(path.join(run.out, 'smoke.json'), 'utf8'));
 ok(run.code === 0, 'the editable path finished for HOOF, MCA and the synthetic client: ' + (run.so.slice(-1200) + run.se.slice(-600)));
 ok(seen.gemini === g1, 'no image was generated with no renders approved');
 ok(rep.cases.every(c => (c.formats || []).length >= 3), 'several formats per case (the master re-laid for free): ' + rep.cases.map(c => c.case + ' ' + (c.formats || []).join('/')).join('; '));
 ok(rep.cases.every(c => (c.composed || []).length >= 3 && c.composed.every(x => x.ok === true || x.ok === false)), 'every tile drawn and measured, its result recorded');
-ok(rep.cases.every(c => c.editableExport && (c.editableExport.exact === true || (c.editableExport.included || []).length === 0)), 'the export holds exactly the tiles that passed and were approved');
+ok(rep.cases.every(c => c.editableExport && (c.editableExport.included || []).length === 0), 'the export holds nothing: a passing measurement is not an approval');
+// 3 November 2026: the tool used to approve every tile that passed its technical validation, as if a person had
+const db = env.MIND_DB.db; const nApprovals = db.prepare('SELECT COUNT(*) n FROM studio_approvals').get().n;
+let nOutcomes = 0; try { nOutcomes = db.prepare("SELECT COUNT(*) n FROM engine_outcomes WHERE surface='studio'").get().n; } catch (e) { nOutcomes = 0; }
+eq([nApprovals, nOutcomes], [0, 0], 'no approval and no WIN or LOSS exemplar was filed by the smoke run');
+ok(!(await projects('mca')).some(p => p.archived), 'kept by default: nothing archived without --archive');
 ok(rep.separation.every(x => x.ok) && Object.values(rep.isolation).every(v => (v || {}).clean !== false), 'each case carries only its own marks; isolation clean');
 ok(rep.reserved.calls <= 30 && seen.claude - c1 <= rep.reserved.calls, 'the calls made (' + (seen.claude - c1) + ') sit inside the reservation (' + rep.reserved.calls + ') inside the cap (30)');
 ok(fs.existsSync(path.join(run.out, 'index.html')), 'the private page is written to --out');
 
-const g2 = seen.gemini, i2 = seen.inspect || 0; const held = await runPy(['--approve-calls', '40', '--approve-renders', '1', '--cases', 'hoof']);
+const g2 = seen.gemini, i2 = seen.inspect || 0; const held = await runPy(['--approve-calls', '40', '--approve-renders', '1', '--cases', 'hoof', '--allow-client', 'mca']);
 ok(seen.gemini === g2 && /cancelled: outside the approved budget|cannot cover/.test(held.so), 'a render the cap cannot cover at its worst case (the policy\'s image requests per job) is cancelled, never painted: ' + held.so.slice(-400));
 // S24: the reservation is the worker's published policy, and the worker holds the same cap as an allowance
 const pol = (await api('GET', '/studio/budget')).policy;
@@ -82,9 +94,16 @@ ok(pol && pol.image && pol.image.requestsPerJob === 4 && pol.text.perLogicalCall
 const heldRep = JSON.parse(fs.readFileSync(path.join(held.out, 'smoke.json'), 'utf8'));
 ok(heldRep.reserved.allowance && heldRep.meta.allowance && heldRep.meta.allowance.calls.cap === 40 && heldRep.meta.allowance.images.cap === 1 && heldRep.meta.allowance.revoked, 'the run carried a server-side allowance with exactly the approved caps, withdrawn at the end: ' + JSON.stringify(heldRep.meta.allowance));
 ok(heldRep.meta.allowance.calls.used <= heldRep.reserved.calls, 'the worker spent no more than the tool reserved: ' + heldRep.meta.allowance.calls.used + ' of ' + heldRep.reserved.calls);
-const fin = await runPy(['--approve-calls', '40', '--approve-renders', '4', '--cases', 'hoof']);
+const fin = await runPy(['--approve-calls', '40', '--approve-renders', '4', '--cases', 'hoof', '--allow-client', 'mca', '--archive']);
 const fr = JSON.parse(fs.readFileSync(path.join(fin.out, 'smoke.json'), 'utf8')).cases[0].finishedResult || {};
 ok(seen.gemini - g2 === 1 && (seen.inspect || 0) > i2, 'the Full AI path painted one piece and read it back: ' + JSON.stringify(fr));
 ok(fr.painted === true && JSON.stringify(fr.marksSent) === '["wordmark"]', 'the HOOF wordmark file went with the request, never the MCA logo');
-ok(fr.verified === false ? !fr.export : true, 'a painting the reading did not verify is neither approved nor exported');
+ok(!fr.export || (fr.export.included || []).length === 0, 'a painting is never approved by the tool, so nothing of it is exported');
+const finRep = JSON.parse(fs.readFileSync(path.join(fin.out, 'smoke.json'), 'utf8')).cases[0];
+const all = await api('GET', '/studio/list?ns=mca&archived=1'); const listed = (all.projects || []);
+const realNow = await api('GET', '/studio/get?id=' + realP.id);
+ok(realNow && !realNow.archived, 'the client\'s own project was not archived: ' + JSON.stringify({ archived: realNow && realNow.archived }));
+ok((finRep.archived || []).length >= 1 && (finRep.archived || []).every(id => id === finRep.editable || id === finRep.finished), '--archive archived only the projects this run created: ' + JSON.stringify(finRep.archived));
+ok(/archived .*created by this run/.test(fin.so), 'and named each one: ' + fin.so.slice(-300));
+eq(db.prepare('SELECT COUNT(*) n FROM studio_approvals').get().n, 0, 'still no approval after the Full AI path');
 server.close(); console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

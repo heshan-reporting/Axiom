@@ -931,13 +931,14 @@
   // S23: the authority of a suggestion, said in words: a rule outranks a preference, which outranks an observation or an inference
   const SRC_AUTH = { approved: 'authority: an approved record of the client (a rule)', preference: 'authority: a recorded preference', previous: 'authority: an earlier brief of this client', reference: 'authority: observed in a reference', team: 'authority: written by the team', ai: 'authority: an AI inference, not verified' };
   /** A searchable, editable field: type freely, or take a suggestion; each suggestion says where it came from. */
-  function Combo({ id, value, onChange, items, rows, disabled, placeholder, label }) {
+  function Combo({ id, value, onChange, items, rows, disabled, placeholder, label, none }) {
     const [open, setOpen] = useState(false);
     const q = String(value || '').toLowerCase().split(/\s+/).filter(w => w.length > 2);
     const list = (items || []).filter(it => !value || it.text.toLowerCase() !== String(value).toLowerCase()).map(it => ({ it, score: q.length ? q.filter(w => it.text.toLowerCase().indexOf(w) >= 0).length : 0 })).sort((x, y) => y.score - x.score).slice(0, open ? 8 : 3).map(x => x.it);
     return html`<div class="st-combo">
       <textarea class="st-ta" rows=${rows || 2} id=${id} aria-label=${label || id} value=${value || ''} disabled=${disabled} placeholder=${placeholder || ''} onInput=${e => onChange(e.target.value, 'team')} onFocus=${() => setOpen(true)}></textarea>
       ${!disabled && list.length ? html`<div class="st-combo-list" role="listbox" aria-label=${'Suggestions for ' + id}>${list.map((it, i) => html`<button key=${i} class="st-combo-opt" role="option" title=${(SRC_AUTH[it.source] || '') + (it.from ? '; source: ' + it.from : '')} onClick=${() => { onChange(it.text, it.source, it); setOpen(false); }}><${Chip} kind=${SRC_KIND[it.source]} title=${SRC_AUTH[it.source] || ''}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- source: ${it.from}</span>` : null}</button>`)}${(items || []).length > list.length && !open ? html`<button class="ov-link" onClick=${() => setOpen(true)}>more (${items.length})</button>` : null}</div>` : null}
+      ${!disabled && !list.length && none && open ? html`<div class="ov-dim st-combo-none" role="note">${none}</div>` : null}
     </div>`;
   }
   /* ------------------------------------------------------------ the brief engine: material in, read against the client */
@@ -1202,9 +1203,9 @@
           ${chk.brand ? html`<div class="st-brand-line" aria-label="Brand readiness"><${Chip} kind=${chk.brand.state === 'ready' ? 'ok' : chk.brand.state === 'blocked' ? 'bad' : 'warn'}>brand ${chk.brand.state === 'ready' ? 'ready' : chk.brand.state}</${Chip}> <span class="ov-dim">${[chk.brand.blocking.length ? chk.brand.blocking.map(x => x.text).join(' ') : '', chk.brand.conflicts.length ? chk.brand.conflicts.length + ' conflict' + (chk.brand.conflicts.length === 1 ? '' : 's') + ' in what the Studio knows' : '', chk.brand.gaps ? chk.brand.gaps + ' gap' + (chk.brand.gaps === 1 ? '' : 's') : '', chk.brand.outdated ? chk.brand.outdated + ' to review' : ''].filter(Boolean).join('; ') || 'nothing missing or conflicting'}. Open Brand in the rail for the detail.</span></div>` : null}
         </div>`}
       </div>
-      ${sugg && !sugg.error ? html`<div class="ov-dim st-brief-src">Suggestions come from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet'}. Approved items are the kit's own records; an AI suggestion is only a suggestion.${!ro ? html` <button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => loadSugg(true)}>${sugg.aiModel ? 'ask the model again' : 'ask the model for suggestions (one call)'}</button>` : null}${sugg.aiError ? ' The model did not answer: ' + sugg.aiError : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.error}</div>` : null}
+      ${sugg && !sugg.error ? html`<div class="ov-dim st-brief-src">Suggestions come from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet'}. Approved items are the kit's own records; an AI suggestion is inferred, only a suggestion.${sugg.campaignNeeded ? ' ' + sugg.campaignNeeded : ''}${!ro ? html` <button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => loadSugg(true)}>${sugg.aiModel ? 'ask the model again' : 'ask the model for suggestions (one call)'}</button>` : null}${sugg.aiError ? ' The model did not answer: ' + sugg.aiError : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.error}</div>` : null}
       <span id="st-brief-fields" class="st-anchor"></span>
-      ${['objective', 'audience', 'message', 'action', 'deliverables'].map(k => html`<div key=${k} class="st-field"><${Lbl}>${k}${(b.proposed || []).indexOf(k) >= 0 ? html` <${Chip} kind="warn">proposed by the Studio</${Chip}>` : null}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}</${Lbl}><${Combo} id=${'brief-' + k} label=${'Brief ' + k} value=${b[k] || ''} items=${fields[k] || []} disabled=${ro} onChange=${(v, src) => set(k, v, src)} placeholder=${k === 'action' ? 'What the audience should do' : ''} /></div>`)}
+      ${['objective', 'audience', 'message', 'action', 'deliverables'].map(k => html`<div key=${k} class="st-field"><${Lbl}>${k}${(b.proposed || []).indexOf(k) >= 0 ? html` <${Chip} kind="warn">proposed by the Studio</${Chip}>` : null}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}</${Lbl}><${Combo} id=${'brief-' + k} label=${'Brief ' + k} value=${b[k] || ''} items=${fields[k] || []} none=${sugg && sugg.empty ? sugg.empty[k] : ''} disabled=${ro} onChange=${(v, src) => set(k, v, src)} placeholder=${k === 'action' ? 'What the audience should do' : ''} /></div>`)}
       <div class="st-field st-reqs"><${Lbl}>Design requirements</${Lbl}><div class="ov-dim">Mandatory items are constraints on every concept; preferred ones are followed unless the message needs otherwise; open ones are the Creative Director's call. Each says where it came from.</div>
         ${['mandatory', 'preferred', 'open'].map(band => html`<div key=${band} class=${'st-req-band ' + band}><div class="st-req-head"><b>${band}</b> <span class="ov-dim">${(req[band] || []).length}</span></div>
           ${(req[band] || []).length ? html`<ul class="st-ul">${(req[band] || []).map((it, i) => html`<li key=${i}><${Chip} kind=${SRC_KIND[it.source]}>${SRC_WORD[it.source] || it.source}</${Chip}> ${it.text}${it.from ? html` <span class="ov-dim">- ${it.from}</span>` : null}${!ro ? html` <button class="ov-link" onClick=${() => setReq(band, req[band].filter((_, j) => j !== i))}>remove</button>` : null}</li>`)}</ul>` : null}
@@ -1937,14 +1938,22 @@
   /** Suggested next directions: specific, editable instructions the worker drew from this tile, its references and the recent feedback. */
   const BASIS_TITLE = { rule: 'an approved rule of the client or campaign', preference: 'a preference the team recorded', reference: 'a reference image the team supplied', inferred: 'the model inferred it; nobody has approved it' };
   function Suggestions({ kind, sugg, onUse, onApply, onRefresh, busy, compact, scopeLabel, applied, onUndo, onCompare }) {
-    const d = sugg && sugg.data; const items = d && Array.isArray(d[kind]) ? d[kind] : [];
+    const d = sugg && sugg.data; const all = d && Array.isArray(d[kind]) ? d[kind] : [];
+    // dismiss (3 November 2026): a suggestion set aside for this asset and version, in this browser only; nothing is sent and the
+    // advice is not deleted - "show dismissed" brings it back. A new version starts with nothing dismissed.
+    const dkey = d ? 'ax_studio_dismiss_' + (d.asset || '') + '_' + (d.version || '') : ''; const [dis, setDis0] = useState(() => { try { return JSON.parse(localStorage.getItem(dkey) || '[]'); } catch (e) { return []; } });
+    const [showDis, setShowDis] = useState(false);
+    useEffect(() => { try { setDis0(JSON.parse(localStorage.getItem(dkey) || '[]')); } catch (e) { setDis0([]); } setShowDis(false); }, [dkey]);
+    const setDis = list => { setDis0(list); try { localStorage.setItem(dkey, JSON.stringify(list.slice(-60))); } catch (e) {} };
+    const dId = s => kind + '|' + s.text; const items = all.filter(s => showDis || dis.indexOf(dId(s)) < 0); const nDis = all.filter(s => dis.indexOf(dId(s)) >= 0).length;
     const title = kind === 'image' ? 'Suggested photographs' : kind === 'typography' ? 'Suggested type changes' : kind === 'copy' ? 'Suggested copy changes' : kind === 'concept' ? 'Concepts worth exploring' : 'Suggested next directions';
     return html`<div class=${'st-sugg ' + kind + (compact ? ' compact' : '')} aria-label=${title}>
       <div class="st-sugg-head"><${Lbl}>${title}</${Lbl}><span class="ov-dim">${sugg && sugg.loading ? 'thinking...' : d ? (d.outdated ? '' : d.cached ? 'from the last look' : 'fresh') + (d.imageSeen ? (d.outdated ? '' : ', ') + 'the artwork seen' : '') + ((d.refsUsed || []).length ? ', ' + d.refsUsed.length + ' reference' + (d.refsUsed.length === 1 ? '' : 's') : '') : ''}</span>${onRefresh && sugg && !sugg.idle ? html`<button class="ov-link" disabled=${!!busy || sugg.loading} onClick=${() => onRefresh(true)} title="Ask again with the context as it is now: one model call">${d && d.outdated ? 'refresh (1 model call)' : 'refresh'}</button>` : null}</div>
       ${d && d.outdated ? html`<div class="st-sugg-outdated" role="status"><${Chip} kind="warn">outdated</${Chip}> Made before a change to ${(d.changed || []).join(', ') || 'its context'}. Read it as history; refresh for advice on the context as it is now.</div>` : null}
       ${sugg && sugg.idle && onRefresh ? html`<div><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onRefresh(false)} title="One small model call for this version (none when an answer for it is already cached); nothing is applied until you choose">Suggest for this version (1 model call)</button></div>` : null}
       ${sugg && sugg.err ? html`<div class="ov-dim">Suggestions unavailable: ${sugg.err}</div>` : null}
-      ${d && !items.length && !sugg.loading ? html`<div class="ov-dim">Nothing suggested for this version.</div>` : null}
+      ${d && !all.length && !sugg.loading ? html`<div class="ov-dim">Nothing suggested for this version.</div>` : null}
+      ${nDis ? html`<div class="ov-dim st-sugg-dismissed">${nDis} dismissed for this version. <button class="ov-link" onClick=${() => setShowDis(!showDis)}>${showDis ? 'hide them' : 'show them'}</button></div>` : null}
       ${items.map((s, i) => { const done = applied && applied.kind === kind && applied.text === s.text ? applied : null;
         return html`<div key=${i} class=${'st-sugg-item' + (done ? ' applied' : '')}><div class="st-sugg-text">${s.text}</div>
         <dl class="st-sugg-facts">
@@ -1956,7 +1965,7 @@
           ${s.why ? html`<div><dt>Why</dt><dd>${s.why}</dd></div>` : null}
           <div><dt>Basis</dt><dd>${s.basis ? html`<${Chip} kind=${s.basis === 'rule' ? 'ok' : s.basis === 'inferred' ? 'warn' : ''} title=${BASIS_TITLE[s.basis] || ''}>${s.basis}</${Chip}>` : html`<span class="ov-dim">not stated</span>`}${(s.refs || []).length ? html` <span class="ov-dim">from ${s.refs.map(r => r.name).join(', ')}</span>` : null}</dd></div>
         </dl>
-        <div class="st-sugg-foot"><span class="st-sugg-acts"><button class="ov-link" disabled=${!!busy} onClick=${() => onUse(s.text)} title="Put it in the composer to edit before sending">${kind === 'image' ? 'Edit as the description' : 'Edit instruction'}</button>${onApply && kind !== 'image' ? html`<button class="btn sm" disabled=${!!busy || !!done} onClick=${() => onApply(s.text)} title=${'Send it as it stands: one model call' + (s.paid ? '; it needs a render, which is proposed and never spent without your yes' : '; no render')}>Apply (1 model call)</button>` : null}</span></div>
+        <div class="st-sugg-foot"><span class="st-sugg-acts"><button class="ov-link" disabled=${!!busy} onClick=${() => onUse(s.text)} title="Put it in the composer to edit before sending">${kind === 'image' ? 'Edit as the description' : 'Edit instruction'}</button>${!done ? (dis.indexOf(dId(s)) < 0 ? html`<button class="ov-link st-sugg-dismiss" onClick=${() => setDis(dis.concat([dId(s)]))} title="Set this suggestion aside for this version, in this browser; nothing is sent">Dismiss</button>` : html`<button class="ov-link st-sugg-dismiss" onClick=${() => setDis(dis.filter(x => x !== dId(s)))}>Restore</button>`) : null}${onApply && kind !== 'image' ? html`<button class="btn sm" disabled=${!!busy || !!done} onClick=${() => onApply(s.text)} title=${'Send it as it stands: one model call' + (s.paid ? '; it needs a render, which is proposed and never spent without your yes' : '; no render')}>Apply (1 model call)</button>` : null}</span></div>
         ${done ? html`<div class="st-sugg-done" role="status">${done.landed ? html`Applied: v${done.landedN} replaced v${done.fromN}. ${onCompare ? html`<button class="ov-link" onClick=${() => onCompare(done.from, done.landed)}>Compare v${done.fromN} with v${done.landedN}</button> ` : null}${onUndo ? html`<button class="ov-link" onClick=${() => onUndo(done)}>Undo (restore v${done.fromN} as a new version)</button>` : null}` : 'Sent: the change lands as a new version of this asset; nothing else changes. It can be undone from here once it lands.'}</div>` : null}
       </div>`; })}
       ${d && (d.unanalysed || []).length ? html`<div class="ov-dim">Not read: ${d.unanalysed.join('; ')}</div>` : null}
@@ -2717,6 +2726,16 @@
     return html`<div class="st-adreview st-cd-review" aria-label="Current review">
       <div class="st-adreview-head"><div><b>${a.title}</b> <span class="ov-dim">current v${vtotal(a)}</span></div>
         ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Creative Director reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : 'Review v' + vtotal(a) + ' (1 model call)'}</button>` : null}</div>
+      ${(() => { const rd = a.readiness || {}; const fin = v.mode === 'finished';
+        // three different judgements, said apart (3 November 2026): what was measured, what one model advised, what a person decided
+        const meas = fin ? (rd.production ? 'words and mark read back' : 'words and mark not yet read back') : rd.technical === 'passed' ? 'passes' : rd.technical === 'failed' ? 'fails' + ((rd.blocking || []).length ? ': ' + rd.blocking.length + ' blocking' : '') : rd.technical === 'stale' ? 'out of date: measure again' : 'not measured yet';
+        const cp = !!standing(a, 'copy'), ds = !!standing(a, 'design');
+        const person = cp && ds ? 'copy and design approved' : cp ? 'copy approved; design not yet' : ds ? 'design approved; copy not yet' : 'not approved';
+        return html`<dl class="st-cd-sources" aria-label="Measured, AI advice and a person's approval, kept apart">
+          <div data-k="measured"><dt>Measured</dt><dd>${meas}</dd></div>
+          <div data-k="ai"><dt>AI advice</dt><dd>${last ? 'verdict ' + last.verdict + (old ? ' on v' + (vn || '?') + ', an earlier version' : '') : reviewing ? 'reviewing...' : 'not reviewed yet'}</dd></div>
+          <div data-k="person"><dt>Person</dt><dd>${person}</dd></div>
+        </dl><div class="ov-dim st-cd-sources-note">A score or a ship verdict is one model's advice, not a measurement and never an approval: only a person approves, in Review & Deliver.</div>`; })()}
       ${last && last.scores ? html`<div class="st-adreview-body">
         <div class="st-cd-verdict"><${Chip} kind=${last.verdict === 'ship' ? 'ok' : last.verdict === 'redo' ? 'bad' : 'warn'}>verdict: ${last.verdict}</${Chip}>
           ${old ? html`<${Chip} kind="warn" title="the asset has moved on since this review">outdated: judged v${vn || '?'}</${Chip}>` : html`<${Chip} kind="ok">judged v${vn || vtotal(a)}, the current version</${Chip}>`}
@@ -4028,6 +4047,7 @@
     };
     const answerImpact = async (ans) => {
       const q = impactQ; setImpactQ(null); if (!q || !ans) return;
+      if (q.kind === 'direction') { await chooseGuided(q.d, ans); return; }
       const ok = await confirmStep(q.step, Object.assign({}, q.body, { acknowledge: ans }), q.opts);
       // "Update directions": the earlier work stays, and new directions are built on the new choice (one model call)
       if (ok && ans === 'update') { const d = pRef.current; const wf = d && d.workflow; if (wf && wf.steps.directions && wf.steps.directions.state !== 'locked') await directGuided({ n: 3 }); else setNotice({ kind: 'info', title: 'The earlier work is kept, marked as built on the earlier choice.', text: 'Confirm the strategy to build new directions on the new choice.' }); }
@@ -4040,11 +4060,14 @@
         if (j && j.state === 'done') ready('directions', o.mode === 'refine' ? 'Refined direction ready' : o.mode === 'merge' ? 'Merged direction ready' : 'Creative Directions ready', 'Compare them and select one; nothing is produced until you do.', 'View directions');
       } catch (e) { fail(e, 'The directions did not start', () => directGuided(o)); }
     });
-    const chooseGuided = async (d) => {
-      const d0 = pRef.current; const other = (d0.assets || []).length && !d.chosen;
-      if (other && !window.confirm('Select "' + d.title + '"? The ' + d0.assets.length + ' piece' + (d0.assets.length === 1 ? '' : 's') + ' already written stay as they are; new copy follows this direction.')) return;
-      try { setBusy('Selecting the direction'); await call('/studio/direction/choose', { id: d.id }); await reload(); ready('copy', 'Direction selected: ' + d.title, 'Copy is open: the words and the visual narrative are written from it.', 'Continue to Copy'); }
-      catch (e) { if (e.status === 409) await reload(); fail(e, 'The direction was not selected'); } finally { setBusy(''); }
+    // 3 November 2026: the worker names the pieces a change of direction would leave written from the earlier one and asks first
+    // (409 affects_downstream); the answer - rewrite later, keep them, or cancel - is sent with the choice. No browser confirm.
+    const chooseGuided = async (d, decision) => {
+      try { setBusy('Selecting the direction'); await call('/studio/direction/choose', Object.assign({ id: d.id }, decision ? { decision } : {})); await reload();
+        ready('copy', 'Direction selected: ' + d.title, decision === 'update' ? 'The pieces written from the earlier direction are marked in Copy, where you can write new copy from this one.' : 'Copy is open: the words and the visual narrative are written from it.', 'Continue to Copy'); }
+      catch (e) {
+        if (e.status === 409 && e.code === 'affects_downstream' && !decision) { setImpactQ({ kind: 'direction', d, impact: (e.body && e.body.impact) || e.impact || {} }); return; }
+        if (e.status === 409) await reload(); fail(e, 'The direction was not selected'); } finally { setBusy(''); }
     };
     const updateDirection = async (d, patch, reason) => { try { await call('/studio/direction/update', { id: d.id, patch, reason: reason || undefined }); await reload(); if (patch.saved != null) toastMsg(patch.saved ? 'Saved for later' : 'No longer saved'); if (patch.archived) toastMsg('Set aside; the reason is recorded'); } catch (e) { fail(e, 'The direction was not changed'); } };
     const duplicateDirection = async (d) => { try { await call('/studio/direction/duplicate', { id: d.id }); await reload(); toastMsg('Duplicated "' + d.title + '"'); } catch (e) { fail(e, 'The direction was not duplicated'); } };

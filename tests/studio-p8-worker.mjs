@@ -171,17 +171,21 @@ await t('the identity audit reports exactly what is on file per campaign: policy
 
 await t('brief suggestions come with their source: approved kit records first, previous briefs, references, recorded preferences; a model is asked only on request, by a full key, and its answers are marked ai', async () => {
   await req('POST', '/engine/fix', { ns: 'mca', task: 'tiles', scope: 'client', wrong: 'haul trucks', right: 'No haul trucks on HOOF tiles', why: 'the campaign is about small business' });
+  // an earlier brief of this campaign is a precedent; the National project's brief is another campaign's (3 November 2026: it used to
+  // be offered here, which this case then expected)
+  await req('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'HOOF earlier', brief: { objective: 'an earlier HOOF objective', channels: ['facebook'] } });
   const s = await req('GET', '/studio/brief/suggest?project=' + P, null, 'read-key'); eq(s.status, 200);
   ok(s.d.fields.action.some(x => x.text === 'handsoffourfuel.com.au' && x.source === 'approved'), JSON.stringify(s.d.fields.action));
   ok(s.d.fields.audience.some(x => x.text === 'Regional voters and farmers' && x.source === 'approved'), 'kit segment');
   ok(s.d.fields.requirements.some(x => x.source === 'approved' && x.band === 'mandatory' && /wordmark, never the client logo/.test(x.text)), 'mark policy as a mandatory requirement');
   ok(s.d.fields.requirements.some(x => x.source === 'reference' && /Approved design: Approved HOOF tile/.test(x.text)), 'the approved reference');
   ok(s.d.fields.requirements.some(x => x.source === 'preference' && /haul trucks/i.test(x.text)), 'the learned correction');
-  ok(s.d.fields.objective.some(x => x.source === 'previous' && /Empty|National/.test(x.from) === false || x.source === 'previous'), 'a previous brief');
+  ok(s.d.fields.objective.some(x => x.source === 'previous' && x.text === 'an earlier HOOF objective'), 'a previous brief of this campaign: ' + JSON.stringify(s.d.fields.objective));
+  ok(!s.d.fields.objective.some(x => x.source === 'previous' && /National/.test(x.from)), 'never another campaign\'s brief');
   eq(s.d.sources.ai, 0, 'no model call unless asked');
   eq((await req('GET', '/studio/brief/suggest?project=' + P + '&ai=1', null, 'read-key')).status, 403);
   const ai = await req('GET', '/studio/brief/suggest?project=' + P + '&ai=1'); ok(ai.d.fields.objective.some(x => x.source === 'ai' && /never meant to apply/.test(x.text)), JSON.stringify(ai.d.fields.objective));
-  ok(/ai = a model's suggestion, requested, not a requirement/.test(ai.d.note));
+  ok(/ai = a model's suggestion, inferred, requested, not a requirement/.test(ai.d.note));
 });
 
 let BASE = '';

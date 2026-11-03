@@ -90,6 +90,14 @@
   /** The question a change to an earlier choice asks before anything is written: update the work built on it, keep it, or cancel. */
   function ImpactDialog({ q, onAnswer }) {
     if (!q) return null; const im = q.impact || {};
+    // a change of direction (3 November 2026): the pieces written from the earlier one are named, and the choice is rewrite or keep
+    if (im.kind === 'direction') return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This direction change affects written pieces"><div class="st-dialog-box narrow st-impact" data-kind="direction">
+      <span class="st-impact-ic" aria-hidden="true"><${Icon} n="alert" size=${22} /></span>
+      <div class="ov-title">${q.title || 'Choosing "' + im.to + '" changes the direction your copy was written from'}</div>
+      <div class="st-pad">${im.assets} piece${im.assets === 1 ? ' was' : 's were'} written from ${im.from ? '"' + im.from + '"' : 'another direction'}${im.approvals ? ' (' + im.approvals + ' with an approval)' : ''}: ${(im.items || []).slice(0, 6).map(x => x.title).join(', ')}${(im.items || []).length > 6 ? ' and ' + ((im.items || []).length - 6) + ' more' : ''}. Nothing is deleted either way.</div>
+      <ul class="st-ul st-impact-opts"><li><b>Rewrite from "${im.to}"</b>: the pieces stay as they are, marked as written from another direction; Copy offers to write new copy from the new one (1 model call, when you start it).</li><li><b>Keep them as written</b>: they stay current under the new direction; nothing is regenerated.</li></ul>
+      <div class="st-dialog-acts"><button class="btn sm" onClick=${() => onAnswer('update')}>Choose it; rewrite later</button><button class="btn sm ghost" onClick=${() => onAnswer('keep')}>Choose it; keep them as written</button><button class="btn sm ghost" onClick=${() => onAnswer(null)}>Cancel</button></div>
+    </div></div>`;
     const what = [im.directions ? im.directions + ' creative direction' + (im.directions === 1 ? '' : 's') + (im.chosen ? ' (one chosen)' : '') : '', im.assets ? im.assets + ' piece' + (im.assets === 1 ? '' : 's') + ' of copy and design' + (im.approvals ? ', ' + im.approvals + ' with an approval' : '') : ''].filter(Boolean).join(' and ');
     return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This change affects later work"><div class="st-dialog-box narrow st-impact">
       <span class="st-impact-ic" aria-hidden="true"><${Icon} n="alert" size=${22} /></span>
@@ -483,10 +491,11 @@
   }
   /** Copy written on an earlier objective, message, strategy or direction: said once, with the two honest choices. */
   function StaleCopy({ p, wf, busy, onRewrite, onKeep }) {
-    const st = (wf && wf.steps && wf.steps.copy) || {}; if (st.why !== 'earlier_choice' || !(st.stale || []).length) return null;
-    const n = st.stale.length; const ro = !canWrite() || p.readOnly;
-    return html`<div class="st-warnbar st-stalecopy" role="status"><${Icon} n="alert" size=${16} /> <span><b>${n} piece${n === 1 ? ' was' : 's were'} written on an earlier choice.</b> The objective, message or strategy changed after ${n === 1 ? 'it was' : 'they were'} written. ${n === 1 ? 'It stays' : 'They stay'} as ${n === 1 ? 'it is' : 'they are'} until you decide.</span>
-      ${!ro ? html`<span class="st-stalecopy-acts"><button class="btn sm" disabled=${!!busy} onClick=${onRewrite}>Write new copy from the current choice <span class="ov-dim">(1 model call)</span></button><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onKeep(st.stale)}>Keep ${n === 1 ? 'it' : 'them'} under the current choice</button></span>` : null}</div>`;
+    const st = (wf && wf.steps && wf.steps.copy) || {}; if ((st.why !== 'earlier_choice' && st.why !== 'other_direction') || !(st.stale || []).length) return null;
+    const n = st.stale.length; const ro = !canWrite() || p.readOnly; const dir = st.why === 'other_direction';
+    const chosen = (p.directions || []).find(d => d.chosen); const names = st.stale.map(id => ((p.assets || []).find(a => a.id === id) || {}).title).filter(Boolean);
+    return html`<div class="st-warnbar st-stalecopy" role="status" data-why=${st.why}><${Icon} n="alert" size=${16} /> <span><b>${n} piece${n === 1 ? ' was' : 's were'} ${dir ? 'written from another direction' : 'written on an earlier choice'}.</b> ${dir ? 'The chosen direction is now "' + ((chosen && chosen.title) || 'another') + '".' : 'The objective, message or strategy changed after ' + (n === 1 ? 'it was' : 'they were') + ' written.'} ${n === 1 ? 'It stays' : 'They stay'} as ${n === 1 ? 'it is' : 'they are'} until you decide${names.length ? ': ' + names.slice(0, 5).join(', ') + (names.length > 5 ? ' and ' + (names.length - 5) + ' more' : '') : ''}.</span>
+      ${!ro ? html`<span class="st-stalecopy-acts"><button class="btn sm" disabled=${!!busy} onClick=${onRewrite}>Write new copy from ${dir ? 'the chosen direction' : 'the current choice'} <span class="ov-dim">(1 model call)</span></button><button class="btn sm ghost" disabled=${!!busy} onClick=${() => onKeep(st.stale)}>Keep ${n === 1 ? 'it' : 'them'} as written</button></span>` : null}</div>`;
   }
 
   /* ------------------------------------------------------------ production mode: chosen once the words are ready */

@@ -289,6 +289,14 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-cd-empty{padding:12px 0}
 #studio-root .st .st-cd-review{margin:0;border:0;padding:0;background:none}
 #studio-root .st .st-cd-verdict{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+/* 3 November 2026: measured, AI advice and a person's approval, side by side and never merged */
+#studio-root .st .st-cd-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:6px 0 2px}
+#studio-root .st .st-cd-sources>div{border:1px solid var(--st-line,#303741);border-radius:6px;padding:5px 7px;min-width:0}
+#studio-root .st .st-cd-sources dt{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--st-ink-3,#9aa3b2)}
+#studio-root .st .st-cd-sources dd{margin:2px 0 0;font-size:12px;overflow-wrap:anywhere}
+#studio-root .st .st-cd-sources-note{font-size:11px;margin-bottom:6px}
+#studio-root .st .st-combo-none{font-size:11px;padding:4px 2px}
+@media (max-width:520px){#studio-root .st .st-cd-sources{grid-template-columns:1fr}}
 #studio-root .st .st-cd-scores{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:5px}
 #studio-root .st .st-cd-scores li{display:grid;grid-template-columns:82px 64px 1fr;gap:6px;align-items:baseline;font-size:12px}
 #studio-root .st .st-cd-sk{color:var(--sk-sub);text-transform:capitalize}

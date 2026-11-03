@@ -7,12 +7,21 @@ worker, what the harnesses can only prove with mocked providers:
   for each case (HOOF - Hands Off Our Fuel, MCA national, and the labelled synthetic client):
     Editable path   a release read into a claim ledger; the copy stage writes and lays out the master; the master is re-laid,
                     free of charge, for other formats (story 9:16, LinkedIn 1.91:1, square 1:1); every tile is drawn with the
-                    app's renderer, repaired if it can be (no render), measured and filed; the tiles that pass are approved and
-                    exported, and the export is checked to hold exactly those.
+                    app's renderer, repaired if it can be (no render), measured and filed; the export is asked for and checked to
+                    hold nothing a person has not approved.
     Full AI path    (only with renders approved) the copy stage in finished mode; one painting per piece with the campaign's
-                    mark file attached; the inspection reads the words and the mark back from that exact image; the piece is
-                    approved and exported only if the reading verified it, and a mark not shown to match is reported as such.
+                    mark file attached; the inspection reads the words and the mark back from that exact image, and a mark not
+                    shown to match is reported as such.
   then: each case's marks are its own (HOOF never carries the MCA logo), and the isolation audit is clean.
+
+Approval is a person's decision. The tool never approves anything (3 November 2026: it used to approve every tile that passed
+its technical validation, which filed approval rows and WIN exemplars in the client's memory as if a person had decided);
+a passing measurement is reported as a passing measurement, and the projects are left for a person to approve or not.
+
+Client namespaces. By default only the labelled synthetic client runs (namespace synthdemo). The HOOF and MCA cases create
+projects in the real MCA namespace, so they run only with --allow-client mca; each such project is titled "Smoke - ..." and
+carries the run's allowance. Projects are kept unless --archive, and --archive archives only a project this run created
+(read back first: its title starts "Smoke" and it carries this run's allowance), naming each one; anything else is left alone.
 
 Spending. Nothing runs without --approve-calls. The worker publishes its attempt policy in /studio/budget (S24): the most
 requests one job can send, every retry, fallback model and job attempt included - a stage's logical calls times the attempts per
@@ -24,11 +33,11 @@ carries it, so the worker refuses any request past it on its own side - child jo
 (/studio/budget, text and images apart) is read before and after, so the report gives the actual spend beside the reservation.
 
 Outputs stay private: --out (default smoke/, ignored by git) holds smoke.json, index.html, the drawn tiles and the export
-bundles. Nothing is published, and the projects are archived at the end unless --keep.
+bundles. Nothing is published or approved.
 
   python3 tools/studio-smoke.py --key $AXIOM_KEY                                        # the estimate only; nothing runs
-  python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 30                      # editable path, no images
-  python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 60 --approve-renders 6 --size 1K --cases hoof,mca,synth
+  python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 30                      # the synthetic client, editable, no images
+  python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 60 --approve-renders 6 --size 1K --cases hoof,mca,synth --allow-client mca
 """
 import argparse, html, importlib.util, json, os, sys, time, urllib.request
 
@@ -115,13 +124,14 @@ def ledger(base, key):
 
 
 def export_check(base, key, pid, ids, out):
-    ej = job(base, key, pid, 'export', {'assets': ids}, 'exporting what passed and was approved')
+    # nothing here is approved (approval is a person's), so the export must hold none of these; it is asked for to prove that
+    ej = job(base, key, pid, 'export', {'assets': ids}, 'asking for the export of tiles no person has approved')
     res = (ej or {}).get('result') or {}
     got = sorted(x.get('asset') for x in res.get('included') or [])
     os.makedirs(out, exist_ok=True); files = []
     for k in list((res.get('files') or {}).values()) + [x['exportKey'] for x in res.get('included') or [] if x.get('exportKey')]:
         p = os.path.join(out, os.path.basename(k)); open(p, 'wb').write(http(base, key, 'GET', '/studio/file?key=' + urllib.request.quote(k, safe=''), raw=True)); files.append(p)
-    return {'included': got, 'expected': sorted(ids), 'exact': got == sorted(ids), 'excluded': res.get('excluded') or [], 'files': files}
+    return {'included': got, 'expected': [], 'exact': got == [], 'unapprovedLeftOut': len(got) == 0, 'excluded': res.get('excluded') or [], 'files': files}
 
 
 def editable(base, key, args, cid, rec):
@@ -146,13 +156,11 @@ def editable(base, key, args, cid, rec):
         raise Stop('the tiles could not be drawn and measured here: ' + str(comp.get('error') or ''))
     g = http(base, key, 'GET', '/studio/get?id=' + pid)
     passed = [a for a in g['assets'] if (a.get('readiness') or {}).get('technical') == 'passed']
-    for a in passed:
-        for part in ('copy', 'design'):
-            http(base, key, 'POST', '/studio/approve', {'asset': a['id'], 'part': part, 'decision': 'approve', 'reason': 'Smoke: %s checked against the brief and the kit' % part}, ok_codes=(409,))
+    # a passing measurement is not an approval: nothing is approved here, and the export must leave every tile out
     rec['editableExport'] = export_check(base, key, pid, [a['id'] for a in passed], os.path.join(out, 'bundle')) if passed else {'included': [], 'note': 'no tile passed its technical validation'}
     rec['formats'] = sorted(set(a['format'] for a in g['assets']))
     rec['marks'] = {a['title']: marks_of(current(a)) for a in g['assets']}
-    print('  editable: %d tile%s in %s; %d passed validation; export exact: %s' % (len(g['assets']), '' if len(g['assets']) == 1 else 's', ', '.join(rec['formats']), len(passed), rec['editableExport'].get('exact')))
+    print('  editable: %d tile%s in %s; %d passed the technical validation (not approved: that is a person\'s decision); unapproved tiles left out of the export: %s' % (len(g['assets']), '' if len(g['assets']) == 1 else 's', ', '.join(rec['formats']), len(passed), rec['editableExport'].get('exact', True)))
 
 
 def finished(base, key, args, cid, rec):
@@ -169,9 +177,7 @@ def finished(base, key, args, cid, rec):
     res = {'painted': bool(v.get('image')), 'model': ((v.get('image') or {}).get('meta') or {}).get('model'), 'marksSent': ((v.get('image') or {}).get('meta') or {}).get('marksSent'),
            'verified': baked.get('verified'), 'why': baked.get('why'), 'markProblem': baked.get('markProblem'), 'wordProblem': baked.get('wordProblem')}
     if baked.get('verified'):
-        for part in ('copy', 'design'):
-            http(base, key, 'POST', '/studio/approve', {'asset': a['id'], 'part': part, 'decision': 'approve', 'reason': 'Smoke: the reading verified the words and the mark'}, ok_codes=(409,))
-        res['export'] = export_check(base, key, pid, [a['id']], os.path.join(out, 'bundle'))
+        res['export'] = export_check(base, key, pid, [a['id']], os.path.join(out, 'bundle'))   # read back, not approved: left out
     rec['finishedResult'] = res
     print('  Full AI: painted %s; words and mark read back: %s%s' % (res['painted'], res['verified'], (' (' + str(res['why']) + ')') if not res['verified'] else ''))
 
@@ -202,15 +208,23 @@ def estimate(cases, renders):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--key', required=True); ap.add_argument('--worker', default=demo.DEFAULT_WORKER); ap.add_argument('--out', default='smoke')
-    ap.add_argument('--cases', default='hoof,mca,synth'); ap.add_argument('--size', default='1K', choices=['1K', '2K', '4K'])
+    ap.add_argument('--cases', default='synth'); ap.add_argument('--size', default='1K', choices=['1K', '2K', '4K'])
     ap.add_argument('--approve-calls', type=int, default=0, help='the most model calls this run may reserve (worst case, retries included)')
     ap.add_argument('--approve-renders', type=int, default=0, help='the most images (worst case, retries included); 0 skips the Full AI path')
-    ap.add_argument('--keep', action='store_true'); ap.add_argument('--no-compose', action='store_true')
+    ap.add_argument('--keep', action='store_true', help='(the default now) leave the projects in place')
+    ap.add_argument('--archive', action='store_true', help='archive the projects this run created, and only those, each named')
+    ap.add_argument('--allow-client', default='', help='client namespaces this run may create projects in (e.g. mca for the HOOF and MCA cases)')
+    ap.add_argument('--no-compose', action='store_true')
     args = ap.parse_args(); base = args.worker.rstrip('/')
     cases = [c.strip() for c in args.cases.split(',') if c.strip()]
     bad = [c for c in cases if c not in CASES]
     if bad:
         raise SystemExit('unknown case: ' + ', '.join(bad))
+    allowed = set(x.strip() for x in args.allow_client.split(',') if x.strip())
+    real = [c for c in cases if CASES[c]['ns'] != demo.SYNTH_NS and CASES[c]['ns'] not in allowed]
+    if real:
+        raise SystemExit('The %s case%s would create projects in the real client namespace %s. Nothing was run. Run only the synthetic client (--cases synth), or say so with --allow-client %s.' % (
+            ', '.join(real), '' if len(real) == 1 else 's', ', '.join(sorted(set(CASES[c]['ns'] for c in real))), ','.join(sorted(set(CASES[c]['ns'] for c in real)))))
     got = ledger(base, args.key); pol = got.get('policy') if isinstance(got, dict) else None
     if pol and pol.get('text') and pol.get('image'):
         POLICY['text'] = pol['text']; POLICY['image'] = pol['image']
@@ -245,10 +259,18 @@ def main():
         except Stop as ex:
             print('  ! stopped: %s' % ex); rec['stopped'] = str(ex)
         recs.append(rec)
-        if not args.keep:
-            for k in ('editable', 'finished'):
-                if rec.get(k):
-                    http(base, args.key, 'POST', '/studio/project/archive', {'id': rec[k]}, ok_codes=(400, 404, 409))
+        for k in ('editable', 'finished'):
+            if not rec.get(k):
+                continue
+            if not args.archive:
+                print('  kept %s (%s): archive it with --archive, or by hand in the library' % (rec[k], k)); continue
+            # read it back first: only a project this run created - titled Smoke and carrying this run's allowance - is archived
+            pr = http(base, args.key, 'GET', '/studio/get?id=' + rec[k], ok_codes=(404,)) or {}
+            mine = str(pr.get('title') or '').startswith('Smoke') and pr.get('allowance') == LEDGER['allowance']
+            if not mine:
+                print('  ! not archived %s: it is not a project this run created (%s)' % (rec[k], pr.get('title') or pr.get('_status') or 'unreadable')); continue
+            http(base, args.key, 'POST', '/studio/project/archive', {'id': rec[k]}, ok_codes=(400, 404, 409))
+            rec.setdefault('archived', []).append(rec[k]); print('  archived %s "%s" (created by this run)' % (rec[k], pr.get('title')))
     sep, iso = demo.separation(base, args.key, recs)
     meta['ledgerAfter'] = ledger(base, args.key)
     write_index(args, recs, meta)

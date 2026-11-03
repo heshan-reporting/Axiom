@@ -331,7 +331,7 @@ await t('suggested next directions: design suggestions sit beside the creative p
   await page.fill(R + '.st-composer textarea', '');
   await tool(page, 'Images'); ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
   await page.click(R + '.st-ad-quick > .ov-link'); await page.waitForSelector(R + '.st-ad-quick .st-sugg.image .st-sugg-item');
-  const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item .ov-link'); eq(img.length, 2); await img[0].click();
+  const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item .ov-link:has-text("Edit as the description")'); eq(img.length, 2); await img[0].click();
   eq(await page.inputValue(R + '[aria-label="Photograph description"]'), SUGGEST.image[0].text);
   await page.click(R + '.st-ad-quick button:has-text("Not now")');
   const urls = await page.$$eval(R + '.st-ad-card canvas', cs => cs.map(c => c.toDataURL('image/png'))); eq(urls.length, 3); eq(new Set(urls).size, 3, 'three visibly different compositions');

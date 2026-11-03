@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r22` since the offline check (3 November 2026).
+  with `?v=r23` since S25 (3 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2691,7 +2691,11 @@ journey in Chromium, Firefox and WebKit (`tests/pw.mjs` exports all three; CI in
 skipped, never passed). **The live test is owner-run and capped:** `python3 tools/studio-smoke.py --key $AXIOM_KEY
 [--approve-calls N] [--approve-renders N] [--cases hoof,mca,synth] [--size 1K]` prints the worst-case estimate and runs
 nothing without `--approve-calls`; it reserves every job at its worst case (three attempts; a render with its inspection),
-cancels what it will not run, reads `/studio/budget` before and after, and writes `smoke/` (ignored by git). Harnesses:
+cancels what it will not run, reads `/studio/budget` before and after, and writes `smoke/` (ignored by git). Since S25 it
+**never approves anything** (a passing measurement is not a person's approval; the export is asked for to prove it leaves
+unapproved tiles out), runs only the synthetic client unless `--allow-client mca` is given for the HOOF and MCA cases, and keeps
+its projects unless `--archive`, which archives only a project it read back as its own (titled "Smoke", carrying this run's
+allowance) and names each one. Harnesses:
 `studio-s23-worker.mjs`, `studio-s23f-worker.mjs`, `studio-s23g/h/i-worker.mjs`, `studio-s23-browser.mjs`,
 `studio-s23g/h/i/j-browser.mjs`, `studio-s23-perf-browser.mjs`, `studio-xbrowser-browser.mjs`, `studio-smoke-test.mjs`;
 captures `tests/studio-s23-shots.mjs before|after` into the ignored `tests/shots/s23/`.
@@ -2735,6 +2739,23 @@ with its own cap); the activity label names the work, never the image model's id
 `fx.open({onPage})` (`tests/studio-fixture.mjs`) runs `onPage(page)` before `goto`, and a harness that collects page errors names its expected faults by
 route (CDN fonts, `/trends` and `/gdelt` 502 in the sandbox, `/brief/daily` 404). Matched captures: `tests/studio-s24-shots.mjs
 before|after` into the ignored `tests/shots/s24/`.
+
+**The production workflow, end to end (S25; build `2026-11-03.studio-p41`, page `?v=r23`; `CREATIVE-STUDIO.md` s.48 holds the
+journey map and the findings ledger).** A change of direction in a guided project names what it leaves behind: `/studio/direction/
+choose` answers 409 `affects_downstream` (`impact.kind: 'direction'`, the pieces and the direction each was written from) unless
+`decision` is `update` (chosen; the pieces are marked in Copy, `steps.copy.why: 'other_direction'`, `earlier.otherDirection`, for a
+rewrite from the new one - nothing regenerated or deleted) or `keep` (chosen; the pieces join `intel.keptItems`); the keep step
+clears them one by one; variant families and pieces already flagged on an earlier basis are not asked about again
+(`stWfAssetDirection`, `stWfOtherDirection`). The island shows the dialog (no browser confirm). Brief suggestions keep campaigns
+apart: earlier briefs of this campaign only, the AI prompt gets this campaign's and client-wide facts only, no campaign-specific
+record before the campaign is set (`campaignNeeded`), and `empty[field]` says in words when nothing reliable is on file (shown
+under the field). The Creative Director's review opens with Measured / AI advice / Person (`.st-cd-sources`) and says a score is
+never an approval; suggestions can be dismissed and restored per asset and version (this browser only). The deploy is proven, not
+believed: `AXIOM_REV` (`'dev'` in the repository) is stamped with the git revision in the uploaded copy by `tools/deploy-verify.mjs`,
+`/`, `/engine/status` and `/studio/status` report `build` and `rev`, and `tools/deploy-worker.sh` fails unless the live `/`
+answers exactly the build and revision it uploaded. `studio-s22-browser` A's intermittent count failure was its sampler reading
+two renders (case C reproduces it); it now takes one snapshot per sample. Harnesses: `studio-s25-worker.mjs` (9),
+`studio-s25-browser.mjs` (6), `deploy-verify-test.mjs` (7), `studio-smoke-test.mjs` (27).
 
 Phase 1, the ground:
 
@@ -3201,5 +3222,7 @@ cron case asserts both `off` and `always`.
   with no access key, since the worker is closed without one; auth from the `wrangler login`
   session or `CLOUDFLARE_API_TOKEN`). Never `wrangler deploy` from the repo
   root: `wrangler.toml` is a template whose Mind bindings are placeholders,
-  so that would detach D1/Vectorize/AI/R2 from the live worker. Secrets:
+  so that would detach D1/Vectorize/AI/R2 from the live worker. Since S25 the
+  script stamps the upload with the git revision and fails unless the live `/`
+  answers that build and revision (`tools/deploy-verify.mjs`). Secrets:
   `npx wrangler secret put NAME --name newsaus`.

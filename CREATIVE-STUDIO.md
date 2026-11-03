@@ -3019,6 +3019,10 @@ images so the worker refuses anything past it on its own side, cancels anything 
 before and after, writes `smoke/` (ignored by git) and archives its projects unless `--keep`. It needs the p40 worker
 deployed first (`tools/deploy-worker.sh` from the laptop).
 
+**Superseded in S25 (48.3 F2):** the tool no longer approves anything, runs only the synthetic client unless
+`--allow-client mca` is given for the HOOF and MCA cases, and keeps its projects unless `--archive` (only its own, named).
+The third command above is now `... --cases hoof,mca,synth --allow-client mca`.
+
 ### 47.7 Known limits
 
 - A provider request already sent cannot be recalled; it may complete and be billed after a cancel (said in the UI).
@@ -3051,3 +3055,58 @@ deployed first (`tools/deploy-worker.sh` from the laptop).
 
 Nothing in these figures called a paid provider. What they prove is the behaviour of this code with Claude and Gemini mocked;
 live behaviour is the owner's smoke test (47.6), after the p40 worker is deployed from the laptop.
+
+## 48. S25 - the production workflow, end to end (build `2026-11-03.studio-p41`, page `?v=r23`)
+
+### 48.1 Baseline (verified 3 November 2026)
+
+`main` and the checkout were at `908a03d` (two commits after the `acbbf51` the request named: the access fix and the offline
+check), the worker build `2026-10-11.studio-p40`, the Studio scripts at `?v=r22` (not `r21`). The tree was clean. Chromium and
+Playwright are installed in this environment, so the browser harnesses ran here; Firefox and WebKit are not (47.7 still holds).
+Nothing in S25 was deployed, merged, committed or sent to a paid provider; every figure below is from harnesses with Claude and
+Gemini mocked and isolated data.
+
+### 48.2 The journey, mapped (guided project)
+
+| Step | The person | Request | Server state after | Job and progress | What it touches downstream |
+|---|---|---|---|---|---|
+| Create | wizard: type, client, campaign, material | `POST /studio/project`, `/studio/source` (text, url, file, Axiom item), `/studio/job` analyse | workflow v2; Brief processing | analyse: reading 0 of 4, knowledge 1, model 2 (streamed characters), checking 3, filing 4 | `studio_intel`, `brief.analysis`, each source's focus |
+| Understanding | reviews, confirms | `/studio/workflow/confirm {step:brief}` | Brief complete, Objectives open | none | a campaign change afterwards sends it back |
+| Objectives | objective, message, topics | confirm `objectives` | Objectives complete | none | work on the old basis: 409 `affects_downstream` - update, keep or cancel |
+| Strategy | a strategy, or a decision not to respond | confirm `strategy` | Strategy complete, Directions open | none | same impact rule |
+| Explore | generate, refine, merge, alternatives; Select | `/studio/job` direct; `/studio/direction/choose` | Directions needs review, then complete | direct: model 2 of 4 (streamed) | **S25:** pieces written from another direction - 409 `affects_downstream` (48.3 F4) |
+| Copy | write (1 call), edit, Mark ready for design | `/studio/job` copy; `/studio/version`; `/studio/approve {part:copy}` | Copy in progress, then complete | copy: composing n of N | a word change drops that copy approval |
+| Design | production mode; imagery (confirmed render); canvas; Fix layout; Measure | `/studio/production`, `/studio/imagery`, `/studio/version`, `/studio/validation` | Review opens on a validated piece | render: request n of 4; inspect | approvals name exact versions |
+| Review & Deliver | Creative Director review (advice); approve copy and design; client link; export | `/studio/job` inspect; `/studio/approve`; `/studio/share`; `/studio/job` export | review complete | inspect; export | the package holds approved versions only |
+
+The two layers (five phases over seven server steps) were already drawn: the phase navigator in the header, the phase's steps
+with their states in the stage head, the step list with states in the context panel, and Needs / Produces / Your decision / Main
+action / AI in every head. S25 audited them against the server's `stWorkflow` and changed nothing there; the gaps it fixed were
+in what happens when an earlier decision moves (F4) and in what the panels say (F5, F6).
+
+### 48.3 Findings ledger
+
+| # | Reproduction | Root cause | Fix | Evidence | Limits |
+|---|---|---|---|---|---|
+| F1 streamed-reading count (47.7) | `studio-s22-browser` A, run 8 times in a loop: run 7 failed with the sample `{"text":"Understanding ready...","written":5929,"thinking":177}` - the done card's text with the streaming figures | not the product: the worker writes `completed: 2, total: 4` with every progress record of the reading. The harness read one sample in two awaits - the card's text, then the stream figures from anywhere on the page (an element handle that may already be detached) - so a render landing between them paired one render's text with another's figures, at the start of the stream (47.7: the knowledge card's "1 of 4" with "thinking, 118") or at its end (this run) | each sample is one `page.evaluate` reading one card; case C renders the card in the two states with a render between two reads and asserts the old sampler produces the recorded failure and the snapshot never does | old sampler: 1 failure in 7 runs; new: A, B and C passed 10 of 10 runs | the card itself is proven by the snapshot only in Chromium |
+| F2 smoke tool | `tools/studio-smoke.py --approve-calls 30` (mocked) | it POSTed `/studio/approve` copy and design for every tile that passed its technical validation - approval rows and WIN exemplars in the client's memory as if a person had decided; HOOF and MCA ran in the real `mca` namespace by default; projects were archived unless `--keep` | it never approves (the export is asked for to prove it leaves unapproved tiles out); `--cases` defaults to the synthetic client, and HOOF / MCA need `--allow-client mca`; projects are kept unless `--archive`, which reads each back and archives only one titled "Smoke" carrying this run's allowance, naming it | `studio-smoke-test` 27 of 27: no approval and no WIN / LOSS row after both paths, a client case without `--allow-client` refused with nothing created, a person's project in `mca` untouched by `--archive`; against the old tool the new cases fail | the tool has not been run live |
+| F3 deploy proof | the 3 November deploy printed "new code is live: /engine/status answered 200" with build `2026-10-11.studio-p40`, the build before | any answer passed (the old code answers too) and the build id never changed between deploys | `AXIOM_REV` in the worker (`'dev'` in the repository); `tools/deploy-verify.mjs` stamps the uploaded copy with the git revision (`-dirty` when the worker file differs from HEAD) and asks the public `/` (which now reports `build` and `rev`, as do `/engine/status` and `/studio/status`) until it answers exactly that build and revision, up to a minute; anything else fails the script naming what serves | `deploy-verify-test` 7 of 7: stamping (once, ASCII, no code in a revision), the stamped worker answering, stale code refused, another revision refused, propagation then success, the command line, and the script uploading the stamped copy | proven against a stub server; the first real deploy is the live proof. `/` now discloses the build and a short git revision |
+| F4 direction change | choose direction A, write copy, choose B | `/studio/direction/choose` switched silently; the browser asked a yes/no question that named nothing and the worker recorded nothing | a guided project answers 409 `affects_downstream` (`impact.kind: 'direction'`, the pieces with the direction each came from) unless `decision` is sent: `update` chooses and marks them in Copy (`steps.copy.why: 'other_direction'`, `earlier.otherDirection`) for a rewrite from the new one - nothing regenerated or deleted; `keep` chooses and records them as kept (`intel.keptItems`); the keep step clears them one by one. Pieces of a variant family, and pieces already flagged on an earlier objective or strategy, are not asked about twice. In-app: a dialog naming the pieces (Choose it; rewrite later / keep them as written / Cancel), no browser confirm; Copy's banner names the pieces | `studio-s25-worker` cases 1-4 (3 fail on the old worker); `studio-s25-browser` R3; `studio-s17-worker` 13 of 13 after the double-ask guard | classic (non-guided) projects keep the old behaviour |
+| F5 brief suggestions | a HOOF project's suggestions | earlier briefs of every campaign were offered (only sorted HOOF first); the AI suggestion was given every approved fact of the client; with no campaign chosen every campaign's call to action, identity and mark were offered at once; an empty field showed nothing | earlier briefs of this campaign only; the AI prompt gets this campaign's and client-wide facts only; with no campaign only client-wide records, and `campaignNeeded` says to choose it first; each empty field carries `empty[field]`, the reason in words, shown under the field when it is focused; AI suggestions are named inferred | `studio-s25-worker` cases 5-9 (all fail on the old worker); `studio-s25-browser` R4; `studio-p8-worker` updated - it had asserted the National brief was offered to a HOOF project | the reasons are the worker's categories, not a model's judgement |
+| F6 Creative Director | the review panel | the scores, verdict, round and composed status already came from the inspection (no hard-coded values found); what was missing was the three judgements said apart in the review itself, and a way to dismiss a suggestion | the review opens with Measured (the technical validation, or words and mark read back for a finished creative) / AI advice (the verdict, and when it judged an earlier version) / Person (the approvals on record) and "a score or a ship verdict is advice, never an approval"; suggestions get Dismiss and Restore, per asset and version, in this browser, nothing sent | `studio-s25-browser` R1 (an inspection with unusual scores 2 / 5 / 1 / 3 / 5 and verdict redo shown exactly), R2, R5 at 1440 x 900, 834 x 1194, 390 x 844 | dismissals are per browser |
+
+### 48.4 Checked and left as they were
+
+- HOOF carries the HANDS OFF OUR FUEL wordmark and never the MCA logo; the approved variant that reads on its ground is chosen
+  (S21 `stMarkLayers`, `studio-s21-worker`); the smoke test's Full AI case sends the wordmark file only.
+- Retries, fallbacks, cancellation, attempt accounting, allowances and stale or late answers: the S24 harnesses pass unchanged
+  (`studio-s24-worker` 19 of 19 in the backend run).
+- The editable / full AI modes, the canvas's move, resize, order and background reframing, and the agreement of preview,
+  measurement and export: their S17-S24 harnesses pass in the browser run (48.5).
+
+### 48.5 Runs
+
+Backend (`node tests/run.mjs check`, `backend`): 24 of 24 checks, 68 of 68 harnesses, including the new `studio-s25-worker` (9),
+`deploy-verify-test` (7) and `guest-link-test` (10). Browser: see the summary in the session report; the new
+`studio-s25-browser` (6) and `studio-s22-browser` (A, B and the new C) are in it. Nothing here is claimed bug-free: the harnesses
+prove the cases they name.

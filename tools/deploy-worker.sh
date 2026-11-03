@@ -68,6 +68,12 @@ node -e '
 ' "$SRC" || die "the worker must stay pure ASCII"
 grep -q '^export default' "$SRC" || die "expected a module worker (export default { fetch, scheduled })"
 echo "syntax ok, pure ASCII, module worker, $(wc -l < "$SRC" | tr -d ' ') lines"
+# what the live worker must answer once this upload serves: the build in the source and the git revision it came from
+# (tools/deploy-verify.mjs; a worker file that differs from HEAD is "<sha>-dirty"). The uploaded copy carries the revision.
+EXPECT="$(node "$REPO/tools/deploy-verify.mjs" expect "$SRC")" || die "could not read the build and revision to expect"
+EXP_BUILD="$(printf '%s' "$EXPECT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).build))')"
+EXP_REV="$(printf '%s' "$EXPECT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).rev))')"
+echo "expect the live worker to answer build $EXP_BUILD, revision $EXP_REV"
 
 step "cloudflare auth"
 TOKEN="${CLOUDFLARE_API_TOKEN:-}"
@@ -192,7 +198,7 @@ fi
 
 if [ "$DRY" = 1 ]; then
   step "dry run"
-  echo "would upload $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'the working copy') with metadata:"
+  echo "would upload revision $EXP_REV (build $EXP_BUILD) with metadata:"
   cat "$META"
   echo
   echo "dry run only; nothing was uploaded"
@@ -201,10 +207,14 @@ fi
 
 step "deploying '$NAME' ($(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'working copy'))"
 RESP="$WORK/$NAME.upload.json"
+# the copy that is uploaded: the source with AXIOM_REV set to the revision, so the live answer can prove which code serves
+STAMPED="$WORK/$NAME.index.js"
+node "$REPO/tools/deploy-verify.mjs" stamp "$SRC" "$STAMPED" "$EXP_REV" || die "could not stamp the revision into the upload"
+node --check "$STAMPED" || die "the stamped copy does not parse"
 upload() {  # $1 = metadata file
   auth -X PUT "$API/accounts/$ACC/workers/scripts/$NAME" \
     -F "metadata=@$1;type=application/json" \
-    -F "index.js=@$SRC;filename=index.js;type=application/javascript+module" > "$RESP" || die "upload request failed"
+    -F "index.js=@$STAMPED;filename=index.js;type=application/javascript+module" > "$RESP" || die "upload request failed"
   node -e '
     const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     if (!j.success) {
@@ -239,10 +249,15 @@ else
   body="(export AXIOM_KEY to read the Engine status itself)"
 fi
 case "$code" in
-  200|401) echo "new code is live: /engine/status answered $code"; echo "$body" ;;
+  200|401) echo "/engine/status answered $code"; echo "$body" ;;
   404) die "the worker still answers 404 on /engine/status - the old code is serving. Check the upload output above." ;;
   *) die "could not reach $URL (HTTP $code)" ;;
 esac
+# an answer is not proof: the old code answers too. The deploy is proven only when the public / reports exactly the build and
+# revision uploaded (asked for up to a minute while Cloudflare propagates); anything else fails here, naming what serves.
+node "$REPO/tools/deploy-verify.mjs" verify "$URL" "$EXP_BUILD" "$EXP_REV" --tries 12 --interval 5000 \
+  || die "the upload was accepted but the live worker is not answering with it (see above). Nothing else is wrong yet: wait a minute and run node tools/deploy-verify.mjs verify $URL $EXP_BUILD $EXP_REV, or deploy again."
+echo "new code is live: build $EXP_BUILD, revision $EXP_REV"
 echo
 echo "done. Bindings, vars, secrets and crons are unchanged. New secrets go in with:"
 echo "  npx wrangler secret put LINKEDIN_TOKEN --name $NAME"

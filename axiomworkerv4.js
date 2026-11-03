@@ -7109,7 +7109,10 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-10-11.studio-p40';
+const AXIOM_BUILD = '2026-11-03.studio-p41';
+// the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
+// (the file in the repository always says 'dev'), and the deploy is proven only when the live worker answers with that revision
+const AXIOM_REV = 'dev';
 let STUDIO_READY = false;
 const ST_STAGES = ['echo', 'render', 'extract', 'direct', 'copy', 'export', 'revise', 'concepts', 'inspect', 'strategy', 'sequence', 'analyse', 'kit', 'suggest', 'refanalyse'];   // render and echo run in stJobRun; the production stages in stStageRun
 const ST_LEASE_MS = 120000;                 // a runner holds a job this long before another may claim it
@@ -8081,7 +8084,7 @@ async function stStatus(env) {
   const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
   const budget = await stBudget(env);
   const durations = await stDurations(env); const aiAutomation = await aiAutomationStatus(env);
-  return { ok: true, build: AXIOM_BUILD, phase: 2, budget, durations, aiAutomation, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  return { ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, phase: 2, budget, durations, aiAutomation, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
 }
 
 // -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
@@ -9489,6 +9492,20 @@ function stWfCurrent(p, bs) {
 function stWfItemCurrent(p, x, bs) { if (!bs) return true; if (stWfCurrent(p, bs)) return true; const i = ((p && p.brief) || {}).intel || {}; return !!(x && x.id && Array.isArray(i.keptItems) && i.keptItems.indexOf(x.id) >= 0); }
 /** The basis an asset's words were written on: the newest version that records one (hand edits carry it forward). */
 function stWfAssetBasis(a) { const vs = (a && Array.isArray(a.versions) ? a.versions : []).slice().reverse(); const v = vs.find(x => x && x.context && x.context.basis); return v ? v.context.basis : null; }
+/** The direction an asset's words were written from (3 November 2026): the copy stage stamps it on the version's basis and
+ *  context, and hand edits carry the basis forward. Pieces of a variant family ("Narrative: ...") are produced from several
+ *  directions on purpose, side by side, and are never on "another" direction. */
+function stWfAssetDirection(a) {
+  if (!a || /^Narrative: /.test(String(a.family || ''))) return '';
+  const vs = (Array.isArray(a.versions) ? a.versions : []).slice().reverse();
+  const v = vs.find(x => x && x.context && ((x.context.basis && x.context.basis.direction) || x.context.direction));
+  return v ? String((v.context.basis && v.context.basis.direction) || v.context.direction || '') : '';
+}
+/** The pieces a choice of direction `did` would leave written from another one, less those the team kept under it. */
+function stWfOtherDirection(p, assets, did) {
+  const i = ((p && p.brief) || {}).intel || {}; const kept = Array.isArray(i.keptItems) ? i.keptItems : [];
+  return (assets || []).filter(a => { const d = stWfAssetDirection(a); return d && did && d !== did && kept.indexOf(a.id) < 0; });
+}
 function stWfVer(a) { return (a && Array.isArray(a.versions) ? a.versions : []).find(x => x.id === a.current) || null; }
 function stWfValid(a) {
   const v = stWfVer(a); if (!v) return false;
@@ -9552,12 +9569,15 @@ function stWorkflow(p) {
   const dirOk = steps.directions.state === 'complete' || (!on && steps.directions.state === 'skipped');
   // COPY: the words and the visual narrative per channel, each piece marked ready for design
   const staleAssets = on ? assets.filter(a => { const bs = stWfAssetBasis(a); return bs && !stWfItemCurrent(p, a, bs); }).map(a => a.id) : [];
+  // pieces written from a direction other than the chosen one (the direction changed after they were written), unless kept
+  const otherDir = on && chosen ? stWfOtherDirection(p, assets, chosen.id).map(a => a.id).filter(id => staleAssets.indexOf(id) < 0) : [];
   const ready = assets.filter(a => a.approvals && a.approvals.copy);
   const cRun = live(['copy', 'sequence']);
   if (on && !dirOk && !assets.length) steps.copy = lock(steps.directions.why === 'chosen_earlier' ? 'The chosen direction was built on an earlier choice: choose a current direction, or keep the existing ones, to continue.' : 'Select a Creative Direction to continue.');
   else if (cRun) steps.copy = S('processing', { job: cRun.id, note: 'writing the copy and the visual narrative' });
   else if (!assets.length) { const f = failed(['copy', 'sequence']); steps.copy = f ? err(f, 'the copy did not complete') : S('not_started', { note: on ? 'generate the copy and the visual narrative' : 'write the copy' }); }
   else if (staleAssets.length) steps.copy = S('needs_review', { why: 'earlier_choice', stale: staleAssets, note: staleAssets.length + ' piece' + (staleAssets.length === 1 ? ' was' : 's were') + ' written on an earlier choice' });
+  else if (otherDir.length) steps.copy = S('needs_review', { why: 'other_direction', stale: otherDir, note: otherDir.length + ' piece' + (otherDir.length === 1 ? ' was' : 's were') + ' written from a direction other than "' + stStr(chosen.title, 60) + '": rewrite from it, or keep ' + (otherDir.length === 1 ? 'it' : 'them') });
   else if (ready.length === assets.length) steps.copy = S('complete', { note: 'all ' + assets.length + ' ready for design' });
   else steps.copy = S('in_progress', { note: ready.length + ' of ' + assets.length + ' ready for design' });
   // DESIGN: the production mode, the imagery, the canvas; every visual validated at its output size
@@ -9584,7 +9604,7 @@ function stWorkflow(p) {
   const onCur = curDirs.filter(d => d.basis);
   const builtAssets = on ? assets.filter(a => { const bs = stWfAssetBasis(a); return bs && stWfItemCurrent(p, a, bs); }) : [];
   const impact = { directions: onCur.length, chosen: !!(chosen && chosen.basis && chosenCur), assets: builtAssets.length, approvals: builtAssets.filter(a => a.approvals && (a.approvals.copy || a.approvals.design)).length, any: onCur.length + builtAssets.length > 0 };
-  return { v: on ? 2 : 1, enforced: on, steps, order: ST_WF_STEPS, current, basis, key: stWfKey(basis), kept: Array.isArray(i0.kept) ? i0.kept : [], earlier: { directions: earlier.map(d => d.id), assets: staleAssets }, impact, type: b.projectType || '', production: b.production || null };
+  return { v: on ? 2 : 1, enforced: on, steps, order: ST_WF_STEPS, current, basis, key: stWfKey(basis), kept: Array.isArray(i0.kept) ? i0.kept : [], earlier: { directions: earlier.map(d => d.id), assets: staleAssets, otherDirection: otherDir }, impact, type: b.projectType || '', production: b.production || null };
 }
 /** A light project view for the gates: the brief and the directions are enough to judge every step up to Copy. */
 async function stWfView(env, p, withAssets) {
@@ -9639,9 +9659,11 @@ async function stWfConfirm(env, p, sb, who) {
     // current again. Nothing is regenerated or deleted; the pieces (or directions) named are the only ones looked at.
     const wantA = Array.isArray(sb.assets) ? sb.assets.map(x => stClean(x, 24)) : null; const wantD = Array.isArray(sb.directions) ? sb.directions.map(x => stClean(x, 24)) : [];
     const ids = []; let na = 0, nd = 0;
-    (view.assets || []).forEach(a => { const bs = stWfAssetBasis(a); if (bs && !stWfItemCurrent(view, a, bs) && (!wantA || wantA.indexOf(a.id) >= 0)) { ids.push(a.id); na++; } });
+    // pieces written from a direction other than the chosen one are kept the same way (3 November 2026)
+    const chosenD = (view.directions || []).find(d => d.chosen); const otherIds = chosenD ? stWfOtherDirection(view, view.assets, chosenD.id).map(a => a.id) : [];
+    (view.assets || []).forEach(a => { const bs = stWfAssetBasis(a); const stale = (bs && !stWfItemCurrent(view, a, bs)) || otherIds.indexOf(a.id) >= 0; if (stale && (!wantA || wantA.indexOf(a.id) >= 0)) { ids.push(a.id); na++; } });
     (view.directions || []).forEach(d => { if (d.basis && !stWfItemCurrent(view, d, d.basis) && wantD.indexOf(d.id) >= 0) { ids.push(d.id); nd++; } });
-    if (!ids.length) return { error: 'nothing_to_keep', status: 400, detail: 'Nothing named here was built on an earlier choice.' };
+    if (!ids.length) return { error: 'nothing_to_keep', status: 400, detail: 'Nothing named here was built on an earlier choice or from another direction.' };
     await stBriefPatch(env, p.id, b => { const i0 = b.intel && typeof b.intel === 'object' ? b.intel : { id: it.id, selected: {} }; i0.keptItems = Array.from(new Set((Array.isArray(i0.keptItems) ? i0.keptItems : []).concat(ids))).slice(-200); b.intel = i0; });
     const what = [na ? na + ' piece' + (na === 1 ? '' : 's') : '', nd ? nd + ' direction' + (nd === 1 ? '' : 's') : ''].filter(Boolean).join(' and ');
     await stIntelLog(env, p.ns, p.id, 'kept_downstream', 'keep', 'kept ' + what + ' built on an earlier choice under the current one', who);
@@ -10118,8 +10140,12 @@ async function stBriefSuggest(env, p, opts) {
   const campaignId = p ? p.campaign : stStr(opts.campaign, 40); const camp = (kit.campaigns || []).find(c => c.id === campaignId) || null;
   const out = { ok: true, ns, campaign: campaignId || '', fields: { objective: [], audience: [], message: [], action: [], deliverables: [], requirements: [] }, sources: { approved: 0, preference: 0, previous: 0, reference: 0, ai: 0 } };
   const add = (field, text, source, from, extra) => { text = String(text || '').trim(); if (!text) return; const list = out.fields[field]; if (list.some(x => x.text.toLowerCase() === text.toLowerCase())) return; list.push(Object.assign({ text: text.slice(0, 300), source, from: String(from || '').slice(0, 120) }, extra || {})); out.sources[source] = (out.sources[source] || 0) + 1; };
-  // the kit: campaign structure, tone, cta and sign-off; segments; approved facts
-  (camp ? [camp] : (kit.campaigns || []).filter(c => c.active !== false)).forEach(c => {
+  // the kit: campaign structure, tone, cta and sign-off; segments; approved facts. 3 November 2026: a campaign's own records are
+  // suggested only for that campaign - with none chosen, the kit's campaigns (MCA national, Hands Off Our Fuel...) were all offered
+  // at once, their calls to action, identities and marks mixed. Until the campaign is set, only client-wide records are offered.
+  const camps = (kit.campaigns || []).filter(c => c.active !== false);
+  if (!camp && camps.length) out.campaignNeeded = 'Choose the campaign first: its call to action, identity and mark are suggested once it is set (' + camps.map(c => c.name || c.id).join(', ') + ').';
+  (camp ? [camp] : []).forEach(c => {
     if (c.cta) add('action', c.cta, 'approved', 'campaign ' + (c.name || c.id) + ' call to action');
     if (c.url) add('action', 'Send them to ' + c.url, 'approved', 'campaign ' + (c.name || c.id) + ' url');
     if (c.identity) add('requirements', c.identity, 'approved', 'campaign ' + (c.name || c.id) + ' identity', { band: 'mandatory' });
@@ -10128,13 +10154,16 @@ async function stBriefSuggest(env, p, opts) {
     if (c.tone) add('requirements', 'Tone: ' + c.tone, 'approved', 'campaign ' + (c.name || c.id) + ' tone', { band: 'preferred' });
   });
   (kit.segments || []).forEach(s => add('audience', s.who || s.name, 'approved', 'kit segment ' + (s.name || s.id)));
-  (kit.facts || []).filter(f => f.status !== 'pending' && (!campaignId || !f.campaign || f.campaign === campaignId)).slice(0, 8).forEach(f => add('message', f.text, 'approved', 'approved fact' + (f.source ? ', ' + f.source : '')));
+  // a campaign's facts reach only that campaign; client-wide facts (no campaign) reach every project of the client
+  const campFacts = (kit.facts || []).filter(f => f.status !== 'pending' && (!f.campaign || f.campaign === campaignId));
+  campFacts.slice(0, 8).forEach(f => add('message', f.text, 'approved', 'approved fact' + (f.campaign ? ' (' + ((camps.find(c => c.id === f.campaign) || {}).name || f.campaign) + ')' : ', client-wide') + (f.source ? ', ' + f.source : '')));
   (kit.banned || []).slice(0, 6).forEach(b => add('requirements', 'Never "' + b.term + '"' + (b.use ? ' - say "' + b.use + '"' : ''), 'approved', 'banned term', { band: 'mandatory' }));
   // recorded preferences: learned corrections for tiles and copy, client-wide or this campaign's
   try { const fixes = (await engineFixes(env, ns, null, false)).filter(f => (f.task === 'tiles' || f.task === 'copy' || f.task === 'any') && (!stCampaignOf(f) || stCampaignOf(f) === String(campaignId || ''))); fixes.slice(0, 10).forEach(f => add('requirements', f.rule, 'preference', 'learned correction' + (f.who ? ' by ' + f.who : '') + (stCampaignOf(f) ? ', campaign ' + stCampaignOf(f) : ''), { band: 'preferred' })); } catch (e) {}
   // previous briefs for the client (same campaign first)
   try {
-    const rows = (await env.MIND_DB.prepare('SELECT id, title, campaign, brief FROM studio_projects WHERE ns=? AND archived=0 ORDER BY (campaign=?) DESC, updated DESC LIMIT 12').bind(ns, campaignId || '').all()).results || [];
+    // only this campaign's earlier briefs: another campaign's objective or message is not a precedent here (HOOF is not MCA national)
+    const rows = (await env.MIND_DB.prepare("SELECT id, title, campaign, brief FROM studio_projects WHERE ns=? AND archived=0 AND COALESCE(campaign,'')=? ORDER BY updated DESC LIMIT 12").bind(ns, campaignId || '').all()).results || [];
     rows.filter(r => !p || r.id !== p.id).forEach(r => { const b = pjs(r.brief, {}); ['objective', 'audience', 'message', 'action', 'deliverables'].forEach(k => { if (b[k]) add(k, b[k], 'previous', 'brief "' + (r.title || r.id) + '"' + (r.campaign ? ' (' + r.campaign + ')' : '')); }); const rq = b.requirements || {}; ['mandatory', 'preferred'].forEach(band => stReqItems(rq[band]).forEach(it => add('requirements', it.text, it.source === 'ai' ? 'previous' : it.source, it.from || 'brief "' + (r.title || r.id) + '"', { band }))); });
   } catch (e) {}
   // references on this project: brand and approved references are requirements
@@ -10144,14 +10173,17 @@ async function stBriefSuggest(env, p, opts) {
     try {
       const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || kit.name || ns;
       const sys = 'You are a strategist at an Australian political communications agency filling gaps in a creative brief for ' + client + '. Answer as strict JSON only: {"objective":["<=20 words"],"audience":["<=15 words"],"message":["<=20 words"],"action":["<=12 words"],"deliverables":["<=12 words"],"requirements":["<=16 words: a design requirement"]}. Two or three per field, specific to the client and the campaign, from the facts and the identity given; never invent a figure; Australian English, no exclamation marks.';
-      const user = 'CAMPAIGN: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') : 'none') + '\nBRIEF SO FAR:\n' + (p ? stBriefText(p) : '(new project)') + '\nAPPROVED FACTS: ' + (kit.facts || []).filter(f => f.status !== 'pending').slice(0, 10).map(f => f.text).join(' | ') + '\nVOICE: ' + String(kit.voice || '').slice(0, 600);
+      const user = 'CAMPAIGN: ' + (camp ? camp.name + (camp.identity ? ' - ' + camp.identity : '') + (camp.tone ? '; tone ' + camp.tone : '') : 'none') + '\nBRIEF SO FAR:\n' + (p ? stBriefText(p) : '(new project)') + '\nAPPROVED FACTS: ' + campFacts.slice(0, 10).map(f => f.text).join(' | ') + '\nVOICE: ' + String(kit.voice || '').slice(0, 600);
       const r = await stClaude(env, { role: 'extract', system: sys, user, maxTok: 1500, timeoutMs: 60000 });
       const j = relJson(r.text) || {};
       ['objective', 'audience', 'message', 'action', 'deliverables', 'requirements'].forEach(k => (Array.isArray(j[k]) ? j[k] : []).slice(0, 3).forEach(t => add(k, t, 'ai', r.model, k === 'requirements' ? { band: 'open' } : undefined)));
       out.aiModel = r.model;
     } catch (e) { out.aiError = String((e && e.message) || e).slice(0, 160); }
   }
-  out.note = 'approved = the kit\'s own records; preference = a learned correction; previous = an earlier brief for this client; reference = a brand or approved reference on this project; ai = a model\'s suggestion, requested, not a requirement.';
+  // where nothing reliable is on file for a field, say so rather than leave a blank that reads as "no suggestion needed"
+  const why = { objective: 'no earlier brief for this campaign states one', audience: 'the kit has no audience segment and no earlier brief for this campaign names one', message: 'no approved fact or earlier brief for this campaign', action: camp ? 'the campaign has no call to action or address on file' : 'set the campaign: its call to action comes from the kit', deliverables: 'no earlier brief for this campaign lists deliverables', requirements: camp ? 'nothing on file: no identity, mark policy, banned term, learned correction or brand reference' : 'set the campaign: its identity and mark policy come from the kit' };
+  out.empty = {}; Object.keys(out.fields).forEach(k => { if (!out.fields[k].length) out.empty[k] = 'Axiom holds nothing reliable for this yet: ' + why[k] + (opts.ai ? '' : '. Ask the model for a suggestion (one call) or write it yourself.'); });
+  out.note = 'approved = the kit\'s own records; preference = a learned correction; previous = an earlier brief for this campaign; reference = a brand or approved reference on this project; ai = a model\'s suggestion, inferred, requested, not a requirement. A campaign\'s facts, briefs and identity reach only that campaign.';
   return out;
 }
 // -- copy: the set written together, adapted per channel, checked, planned and laid out; the imagery queued as jobs --
@@ -15263,7 +15295,7 @@ const AXIOM_WORKER = {
           const ar = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM engine_art WHERE ns=?').bind(ens).first()) || {};
           let docs = [];
           try { docs = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) n FROM mind_docs WHERE ns=? GROUP BY kind ORDER BY n DESC').bind(ens).all()).results || []; } catch (e) {}
-          return jsonResp({ ok: true, build: AXIOM_BUILD, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
+          return jsonResp({ ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, ns: ens, fixes: { total: fx.n || 0, inForce: fx.live || 0, applied: fx.hits || 0 }, outcomes: { approved: oc.approved || 0, killed: oc.killed || 0 }, artworks: ar.n || 0, mind: docs });
         }
         if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Teaching the Engine, approving and filing artwork need a full-access key.' }, 403);
         if (path === '/engine/fix' && req.method === 'POST') {
@@ -15739,8 +15771,29 @@ const AXIOM_WORKER = {
         if (path === '/studio/direction/choose') {
           const d = await env.MIND_DB.prepare('SELECT * FROM studio_directions WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!d) return jsonResp({ error: 'unknown_direction' }, 404);
           { const pr0 = await stProject(env, d.project); if (pr0 && stWfOn(pr0)) { const g = await stWfGate(env, pr0, 'choose'); if (g) return jsonResp({ ok: false, error: g.error, detail: g.detail, step: g.step, need: g.need }, g.status); const dd0 = pjs(d.data, {}); if (dd0.basis && !stWfItemCurrent(pr0, { id: d.id }, dd0.basis)) return jsonResp({ ok: false, error: 'direction_earlier', detail: 'This direction was built on an earlier objective, message or strategy. Keep the existing directions under the current choice, or choose one built on it.' }, 409); } }
+          // 3 November 2026: choosing another direction after copy was written from the first one used to happen silently. A guided
+          // project now names the pieces it leaves written from another direction and asks first: update (they are marked for a
+          // rewrite from the new one in Copy; nothing is regenerated by itself), keep (they stay current under the new choice), or
+          // cancel (nothing changes). Nothing is deleted either way.
+          let otherNote = '';
+          { const pr1 = await stProject(env, d.project);
+            if (pr1 && stWfOn(pr1)) {
+              const full = await stGet(env, d.project); const prev = (full && full.directions || []).find(x => x.chosen);
+              // pieces already flagged as built on an earlier objective, message or strategy were asked about then; not again here
+              const hit = stWfOtherDirection(pr1, (full && full.assets) || [], d.id).filter(a => { const bs = stWfAssetBasis(a); return !bs || stWfItemCurrent(pr1, a, bs); });
+              const dec = String(sb.decision || '');
+              if (hit.length && dec !== 'keep' && dec !== 'update') {
+                const dirT = id => { const x = ((full && full.directions) || []).find(y => y.id === id); return x ? x.title : 'another direction'; };
+                return jsonResp({ ok: false, error: 'affects_downstream', detail: hit.length + ' piece' + (hit.length === 1 ? ' was' : 's were') + ' written from ' + (prev && prev.id !== d.id ? '"' + prev.title + '"' : 'another direction') + '. Choose whether to rewrite ' + (hit.length === 1 ? 'it' : 'them') + ' from "' + stStr(pjs(d.data, {}).title || '', 80) + '" or keep ' + (hit.length === 1 ? 'it' : 'them') + '; nothing is deleted.',
+                  impact: { kind: 'direction', to: stStr(pjs(d.data, {}).title || '', 80), from: prev && prev.id !== d.id ? prev.title : '', assets: hit.length, approvals: hit.filter(a => a.approvals && (a.approvals.copy || a.approvals.design)).length, items: hit.slice(0, 40).map(a => ({ id: a.id, title: a.title, from: dirT(stWfAssetDirection(a)) })) } }, 409);
+              }
+              if (hit.length && dec === 'keep') {
+                await stBriefPatch(env, d.project, b => { const i0 = b.intel && typeof b.intel === 'object' ? b.intel : { selected: {} }; i0.keptItems = Array.from(new Set((Array.isArray(i0.keptItems) ? i0.keptItems : []).concat(hit.map(a => a.id)))).slice(-200); b.intel = i0; });
+                otherNote = ' ' + hit.length + ' piece' + (hit.length === 1 ? '' : 's') + ' written from another direction kept as written: ' + hit.slice(0, 6).map(a => a.title).join(', ') + (hit.length > 6 ? ' and ' + (hit.length - 6) + ' more' : '') + '.';
+              } else if (hit.length) otherNote = ' ' + hit.length + ' piece' + (hit.length === 1 ? '' : 's') + ' written from another direction marked for a rewrite from this one in Copy (nothing was regenerated or deleted): ' + hit.slice(0, 6).map(a => a.title).join(', ') + (hit.length > 6 ? ' and ' + (hit.length - 6) + ' more' : '') + '.';
+            } }
           await env.MIND_DB.batch([env.MIND_DB.prepare('UPDATE studio_directions SET chosen=0 WHERE project=?').bind(d.project), env.MIND_DB.prepare('UPDATE studio_directions SET chosen=1 WHERE id=?').bind(d.id)]);
-          await stBump(env, d.project); await stEvent(env, d.project, 'direction', { text: 'Direction chosen: ' + stStr(pjs(d.data, {}).title || '', 80) + '. Saved as the project decision; nothing saved as a rule.', direction: d.id }, who);
+          await stBump(env, d.project); await stEvent(env, d.project, 'direction', { text: 'Direction chosen: ' + stStr(pjs(d.data, {}).title || '', 80) + '. Saved as the project decision; nothing saved as a rule.' + otherNote, direction: d.id }, who);
           { const dd = pjs(d.data, {}); const pr = await stProject(env, d.project); if (pr) await stIntelLog(env, pr.ns, pr.id, 'direction', d.id, stStr(dd.title, 80) + (dd.approach ? ' (' + dd.approach + ', ' + (dd.route || 'editable') + ')' : '') + ': ' + stStr(dd.idea || dd.message, 200), who); }
           return jsonResp({ ok: true });
         }
@@ -18332,6 +18385,8 @@ const AXIOM_WORKER = {
       name:    'AXIOM Proxy v4',
       status:  'ok',
       version: '4.0.0',
+      build:   AXIOM_BUILD,
+      rev:     AXIOM_REV,
       engines: ['vbulletin4', 'vbulletin5', 'xenforo2', 'xenforo1', 'phpbb', 'mybb', 'discourse', 'invision', 'smf', 'yabb', 'generic'],
       routes: [
         'GET /reddit?q=&sr=',
