@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r23` since S25 (3 November 2026).
+  with `?v=r24` since S26 (4 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2750,12 +2750,33 @@ clears them one by one; variant families and pieces already flagged on an earlie
 apart: earlier briefs of this campaign only, the AI prompt gets this campaign's and client-wide facts only, no campaign-specific
 record before the campaign is set (`campaignNeeded`), and `empty[field]` says in words when nothing reliable is on file (shown
 under the field). The Creative Director's review opens with Measured / AI advice / Person (`.st-cd-sources`) and says a score is
-never an approval; suggestions can be dismissed and restored per asset and version (this browser only). The deploy is proven, not
-believed: `AXIOM_REV` (`'dev'` in the repository) is stamped with the git revision in the uploaded copy by `tools/deploy-verify.mjs`,
-`/`, `/engine/status` and `/studio/status` report `build` and `rev`, and `tools/deploy-worker.sh` fails unless the live `/`
-answers exactly the build and revision it uploaded. `studio-s22-browser` A's intermittent count failure was its sampler reading
+never an approval; suggestions can be dismissed and restored per asset and version (the team's since S26). The deploy is proven,
+not believed: `AXIOM_REV` (`'dev'` in the repository) is stamped with the git revision in the uploaded copy by
+`tools/deploy-verify.mjs`, and `tools/deploy-worker.sh` fails unless the live worker answers what it uploaded (since S26 an opaque
+token on `/`, the build and revision on the gated routes). `studio-s22-browser` A's intermittent count failure was its sampler reading
 two renders (case C reproduces it); it now takes one snapshot per sample. Harnesses: `studio-s25-worker.mjs` (9),
 `studio-s25-browser.mjs` (6), `deploy-verify-test.mjs` (7), `studio-smoke-test.mjs` (27).
+
+**What S25 left open, closed (S26; build `2026-11-04.studio-p42`, page `?v=r24`; `CREATIVE-STUDIO.md` s.49).** A **classic**
+project (made without the wizard) now asks before a direction change too: `/studio/direction/choose` answers 409
+`affects_downstream` with `impact.classic`; `update` leaves the pieces listed in Production > Needs attention (`GET
+/studio/impact` reason `direction_changed`, remedy `redirect` - a revise job with `input.direction`, which `stReviseStage` stamps
+on the versions it writes - and a free **Keep as written** through `POST /studio/direction/keep {project, assets}`); `keep` records
+them in `brief.keptDirection` (a classic project's list, which a new brief analysis does not reset; guided projects keep
+`intel.keptItems`; `stDirKept` reads both). The classic Directions view no longer asks a browser confirm first when the worker
+will ask. **Dismissed suggestions are the team's**: D1 `studio_dismissals(asset, version, skey, project, who, at)`, `POST
+/studio/suggest/dismiss {asset, version, key: kind|text, dismissed}` (full), `dismissed: [{key, who, at}]` on GET and POST
+`/studio/suggest`; the island shows who set one aside and when, and sends a browser's pre-S26 localStorage dismissals up once.
+**The public `/` names no build or revision**: it answers `deploy`, an opaque random token `tools/deploy-worker.sh` stamps into
+each upload (`AXIOM_DEPLOY`, `''` in the repository); `build`, `rev` and `deploy` are on the key-gated `/engine/status` and
+`/studio/status`; `deploy-verify.mjs verify <url> <token> --build --rev` checks the token, and with `AXIOM_KEY` exported the gated
+build and revision too. **The Design artboard**: under the canvas the page strip and the measurement line share a row and the
+composition's facts take the full width (they wrapped to four lines beside the page strip; the fitted 4:5 artboard at 1440 x 900
+was 548 px here, now 592), and the readiness line no longer names the same layers twice (`namesAll`). The Studio's faces (DM Sans,
+Manrope) are served from `docs/vendor/fonts/` (OFL, from @fontsource-variable 5.3.0), not Google Fonts. `tests/workerd-deploy-
+test.mjs` runs the stamped module in **workerd** (Cloudflare's runtime, through `miniflare`, a pinned dev dependency) and the
+deploy verifier against it over HTTP, plus the S26 routes on workerd's D1; it says SKIP when miniflare is missing. Harnesses:
+`studio-s26-worker.mjs` (4), `studio-s26-browser.mjs` (4), `deploy-verify-test.mjs` (7), `workerd-deploy-test.mjs` (3).
 
 Phase 1, the ground:
 
@@ -3223,6 +3244,8 @@ cron case asserts both `off` and `always`.
   session or `CLOUDFLARE_API_TOKEN`). Never `wrangler deploy` from the repo
   root: `wrangler.toml` is a template whose Mind bindings are placeholders,
   so that would detach D1/Vectorize/AI/R2 from the live worker. Since S25 the
-  script stamps the upload with the git revision and fails unless the live `/`
-  answers that build and revision (`tools/deploy-verify.mjs`). Secrets:
+  script stamps the upload with the git revision, and since S26 with a fresh
+  deploy token, and fails unless the live `/` answers that token (with
+  `AXIOM_KEY` exported, `/engine/status` must also answer the build and
+  revision; `tools/deploy-verify.mjs`). Secrets:
   `npx wrangler secret put NAME --name newsaus`.

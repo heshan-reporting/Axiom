@@ -3116,6 +3116,36 @@ case), `studio-s19-browser` I took the word "verdict" in the new note for a revi
 26 of 26, 8 of 8 and 16 of 16. The other two, `studio-s20-browser` W1 and `studio-s23g-browser` G-B6, measure the fitted 4:5
 Design artboard at 1440 x 900 as 548 px against a 560 px floor; both fail identically on the baseline `908a03d` in this
 environment (run from a worktree of that commit), so they are not S25's; S24 recorded 565 px where it ran, and the cause here
-(fonts the sandbox does not load are a candidate) is not established. The new `studio-s25-browser` passed 6 of 6 in the suite and
+(fonts the sandbox does not load are a candidate) is not established. (S26, s.49: fonts were ruled out; the cause was the text
+under the canvas, and both now pass.) The new `studio-s25-browser` passed 6 of 6 in the suite and
 fails 6 of 6 on the old code; `studio-s22-browser` passed A, B and C. Nothing here is claimed bug-free: the harnesses prove the
 cases they name.
+
+## 49. S26 - what S25 left open, closed (build `2026-11-04.studio-p42`, page `?v=r24`)
+
+S25 ended with three things unverified and four remaining issues. Each remaining issue was reproduced by a test that fails on the
+S25 code (`20164e9`) before it was fixed; each "not verified" line is answered with what this environment can actually reach, and
+what it cannot is said plainly.
+
+### 49.1 Findings ledger
+
+| # | Reproduction | Root cause | Fix | Evidence |
+|---|---|---|---|---|
+| G1 classic direction change | a project made without the wizard: choose A, write copy, choose B | S25's ask was gated on `stWfOn` (guided projects only); a classic project switched silently and the browser asked only about cost | `/studio/direction/choose` asks on every project (409 `affects_downstream`, `impact.classic`); `update` lists the pieces under Production > Needs attention (`direction_changed`, a paid rewrite from the chosen direction that stamps it on the new versions, and a free Keep as written, `POST /studio/direction/keep`); `keep` records `brief.keptDirection`, which a new analysis does not reset; the classic view asks no browser confirm when the worker will ask | `studio-s26-worker` 1-3, `studio-s26-browser` B3 (fail on `20164e9`) |
+| G2 dismissals in one browser | dismiss a suggestion, open the project in another browser | S25 kept them in localStorage | D1 `studio_dismissals` per asset, version and suggestion with who and when; `POST /studio/suggest/dismiss`; `dismissed` on the suggestion answers; pre-S26 local dismissals sent up once | `studio-s26-worker` 4, `studio-s26-browser` B1-B2, `studio-s25-browser` R2 (now one write, the dismissal) |
+| G3 public build | `GET /` answered `build` and the git `rev` to anyone | S25 put them there so the deploy could be proven without a key | `/` answers `deploy`, an opaque random token stamped per upload; build and revision only on the key-gated status routes; the verifier checks the token and, with `AXIOM_KEY`, the gated build and revision | `deploy-verify-test` (7), `workerd-deploy-test` (3) |
+| G4 artboard 548 px | `studio-s20-browser` W1 / `studio-s23g-browser` G-B6 at 1440 x 900 | the composition's facts sat beside the page strip and wrapped to four lines (69 px), the measurement line to two, and the readiness line repeated the layers it names; the footer took 217 px. Fonts were suspected and ruled out: with DM Sans and Manrope loaded (now served from `docs/vendor/fonts`) it still measured 548 | the facts take the full width under the page strip (two lines), the measurement line sits beside the strip, the readiness line names the layers once (`namesAll`); nothing is cut off (S24 U4 holds) | W1 and G-B6 pass here; the artboard measures 592 px (was 548) |
+
+### 49.2 What could and could not be verified here
+
+- **Real Claude and Gemini**: not run. This session has no provider key and no Axiom key, its network policy refuses
+  `newsaus.heshan-998.workers.dev`, and no computer of the owner's is attached. The live check stays owner-run, capped and safe
+  since S25: after deploying, `python3 tools/studio-smoke.py --key $AXIOM_KEY --approve-calls 12 --approve-renders 1 --size 1K`
+  (synthetic client only; it approves nothing; it keeps its projects unless `--archive`).
+- **Cloudflare**: the deploy proof now runs against **workerd**, Cloudflare's own Workers runtime, not only a stand-in server:
+  `tests/workerd-deploy-test.mjs` stamps the module as `deploy-worker.sh` does, serves it through Miniflare with local D1, KV and
+  R2, runs `deploy-verify.mjs verify` against it over HTTP (with a key, so the gated build and revision are read), and drives the
+  S26 routes on workerd's D1. The upload to Cloudflare itself (the Workers API, `keep_bindings`) is proven only by the owner's next
+  `tools/deploy-worker.sh`, which stops with the reason unless the live worker answers the new token.
+- **Firefox and WebKit**: Playwright's browser downloads are refused by this sandbox's network policy. CI installs Chromium,
+  Firefox and WebKit on every push and runs the browser suite, including `studio-xbrowser-browser` (the core journey in all three).

@@ -710,3 +710,10 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-canvasbar .st-addmenu>.btn{padding:4px 7px;min-width:28px;justify-content:center}
   #studio-root .st .st-canvasbar .st-zoom .st-sel{width:64px}
 }
+/* S26: under the canvas, the page strip and the measurement line share one row and the composition's facts take the full width
+   beneath them (beside the page strip they wrapped onto four lines and pushed the fitted 4:5 artboard under 560 px at 1440 x 900);
+   the facts still wrap rather than cut off (S24 U4) */
+#studio-root .st .st-canvas-sub > .st-comp-info{flex:1 1 100%;order:3}
+#studio-root .st .st-canvas-sub > .st-canvas-subr{align-self:center}
+#studio-root .st .st-canvas-sub > .st-canvas-subr:empty{display:none}
+

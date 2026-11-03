@@ -207,9 +207,11 @@ fi
 
 step "deploying '$NAME' ($(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'working copy'))"
 RESP="$WORK/$NAME.upload.json"
-# the copy that is uploaded: the source with AXIOM_REV set to the revision, so the live answer can prove which code serves
+# the copy that is uploaded: the source with AXIOM_REV set to the revision (reported on the key-gated status routes) and
+# AXIOM_DEPLOY set to a fresh random token (answered by the public /, which names no build or revision since S26)
 STAMPED="$WORK/$NAME.index.js"
-node "$REPO/tools/deploy-verify.mjs" stamp "$SRC" "$STAMPED" "$EXP_REV" || die "could not stamp the revision into the upload"
+DEPLOY_ID="$(node "$REPO/tools/deploy-verify.mjs" token)" || die "could not make a deploy token"
+node "$REPO/tools/deploy-verify.mjs" stamp "$SRC" "$STAMPED" "$EXP_REV" "$DEPLOY_ID" || die "could not stamp the revision into the upload"
 node --check "$STAMPED" || die "the stamped copy does not parse"
 upload() {  # $1 = metadata file
   auth -X PUT "$API/accounts/$ACC/workers/scripts/$NAME" \
@@ -253,11 +255,12 @@ case "$code" in
   404) die "the worker still answers 404 on /engine/status - the old code is serving. Check the upload output above." ;;
   *) die "could not reach $URL (HTTP $code)" ;;
 esac
-# an answer is not proof: the old code answers too. The deploy is proven only when the public / reports exactly the build and
-# revision uploaded (asked for up to a minute while Cloudflare propagates); anything else fails here, naming what serves.
-node "$REPO/tools/deploy-verify.mjs" verify "$URL" "$EXP_BUILD" "$EXP_REV" --tries 12 --interval 5000 \
-  || die "the upload was accepted but the live worker is not answering with it (see above). Nothing else is wrong yet: wait a minute and run node tools/deploy-verify.mjs verify $URL $EXP_BUILD $EXP_REV, or deploy again."
-echo "new code is live: build $EXP_BUILD, revision $EXP_REV"
+# an answer is not proof: the old code answers too. The deploy is proven only when the public / answers this upload's own token
+# (asked for up to a minute while Cloudflare propagates) and, with AXIOM_KEY exported, /engine/status answers the build and
+# revision uploaded; anything else fails here, naming what serves.
+node "$REPO/tools/deploy-verify.mjs" verify "$URL" "$DEPLOY_ID" --build "$EXP_BUILD" --rev "$EXP_REV" --tries 12 --interval 5000 \
+  || die "the upload was accepted but the live worker is not answering with it (see above). Nothing else is wrong yet: wait a minute and run node tools/deploy-verify.mjs verify $URL $DEPLOY_ID --build $EXP_BUILD --rev $EXP_REV, or deploy again."
+echo "new code is live: build $EXP_BUILD, revision $EXP_REV, deploy token $DEPLOY_ID"
 echo
 echo "done. Bindings, vars, secrets and crons are unchanged. New secrets go in with:"
 echo "  npx wrangler secret put LINKEDIN_TOKEN --name $NAME"

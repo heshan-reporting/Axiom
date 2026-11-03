@@ -2,7 +2,7 @@
  *   R1 the Creative Director's review keeps three judgements apart - Measured, AI advice, Person - and shows the five scores, the
  *      verdict, the round and composed / imagery only exactly as the inspection returned them (unusual values here, so nothing
  *      hard-coded can pass), and says a score is never an approval;
- *   R2 a suggestion can be dismissed for this version and restored; nothing is sent;
+ *   R2 a suggestion can be dismissed for this version and restored (since S26 the worker keeps it: one POST, nothing else);
  *   R3 choosing another direction after copy was written names the pieces in a dialog (no browser confirm): Cancel changes
  *      nothing; "keep them as written" chooses it and Copy stays clear;
  *   R4 a brief field Axiom has nothing reliable for says so, with the reason;
@@ -59,7 +59,7 @@ await T.t('R1 the review keeps Measured, AI advice and Person apart, and shows t
   await page.ctxB.close();
 });
 
-await T.t('R2 a suggestion is dismissed for this version and restored; nothing is sent', async () => {
+await T.t('R2 a suggestion is dismissed for this version and restored; the only write is the dismissal itself', async () => {
   await openProject('S25 at design'); await toDirector();
   const ex = page.locator(R + '.st-cd-tabs button:has-text("Explore"), ' + R + '[role="tab"]:has-text("Explore")').first(); if (await ex.count()) await ex.click();
   const ask = page.locator(R + 'button:has-text("Suggest for this version")').first();
@@ -70,7 +70,8 @@ await T.t('R2 a suggestion is dismissed for this version and restored; nothing i
   await page.locator(R + '.st-sugg-item .st-sugg-dismiss').first().click(); await sleep(200);
   eq(await page.locator(R + '.st-sugg-item').count(), n0 - 1, 'one fewer shown');
   ok(/1 dismissed for this version/.test(await page.textContent(R + '.st-sugg-dismissed')), 'and the count says so');
-  ok(!fx.seen.slice(before).some(x => x.method !== 'GET'), 'nothing was sent: ' + JSON.stringify(fx.seen.slice(before).map(x => x.method + ' ' + x.path)));
+  const writes = fx.seen.slice(before).filter(x => x.method !== 'GET').map(x => x.method + ' ' + x.path);
+  ok(writes.length === 1 && writes[0] === 'POST /studio/suggest/dismiss', 'one write, the dismissal (S26: the team\'s, not this browser\'s): ' + JSON.stringify(writes));
   await page.click(R + '.st-sugg-dismissed button'); await page.locator(R + '.st-sugg-item:has-text("' + first.slice(0, 30).replace(/"/g, '') + '") .st-sugg-dismiss:has-text("Restore")').first().click(); await sleep(200);
   eq(await page.locator(R + '.st-sugg-item').count(), n0, 'restored');
   await page.ctxB.close();
