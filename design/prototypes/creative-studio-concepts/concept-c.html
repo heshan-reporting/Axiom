@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guided Production</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Manrope:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+/* Concept C: one guided journey. Stages 1-4 and 6-7 are a single focused column under a stage navigator; stage 5 (Design) opens
+   into a full-window canvas with controls that float beside what is selected, a version strip at the foot and a Creative Partner
+   that slides in and out. Every wait shows the call, the time, the typical time and an estimated share, and never blocks. */
+body { margin: 0; }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 6; background: rgba(16,19,24,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--ground); }
+.top .in { max-width: 1180px; margin: 0 auto; padding: 12px max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px)); }
+.title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.title h1 { font: 800 17px/1.2 var(--display); margin: 0; }
+.title .sub { color: var(--ink-3); font-size: 12.5px; }
+.title .grow { flex: 1; }
+.steps { display: flex; gap: 4px; margin-top: 12px; overflow-x: auto; }
+.step { flex: 1 0 128px; border: 0; background: none; color: var(--ink-3); text-align: left; padding: 8px 4px 10px; border-bottom: 2px solid var(--line); cursor: pointer; }
+.step .n { font: 700 11px/1 var(--mono); letter-spacing: .06em; }
+.step .t { display: block; font: 700 13px/1.25 var(--display); margin-top: 4px; color: var(--ink-2); }
+.step.done { border-color: var(--good); }
+.step.done .n::after { content: ' ✓'; color: var(--good); }
+.step.cur { border-color: var(--accent); }
+.step.cur .t { color: var(--ink); }
+.step[disabled] { cursor: not-allowed; opacity: .55; }
+.next { font-size: 12.5px; color: var(--ink-3); padding: 0 0 10px; }
+.next b { color: var(--ink-2); font-weight: 600; }
+.col { max-width: 760px; margin: 0 auto; padding: 28px max(20px, env(safe-area-inset-right, 0px)) 80px max(20px, env(safe-area-inset-left, 0px)); }
+.eyebrow { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+.col h2 { font: 800 30px/1.15 var(--display); margin: 8px 0 8px; letter-spacing: -.01em; text-wrap: balance; }
+.col .lead { color: var(--ink-2); font-size: 15px; margin: 0 0 22px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+.card h3 { font: 700 15px/1.3 var(--display); margin: 0 0 8px; }
+.src { font-size: 14px; color: var(--ink-2); border-left: 3px solid var(--line); padding-left: 12px; margin: 0; }
+.btn { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: 13.5px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fld { display: grid; gap: 6px; margin-bottom: 14px; }
+.fld label { font-size: 12.5px; color: var(--ink-3); display: flex; justify-content: space-between; }
+.fld input, .fld textarea { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font: 14px/1.45 var(--body); padding: 9px 11px; }
+.src-chip { font: 600 10.5px/1 var(--mono); color: var(--ink-3); }
+.obj { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.obj:first-child { border-top: 0; }
+.obj .rk { font: 800 18px/1 var(--display); color: var(--ink-3); }
+.opt { display: grid; grid-template-columns: 64px 1fr auto; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; cursor: pointer; background: var(--panel); }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.opt input { position: absolute; opacity: 0; }
+.opt .th { width: 64px; }
+.opt b { font: 700 15px/1.25 var(--display); }
+.opt p { margin: 3px 0 0; font-size: 13px; color: var(--ink-2); }
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.tab { border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.tab[aria-selected="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.sugg { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 12px; }
+.landed { border: 1px solid rgba(93,212,229,.35); background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; font-size: 13.5px; }
+/* the wait: what runs, how long, how long it usually takes, an estimated share; never blocks */
+.runs { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 30; display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); }
+.run { background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.run .h { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.run .h b { font-weight: 700; }
+.run .phase { font-size: 12.5px; color: var(--ink-2); margin: 4px 0 8px; }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); transition: width .5s linear; }
+.run .nums { display: flex; justify-content: space-between; font: 12px/1.4 var(--mono); color: var(--ink-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.run .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--ink-3); }
+.run.done { border-color: rgba(111,211,154,.4); }
+.run.done .bar i { background: var(--good); }
+/* review */
+.piece { display: grid; grid-template-columns: 120px 1fr; gap: 16px; }
+.trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+.trio > div { border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px; font-size: 12.5px; color: var(--ink-2); }
+.trio .lbl { font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); display: block; margin-bottom: 6px; }
+/* ---------- the immersive Design stage ---------- */
+.studio { position: fixed; inset: 0; z-index: 8; background: #07090c; display: none; }
+.studio.on { display: block; }
+.studio .pill { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 10px; background: rgba(35,40,49,.92); border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px 6px 14px; font-size: 13px; z-index: 3; }
+.studio .pill b { font: 700 13px/1 var(--display); }
+.studio .pieces { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); display: flex; gap: 4px; background: rgba(35,40,49,.92); border: 1px solid var(--line); border-radius: 999px; padding: 4px; z-index: 3; }
+.studio .pieces button { border: 0; background: none; color: var(--ink-2); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 12.5px; }
+.studio .pieces button[aria-selected="true"] { background: var(--ink); color: var(--ground); }
+.studio .done-btn { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); z-index: 3; display: flex; gap: 8px; }
+.stagewrap { position: absolute; inset: 64px 0 120px; display: grid; place-items: center; }
+#tile { width: min(62vh, 640px); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+#tile.story { width: min(44vh, 420px); }
+body.studio-on .top, body.studio-on .col { visibility: hidden; }
+#tile .hl-layer { cursor: pointer; }
+#tile .hl-layer:hover { outline: 1px dashed rgba(255,255,255,.55); }
+#tile .hl-layer.sel { outline: 2px solid var(--accent); }
+.sketch { position: absolute; inset: 0; display: grid; place-items: center; background: repeating-linear-gradient(135deg, #1b2a35 0 10px, #1f303c 10px 20px); color: #9fb4c2; font: 600 3.4cqw/1.3 var(--body); text-align: center; padding: 10%; }
+.float { position: absolute; z-index: 4; display: flex; gap: 2px; align-items: center; background: #f4f6f9; color: #13232F; border-radius: 10px; padding: 4px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.float button { border: 0; background: none; color: #13232F; border-radius: 7px; padding: 6px 9px; cursor: pointer; font: 600 12.5px/1 var(--body); }
+.float button:hover { background: #e2e7ee; }
+.float .sep { width: 1px; height: 18px; background: #c9d1db; margin: 0 2px; }
+.pos { position: absolute; z-index: 5; width: 250px; background: #f4f6f9; color: #13232F; border-radius: 12px; padding: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.55); font-size: 12.5px; }
+.pos .g { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0; }
+.pos label { display: flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #c9d1db; border-radius: 6px; padding: 4px 8px; }
+.pos input { width: 100%; border: 0; font: 13px var(--body); font-variant-numeric: tabular-nums; outline: none; background: none; color: #13232F; }
+.pos .nudge { display: grid; grid-template-columns: repeat(3, 30px); gap: 4px; justify-content: center; margin: 6px 0; }
+.pos .nudge button { height: 28px; border: 1px solid #c9d1db; background: #fff; border-radius: 6px; cursor: pointer; color: #13232F; }
+.pos .snaps { display: flex; gap: 4px; flex-wrap: wrap; }
+.pos .snaps button { border: 1px solid #c9d1db; background: #fff; border-radius: 999px; padding: 4px 8px; cursor: pointer; font-size: 11.5px; color: #13232F; }
+.vstrip { position: absolute; left: 0; right: 0; bottom: 0; height: 112px; display: flex; align-items: center; gap: 10px; padding: 0 max(20px, env(safe-area-inset-left, 0px)) env(safe-area-inset-bottom, 0px); background: linear-gradient(transparent, rgba(7,9,12,.95) 30%); overflow-x: auto; }
+.vstrip .lbl { font: 600 11px/1 var(--mono); letter-spacing: .08em; color: var(--ink-3); text-transform: uppercase; margin-right: 6px; white-space: nowrap; }
+.vcard { flex: 0 0 auto; width: 58px; border: 2px solid transparent; border-radius: 6px; overflow: hidden; cursor: pointer; padding: 0; background: none; position: relative; }
+.vcard.on { border-color: var(--accent); }
+.vcard em { position: absolute; left: 3px; bottom: 3px; font: 700 10px/1 var(--mono); background: rgba(0,0,0,.7); color: #fff; padding: 2px 4px; border-radius: 3px; font-style: normal; }
+.check-line { position: absolute; left: 50%; transform: translateX(-50%); bottom: 118px; z-index: 3; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 90vw; }
+.partner { position: absolute; top: 0; right: 0; bottom: 0; width: min(360px, 92vw); background: var(--panel); border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .25s; z-index: 6; display: flex; flex-direction: column; }
+.partner.open { transform: none; }
+.partner .ph { display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 1px solid var(--line); }
+.partner .pb { padding: 14px 16px; overflow: auto; flex: 1; display: grid; gap: 10px; align-content: start; font-size: 13.5px; color: var(--ink-2); }
+.partner .msg { background: var(--raised); border-radius: 10px; padding: 10px 12px; }
+.partner .msg b { color: var(--ink); }
+.partner .compose { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; gap: 8px; }
+.partner .compose input { flex: 1; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 8px 10px; font: 13.5px var(--body); }
+.ptab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 5; writing-mode: vertical-rl; background: var(--raised); border: 1px solid var(--line); border-right: 0; border-radius: 10px 0 0 10px; padding: 14px 8px; cursor: pointer; font: 700 12.5px/1 var(--display); color: var(--ink); }
+body.studio-on .runs { left: max(16px, env(safe-area-inset-left, 0px)); right: auto; bottom: calc(124px + env(safe-area-inset-bottom, 0px)); width: min(320px, calc(100vw - 32px)); }
+body.studio-on .run .foot span { display: none; }
+.studio.popen .done-btn { right: calc(min(360px, 92vw) + 16px); }
+.studio.popen #genBtn { display: none; }
+.studio.popen .pieces { left: calc((100% - min(360px, 92vw)) / 2 - 70px); }
+.toast { position: fixed; left: 50%; top: 80px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 40; }
+.toast.on { opacity: 1; }
+@media (max-width: 720px) { .piece { grid-template-columns: 1fr; } .trio { grid-template-columns: 1fr; } .studio .pieces { top: 64px; } .stagewrap { inset: 110px 0 120px; } #tile { width: min(80vw, 46vh); } }
+</style>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="in">
+    <div class="title"><h1 id="ptitle"></h1><span class="sub" id="psub"></span><div class="grow"></div><span class="chip">Concept C · Guided Production</span></div>
+    <nav class="steps" id="steps" aria-label="Stages"></nav>
+    <div class="next" id="next" aria-live="polite"></div>
+  </div>
+</header>
+<main class="col" id="col"></main>
+<section class="studio" id="studio" aria-label="Design studio">
+  <div class="pill"><span class="proto-flag">5 of 7</span><b>Design</b><button class="btn" id="backSteps" style="padding:5px 10px">Steps</button></div>
+  <div class="pieces" role="tablist" aria-label="Pieces" id="pieces"></div>
+  <div class="done-btn"><button class="btn" id="genBtn">Generate the photograph</button><button class="btn primary" id="toReview">Done designing: Review</button></div>
+  <div class="stagewrap" id="stagewrap"><div id="tile"></div></div>
+  <div class="check-line" id="checkline" role="status" aria-live="polite"></div>
+  <div class="vstrip" id="vstrip"></div>
+  <button class="ptab" id="ptab" aria-expanded="false" aria-controls="partner">Creative Partner</button>
+  <aside class="partner" id="partner" aria-label="Creative Partner"><div class="ph"><b style="font:700 15px/1 var(--display)">Creative Partner</b><button class="btn" id="pclose" style="padding:5px 10px">Hide</button></div><div class="pb" id="pbody"></div><form class="compose" id="pform"><input id="pinput" placeholder="Ask about the selected element…" aria-label="Ask the Creative Partner"><button class="btn primary">Send</button></form></aside>
+</section>
+<div class="runs" id="runs" aria-live="polite"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const H = window.HL; const $ = s => document.querySelector(s);
+  const STAGES = [
+    { id: 'brief', t: 'Brief and objectives', next: 'Confirm what the brief asks; then audience, message and action.' },
+    { id: 'shape', t: 'Audience, message, action, deliverables', next: 'Set who it is for and what it must make; then the creative direction.' },
+    { id: 'dir', t: 'Creative direction', next: 'Choose one route; then the words.' },
+    { id: 'copy', t: 'Copy development', next: 'Get the words right for each piece; then Design opens as a full canvas.' },
+    { id: 'design', t: 'Design and image generation', next: 'Compose each piece on the canvas; then review.' },
+    { id: 'review', t: 'Review and approval', next: 'Check what was measured, read the AI opinion, then approve as a person.' },
+    { id: 'export', t: 'Export and delivery', next: 'Package the approved pieces.' },
+  ];
+  const st = { stage: 0, done: new Set(), objectives: null, dir: 'D1', copy: {}, copyReady: {}, piece: 'ig', sel: null, docs: {}, versions: {}, imagery: false, approved: {}, partnerOpen: false, sugg: null };
+  H.project.deliverables.forEach(d => { st.copy[d.id] = Object.assign({}, H.copy); st.docs[d.id] = H.layout(d.format, 'dawn'); st.versions[d.id] = [{ n: 1, note: 'first layout, no photograph yet', lay: JSON.parse(JSON.stringify(st.docs[d.id])), img: false }]; });
+  $('#ptitle').textContent = H.project.title; $('#psub').textContent = H.client.name + ' (' + H.client.tag + ') · ' + H.project.campaign;
+  function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2400); }
+
+  /* ---- the wait: a call runs in the background; its card says what it is, how long, how long it usually takes, and an estimate ---- */
+  const runs = [];
+  function startRun(o) {
+    const r = { id: Math.random().toString(36).slice(2), label: o.label, role: o.role, typical: o.typical, phases: o.phases, t0: Date.now(), done: false, cancelled: false, onDone: o.onDone };
+    runs.push(r); drawRuns(); return r;
+  }
+  const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  function drawRuns() {
+    const now = Date.now();
+    $('#runs').innerHTML = runs.map(r => {
+      const el = (now - r.t0) / 1000; const pct = r.done ? 100 : Math.min(95, Math.round(el / r.typical * 100));
+      const pi = r.done ? r.phases.length - 1 : Math.min(r.phases.length - 1, Math.floor(el / r.typical * r.phases.length));
+      return `<div class="run${r.done ? ' done' : ''}" role="status"><div class="h"><b>${H.esc(r.label)}</b><span>${r.done ? 'done' : pct + '% est.'}</span></div>
+        <div class="phase">${r.done ? 'Landed. ' + H.esc(r.doneText || '') : 'Step ' + (pi + 1) + ' of ' + r.phases.length + ': ' + H.esc(r.phases[pi])}</div>
+        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${H.esc(r.label)}"><i style="width:${pct}%"></i></div>
+        <div class="nums"><span>${fmt(r.done ? r.took : el)} elapsed</span><span>typically about ${fmt(r.typical)}</span></div>
+        <div class="foot"><span title="What runs is named; the prompt, the key and the client material are never shown here">${H.esc(r.role)} · you can keep working</span>${r.done ? `<button class="btn" data-dismiss="${r.id}" style="padding:4px 10px">Dismiss</button>` : `<button class="btn" data-cancel="${r.id}" style="padding:4px 10px">Cancel</button>`}</div></div>`;
+    }).join('');
+    document.querySelectorAll('[data-cancel]').forEach(b => b.onclick = () => { const r = runs.find(x => x.id === b.dataset.cancel); r.cancelled = true; runs.splice(runs.indexOf(r), 1); toast('Cancelled. A request already sent may still finish and be counted; nothing it returns is used.'); drawRuns(); });
+    document.querySelectorAll('[data-dismiss]').forEach(b => b.onclick = () => { runs.splice(runs.findIndex(x => x.id === b.dataset.dismiss), 1); drawRuns(); });
+  }
+  setInterval(() => {
+    let changed = false;
+    runs.forEach(r => { if (!r.done && !r.cancelled && (Date.now() - r.t0) / 1000 >= r.typical * (0.85 + Math.random() * 0.1)) { r.done = true; r.took = (Date.now() - r.t0) / 1000; r.doneText = r.onDone() || ''; changed = true; setTimeout(() => { const i = runs.indexOf(r); if (i >= 0) { runs.splice(i, 1); drawRuns(); } }, 6000); } });
+    if (runs.length) drawRuns(); if (changed) render();
+  }, 500);
+  const running = label => runs.some(r => !r.done && r.label === label);
+
+  /* ---- the navigator ---- */
+  function drawSteps() {
+    $('#steps').innerHTML = STAGES.map((s, i) => { const open = i <= Math.max(...Array.from(st.done).map(Number).concat([-1])) + 1; return `<button class="step${st.done.has(i) ? ' done' : ''}${i === st.stage ? ' cur' : ''}" data-s="${i}" ${open ? '' : 'disabled'} aria-current="${i === st.stage ? 'step' : 'false'}"><span class="n">${String(i + 1).padStart(2, '0')}</span><span class="t">${s.t}</span></button>`; }).join('');
+    $('#next').innerHTML = '<b>Now:</b> ' + STAGES[st.stage].t + ' · <b>Next:</b> ' + H.esc(STAGES[st.stage].next);
+    document.querySelectorAll('.step[data-s]').forEach(b => b.onclick = () => go(+b.dataset.s));
+  }
+  function go(i) { st.stage = i; render(); window.scrollTo({ top: 0 }); }
+  function complete(i, nextI) { st.done.add(i); go(nextI); }
+
+  /* ---- stages ---- */
+  function stageBrief() {
+    const o = st.objectives;
+    return `<span class="eyebrow">Step 1 of 7</span><h2>What is this brief asking for?</h2><p class="lead">Axiom reads the material against what it knows about ${H.esc(H.client.name)} and proposes the objectives. You confirm them before anything else happens.</p>
+      <div class="card"><h3>The material</h3><p class="src">${H.esc(H.project.source)}</p></div>
+      ${o ? `<div class="card"><h3>Objectives, ranked</h3>${o.map((x, i) => `<div class="obj"><span class="rk">${i + 1}</span><div><b>${H.esc(x.t)}</b><div style="font-size:13px;color:var(--ink-2)">${H.esc(x.why)}</div></div><span class="chip ${i === 0 ? 'accent' : ''}">${i === 0 ? 'lead' : 'support'}</span></div>`).join('')}</div>
+        <div class="row"><button class="btn primary" id="okBrief">Confirm the objectives</button><button class="btn" id="reread">Read it again</button></div>`
+        : `<div class="row"><button class="btn primary" id="read" ${running('Reading the brief') ? 'disabled' : ''}>${running('Reading the brief') ? 'Reading…' : 'Read the brief (1 model call)'}</button><span style="font-size:12.5px;color:var(--ink-3)">You can fill in the next step by hand while it reads.</span></div>`}`;
+  }
+  function bindBrief() {
+    const read = () => startRun({ label: 'Reading the brief', role: 'Creative model', typical: 9, phases: ['sending the material', 'reading it against the client', 'writing the objectives'], onDone: () => { st.objectives = [{ t: 'Tell weekday riders the 6.40 and 7.10 start Monday 9 March', why: 'The notice is an announcement with a date: reach and clarity first.' }, { t: 'Name Pier 2 and Northbridge Wharf', why: 'Your brand rule: always name the wharf.' }, { t: 'Send them to plan a crossing', why: 'The action in your campaign kit.' }]; return '3 objectives proposed'; } });
+    const b = $('#read'); if (b) b.onclick = () => { read(); render(); };
+    const rr = $('#reread'); if (rr) rr.onclick = () => { st.objectives = null; read(); render(); };
+    const ok = $('#okBrief'); if (ok) ok.onclick = () => complete(0, 1);
+  }
+  function stageShape() {
+    const f = (id, l, v, src) => `<div class="fld"><label for="${id}">${l}<span class="src-chip">${src}</span></label><input id="${id}" value="${H.esc(v)}"></div>`;
+    return `<span class="eyebrow">Step 2 of 7</span><h2>Who is it for, and what must it make?</h2><p class="lead">Each field says where it came from. Change anything; the rest of the journey follows these.</p>
+      <div class="card">${f('aud', 'Audience', H.project.audience, 'from the brief')}${f('msg', 'Message', H.project.message, 'from the brief')}${f('act', 'Action', H.project.action, 'campaign kit')}</div>
+      <div class="card"><h3>Deliverables</h3>${H.project.deliverables.map(d => `<label style="display:flex;gap:10px;align-items:center;padding:6px 0"><input type="checkbox" checked> ${d.label} <span class="chip">${d.format} · ${d.px}</span></label>`).join('')}</div>
+      <div class="card"><h3>Requirements this project carries</h3>${H.requirements.map(r => `<div style="font-size:13px;padding:3px 0"><span class="chip">${r.id}</span> ${H.esc(r.text)} <span style="color:var(--ink-3)">(${H.esc(r.from)})</span></div>`).join('')}</div>
+      <div class="row"><button class="btn primary" id="okShape">Confirm and choose a direction</button></div>`;
+  }
+  function stageDir() {
+    const top = H.directions.slice(0, 3);
+    return `<span class="eyebrow">Step 3 of 7</span><h2>Pick the route.</h2><p class="lead">Three routes, ranked by the Creative Partner for this brief. Choosing one sets the imagery brief and the layout idea for Design.</p>
+      ${top.map(d => `<label class="opt"><input type="radio" name="dir" value="${d.id}" ${st.dir === d.id ? 'checked' : ''}><div class="th" data-th="${d.spec}"></div><div><b>${H.esc(d.name)}</b>${d.id === 'D1' ? ' <span class="chip accent">recommended</span>' : ''}<p>${H.esc(d.idea)}</p><p style="color:var(--ink-3)">${H.esc(d.cost)} · ${H.requirements.filter(r => (d.follows[r.id] || ['yes'])[0] === 'yes').length} of ${H.requirements.length} requirements met</p></div><span></span></label>`).join('')}
+      <div class="row"><button class="btn primary" id="okDir">Use this route and write the copy</button></div>`;
+  }
+  function stageCopy() {
+    const c = st.copy[st.piece]; const d = H.project.deliverables;
+    const fld = (k, l, max, rows) => `<div class="fld"><label for="c_${k}">${l}<span class="src-chip">${(c[k] || '').length}${max ? ' / ' + max : ''}</span></label>${rows ? `<textarea id="c_${k}" rows="${rows}">${H.esc(c[k])}</textarea>` : `<input id="c_${k}" value="${H.esc(c[k])}">`}</div>`;
+    const sug = st.sugg && st.sugg.piece === st.piece ? st.sugg : null;
+    return `<span class="eyebrow">Step 4 of 7</span><h2>Get the words right first.</h2><p class="lead">One piece at a time. Ask the Creative Partner for options; they land beside the field, and you choose. Design opens when every piece is ready.</p>
+      <div class="tabs" role="tablist">${d.map(x => `<button class="tab" role="tab" data-p="${x.id}" aria-selected="${x.id === st.piece}">${x.label}${st.copyReady[x.id] ? ' ✓' : ''}</button>`).join('')}</div>
+      <div class="card">${fld('headline', 'Headline', 48)}<div class="sugg"><button class="btn" id="shorter" ${running('Shorter headline options') ? 'disabled' : ''}>Three shorter headlines (1 model call)</button></div>
+        ${sug ? `<div class="landed"><b>Options landed.</b> ${sug.opts.map((o, i) => `<button class="btn" data-use="${i}" style="margin:4px 4px 0 0">${H.esc(o)}</button>`).join('')}</div>` : ''}
+        ${fld('support', 'Supporting line', 90)}${fld('cta', 'Call to action', 24)}${fld('caption', 'Caption', 2200, 3)}${fld('alt', 'Alt text', 250, 2)}
+        <div class="row" style="margin-top:4px">${H.checks(Object.assign({}, st.docs[st.piece], { layers: st.docs[st.piece].layers.map(l => l.role in c ? Object.assign({}, l, { text: c[l.role] }) : l) })).filter(x => /R1|R4|R5/.test(x.id)).map(x => `<span class="chip ${x.ok ? 'ok' : 'no'}">${x.ok ? '✓' : '!'} ${x.label}</span>`).join('')}</div></div>
+      <div class="row"><button class="btn ${st.copyReady[st.piece] ? '' : 'primary'}" id="ready">${st.copyReady[st.piece] ? 'Ready for design ✓' : 'Mark this piece ready for design'}</button><button class="btn primary" id="okCopy" ${d.every(x => st.copyReady[x.id]) ? '' : 'disabled'}>Open the design canvas</button></div>`;
+  }
+  function stageReview() {
+    const d = H.project.deliverables;
+    return `<span class="eyebrow">Step 6 of 7</span><h2>Review what was made.</h2><p class="lead">Three different things, kept apart: what was measured, what the AI thinks, and what a person decides. Only the last is an approval.</p>
+      ${d.map(x => { const cs = H.checks(st.docs[x.id]); const ok = cs.every(c => c.ok); return `<div class="card piece"><div data-rv="${x.id}"></div><div><h3>${x.label} <span class="chip">${x.format}</span></h3>
+        <div class="trio"><div><span class="lbl">Measured</span>${ok ? '<span class="chip ok">every check passes</span>' : cs.filter(c => !c.ok).map(c => `<span class="chip no">${H.esc(c.label)}</span>`).join(' ')}</div>
+        <div><span class="lbl">AI opinion</span>${st.versions[x.id].some(v => v.img) ? 'Reads in a second; the band holds the times; logo clear. Ship.' : 'No photograph yet: the opinion waits for the finished tile.'}</div>
+        <div><span class="lbl">Person</span>${st.approved[x.id] ? '<span class="chip accent">approved by you</span>' : `<button class="btn" data-approve="${x.id}" ${ok ? '' : 'disabled title="Fix the measured checks first"'}>Approve design</button>`}</div></div>
+        ${ok ? '' : `<button class="btn" data-fix="${x.id}" style="margin-top:10px">Back to the canvas to fix it</button>`}</div></div>`; }).join('')}
+      <div class="row"><button class="btn primary" id="okReview" ${d.some(x => st.approved[x.id]) ? '' : 'disabled'}>Go to export</button></div>`;
+  }
+  function stageExport() {
+    const d = H.project.deliverables; const inc = d.filter(x => st.approved[x.id]), out = d.filter(x => !st.approved[x.id]);
+    return `<span class="eyebrow">Step 7 of 7</span><h2>Package and deliver.</h2><p class="lead">The package is stated before anything is drawn: exactly the approved versions, and what is left out and why.</p>
+      <div class="card"><h3>In the package</h3>${inc.map(x => `<div style="font-size:13.5px;padding:3px 0">${x.label} · PNG ${x.px} · approved v${st.versions[x.id].length}</div>`).join('')}<div style="font-size:13.5px;padding:3px 0">Copy sheet (headline, support, CTA, caption, alt text) · manifest</div></div>
+      ${out.length ? `<div class="card"><h3>Left out</h3>${out.map(x => `<div style="font-size:13.5px;padding:3px 0;color:var(--ink-2)">${x.label}: design not approved</div>`).join('')}</div>` : ''}
+      <div class="row"><button class="btn primary" id="pack">Prepare the package</button><button class="btn" id="share">Share a review link with the client</button></div>`;
+  }
+
+  /* ---- Design: the immersive canvas ---- */
+  const doc = () => st.docs[st.piece]; const layer = id => doc().layers.find(l => l.id === id);
+  function enterStudio() { $('#studio').classList.add('on'); document.body.classList.add('studio-on'); document.body.style.overflow = 'hidden'; drawStudio(); }
+  function leaveStudio() { $('#studio').classList.remove('on'); document.body.classList.remove('studio-on'); document.body.style.overflow = ''; }
+  function drawStudio() {
+    const d = doc(); const t = $('#tile'); t.className = d.format === '9:16' ? 'story' : '';
+    H.renderTile(t, d, { selected: st.sel });
+    if (!st.versions[st.piece][st.versions[st.piece].length - 1].img) { const sk = document.createElement('div'); sk.className = 'sketch'; sk.innerHTML = 'Photograph not made yet<br>Pier 2 at first light, the 6.40 leaving'; t.prepend(sk); }
+    t.querySelectorAll('.hl-layer').forEach(el => el.onclick = e => { e.stopPropagation(); st.sel = el.dataset.id; drawStudio(); });
+    $('#stagewrap').onclick = () => { st.sel = 'bg'; drawStudio(); };
+    $('#pieces').innerHTML = H.project.deliverables.map(x => `<button role="tab" aria-selected="${x.id === st.piece}" data-pc="${x.id}">${x.label}</button>`).join('');
+    document.querySelectorAll('[data-pc]').forEach(b => b.onclick = () => { st.piece = b.dataset.pc; st.sel = null; drawStudio(); });
+    const cs = H.checks(d); $('#checkline').innerHTML = cs.map(c => `<span class="chip ${c.ok ? 'ok' : 'no'}" title="${H.esc(c.detail)}">${c.ok ? '✓' : '!'} ${c.label}</span>`).join('');
+    const vs = st.versions[st.piece]; $('#vstrip').innerHTML = '<span class="lbl">Versions</span>' + vs.map((v, i) => `<button class="vcard${i === vs.length - 1 ? ' on' : ''}" data-v="${i}" title="v${v.n}: ${H.esc(v.note)}"><div data-vt="${i}"></div><em>v${v.n}</em></button>`).join('') + '<button class="btn" id="saveV" style="margin-left:8px">Save as a version</button>';
+    document.querySelectorAll('[data-vt]').forEach(el => { const v = vs[+el.dataset.vt]; H.renderTile(el, v.lay); if (!v.img) { const sk = document.createElement('div'); sk.className = 'sketch'; sk.style.fontSize = '0'; el.prepend(sk); } });
+    document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { const v = vs[+b.dataset.v]; st.docs[st.piece] = JSON.parse(JSON.stringify(v.lay)); toast('Showing v' + v.n + ' (save to make it the newest)'); drawStudio(); });
+    $('#saveV').onclick = () => { vs.push({ n: vs.length + 1, note: 'saved on the canvas', lay: JSON.parse(JSON.stringify(doc())), img: vs[vs.length - 1].img }); toast('Saved v' + vs.length); drawStudio(); };
+    drawFloat(); drawPartner();
+    $('#genBtn').disabled = running('Generating the photograph'); $('#genBtn').textContent = running('Generating the photograph') ? 'Generating… keep working' : (vs[vs.length - 1].img ? 'Generate again (1 image at 2K)' : 'Generate the photograph (1 image at 2K)');
+  }
+  function drawFloat() {
+    document.querySelectorAll('.float, .pos').forEach(x => x.remove());
+    if (!st.sel) return; const t = $('#tile').getBoundingClientRect(); const s = $('#studio');
+    const f = document.createElement('div'); f.className = 'float'; f.setAttribute('role', 'toolbar'); f.setAttribute('aria-label', 'Edit the selection');
+    let html = '';
+    const l = layer(st.sel);
+    if (st.sel === 'bg') html = '<b style="padding:0 8px;font-size:12.5px">Photograph</b><span class="sep"></span><button data-f="focus-">Pan left</button><button data-f="focus+">Pan right</button><button data-f="zoom">Zoom 1.2x</button><span class="sep"></span><button data-f="regen">Re-brief the photograph</button>';
+    else if (l && (l.type === 'text' || l.type === 'cta')) html = `<b style="padding:0 8px;font-size:12.5px">${l.role}</b><span class="sep"></span><button data-f="smaller" aria-label="Smaller type">A-</button><button data-f="larger" aria-label="Larger type">A+</button><button data-f="weight">${l.weight >= 800 ? 'Medium' : 'Bold'}</button><button data-f="align">${l.align === 'center' ? 'Left' : 'Centre'}</button><span class="sep"></span><button data-f="pos">Position…</button><button data-f="ask">Ask the Partner</button>`;
+    else if (l && l.type === 'logo') html = `<b style="padding:0 8px;font-size:12.5px">Logo</b><span class="sep"></span><button data-f="tone">${l.tone === 'dark' ? 'Use the light logo' : 'Use the dark logo'}</button><button data-f="pos">Position…</button><span style="font-size:11.5px;padding:0 8px;color:#5b6676">held bottom right by the campaign rule</span>`;
+    else if (l && l.type === 'shape') html = `<b style="padding:0 8px;font-size:12.5px">${l.role}</b><span class="sep"></span><button data-f="gold">Gold</button><button data-f="navy">Navy</button><button data-f="pos">Position…</button>`;
+    f.innerHTML = html; s.appendChild(f);
+    let x = t.left, y = t.top - 52;
+    if (l) { x = t.left + l.x / 100 * t.width; y = t.top + l.y / 100 * t.height - 52; }
+    f.style.left = Math.max(12, Math.min(window.innerWidth - f.offsetWidth - 12, x)) + 'px'; f.style.top = Math.max(60, y) + 'px';
+    f.querySelectorAll('[data-f]').forEach(b => b.onclick = e => { e.stopPropagation(); act(b.dataset.f, f); });
+  }
+  function act(k, f) {
+    const l = layer(st.sel);
+    if (k === 'smaller') l.size = +(l.size - .3).toFixed(1); if (k === 'larger') l.size = +(l.size + .3).toFixed(1);
+    if (k === 'weight') l.weight = l.weight >= 800 ? 600 : 800; if (k === 'align') l.align = l.align === 'center' ? 'left' : 'center';
+    if (k === 'tone') l.tone = l.tone === 'dark' ? 'light' : 'dark'; if (k === 'gold') l.fill = '#F2A541'; if (k === 'navy') l.fill = 'rgba(11,79,108,.92)';
+    if (k === 'focus-' || k === 'focus+' || k === 'zoom') toast('Framing moves the crop of the photograph; the words stay where they are');
+    if (k === 'regen') { st.sel = null; $('#genBtn').click(); return; }
+    if (k === 'ask') { openPartner(); $('#pinput').value = 'Is the ' + l.role + ' doing its job?'; $('#pinput').focus(); return; }
+    if (k === 'pos') return openPos(f);
+    drawStudio();
+  }
+  function openPos(f) {
+    const l = layer(st.sel); const p = document.createElement('div'); p.className = 'pos'; p.setAttribute('role', 'dialog'); p.setAttribute('aria-label', 'Position');
+    const held = l.type === 'logo';
+    p.innerHTML = `<b>Position, in % of the stage</b>${held ? '<div style="color:#8a5a00;margin-top:6px">The campaign rule holds the logo bottom right. Moving it records that it moved against the rule.</div>' : ''}<div class="g">${['x', 'y', 'w', 'h'].map(k => `<label>${k.toUpperCase()} <input data-k="${k}" type="number" step="0.5" value="${(+l[k]).toFixed(1)}" aria-label="${k}"></label>`).join('')}</div>
+      <div class="nudge"><span></span><button data-n="0,-0.5" aria-label="Nudge up">↑</button><span></span><button data-n="-0.5,0" aria-label="Nudge left">←</button><button data-n="0,0" aria-label="Hold">·</button><button data-n="0.5,0" aria-label="Nudge right">→</button><span></span><button data-n="0,0.5" aria-label="Nudge down">↓</button><span></span></div>
+      <div class="snaps"><button data-snap="safe">Into the safe area</button><button data-snap="cx">Centre across</button><button data-snap="margin">To the left margin</button></div>`;
+    $('#studio').appendChild(p); const fr = f.getBoundingClientRect(); p.style.left = Math.min(window.innerWidth - 262, fr.left) + 'px'; p.style.top = (fr.bottom + 8) + 'px';
+    p.onclick = e => e.stopPropagation();
+    p.querySelectorAll('input[data-k]').forEach(i => i.onchange = () => { l[i.dataset.k] = +i.value; redrawKeepPos(); });
+    p.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { const [dx, dy] = b.dataset.n.split(',').map(Number); l.x += dx; l.y += dy; redrawKeepPos(); });
+    p.querySelectorAll('[data-snap]').forEach(b => b.onclick = () => { const s = b.dataset.snap, story = doc().format === '9:16'; if (s === 'cx') l.x = (100 - l.w) / 2; if (s === 'margin') l.x = 7; if (s === 'safe') { const lo = story ? 14 : 3, hi = story ? 80 : 97; l.y = Math.max(lo, Math.min(hi - l.h, l.y)); l.x = Math.max(3, Math.min(97 - l.w, l.x)); } redrawKeepPos(); });
+    function redrawKeepPos() { const d = doc(); H.renderTile($('#tile'), d, { selected: st.sel }); $('#tile').querySelectorAll('.hl-layer').forEach(el => el.onclick = e => { e.stopPropagation(); st.sel = el.dataset.id; drawStudio(); }); const cs = H.checks(d); $('#checkline').innerHTML = cs.map(c => `<span class="chip ${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '!'} ${c.label}</span>`).join(''); p.querySelectorAll('input[data-k]').forEach(i => i.value = (+l[i.dataset.k]).toFixed(1)); }
+  }
+  function openPartner() { st.partnerOpen = true; drawPartner(); }
+  function drawPartner() {
+    $('#partner').classList.toggle('open', st.partnerOpen); $('#studio').classList.toggle('popen', st.partnerOpen); $('#ptab').setAttribute('aria-expanded', st.partnerOpen); $('#ptab').hidden = st.partnerOpen;
+    const l = st.sel && st.sel !== 'bg' ? layer(st.sel) : null;
+    $('#pbody').innerHTML = `<div class="proto-flag">Looking at: ${H.esc(H.project.deliverables.find(x => x.id === st.piece).label)}${l ? ' · ' + l.role : st.sel === 'bg' ? ' · photograph' : ''}</div>
+      <div class="msg"><b>On this piece.</b> ${doc().format === '9:16' ? 'In the story the band sits low; lift the supporting line clear of the bottom 20% or Instagram covers it.' : 'The band carries the times well. The logo has its clear space.'}</div>
+      <div class="msg"><b>From your references.</b> The approved Easter tile put the wharf name first in the band. This does the same.</div>
+      ${st.partnerReply ? `<div class="msg"><b>You asked:</b> ${H.esc(st.partnerReply.q)}<br>${H.esc(st.partnerReply.a)}</div>` : ''}`;
+  }
+  $('#ptab').onclick = openPartner; $('#pclose').onclick = () => { st.partnerOpen = false; drawPartner(); };
+  $('#pform').onsubmit = e => { e.preventDefault(); const q = $('#pinput').value.trim(); if (!q) return; $('#pinput').value = ''; startRun({ label: 'Creative Partner answering', role: 'Creative model', typical: 6, phases: ['reading the tile and your question', 'writing the answer'], onDone: () => { st.partnerReply = { q, a: 'Yes: it reads in one glance. If you want more weight, take the headline up one step; it still fits its box.' }; if ($('#studio').classList.contains('on')) drawPartner(); return 'answer in the Partner panel'; } }); };
+  $('#backSteps').onclick = () => { leaveStudio(); go(3); };
+  $('#toReview').onclick = () => { leaveStudio(); complete(4, 5); };
+  $('#genBtn').onclick = () => {
+    const piece = st.piece;
+    startRun({ label: 'Generating the photograph', role: 'Image model · 2K', typical: 14, phases: ['preparing the brief and references', 'generating the image', 'filing it as a new version'], onDone: () => { const vs = st.versions[piece]; vs.push({ n: vs.length + 1, note: 'photograph: Pier 2 at first light', lay: JSON.parse(JSON.stringify(st.docs[piece])), img: true }); st.imagery = true; if ($('#studio').classList.contains('on')) drawStudio(); return 'new version v' + vs.length + ' with the photograph'; } });
+    drawStudio(); toast('Generating in the background. Keep editing the words; your changes are kept when the image lands.');
+  };
+  window.addEventListener('resize', () => { if ($('#studio').classList.contains('on')) drawFloat(); });
+  document.addEventListener('keydown', e => { if (!$('#studio').classList.contains('on')) return; if (e.key === 'Escape') { if (document.querySelector('.pos')) { document.querySelector('.pos').remove(); return; } if (st.partnerOpen) { st.partnerOpen = false; drawPartner(); return; } st.sel = null; drawStudio(); } const l = st.sel && layer(st.sel); if (l && /^Arrow/.test(e.key) && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); const s = e.shiftKey ? 2 : .5; if (e.key === 'ArrowLeft') l.x -= s; if (e.key === 'ArrowRight') l.x += s; if (e.key === 'ArrowUp') l.y -= s; if (e.key === 'ArrowDown') l.y += s; drawStudio(); } });
+
+  /* ---- render ---- */
+  function render() {
+    drawSteps(); const c = $('#col'); const s = STAGES[st.stage].id;
+    if (s === 'design') { c.innerHTML = '<span class="eyebrow">Step 5 of 7</span><h2>The canvas is open.</h2><p class="lead">Design fills the window. Use Steps (top left) to come back here.</p><button class="btn primary" id="reopen">Back to the canvas</button>'; $('#reopen').onclick = enterStudio; if (!$('#studio').classList.contains('on')) enterStudio(); else drawStudio(); return; }
+    leaveStudio();
+    c.innerHTML = s === 'brief' ? stageBrief() : s === 'shape' ? stageShape() : s === 'dir' ? stageDir() : s === 'copy' ? stageCopy() : s === 'review' ? stageReview() : stageExport();
+    if (s === 'brief') bindBrief();
+    if (s === 'shape') $('#okShape').onclick = () => complete(1, 2);
+    if (s === 'dir') { document.querySelectorAll('[data-th]').forEach(el => H.renderTile(el, H.layout('4:5', el.dataset.th))); document.querySelectorAll('input[name=dir]').forEach(i => i.onchange = () => { st.dir = i.value; }); $('#okDir').onclick = () => complete(2, 3); }
+    if (s === 'copy') {
+      document.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { st.piece = b.dataset.p; render(); });
+      ['headline', 'support', 'cta', 'caption', 'alt'].forEach(k => { const i = $('#c_' + k); i.oninput = () => { st.copy[st.piece][k] = i.value; st.copyReady[st.piece] = false; const l = st.docs[st.piece].layers.find(x => x.role === k); if (l) l.text = i.value; }; i.onchange = render; });
+      $('#shorter').onclick = () => { const piece = st.piece; startRun({ label: 'Shorter headline options', role: 'Creative model', typical: 7, phases: ['reading the brief, the copy and your rules', 'writing three options', 'checking them against your facts and banned terms'], onDone: () => { st.sugg = { piece, opts: ['Two more crossings from Monday.', 'More morning crossings from 9 March.', 'Two new morning ferries from Pier 2.'] }; return '3 options beside the headline'; } }); render(); };
+      document.querySelectorAll('[data-use]').forEach(b => b.onclick = () => { const v = st.sugg.opts[+b.dataset.use]; st.copy[st.piece].headline = v; const l = st.docs[st.piece].layers.find(x => x.role === 'headline'); if (l) l.text = v; st.sugg = null; render(); });
+      $('#ready').onclick = () => { st.copyReady[st.piece] = !st.copyReady[st.piece]; render(); };
+      $('#okCopy').onclick = () => { complete(3, 4); };
+    }
+    if (s === 'review') {
+      document.querySelectorAll('[data-rv]').forEach(el => { const v = st.versions[el.dataset.rv]; H.renderTile(el, st.docs[el.dataset.rv]); if (!v[v.length - 1].img) { const sk = document.createElement('div'); sk.className = 'sketch'; sk.style.fontSize = '0'; el.prepend(sk); } });
+      document.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => { st.approved[b.dataset.approve] = true; toast('Approved by you, for this exact version'); render(); });
+      document.querySelectorAll('[data-fix]').forEach(b => b.onclick = () => { st.piece = b.dataset.fix; st.sel = 'support'; go(4); });
+      $('#okReview').onclick = () => complete(5, 6);
+    }
+    if (s === 'export') { $('#pack').onclick = () => startRun({ label: 'Preparing the package', role: 'Your browser and the worker · no model call', typical: 5, phases: ['drawing each approved piece at full size', 'writing the copy sheet and manifest'], onDone: () => 'package ready to download' }); $('#share').onclick = () => toast('A private review link, 14 days, for the approved pieces only (prototype)'); }
+  }
+  st.docs.st.layers.find(l => l.id === 'support').y = 82;   // the story starts with a real problem to fix on the canvas
+  render();
+})();
+</script>
+</body>
+</html>

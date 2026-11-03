@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-block:env(safe-area-inset-top,0px) env(safe-area-inset-bottom,0px)} body{margin:0} img{max-width:100%}</style>
+<title>Creative Studio Concepts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Manrope:wght@600;700;800&display=swap">
+<style>
+/* One look on purpose: the Studio's own dark palette and faces, the same in all three concepts, so what differs is structure.
+   Layout: a short brief strip, three concept cards side by side, then the structural comparison as a table. */
+:root {
+  --ground: #101318; --panel: #191d24; --raised: #232831; --line: #303741;
+  --ink: #edf0f5; --ink-2: #b9c1cc; --ink-3: #8a94a3; --accent: #5dd4e5; --accent-ink: #062e39; --gold: #F2A541;
+  --display: 'Manrope', 'DM Sans', system-ui, sans-serif; --body: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+body { background: var(--ground); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1200px; margin: 0 auto; padding-block: 36px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { font: 800 clamp(28px, 4vw, 40px)/1.1 var(--display); margin: 0 0 10px; letter-spacing: -.015em; text-wrap: balance; }
+.lede { color: var(--ink-2); max-width: 70ch; margin: 0 0 22px; font-size: 16px; }
+.lbl { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.sample { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 28px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); margin-bottom: 30px; }
+.sample p { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); }
+.sample b { color: var(--ink); font-weight: 600; }
+.reqs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; line-height: 20px; background: var(--raised); border: 1px solid var(--line); color: var(--ink-2); }
+.chip b { color: var(--accent); font: 700 11.5px/20px var(--mono); }
+.concepts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 36px; }
+.card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); overflow: hidden; }
+.card img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; border-bottom: 1px solid var(--line); background: #0b0d11; }
+.card .body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+.card h2 { font: 800 21px/1.2 var(--display); margin: 0; }
+.card .tag { font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--gold); }
+.card p { margin: 0; color: var(--ink-2); font-size: 14px; }
+.card ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+.card li { margin: 3px 0; }
+.open { margin-top: auto; display: inline-flex; justify-content: center; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--accent); color: var(--accent-ink); font-weight: 700; text-decoration: none; }
+.open:hover { filter: brightness(1.08); }
+.open:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+h3 { font: 800 22px/1.25 var(--display); margin: 0 0 12px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); margin-bottom: 30px; }
+table { border-collapse: collapse; width: 100%; min-width: 820px; }
+th, td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid #262c35; font-size: 13.5px; }
+thead th { font: 800 15px/1.2 var(--display); color: var(--ink); background: var(--raised); }
+tbody th { width: 170px; color: var(--ink-3); font-weight: 500; }
+td { color: var(--ink-2); }
+tr:last-child th, tr:last-child td { border-bottom: 0; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.box { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 18px 20px; }
+.box p, .box li { color: var(--ink-2); font-size: 14px; }
+.box ul { padding-left: 18px; margin: 8px 0 0; }
+code { font: 12.5px/1.5 var(--mono); background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--ink); overflow-wrap: anywhere; }
+pre { font: 12.5px/1.6 var(--mono); background: #0b0d11; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; color: var(--ink); margin: 8px 0 0; }
+.ask { border-color: rgba(242,165,65,.45); background: rgba(242,165,65,.06); }
+.ask h3 { color: var(--gold); }
+.two > *, .concepts > *, .sample > * { min-width: 0; }
+@media (max-width: 980px) { .concepts { grid-template-columns: minmax(0, 1fr); } .two { grid-template-columns: minmax(0, 1fr); } }
+</style>
+<div class="wrap">
+  <div class="lbl" style="margin-bottom:10px">AXIOM Creative Studio · three concepts for review</div>
+  <h1>Three ways to make the same tile</h1>
+  <p class="lede">Each concept is a working prototype of the Studio built around one brief, one client and the same words, so you can judge the shape of the work rather than the content. They share the Studio's own colours and type on purpose: the differences are in navigation, layout, where the tools sit, how the canvas is used and how decisions get made. None of this touches the production app.</p>
+
+  <section class="sample" aria-label="The shared sample">
+    <div><span class="lbl">Client</span><p><b>Harbourline Ferries</b>, a synthetic demo client. Campaign: Harbour crossings.</p></div>
+    <div><span class="lbl">Brief</span><p><b>Two more morning crossings.</b> Tell weekday riders the 6.40 and 7.10 from Pier 2 start Monday 9 March.</p></div>
+    <div><span class="lbl">Copy</span><p><b>"Two more morning crossings from Monday."</b> The 6.40 and 7.10 now leave Pier 2 for Northbridge Wharf, weekdays. Plan your crossing.</p></div>
+    <div><span class="lbl">Pieces</span><p>Instagram feed 4:5, Facebook feed 1:1, Instagram story 9:16.</p></div>
+    <div class="reqs" aria-label="Requirements"><span class="chip"><b>R1</b> Name the wharf</span><span class="chip"><b>R2</b> Only announced times</span><span class="chip"><b>R3</b> Logo bottom right, clear space</span><span class="chip"><b>R4</b> Approved facts only</span><span class="chip"><b>R5</b> "Good value", never "cheap"</span><span class="chip"><b>R6</b> Story safe area</span></div>
+  </section>
+
+  <section class="concepts" aria-label="The concepts">
+    <article class="card">
+      <img src="shots/a.jpg" alt="Concept A: assets and layers on the left, the tile in the centre, properties on the right, production checks along the foot." width="960" height="600">
+      <div class="body"><span class="tag">Concept A · direct control</span><h2>Production Desk</h2>
+        <p>A stable, tool-rich desk for people who know what they want to change. Everything is on screen at once and stays put.</p>
+        <ul><li>Open the Instagram story: its supporting line fails the safe-area check at the foot.</li><li>Select it in Layers, set Y to 72 in the inspector, and watch the check pass and Approve design unlock.</li><li>Drag words on the canvas, nudge with the arrow keys, undo with Ctrl+Z.</li></ul>
+        <a class="open" href="concept-a.html">Open Concept A</a></div>
+    </article>
+    <article class="card">
+      <img src="shots/b.jpg" alt="Concept B: the Creative Partner's recommendation above a wall of large direction boards, with a decision tray at the foot." width="960" height="600">
+      <div class="body"><span class="tag">Concept B · exploration and choice</span><h2>Creative Direction Board</h2>
+        <p>A pin-up wall for choosing a creative route before anything is produced. No canvas, no inspector: boards, reasons and decisions.</p>
+        <ul><li>Read the Partner's recommendation, then "Why not the others".</li><li>Shortlist the departure board, Compare, then Combine two: take the photograph from one and the layout from the other.</li><li>Set aside "Twenty more minutes" with a reason, open a board, and Continue into production.</li></ul>
+        <a class="open" href="concept-b.html">Open Concept B</a></div>
+    </article>
+    <article class="card">
+      <img src="shots/c.jpg" alt="Concept C in Design: the tile fills the window, a toolbar floats above the selected headline, versions run along the foot, waits are shown as progress cards." width="960" height="600">
+      <div class="body"><span class="tag">Concept C · guided, end to end</span><h2>Guided Production</h2>
+        <p>Seven steps from brief to delivery in one focused column. At Design the page opens into a full-window canvas, then folds back for review and delivery.</p>
+        <ul><li>Read the brief: the wait card shows the call, elapsed time, typical time and an estimated share. Carry on while it runs.</li><li>Mark each piece's copy ready, then open the canvas: select the headline, use Position… for exact placement, open the Creative Partner.</li><li>Generate the photograph and keep editing; the new version lands in the strip.</li></ul>
+        <a class="open" href="concept-c.html">Open Concept C</a></div>
+    </article>
+  </section>
+
+  <h3>How they differ in structure</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th scope="col"></th><th scope="col">A · Production Desk</th><th scope="col">B · Creative Direction Board</th><th scope="col">C · Guided Production</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Primary purpose</th><td>Direct editing and production control</td><td>Exploring routes and choosing one</td><td>Brief to delivery in order, with immersive editing at Design</td></tr>
+      <tr><th scope="row">Navigation</th><td>Persistent left panel: pieces, then layers, then the brief</td><td>One scrolling wall with a view switch (Wall, Compare, Set aside)</td><td>A seven-step navigator; each step opens only after the one before</td></tr>
+      <tr><th scope="row">Workspace</th><td>Three fixed panels plus a fixed foot, all visible all the time</td><td>Large boards in a grid, a recommendation banner, a decision tray</td><td>A single focused column; at Design, the whole window is canvas</td></tr>
+      <tr><th scope="row">Where the tools are</th><td>A fixed toolbar on top and a fixed inspector on the right</td><td>On each board (shortlist, compare, set aside) and in the tray</td><td>A toolbar that floats beside the selection, a Position panel, a sliding Creative Partner</td></tr>
+      <tr><th scope="row">Canvas</th><td>Always on, between the panels</td><td>None: example tiles and layout sketches only</td><td>Only in Design, full window, then gone</td></tr>
+      <tr><th scope="row">How decisions are made</th><td>Live checks along the foot gate the Approve button per piece</td><td>Shortlist, compare, combine, set aside with a reason, then choose with a summary of what carries forward</td><td>Confirm each step; review keeps Measured, AI opinion and Person apart</td></tr>
+      <tr><th scope="row">Waiting on AI</th><td>Not part of this concept's job</td><td>Not part of this concept's job</td><td>Every wait shows the call, elapsed time, typical time and an estimated share, and never blocks the page</td></tr>
+      <tr><th scope="row">Measured in Chromium, 1440 x 900</th><td>Navigation 252 px and inspector 300 px wide in every state; canvas 888 px wide between them</td><td>No canvas, inspector or side panel in any view</td><td>No canvas before Design; at Design the canvas takes the window and nothing else stays fixed</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="two">
+    <section class="box ask" aria-label="Your decision">
+      <h3>Pick one</h3>
+      <p>Tell me A, B or C and I will plan the change to the production Studio from it. Nothing in the app changes until you choose.</p>
+      <p><b>One question for C.</b> The Studio today never shows a percentage worked out from the clock, because it can mislead. C shows one, labelled "estimated" and based on how long that step usually takes, next to the elapsed and typical times. If you choose C, say whether production should do the same.</p>
+    </section>
+    <section class="box" aria-label="Where the files are">
+      <h3>Where the files are</h3>
+      <p>In the repository at <code>design/prototypes/creative-studio-concepts/</code>, outside <code>docs/</code>, so GitHub Pages never serves them and the app never loads them. To open them on a Mac:</p>
+      <pre>cd ~/Axiom/design/prototypes/creative-studio-concepts
+python3 -m http.server 8080
+# then open http://localhost:8080/concept-a.html (b, c)</pre>
+      <ul><li>Nothing is sent anywhere: no worker, no model, no key.</li><li>The client, brief, figures and references are invented.</li></ul>
+    </section>
+  </div>
+</div>
+
+</html>

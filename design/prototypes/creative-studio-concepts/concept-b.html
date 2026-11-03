@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Creative Direction Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Manrope:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+/* Concept B: a pin-up wall. No editable canvas, no inspector, no side panels: the page scrolls through large direction boards,
+   the Creative Partner speaks in a banner above them, and every decision collects in a tray along the foot. */
+body { margin: 0; padding-bottom: 96px; }
+.page { max-width: 1320px; margin: 0 auto; padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px)); }
+.brief { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; padding: 22px 0 14px; border-bottom: 1px solid var(--line); }
+.brief h1 { font: 800 26px/1.15 var(--display); margin: 0; letter-spacing: -.01em; }
+.brief .meta { color: var(--ink-3); font-size: 13px; }
+.brief .ask { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; color: var(--ink-2); }
+.brief .ask b { color: var(--ink); font-weight: 600; }
+.views { margin-left: auto; display: flex; gap: 4px; }
+.seg { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.seg[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.partner { margin: 18px 0; display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: start; padding: 16px 18px; border-radius: 14px; background: linear-gradient(120deg, rgba(93,212,229,.10), rgba(242,165,65,.08)); border: 1px solid rgba(93,212,229,.28); }
+.partner .av { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font: 800 14px/1 var(--display); }
+.partner h2 { font: 700 16px/1.3 var(--display); margin: 0 0 6px; }
+.partner ul { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; }
+.partner li { margin: 3px 0; }
+.partner .why { margin-top: 10px; display: none; gap: 8px; flex-direction: column; }
+.partner.open .why { display: flex; }
+.partner .why div { font-size: 13px; color: var(--ink-2); }
+.partner .why b { color: var(--ink); }
+.linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.refs { display: flex; gap: 12px; overflow-x: auto; padding: 4px 0 18px; }
+.ref { flex: 0 0 230px; display: grid; grid-template-columns: 56px 1fr; gap: 10px; padding: 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+.ref .rt { width: 56px; height: 56px; border-radius: 6px; overflow: hidden; position: relative; }
+.ref > div > b { display: block; font-size: 13px; }
+.ref > div > span { font-size: 12px; color: var(--ink-3); }
+.lbl { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.wall { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.dboard { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; transition: transform .15s, border-color .15s; }
+.dboard:hover { border-color: #46505d; }
+.dboard.short { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
+.dboard.aside { opacity: .55; }
+.dboard.rec::before { content: 'Partner recommends'; position: absolute; top: 12px; left: 12px; z-index: 2; background: var(--accent); color: var(--accent-ink); font: 700 11px/1 var(--display); padding: 6px 10px; border-radius: 999px; }
+.collage { display: grid; grid-template-columns: 1.15fr 1fr; gap: 6px; padding: 6px; background: #0b0d11; }
+.collage .hero { border-radius: 10px; overflow: hidden; }
+.collage .side { display: grid; grid-template-rows: auto 1fr; gap: 6px; }
+.mood { display: grid; grid-template-columns: repeat(4, 1fr); border-radius: 10px; overflow: hidden; height: 48px; }
+.wire { border-radius: 10px; overflow: hidden; background: #14181e; padding: 8px; display: grid; place-items: center; }
+.wire > div { width: 62%; }
+.words { padding: 4px 2px 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.dbody { padding: 16px 18px 12px; display: grid; gap: 12px; }
+.dhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dhead h3 { font: 800 20px/1.2 var(--display); margin: 0; }
+.dhead .med { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+.idea { font-size: 15px; line-height: 1.45; color: var(--ink); margin: 0; }
+.facts { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 13px; color: var(--ink-2); margin: 0; }
+.facts dt { color: var(--ink-3); }
+.facts dd { margin: 0; }
+.excopy { border-left: 3px solid var(--gold); padding: 4px 0 4px 12px; }
+.excopy b { font: 800 16px/1.25 var(--display); display: block; }
+.excopy span { font-size: 13px; color: var(--ink-2); }
+.reqs { display: flex; flex-wrap: wrap; gap: 5px; }
+.preview { font-size: 13px; color: var(--ink-2); background: rgba(93,212,229,.06); border: 1px solid rgba(93,212,229,.2); border-radius: 10px; padding: 9px 11px; }
+.preview b { color: var(--accent); font-weight: 600; }
+.dacts { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--line-soft); margin-top: auto; }
+.act { border: 1px solid var(--line); background: var(--raised); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.act:hover { border-color: #46505d; }
+.act[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: #13232F; font-weight: 700; }
+.act.ghost { background: transparent; }
+.aside-note { font-size: 12.5px; color: var(--bad); }
+/* compare */
+.compare { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.compare table { border-collapse: collapse; width: 100%; min-width: 760px; }
+.compare th, .compare td { text-align: left; vertical-align: top; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); font-size: 13px; color: var(--ink-2); }
+.compare th { width: 150px; color: var(--ink-3); font-weight: 500; }
+.compare thead td { color: var(--ink); }
+.compare thead td > b { font: 800 17px/1.2 var(--display); display: block; margin-top: 8px; }
+.compare .best { background: rgba(111,211,154,.06); }
+/* tray */
+.tray { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(25,29,36,.96); backdrop-filter: blur(8px); border-top: 1px solid var(--line); padding: 12px max(20px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+.tray .in { max-width: 1320px; margin: 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.slots { display: flex; gap: 8px; }
+.slot { width: 44px; height: 55px; border-radius: 6px; border: 1px dashed #46505d; overflow: hidden; position: relative; }
+.tray .grow { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: 13.5px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+/* sheets */
+.sheet { position: fixed; inset: 0; z-index: 10; background: rgba(5,7,10,.72); display: none; align-items: flex-end; justify-content: center; }
+.sheet.on { display: flex; }
+.sheet .card { width: min(820px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 22px 24px calc(22px + env(safe-area-inset-bottom, 0px)); }
+.sheet h2 { font: 800 22px/1.2 var(--display); margin: 0 0 8px; }
+.sheet p { color: var(--ink-2); margin: 0 0 12px; }
+.pick { display: grid; grid-template-columns: 120px 1fr 1fr; gap: 8px; align-items: center; margin: 12px 0; font-size: 13px; }
+.pick label { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.pick input:checked + span { color: var(--accent); font-weight: 600; }
+.spread { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 20px; }
+.carry { display: grid; gap: 6px; margin: 12px 0; font-size: 13.5px; color: var(--ink-2); }
+.carry div { display: grid; grid-template-columns: 130px 1fr; gap: 10px; }
+.carry b { color: var(--ink-3); font-weight: 500; }
+.toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
+.toast.on { opacity: 1; }
+@media (max-width: 860px) { .wall { grid-template-columns: 1fr; } .partner { grid-template-columns: auto 1fr; } .partner .pact { grid-column: 1 / -1; } .spread { grid-template-columns: 1fr; } .pick { grid-template-columns: 1fr; } .facts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <section class="brief" aria-label="The brief">
+    <h1 id="title"></h1><span class="meta" id="meta"></span>
+    <div class="views" role="group" aria-label="View"><button class="seg" data-view="wall" aria-pressed="true">Wall</button><button class="seg" data-view="compare" aria-pressed="false">Compare</button><button class="seg" data-view="aside" aria-pressed="false">Set aside</button></div>
+    <div class="ask" id="ask"></div>
+  </section>
+  <section class="partner" id="partner" aria-label="Creative Partner">
+    <div class="av" aria-hidden="true">CP</div>
+    <div><h2 id="ptitle"></h2><ul id="preasons"></ul><div class="why" id="pwhy"></div></div>
+    <div class="pact"><button class="linkbtn" id="pwhyBtn" aria-expanded="false">Why not the others</button></div>
+  </section>
+  <div class="lbl" style="margin-bottom:8px">Brand references in play</div>
+  <div class="refs" id="refs"></div>
+  <main id="main"></main>
+</div>
+<div class="tray" role="region" aria-label="Your decision">
+  <div class="in">
+    <div><div class="lbl" style="margin-bottom:6px">Shortlist</div><div class="slots" id="slots"></div></div>
+    <div class="grow" id="trayText" style="color:var(--ink-2);font-size:13.5px"></div>
+    <button class="btn" id="cmpBtn">Compare</button>
+    <button class="btn" id="combBtn">Combine two</button>
+    <button class="btn primary" id="goBtn">Continue with…</button>
+  </div>
+</div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="card" id="sheetCard"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const H = window.HL; const $ = s => document.querySelector(s);
+  const dirs = H.directions.map(d => Object.assign({}, d));
+  const st = { view: 'wall', short: new Set(['D1']), cmp: new Set(['D1', 'D2']), aside: {}, chosen: null };
+  const rec = dirs.slice().sort((a, b) => b.score - a.score)[0];
+  const req = id => H.requirements.find(r => r.id === id);
+  function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2200); }
+  $('#title').textContent = H.project.title;
+  $('#meta').textContent = H.client.name + ' (' + H.client.tag + ') · ' + H.project.campaign + ' · ' + H.project.deliverables.map(d => d.label + ' ' + d.format).join(', ');
+  $('#ask').innerHTML = `<span><b>Objective</b> ${H.esc(H.project.objective)}</span><span><b>Message</b> ${H.esc(H.project.message)}</span><span><b>Action</b> ${H.esc(H.project.action)}</span>`;
+  $('#ptitle').textContent = 'Go with "' + rec.name + '". ' + rec.partner.split('.')[0].replace('Recommended', '').trim();
+  $('#preasons').innerHTML = [
+    'It follows your approved Easter timetable tile (14 Oct 2026): the wharf first, a gold band at the foot, the logo bottom right.',
+    'It names Pier 2 and Northbridge Wharf and only the two announced times, as your rules ask.',
+    'One image at 2K. "The departure board" costs nothing to make and is the clearest on facts; combine it in if you want the times bigger.',
+  ].map(t => '<li>' + H.esc(t) + '</li>').join('');
+  $('#pwhy').innerHTML = dirs.filter(d => d.id !== rec.id).map(d => `<div><b>${H.esc(d.name)}.</b> ${H.esc(d.partner)}</div>`).join('');
+  $('#pwhyBtn').onclick = () => { const p = $('#partner'); p.classList.toggle('open'); $('#pwhyBtn').setAttribute('aria-expanded', p.classList.contains('open')); };
+  $('#refs').innerHTML = H.references.map(r => `<div class="ref"><div class="rt" data-ref="${r.look}"></div><div><b>${H.esc(r.name)}</b><span class="chip" style="margin:3px 0">${r.purpose}</span><br><span>${H.esc(r.note)}</span></div></div>`).join('');
+  document.querySelectorAll('[data-ref]').forEach(el => { const look = el.dataset.ref; const lay = H.layout('1:1', look === 'band' ? 'dawn' : look === 'photo' ? 'night' : look === 'board' ? 'board' : 'paper'); if (look === 'photo') lay.layers = []; H.renderTile(el, lay); });
+  function follows(d) { return H.requirements.map(r => { const f = d.follows[r.id] || ['yes', '']; return `<span class="chip ${f[0] === 'yes' ? 'ok' : f[0] === 'watch' ? 'watch' : 'no'}" title="${H.esc(r.text + ': ' + f[1])}">${f[0] === 'yes' ? '✓' : f[0] === 'watch' ? '◐' : '✕'} ${r.id} ${H.esc(r.text.split(',')[0].split('(')[0].slice(0, 28))}</span>`; }).join(''); }
+  function boardHtml(d) {
+    const aside = st.aside[d.id];
+    return `<article class="dboard${st.short.has(d.id) ? ' short' : ''}${aside ? ' aside' : ''}${d.id === rec.id ? ' rec' : ''}" aria-label="${H.esc(d.name)}">
+      <div class="collage"><div class="hero" data-tile="${d.id}"></div><div class="side"><div><div class="mood">${d.mood.swatches.map(c => `<span style="background:${c}"></span>`).join('')}</div><div class="words">${d.mood.words.map(w => `<span class="chip">${w}</span>`).join('')}</div></div><div class="wire"><div data-wire="${d.id}"></div></div></div></div>
+      <div class="dbody">
+        <div class="dhead"><h3>${H.esc(d.name)}</h3><span class="med">${H.esc(d.medium)} · ${H.esc(d.cost)}</span></div>
+        <p class="idea">${H.esc(d.idea)}</p>
+        <dl class="facts"><dt>Why</dt><dd>${H.esc(d.rationale)}</dd><dt>Imagery</dt><dd>${H.esc(d.imagery)}</dd><dt>Layout idea</dt><dd>${H.esc(d.layout)}</dd><dt>References</dt><dd>${d.refs.map(id => H.esc(H.references.find(r => r.id === id).name)).join(', ')}</dd></dl>
+        <div class="excopy"><b>${H.esc(d.copy.headline)}</b><span>${H.esc(d.copy.support)}</span></div>
+        <div><div class="lbl" style="margin-bottom:6px">Client requirements</div><div class="reqs">${follows(d)}</div></div>
+        <div class="preview"><b>Partner:</b> ${H.esc(d.partner)}</div>
+        ${aside ? `<div class="aside-note">Set aside: ${H.esc(aside)}</div>` : ''}
+      </div>
+      <div class="dacts">
+        <button class="act" data-short="${d.id}" aria-pressed="${st.short.has(d.id)}">${st.short.has(d.id) ? '★ Shortlisted' : '☆ Shortlist'}</button>
+        <button class="act ghost" data-cmp="${d.id}" aria-pressed="${st.cmp.has(d.id)}">${st.cmp.has(d.id) ? 'In compare' : 'Add to compare'}</button>
+        <button class="act ghost" data-open="${d.id}">Open board</button>
+        ${aside ? `<button class="act ghost" data-restore="${d.id}">Bring back</button>` : `<button class="act ghost" data-aside="${d.id}">Set aside</button>`}
+      </div></article>`;
+  }
+  function drawTiles(root) {
+    root.querySelectorAll('[data-tile]').forEach(el => { const d = dirs.find(x => x.id === el.dataset.tile); H.renderTile(el, d.lay || H.layout('4:5', d.spec)); });
+    root.querySelectorAll('[data-wire]').forEach(el => { const d = dirs.find(x => x.id === el.dataset.wire); H.renderTile(el, d.lay || H.layout('4:5', d.spec), { wire: true }); });
+  }
+  function renderWall(list) {
+    const m = $('#main'); m.innerHTML = list.length ? '<div class="wall">' + list.map(boardHtml).join('') + '</div>' : '<p style="color:var(--ink-3);padding:40px 0">Nothing set aside. Directions you set aside appear here with your reason, and can be brought back.</p>';
+    drawTiles(m); bindBoards(m);
+  }
+  function renderCompare() {
+    const list = dirs.filter(d => st.cmp.has(d.id));
+    if (list.length < 2) { $('#main').innerHTML = '<p style="color:var(--ink-3);padding:40px 0">Add two or three directions to compare from the wall.</p>'; return; }
+    const row = (label, f, best) => `<tr><th scope="row">${label}</th>${list.map(d => `<td class="${best && best(d) ? 'best' : ''}">${f(d)}</td>`).join('')}</tr>`;
+    const maxScore = Math.max(...list.map(d => H.requirements.filter(r => (d.follows[r.id] || ['yes'])[0] === 'yes').length));
+    $('#main').innerHTML = `<div class="compare"><table><thead><tr><th></th>${list.map(d => `<td><div data-tile="${d.id}" style="max-width:180px"></div><b>${H.esc(d.name)}</b><span class="lbl">${H.esc(d.medium)}</span></td>`).join('')}</tr></thead><tbody>
+      ${row('Idea', d => H.esc(d.idea))}${row('Mood', d => d.mood.words.join(', '))}${row('Imagery', d => H.esc(d.imagery))}${row('Layout', d => `<div data-wire="${d.id}" style="max-width:120px"></div>${H.esc(d.layout)}`)}
+      ${row('Example copy', d => '<b>' + H.esc(d.copy.headline) + '</b><br>' + H.esc(d.copy.support))}
+      ${row('Requirements met', d => { const y = H.requirements.filter(r => (d.follows[r.id] || ['yes'])[0] === 'yes').length; return y + ' of ' + H.requirements.length + '<div class="reqs" style="margin-top:6px">' + follows(d) + '</div>'; }, d => H.requirements.filter(r => (d.follows[r.id] || ['yes'])[0] === 'yes').length === maxScore)}
+      ${row('Cost', d => H.esc(d.cost), d => /no image/.test(d.cost))}${row('Partner', d => H.esc(d.partner), d => d.id === rec.id)}
+      ${row('', d => `<button class="act" data-choose="${d.id}">Choose this one</button>`)}</tbody></table></div>`;
+    drawTiles($('#main')); $('#main').querySelectorAll('[data-choose]').forEach(b => b.onclick = () => openChoose(b.dataset.choose));
+  }
+  function render() {
+    document.querySelectorAll('.seg').forEach(s => s.setAttribute('aria-pressed', s.dataset.view === st.view));
+    if (st.view === 'wall') renderWall(dirs.filter(d => !st.aside[d.id]));
+    else if (st.view === 'aside') renderWall(dirs.filter(d => st.aside[d.id]));
+    else renderCompare();
+    renderTray();
+  }
+  function renderTray() {
+    const sl = dirs.filter(d => st.short.has(d.id));
+    $('#slots').innerHTML = [0, 1, 2].map(i => sl[i] ? `<div class="slot" data-slot="${sl[i].id}" title="${H.esc(sl[i].name)}"></div>` : '<div class="slot" aria-hidden="true"></div>').join('');
+    document.querySelectorAll('[data-slot]').forEach(el => { const d = dirs.find(x => x.id === el.dataset.slot); H.renderTile(el, d.lay || H.layout('4:5', d.spec)); });
+    $('#trayText').textContent = sl.length ? sl.length + ' shortlisted · ' + st.cmp.size + ' in compare · ' + Object.keys(st.aside).length + ' set aside' : 'Shortlist the directions worth taking further.';
+    $('#cmpBtn').textContent = 'Compare (' + st.cmp.size + ')'; $('#cmpBtn').disabled = st.cmp.size < 2;
+    $('#combBtn').disabled = st.short.size < 2;
+    const pick = sl.length === 1 ? sl[0] : sl.find(d => d.id === rec.id) || sl[0];
+    $('#goBtn').textContent = pick ? 'Continue with ' + pick.name : 'Choose a direction'; $('#goBtn').disabled = !pick; $('#goBtn').dataset.id = pick ? pick.id : '';
+  }
+  function bindBoards(root) {
+    root.querySelectorAll('[data-short]').forEach(b => b.onclick = () => { const id = b.dataset.short; st.short.has(id) ? st.short.delete(id) : st.short.add(id); render(); });
+    root.querySelectorAll('[data-cmp]').forEach(b => b.onclick = () => { const id = b.dataset.cmp; if (st.cmp.has(id)) st.cmp.delete(id); else if (st.cmp.size >= 3) return toast('Compare holds three at a time'); else st.cmp.add(id); render(); });
+    root.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openSpread(b.dataset.open));
+    root.querySelectorAll('[data-aside]').forEach(b => b.onclick = () => openAside(b.dataset.aside));
+    root.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { delete st.aside[b.dataset.restore]; toast('Back on the wall'); render(); });
+  }
+  const sheet = $('#sheet'); let lastFocus = null;
+  function openSheet(html) { lastFocus = document.activeElement; $('#sheetCard').innerHTML = html; sheet.classList.add('on'); const f = sheet.querySelector('button, input, textarea, select'); if (f) f.focus(); sheet.querySelectorAll('[data-close]').forEach(b => b.onclick = closeSheet); }
+  function closeSheet() { sheet.classList.remove('on'); if (lastFocus) lastFocus.focus(); }
+  sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && sheet.classList.contains('on')) closeSheet(); });
+  function openSpread(id) {
+    const d = dirs.find(x => x.id === id);
+    openSheet(`<div class="spread"><div><div data-tile="${d.id}"></div><div class="lbl" style="margin:12px 0 6px">References this direction draws on</div>${d.refs.map(r => { const x = H.references.find(y => y.id === r); return `<p style="font-size:13px"><b>${H.esc(x.name)}</b> (${x.purpose}): ${H.esc(x.note)}</p>`; }).join('')}</div>
+      <div><h2 id="sheetTitle">${H.esc(d.name)}</h2><p>${H.esc(d.idea)}</p><dl class="facts"><dt>Why</dt><dd>${H.esc(d.rationale)}</dd><dt>Mood</dt><dd>${d.mood.words.join(', ')}</dd><dt>Imagery</dt><dd>${H.esc(d.imagery)}</dd><dt>Layout idea</dt><dd>${H.esc(d.layout)}</dd><dt>Cost</dt><dd>${H.esc(d.cost)}</dd></dl>
+      <div class="lbl" style="margin:14px 0 6px">Which requirements it follows, and how</div>${H.requirements.map(r => { const f = d.follows[r.id] || ['yes', '']; return `<p style="font-size:13px;margin:0 0 6px"><span class="chip ${f[0] === 'yes' ? 'ok' : f[0] === 'watch' ? 'watch' : 'no'}">${r.id}</span> ${H.esc(r.text)} <span style="color:var(--ink-3)">(${H.esc(r.from)})</span><br><span style="color:var(--ink-2)">${H.esc(f[1])}</span></p>`; }).join('')}
+      <div class="preview" style="margin:12px 0"><b>Partner:</b> ${H.esc(d.partner)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-pick="${d.id}">Choose this direction</button><button class="btn" data-close>Back to the wall</button></div></div></div>`);
+    drawTiles($('#sheetCard')); $('#sheetCard').querySelector('[data-pick]').onclick = () => openChoose(d.id);
+  }
+  function openAside(id) {
+    const d = dirs.find(x => x.id === id);
+    openSheet(`<h2 id="sheetTitle">Set aside "${H.esc(d.name)}"</h2><p>Say why, in a few words. It stays in Set aside with your reason and can be brought back.</p><textarea id="why" rows="3" style="width:100%;box-sizing:border-box;background:var(--raised);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit" aria-label="Reason">${d.follows.R4 && d.follows.R4[0] === 'no' ? 'The time saving is not an approved fact.' : ''}</textarea><div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="asideOk">Set aside</button><button class="btn" data-close>Cancel</button></div>`);
+    $('#asideOk').onclick = () => { const w = $('#why').value.trim(); if (w.length < 4) return toast('A reason, please'); st.aside[id] = w; st.short.delete(id); st.cmp.delete(id); closeSheet(); toast('Set aside: ' + d.name); render(); };
+  }
+  function openCombine() {
+    const sl = dirs.filter(d => st.short.has(d.id)).slice(0, 2); const [a, b] = sl;
+    const parts = [['idea', 'Idea'], ['imagery', 'Imagery'], ['layout', 'Layout'], ['copy', 'Example copy'], ['mood', 'Mood']];
+    openSheet(`<h2 id="sheetTitle">Combine "${H.esc(a.name)}" and "${H.esc(b.name)}"</h2><p>Take each part from one of them. The Creative Partner writes the combined direction and checks it against the requirements again; nothing is generated yet.</p>
+      ${parts.map(([k, l], i) => `<div class="pick" role="radiogroup" aria-label="${l}"><span class="lbl">${l}</span><label><input type="radio" name="p${k}" value="a" ${k === 'layout' || k === 'copy' ? '' : 'checked'}><span>${H.esc(a.name)}</span></label><label><input type="radio" name="p${k}" value="b" ${k === 'layout' || k === 'copy' ? 'checked' : ''}><span>${H.esc(b.name)}</span></label></div>`).join('')}
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" id="combOk">Make the combined board</button><button class="btn" data-close>Cancel</button></div>`);
+    $('#combOk').onclick = () => {
+      const from = k => (document.querySelector(`input[name="p${k}"]:checked`).value === 'a' ? a : b);
+      const lay = H.layout('4:5', from('layout').spec);
+      if (from('imagery').spec === 'dawn' && from('layout').spec === 'board') { lay.bg = 'dawn'; lay.layers = [{ id: 'band', role: 'band', type: 'shape', x: 0, y: 0, w: 100, h: 100, fill: 'rgba(11,79,108,.55)' }].concat(lay.layers); }
+      const follows = {}; H.requirements.forEach(r => { const fa = (a.follows[r.id] || ['yes', ''])[0], fb = (b.follows[r.id] || ['yes', ''])[0]; const rank = { yes: 0, watch: 1, no: 2 }; const w = rank[fa] >= rank[fb] ? a : b; follows[r.id] = w.follows[r.id] || ['yes', '']; });
+      const c = { id: 'D' + (dirs.length + 1), name: from('idea').name.split(',')[0] + ' + ' + from('layout').name.replace(/^The /, ''), medium: 'Combined', idea: from('idea').idea, rationale: 'Combined from your shortlist: ' + parts.map(([k, l]) => l.toLowerCase() + ' from ' + from(k).name).join('; ') + '.',
+        mood: from('mood').mood, imagery: from('imagery').imagery, layout: from('layout').layout, copy: from('copy').copy, follows, refs: Array.from(new Set(a.refs.concat(b.refs))), cost: from('imagery').cost,
+        partner: 'Combined. Check the watch items before choosing: it inherits the strictest reading of each requirement from its parents.', score: 2, spec: from('layout').spec, lay };
+      dirs.push(c); st.short.add(c.id); closeSheet(); st.view = 'wall'; toast('Combined board added to the wall'); render();
+    };
+  }
+  function openChoose(id) {
+    const d = dirs.find(x => x.id === id); const watch = H.requirements.filter(r => (d.follows[r.id] || ['yes'])[0] !== 'yes');
+    openSheet(`<h2 id="sheetTitle">Continue with "${H.esc(d.name)}"</h2><p>This becomes the direction for production. Nothing is generated until production starts; the others stay on the wall.</p>
+      <div class="carry"><div><b>Idea</b><span>${H.esc(d.idea)}</span></div><div><b>Imagery brief</b><span>${H.esc(d.imagery)}</span></div><div><b>Layout idea</b><span>${H.esc(d.layout)}</span></div><div><b>Starting copy</b><span>${H.esc(d.copy.headline)} ${H.esc(d.copy.support)}</span></div><div><b>Pieces</b><span>${H.project.deliverables.map(x => x.label + ' ' + x.format).join(', ')}</span></div><div><b>Cost to start</b><span>${H.esc(d.cost)}, after you confirm in production</span></div></div>
+      ${watch.length ? `<div class="preview" style="border-color:rgba(242,193,78,.4);background:rgba(242,193,78,.07)"><b style="color:var(--warn)">Carried as watch items:</b> ${watch.map(r => r.id + ' ' + H.esc((d.follows[r.id] || ['', ''])[1])).join('; ')}</div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap"><button class="btn primary" id="chooseOk">Choose and start production</button><button class="btn" data-close>Not yet</button></div>`);
+    $('#chooseOk').onclick = () => { st.chosen = id; closeSheet(); toast('"' + d.name + '" chosen. Production opens next (in the app: the Copy step).'); };
+  }
+  $('#cmpBtn').onclick = () => { st.view = 'compare'; render(); window.scrollTo({ top: $('#main').offsetTop - 20, behavior: 'smooth' }); };
+  $('#combBtn').onclick = openCombine;
+  $('#goBtn').onclick = () => openChoose($('#goBtn').dataset.id);
+  document.querySelectorAll('.seg').forEach(s => s.onclick = () => { st.view = s.dataset.view; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Production Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Manrope:wght@500;700;800&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+/* Concept A: a persistent three-panel desk. Navigation left (assets, layers), the canvas in the middle, a fixed inspector right,
+   and the production checks always in view along the foot. Everything is on screen at once; nothing opens or closes. */
+body { margin: 0; overflow: hidden; }
+.desk { height: 100vh; height: 100dvh; display: grid; grid-template-rows: 48px 40px 1fr 56px; grid-template-columns: 252px 1fr 300px; grid-template-areas: "top top top" "tools tools tools" "nav canvas insp" "foot foot foot"; }
+.top { grid-area: top; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #2a8fa0); }
+.top h1 { font: 700 14px/1 var(--display); margin: 0; }
+.top .sub { color: var(--ink-3); font-size: 12px; }
+.top .grow { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.btn:hover { border-color: #46505d; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.tools { grid-area: tools; overflow-x: auto; display: flex; align-items: center; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.tool { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 6px; border: 0; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 12.5px; }
+.tool:hover, .tool.on { background: var(--raised); color: var(--ink); }
+.tool svg { width: 16px; height: 16px; }
+.sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
+.nav { grid-area: nav; border-right: 1px solid var(--line); background: var(--panel); overflow: auto; }
+.sec { padding: 12px 12px 6px; font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); display: flex; justify-content: space-between; }
+.asset { display: grid; grid-template-columns: 40px 1fr; gap: 10px; align-items: center; margin: 2px 8px; padding: 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; background: none; width: calc(100% - 16px); text-align: left; }
+.asset:hover { background: var(--raised); }
+.asset.on { background: var(--accent-soft); border-color: rgba(93,212,229,.35); }
+.asset .thumb { width: 40px; }
+.asset b { display: block; font-size: 13px; font-weight: 600; }
+.asset span { font-size: 11.5px; color: var(--ink-3); }
+.layers { margin: 0 8px 12px; }
+.lrow { display: grid; grid-template-columns: 18px 1fr 22px 22px; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
+.lrow:hover { background: var(--raised); }
+.lrow.on { background: #2a5d6a; color: #fff; }
+.lrow .ico { font: 600 10px/1 var(--mono); color: var(--ink-3); }
+.lrow button { border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0; font-size: 12px; }
+.canvas { grid-area: canvas; position: relative; overflow: auto; background: #0b0d11; background-image: radial-gradient(#1b2028 1px, transparent 1px); background-size: 16px 16px; display: grid; place-items: center; }
+.ruler-x, .ruler-y { position: absolute; background: #14181e; color: #5b6676; font: 9px/1 var(--mono); }
+.ruler-x { top: 0; left: 18px; right: 0; height: 18px; border-bottom: 1px solid var(--line-soft); background-image: repeating-linear-gradient(90deg, #2a313b 0 1px, transparent 1px 40px); }
+.ruler-y { top: 18px; left: 0; bottom: 0; width: 18px; border-right: 1px solid var(--line-soft); background-image: repeating-linear-gradient(0deg, #2a313b 0 1px, transparent 1px 40px); }
+.board-wrap { position: relative; margin: 40px; }
+.board-label { position: absolute; top: -22px; left: 0; font: 600 11px/1 var(--mono); color: var(--ink-3); }
+#art { width: min(420px, 60vh, calc(100vw - 120px)); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+#art.story { width: min(300px, 40vh, calc(100vw - 120px)); }
+#art .hl-layer { cursor: move; }
+#art .hl-layer:hover { outline: 1px solid rgba(93,212,229,.5); }
+#art .hl-layer.sel { outline: 1.5px solid var(--accent); }
+.handle { position: absolute; width: 8px; height: 8px; background: #fff; border: 1.5px solid var(--accent); border-radius: 2px; transform: translate(-50%, -50%); pointer-events: none; }
+.safe { position: absolute; left: 0; right: 0; background: repeating-linear-gradient(135deg, rgba(240,122,106,.18) 0 6px, transparent 6px 12px); pointer-events: none; display: none; }
+.show-safe .safe { display: block; }
+.insp { grid-area: insp; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; }
+.irow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 0 12px 10px; }
+.irow > * { min-width: 0; }
+.field { display: flex; align-items: center; gap: 6px; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; height: 30px; }
+.field label { font: 600 10px/1 var(--mono); color: var(--ink-3); width: 14px; }
+.field input, .field select { flex: 1; min-width: 0; width: 100%; background: none; border: 0; color: var(--ink); font: 13px var(--body); font-variant-numeric: tabular-nums; outline: none; }
+.field.wide { grid-column: 1 / -1; }
+.ititle { padding: 12px 12px 8px; display: flex; align-items: center; justify-content: space-between; }
+.ititle b { font: 700 15px/1.2 var(--display); }
+.align { display: flex; gap: 2px; padding: 8px 12px 12px; border-bottom: 1px solid var(--line-soft); }
+.align button { flex: 1; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer; }
+.align button:hover { background: var(--raised); color: var(--ink); }
+.rule { margin: 0 12px 12px; padding: 10px; border-radius: 8px; background: rgba(242,193,78,.07); border: 1px solid rgba(242,193,78,.3); font-size: 12.5px; color: var(--ink-2); }
+.rule b { color: var(--warn); }
+textarea.copy { width: 100%; min-height: 64px; resize: vertical; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: 13px/1.4 var(--body); padding: 8px; box-sizing: border-box; }
+.foot { grid-area: foot; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-top: 1px solid var(--line); background: var(--panel); min-width: 0; }
+.foot .lbl { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+.checks { display: flex; gap: 6px; overflow-x: auto; min-width: 0; flex: 1 1 auto; scrollbar-width: thin; }
+.foot > * { flex-shrink: 0; }
+.foot .checks { flex-shrink: 1; }
+#savev { white-space: nowrap; }
+.versions { display: flex; gap: 4px; align-items: center; }
+.vchip { border: 1px solid var(--line); background: var(--raised); color: var(--ink-2); border-radius: 6px; padding: 3px 8px; cursor: pointer; font: 600 12px/1.4 var(--mono); }
+.vchip.on { border-color: var(--accent); color: var(--accent); }
+.status { margin-left: auto; display: flex; flex-shrink: 0; align-items: center; gap: 10px; white-space: nowrap; }
+.toast { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.on { opacity: 1; }
+@media (max-width: 900px) { .desk > * { min-width: 0; } .foot { overflow-x: auto; } .top { flex-wrap: wrap; padding-block: 8px; row-gap: 6px; } .top .sub, .top .chip { display: none; } .desk { grid-template-columns: 1fr; grid-template-rows: auto 40px auto 1fr auto 56px; grid-template-areas: "top" "tools" "nav" "canvas" "insp" "foot"; } body { overflow: auto; } .nav, .insp { max-height: 36vh; } }
+</style>
+</head>
+<body>
+<div class="desk" id="desk">
+  <header class="top">
+    <div class="mark" aria-hidden="true"></div>
+    <h1 id="ptitle"></h1><span class="sub" id="psub"></span>
+    <span class="chip">Concept A · Production Desk</span>
+    <div class="grow"></div>
+    <span class="sub" id="save">Version saved</span>
+    <button class="btn" id="preview">Preview</button>
+    <button class="btn primary" id="export" title="Export the approved pieces">Export</button>
+  </header>
+  <div class="tools" role="toolbar" aria-label="Canvas tools">
+    <button class="tool on" data-tool="move" title="Move (V)"><svg viewBox="0 0 16 16"><path d="M3 2l9 5-4 1-1 4z" fill="currentColor"/></svg>Move</button>
+    <button class="tool" data-tool="text" title="Text (T)"><svg viewBox="0 0 16 16"><path d="M3 3h10v2H9v8H7V5H3z" fill="currentColor"/></svg>Text</button>
+    <button class="tool" data-tool="shape" title="Shape (R)"><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>Shape</button>
+    <button class="tool" data-tool="image" title="Image"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 12l3-4 3 3 2-2 2 3z" fill="currentColor"/></svg>Image</button>
+    <div class="sep"></div>
+    <button class="tool" id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button class="tool" id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+    <div class="sep"></div>
+    <button class="tool" id="safeBtn" aria-pressed="false" title="Show the platform safe area">Safe area</button>
+    <button class="tool" id="zoomOut" title="Zoom out">-</button><span class="sub" id="zoomLbl">100%</span><button class="tool" id="zoomIn" title="Zoom in">+</button>
+  </div>
+  <nav class="nav" aria-label="Project">
+    <div class="sec"><span>Pieces</span><span id="ncount"></span></div>
+    <div id="assets"></div>
+    <div class="sec"><span>Layers</span><span>front to back</span></div>
+    <div class="layers" id="layers"></div>
+    <div class="sec"><span>Brief</span></div>
+    <div style="padding:0 14px 16px;font-size:12.5px;color:var(--ink-2)" id="brief"></div>
+  </nav>
+  <main class="canvas" id="canvas" aria-label="Canvas">
+    <div class="ruler-x" aria-hidden="true"></div><div class="ruler-y" aria-hidden="true"></div>
+    <div class="board-wrap" id="wrap"><div class="board-label" id="blabel"></div><div id="art"></div><div id="handles"></div></div>
+  </main>
+  <aside class="insp" aria-label="Properties" id="insp"></aside>
+  <footer class="foot" aria-label="Production checks">
+    <span class="lbl">Checks</span><div class="checks" id="checks" role="status" aria-live="polite"></div>
+    <span class="lbl">Versions</span><div class="versions" id="versions"></div>
+    <div class="status"><span id="appr" class="chip">Copy approved</span><button class="btn" id="approve">Approve design</button></div>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="shared.js"></script>
+<script>
+(function () {
+  const H = window.HL; const $ = s => document.querySelector(s);
+  const state = { asset: 'ig', sel: 'headline', zoom: 1, safe: false, approved: {}, docs: {}, versions: {}, hist: [], fut: [] };
+  H.project.deliverables.forEach(d => { state.docs[d.id] = H.layout(d.format, 'dawn'); state.versions[d.id] = [{ n: 1, note: 'first draft', lay: JSON.parse(JSON.stringify(state.docs[d.id])) }]; });
+  const doc = () => state.docs[state.asset]; const layer = id => doc().layers.find(l => l.id === id);
+  $('#ptitle').textContent = H.project.title; $('#psub').textContent = H.client.name + ' (' + H.client.tag + ') · ' + H.project.campaign;
+  $('#brief').innerHTML = '<p style="margin:0 0 6px"><b>Message.</b> ' + H.esc(H.project.message) + '</p><p style="margin:0 0 6px"><b>Action.</b> ' + H.esc(H.project.action) + '</p><p style="margin:0"><b>Route.</b> First light, Pier 2</p>';
+  function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 1800); }
+  function snapshot() { state.hist.push(JSON.stringify(doc())); if (state.hist.length > 60) state.hist.shift(); state.fut = []; $('#save').textContent = 'Unsaved changes'; }
+  function renderAssets() {
+    $('#ncount').textContent = H.project.deliverables.length;
+    $('#assets').innerHTML = H.project.deliverables.map(d => { const ok = H.checks(state.docs[d.id]).every(c => c.ok); return `<button class="asset${d.id === state.asset ? ' on' : ''}" data-a="${d.id}"><div class="thumb" data-thumb="${d.id}"></div><div><b>${d.label}</b><span>${d.format} · ${d.px}</span><br><span class="chip ${ok ? 'ok' : 'no'}" style="margin-top:4px">${ok ? 'checks pass' : 'needs a fix'}</span>${state.approved[d.id] ? ' <span class="chip accent">approved</span>' : ''}</div></button>`; }).join('');
+    document.querySelectorAll('[data-thumb]').forEach(el => H.renderTile(el, state.docs[el.dataset.thumb]));
+    document.querySelectorAll('.asset').forEach(b => b.onclick = () => { state.asset = b.dataset.a; state.sel = 'headline'; state.hist = []; state.fut = []; render(); });
+  }
+  function renderLayers() {
+    const ls = doc().layers.slice().reverse();
+    $('#layers').innerHTML = ls.map(l => `<div class="lrow${l.id === state.sel ? ' on' : ''}" data-l="${l.id}" role="button" tabindex="0"><span class="ico">${l.type === 'text' ? 'T' : l.type === 'logo' ? 'L' : l.type === 'cta' ? 'B' : 'R'}</span><span>${l.role}</span><button data-hide="${l.id}" title="${l.hidden ? 'Show' : 'Hide'}" aria-label="${l.hidden ? 'Show' : 'Hide'} ${l.role}">${l.hidden ? '○' : '●'}</button><button data-lock="${l.id}" title="${l.locked ? 'Unlock' : 'Lock'}" aria-label="${l.locked ? 'Unlock' : 'Lock'} ${l.role}">${l.locked ? 'L' : '-'}</button></div>`).join('') + '<div class="lrow" style="cursor:default"><span class="ico">P</span><span>background photograph</span><span></span><span></span></div>';
+    document.querySelectorAll('.lrow[data-l]').forEach(r => { r.onclick = e => { if (e.target.dataset.hide || e.target.dataset.lock) return; state.sel = r.dataset.l; render(); }; r.onkeydown = e => { if (e.key === 'Enter') { state.sel = r.dataset.l; render(); } }; });
+    document.querySelectorAll('[data-hide]').forEach(b => b.onclick = () => { snapshot(); const l = layer(b.dataset.hide); l.hidden = !l.hidden; render(); });
+    document.querySelectorAll('[data-lock]').forEach(b => b.onclick = () => { const l = layer(b.dataset.lock); l.locked = !l.locked; render(); });
+  }
+  function renderArt() {
+    const art = $('#art'); const d = doc(); art.className = d.format === '9:16' ? 'story' : '';
+    art.style.transform = 'scale(' + state.zoom + ')'; art.style.transformOrigin = 'center';
+    H.renderTile(art, d, { selected: state.sel });
+    if (d.format === '9:16') art.insertAdjacentHTML('beforeend', '<div class="safe" style="top:0;height:14%"></div><div class="safe" style="bottom:0;height:20%"></div>');
+    $('#wrap').classList.toggle('show-safe', state.safe);
+    $('#blabel').textContent = H.project.deliverables.find(x => x.id === state.asset).label + ' · ' + d.format;
+    art.querySelectorAll('.hl-layer').forEach(el => el.addEventListener('pointerdown', startDrag));
+    const l = layer(state.sel); const hs = $('#handles'); hs.innerHTML = '';
+    if (l && !l.hidden) { const r = art.getBoundingClientRect(), w = $('#wrap').getBoundingClientRect(); [[0, 0], [.5, 0], [1, 0], [0, .5], [1, .5], [0, 1], [.5, 1], [1, 1]].forEach(([fx, fy]) => { const h = document.createElement('div'); h.className = 'handle'; h.style.left = (r.left - w.left + (l.x + l.w * fx) / 100 * r.width) + 'px'; h.style.top = (r.top - w.top + (l.y + l.h * fy) / 100 * r.height) + 'px'; hs.appendChild(h); }); }
+  }
+  function num(id, label, val, key) { return `<div class="field"><label for="${id}">${label}</label><input id="${id}" data-k="${key}" type="number" step="0.5" value="${(+val).toFixed(1)}"></div>`; }
+  function renderInsp() {
+    const l = layer(state.sel); const insp = $('#insp');
+    if (!l) { insp.innerHTML = '<div class="ititle"><b>Nothing selected</b></div>'; return; }
+    let h = `<div class="align" role="toolbar" aria-label="Align">${['left', 'centre', 'right', 'top', 'middle', 'bottom'].map(a => `<button data-al="${a}" title="Align ${a}" aria-label="Align ${a}">${{ left: '|◧', centre: '◫', right: '◨|', top: '⊤', middle: '⊟', bottom: '⊥' }[a]}</button>`).join('')}</div>`;
+    h += `<div class="ititle"><b>${l.role}</b><span class="chip">${l.type}</span></div>`;
+    h += '<div class="sec" style="padding-top:0"><span>Position and size (% of the stage)</span></div><div class="irow">' + num('fx', 'X', l.x, 'x') + num('fy', 'Y', l.y, 'y') + num('fw', 'W', l.w, 'w') + num('fh', 'H', l.h, 'h') + '</div>';
+    if (l.type === 'text' || l.type === 'cta') {
+      h += '<div class="sec"><span>Words</span></div><div style="padding:0 12px 10px"><textarea class="copy" id="ftext" aria-label="Words">' + H.esc(l.text) + '</textarea></div>';
+      h += '<div class="sec"><span>Type</span></div><div class="irow"><div class="field wide"><label>Aa</label><select id="ffont" aria-label="Typeface"><option>Manrope</option><option>DM Sans</option></select></div>' + num('fsize', 'Sz', l.size, 'size') + `<div class="field"><label for="fweight">Wt</label><select id="fweight" data-k="weight">${[500, 700, 800].map(w => `<option ${w === l.weight ? 'selected' : ''}>${w}</option>`).join('')}</select></div><div class="field wide"><label for="fcolor">#</label><input id="fcolor" data-k="color" value="${l.color}" aria-label="Colour"></div></div>`;
+    }
+    if (l.type === 'logo') h += `<div class="rule"><b>Held by a campaign rule.</b> Harbour crossings keeps the Harbourline logo bottom right with clear space of half its height. Moving it asks first.</div><div class="irow"><div class="field wide"><label for="ftone">V</label><select id="ftone" aria-label="Logo variant"><option value="dark" ${l.tone === 'dark' ? 'selected' : ''}>Dark (on gold)</option><option value="light" ${l.tone === 'light' ? 'selected' : ''}>Light (on blue)</option></select></div></div>`;
+    if (l.type === 'shape') h += `<div class="sec"><span>Fill</span></div><div class="irow"><div class="field wide"><label for="ffill">#</label><input id="ffill" data-k="fill" value="${l.fill}"></div></div>`;
+    insp.innerHTML = h;
+    insp.querySelectorAll('input[data-k], select[data-k]').forEach(i => i.onchange = () => { snapshot(); const v = i.type === 'number' || i.dataset.k === 'weight' ? +i.value : i.value; l[i.dataset.k] = v; render(); });
+    const t = $('#ftext'); if (t) t.oninput = () => { if (!t._s) { snapshot(); t._s = true; } l.text = t.value; renderArt(); renderChecks(); };
+    const tone = $('#ftone'); if (tone) tone.onchange = () => { snapshot(); l.tone = tone.value; render(); };
+    insp.querySelectorAll('[data-al]').forEach(b => b.onclick = () => { if (l.locked) return toast('That layer is locked'); snapshot(); const a = b.dataset.al; if (a === 'left') l.x = 7; if (a === 'right') l.x = 93 - l.w; if (a === 'centre') l.x = (100 - l.w) / 2; if (a === 'top') l.y = 7; if (a === 'bottom') l.y = 93 - l.h; if (a === 'middle') l.y = (100 - l.h) / 2; render(); });
+  }
+  function renderChecks() {
+    const cs = H.checks(doc());
+    $('#checks').innerHTML = cs.map(c => `<span class="chip ${c.ok ? 'ok' : 'no'}" title="${H.esc(c.detail)}">${c.ok ? '✓' : '!'} ${c.label}</span>`).join('');
+    const ok = cs.every(c => c.ok); const ap = $('#approve'); ap.disabled = !ok || state.approved[state.asset];
+    ap.textContent = state.approved[state.asset] ? 'Design approved' : 'Approve design'; ap.title = ok ? 'Records the agency\'s design approval of this version' : 'Fix the failing checks first';
+    $('#appr').textContent = state.approved[state.asset] ? 'Copy and design approved' : 'Copy approved · design pending';
+  }
+  function renderVersions() {
+    const vs = state.versions[state.asset];
+    $('#versions').innerHTML = vs.map((v, i) => `<button class="vchip${i === vs.length - 1 ? ' on' : ''}" data-v="${i}" title="${H.esc(v.note)}">v${v.n}</button>`).join('') + '<button class="btn" id="savev">Save version</button>';
+    document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { snapshot(); state.docs[state.asset] = JSON.parse(JSON.stringify(vs[+b.dataset.v].lay)); toast('Restored v' + vs[+b.dataset.v].n + ' as your working copy'); render(); });
+    $('#savev').onclick = () => { vs.push({ n: vs.length + 1, note: 'saved from the desk', lay: JSON.parse(JSON.stringify(doc())) }); state.approved[state.asset] = false; $('#save').textContent = 'Version saved'; toast('Saved v' + vs.length); render(); };
+  }
+  function render() { renderAssets(); renderLayers(); renderArt(); renderInsp(); renderChecks(); renderVersions(); }
+  function startDrag(e) {
+    const id = e.currentTarget.dataset.id; state.sel = id; const l = layer(id); if (!l) return;
+    if (l.locked) { render(); return toast('That layer is locked'); }
+    if (l.type === 'logo') { render(); return toast('The campaign rule holds the logo. Unlock the rule in the inspector to move it.'); }
+    e.preventDefault(); const r = $('#art').getBoundingClientRect(); const sx = e.clientX, sy = e.clientY, ox = l.x, oy = l.y; let moved = false;
+    const mv = ev => { if (!moved) { snapshot(); moved = true; } l.x = Math.round((ox + (ev.clientX - sx) / r.width * 100) * 2) / 2; l.y = Math.round((oy + (ev.clientY - sy) / r.height * 100) * 2) / 2; renderArt(); renderChecks(); };
+    const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); render(); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); render();
+  }
+  document.addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    const l = layer(state.sel);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) { if (state.fut.length) { state.hist.push(JSON.stringify(doc())); state.docs[state.asset] = JSON.parse(state.fut.pop()); render(); } } else if (state.hist.length) { state.fut.push(JSON.stringify(doc())); state.docs[state.asset] = JSON.parse(state.hist.pop()); render(); } return; }
+    if (l && !l.locked && l.type !== 'logo' && /^Arrow/.test(e.key)) { e.preventDefault(); snapshot(); const s = e.shiftKey ? 2 : 0.5; if (e.key === 'ArrowLeft') l.x -= s; if (e.key === 'ArrowRight') l.x += s; if (e.key === 'ArrowUp') l.y -= s; if (e.key === 'ArrowDown') l.y += s; render(); }
+  });
+  $('#undo').onclick = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true }));
+  $('#redo').onclick = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: true }));
+  $('#safeBtn').onclick = () => { state.safe = !state.safe; $('#safeBtn').setAttribute('aria-pressed', state.safe); $('#safeBtn').classList.toggle('on', state.safe); renderArt(); };
+  $('#zoomIn').onclick = () => { state.zoom = Math.min(2, state.zoom + .1); $('#zoomLbl').textContent = Math.round(state.zoom * 100) + '%'; renderArt(); };
+  $('#zoomOut').onclick = () => { state.zoom = Math.max(.5, state.zoom - .1); $('#zoomLbl').textContent = Math.round(state.zoom * 100) + '%'; renderArt(); };
+  $('#approve').onclick = () => { state.approved[state.asset] = true; toast('Design approved for this version. A measurement is never an approval; this click is.'); render(); };
+  $('#export').onclick = () => { const n = Object.values(state.approved).filter(Boolean).length; toast(n ? n + ' approved piece' + (n > 1 ? 's' : '') + ' ready to export' : 'Nothing approved yet: approve a design first'); };
+  $('#preview').onclick = () => { state.sel = null; render(); toast('Preview: selection hidden'); };
+  document.querySelectorAll('.tool[data-tool]').forEach(t => t.onclick = () => { document.querySelectorAll('.tool[data-tool]').forEach(x => x.classList.toggle('on', x === t)); if (t.dataset.tool !== 'move') toast(t.textContent.trim() + ': click the canvas to add one (prototype)'); });
+  window.addEventListener('resize', renderArt);
+  render();
+  // the story starts with a failing check, so the desk's foot shows a real problem to fix
+  state.docs.st.layers.find(l => l.id === 'support').y = 82;
+  renderAssets();
+})();
+</script>
+</body>
+</html>
