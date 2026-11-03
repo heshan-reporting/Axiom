@@ -8,6 +8,7 @@
  *  B4 spend: a person's daily cap holds while another person can still run.
  * Providers MOCKED. Run: node --experimental-sqlite tests/studio-ready-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 import { answerFor } from './studio-answers.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
 const T = suite('studio-ready-worker (learning once and retracted, test projects, person identity, export integrity, per-person caps)');
@@ -22,7 +23,7 @@ const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'key-jo-full' : k
 const db = w.env.MIND_DB;
 const rows = async (sql, ...args) => ((await db.prepare(sql).bind(...args).all()).results || []);
 /** a PNG header with a real IHDR (width, height) and filler: enough for the worker's checks */
-const png = (wd, ht, fill) => { const b = Buffer.alloc(200, fill || 1); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b.writeUInt32BE(wd, 16); b.writeUInt32BE(ht, 20); b[24] = 8; b[25] = 6; return b.toString('base64'); };
+const png = (wd, ht, fill) => pngB64(wd, ht, { fill: fill || 1 });   // p44: a whole PNG (the worker decodes a measured export)
 const LAYOUT = { v: 4, stage: { w: 1080, h: 1080 }, noImagery: true, bg: '#0E6A6E', layers: [{ id: 'headline', type: 'text', role: 'headline', x: 6, y: 10, w: 80, h: 30, size: 6, weight: 700, color: '#FFFFFF' }] };
 const get = async (P, k) => (await call('GET', '/studio/get?id=' + P, null, k)).body;
 async function project(title, extra, key) { const r = await call('POST', '/studio/project', Object.assign({ ns: 'mca', title, brief: { objective: 'Correct the subsidy myth', message: 'Fuel tax credits are not a subsidy' } }, extra || {}), key); if (r.status !== 200) throw new Error('project: ' + JSON.stringify(r.body)); return r.body; }

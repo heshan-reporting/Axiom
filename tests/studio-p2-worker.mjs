@@ -5,6 +5,7 @@
  * are stubs that answer by what the prompt asks for and record every request.
  * Run: node --experimental-sqlite tests/studio-p2-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 import { validateAsset } from './studio-measure-stub.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
@@ -200,8 +201,8 @@ await t('export takes exactly the approved versions: an unapproved asset is left
   await req('POST', '/studio/approve', { asset: fb.id, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' });
   const vd = await validateAsset(req, P, fb.id); eq(vd.status, 200, JSON.stringify(vd.d)); ok(vd.d.validation.ok, JSON.stringify(vd.d.validation.issues));
   eq((await req('POST', '/studio/approve', { asset: fb.id, part: 'design', decision: 'approve', reason: 'fine' })).status, 200);
-  let g = await req('GET', '/studio/get?id=' + P); const cur = g.d.assets.find(x => x.id === fb.id).current;
-  const sv = await req('POST', '/studio/render/save', { asset: fb.id, version: cur, imageB64: PNG, mime: 'image/png' }); eq(sv.status, 200, JSON.stringify(sv.d)); ok(/-export-[0-9a-f]{16}\.png$/.test(sv.d.key), 'bound to its passing measurement under its own hash (S28): ' + sv.d.key); ok(sv.d.bound, 'the measurement had no image: this one became its validated file'); ok(r2.has(sv.d.key));
+  let g = await req('GET', '/studio/get?id=' + P); const cur = g.d.assets.find(x => x.id === fb.id).current; const curVer = g.d.assets.find(x => x.id === fb.id).versions.find(x => x.id === cur);
+  const sv = await req('POST', '/studio/render/save', { asset: fb.id, version: cur, imageB64: pngForVersion(curVer), mime: 'image/png' }); eq(sv.status, 200, JSON.stringify(sv.d)); ok(/-export-[0-9a-f]{16}\.png$/.test(sv.d.key), 'bound to its passing measurement under its own hash (S28): ' + sv.d.key); ok(sv.d.bound, 'the measurement had no image: this one became its validated file'); ok(r2.has(sv.d.key));
   eq((await req('POST', '/studio/render/save', { asset: fb.id, version: 'v_nope', imageB64: PNG })).status, 404);
   const j = await req('POST', '/studio/job', { project: P, stage: 'export', input: {}, idem: 'e1' }); const done = await run(j.d.job); eq(done.state, 'done', done.error);
   eq(done.result.included.length, 1); eq(done.result.included[0].asset, fb.id); eq(done.result.included[0].version, cur); eq(done.result.included[0].exportKey, sv.d.key);

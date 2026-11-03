@@ -6,6 +6,7 @@
  * naming the version that addresses them; the delivery manifest records the client's decision and can require it.
  * Run: node --experimental-sqlite tests/studio-p11-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
@@ -30,7 +31,7 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new
 const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
 const run = async (job) => { let j = job; for (let i = 0; i < 4 && (j.state === 'queued' || j.state === 'running'); i++) j = (await req('POST', '/studio/job/step', { id: j.id })).d.job; return j; };
 const curV = async (P, A) => { const g = (await req('GET', '/studio/get?id=' + P)).d; const a = g.assets.find(x => x.id === A); return { a, v: a.versions.find(x => x.id === a.current) }; };
-const measure = async (P, A) => { const { a, v } = await curV(P, A); return req('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a), imageB64: png(3) }); };
+const measure = async (P, A) => { const { a, v } = await curV(P, A); return req('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a), imageB64: pngForVersion(v, { fill: 3 }) }); };   // p44: a real PNG at the stage's size
 const L = { v: 5, format: '1:1', stage: { w: 1080, h: 1080 }, bg: '#0E6A6E', regions: [], layers: [{ id: 'h', type: 'text', role: 'headline', x: 6, y: 10, w: 80, h: 20, size: 6, weight: 800, color: '#fff' }, { id: 's', type: 'text', role: 'support', x: 6, y: 40, w: 80, h: 12, size: 3, weight: 500, color: '#fff' }, { id: 'c', type: 'text', role: 'cta', x: 6, y: 70, w: 40, h: 8, size: 2.6, weight: 700, color: '#111', bg: '#E8B23A' }] };
 
 console.log('studio-p11-worker harness (client review: private scoped links, allow-list, pins, stale versions, approval after the agency, resolution by version, delivery)');

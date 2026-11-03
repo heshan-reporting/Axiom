@@ -2,7 +2,7 @@
 
 This page is for the people running a test round of the AXIOM Creative Studio, and for the testers themselves. It says who can
 do what, where to test, what to try, what costs money, what is known not to work yet, and how to report a problem. Build
-`2026-11-05.studio-p43`, page release `?v=r26` (S28; `CREATIVE-STUDIO.md` s.51 holds the findings behind it).
+`2026-11-06.studio-p44`, page release `?v=r27` (S28 and the p43 audit; `CREATIVE-STUDIO.md` s.51 and s.52 hold the findings behind it).
 
 ## Before a round: the gate
 
@@ -15,14 +15,14 @@ A round starts only when all of these hold:
    `tests/shots/s27/after-sweep.json`; every row's `axe` list is empty.
 3. Every scripted journey below passes once by hand on the deployed page with the synthetic client.
 4. No finding in the ledger (`CREATIVE-STUDIO.md` s.51) is open at "blocker".
-5. The worker and the page are deployed together: `/studio/status` answers the build above, and the page loads `?v=r26`.
+5. The worker and the page are deployed together: `/studio/status` answers the build above, and the page loads `?v=r27`.
 
 ## Roles
 
 | Who | Key | Can | Cannot |
 |---|---|---|---|
 | Reviewer | guest link, read-only (the default) | open every step, read projects, run Measure and Check, copy a problem report | create, change, approve or spend |
-| Tester | guest link with `--full` | create test projects, write, generate within their daily allowance, approve inside test projects, send a problem report | change a live client's brand kit, taught rules or standing corrections; make a project count as live work |
+| Tester | guest link with `--full` | create test projects, write, generate within their daily allowance, approve inside test projects, change the synthetic client's kit, send a problem report | change a live client's memory by any route (brand kit, taught rules, corrections, outcomes, artwork, the Mind); change a live client's project (it opens read-only, "live client work, read-only for a guest link"); import a live client's earlier work; write anywhere else in AXIOM; make a project count as live work |
 | Agency | roster key | everything | - |
 
 Make the links on the Mac: `python3 tools/guest-link.py add "Name" --days 14` (read-only) or `... --full` (tester). Each person gets their
@@ -88,8 +88,9 @@ says what each job actually sent.
 
 ## Known limits (say so, do not report them as new)
 
-- The technical measurement is made in the tester's browser; the worker re-judges its geometry, words and fonts and checks the PNG's
-  type and size, but takes the pixel figures (contrast, ink readability) as reported. The validated PNG is stored under its own hash
+- The technical measurement is made in the tester's browser; the worker re-judges its geometry, words and fonts and checks the PNG
+  whole (every chunk and checksum, the image data decompressing to exactly its stated size, which must be the composition's), but
+  takes the pixel figures (contrast, ink readability) as reported. The validated PNG is stored under its own hash
   and is what the client sees and what is delivered.
 - A client's approval through a review link is whoever holds the link, under the name they type. Treat it as a link approval.
 - Keys are agency-wide by client: a guest link can open every client's projects to read. Per-key client scope is proposed, not built

@@ -10,6 +10,7 @@
  * verdict never approves; the identity audit reports exactly what is on file.
  * Run: node --experimental-sqlite tests/studio-p8-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -248,7 +249,7 @@ await t('the inspection reads the composed export when one is saved - with the w
   const g0 = await get(P); IG = g0.assets.filter(x => { const xv = cur(g0, x.id); return xv && xv.layout && layerOf(xv.layout, 'kicker') && layerOf(xv.layout, 'wordmark'); }).pop().id;
   await req('POST', '/studio/version', { asset: IG, image: { key: 'studio/x/y/base.png', url: '/studio/file?key=studio%2Fx%2Fy%2Fbase.png', model: 'gemini-3-pro-image', size: '2K' }, kind: 'render', note: 'image' });
   const vv = cur(await get(P), IG);
-  const s = await req('POST', '/studio/render/save', { asset: IG, version: vv.id, imageB64: png(6, 5).toString('base64'), mime: 'image/png' }); eq(s.status, 200);
+  const s = await req('POST', '/studio/render/save', { asset: IG, version: vv.id, imageB64: pngForVersion(vv, { alpha: true, fill: 5 }), mime: 'image/png' }); eq(s.status, 200, JSON.stringify(s.d).slice(0, 200));
   inspectVerdict = 'fix';
   const j = await jobRun(P, 'inspect', { version: vv.id }, IG); eq(j.state, 'done', j.error); eq(j.result.composed, true);
   const body = anth.calls.filter(b => /inspecting a rendered social tile/.test(String(b.system))).pop(); const user = textOf(body);

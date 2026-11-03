@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r26` since S28 (5 November 2026).
+  with `?v=r27` since the p43 audit (6 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2819,6 +2819,28 @@ redirect (`fullText` `publicOnly`, `srcFetchPublic`). **Report a problem** (Help
 seed|reset` (dry run by default) seeds and clears the synthetic client; `tools/guest-link.py` makes read-only links unless `--full`;
 `npm run test:release` is the gate. Harnesses: `studio-ready-worker.mjs` (10), `studio-ready2-worker.mjs` (8),
 `studio-ready-browser.mjs` (8), `studio-test-kit-test.py` (4), `guest-link-test.py` (11).
+
+**The p43 audit closed (build `2026-11-06.studio-p44`, page `?v=r27`; `CREATIVE-STUDIO.md` s.52).** A guest link writes test work
+only, decided in one place before any route runs: `axGuestGuard(env, req, path, url)` reads the client or project a request writes to
+the way that route's own handler reads it (the address before the body on `/brand`, the stored row for anything named by id: a rule,
+an artwork, a text, a direction, a reference, a job, a share, a comment) and answers `guest_live_memory` (a live client's kit, rules,
+corrections, outcomes, artwork or the Mind; an every-client rule), `guest_live_project` (a live project, or importing a live client's
+earlier work, whose one import slot is the agency's) or `guest_scope` (anything else in AXIOM, acting reads included; `/mind/query`
+stays open). Backstop: in a guest's Studio write `env` is `Object.create(env, {__guestGate})`, `stProject` answers null for a live
+project and the request wrapper turns the answer into `guest_live_project` (`AX_GUEST_GATES`). `/studio/get` marks a live project
+`readOnly` with `readOnlyWhy: 'guest_live'` for a guest (the island's chip says so). Opened only on purpose: `STUDIO_GUEST_BRAND=1`,
+`STUDIO_GUEST_LIVE=1`, `AXIOM_GUEST_WRITE=any`. For everyone, a test project now files nothing by any route (kit text verdicts too; a
+reference observation there changes no live rule; `brTeachObservation` refuses its references, `test_reference`), and the client-wide
+reads (brand workspace, inventory, identity audit, teach evidence, recorded decisions, brief suggestions) leave test projects out
+(`stLiveSql`). A measured export is a PNG by its structure: `stPngCheck(buf, want)` (every chunk whole with its CRC, IHDR first and
+legal, consecutive IDAT, IEND last, nothing after it, the stage size checked before inflating, the image data inflated through
+`DecompressionStream` to exactly its stated size with a legal filter on every row) in `stValidationSubmit` (the stage size is now
+required, 0 x 0 refused: `bad_png` / `image_size` 422) and `/studio/render/save`. A withdrawal is retracted only when its vectors are
+gone: `mindRetract` marks the document `retracting` first (`mindDropRetracted` leaves it out of `mindRetrieve` and `/mind/query` from
+then on), deletes the vectors, then `retracted`; a failed deletion stays pending (`engine_outcomes.retract` / `retract_err`,
+`/studio/approve` answers `learned: 'retraction_pending'` and `retract {done, pending, detail}`) and `mindRetractPending` finishes it
+each tick; refiling identical text never revives a retracted document. Harnesses: `tests/studio-p44-worker.mjs` (11);
+`tests/png.mjs` builds whole PNGs (and broken ones) for every harness that files a measurement.
 
 Phase 1, the ground:
 

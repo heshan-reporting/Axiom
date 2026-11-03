@@ -8,6 +8,7 @@
  * figures. Providers are mocked; nothing is spent.
  * Run: node --experimental-sqlite tests/studio-s11-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
 import { HOOF_STRADDLE, HOOF_STRADDLE_COPY } from './fixtures/studio-layouts.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
@@ -51,7 +52,7 @@ const run = async (job) => { let j = job; for (let i = 0; i < 4 && (j.state === 
 const get = async P => (await req('GET', '/studio/get?id=' + P)).d;
 const curV = async (P, A) => { const g = await get(P); const a = g.assets.find(x => x.id === A); return { a, v: a.versions.find(x => x.id === a.current) }; };
 const readiness = async A => (await req('GET', '/studio/readiness?asset=' + A, null, 'read-key')).d;
-const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: png(3) }); };
+const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngForVersion(v, { fill: 3 }) }); };   // p44: a real PNG at the stage's size
 const box = (rep, id) => rep.boxes.find(b => b.id === id);
 const codes = r => (r.d.validation ? r.d.validation.issues : []).map(i => i.code + '/' + i.severity + ':' + i.layers.join(','));
 
@@ -211,7 +212,7 @@ await t('words shown twice: a free layer that repeats the support is hidden on t
   // two free layers with the same words (case and punctuation aside) are not the copy's: the version keeps them, the judge blocks them
   eq(v.layout.layers.find(l => l.id === 'k1').hidden, undefined); eq(v.layout.layers.find(l => l.id === 'k2').hidden, undefined);
   const rep = stubReport(v, arow);
-  const r = await req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: png(3) }); eq(r.status, 200, JSON.stringify(r.d).slice(0, 300));
+  const r = await req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngForVersion(v, { fill: 3 }) }); eq(r.status, 200, JSON.stringify(r.d).slice(0, 300));
   const dup = r.d.validation.issues.find(i => i.code === 'duplicate_text'); ok(dup && dup.severity === 'blocking' && dup.layers.join(',') === 'k1,k2', 'duplicate_text blocking on k1 and k2: ' + JSON.stringify(dup));
   eq(r.d.validation.ok, false); ok(!r.d.validation.issues.some(i => i.layers.indexOf('echo') >= 0), 'the hidden echo is judged no more');
 });

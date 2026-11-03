@@ -2137,7 +2137,7 @@ async function mindIngestDoc(env, doc, opts) {
   await mindSchema(env);
   const hash = await sha256hex(text);
   if (!doc.force) {
-    const had = await env.MIND_DB.prepare('SELECT id, status FROM mind_docs WHERE ns=? AND hash=? ORDER BY created DESC LIMIT 1').bind(ns, hash).first();
+    const had = await env.MIND_DB.prepare("SELECT id, status FROM mind_docs WHERE ns=? AND hash=? AND COALESCE(status,'') NOT IN ('retracting','retracted') ORDER BY created DESC LIMIT 1").bind(ns, hash).first();
     if (had) {
       // the same text sent again with an explicit classification classifies the stored document
       const cls = mindClass(doc); if (cls.classified) await env.MIND_DB.prepare('UPDATE mind_docs SET campaign=?, approval=?, scope=?, classified=? WHERE id=?').bind(cls.campaign, cls.approval, cls.scope, cls.classified, had.id).run();
@@ -3185,6 +3185,61 @@ function stImgSniff(buf) {
   }
   return null;
 }
+/* p44 (the 3 November audit): a measured export is a PNG by its structure, not by its first bytes. The signature; an IHDR of 13
+ * bytes first, with a legal bit depth and colour type and a size that is not zero; every chunk whole, its name letters, its CRC
+ * right; a palette where the colour type needs one; the IDAT chunks consecutive; IEND last with nothing after it; and the image
+ * data, inflated, exactly the bytes its size and type need, every row (of a non-interlaced image) naming one of the five filters.
+ * `want` {w, h} is checked before anything is inflated, so the work is bounded by the composition's own size. Returns {ok, w, h}
+ * or {ok:false, why, size?}; never throws. */
+const ST_PNG_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function stCrc32(u, s, e) { let c = 0xffffffff; for (let i = s; i < e; i++) c = ST_PNG_CRC[(c ^ u[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+const ST_PNG_DEPTHS = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }, ST_PNG_CHANNELS = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+async function stPngCheck(buf, want) {
+  const u = new Uint8Array(buf instanceof ArrayBuffer ? buf : (buf && buf.buffer ? buf.buffer.slice(buf.byteOffset || 0, (buf.byteOffset || 0) + buf.byteLength) : new ArrayBuffer(0)));
+  const bad = (why, extra) => Object.assign({ ok: false, why }, extra || {});
+  const u32 = i => ((u[i] << 24) | (u[i + 1] << 16) | (u[i + 2] << 8) | u[i + 3]) >>> 0;
+  const SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (u.length < 8 || SIG.some((b, i) => u[i] !== b)) return bad('it does not start with the PNG signature');
+  let pos = 8, hd = null, plte = false, ended = false, idat = [], idatLen = 0, inIdat = false, idatClosed = false;
+  while (pos < u.length) {
+    if (pos + 12 > u.length) return bad('a chunk is cut off at byte ' + pos);
+    const len = u32(pos); const type = String.fromCharCode(u[pos + 4], u[pos + 5], u[pos + 6], u[pos + 7]);
+    if (!/^[A-Za-z]{4}$/.test(type)) return bad('the chunk at byte ' + pos + ' has no name (the file is damaged)');
+    const ds = pos + 8, de = ds + len; if (len > 0x7fffffff || de + 4 > u.length) return bad('the ' + type + ' chunk is cut off: the file is incomplete');
+    if (stCrc32(u, pos + 4, de) !== u32(de)) return bad('the ' + type + ' chunk fails its checksum: the file is damaged');
+    if (!hd) { if (type !== 'IHDR' || len !== 13) return bad('the first chunk is not a 13-byte IHDR'); hd = { w: u32(ds), h: u32(ds + 4), depth: u[ds + 8], ct: u[ds + 9], comp: u[ds + 10], filter: u[ds + 11], interlace: u[ds + 12] }; }
+    else if (type === 'IHDR') return bad('it has a second IHDR');
+    if (type === 'PLTE') plte = true;
+    if (type === 'IDAT') { if (idatClosed) return bad('its image data (IDAT) is split by another chunk'); inIdat = true; idat.push([ds, de]); idatLen += len; }
+    else if (inIdat) idatClosed = true;
+    pos = de + 4;
+    if (type === 'IEND') { if (len) return bad('its IEND carries data'); ended = true; break; }
+  }
+  if (!ended) return bad('it has no IEND: the file is incomplete');
+  if (pos !== u.length) return bad('there are ' + (u.length - pos) + ' bytes after its end');
+  const { w, h, depth, ct, comp, filter, interlace } = hd;
+  if (!w || !h) return bad('it says it is ' + w + 'x' + h, { size: true, w, h });
+  if (!ST_PNG_DEPTHS[ct] || ST_PNG_DEPTHS[ct].indexOf(depth) < 0 || comp !== 0 || filter !== 0 || interlace > 1) return bad('its header is not a legal PNG header (colour type ' + ct + ', depth ' + depth + ')');
+  if (ct === 3 && !plte) return bad('it is a palette image without its palette');
+  if (!idat.length) return bad('it holds no image data (IDAT)');
+  if (want && want.w && want.h && (w !== want.w || h !== want.h)) return bad('it is ' + w + 'x' + h + ', not ' + want.w + 'x' + want.h, { size: true, w, h });
+  const bpp = ST_PNG_CHANNELS[ct] * depth, rowBytes = pw => Math.ceil(pw * bpp / 8);
+  let expected = 0;
+  if (!interlace) expected = h * (1 + rowBytes(w));
+  else for (const [x0, y0, dx, dy] of [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]]) { const pw = Math.ceil((w - x0) / dx), ph = Math.ceil((h - y0) / dy); if (pw > 0 && ph > 0) expected += ph * (1 + rowBytes(pw)); }
+  const z = new Uint8Array(idatLen); let o = 0; for (const [s, e] of idat) { z.set(u.subarray(s, e), o); o += e - s; }
+  const rowLen = 1 + rowBytes(w); let got = 0, nextRow = 0, reader = null;
+  try {
+    reader = new Response(z).body.pipeThrough(new DecompressionStream('deflate')).getReader();
+    for (;;) {
+      const r = await reader.read(); if (r.done) break; const v = r.value;
+      if (!interlace) { while (nextRow < got + v.length) { if (v[nextRow - got] > 4) { try { await reader.cancel(); } catch (e) {} return bad('row ' + Math.floor(nextRow / rowLen) + ' names an unknown filter: the image data is damaged'); } nextRow += rowLen; } }
+      got += v.length; if (got > expected) { try { await reader.cancel(); } catch (e) {} return bad('it holds more image data than a ' + w + 'x' + h + ' image needs'); }
+    }
+  } catch (e) { return bad('its image data does not decompress (' + String((e && e.message) || e).slice(0, 80) + ')'); }
+  if (got !== expected) return bad('its image data holds ' + got + ' bytes; a ' + w + 'x' + h + ' image of this kind needs ' + expected);
+  return { ok: true, w, h, depth, ct, interlace: !!interlace };
+}
 async function stBufSha(buf) { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join(''); }
 /** S28: the composed PNG a version's measurement filed: content-addressed, so it can never be replaced under the same name */
 function stExportKey(p, a, v, hash) { return 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export-' + String(hash).slice(0, 16) + '.png'; }
@@ -3486,7 +3541,7 @@ async function ensureEngine(env) {
   // and what happened to it since (superseded by another rule, its evidence retired) - so a rule and its evidence stay linked
   try { await env.MIND_DB.prepare('ALTER TABLE engine_fixes ADD COLUMN origin TEXT').run(); } catch (e) {}
   // S28: the Mind document an outcome filed, and when the outcome was withdrawn (its document retracted with it)
-  for (const c of ['doc TEXT', 'withdrawn INTEGER']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_outcomes ADD COLUMN ' + c).run(); } catch (e) {} }
+  for (const c of ['doc TEXT', 'withdrawn INTEGER', 'retract TEXT', 'retract_err TEXT']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_outcomes ADD COLUMN ' + c).run(); } catch (e) {} }
   ENGINE_READY = true;
   return true;
 }
@@ -3566,25 +3621,55 @@ async function engineOutcome(env, body, who) {
   } catch (e) { o.exemplarError = String((e && e.message) || e).slice(0, 200); console.log('outcome exemplar not filed: ' + o.exemplarError); }   // the verdict stands; the answer says the exemplar is missing
   return Object.assign(o, { docId });
 }
-/** S28: take a decision back out of the client's memory: the outcome is marked withdrawn and the WIN or LOSS document it filed is
- *  retracted (its vectors deleted, so no brief retrieves it; the row says retracted). `ref` is exact; `verdict` narrows it. */
+/** S28, p44: take a decision back out of the client's memory. The outcome is marked withdrawn (the person's decision stands
+ *  withdrawn whatever happens next) and the WIN or LOSS document it filed is retracted. The retraction is reported done only
+ *  when its vectors are gone: until then it is `pending` with the reason, the document is already left out of retrieval
+ *  (mindRetract marks it first), and mindRetractPending finishes it on a later tick. `ref` is exact; `verdict` narrows it.
+ *  Answers {n, done, pending, errors}. */
 async function engineRetract(env, f) {
-  await ensureEngine(env); const now = Date.now();
+  await ensureEngine(env); const now = Date.now(); const out = { n: 0, done: 0, pending: 0, errors: [] };
   const rows = (await env.MIND_DB.prepare('SELECT id, doc FROM engine_outcomes WHERE ns=? AND surface=? AND ref=? AND COALESCE(withdrawn,0)=0' + (f.verdict ? ' AND verdict=?' : '')).bind(...[relNs(f.ns), String(f.surface || '').slice(0, 40), String(f.ref || '').slice(0, 60)].concat(f.verdict ? [f.verdict] : [])).all()).results || [];
   for (const r of rows) {
-    if (r.doc) { try { await mindRetract(env, r.doc); } catch (e) { console.log('retract failed for ' + r.doc + ': ' + String(e && e.message || e).slice(0, 120)); } }
-    await env.MIND_DB.prepare('UPDATE engine_outcomes SET withdrawn=? WHERE id=?').bind(now, r.id).run();
+    out.n++; let state = 'done', err = '';
+    if (r.doc) { try { const m = await mindRetract(env, r.doc); if (!m.ok) { state = 'pending'; err = m.error || 'not retracted'; } } catch (e) { state = 'pending'; err = String((e && e.message) || e).slice(0, 200); } }
+    await env.MIND_DB.prepare('UPDATE engine_outcomes SET withdrawn=?, retract=?, retract_err=? WHERE id=?').bind(now, state, err, r.id).run();
+    if (state === 'done') out.done++; else { out.pending++; out.errors.push(err); console.log('retraction pending for ' + r.doc + ': ' + err.slice(0, 120)); }
   }
-  return rows.length;
+  return out;
 }
-/** S28: a Mind document taken back: every chunk's vector deleted, the text removed from R2, the row kept as status retracted. */
+/** S28, p44: a Mind document taken back. It is marked `retracting` first - from then on retrieval leaves it out (mindDropRetracted)
+ *  - then every chunk's vector is deleted, the text removed from R2, and the row set `retracted`. A failed deletion leaves it
+ *  `retracting` with the error and answers {ok:false}; nothing is reported retracted that is not. */
 async function mindRetract(env, docId) {
-  const row = await env.MIND_DB.prepare('SELECT id, ns, chunks FROM mind_docs WHERE id=?').bind(String(docId || '').slice(0, 80)).first(); if (!row) return false;
+  const row = await env.MIND_DB.prepare('SELECT id, ns, chunks FROM mind_docs WHERE id=?').bind(String(docId || '').slice(0, 80)).first(); if (!row) return { ok: true, missing: true };
+  await env.MIND_DB.prepare("UPDATE mind_docs SET status='retracting', error='', updated=? WHERE id=?").bind(Date.now(), row.id).run();
   const n = Math.max(1, Number(row.chunks) || 1); const ids = []; for (let i = 0; i < n; i++) ids.push(row.id + '_' + i);
-  if (env.MIND_VECTORS && env.MIND_VECTORS.deleteByIds) { for (let i = 0; i < ids.length; i += 100) await env.MIND_VECTORS.deleteByIds(ids.slice(i, i + 100)); }
+  try { if (env.MIND_VECTORS && env.MIND_VECTORS.deleteByIds) { for (let i = 0; i < ids.length; i += 100) await env.MIND_VECTORS.deleteByIds(ids.slice(i, i + 100)); } }
+  catch (e) { const err = 'the vectors were not deleted: ' + String((e && e.message) || e).slice(0, 160); try { await env.MIND_DB.prepare('UPDATE mind_docs SET error=?, updated=? WHERE id=?').bind(err, Date.now(), row.id).run(); } catch (e2) {} return { ok: false, error: err }; }
   if (env.MIND_DOCS) { try { await env.MIND_DOCS.delete('mind/' + row.ns + '/' + row.id + '.txt'); } catch (e) {} }
-  await env.MIND_DB.prepare("UPDATE mind_docs SET status='retracted', updated=? WHERE id=?").bind(Date.now(), row.id).run();
-  return true;
+  await env.MIND_DB.prepare("UPDATE mind_docs SET status='retracted', error='', updated=? WHERE id=?").bind(Date.now(), row.id).run();
+  return { ok: true };
+}
+/** p44: finish the retractions a failed deletion left pending (every tick, a few at a time; never gated, it spends nothing). */
+async function mindRetractPending(env, limit) {
+  if (!env.MIND_DB) return { tried: 0, done: 0 };
+  let rows = []; try { rows = (await env.MIND_DB.prepare("SELECT id, doc FROM engine_outcomes WHERE retract='pending' ORDER BY withdrawn LIMIT ?").bind(limit || 20).all()).results || []; } catch (e) { return { tried: 0, done: 0 }; }
+  let done = 0;
+  for (const r of rows) {
+    let m = { ok: true }; if (r.doc) { try { m = await mindRetract(env, r.doc); } catch (e) { m = { ok: false, error: String((e && e.message) || e).slice(0, 200) }; } }
+    try { await env.MIND_DB.prepare('UPDATE engine_outcomes SET retract=?, retract_err=? WHERE id=?').bind(m.ok ? 'done' : 'pending', m.ok ? '' : String(m.error || ''), r.id).run(); } catch (e) {}
+    if (m.ok) done++;
+  }
+  return { tried: rows.length, done };
+}
+/** p44: retrieval never returns a document being retracted or retracted (its vectors may outlive a failed deletion). */
+async function mindDropRetracted(env, hits) {
+  const ids = Array.from(new Set((hits || []).map(h => h && h.meta && h.meta.docId).filter(Boolean))).slice(0, 90);
+  if (!ids.length || !env.MIND_DB) return hits;
+  try {
+    const gone = new Set(((await env.MIND_DB.prepare("SELECT id FROM mind_docs WHERE status IN ('retracting','retracted') AND id IN (" + ids.map(() => '?').join(',') + ')').bind(...ids).all()).results || []).map(r => r.id));
+    return gone.size ? hits.filter(h => !(h && h.meta && gone.has(h.meta.docId))) : hits;
+  } catch (e) { return hits; }
 }
 /** Describe a piece of artwork with a vision model so it can be remembered and
  *  retrieved. Text only comes back; the image itself goes to R2. */
@@ -7194,7 +7279,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-05.studio-p43';
+const AXIOM_BUILD = '2026-11-06.studio-p44';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7319,7 +7404,10 @@ async function stEvent(env, project, kind, data, who) {
 async function stProject(env, id) {
   id = stClean(id, 24); if (!id) return null;
   const r = await env.MIND_DB.prepare('SELECT * FROM studio_projects WHERE id=?').bind(id).first();
-  return r ? stProjectRow(r) : null;
+  const p = r ? stProjectRow(r) : null;
+  // p44: in a guest's write a live project is not there (axGuestGuard refuses first; this holds whatever a route resolves later)
+  if (p && env.__guestGate && !stIsTest(env, p)) { env.__guestGate.refused = p.id; return null; }
+  return p;
 }
 /** An asset with its project - the project's namespace is the only namespace that counts. */
 async function stAsset(env, id) {
@@ -9274,7 +9362,7 @@ async function stIntelKnowledge(env, p, q, log) {
   } catch (e) {}
   try { const rows = (await db.prepare('SELECT id,label,issue,ratio,angle,detected_ts,acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? ORDER BY detected_ts DESC LIMIT 4').bind(ns, Date.now() - 14 * 864e5).all()).results || []; out.A = rows.map((r, i) => ({ id: 'A' + (i + 1), ref: r.id, label: stStr(r.label, 120), issue: r.issue || '', ratio: Math.round((r.ratio || 0) * 10) / 10, angle: stStr(r.angle, 240), at: r.detected_ts || 0 })); } catch (e) {}
   try {
-    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8 ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
+    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8" + stLiveSql(env, ns, 'p') + " ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
     try { await ensureEngine(env); } catch (e) {}
     const eo = (await db.prepare('SELECT verdict,why,headline,surface,created FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
     out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created }))).sort((a, b) => b.at - a.at).slice(0, 8).map((x, i) => Object.assign({ id: 'D' + (i + 1) }, x));
@@ -10308,7 +10396,7 @@ async function stBriefSuggest(env, p, opts) {
   // previous briefs for the client (same campaign first)
   try {
     // only this campaign's earlier briefs: another campaign's objective or message is not a precedent here (HOOF is not MCA national)
-    const rows = (await env.MIND_DB.prepare("SELECT id, title, campaign, brief FROM studio_projects WHERE ns=? AND archived=0 AND COALESCE(campaign,'')=? ORDER BY updated DESC LIMIT 12").bind(ns, campaignId || '').all()).results || [];
+    const rows = (await env.MIND_DB.prepare("SELECT id, title, campaign, brief FROM studio_projects WHERE ns=? AND archived=0 AND COALESCE(campaign,'')=?" + stLiveSql(env, ns, '') + " ORDER BY updated DESC LIMIT 12").bind(ns, campaignId || '').all()).results || [];
     rows.filter(r => !p || r.id !== p.id).forEach(r => { const b = pjs(r.brief, {}); ['objective', 'audience', 'message', 'action', 'deliverables'].forEach(k => { if (b[k]) add(k, b[k], 'previous', 'brief "' + (r.title || r.id) + '"' + (r.campaign ? ' (' + r.campaign + ')' : '')); }); const rq = b.requirements || {}; ['mandatory', 'preferred'].forEach(band => stReqItems(rq[band]).forEach(it => add('requirements', it.text, it.source === 'ai' ? 'previous' : it.source, it.from || 'brief "' + (r.title || r.id) + '"', { band }))); });
   } catch (e) {}
   // references on this project: brand and approved references are requirements
@@ -11870,7 +11958,7 @@ async function stIdentityAudit(env, ns) {
   const kit = (await brandKit(env, ns)) || {};
   const head = async key => { if (!env.MIND_DOCS) return null; try { const o = await env.MIND_DOCS.get(key); if (!o) return null; const buf = await o.arrayBuffer(); return { bytes: buf.byteLength, mime: (o.httpMetadata && o.httpMetadata.contentType) || '' }; } catch (e) { return null; } };
   const logo = await head('brand/' + ns + '/logo');
-  const refRows = (await env.MIND_DB.prepare('SELECT r.*, p.campaign AS project_campaign FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
+  const refRows = (await env.MIND_DB.prepare('SELECT r.*, p.campaign AS project_campaign FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=?' + stLiveSql(env, ns, 'p') + ' ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
   let fixes = []; try { fixes = (await engineFixes(env, ns, null, false)).filter(f => f.task === 'tiles' || f.task === 'any'); } catch (e) {}
   let art = []; try { art = (await env.MIND_DB.prepare('SELECT id, title, meta, description FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || []; } catch (e) {}
   const refsFor = cid => refRows.filter(r => (r.campaign || r.project_campaign || '') === cid);
@@ -12129,7 +12217,7 @@ async function brandWorkspace(env, ns, campaignId) {
   const item = (o) => Object.assign({ status: 'active', scope: o.campaign ? 'campaign' : 'client', campaign: o.campaign || '', authorityWord: BR_AUTH_WORD[o.authority] || o.authority }, o);
   const identity = await brMarks(env, ns, kit, camp);
   // references: every project of this client; a campaign view shows that campaign's and the unassigned ones
-  const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, r.meta, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
+  const refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.note, r.key, r.analysis, r.campaign, r.project, r.created, r.meta, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=?' + stLiveSql(env, ns, 'p') + ' ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || [];
   // S23: where a reference's campaign comes from (its own record, or only its project), its record, and its observations by authority
   const refMeta = r => { const m = pjs(r.meta, {}) || {}; const obs = (m.observations || []); const n = k => obs.filter(o => o.status === 'active' && o.authority === k).length; return { context: m.context || '', format: m.format || '', channel: m.channel || '', approval: m.approval || null, likes: (m.likes || []).length, dislikes: (m.dislikes || []).length, observations: { active: obs.filter(o => o.status === 'active').length, observed: n('observed'), inferred: n('inferred'), preferred: n('preferred'), mandatory: n('mandatory'), promoted: obs.filter(o => o.status === 'promoted').length, retired: obs.filter(o => o.status === 'retired').length } }; };
   const refs = refRows.filter(r => { const c = r.campaign || r.pc || ''; return cid ? (c === cid || c === '') : true; }).map(r => { const an = pjs(r.analysis, null); return item({ id: r.id, kind: 'reference', authority: 'observation', campaign: r.campaign || r.pc || '', campaignFrom: r.campaign ? 'reference' : r.pc ? 'project' : 'none', name: r.name, title: r.name, purpose: r.purpose, body: an && !an.error ? stStr(an.summary, 300) : (r.note || ''), analysed: !!(an && !an.error), meta: refMeta(r), project: r.project, projectTitle: r.ptitle, url: r.key ? '/studio/file?key=' + encodeURIComponent(r.key) : '', source: { type: 'reference', id: r.id, label: 'reference on project ' + (r.ptitle || r.project), project: r.project }, created: r.created }); });
@@ -12199,7 +12287,7 @@ async function brInventory(env, ns, campaignId) {
   const nr = (code, items, why, remedy) => { if (items.length) notRetrieved.push({ code, n: items.length, items: items.slice(0, 20), why, remedy }); };
   nr('fact_pending', ws.words.items.filter(i => i.kind === 'claim' && i.status === 'proposed').map(f => ({ id: f.id.replace(/^kit:fact:/, ''), text: f.body, source: (f.data || {}).source || '' })), 'a pending fact is an unreviewed inference: the copy stage never quotes it', 'review it: Teach this brand, approve the fact with its source');
   if (cid) nr('facts_other_campaign', (kit.facts || []).filter(f => f.campaign && f.campaign !== cid).map(f => ({ id: f.id, text: f.text, campaign: f.campaign })), 'facts of another campaign are kept out of this campaign\'s context by design', 'none needed unless the fact belongs here too: re-file it on this campaign');
-  let refRows = []; try { refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.campaign, r.project, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) {}
+  let refRows = []; try { refRows = (await env.MIND_DB.prepare('SELECT r.id, r.name, r.purpose, r.campaign, r.project, p.campaign AS pc, p.title AS ptitle FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=?' + stLiveSql(env, ns, 'p') + ' ORDER BY r.created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) {}
   if (cid) nr('references_other_campaign', refRows.filter(r => { const c = r.campaign || r.pc || ''; return c && c !== cid; }).map(r => ({ id: r.id, name: r.name, purpose: r.purpose, campaign: r.campaign || r.pc, project: r.project })), 'references filed on another campaign are excluded from this campaign\'s reference pack in recommended mode', 'none needed unless the reference belongs here too: change its campaign on the project');
   nr('corrections_off', ws.preferences.filter(p => p.status === 'retired').map(p => ({ id: p.id.replace(/^fix:/, ''), text: p.body, campaign: p.campaign })), 'a switched-off correction is kept but not applied', 'switch it back on in the Learned table if it still holds');
   nr('artwork_undescribed', artUndescribed.map(a => ({ id: a.id, title: a.title, text: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || '') })), 'the image is stored but the describer never catalogued it, so nothing retrieves it', 'POST /engine/artwork/describe (one model call each)');
@@ -12251,8 +12339,10 @@ async function brTeachInspect(env, ns, campaignId) {
 async function brTeachObservation(env, ns, camp, cid, proposal, confirm, reason, who) {
   await ensureStudio(env);
   const refId = stClean(proposal.observation.ref, 24), obsId = stClean(proposal.observation.obs, 24);
-  const ref = await env.MIND_DB.prepare('SELECT r.*, p.ns AS pns, p.campaign AS pc FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE r.id=?').bind(refId).first();
+  const ref = await env.MIND_DB.prepare('SELECT r.*, p.ns AS pns, p.campaign AS pc, p.test AS ptest FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE r.id=?').bind(refId).first();
   if (!ref || ref.pns !== ns) return { error: 'unknown_reference', status: 404, detail: 'No reference ' + refId + ' for ' + ns + '.' };
+  // p44: a reference in a test project is not evidence for a live client's rule
+  if (ref.ptest && !stTestNs(env, ns)) return { error: 'test_reference', status: 409, detail: 'That reference belongs to a test project; a test project teaches the client nothing. Add it to a live project to use it as evidence.' };
   const meta = pjs(ref.meta, {}) || {}; const o = (meta.observations || []).find(x => x.id === obsId);
   if (!o) return { error: 'unknown_observation', status: 404 };
   await ensureEngine(env);
@@ -12266,7 +12356,7 @@ async function brTeachObservation(env, ns, camp, cid, proposal, confirm, reason,
   if (!ref.campaign) return { error: 'scope_uncertain', status: 409, detail: 'The reference "' + ref.name + '" carries no campaign of its own' + (ref.pc ? ' (it is counted under ' + ref.pc + ' only because its project is)' : '') + '. Set its campaign in its record first, so the rule is not taught to the wrong identity.' };
   if (ref.campaign !== cid) return { error: 'wrong_campaign', status: 409, detail: 'The reference "' + ref.name + '" belongs to ' + ref.campaign + ', not ' + cid + '.' };
   if (o.authority === 'inferred') return { error: 'unconfirmed', status: 409, detail: 'This is an inference the vision pass drew ("' + stStr(o.text, 120) + '"). A person confirms it first - set its authority to observed, preferred or mandatory and say who confirmed it; an inference never becomes a standing rule as it stands.', observation: o };
-  const rows = (await env.MIND_DB.prepare("SELECT r.id, r.name, r.purpose, r.meta FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? AND r.id<>? AND r.campaign=? AND r.purpose IN ('approved','brand')").bind(ns, ref.id, cid).all()).results || [];
+  const rows = (await env.MIND_DB.prepare("SELECT r.id, r.name, r.purpose, r.meta FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE p.ns=? AND r.id<>? AND r.campaign=? AND r.purpose IN ('approved','brand')" + stLiveSql(env, ns, 'p')).bind(ns, ref.id, cid).all()).results || [];
   const others = [];
   rows.forEach(r => { const m = pjs(r.meta, {}) || {}; (m.observations || []).filter(x => x.area === o.area && x.status === 'active' && stObsNorm(x.text) !== stObsNorm(o.text)).forEach(x => others.push({ ref: r.id, name: r.name, purpose: r.purpose, obs: x.id, text: x.text, authority: x.authority })); });
   const resolve = String(proposal.resolve || '');
@@ -13101,9 +13191,13 @@ async function stValidationSubmit(env, pair, body, who) {
     const buf = bufFromB64(body.imageB64);
     if (buf.byteLength < 64 || buf.byteLength > 12 * 1024 * 1024) return { error: 'bad_image', status: 422, detail: 'The measured image must be between 64 bytes and 12 MB; nothing was recorded.' };
     const sn = stImgSniff(buf); if (!sn || sn.type !== 'png') return { error: 'not_png', status: 422, detail: 'The measured image is not a PNG (judged by its bytes, not its name); nothing was recorded. Measure again in the Studio.' };
+    // p44: a PNG by its whole structure (it decodes to exactly its stated size) and exactly the composition's output size
     const stg = (v.layout && v.layout.stage) || null;
-    if (sn.w && sn.h && stg && stg.w && stg.h && (sn.w !== stg.w || sn.h !== stg.h)) return { error: 'image_size', status: 422, detail: 'The measured PNG is ' + sn.w + 'x' + sn.h + ' but this composition is drawn at ' + stg.w + 'x' + stg.h + '; nothing was recorded. Measure it again at its output size.' };
-    exportHash = await stBufSha(buf); exportW = sn.w || null; exportH = sn.h || null; exportKey = stExportKey(p, a, v, exportHash);
+    if (!(stg && stg.w && stg.h)) return { error: 'no_stage', status: 422, detail: 'This version has no output size to measure against; nothing was recorded.' };
+    const pc = await stPngCheck(buf, { w: Number(stg.w), h: Number(stg.h) });
+    if (!pc.ok) return pc.size ? { error: 'image_size', status: 422, detail: 'The measured PNG ' + pc.why + ': this composition is drawn at ' + stg.w + 'x' + stg.h + '. Nothing was recorded; measure it again at its output size.' }
+      : { error: 'bad_png', status: 422, detail: 'The measured image is not a whole PNG: ' + pc.why + '. Nothing was recorded; measure again in the Studio.' };
+    exportHash = await stBufSha(buf); exportW = pc.w; exportH = pc.h; exportKey = stExportKey(p, a, v, exportHash);
     await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } });
   }
   const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
@@ -13559,6 +13653,73 @@ async function axPersonId(key) {
 const ST_TEST_NS = ['synthdemo'];
 function stTestNs(env, ns) { const extra = String((env && env.STUDIO_TEST_NS) || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean); return ST_TEST_NS.concat(extra).indexOf(String(ns || '').toLowerCase()) >= 0; }
 function stIsTest(env, p) { return !!(p && (p.test || stTestNs(env, p.ns))); }
+/** p44: a client-wide read of a live client leaves its test projects out (in a test namespace every project is a test project). */
+function stLiveSql(env, ns, alias) { return stTestNs(env, ns) ? '' : ' AND COALESCE(' + (alias ? alias + '.' : '') + 'test,0)=0'; }
+/* p44 (the 3 November audit): what a guest link - auth.guest, a tester's key - may write. A guest tests the Creative Studio: it
+ * works in test projects and the test namespaces and nowhere else. The client a request writes to is read the way that route's
+ * own handler reads it - the address before the body on /brand (ns2), the body on /engine and the Studio's namespace routes, the
+ * stored row for anything named by id (a rule, an artwork, a text, a direction, a reference, a job, a share, a comment) - so a
+ * body can never name one client while the handler writes another. Answers null (go on) or {status, body}. Opened on purpose
+ * only: STUDIO_GUEST_BRAND=1 live client memory, STUDIO_GUEST_LIVE=1 live projects, AXIOM_GUEST_WRITE=any the rest of AXIOM. */
+const AX_GUEST_STUDIO_FREE = { '/studio/project': 1, '/studio/project/archive-tests': 1, '/studio/feedback': 1 };
+const AX_GUEST_STUDIO_NS = { '/studio/campaign/create': 1, '/studio/recipe': 1 };
+const AX_GUEST_STUDIO_AGENCY = { '/studio/allowance': 1, '/studio/allowance/revoke': 1 };
+const AX_GUEST_BY_ID = { '/studio/project/update': 'studio_projects', '/studio/project/archive': 'studio_projects', '/studio/job/step': 'studio_jobs', '/studio/job/cancel': 'studio_jobs',
+  '/studio/text/update': 'studio_texts', '/studio/text/verdict': 'studio_texts', '/studio/direction/update': 'studio_directions', '/studio/direction/duplicate': 'studio_directions',
+  '/studio/direction/choose': 'studio_directions', '/studio/reference/meta': 'studio_references', '/studio/reference/observation': 'studio_references', '/studio/reference/recipe': 'studio_references',
+  '/studio/reference/analyse': 'studio_references', '/studio/share/revoke': 'studio_shares', '/studio/review/resolve': 'studio_review' };
+const AX_GUEST_GATES = new WeakMap();   // request -> {refused}: the backstop in stProject, answered by the request wrapper
+function axGuestRefusal(kind, detail) {
+  const words = {
+    guest_live_memory: 'A guest link does not change a live client\'s memory (its brand kit, taught rules, corrections, outcomes, artwork or the Mind). Use the synthetic test client (synthdemo), or ask the agency to make the change.',
+    guest_live_project: 'A guest link works in test projects only. This is a live client project: it can be read here but not changed. Start a test project (New project) to try the same thing.',
+    guest_scope: 'A guest link is for testing the Creative Studio; it changes nothing else in AXIOM. Ask the agency for a staff key if you need to.' };
+  return { status: 403, body: { ok: false, error: kind, detail: detail || words[kind] } };
+}
+async function axGuestGuard(env, req, path, url) {
+  const reads = req.method === 'GET' || req.method === 'HEAD';
+  let body = {}; if (!reads) { try { const j = await req.clone().json(); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch (e) {} }
+  const one = async (sql, ...a) => { try { return env.MIND_DB ? await env.MIND_DB.prepare(sql).bind(...a).first() : null; } catch (e) { return null; } };
+  const testNs = ns => !!String(ns || '').trim() && stTestNs(env, relNs(ns));
+  const memOpen = String(env.STUDIO_GUEST_BRAND || '') === '1';
+  const memory = ok => ok || memOpen ? null : axGuestRefusal('guest_live_memory');
+  if (path === '/studio' || path.startsWith('/studio/')) {
+    if (reads || AX_GUEST_STUDIO_FREE[path]) return null;   // an acting read under /studio (brief suggestions with ai=1) writes nothing
+    if (AX_GUEST_STUDIO_AGENCY[path]) return axGuestRefusal('guest_scope', 'Spending allowances are the agency\'s to set; a guest link works within its own daily allowance.');
+    if (AX_GUEST_STUDIO_NS[path]) return memory(testNs(body.ns));
+    if (path === '/studio/import') {
+      // an import is a live project, and each earlier item imports once: a guest does not take the agency's one slot
+      let lns = ''; try { const lg = await stLegacyGet(env, String(body.legacy || '').slice(0, 48)); lns = lg ? lg.ns : ''; } catch (e) {}
+      return testNs(lns) ? null : axGuestRefusal('guest_live_project', 'A guest link does not import a live client\'s earlier work: each item imports once, and that import is the agency\'s. Read it in the library, or start a test project.');
+    }
+    if (String(env.STUDIO_GUEST_LIVE || '') === '1') return null;
+    const ids = new Set(); const tbl = AX_GUEST_BY_ID[path];
+    if (tbl) { const id = stClean(body.id, 30); if (tbl === 'studio_projects') { if (id) ids.add(id); } else if (id) { const r = await one('SELECT project FROM ' + tbl + ' WHERE id=?', id); if (r && r.project) ids.add(r.project); } }
+    if (body.project) ids.add(stClean(body.project, 24));
+    for (const a of [].concat(body.asset ? [body.asset] : [], Array.isArray(body.assets) ? body.assets.slice(0, 60) : [])) { const r = await one('SELECT project FROM studio_assets WHERE id=?', stClean(a, 24)); if (r && r.project) ids.add(r.project); }
+    for (const id of ids) { if (!id) continue; const r = await one('SELECT * FROM studio_projects WHERE id=?', id); if (r && !stIsTest(env, stProjectRow(r))) return axGuestRefusal('guest_live_project'); }
+    return null;   // anything resolved later through stProject is held by the backstop
+  }
+  if (reads) return axGuestRefusal('guest_scope');   // acting reads elsewhere: collection, probes, live reads, bridge claims
+  if (path.startsWith('/brand/')) return memory(testNs(url.searchParams.get('ns') || body.ns));   // ns2 in the /brand block: the address first
+  if (path.startsWith('/engine/')) {
+    if (path === '/engine/fix') return String(body.scope || '') === 'all' ? axGuestRefusal('guest_live_memory', 'A guest link does not teach a rule for every client.') : memory(testNs(body.ns));
+    if (path === '/engine/fix/update' || path === '/engine/fix/delete') {
+      const r = await one('SELECT ns, scope FROM engine_fixes WHERE id=?', String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (!r) return null;
+      return r.scope === 'all' ? axGuestRefusal('guest_live_memory', 'A guest link does not change a rule that applies to every client.') : memory(testNs(r.ns));
+    }
+    if (path === '/engine/outcome') return memory(testNs(body.ns));
+    if (path === '/engine/artwork') { const ns = relNs(body.ns), m = String(body.mindNs || '').toLowerCase(); return memory(testNs(body.ns) && (!m || m === ns || m.indexOf(ns + '_') === 0)); }
+    if (path === '/engine/artwork/describe') {
+      if (body.id) { const r = await one('SELECT ns FROM engine_art WHERE id=?', String(body.id).replace(/[^a-z0-9]/gi, '').slice(0, 24)); return r ? memory(testNs(r.ns)) : null; }
+      return memory(testNs(url.searchParams.get('ns') || body.ns));
+    }
+    return memory(false);
+  }
+  if (path === '/mind/query') return null;   // a question, asked by POST
+  if (String(env.AXIOM_GUEST_WRITE || '') === 'any' && !/^\/(mind|content)\//.test(path)) return null;
+  return axGuestRefusal('guest_scope');
+}
 /* THE ROUTE POLICY - deny by default. Every request is one of:
  *   public  - answers without a key (aggregate counts, the health answer)
  *   token   - authenticated by the route's own token (a client review link, SIFA's bearer), never the AXIOM key
@@ -13764,7 +13925,7 @@ async function mindRetrieve(env, ns, q, topK = 5, opts) {
   if (opts && opts.creative && ns !== 'cmm') await one(ns + '_creative', topK);
   if (ns !== 'cmm') await one('cmm', 3);
   hits.sort((a, b) => b.score - a.score);
-  return hits;
+  return mindDropRetracted(env, hits);
 }
 
 /* == THE RESEARCH AGENT ====================================================
@@ -14315,7 +14476,7 @@ const AXIOM_WORKER = {
     const rid = String(crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 16);
     const t0 = Date.now(); let path = ''; try { path = new URL(req.url).pathname; } catch (e) {}
     let res;
-    try { res = await AXIOM_WORKER.handle(req, env, ctx); }
+    try { res = await AXIOM_WORKER.handle(req, env, ctx); const gg = AX_GUEST_GATES.get(req); if (gg && gg.refused) { const r = axGuestRefusal('guest_live_project'); res = new Response(JSON.stringify(r.body), { status: r.status, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) }); } }
     catch (e) {
       console.log(JSON.stringify({ rid, level: 'error', method: req.method, path, err: axRedact((e && e.message) || e).slice(0, 300) }));
       res = new Response(JSON.stringify({ ok: false, error: 'internal_error', detail: 'Something failed on the worker; nothing more was done. Quote this id when reporting it.', requestId: rid }), { status: 500, headers: Object.assign({ 'Content-Type': 'application/json' }, CORS_ONLY) });
@@ -14372,12 +14533,13 @@ const AXIOM_WORKER = {
       if (policy === 'full' && auth.public && /^\/(studio|brand|engine)\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') !== '1') return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only in the Creative Studio and the brand workspace. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
     }
     { const sk = req.headers.get('X-Axiom-Key') || ''; auth.pid = sk && auth.ok && !auth.public ? (auth.guest ? 'g' : '') + await axPersonId(sk) : (auth.public ? 'public' : auth.dev ? 'dev' : ''); }
-    // S28: a guest (a tester's sign-in link) works in test projects and the synthetic clients; it does not change a live client's
-    // brand kit, its taught rules, its brand items or its standing corrections (STUDIO_GUEST_BRAND=1 allows it)
-    if (auth.guest && req.method === 'POST' && String(env.STUDIO_GUEST_BRAND || '') !== '1' && /^\/(brand\/(kit|teach|item)|engine\/fix)/.test(path)) {
-      let gns = ''; try { const gb = await req.clone().json(); gns = String((gb && gb.ns) || ''); } catch (e) {}
-      if (!gns) gns = reqUrl.searchParams.get('ns') || '';
-      if (!stTestNs(env, relNs(gns))) return jsonResp({ error: 'guest_live_memory', detail: 'A guest link does not change a live client\'s brand memory. Use the synthetic test client (synthdemo), or ask the agency to make the change.' }, 403);
+    // S28, p44: a guest (a tester's sign-in link) writes only test work: test projects and the test namespaces. One guard, before
+    // any route runs, reading the client each route writes to as that route does (axGuestGuard); reads are unchanged
+    if (auth.guest && policy === 'full') {
+      const g = await axGuestGuard(env, req, path, reqUrl); if (g) return jsonResp(g.body, g.status);
+      // the backstop: in a guest's Studio write, any live project the route still resolves reads as not there, and the request
+      // is answered guest_live_project (the request wrapper reads the gate)
+      if (path.startsWith('/studio/') && !AX_GUEST_STUDIO_FREE[path] && String(env.STUDIO_GUEST_LIVE || '') !== '1') { const gate = { refused: '' }; AX_GUEST_GATES.set(req, gate); env = Object.create(env, { __guestGate: { value: gate } }); }
     }
 
     if (path === '/studio/versions' && req.method === 'GET') {
@@ -15637,6 +15799,8 @@ const AXIOM_WORKER = {
             const id = String(qf('id')).slice(0, 48);
             const p = /^(rp|cs|ks):/.test(id) ? await stLegacyGet(env, id) : await stGet(env, id, { light: qf('light') === '1' });
             if (p) { delete p._versions; delete p._sid; }
+            // p44: a guest link reads a live client's project as read-only (axGuestGuard refuses its writes there)
+            if (p && auth.guest && !p.readOnly && !stIsTest(env, p) && String(env.STUDIO_GUEST_LIVE || '') !== '1') { p.readOnly = true; p.readOnlyWhy = 'guest_live'; }
             return p ? jsonResp(Object.assign({ ok: true }, p)) : jsonResp({ error: 'unknown_project' }, 404);
           }
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
@@ -15832,7 +15996,8 @@ const AXIOM_WORKER = {
           const verdict = sb.verdict === 'approve' ? 'approved' : sb.verdict === 'reject' ? 'rejected' : ''; if (!verdict) return jsonResp({ error: 'bad_verdict' }, 400);
           const reason = stStr(sb.reason, 400).trim(); if (reason.length < 4) return jsonResp({ error: 'reason_required', detail: 'Say why, in a few words.' }, 400);
           await env.MIND_DB.prepare('UPDATE studio_texts SET status=?, updated=?, who=? WHERE id=?').bind(verdict, Date.now(), who, row.id).run();
-          try { await engineOutcome(env, { ns: p.ns, campaign: p.campaign || '', surface: 'studio_kit', ref: row.id, verdict: verdict === 'approved' ? 'approved' : 'killed', why: reason, headline: stStr(row.title, 200), support: stStr(row.body, 300) }, who); } catch (e) {}
+          // p44: a test project files nothing in the client's memory (as /studio/approve)
+          if (!stIsTest(env, p)) try { await engineOutcome(env, { ns: p.ns, campaign: p.campaign || '', surface: 'studio_kit', ref: row.id, verdict: verdict === 'approved' ? 'approved' : 'killed', why: reason, headline: stStr(row.title, 200), support: stStr(row.body, 300) }, who); } catch (e) {}
           await stIntelLog(env, p.ns, p.id, verdict, row.kind, (ST_TEXT_KINDS[row.kind] || row.kind) + ' ' + verdict + ': "' + stStr(row.body, 160) + '" - ' + reason, who);
           await stEvent(env, p.id, 'kit_verdict', { text: (ST_TEXT_KINDS[row.kind] || row.kind) + ' ' + verdict + ': ' + reason, text_id: row.id }, who);
           return jsonResp({ ok: true, text: stTextRow(await env.MIND_DB.prepare('SELECT * FROM studio_texts WHERE id=?').bind(row.id).first()) });
@@ -16190,15 +16355,15 @@ const AXIOM_WORKER = {
           // S28: what the client's memory learns. A final verdict is filed once per asset, version and part: a design decision, the copy
           // decision of a copy-only piece, any rejection. The "ready for design" tick is a hand-off to Design, not a verdict, and files
           // nothing; a withdrawal retracts the WIN it had filed; a test project files nothing at all.
-          let outcome = '', learned = '';
+          let outcome = '', learned = '', retract = null;
           const isTest = stIsTest(env, pair.project);
           const handoff = part === 'copy' && decision === 'approve' && cur.mode !== 'copy' && (sb.handoff === true || String(sb.reason || '').trim() === 'copy ready');
           const lref = vid => pair.asset.id + ':' + vid + ':' + part;
           if (isTest) learned = 'test';
-          else if (decision === 'withdraw') { const st0 = before && before[part]; if (st0) { try { if (await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(st0.version), verdict: 'approved' })) learned = 'retracted'; } catch (e) {} } }
+          else if (decision === 'withdraw') { const st0 = before && before[part]; if (st0) { try { retract = await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(st0.version), verdict: 'approved' }); if (retract.n) learned = retract.pending ? 'retraction_pending' : 'retracted'; } catch (e) {} } }
           else if (!handoff && (decision === 'reject' || part === 'design' || cur.mode === 'copy')) {
             try {
-              await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(cur.id), verdict: decision === 'approve' ? 'killed' : 'approved' });
+              retract = await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(cur.id), verdict: decision === 'approve' ? 'killed' : 'approved' });
               const o = await engineOutcome(env, { ns: pair.project.ns, campaign: pair.project.campaign || '', surface: 'studio', ref: lref(cur.id), dedupe: true, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who);
               if (!o.existing) outcome = o.id; learned = o.existing ? 'already' : 'filed';
             } catch (e) {}
@@ -16208,7 +16373,9 @@ const AXIOM_WORKER = {
           // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope
           let proposal = null;
           if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 12) proposal = await brPropose(env, pair.project.ns, pair.project.campaign || '', decision === 'approve' ? 'accepted' : 'rejected', (decision === 'approve' ? 'Accepted ' : 'Rejected ') + part + ': ' + stStr(pair.asset.title, 120), stStr(sb.reason, 600), { type: 'approval', id: pair.asset.id, label: (decision === 'approve' ? 'approval' : 'rejection') + ' of the ' + part + ' of ' + stStr(pair.asset.title, 80) + ' on project ' + stStr(pair.project.title, 80), project: pair.project.id, asset: pair.asset.id, version: cur.id }, who);
-          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal, learned: learned || undefined });
+          // p44: a retraction is reported as it stands - done only when its vectors are gone; pending says so and is finished on a later tick
+          const retractOut = retract && retract.n ? { done: retract.done, pending: retract.pending, detail: retract.pending ? 'The decision is withdrawn and its document is already left out of every brief; deleting its index failed (' + stStr(retract.errors[0], 160) + ') and is retried on the next tick.' : undefined } : undefined;
+          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal, learned: learned || undefined, retract: retractOut });
         }
         // the imagery a composition's current version plans, queued when a person asks (the guided flow: copy first, then design)
         if (path === '/studio/imagery') {
@@ -16301,7 +16468,8 @@ const AXIOM_WORKER = {
           // could not be written); retiring with the rule switches the rule off; nothing deletes a rule
           await ensureEngine(env);
           const obsId = stClean(sb.obs, 24); const pre = (pjs(ref.meta, {}) || {}); const o0 = (pre.observations || []).find(x => x.id === obsId) || null;
-          const fixRow = o0 && o0.promoted && o0.promoted.fix ? await env.MIND_DB.prepare('SELECT id, rule, task, active, origin, why, source FROM engine_fixes WHERE id=? AND ns=?').bind(o0.promoted.fix, p.ns).first() : null;
+          // p44: a test project in a live client's namespace records the observation but changes none of the client's rules
+          const fixRow = o0 && o0.promoted && o0.promoted.fix && !(stIsTest(env, p) && !stTestNs(env, p.ns)) ? await env.MIND_DB.prepare('SELECT id, rule, task, active, origin, why, source FROM engine_fixes WHERE id=? AND ns=?').bind(o0.promoted.fix, p.ns).first() : null;
           const ruleActive = !!(fixRow && fixRow.active);
           let newFix = null;
           if (o0 && o0.status === 'promoted' && ruleActive && String(sb.action) === 'correct' && sb.rule === 'supersede' && stStr(sb.text, 300).trim() && stStr(sb.why, 300).trim()) {
@@ -16366,7 +16534,10 @@ const AXIOM_WORKER = {
           // S28: the type comes from the bytes, a PNG must be the composition's output size, and the file a measurement validated is never
           // replaced: once the design is approved or the asset is open to a client, other bytes are refused and the validated file named
           const sn = stImgSniff(buf); if (!sn) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP, judged by the bytes.' }, 400);
-          const stg = v.layout && v.layout.stage; if (sn.type === 'png' && sn.w && sn.h && stg && stg.w && stg.h && (sn.w !== stg.w || sn.h !== stg.h)) return jsonResp({ error: 'image_size', detail: 'The PNG is ' + sn.w + 'x' + sn.h + '; this composition is drawn at ' + stg.w + 'x' + stg.h + '.' }, 422);
+          // p44: a PNG is checked whole and must be the composition's output size (a JPEG or WebP is a working image, never bound)
+          const stg = v.layout && v.layout.stage;
+          if (sn.type === 'png') { const pc = await stPngCheck(buf, stg && stg.w && stg.h ? { w: Number(stg.w), h: Number(stg.h) } : null); if (!pc.ok) return jsonResp(pc.size ? { error: 'image_size', detail: 'The PNG ' + pc.why + '; nothing was saved.' } : { error: 'bad_png', detail: 'Not a whole PNG: ' + pc.why + '. Nothing was saved.' }, 422); sn.w = pc.w; sn.h = pc.h; }
+          if (sn.type === 'png' && sn.w && sn.h && stg && stg.w && stg.h && (sn.w !== stg.w || sn.h !== stg.h)) return jsonResp({ error: 'image_size', detail: 'The PNG is ' + sn.w + 'x' + sn.h + '; this composition is drawn at ' + stg.w + 'x' + stg.h + '.' }, 422);
           const hash = await stBufSha(buf); const url = k => '/studio/file?key=' + encodeURIComponent(k);
           const kitS = (await brandKit(env, pair.project.ns)) || {}; const sigS = stCompSig(pair.asset, v, kitS);
           const val = await env.MIND_DB.prepare('SELECT id, export_key, export_hash FROM studio_validations WHERE asset=? AND sig=? AND ok=1 ORDER BY created DESC, id DESC LIMIT 1').bind(pair.asset.id, sigS).first();
@@ -17412,7 +17583,7 @@ const AXIOM_WORKER = {
         if (creative && ns !== 'cmm') await one(ns + '_creative', kClient);   // the creative shelf, for the creative surfaces only
         if (ns !== 'cmm') await one('cmm', kShared);
         hits.sort((a, b) => b.score - a.score);
-        return hits;
+        return mindDropRetracted(env, hits);
       };
 
       // POST /mind/ingest {namespace, title, text, kind?, source?, date?}
@@ -18772,6 +18943,8 @@ async function handleScheduled(env) {
   try { const nr = ai.run ? await narrativesCron(env) : await narrativesRun(env, { budgetMs: 120000, skipNaming: true }); if (nr && nr.placed) console.log('Narratives:', nr.placed, 'rows placed,', nr.started, 'started,', nr.named || 0, 'named', ai.run ? '' : '(naming held)'); } catch (e) { console.log('narratives cron failed', String(e).slice(0, 120)); }
   // Creative Studio jobs: anything queued, or abandoned by a runner that stopped, is claimed and run here.
   try { const sj = await studioCron(env, 120000); if (sj && sj.ran) console.log('Studio jobs:', sj.ran, 'run,', sj.done, 'done,', sj.failed, 'failed'); } catch (e) { console.log('studio cron failed', String(e).slice(0, 120)); }
+  // p44: retractions a failed index deletion left pending are finished here (spends nothing; never gated)
+  try { const rp = await mindRetractPending(env, 20); if (rp.tried) console.log('Retractions:', rp.done, 'of', rp.tried, 'finished'); } catch (e) { console.log('retraction retry failed', String(e).slice(0, 120)); }
   // The daily brief: written once after 7am Sydney from what the modules above keep; rewritten on demand from the app or tools/daily-brief.py.
   // (already once a day by its own guard; held only when automated model work is off)
   if (ai.mode !== 'off') { try { const br = await briefCron(env); if (br && br.ok && br.brief) console.log('Brief:', br.day, br.brief.headline); } catch (e) { console.log('brief cron failed', String(e).slice(0, 120)); } }

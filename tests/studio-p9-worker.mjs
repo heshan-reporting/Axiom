@@ -9,6 +9,7 @@
  * overwriting; a layout repair spends nothing.
  * Run: node --experimental-sqlite tests/studio-p9-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
 import { HOOF_REPRO, HOOF_COPY } from './fixtures/studio-layouts.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
@@ -56,7 +57,7 @@ const curV = async (P, A) => { const g = await get(P); const a = g.assets.find(x
 const readiness = async A => (await req('GET', '/studio/readiness?asset=' + A, null, 'read-key')).d;
 /** a measurement of the current version as the browser would file it; `tweak` edits the report before sending */
 /* S28: the measured PNG states the composition's output size in its header, as the renderer's does (the worker checks it) */
-const pngAt = (fill, st) => { const b = Buffer.from(png(fill), 'base64'); b.writeUInt32BE((st && st.w) || 1080, 16); b.writeUInt32BE((st && st.h) || 1080, 20); return b.toString('base64'); };
+const pngAt = (fill, st) => pngB64((st && st.w) || 1080, (st && st.h) || 1080, { fill });   // p44: a whole PNG that decodes to the stage's size
 const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngAt(3, v.layout && v.layout.stage) }); };
 const lastManifest = () => { const keys = Array.from(r2.keys()).filter(k => /\/export\/[^/]+\.json$/.test(k)); const m = JSON.parse(r2.get(keys[keys.length - 1]).v.toString()); m.assets = m.assets || m.items || []; m.excluded = m.excluded || []; return m; };
 const box = (rep, id) => rep.boxes.find(b => b.id === id);
