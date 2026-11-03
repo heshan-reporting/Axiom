@@ -6,6 +6,7 @@
  * Run: node --experimental-sqlite tests/studio-review-browser.mjs   (SHOT=1 writes screenshots) */
 import { studioAskBridge } from './studio-fixture.mjs';
 import { spawn } from 'node:child_process';
+import zlib from 'node:zlib';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
@@ -27,7 +28,13 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new
 const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
 
 // a project with one validated composition (its export a real PNG the browser can decode) and one copy-only asset
-const TILE = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+/* S28: the measured PNG states the composition's output size (the worker checks it), so the tile is a real 1080 x 1080 PNG,
+   drawn here in one colour */
+const TILE = (() => { const w = 1080, h = 1080, row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x30)]), raw = Buffer.concat(Array.from({ length: h }, () => row));
+  const crc = b => { let c, t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } let x = 0xffffffff; for (const v of b) x = t[(x ^ v) & 0xff] ^ (x >>> 8); return (x ^ 0xffffffff) >>> 0; };
+  const chunk = (ty, d) => { const len = Buffer.alloc(4); len.writeUInt32BE(d.length); const td = Buffer.concat([Buffer.from(ty), d]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ih = Buffer.alloc(13); ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]).toString('base64'); })();
 await api('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'none' }] });
 const P = (await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Fuel tax review', brief: { objective: 'o', message: 'm' } })).id;
 const L = { v: 5, format: '1:1', stage: { w: 1080, h: 1080 }, bg: '#0E6A6E', regions: [], layers: [{ id: 'h', type: 'text', role: 'headline', x: 6, y: 10, w: 80, h: 20, size: 6, weight: 800, color: '#fff' }] };
