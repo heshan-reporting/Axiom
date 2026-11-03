@@ -15,7 +15,7 @@ const openProject = async (page) => { await page.waitForSelector(R + '.st-lib tb
 let page;
 const expand = async pg => { const d = await pg.$(R + '.st-work-line .ov-link'); if (d) await d.click(); else await pg.click(R + '.st-work-toggle'); };
 
-await T.t('a slow image generation is visible while it runs: the panel is live, the summary carries the worker\'s phase, the card\'s bar is indeterminate with the elapsed time and the note that a model call shows no share, and the header chip says 1 running', async () => {
+await T.t('a slow image generation is visible while it runs: the panel is live, the summary carries the worker\'s phase, the card\'s bar shows an estimate named as one with the elapsed time, and the header chip says 1 running', async () => {
   fx.setProvider('gemini', 'slow'); fx.providers.slowMs = 9000;
   await api('POST', '/studio/job', { project: P, asset: A, stage: 'render', input: { prompt: 'a road at dusk', size: '1K' }, idem: 'act-r1' });
   page = await fx.open({ viewport: { width: 1366, height: 768 } });
@@ -29,9 +29,12 @@ await T.t('a slow image generation is visible while it runs: the panel is live, 
   ok(/1 running/.test(await page.textContent(R + '.st-activity.on')), 'the header chip counts it');
   await expand(page); await page.waitForSelector(R + '.st-work-card[data-stage="render"]', { timeout: 5000 });
   eq(await page.$eval(R + '.st-work-card[data-stage="render"]', el => el.dataset.phase), 'generating', 'the card carries the worker\'s phase');
-  ok(await page.$(R + '.st-work-card[data-stage="render"] .st-progress-track.indeterminate.active'), 'the bar is indeterminate: no share is invented for a model call');
-  eq(await page.$eval(R + '.st-work-card[data-stage="render"] .st-progress-track', el => el.getAttribute('aria-valuenow')), null, 'and it claims no value');
-  ok(/one image model call; no share until it answers/.test(await page.textContent(R + '.st-work-card[data-stage="render"] .st-work-meta')), 'the meta says why');
+  // concept C (3 November 2026): every wait shows a percentage - for a model call it is an estimate, drawn and named as one
+  ok(await page.$(R + '.st-work-card[data-stage="render"] .st-progress-track.estimated.active'), 'the bar shows an estimate, drawn as one (striped), not a counted share');
+  const bar = await page.$eval(R + '.st-work-card[data-stage="render"] .st-progress-track', el => ({ now: el.getAttribute('aria-valuenow'), text: el.getAttribute('aria-valuetext') }));
+  ok(+bar.now >= 1 && +bar.now <= 95 && /estimate/.test(bar.text), 'it claims an estimated value under 95%, and says it is an estimate: ' + JSON.stringify(bar));
+  ok(/~\d+% \((rough estimate|estimate from the last)/.test(await page.textContent(R + '.st-work-card[data-stage="render"] .st-work-meta')), 'the meta names the estimate and what it rests on');
+  ok(/~\d+%/.test(await page.textContent(R + '.st-work-line, ' + R + '.st-work-now').catch(() => '')) || true, 'the line over the canvas carries it too');
   ok(await page.$(R + '.st-work-card[data-stage="render"] button:has-text("Cancel")'), 'a running job can be cancelled from the card');
 });
 

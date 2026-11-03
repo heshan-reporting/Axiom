@@ -41,7 +41,7 @@ for (const role of ['full', 'read']) {
     try {
       rows.push(await check(page, 'library'));
       await openProject(page, 'S27 sweep at design');
-      for (const ph of ['Brief', 'Explore', 'Copy', 'Design', 'Review']) { if (await phase(page, ph)) { if (ph === 'Design') { const a = page.locator(R + '.st-pagechip, ' + R + '.st-assetpick').first(); if (await a.count()) { await a.click(); await sleep(1200); } } rows.push(await check(page, ph)); } }
+      for (const ph of ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver']) { if (await phase(page, ph)) { if (ph === 'Design') { const a = page.locator(R + '.st-pagechip, ' + R + '.st-assetpick').first(); if (await a.count()) { await a.click(); await sleep(1200); } } rows.push(await check(page, ph)); } }
       const brand = page.locator(R + 'button:has-text("Brand")').first(); if (await brand.count() && await brand.isVisible()) { await brand.click().catch(() => {}); await sleep(900); rows.push(await check(page, 'Brand')); }
     } catch (e) { rows.push({ view: 'error', error: String(e.message).slice(0, 200) }); }
     rows.forEach(r => report.rows.push(Object.assign({ role, width: vp[0], errors: page.errs.slice() }, r)));

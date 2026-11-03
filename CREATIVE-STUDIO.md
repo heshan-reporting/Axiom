@@ -3359,3 +3359,64 @@ Providers mocked, in this sandbox:
 
 Not run: anything against the live worker, a live model or image provider, Cloudflare's real Vectorize, or Firefox and WebKit
 canvas output. The p44 worker is not deployed; `tools/deploy-worker.sh` from the Mac when the branch is merged.
+
+## 53. Concept C in production (page `?v=r28`, worker unchanged)
+
+**The decision (3 November 2026).** Of the three isolated prototypes (`design/prototypes/creative-studio-concepts/`: A a
+production desk, B a creative direction board, C guided production with an immersive canvas) the owner chose C, and asked that
+the editing interface look like their reference editor (a Webflow-style layout: an icon rail with an Add button, an "Add item"
+flyout of tile sections, a centred device switcher with px and %, a selection drawn with a name tag and handles, a Style panel
+with a style chip, a Spacing box model, Size, Overflow, Typography and a colour picker with a contrast grade and saved colours),
+and that the rest of the interface be improved the same way. Mid-build they added that the colour need not be green: the
+reference's green was its example, so the accent stays the client's own (`--st-client-accent`, else the Studio's cyan).
+
+### 53.1 What changed
+
+- **Seven stages** in the header, as concept C has them: Brief (the material and Axiom's understanding), Message (Objectives and
+  Strategy, as two steps in the stage head), Direction, Copy, Design, Review (the preflight and approvals) and Deliver (the
+  package, formerly the Delivery tab of Review; a new `STAGES` entry `export` whose state comes from `flowCounts`, since the
+  worker's workflow has no export step). Numbered steps with an underline for where you are; Alt+1..7. The worker's seven
+  steps and their gates are unchanged; only the grouping a person moves through changed.
+- **The palette** (`studio-skin.css` tokens): charcoal panels on a near-black ground, hairline dividers, larger radii, round icon
+  buttons, a solid header. Only the interface reads the tokens; the renderer never does.
+- **The Design workspace as the reference editor**, one seamless frame: the rail (`DesignDock`) with **Add** as its accent button
+  at the top, the tools as icons, the Design views (Canvas, Board, Recipes, Jobs) at its foot; the **Add item** flyout
+  (`ElementsPanel`) with folding sections over three-up tiles (Layouts - layout and style variations and other formats, free -
+  Typography, Basic elements, Lines and arrows, Frames, Brand colours, Brand assets, Media, Icons); the top bar with the editor's
+  tools, the **formats of the piece's family** as device-style buttons, the output width and one zoom control naming the measured
+  zoom ("Fit - 54 %", from the artboard's own size); the selection as a 2 px accent outline with a name tag and white square
+  handles; under the canvas compact page chips and the **version strip** (the newest six versions drawn small; a click compares
+  with the current one and changes nothing; History keeps the rest).
+- **The Style panel** (`docs/studio-style.js`): "Style" with the selected layer as a chip, folding sections - Spacing (the layer's
+  distance to each edge in output pixels, typed to move it), Size (px; aspect kept for exact marks; the per-cent box beneath),
+  Overflow (fit now, keep fitted), Typography (font, weight by name, size, line height, tracking, alignment, emphasis, colour),
+  Effects, Image adjustments, Background (the photograph's framing). Every change is a patch through the editor's `setOne`:
+  locks, the history, the drafts and saving are untouched.
+- **The colour picker**: saturation and brightness, hue, HSB and hex, the eyedropper, the client's saved colours (the kit's
+  palette) and recent ones, and the **contrast ratio with its WCAG grade against the ground the renderer measured behind the
+  words** (`groundLum`, `groundRange` on the validation boxes), with the worst patch. A drag previews in the picker and commits
+  once on release.
+- **Every wait shows a percentage** (`STProgress.estimate`): counted where the work is countable; otherwise the time so far
+  against the stage's own median from the worker's history (two runs or more), or a stated rough guess per stage before there is
+  history. Always labelled ("~42% (estimate from the last 8 runs), about 20 s left"), drawn striped so it never reads as measured,
+  held under 95% until the worker says done, and saying so when a job runs past its usual time. On the activity line over the
+  canvas, the activity cards, the guided processing card and the operations line. This replaces S12's rule of no percentage from
+  the clock; a counted share is still only ever counted, and a model call still shows the characters it has written.
+
+### 53.2 Kept, and why
+
+- The S24 toolbar rule (one row, 48 px or less, at 1024 to 1920 with a selection) and the S20 rule (a fitted 4:5 artboard at least
+  560 px tall at 1440 x 900 with the inspector open): the views moved to the rail, the zoom buttons folded into the zoom control
+  (Ctrl or Cmd with + and -, and the wheel, still step it), the page chips became compact, and the formats hide when the bar is
+  narrow. Measured here: one row at 1024, 1440 and 1920; the 4:5 artboard 581 px.
+- Every class name, label and test hook the suites rely on (`.st-le-type[aria-label=...]`, `.st-le-fitrow`, `.st-le-colour`,
+  `.st-dock-btn` names, `.st-pagechip` text), so the editor's behaviour is proven by the same harnesses.
+- The inspector's width (360 px): narrower clipped the History tab.
+
+### 53.3 Not done, said plainly
+
+- The reference's Overflow modes (visible, hidden, scroll, auto) have no counterpart in the renderer; the section offers what the
+  Studio has (fit now, keep fitted) and says that words that do not fit are flagged, never clipped.
+- The picker sets solid colours; opacity stays in Effects. The Spacing box model has no padding ring, since layers carry no
+  padding of their own.
+- The estimate rests on the stage's history; a stage that has run fewer than twice uses a stated rough guess per stage.

@@ -29,13 +29,14 @@ export async function openProject(page, title) {
   await page.waitForSelector(R + '.st-steps, ' + R + '.st-step', { timeout: 15000 });
 }
 
-/** A step by its S17 name (Brief, Objectives, Strategy, Directions, Copy, Design, Review). S20: the navigator shows five phases -
-    Brief (with Understanding, Objectives and Strategy as its steps, shown in the stage head), Explore (Directions), Copy, Design,
-    Review & Deliver - so Objectives and Strategy are reached through Brief, and Directions is Explore. */
+/** A step by its S17 name (Brief, Objectives, Strategy, Directions, Copy, Design, Review, Export). Concept C (3 November 2026):
+    the navigator shows seven stages - Brief, Message (with Objectives and Strategy as its steps, shown in the stage head),
+    Direction, Copy, Design, Review, Deliver - so Objectives and Strategy are reached through Message, Directions is Direction
+    and Export is Deliver. */
 const SUBSTEP = { Objectives: 1, Strategy: 1 };
 export async function goStep(page, label) {
   if (SUBSTEP[label]) {
-    if (!(await page.$(R + '.st-substep:has-text("' + label + '")'))) { await page.click(step('Brief')); await page.waitForSelector(R + '.st-substep', { timeout: 15000 }); }
+    if (!(await page.$(R + '.st-substep:has-text("' + label + '")'))) { await page.click(step('Message')); await page.waitForSelector(R + '.st-substep', { timeout: 15000 }); }
     await page.click(R + '.st-substep:has-text("' + label + '")');
   } else await page.click(step(label));
   await page.waitForSelector(step(label, true), { timeout: 15000 });
@@ -44,8 +45,8 @@ export async function goStep(page, label) {
     phase's "ready for design"). */
 export function step(label, on) {
   if (SUBSTEP[label]) return R + '.st-substep' + (on ? '.on' : '') + ':has-text("' + label + '")';
-  const l = label === 'Directions' || label === 'Direction' ? 'Explore' : label;
-  const t = l === 'Review' ? 'text-matches("^Review")' : 'text-is("' + l + '")'; return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:' + t + ')';
+  const l = label === 'Directions' || label === 'Explore' ? 'Direction' : label === 'Export' || label === 'Delivery' ? 'Deliver' : label;
+  return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:text-is("' + l + '"))';
 }
 
 /** The wizard, start to finish. o: { type (the card's words, default "Response Creative"), client (default "Minerals

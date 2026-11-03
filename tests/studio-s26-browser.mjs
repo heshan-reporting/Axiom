@@ -105,7 +105,7 @@ await T.t('B3 classic project: a dialog names the pieces before a direction chan
   const cj = await job('copy', { channels: ['facebook', 'instagram'], deliverable: 'set', formats: { facebook: '1:1', instagram: '4:5' } }); eq(cj.state, 'done', 'copy: ' + (cj.error || ''));
   g = await api('GET', '/studio/get?id=' + Pc); const other = g.directions[1]; const old = g.assets.map(a => a.id);
   const page = await openProject('S26 classic');
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await sleep(600);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await sleep(600);
   const card = page.locator(R + '.st-dir:has(.st-dir-title:has-text("' + other.title.replace(/"/g, '') + '"))').first();
   await card.locator('button:has-text("Choose this direction")').click();
   await page.waitForSelector(R + '.st-impact[data-kind="direction"]', { timeout: 10000 });

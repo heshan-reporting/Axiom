@@ -10,16 +10,18 @@
 
 /* ---------------------------------------------------------------------------------------------- tokens */
 #studio-root .st{
-  /* the mockup palette */
-  --sk-bg:#101318; --sk-panel:#191d24; --sk-raised:#232831; --sk-hover:#2a303a; --sk-line:#303741; --sk-line-2:#3b4350;
-  --sk-ink:#edf0f5; --sk-ink-2:#c9d0da; --sk-sub:#a5afbd; --sk-quiet:#8b97a7; --sk-canvas:#0c1015;
+  /* the reference editor's palette (concept C, chosen 3 November 2026): charcoal panels on a near-black ground, one accent
+     for state and action. The accent is the client's own (--st-client-accent from studioTheme, lightened until it reads at
+     4.5:1 on the panel, with its own ink), else the Studio's cyan; the reference's green was its example, not a requirement. */
+  --sk-bg:#0b0e10; --sk-panel:#1b1f22; --sk-raised:#252a2e; --sk-hover:#2d3337; --sk-line:#2e3438; --sk-line-2:#3a4247;
+  --sk-ink:#e9edef; --sk-ink-2:#c9d0d4; --sk-sub:#a9b2b8; --sk-quiet:#8a959c; --sk-canvas:#111518;
   --sk-accent:var(--st-client-accent,#5dd4e5); --sk-accent-ink:var(--st-client-ink,#062e39);
-  --sk-soft:color-mix(in srgb,var(--sk-accent) 14%,#101318); --sk-soft-2:color-mix(in srgb,var(--sk-accent) 22%,#101318);
-  --sk-good:#93dcb5; --sk-warn:#f5c27a; --sk-bad:#f5a08a;
-  --sk-r-xs:5px; --sk-r-sm:7px; --sk-r:10px; --sk-r-lg:14px; --sk-r-xl:16px;
-  --sk-sh-1:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.25);
-  --sk-sh-2:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px -12px rgba(0,0,0,.55);
-  --sk-sh-art:0 2px 6px rgba(0,0,0,.25),0 22px 48px -18px rgba(0,0,0,.65);
+  --sk-soft:color-mix(in srgb,var(--sk-accent) 12%,#0b0e10); --sk-soft-2:color-mix(in srgb,var(--sk-accent) 20%,#0b0e10);
+  --sk-good:#6fd39a; --sk-warn:#f5c27a; --sk-bad:#f5a08a;
+  --sk-r-xs:6px; --sk-r-sm:8px; --sk-r:10px; --sk-r-lg:14px; --sk-r-xl:18px;
+  --sk-sh-1:0 1px 0 rgba(255,255,255,.025) inset;
+  --sk-sh-2:0 16px 40px rgba(0,0,0,.5);
+  --sk-sh-art:0 2px 6px rgba(0,0,0,.3),0 24px 56px -20px rgba(0,0,0,.7);
   --sk-ease:cubic-bezier(.2,.7,.2,1); --sk-ease-out:cubic-bezier(.16,1,.3,1);
   --sk-font:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; --sk-display:'Manrope','DM Sans',sans-serif;
 

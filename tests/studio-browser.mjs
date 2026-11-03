@@ -114,10 +114,10 @@ async function open(role) {
 const R = '#studio-root ';
 /* the Studio's navigation: six stages in the navigator, views inside a stage as tabs, the inspector's tabs beside the artwork */
 /* S13: the guided steps - Brief, Direction, Copy, Design, Review, Export */
-const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', Recipes: 'Design', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Review', Delivery: 'Review' };
-// S20: five phases - Directions is Explore; Review matches "Review & Deliver"
-const goStep = (pg, name) => { const n = name === 'Directions' || name === 'Direction' ? 'Explore' : name; return pg.click(R + '.st-step:has(.st-step-l:' + (n === 'Review' ? 'text-matches("^Review")' : 'text-is("' + n + '")') + ')'); };
-const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
+const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', Recipes: 'Design', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Deliver', Delivery: 'Deliver' };
+// concept C: seven stages - Directions is Direction; Export (Delivery) is its own stage, Deliver, with no tabs
+const goStep = (pg, name) => { const n = name === 'Directions' || name === 'Explore' ? 'Direction' : name === 'Export' || name === 'Delivery' ? 'Deliver' : name; return pg.click(R + '.st-step:has(.st-step-l:text-is("' + n + '"))'); };
+const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); if (VIEW_STAGE[name] === 'Deliver') return pg.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))'); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
 const itab = (pg, name) => place(pg, name);
 /* an asset on the canvas: the assets rail belongs to Copy, Design and Review (S17 keeps it out of the early steps), and a
    rail click inside Copy opens the words, so the canvas is reached through Design */
@@ -426,7 +426,7 @@ await t('a project made before the guided workflow from an open brief, copy only
   await page.click(R + '.st-dir:first-child button:has-text("Choose this direction")');
   let d = null; for (let i = 0; i < 160; i++) { d = await api('GET', '/studio/get?id=' + pr.id); if (d.assets.length === 3 && !(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) break; await new Promise(r => setTimeout(r, 250)); }
   eq(d.assets.length, 3, 'one copy-only piece per channel');
-  ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Explore"))'), 'the page stays where the team is: production does not move it');
+  ok(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Direction"))'), 'the page stays where the team is: production does not move it');
   // S19: Copy lists the pieces itself (no second list in an assets rail)
   await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-copy-pick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
@@ -721,7 +721,7 @@ await t('a read-only key reviews everything and changes nothing: no composer, lo
   await p2.waitForSelector(R + '.st-asset', { timeout: 15000 });
   ok(!(await p2.$(R + '.st-composer')), 'no composer'); ok(/needs a full key/.test(await p2.textContent(R + '.st-partner')));
   ok(!(await p2.$(R + '.st-lock')), 'no locks'); ok(!(await p2.$(R + '.st-appr .btn')), 'no approve buttons');
-  await goStep(p2, 'Review'); await p2.waitForSelector(R + '.st-subtab:has-text("Delivery")'); ok(true, 'export available inside Review');
+  await goStep(p2, 'Deliver'); await p2.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))'); ok(true, 'export available as the Deliver stage');
   await p2.close();
 });
 await t('P8: with two campaigns the wizard assumes none until the team chooses; the brief editor (a project made before the guided workflow) offers sourced suggestions in editable fields, design requirements in three bands and the check before anything is spent; the art director inspected the composed tile, not the imagery alone', async () => {

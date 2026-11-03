@@ -83,11 +83,11 @@ await T.t('accessibility: every control is named, every image has a name, headin
   await itab(page, 'Art Director'); const ad = await check('Refine / Art Director'); ok(ad.live >= 1, 'a live region exists on the page: ' + ad.live);
   await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand'); await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); }); await check('Brand');
   await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))'); await check('Brief');
-  // seven steps since S17: Brief, Objectives, Strategy, Directions, Copy, Design, Review; Export is a view inside Review
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))'); await check('Review');
-  await page.click(R + '.st-subtab:has-text("Delivery")'); await page.waitForSelector(R + '.st-subtab.on:has-text("Delivery")'); await check('Export');
-  await page.keyboard.press('Alt+3'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
-  await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  // concept C: seven stages - Brief, Message, Direction, Copy, Design, Review, Deliver
+  await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))'); await check('Review');
+  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))'); await check('Export');
+  await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
   // keyboard: from a stage button, Tab moves on to the next focusable control without a trap
   await page.focus(R + '.st-step.on'); await page.keyboard.press('Tab'); const active = await page.evaluate(() => { const el = document.activeElement; return el && el !== document.body ? (el.tagName + ' ' + (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)) : ''; }); ok(active, 'focus moved on: ' + active);
   await page.click(R + '.st-head .ov-link:has-text("All projects")'); await page.waitForSelector(R + '.st-lib'); await check('Library');

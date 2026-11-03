@@ -2,7 +2,8 @@
 
 This page is for the people running a test round of the AXIOM Creative Studio, and for the testers themselves. It says who can
 do what, where to test, what to try, what costs money, what is known not to work yet, and how to report a problem. Build
-`2026-11-06.studio-p44`, page release `?v=r27` (S28 and the p43 audit; `CREATIVE-STUDIO.md` s.51 and s.52 hold the findings behind it).
+`2026-11-06.studio-p44`, page release `?v=r28` (S28 and the p43 audit; `CREATIVE-STUDIO.md` s.51 and s.52 hold the findings behind it;
+r28 is the concept C interface, s.53: seven stages, the reference editor, an estimate on every wait).
 
 ## Before a round: the gate
 
@@ -15,7 +16,7 @@ A round starts only when all of these hold:
    `tests/shots/s27/after-sweep.json`; every row's `axe` list is empty.
 3. Every scripted journey below passes once by hand on the deployed page with the synthetic client.
 4. No finding in the ledger (`CREATIVE-STUDIO.md` s.51) is open at "blocker".
-5. The worker and the page are deployed together: `/studio/status` answers the build above, and the page loads `?v=r27`.
+5. The worker and the page are deployed together: `/studio/status` answers the build above, and the page loads `?v=r28`.
 
 ## Roles
 
@@ -53,10 +54,11 @@ or in the library: the "Live and test" filter, then "Archive all test projects".
 Each is short; note the time it takes and anything that surprised you.
 
 1. **Guided project to delivery.** New project, Response creative, Harbourline, the Harbour crossings campaign, paste the brief
-   from the first sample project. Create and analyse. Confirm the understanding, the objective and message, the strategy. Choose a
-   direction in Explore. Write the copy; tick "Mark this copy ready for design" on each piece. In Design choose Editable creative and
-   **Cancel** the generate question (no imagery is needed). Try Layout variations and Fix layout. In Review & Deliver press
-   **Measure them here**, approve the design of one piece with a reason, open Delivery, prepare and download the package.
+   from the first sample project. Create and analyse. Confirm the understanding (Brief), then the objective, message and strategy
+   (Message). Choose a direction in Direction. Write the copy; tick "Mark this copy ready for design" on each piece. In Design choose
+   Editable creative and **Cancel** the generate question (no imagery is needed). Try Layout variations and Fix layout; select the
+   headline and use the Style panel (Spacing, Size, Typography, the colour picker and its contrast). In Review press **Measure them
+   here** and approve the design of one piece with a reason; in Deliver prepare and download the package.
    Check: the package holds only the approved piece; its PNG is the one Review measured.
 2. **Classic project.** From the library, a project without the wizard; propose directions; choose one; write copy; then choose a
    different direction. Check: the Studio asks what to do with the pieces written from the first one.

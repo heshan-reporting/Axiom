@@ -88,7 +88,7 @@ await T.t('G-B2 the appearance is this browser\'s (dark, light, system), survive
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await openLib(page);
   const tokens = () => page.$eval(R + '.st', e => ({ theme: e.getAttribute('data-st-theme'), bg: getComputedStyle(e).getPropertyValue('--sk-bg').trim(), panel: getComputedStyle(e).getPropertyValue('--sk-panel').trim(), accent: getComputedStyle(e).getPropertyValue('--sk-accent').trim() }));
-  const dark = await tokens(); eq([dark.theme, dark.bg], ['dark', '#101318'], 'dark by default');
+  const dark = await tokens(); eq([dark.theme, dark.bg], ['dark', '#0b0e10'], 'dark by default');
   const find = '(' + thumbOf.toString() + ')(' + JSON.stringify(PFX + ' at design') + ')';
   const art = async () => page.evaluate(f => { const c = eval(f); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 0; i < d.length; i += 41) h = (h * 31 + d[i]) >>> 0; return c.width + 'x' + c.height + ':' + h; }, find);
   await page.waitForFunction(f => { const c = eval(f); if (!c) return false; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 400) if (d[i]) return true; return false; }, find, { timeout: 20000 });
@@ -105,7 +105,7 @@ await T.t('G-B2 the appearance is this browser\'s (dark, light, system), survive
   await page.click(R + '.st-theme button:has-text("System")'); await page.emulateMedia({ colorScheme: 'light' }); await sleep(200);
   eq((await tokens()).bg, '#f4f6f9', 'system + a light device = light');
   await page.emulateMedia({ colorScheme: 'dark' }); await sleep(200);
-  eq((await tokens()).bg, '#101318', 'system + a dark device = dark');
+  eq((await tokens()).bg, '#0b0e10', 'system + a dark device = dark');
   await page.click(R + '.st-theme button:has-text("Dark")');
   ok(!page.errors.length, 'no page errors: ' + page.errors.join(' | ')); await page.ctxB.close();
 });
@@ -113,7 +113,7 @@ await T.t('G-B2 the appearance is this browser\'s (dark, light, system), survive
 await T.t('G-B3 the stage heads answer missing / accepted / main action / next, and an earlier stage says what a change would leave behind', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await openProject(page, PFX + ' at directions');
-  await phase(page, 'Explore');
+  await phase(page, 'Direction');
   const five = async () => page.$$eval(R + '.st-stagehead .st-five > div', d => Object.fromEntries(d.map(x => [x.querySelector('dt').textContent.trim(), x.querySelector('dd').textContent.trim()])));
   let f = await five();
   eq(Object.keys(f), ['Missing', 'Accepted', 'Main action', 'Next'], 'the four answers beside "Working on"');
@@ -121,14 +121,14 @@ await T.t('G-B3 the stage heads answer missing / accepted / main action / next, 
   ok(/objective "Correct the subsidy claim/.test(f.Accepted) && /strategy: Evidence-led/.test(f.Accepted), 'accepted names what was confirmed: ' + f.Accepted);
   ok(/Copy/.test(f.Next), 'next names the step after: ' + f.Next);
   // upstream: the objectives step says what a change there would leave on the earlier choice, before anything changes
-  await phase(page, 'Brief', 'Objectives');
+  await phase(page, 'Message', 'Objectives');
   await page.waitForSelector(R + '.st-downstream', { timeout: 10000 });
   ok(/Changing a choice here would leave 3 directions on the earlier choice/.test(await page.textContent(R + '.st-downstream')), await page.textContent(R + '.st-downstream'));
   // the key message changes (the team chose to update); the directions are now on an earlier choice and every head says so
   const r = await fx.api('POST', '/studio/workflow/confirm', { project: S.directions, step: 'objectives', objective: 'O1', message: 'M1.2', acknowledge: 'update' });
   ok(!r.error, JSON.stringify(r).slice(0, 200));
   await page.reload(); await page.evaluate(() => go('studio')); await page.waitForSelector(R + '.st-step', { timeout: 20000 });
-  await phase(page, 'Brief', 'Strategy');
+  await phase(page, 'Message', 'Strategy');
   await page.waitForSelector(R + '.st-downstream', { timeout: 10000 });
   const ds = await page.textContent(R + '.st-downstream');
   ok(/Built on an earlier choice: 3 directions/.test(ds) && /never deleted/.test(ds), ds);
@@ -139,7 +139,7 @@ await T.t('G-B3 the stage heads answer missing / accepted / main action / next, 
 
 await T.t('G-B4 Explore is one set of direction cards side by side, each with its own sketch and words', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
-  await openProject(page, PFX + ' at copy'); await phase(page, 'Explore');
+  await openProject(page, PFX + ' at copy'); await phase(page, 'Direction');
   await page.waitForSelector(R + '.st-dcard', { timeout: 15000 });
   eq(await page.$(R + '.st-dstrip'), null, 'no strip of the same previews above the cards');
   // the cards rise in one after another (sk-pop, 60 ms apart): measured mid-entrance a card still carries part of its

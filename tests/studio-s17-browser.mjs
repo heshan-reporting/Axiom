@@ -26,7 +26,8 @@ const latest = ns => env.MIND_DB.db.prepare('SELECT id FROM studio_projects WHER
 async function settle(pid, ms = 60000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle'); await sleep(200); } }
 const BRIEF = 'A Senate crossbencher called the fuel tax credit a subsidy for miners on regional radio this morning and wants it scrapped. We need an answer on social this week, with a regional focus.';
 let page, pid;
-const stateOf = label => page.getAttribute(step(label), 'data-state');
+// concept C: Objectives and Strategy are the Message stage's two steps; off that stage their state is the Message stage's own
+const stateOf = async label => (/^(Objectives|Strategy)$/.test(label) && !(await page.$(step(label)))) ? page.getAttribute(R + '.st-step[data-phase="message"]', 'data-state') : page.getAttribute(step(label), 'data-state');
 const onStep = async label => !!(await page.$(step(label, true)));
 
 await T.t('the wizard asks four things in order - the type of work, the client, the campaign context, the brief - and moves on only when each is answered; Back keeps the answers and Escape leaves', async () => {
@@ -63,7 +64,7 @@ await T.t('a new project starts at the Brief: every later step is locked and say
   ok(await onStep('Brief'), 'on the Brief');
   for (const l of ['Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review']) ok(/locked|blocked/.test(await stateOf(l) || ''), l + ' is locked: ' + await stateOf(l));
   await page.click(step('Directions')); await page.waitForSelector(R + '.st-locked');
-  const lk = await page.textContent(R + '.st-locked'); ok(/(Directions|Explore) is locked/.test(lk) && /Go to/.test(lk), lk);
+  const lk = await page.textContent(R + '.st-locked'); ok(/(Directions?|Explore) is locked/.test(lk) && /Go to/.test(lk), lk);
   eq(await page.$$eval(R + '.st-dcard', x => x.length), 0, 'a locked step shows what opens it, never the work');
   await page.click(R + '.st-locked button:has-text("Go to")'); await page.waitForSelector(step('Brief', true));
   for (const stage of ['direct', 'copy']) {

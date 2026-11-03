@@ -167,20 +167,22 @@ await T.t('W1. at 1440 x 900 a fitted 4:5 artboard is at least 560px tall with t
   ok(m.h >= 560, 'the artboard is at least 560px tall: ' + m.h); ok(m.scroll, 'and the page does not scroll');
 });
 
-await T.t('W2. five phases in the header - Brief, Explore, Copy, Design, Review & Deliver - with Brief\'s three steps in its head, Alt+1..5 between phases, one main action in Design', async () => {
-  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Explore', 'Copy', 'Design', 'Review & Deliver']);
+await T.t('W2. seven stages in the header (concept C) - Brief, Message, Direction, Copy, Design, Review, Deliver - with Message\'s two steps in its head, Alt+1..7 between stages, one main action in Design', async () => {
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver']);
   ok(!(await page.$(R + '.st > .st-steps')), 'no navigator bar of its own: the phases sit in the header');
   eq(await page.$$eval(R + '.st-canvasbar .btn.st-primary, ' + R + '.st-canvasbar .btn:not(.ghost):not(.sm.on)', x => x.filter(e => /Continue to Review/.test(e.textContent)).length), 1, 'Design has one main action');
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
-  await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))');
+  await page.keyboard.press('Alt+2'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Message"))');
   const subs = await page.$$eval(R + '.st-phasesteps .st-substep', x => x.map(e => e.textContent.replace(/,.*$/, '').replace(/^\S*\d/, '').trim()));
-  ok(subs.join('|').indexOf('Understanding') >= 0 && subs.join('|').indexOf('Objectives') >= 0 && subs.join('|').indexOf('Strategy') >= 0, 'Brief shows its steps: ' + subs.join(' | '));
+  ok(subs.join('|').indexOf('Objectives') >= 0 && subs.join('|').indexOf('Strategy') >= 0, 'Message shows its steps: ' + subs.join(' | '));
   await page.click(R + '.st-substep:has-text("Strategy")'); await page.waitForSelector(R + '.st-substep.on:has-text("Strategy")');
   ok(/Working on/.test(await page.textContent(R + '.st-stagehead')), 'the head says what this is working on');
   ok(!/Needs/.test(await page.textContent(R + '.st-stagehead')), 'the long account is behind help, not on the page');
-  await page.keyboard.press('Alt+2'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Explore"))');
-  await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-matches("^Review"))');
+  await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))');
+  await page.keyboard.press('Alt+3'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Direction"))');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))');
+  await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))');
 });
 
 await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it needs a render, why and its basis; Edit instruction and Apply are two actions', async () => {

@@ -79,7 +79,7 @@ for (const sz of sizes) {
   release(); await wait(1500);
   { const c = page.locator(R + '.st-insp-close'); if (await c.count() && await c.first().isVisible()) await c.first().click().catch(() => {}); await page.keyboard.press('Escape').catch(() => {}); await wait(300); }   // the drawer covers the navigator on narrow windows
   await page.click(stepBtn('Review')).catch(() => {}); await wait(900); await shot(page, 'review', sz);
-  const ex = page.locator(R + '.st-subtab:has-text("Delivery")'); if (await ex.count()) { await ex.first().click().catch(() => {}); await wait(700); await shot(page, 'delivery', sz); }
+  const ex = page.locator(R + '.st-step:has(.st-step-l:text-is("Deliver"))'); if (await ex.count()) { await ex.first().click().catch(() => {}); await wait(700); await shot(page, 'delivery', sz); }
   if (page.errors && page.errors.length) report.shots.push({ size: sz, pageErrors: page.errors.slice(0, 10) });
   await page.ctxB.close();
 }

@@ -170,8 +170,8 @@ await T.t('J-B5 a keyboard-only journey: search the library, open a project, mov
   let hops = 0; while (hops++ < 30) { await page.keyboard.press('Tab'); const t = await page.evaluate(() => { const e = document.activeElement; return e ? (e.className || '') + '|' + (e.textContent || '').trim().slice(0, 40) : ''; }); if (/st-lib-open/.test(t)) break; }
   ok(hops < 30, 'Tab reaches the project in a few steps (' + hops + ')');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await sleep(400);
-  for (const [k, re] of [['Alt+4', /Design/], ['Alt+3', /Copy/], ['Alt+1', /Brief/]]) { await page.keyboard.press(k); await sleep(500); ok(re.test(await page.textContent(R + '.st-step.on')), k + ' opens ' + re); }
-  await page.keyboard.press('Alt+4'); await sleep(400); await page.click(R + '.st-assetpick:has-text("Steady tile")'); await page.waitForSelector(R + '.st-le-layer');
+  for (const [k, re] of [['Alt+5', /Design/], ['Alt+4', /Copy/], ['Alt+1', /Brief/]]) { await page.keyboard.press(k); await sleep(500); ok(re.test(await page.textContent(R + '.st-step.on')), k + ' opens ' + re); }
+  await page.keyboard.press('Alt+5'); await sleep(400); await page.click(R + '.st-assetpick:has-text("Steady tile")'); await page.waitForSelector(R + '.st-le-layer');
   await page.focus(R + '.st-le-layer[data-id="chip"]'); await page.keyboard.press('Shift+Slash'); await page.waitForSelector(R + '.st-keys', { timeout: 5000 });
   await page.keyboard.press('Escape'); await page.waitForSelector(R + '.st-keys', { state: 'detached', timeout: 5000 });
   ok(await page.evaluate(() => document.activeElement && document.activeElement !== document.body), 'the focus is on a control, not lost to the page');

@@ -55,7 +55,7 @@ await T.t('P2 the direction-change dialog takes the focus, keeps Tab inside, clo
   await api('POST', '/studio/direction/choose', { id: g.directions[0].id }); eq((await job('copy', { channels: ['facebook'], deliverable: 'set', formats: { facebook: '1:1' } })).state, 'done');
   g = await api('GET', '/studio/get?id=' + pr.id); const other = g.directions[1];
   const page = await open('S27 classic'); page.on('dialog', d => { pageErrors.push('unexpected dialog: ' + d.message().slice(0, 100)); d.dismiss(); });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await sleep(600);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await sleep(600);
   const btn = page.locator(R + '.st-dir:has(.st-dir-title:has-text("' + other.title.replace(/"/g, '') + '")) button:has-text("Choose this direction")').first();
   await btn.focus(); await page.keyboard.press('Enter');
   await page.waitForSelector(R + '.st-impact[data-kind="direction"]', { timeout: 10000 });
@@ -96,7 +96,7 @@ await T.t('P4 setting a direction aside asks for the reason in the Studio\'s dia
   const P = seeded.directions; const g = await api('GET', '/studio/get?id=' + P); const d0 = g.directions.find(d => !d.archived && !d.chosen) || g.directions[0];
   // a listener that leaves the Studio's own questions to the test (the fixture hands them to listeners; with none it dismisses)
   const page = await open('S27 at directions'); page.removeAllListeners('dialog'); page.on('dialog', d => { if (!d.studio) { pageErrors.push('browser dialog: ' + d.message().slice(0, 80)); d.dismiss(); } });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await sleep(700);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await sleep(700);
   const card = page.locator(R + 'article.st-dcard[aria-label="Direction ' + d0.title.replace(/"/g, '') + '"]').first();
   await card.locator('button[aria-label="Set aside ' + d0.title.replace(/"/g, '') + '"]').first().click();
   await page.waitForSelector(R + '.st-ask[data-kind="prompt"]', { timeout: 5000 });
@@ -113,7 +113,7 @@ await T.t('P4 setting a direction aside asks for the reason in the Studio\'s dia
 await T.t('P5 axe: no serious or critical violation in Explore (direction cards) or Copy (with a job in the activity panel)', async () => {
   const page = await open('S27 at design'); await page.addScriptTag({ content: AXE });
   const run = async label => { await sleep(700); const v = await page.evaluate(async () => (await window.axe.run(document.querySelector('#studio-root'), { resultTypes: ['violations'] })).violations.filter(x => x.impact === 'serious' || x.impact === 'critical').map(x => x.id + ' x' + x.nodes.length + ' ' + x.nodes.slice(0, 2).map(n => n.target.join(' ')).join(', '))); eq(v, [], label); };
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await run('Explore');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await run('Explore');
   await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await run('Copy');
   await page.ctxB.close();
 });

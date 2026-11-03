@@ -80,7 +80,7 @@ await T.t('R2 a suggestion is dismissed for this version and restored; the only 
 await T.t('R3 another direction after copy was written: a dialog names the pieces; Cancel changes nothing; keep chooses it and Copy stays clear', async () => {
   const P = seeded.copy; const g = await api('GET', '/studio/get?id=' + P); const other = g.directions.find(d => !d.chosen && !d.archived);
   await openProject('S25 at copy');
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await sleep(600);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await sleep(600);
   const card = page.locator(R + 'article.st-dcard:has(h4:text-is("' + other.title.replace(/"/g, '') + '"))').first();
   await card.locator('button:has-text("Select"), button:has-text("Choose"), button:has-text("Use this")').first().click();
   await page.waitForSelector(R + '.st-impact[data-kind="direction"]', { timeout: 10000 });

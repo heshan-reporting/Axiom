@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r27` since the p43 audit (6 November 2026).
+  with `?v=r28` since the concept C interface (3 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2843,6 +2843,45 @@ then on), deletes the vectors, then `retracted`; a failed deletion stays pending
 each tick, and the withdrawals the S28 build left half-done (withdrawn, no retract state, the document not retracted); refiling
 identical text never revives a retracted document. Harnesses: `tests/studio-p44-worker.mjs` (13);
 `tests/png.mjs` builds whole PNGs (and broken ones) for every harness that files a measurement.
+
+**Concept C in production (page `?v=r28`, worker unchanged; `CREATIVE-STUDIO.md` s.53).** The owner chose concept C (guided
+production with an immersive canvas; prototypes in `design/prototypes/creative-studio-concepts/`, never served) and asked for the
+editing interface to look like their reference editor - a Webflow-style layout - and for the whole interface to follow it; the
+reference's green was an example, not a requirement, so the accent stays the client's (`--st-client-accent`, else the Studio's
+cyan). **Seven stages** in the header (`PHASES`): Brief (`brief`), Message (`objectives`, `strategy` as its two steps), Direction
+(`directions`), Copy, Design, Review (`review`, approvals only) and Deliver (a new `STAGES` entry `export` over the export view,
+its state from `flowCounts`); Alt+1..7; numbered steps with an underline for where you are; `tests/studio-flow.mjs` maps the old
+names (Explore -> Direction, Export or Delivery -> Deliver, Objectives and Strategy through Message). **The palette** in
+`studio-skin.css`: charcoal panels (#1b1f22 on #0b0e10, raised #252a2e, hairlines #262c30/#2e3438), larger radii, round icon
+buttons. **The Design workspace is the reference editor**, one seamless frame: a 64 px rail (`DesignDock`) with **Add** as its
+accent button (the elements tool, its flyout titled "Add item" with folding sections over three-up tiles - Layouts, Typography,
+Basic elements, Lines and arrows, Frames, Brand colours, Brand assets, Media, Icons; folds remembered in `ax_studio_elfold`), the
+other tools as icons (names kept for screen readers and tests), and the Design views (Canvas, Board, Recipes, Jobs) at the foot
+of the rail; one 48 px top bar (still one row at 1024 to 1920 with a selection, the S24 rule) with the editor's tools, the
+**formats of the piece's family** as device-style buttons (`.st-fmts`, hidden when the bar is narrower than 760 px; the page strip
+offers the same pieces), the output width and one zoom control that names the measured zoom ("Fit - 54 %", from the artboard's
+own size through a ResizeObserver); the canvas on #111518 with the selection drawn as a 2 px accent outline, a name tag and white
+square handles; under it the compact page chips (drawing and ratio; the full name stays in the text for search and tests) and
+the **version strip** (`VersionStrip`: the newest six versions drawn small, the current one marked, a click compares with the
+current version and changes nothing, History holds the rest). **The Style panel** (`docs/studio-style.js`, `window.STStyle`):
+"Style" with the selected layer as an accent chip (a select of every layer), folding sections (`ax_studio_stysec`) - Spacing (the
+box model: the layer's distance to each edge in output pixels, typed to move it; disabled with the reason for a locked layer or
+a rule-held mark), Size (width and height in px, aspect kept for exact marks, then the per-cent box as before), Overflow (Fit the
+words to the box / keep fitted), Typography (Font opens the font picker, weight with its name, size, line height, tracking,
+alignment, emphasis, and the colour field), Effects, Image adjustments, Background (the photograph's framing). **The colour
+picker** (portalled to the Studio root, placed beside the panel that holds the field): saturation and brightness, hue, HSB and
+hex fields, the eyedropper, the contrast ratio and its WCAG grade against the ground the renderer measured behind the words
+(`groundLum` and `groundRange` on the validation boxes - never a guess from the layout), the worst patch, the client's saved
+colours from the kit palette and the recent ones; a drag previews in the picker and commits once on release (one undo step).
+Every edit is a patch through the editor's `setOne`, so locks, history, drafts and saving are unchanged. **Every wait shows a
+percentage:** `STProgress.estimate` gives each running job a measured share where the work is countable, else the time so far
+against the stage's own median (`/studio/status` durations, two runs or more) or a stated rough guess per stage (`GUESS`)
+before there is history - always labelled as an estimate ("~42% (estimate from the last 8 runs), about 20 s left"), drawn
+striped (`.st-progress-track.estimated`, `.st-minibar.estimated`) so it never reads as measured, held under 95% until the worker
+says done, and saying when a job runs past its usual time. It shows on the activity line over the canvas, the activity cards,
+the guided processing card and the operations line for requests that are not jobs. This supersedes S12's "never a percentage
+from the clock": a counted share is still only ever counted. Harnesses updated for the seven stages, the rail and the estimate;
+`tests/studio-progress-test.mjs` covers the estimate (49).
 
 Phase 1, the ground:
 

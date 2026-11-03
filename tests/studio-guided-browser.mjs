@@ -29,7 +29,7 @@ await T.t('seven steps in order: the wizard makes a guided project, the understa
   page = await fx.open({ viewport: { width: 1440, height: 900 } });
   const g0 = calls.gemini;
   await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', text: 'Write one Instagram tile on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
-  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Explore', 'Copy', 'Design', 'Review & Deliver'], 'S20: five phases over the seven steps');
+  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'], 'concept C: seven stages over the seven steps and the delivery');
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page);
   pid = (await latest('mca')).id; const d = await settle(pid);
   eq(d.brief.workflow, 2, 'a guided project');
@@ -95,7 +95,8 @@ await T.t('Design: the production mode is chosen once the words are ready, its c
   eq((d.brief.production || {}).mode, 'editable', 'the mode is recorded on the project');
   // the canvas and its dock
   await goStep(page, 'Design'); await page.waitForSelector(R + '.st-dock', { timeout: 15000 });
-  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Elements', 'Design', 'Text', 'Images', 'Brand', 'Layers'], 'the six tools, Elements first since S23 (the Creative Director is the right panel)');
+  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Add elements', 'Design', 'Text', 'Images', 'Brand', 'Layers'], 'the six tools, Add elements first (concept C: the accent Add button at the top of the rail); the Creative Director is the right panel');
+  ok(await page.$(R + '.st-dock .st-dock-btn.add'), 'Add is the rail\'s accent button');
   // S18: each tool opens its panel beside the canvas (the page does not scroll), and the canvas stays in view
   const y0 = await page.evaluate(() => document.querySelector('#studio-root .st-centre').scrollTop);
   for (const t of ['Brand', 'Text', 'Layers', 'Design', 'Images']) { await tool(page, t); ok(await page.isVisible(R + '.st-library[data-tool="' + t.toLowerCase() + '"]'), t + ' panel open'); }

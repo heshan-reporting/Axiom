@@ -33,7 +33,7 @@ const phase = async (page, name) => { await page.click(R + '.st-step:has(.st-ste
 const text = async page => ((await page.textContent(R)) || '').replace(/\s+/g, ' ');
 
 await T.t('H1 the stage lines state the worst case from the worker\'s policy; the Studio\'s paid question says retries are counted', async () => {
-  const page = await lib(); await openProject(page, 'Ready at directions'); await phase(page, 'Explore');
+  const page = await lib(); await openProject(page, 'Ready at directions'); await phase(page, 'Direction');
   ok(/At most 6 requests for one ask/.test(await text(page)), 'Explore names its ceiling: ' + (await text(page)).match(/AI.{0,200}/));
   await phase(page, 'Copy'); ok(/At most 6 requests \(a re-plan and retries included\)/.test(await text(page)), 'Copy names its ceiling');
   const pending = page.evaluate(() => window.STKit.ask({ title: 'Spend one call?', text: 'A test of the paid question.', cost: '1 model call', paid: true }));

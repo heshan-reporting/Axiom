@@ -115,7 +115,7 @@ await T.t('S9 + S8 + S5 in the page: an issue outlines its layer, the action sta
   await page.waitForSelector(R + '.st-le-layer'); const le = (await page.textContent(R + '.st-le-wrap')).replace(/\s+/g, ' ');
   ok(/held by the campaign rule/.test(le), 'the editor names the held mark: ' + le.slice(0, 300)); await shot(page, 'editor'); await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {});
   await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review"))'); await page.waitForSelector(R + '.st-approvals'); await shot(page, 'review');
-  await page.click(R + '.st-subtab:has-text("Delivery")'); await page.waitForTimeout(500); await shot(page, 'export');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Deliver"))'); await page.waitForTimeout(500); await shot(page, 'export');
   await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand');
   await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); });

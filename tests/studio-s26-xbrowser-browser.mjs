@@ -41,7 +41,7 @@ for (const [name, type, port] of ENGINES) {
     if ((await job(P, 'copy', { channels: ['facebook'], deliverable: 'set', formats: { facebook: '1:1' } })).state !== 'done') throw new Error('copy was not written');
     g = await api('GET', '/studio/get?id=' + P); const other = g.directions[1];
     const page = await open('Engines classic ' + name);
-    await page.click(R + '.st-step:has(.st-step-l:text-is("Explore"))'); await sleep(600);
+    await page.click(R + '.st-step:has(.st-step-l:text-is("Direction"))'); await sleep(600);
     const card = page.locator(R + '.st-dir:has(.st-dir-title:has-text("' + other.title.replace(/"/g, '') + '"))').first();
     await card.locator('button:has-text("Choose this direction")').click();
     await page.waitForSelector(R + '.st-impact[data-kind="direction"]', { timeout: 15000 });

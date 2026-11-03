@@ -73,3 +73,12 @@
 .st .st-work-link.full{display:block;padding:6px 10px;border-radius:6px;background:color-mix(in srgb,var(--st-warn) 12%,transparent);text-transform:none;letter-spacing:0;font:500 12px/1.4 inherit;color:var(--st-ink)}
 @keyframes st-draft-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.st .st-drafting{animation:none}}
+/* concept C (3 November 2026): an estimate is drawn differently from a counted share - striped, so it never reads as measured */
+.st .st-progress-track.estimated>span{background:repeating-linear-gradient(135deg,var(--st-accent) 0 6px,color-mix(in srgb,var(--st-accent) 62%,transparent) 6px 12px);transition:width 1s linear}
+.st .st-work-est{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--st-ink-2,#c9d0d4);font-variant-numeric:tabular-nums;min-width:0}
+.st .st-minibar{position:relative;width:64px;height:4px;flex-shrink:0;border-radius:2px;background:color-mix(in srgb,var(--st-ink) 12%,transparent);overflow:hidden}
+.st .st-minibar>i{display:block;height:100%;border-radius:inherit;background:var(--st-accent);transition:width 1s linear}
+.st .st-minibar.estimated>i{background:repeating-linear-gradient(135deg,var(--st-accent) 0 5px,color-mix(in srgb,var(--st-accent) 62%,transparent) 5px 10px)}
+.st .st-proc-est{display:flex;flex-direction:column;gap:6px;margin:4px 0 2px}
+.st .st-proc-est .st-progress-track{height:6px;border-radius:3px}
+@media (prefers-reduced-motion:reduce){.st .st-progress-track.estimated>span,.st .st-minibar>i{transition:none}}

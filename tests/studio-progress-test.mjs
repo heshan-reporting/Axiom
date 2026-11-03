@@ -88,5 +88,20 @@ eq(S.job({ id: 'q4', stage: 'copy', state: 'cancelled', created: now, cancel: { 
     eq(merged.map(j => j.id + ':' + (j.progress ? j.progress.activity.completed : j.state)), ['c1:3', 'n:queued', 'z:done'], 'a reload laid over the list keeps each job\'s newer snapshot');
   }
 }
+
+// concept C (3 November 2026): an estimate on every wait, never presented as measured
+{
+  const now2 = Date.now();
+  const g = S.job({ id: 'e1', stage: 'render', state: 'running', created: now2 - 20000, progress: { activity: { phase: 'generating', startedAt: now2 - 20000 } } }, now2, null);
+  eq([g.percent, g.est.measured, g.est.basis], [null, false, 'guess'], 'a model call in flight: no measured share, an estimate on a stated rough guess');
+  ok(g.est.percent > 0 && g.est.percent <= 95 && /rough estimate/.test(g.est.text) && /left/.test(g.est.text), 'the guess says it is rough and how long is left: ' + g.est.text);
+  const h = S.job({ id: 'e2', stage: 'analyse', state: 'running', created: now2 - 50000, progress: { activity: { phase: 'model', startedAt: now2 - 50000 } } }, now2, { n: 5, median: 40000, p80: 60000 });
+  ok(h.est.basis === 'history' && h.est.over && h.est.percent <= 95 && /longer than the usual 40 s/.test(h.est.text), 'past its usual time it says so and stays under 95%: ' + h.est.text);
+  const c2 = S.job({ id: 'e3', stage: 'copy', state: 'running', created: now2 - 5000, progress: { activity: { phase: 'composing', startedAt: now2 - 5000, completed: 1, total: 2 } } }, now2, null);
+  eq([c2.est.measured, c2.est.percent], [true, 50], 'countable work keeps its counted share');
+  eq(S.job({ id: 'e4', stage: 'copy', state: 'done', created: now2 - 5000 }, now2, null).est.percent, 100, 'done is 100');
+  eq(S.job({ id: 'e5', stage: 'copy', state: 'queued', created: now2 - 5000 }, now2, null).est.percent, 0, 'queued is 0, not started');
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

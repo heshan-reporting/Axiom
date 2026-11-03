@@ -111,7 +111,7 @@ await T.t('U4. nothing essential is cut off: the composition facts, the measurem
 });
 
 await T.t('U5. every stage head says whether its actions call a model (and how many), or that they call none', async () => {
-  for (const [step, re] of [['Brief', /AI\s+Analyse: 1 model call/], ['Explore', /AI\s+Selecting: none/], ['Copy', /AI\s+Writing the copy: 1 model call, no render/], ['Review', /AI\s+None/]]) {
+  for (const [step, re] of [['Brief', /AI\s+Analyse: 1 model call/], ['Direction', /AI\s+Selecting: none/], ['Copy', /AI\s+Writing the copy: 1 model call, no render/], ['Review', /AI\s+None/]]) {
     await page.click(R + '.st-step:has(.st-step-l:text-matches("^' + step + '"))'); await sleep(600);
     const t = await page.textContent(R + '.st-stagehead .st-phase-line'); ok(re.test(t), step + ': ' + t.replace(/\s+/g, ' '));
   }
@@ -155,7 +155,7 @@ await T.t('U9. at tablet width no step label is cut to an ellipsis; the other st
   await close(); await openDesign({ width: 834, height: 1194 });
   const bad = await cut('.st-step .st-step-l, .st-ptitle');
   eq(bad, [], 'no cut-off step label');
-  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Explore', 'Copy', 'Design', 'Review & Deliver'], 'every step keeps its name in the page');
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'], 'every step keeps its name in the page');
   const m = await bar(); eq(m.out, [], 'the toolbar keeps every control inside its box at 834: ' + m.names.join(' | '));
   for (const n of ['Undo', 'Redo', 'Add', 'View']) ok(m.names.some(x => x.indexOf(n) >= 0), n + ' is reachable at 834: ' + m.names.join(' | '));
   // and on a wide laptop the step names and the current step's note are whole (the other notes fold into the step's name for screen readers)
