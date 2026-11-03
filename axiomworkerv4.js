@@ -9278,13 +9278,15 @@ function stCompDescriptor(d) {
   const wz = (place.match(/\b(?:words?|headline|text|type|copy|message)\b[^.,;:]{0,40}?\b(top|upper|bottom|foot|lower|left|right|centre|center|middle)\b/) || [])[1];
   const ZW = { top: 'top', upper: 'top', bottom: 'bottom', foot: 'bottom', lower: 'bottom', left: 'left', right: 'right', centre: 'middle', center: 'middle', middle: 'middle' };
   const zone = wz ? ZW[wz] : /\b(top|upper|above|header)\b/.test(place) ? 'top' : /\bleft\b/.test(place) ? 'left' : /\bright\b/.test(place) ? 'right' : /\b(centre|center|middle|centred|centered)\b/.test(place) ? 'middle' : 'bottom';
+  // RC (C1): 'bottom' above is the preview's default, not something the direction said; the likeness measure must know
+  const zoneSaid = !!wz || /\b(top|upper|above|header|left|right|centre|center|middle|centred|centered|bottom|foot|lower|base)\b/.test(place);
   const image = medium === 'typographic' || /\b(no (photo|photograph|image|imagery)|type only|type-only|typographic|text only|words only)\b/.test(all) ? 'none'
     : medium === 'infographic' || medium === 'diagram' || /\b(chart|graph|diagram|infographic|data visuali[sz]ation)\b/.test(all) ? 'chart'
     : /\b(split|half and half|side by side|two halves|diptych)\b/.test(all) ? 'split'
     : medium === 'cutout' || /\b(inset|small (photo|photograph|image)|thumbnail|framed (photo|photograph)|cut ?out)\b/.test(all) ? 'inset' : 'full';
   const scale = /\b(huge|giant|oversized|massive|dominant|towering|very large|poster|billboard)\b/.test(typ + ' ' + all) ? 'large' : /\b(small|understated|quiet|restrained|minimal)\b/.test(typ) ? 'small' : 'standard';
   const palette = ST_COLOUR_WORDS.filter(w => new RegExp('\\b' + w + '\\b').test(col)).slice(0, 4);
-  return { medium, zone, image, scale, palette };
+  return { medium, zone, zoneSaid, image, scale, palette };
 }
 /** How different a set of directions is in what it would draw: one minus the mean pairwise likeness of their descriptors
  *  (medium 0.3, imagery 0.25, where the words sit 0.2, type scale 0.1, palette 0.15); a pair scoring under 0.3 apart is named
@@ -9298,7 +9300,8 @@ function stCompositionDiversity(dirs) {
     const fam = m => (/^photo|photograph/i.test(String(m || '')) ? 'photographic' : String(m || ''));
     let dist = 0; if (fam(a.medium) !== fam(b.medium) || !a.medium) dist += 0.3; else same.push(fam(a.medium) === a.medium ? 'medium' : 'medium (' + fam(a.medium) + ')');
     if (a.image !== b.image) dist += 0.25; else same.push('imagery ' + a.image);
-    if (a.zone !== b.zone) dist += 0.2; else same.push('words at the ' + a.zone);
+    // a placement neither direction stated is unknown, not shared (zoneSaid false; older stored sketches carry no flag and count as stated)
+    if (a.zone !== b.zone || a.zoneSaid === false || b.zoneSaid === false) dist += 0.2; else same.push('words at the ' + a.zone);
     if (a.scale !== b.scale) dist += 0.1; else same.push(a.scale + ' type');
     const u = new Set(a.palette.concat(b.palette)); const inter = a.palette.filter(x => b.palette.indexOf(x) >= 0).length; const pd = u.size ? 1 - inter / u.size : 0; dist += 0.15 * pd; if (u.size && pd < 0.5) same.push('palette');
     dist = Math.round(dist * 100) / 100; pairs.push({ a: dirs[i].title, b: dirs[k].title, distance: dist, close: dist < 0.3, same }); sum += dist; n++;

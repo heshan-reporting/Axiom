@@ -59,4 +59,21 @@ await S.t('C1: when the round brings back look-alikes again, they stand marked, 
   } finally { x.w.restore(); }
 });
 
+await S.t('C1: a direction that never says where its words sit is not a look-alike by default: unstated placement is not "the same placement"', async () => {
+  // found by the release gate (studio-s17-browser): a portrait with the headline in a low band and a hero image with the words
+  // painted in the sky are both photographic; the descriptor took the unstated placement as "bottom" and called them twins
+  const SET = [
+    { title: 'The plain ask', idea: 'Say plainly what the credit is', headline: 'Not a subsidy.', message: 'It returns a tax that never applied', medium: 'typographic', composition: 'type-led', typography: 'condensed', colour: 'teal and cream' },
+    { title: 'Who it really is', idea: 'Name the people who use it', headline: 'Farmers. Tradies.', message: 'Used by 150,000 businesses', medium: 'photo-documentary', composition: 'portrait with low band', layout: 'Portrait full bleed, headline in a low band', colour: 'natural light' },
+    { title: 'The road never driven', idea: 'Show the road the fuel never touches', headline: 'A tax for roads it never used', message: 'Off-road fuel never used the roads', medium: 'photo-cinematic', composition: 'hero image', layout: 'One hero image, words painted in the sky', visualNarrative: { textPlacement: 'sky third' } },
+  ];
+  const x = await directWith([SET]);
+  try {
+    eq(x.job.state, 'done', JSON.stringify(x.job.error || ''));
+    eq(x.sent.length, 1, 'no replanning round: ' + (x.sent[1] || '').slice(-300));
+    eq(x.g.directions.map(d => d.title), SET.map(d => d.title));
+    ok(!x.g.directions.some(d => d.lookalike), 'nothing marked: ' + JSON.stringify(x.g.directions.map(d => [d.title, d.lookalike])));
+  } finally { x.w.restore(); }
+});
+
 const r = S.done(); process.exit(r.fail ? 1 : 0);
