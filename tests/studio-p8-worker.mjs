@@ -23,7 +23,7 @@ const env = {
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
 // a PNG header whose IHDR colour type (byte 25) says whether it carries alpha: 6 = RGBA, 2 = RGB
-const png = (colourType, fill) => { const b = Buffer.alloc(120, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b[24] = 8; b[25] = colourType; return b; };
+const png = (colourType, fill) => { const b = Buffer.alloc(120, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b.fill(0, 16, 24);   /* S28: the header states no size, as this fake is no picture (the worker checks a stated size against the stage) */ b[24] = 8; b[25] = colourType; return b; };
 const PNG = png(6).toString('base64');
 const anth = { calls: [] }; const gem = { calls: [], queue: [], fail404Once: false };
 const textOf = body => typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');

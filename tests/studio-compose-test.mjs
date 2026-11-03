@@ -37,7 +37,7 @@ let d = null; try { d = JSON.parse(String(r.stdout).trim().split('\n').pop()); }
 ok(d && d.ok && d.composed.length === 1, 'one composition drawn: ' + JSON.stringify(d && (d.composed || d)));
 const row = d && d.composed[0];
 ok(row && fs.existsSync(row.file) && fs.statSync(row.file).size > 1000, 'written to disk at native size');
-ok(row && row.saved === 'studio/' + p.id + '/' + a.asset.id + '/' + a.asset.current + '-export.png' && r2.has(row.saved), 'saved as the version\'s export: ' + JSON.stringify(row && (row.saveError || row.validation)));
+ok(row && new RegExp('^studio/' + p.id + '/' + a.asset.id + '/' + a.asset.current + '-export-[0-9a-f]{16}\\.png$').test(row.saved || '') && r2.has(row.saved), 'saved as the version\'s export, under its own hash (S28): ' + JSON.stringify(row && (row.saveError || row.validation)));
 ok(row && row.validation && row.validation.technical, 'the measurement was filed and re-judged by the worker: ' + JSON.stringify(row && row.validation));
 ok(row && row.fonts && Array.isArray(row.fonts.fallback), 'the fonts used are reported, fallback included: ' + JSON.stringify(row && row.fonts));
 ok(row && !row.missing, 'the wordmark image was fetched and drawn');

@@ -3166,6 +3166,28 @@ function bufFromB64(b64) {
   return out.buffer;
 }
 /** A short content hash: a mark file's version, so a replaced file never hides behind the same URL. */
+/* S28: what an uploaded image really is, from its bytes (never the declared type): png / jpeg / webp, and a PNG's size from IHDR */
+function stImgSniff(buf) {
+  const u = new Uint8Array(buf instanceof ArrayBuffer ? buf : (buf && buf.buffer ? buf.buffer.slice(buf.byteOffset || 0, (buf.byteOffset || 0) + buf.byteLength) : new ArrayBuffer(0)));
+  if (u.length > 24 && u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47) return { type: 'png', mime: 'image/png', w: ((u[16] << 24) | (u[17] << 16) | (u[18] << 8) | u[19]) >>> 0, h: ((u[20] << 24) | (u[21] << 16) | (u[22] << 8) | u[23]) >>> 0 };
+  if (u.length > 3 && u[0] === 0xff && u[1] === 0xd8 && u[2] === 0xff) {
+    // the frame header (SOF0-SOF15 but DHT, JPG and DAC) carries the size
+    let i = 2, w = 0, h = 0; while (i + 9 < u.length) { if (u[i] !== 0xff) { i++; continue; } const m = u[i + 1]; if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { i += 2; continue; } const len = (u[i + 2] << 8) | u[i + 3];
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) { h = (u[i + 5] << 8) | u[i + 6]; w = (u[i + 7] << 8) | u[i + 8]; break; } i += 2 + len; }
+    return { type: 'jpeg', mime: 'image/jpeg', w, h };
+  }
+  if (u.length > 30 && String.fromCharCode(u[0], u[1], u[2], u[3]) === 'RIFF' && String.fromCharCode(u[8], u[9], u[10], u[11]) === 'WEBP') {
+    const c = String.fromCharCode(u[12], u[13], u[14], u[15]); let w = 0, h = 0;
+    if (c === 'VP8X') { w = 1 + (u[24] | (u[25] << 8) | (u[26] << 16)); h = 1 + (u[27] | (u[28] << 8) | (u[29] << 16)); }
+    else if (c === 'VP8 ') { w = (u[26] | (u[27] << 8)) & 0x3fff; h = (u[28] | (u[29] << 8)) & 0x3fff; }
+    else if (c === 'VP8L') { const b = u[21] | (u[22] << 8) | (u[23] << 16) | (u[24] << 24); w = 1 + (b & 0x3fff); h = 1 + ((b >>> 14) & 0x3fff); }
+    return { type: 'webp', mime: 'image/webp', w, h };
+  }
+  return null;
+}
+async function stBufSha(buf) { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, '0')).join(''); }
+/** S28: the composed PNG a version's measurement filed: content-addressed, so it can never be replaced under the same name */
+function stExportKey(p, a, v, hash) { return 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export-' + String(hash).slice(0, 16) + '.png'; }
 async function stContentV(buf) { try { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return Date.now().toString(36); } }
 async function brandSave(env, ns, body, who) {
   const cur = (await brandKit(env, ns)) || {};
@@ -3258,6 +3280,27 @@ async function brandSave(env, ns, body, who) {
   await kvPut(env.AXIOM_KV, 'brand_' + ns, JSON.stringify(kit), 10 * 365 * 86400);
   try { await brKitRevision(env, ns, cur, kit, who); } catch (e) {}   // the kit's history: who changed what, when (brand_revisions)
   return kit;
+}
+/* S28: put the kit back as it stood at one revision of its history, as a new revision with the reason. The words, facts, campaigns
+ * and rules come back exactly; the marks come back as the files that revision named (their immutable copies stay in R2 for good),
+ * and the current single-slot logo and wordmarks are pointed at those files again. */
+async function brandRestore(env, ns, body, who) {
+  await ensureBrand(env);
+  const reason = String(body.reason || '').trim(); if (reason.length < 4) return { error: 'reason_required', status: 400, detail: 'Say why the kit goes back (four characters or more): it is recorded on the new revision.' };
+  const rid = stClean(body.revision, 30); const row = rid ? await env.MIND_DB.prepare('SELECT id, at, kit FROM brand_revisions WHERE ns=? AND id=?').bind(ns, rid).first() : null;
+  if (!row) return { error: 'unknown_revision', status: 404, detail: 'No revision ' + rid + ' of the ' + ns + ' kit.' };
+  const snap = pjs(row.kit, null); if (!snap || typeof snap !== 'object' || snap._truncated) return { error: 'revision_unusable', status: 409, detail: 'That revision was stored cut short, so it cannot be restored exactly.' };
+  const cur = (await brandKit(env, ns)) || {};
+  const kit = Object.assign({}, snap, { ns, updated: Date.now(), by: stStr(who, 40), restoredFrom: row.id });
+  delete kit.logoInk; (kit.logoVariants || []).forEach(x => { delete x.ink; }); (kit.campaigns || []).forEach(c => { delete c.wordmarkInk; (c.wordmarks || []).forEach(x => { delete x.ink; }); });
+  if (env.MIND_DOCS) {
+    try { if (kit.hasLogo && kit.logoV) { const o = await env.MIND_DOCS.get('brand/' + ns + '/logo@' + kit.logoV); if (o) await env.MIND_DOCS.put('brand/' + ns + '/logo', await o.arrayBuffer(), { httpMetadata: o.httpMetadata || { contentType: kit.logoMime || 'image/png' } }); } } catch (e) {}
+    for (const c of (kit.campaigns || [])) { try { if (c.wordmarkV) { const o = await env.MIND_DOCS.get('brand/' + ns + '/wordmark/' + c.id + '@' + c.wordmarkV); if (o) await env.MIND_DOCS.put('brand/' + ns + '/wordmark/' + c.id, await o.arrayBuffer(), { httpMetadata: o.httpMetadata || { contentType: c.wordmarkMime || 'image/png' } }); } } catch (e) {} }
+  }
+  await kvPut(env.AXIOM_KV, 'brand_' + ns, JSON.stringify(kit), 10 * 365 * 86400);
+  const at = new Date(row.at || 0).toISOString().slice(0, 16).replace('T', ' ');
+  try { await brKitRevision(env, ns, cur, kit, who, 'restored from revision ' + row.id + ' (' + at + ' UTC): ' + reason); } catch (e) {}
+  return { ok: true, ns, kit, restoredFrom: row.id };
 }
 
 // -- Compose: the release, read properly, then the tiles -------------------------
@@ -3442,6 +3485,8 @@ async function ensureEngine(env) {
   // S24: where a rule came from, as data - an observation of a reference (ref, obs, area, campaign, the words it was taught from)
   // and what happened to it since (superseded by another rule, its evidence retired) - so a rule and its evidence stay linked
   try { await env.MIND_DB.prepare('ALTER TABLE engine_fixes ADD COLUMN origin TEXT').run(); } catch (e) {}
+  // S28: the Mind document an outcome filed, and when the outcome was withdrawn (its document retracted with it)
+  for (const c of ['doc TEXT', 'withdrawn INTEGER']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_outcomes ADD COLUMN ' + c).run(); } catch (e) {} }
   ENGINE_READY = true;
   return true;
 }
@@ -3499,6 +3544,11 @@ async function engineOutcome(env, body, who) {
   await ensureEngine(env);
   const ns = relNs(body.ns);
   const verdict = body.verdict === 'killed' ? 'killed' : 'approved';
+  // S28: a decision is learned from once - a second identical decision on the same thing (the same asset, version and part) files nothing
+  if (body.dedupe && body.ref) {
+    const had = await env.MIND_DB.prepare('SELECT * FROM engine_outcomes WHERE ns=? AND surface=? AND ref=? AND verdict=? AND COALESCE(withdrawn,0)=0 LIMIT 1').bind(ns, String(body.surface || 'release').slice(0, 40), String(body.ref).slice(0, 60), verdict).first();
+    if (had) return Object.assign({}, had, { docId: had.doc || '', existing: true });
+  }
   const o = { id: engId('o'), ns, surface: String(body.surface || 'release').slice(0, 40), ref: String(body.ref || '').slice(0, 60), n: parseInt(body.n, 10) || 0, verdict,
     why: String(body.why || '').slice(0, 600), headline: String(body.headline || '').slice(0, 200), support: String(body.support || '').slice(0, 300), cta: String(body.cta || '').slice(0, 60),
     who: String(who || '').slice(0, 40), created: Date.now() };
@@ -3507,13 +3557,34 @@ async function engineOutcome(env, body, who) {
   // an exemplar in the Mind, so future briefs retrieve the wins and learn from the losses
   let docId = '';
   try {
-    const text = 'VERDICT: ' + verdict.toUpperCase() + '\nSurface: ' + o.surface + (o.ref ? ' ' + o.ref + ' tile ' + (o.n + 1) : '') + '\nDate: ' + new Date().toISOString().slice(0, 10)
+    const text = 'VERDICT: ' + verdict.toUpperCase() + '\nSurface: ' + o.surface + (o.ref ? ' ' + o.ref + ' tile ' + (o.n + 1) : '') + '\nDate: ' + auDayKey()
       + (o.headline ? '\nHeadline: ' + o.headline : '') + (o.support ? '\nSupport: ' + o.support : '') + (o.cta ? '\nCTA: ' + o.cta : '') + (o.why ? '\nWhy: ' + o.why : '');
     const camp = String(body.campaign || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40);
-    const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: new Date().toISOString().slice(0, 10), campaign: camp, approval: verdict === 'approved' ? 'approved' : 'rejected', scope: camp ? 'campaign' : 'client', classifiedBy: 'verdict:' + o.surface });
+    const r = await mindIngestDoc(env, { ns, title: (verdict === 'approved' ? 'WIN: ' : 'LOSS: ') + (o.headline || o.surface).slice(0, 120), text, kind: 'outcome', source: o.surface + ':' + o.ref, date: auDayKey(), campaign: camp, approval: verdict === 'approved' ? 'approved' : 'rejected', scope: camp ? 'campaign' : 'client', classifiedBy: 'verdict:' + o.surface });
     docId = r.docId;
+    if (docId) { try { await env.MIND_DB.prepare('UPDATE engine_outcomes SET doc=? WHERE id=?').bind(docId, o.id).run(); } catch (e) {} }
   } catch (e) { o.exemplarError = String((e && e.message) || e).slice(0, 200); console.log('outcome exemplar not filed: ' + o.exemplarError); }   // the verdict stands; the answer says the exemplar is missing
   return Object.assign(o, { docId });
+}
+/** S28: take a decision back out of the client's memory: the outcome is marked withdrawn and the WIN or LOSS document it filed is
+ *  retracted (its vectors deleted, so no brief retrieves it; the row says retracted). `ref` is exact; `verdict` narrows it. */
+async function engineRetract(env, f) {
+  await ensureEngine(env); const now = Date.now();
+  const rows = (await env.MIND_DB.prepare('SELECT id, doc FROM engine_outcomes WHERE ns=? AND surface=? AND ref=? AND COALESCE(withdrawn,0)=0' + (f.verdict ? ' AND verdict=?' : '')).bind(...[relNs(f.ns), String(f.surface || '').slice(0, 40), String(f.ref || '').slice(0, 60)].concat(f.verdict ? [f.verdict] : [])).all()).results || [];
+  for (const r of rows) {
+    if (r.doc) { try { await mindRetract(env, r.doc); } catch (e) { console.log('retract failed for ' + r.doc + ': ' + String(e && e.message || e).slice(0, 120)); } }
+    await env.MIND_DB.prepare('UPDATE engine_outcomes SET withdrawn=? WHERE id=?').bind(now, r.id).run();
+  }
+  return rows.length;
+}
+/** S28: a Mind document taken back: every chunk's vector deleted, the text removed from R2, the row kept as status retracted. */
+async function mindRetract(env, docId) {
+  const row = await env.MIND_DB.prepare('SELECT id, ns, chunks FROM mind_docs WHERE id=?').bind(String(docId || '').slice(0, 80)).first(); if (!row) return false;
+  const n = Math.max(1, Number(row.chunks) || 1); const ids = []; for (let i = 0; i < n; i++) ids.push(row.id + '_' + i);
+  if (env.MIND_VECTORS && env.MIND_VECTORS.deleteByIds) { for (let i = 0; i < ids.length; i += 100) await env.MIND_VECTORS.deleteByIds(ids.slice(i, i + 100)); }
+  if (env.MIND_DOCS) { try { await env.MIND_DOCS.delete('mind/' + row.ns + '/' + row.id + '.txt'); } catch (e) {} }
+  await env.MIND_DB.prepare("UPDATE mind_docs SET status='retracted', updated=? WHERE id=?").bind(Date.now(), row.id).run();
+  return true;
 }
 /** Describe a piece of artwork with a vision model so it can be remembered and
  *  retrieved. Text only comes back; the image itself goes to R2. */
@@ -4574,6 +4645,19 @@ async function srcFetch(url, accept, ms) {
     return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: /timeout|abort/i.test(s) ? 'timed out after ' + Math.round((ms || SOURCE_FETCH_MS) / 1000) + 's' : s.trim().slice(0, 90) };
   }
 }
+/* S28: the same answer as srcFetch for an address a person supplied, with every redirect checked by hand (axFetchPublic): a public
+ * page that redirects to a private or local address is refused, not followed */
+async function srcFetchPublic(url, accept, ms) {
+  const t0 = Date.now();
+  try {
+    const r = await axFetchPublic(url, { headers: { 'User-Agent': BROWSER_UA, 'Accept': accept || '*/*', 'Accept-Language': 'en-AU,en;q=0.8' }, signal: abortAfter(ms || SOURCE_FETCH_MS) });
+    const text = r.ok ? (await r.text()).slice(0, 1500000) : '';
+    return { ok: r.ok, status: r.status, text, ms: Date.now() - t0, ctype: (r.headers.get('content-type') || '').toLowerCase(), url: r.url || url };
+  } catch (e) {
+    const s = String((e && e.name) || '') + ' ' + String((e && e.message) || e);
+    return { ok: false, status: 0, text: '', ms: Date.now() - t0, error: e && e.blocked ? String(e.message).slice(0, 120) : /timeout|abort/i.test(s) ? 'timed out after ' + Math.round((ms || SOURCE_FETCH_MS) / 1000) + 's' : s.trim().slice(0, 90) };
+  }
+}
 function srcFail(f, what) { return { ok: false, items: [], status: f.status || 0, detail: f.error ? f.error : (f.status ? 'HTTP ' + f.status : (what || 'failed')) }; }
 /** Article-shaped links on a listing page: same host, a slug or a dated path,
  *  anchor text long enough to be a headline. Undated - the sweep stamps the
@@ -5081,7 +5165,7 @@ async function fullText(env, url, opts) {
     const a0 = Date.now();
     const a = { method, target: String(target || '').slice(0, 220), ok: false, ms: 0, status: 0, chars: 0, detail: '' };
     try {
-      const f = await (fetcher ? fetcher() : srcFetch(target, 'text/html,application/xhtml+xml,*/*', opts.ms || 8000));
+      const f = await (fetcher ? fetcher() : (opts.publicOnly ? srcFetchPublic : srcFetch)(target, 'text/html,application/xhtml+xml,*/*', opts.ms || 8000));
       a.status = f.status || 0;
       if (!f.ok) { a.detail = f.error || (f.skipped ? String(f.detail || 'skipped') : ('HTTP ' + f.status)); if (f.skipped) a.skipped = true; }
       else {
@@ -5106,6 +5190,7 @@ async function fullText(env, url, opts) {
     const d = await gnewsDecode(url);
     attempts.push({ method: 'gnews', target: url.slice(0, 220), ok: d.ok, ms: d.ms || 0, status: 0, chars: 0, detail: d.ok ? 'decoded via ' + d.via : d.detail });
     if (!d.ok) { out.detail = 'could not resolve the Google News link to the article'; return done(); }
+    if (opts.publicOnly && axUrlProblem(d.url)) { out.detail = 'the Google News link resolves to an address that is not read: ' + axUrlProblem(d.url); return done(); }
     url = d.url; out.final = url; out.decoded = url;
   }
   const direct = await attempt('direct', url);
@@ -7109,7 +7194,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-04.studio-p42';
+const AXIOM_BUILD = '2026-11-05.studio-p43';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7180,7 +7265,7 @@ async function ensureStudio(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN meta TEXT').run(); } catch (e) {}   // S23: the reference's record (paid or organic, format, channel, approval, likes and dislikes) and its observations
   // S24: what each job has sent against its attempt policy (text and image requests, retries and fallbacks included), what a cancel
   // found already in flight, and the live-test allowance a project may carry - checked on the server before every dispatch
-  for (const [t, c, ty] of [['studio_jobs', 'text_sent', 'INTEGER'], ['studio_jobs', 'image_sent', 'INTEGER'], ['studio_jobs', 'cancel', 'TEXT'], ['studio_projects', 'allowance', 'TEXT'], ['studio_references', 'rev', 'INTEGER']]) { try { await env.MIND_DB.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + ty).run(); } catch (e) {} }
+  for (const [t, c, ty] of [['studio_jobs', 'text_sent', 'INTEGER'], ['studio_jobs', 'image_sent', 'INTEGER'], ['studio_jobs', 'cancel', 'TEXT'], ['studio_projects', 'allowance', 'TEXT'], ['studio_references', 'rev', 'INTEGER'], ['studio_projects', 'test', 'INTEGER'], ['studio_jobs', 'pid', 'TEXT'], ['studio_validations', 'export_hash', 'TEXT'], ['studio_validations', 'export_w', 'INTEGER'], ['studio_validations', 'export_h', 'INTEGER']]) { try { await env.MIND_DB.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + ty).run(); } catch (e) {} }
   try { await env.MIND_DB.batch([
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_dispatch(id TEXT PRIMARY KEY, job TEXT, project TEXT, kind TEXT, model TEXT, attempt INTEGER, n INTEGER, retry INTEGER, fallback INTEGER, at INTEGER, ended INTEGER, outcome TEXT, ms INTEGER, detail TEXT)'),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_dispatch_j ON studio_dispatch(job, at)'),
@@ -7223,7 +7308,7 @@ function stOrderAssets(list) {
   return out;
 }
 function stProjectRow(r) {
-  return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false, allowance: r.allowance || '' };
+  return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false, allowance: r.allowance || '', test: !!r.test };
 }
 /* Events that carry whole proposals (art directions with their layouts, alternatives, render proposals) are
    larger than a thread note; a truncated JSON document reads back as nothing, so those kinds get more room. */
@@ -7403,6 +7488,7 @@ async function stList(env, f) {
   const ns = relNs(f.ns);
   const w = ['ns=?']; const b = [ns];
   if (!f.archived) w.push('archived=0');
+  if (f.tests === 'only') w.push('COALESCE(test,0)=1'); else if (f.tests === 'hide') w.push('COALESCE(test,0)=0');   // S28: live work and test projects apart
   if (f.status) { w.push('status=?'); b.push(stStr(f.status, 20)); }
   if (f.q) { w.push("title LIKE ? ESCAPE '\\'"); b.push(arcLike(String(f.q).slice(0, 80))); }
   const rows = (await env.MIND_DB.prepare('SELECT p.*, (SELECT COUNT(*) FROM studio_assets a WHERE a.project=p.id AND COALESCE(a.archived,0)=0) n_assets, (SELECT COUNT(*) FROM studio_sources s WHERE s.project=p.id) n_sources FROM studio_projects p WHERE ' + w.join(' AND ') + ' ORDER BY updated DESC LIMIT ?').bind(...b, Math.min(parseInt(f.limit, 10) || 100, 300)).all()).results || [];
@@ -7543,7 +7629,7 @@ async function stImport(env, legacyId, who) {
   return { id, existing: false };
 }
 // -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
-function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '', textSent: Number(r.text_sent) || 0, imageSent: Number(r.image_sent) || 0, cancel: pjs(r.cancel, null) }; }
+function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '', textSent: Number(r.text_sent) || 0, imageSent: Number(r.image_sent) || 0, cancel: pjs(r.cancel, null), pid: r.pid || '' }; }
 async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
 /* How long each stage has actually taken here (the last 40 finished attempts per stage, KV studio_dur_<stage>): the app says
  * "typically N s" from the median and is never a percentage invented from the clock. */
@@ -7582,8 +7668,8 @@ async function stJobCreate(env, body, who) {
   try {
     await ensureRecipes(env);
     let after = ''; if (body.after) { const dep = await env.MIND_DB.prepare('SELECT id FROM studio_jobs WHERE id=? AND project=?').bind(stClean(body.after, 30), p.id).first(); if (!dep) return { error: 'unknown_after', status: 400, detail: 'after must name a job of the same project.' }; after = dep.id; }
-    await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated,after,recipe) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null).run();
+    await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated,after,recipe,pid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null, stClean(body.pid, 40) || null).run();
   } catch (e) {
     if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
     throw e;
@@ -7653,6 +7739,32 @@ async function stAllowanceCharge(env, id, kind) {
 async function stAllowanceRefund(env, id, kind) { const col = kind === 'image' ? 'images' : 'calls'; try { await env.MIND_DB.prepare('UPDATE studio_allowances SET ' + col + '_used=MAX(0,COALESCE(' + col + '_used,0)-1) WHERE id=?').bind(id).run(); } catch (e) {} }
 /** The gate every provider request of a job passes, in order: ownership and the job's cap (one conditional write), the project's
  *  allowance, the day's budget for the kind. Refused before anything is sent; nothing half-charged stays charged. */
+/* S28: each person's daily allowance of Studio model calls and image requests (Sydney days), so one tester cannot spend the agency's
+ * whole budget. STUDIO_PERSON_DAILY_CALLS / _IMAGES for keys on the roster, STUDIO_GUEST_DAILY_CALLS / _IMAGES for guest links; 0 lifts
+ * a cap. Reserved before the request, like the agency ledger; a request that was never sent is given back. */
+const ST_PERSON_CAPS = { calls: 120, images: 40, guestCalls: 40, guestImages: 12 };
+function stPersonCap(env, pid, kind) {
+  const guest = /^g/.test(String(pid || ''));
+  const v = kind === 'image' ? (guest ? env.STUDIO_GUEST_DAILY_IMAGES : env.STUDIO_PERSON_DAILY_IMAGES) : (guest ? env.STUDIO_GUEST_DAILY_CALLS : env.STUDIO_PERSON_DAILY_CALLS);
+  const d = kind === 'image' ? (guest ? ST_PERSON_CAPS.guestImages : ST_PERSON_CAPS.images) : (guest ? ST_PERSON_CAPS.guestCalls : ST_PERSON_CAPS.calls);
+  const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : d;
+}
+async function stPersonLedger(env) { await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_person_usage(day TEXT, pid TEXT, kind TEXT, used INTEGER DEFAULT 0, updated INTEGER, PRIMARY KEY(day, pid, kind))').run(); }
+async function stPersonReserve(env, pid, kind) {
+  const cap = stPersonCap(env, pid, kind); if (!pid || !cap) return { ok: true, cap: 0 };
+  await stPersonLedger(env); const day = auDayKey(); const k = kind === 'image' ? 'image' : 'text';
+  await env.MIND_DB.prepare('INSERT OR IGNORE INTO studio_person_usage(day, pid, kind, used, updated) VALUES(?,?,?,0,?)').bind(day, pid, k, Date.now()).run();
+  const u = await env.MIND_DB.prepare('UPDATE studio_person_usage SET used=used+1, updated=? WHERE day=? AND pid=? AND kind=? AND used < ?').bind(Date.now(), day, pid, k, cap).run();
+  if (u && u.meta && u.meta.changes) return { ok: true, cap, day };
+  const r = await env.MIND_DB.prepare('SELECT used FROM studio_person_usage WHERE day=? AND pid=? AND kind=?').bind(day, pid, k).first();
+  return { ok: false, cap, used: Number(r && r.used) || 0, day };
+}
+async function stPersonRefund(env, pid, kind, day) { try { await env.MIND_DB.prepare('UPDATE studio_person_usage SET used=MAX(0, used-1), updated=? WHERE day=? AND pid=? AND kind=?').bind(Date.now(), day || auDayKey(), pid, kind === 'image' ? 'image' : 'text').run(); } catch (e) {} }
+async function stPersonUsage(env, pid) {
+  await stPersonLedger(env); const day = auDayKey(); const out = { day, guest: /^g/.test(String(pid || '')) };
+  for (const k of ['text', 'image']) { const r = await env.MIND_DB.prepare('SELECT used FROM studio_person_usage WHERE day=? AND pid=? AND kind=?').bind(day, pid, k).first(); out[k === 'text' ? 'calls' : 'images'] = { used: Number(r && r.used) || 0, cap: stPersonCap(env, pid, k === 'text' ? 'text' : 'image') }; }
+  return out;
+}
 async function stDispatchOpen(env, job, attempt, kind, info) {
   info = info || {}; const col = kind === 'image' ? 'image_sent' : 'text_sent'; const cap = await stJobCapNow(env, job, kind); const now = Date.now();
   const u = await env.MIND_DB.prepare('UPDATE studio_jobs SET ' + col + '=COALESCE(' + col + ',0)+1, updated=? WHERE id=? AND state=\'running\' AND attempts=? AND COALESCE(' + col + ',0) < ?').bind(now, job.id, attempt, cap).run();
@@ -7665,8 +7777,10 @@ async function stDispatchOpen(env, job, attempt, kind, info) {
   const pr = await env.MIND_DB.prepare('SELECT allowance FROM studio_projects WHERE id=?').bind(job.project).first();
   const alId = pr && pr.allowance ? String(pr.allowance) : '';
   if (alId) { const al = await stAllowanceCharge(env, alId, kind); if (!al.ok) { await undo(); throw new Error(al.error + ': ' + al.detail + ' (not retried)'); } }
+  const pres = job.pid ? await stPersonReserve(env, job.pid, kind) : { ok: true, cap: 0 };
+  if (!pres.ok) { await undo(); if (alId) await stAllowanceRefund(env, alId, kind); throw new Error('person_budget_exhausted: the person who asked for this has used ' + pres.used + ' of their ' + pres.cap + ' Studio ' + (kind === 'image' ? 'image requests' : 'model calls') + ' today (a daily cap per person; it resets at midnight Sydney time) (not retried)'); }
   const rv = await aiReserve(env, kind === 'image' ? 'studio_image' : 'studio', { retry: !!info.retry, fallback: !!info.fallback });
-  if (!rv.ok) { await undo(); if (alId) await stAllowanceRefund(env, alId, kind); throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio ' + (kind === 'image' ? 'image requests (STUDIO_DAILY_IMAGES)' : 'model calls (STUDIO_DAILY_CALLS)') + ' used today; the rest waits for tomorrow or a higher limit (not retried)'); }
+  if (!rv.ok) { await undo(); if (alId) await stAllowanceRefund(env, alId, kind); if (pres.cap) await stPersonRefund(env, job.pid, kind, pres.day); throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio ' + (kind === 'image' ? 'image requests (STUDIO_DAILY_IMAGES)' : 'model calls (STUDIO_DAILY_CALLS)') + ' used today; the rest waits for tomorrow or a higher limit (not retried)'); }
   const row = await env.MIND_DB.prepare('SELECT ' + col + ' AS n FROM studio_jobs WHERE id=?').bind(job.id).first(); const n = Number(row && row.n) || 0;
   const id = stId('d');
   try { await env.MIND_DB.prepare('INSERT INTO studio_dispatch(id,job,project,kind,model,attempt,n,retry,fallback,at,ended,outcome,ms,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, job.id, job.project, kind, stStr(info.model, 60), attempt, n, info.retry ? 1 : 0, info.fallback ? 1 : 0, now, null, 'sent', 0, '').run(); } catch (e) {}
@@ -7874,7 +7988,7 @@ async function stRecipeRun(env, p, body, who) {
   if (est.renders > 0 && !body.confirm) return { error: 'confirm_spend', status: 409, detail: 'This recipe would generate about ' + est.renders + ' image' + (est.renders === 1 ? '' : 's') + ' and ' + est.calls + ' model calls. Confirm to run it.', estimate: est };
   const steps = await stRecipeResolve(env, p, recipe.steps); const runId = stId('rr'); const jobs = []; let prev = '';
   for (let i = 0; i < steps.length; i++) {
-    const r = await stJobCreate(env, { project: p.id, stage: steps[i].stage, input: steps[i].input, idem: 'recipe:' + runId + ':' + i, after: prev || undefined, recipe: recipe.id }, who);
+    const r = await stJobCreate(env, { pid: body.__pid, project: p.id, stage: steps[i].stage, input: steps[i].input, idem: 'recipe:' + runId + ':' + i, after: prev || undefined, recipe: recipe.id }, who);
     if (r.error) return Object.assign({ jobs }, r);
     jobs.push(r.job.id); prev = r.job.id;
   }
@@ -7957,8 +8071,9 @@ async function stPreservation(env, p, a, body, who) {
 const ST_ADHERENCE_BAD = ['differs', 'unsupported', 'banned', 'mark_missing'];
 function stMedian(xs) { const a = xs.filter(x => typeof x === 'number' && isFinite(x)).sort((x, y) => x - y); if (!a.length) return null; const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2); }
 function stStat(xs) { const a = xs.filter(x => typeof x === 'number' && isFinite(x)); return { n: a.length, median: stMedian(a), mean: a.length ? Math.round(a.reduce((s, x) => s + x, 0) / a.length * 10) / 10 : null }; }
-async function stMetricsWindow(env, ns, from, to) {
-  const projects = ((await env.MIND_DB.prepare("SELECT id, campaign, created FROM studio_projects WHERE ns=? AND created>=? AND created<? AND COALESCE(legacy_id,'')='' AND COALESCE(archived,0)=0").bind(ns, from, to).all()).results || []);
+async function stMetricsWindow(env, ns, from, to, withTests) {
+  // S28: test projects (a tester's or a synthetic client's) are left out of the figures unless asked for
+  const projects = ((await env.MIND_DB.prepare("SELECT id, campaign, created FROM studio_projects WHERE ns=? AND created>=? AND created<? AND COALESCE(legacy_id,'')='' AND COALESCE(archived,0)=0" + (withTests ? '' : ' AND COALESCE(test,0)=0')).bind(ns, from, to).all()).results || []);
   const out = { projects: projects.length, assets: 0, approvedAssets: 0, firstDraftMs: [], firstValidatedMs: [], firstApprovalMs: [], versionsToApproval: [], calls: 0, images: 0, current: 0, clean: 0, byState: {}, measured: 0, passed: 0, rejections: 0, clientChanges: 0, clientApprovals: 0, firstMeasured: 0, firstPassed: 0 };
   for (const p of projects) {
     const one = async (sql, ...b) => env.MIND_DB.prepare(sql).bind(...b).first();
@@ -8028,12 +8143,14 @@ async function stIsolationAudit(env, ns) {
 async function stMetrics(env, ns, opts) {
   opts = opts || {}; await ensureStudio(env); try { await ensureReview(env); } catch (e) {}
   const days = Math.max(1, Math.min(365, parseInt(opts.days, 10) || 30)); const now = opts.now || Date.now(); const span = days * 86400000;
-  const current = await stMetricsWindow(env, ns, now - span, now + 1);
-  const earlier = await stMetricsWindow(env, ns, now - 2 * span, now - span);
+  const withTests = !!opts.tests;
+  const current = await stMetricsWindow(env, ns, now - span, now + 1, withTests);
+  const earlier = await stMetricsWindow(env, ns, now - 2 * span, now - span, withTests);
+  const testRow = await env.MIND_DB.prepare("SELECT COUNT(*) AS n FROM studio_projects WHERE ns=? AND created>=? AND COALESCE(test,0)=1 AND COALESCE(archived,0)=0").bind(ns, now - span).first().catch(() => null);
   const legacy = await stMetricsLegacy(env, ns, now - span, now + 1);
   const legacyAll = await stMetricsLegacy(env, ns, 0, now + 1);
   const isolation = await stIsolationAudit(env, ns);
-  return { ok: true, ns, days, at: now, current, baseline: { earlier, legacy, legacyAll }, isolation,
+  return { ok: true, ns, days, at: now, current, baseline: { earlier, legacy, legacyAll }, isolation, tests: { included: withTests, projects: (testRow && testRow.n) || 0, note: withTests ? 'test projects are included' : 'test projects are left out; add tests=1 to include them' }, costUnit: 'requests (model calls and image requests sent), not money: a large call and a small one count the same',
     definitions: {
       timeToFirstDraft: 'project created to its first version of any asset (median)',
       timeToFirstValidated: 'project created to the first composition that passed technical validation at its output size',
@@ -8098,7 +8215,10 @@ async function stStatus(env) {
   const v = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM studio_versions').first()) || {};
   const budget = await stBudget(env);
   const durations = await stDurations(env); const aiAutomation = await aiAutomationStatus(env);
-  return { ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, deploy: AXIOM_DEPLOY || undefined, phase: 2, budget, durations, aiAutomation, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  // S28: "configured" is not "working": the last answer each provider gave (from the dispatch record), so the header can say both
+  const lastProvider = {};
+  try { for (const k of ['text', 'image']) { const r = await env.MIND_DB.prepare('SELECT outcome, model, ended, at, detail FROM studio_dispatch WHERE kind=? AND ended IS NOT NULL ORDER BY ended DESC LIMIT 1').bind(k).first(); if (r) lastProvider[k === 'text' ? 'claude' : 'gemini'] = { ok: r.outcome === 'ok', outcome: r.outcome, model: r.model || '', at: r.ended || r.at, detail: stStr(r.detail || '', 160) }; } } catch (e) {}
+  return { ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, deploy: AXIOM_DEPLOY || undefined, phase: 2, budget, durations, aiAutomation, lastProvider, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
 }
 
 // -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
@@ -9155,7 +9275,8 @@ async function stIntelKnowledge(env, p, q, log) {
   try { const rows = (await db.prepare('SELECT id,label,issue,ratio,angle,detected_ts,acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? ORDER BY detected_ts DESC LIMIT 4').bind(ns, Date.now() - 14 * 864e5).all()).results || []; out.A = rows.map((r, i) => ({ id: 'A' + (i + 1), ref: r.id, label: stStr(r.label, 120), issue: r.issue || '', ratio: Math.round((r.ratio || 0) * 10) / 10, angle: stStr(r.angle, 240), at: r.detected_ts || 0 })); } catch (e) {}
   try {
     const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8 ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
-    const eo = (await db.prepare('SELECT verdict,why,headline,surface,created FROM engine_outcomes WHERE ns=? ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
+    try { await ensureEngine(env); } catch (e) {}
+    const eo = (await db.prepare('SELECT verdict,why,headline,surface,created FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
     out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created }))).sort((a, b) => b.at - a.at).slice(0, 8).map((x, i) => Object.assign({ id: 'D' + (i + 1) }, x));
   } catch (e) {}
   try { const rows = (await db.prepare('SELECT kind,text,created FROM studio_intel_log WHERE ns=? ORDER BY created DESC LIMIT 12').bind(ns).all()).results || []; out.H = rows.map((r, i) => ({ id: 'H' + (i + 1), kind: r.kind, text: stStr(r.text, 220), at: r.created })); } catch (e) {}
@@ -9400,6 +9521,7 @@ async function stIntelGet(env, project, id) {
   return row ? Object.assign(pjs(row.data, {}), { id: row.id }) : null;
 }
 async function stIntelLog(env, ns, project, kind, ref, text, who) {
+  try { if (project) { const tp = await env.MIND_DB.prepare('SELECT test, ns FROM studio_projects WHERE id=?').bind(project).first(); if (tp && stIsTest(env, { test: !!tp.test, ns: tp.ns })) return; } } catch (e) {}
   try { await env.MIND_DB.prepare('INSERT INTO studio_intel_log(id,ns,project,kind,ref,text,who,created) VALUES(?,?,?,?,?,?,?,?)').bind(stId('l'), relNs(ns), project || '', stStr(kind, 40), stStr(ref, 60), stStr(text, 600), stStr(who, 40), Date.now()).run(); } catch (e) {}
 }
 /** The analysis as later stages read it: what the material was, the choices the team made, the claims that may and may not
@@ -9968,7 +10090,7 @@ async function stProduction(env, p, sb, who) {
     const layout = Object.assign({}, L, { approach: 'artwork', finished: true, templateName: String(L.templateName || L.mediumName || 'composition').replace(/, finished creative$/, '') + ', finished creative' });
     const v = await stAppendVersion(env, a, { kind: 'layout', note: 'production mode: finished creative - the image model paints the whole piece from the approved words and the mark files (no render yet)', copy: cur.copy, layout, image: null, mode: 'finished', context: Object.assign({}, cur.context || {}, { creationMode: 'finished', convertedFrom: cur.id }) }, who);
     await stVersionChecks(env, p, a, v);
-    try { const js = await stPlanRenders(env, p, a, v, layout, (cur.context || {}).planIn || null, { ctx, who, idem: 'finished:' + v.id, note: 'finished creative for ' + a.title, size, forceAll: true }); jobs.push(...js); done.push(a.id); }
+    try { const js = await stPlanRenders(env, p, a, v, layout, (cur.context || {}).planIn || null, { pid: sb.__pid, ctx, who, idem: 'finished:' + v.id, note: 'finished creative for ' + a.title, size, forceAll: true }); jobs.push(...js); done.push(a.id); }
     catch (e) { skip(String((e && e.message) || e).slice(0, 200), 'render_failed'); }
   }
   if (done.length) await stBriefPatch(env, p.id, b => { b.production = { mode, at: Date.now(), by: stStr(who, 40), size: size || undefined }; });
@@ -10411,8 +10533,8 @@ async function stCopyStage(env, job, p, log) {
     const v = await stAppendVersion(env, a, { kind: 'text', note: 'first production' + (direction ? ' from "' + direction.title + '"' : '') + (how === 'plan' ? ': ' + layout.mediumName : how === 'house' ? ' (house composition: ' + (fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') + ')' : ''), copy, layout, image: null, mode: deliverable === 'copy' ? 'copy' : finished ? 'finished' : (how === 'plan' && layout.approach === 'artwork' ? 'artwork' : 'composition'), checks, context: Object.assign({}, ctx.snapshot, { job: job.id, model: r.model, informed: cc.manifest, creationMode: deliverable === 'copy' ? undefined : finished ? 'finished' : 'editable', direction: direction ? direction.id : '', trace: direction && direction.trace ? Object.assign({}, direction.trace, { direction: direction.id, directionTitle: direction.title, route: direction.route || '', format: direction.format || '' }) : undefined, basis: guided ? Object.assign(stWfBasis(p), { direction: direction ? direction.id : '' }) : undefined, claims: (Array.isArray(piece.claims) ? piece.claims : []).map(String).filter(x => known.has(x)), visual: stStr(bgRegion ? bgRegion.prompt : piece.visual, 400), angle: stStr(piece.note, 80), template: deliverable === 'copy' ? '' : (how === 'plan' ? 'plan' : template), how, planIn: planIn || undefined, imagery: inp.imagery === 'none' ? 'none' : undefined, bespoke: deliverable === 'copy' ? undefined : how === 'plan', fallbackReason: how === 'house' ? ((fallbacks.find(f => f.indexOf(c + ':') === 0) || '').replace(c + ': ', '') || undefined) : undefined, medium: how === 'plan' ? layout.medium : undefined, approach: how === 'plan' ? layout.approach : undefined, brief: { assumptions: check.assumptions.map(x => x.text), gaps: check.gaps.map(x => x.code), acknowledged: !check.ok }, refPack: pack ? pack.record : undefined, size }) }, 'studio');
     assets.push(aid); versions.push(v.id);
     if (deliverable !== 'copy' && inp.render !== false && !(afterCopy && inp.render !== true)) {
-      if (how === 'plan' || finished) renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true, marks: markFiles ? markFiles.marks : undefined }));
-      else { const rj = await stJobCreate(env, { project: p.id, asset: aid, stage: 'render', input: { prompt: stArtPrompt(Object.assign({}, piece, { visual: stStr(piece.visual, 200), headline: copy.headline, support: copy.support }), direction, ctx, format, template, layout.design), aspect: format, size, note: 'background for ' + title }, idem: 'render:' + aid + ':' + v.id }, 'studio'); if (rj.job) renders.push(rj.job.id); }
+      if (how === 'plan' || finished) renders.push(...await stPlanRenders(env, p, a, v, layout, planIn, { pid: job.pid, ctx, who: 'studio', idem: 'render:' + aid + ':' + v.id, note: 'first production for ' + title, size, forceAll: true, marks: markFiles ? markFiles.marks : undefined }));
+      else { const rj = await stJobCreate(env, { pid: job.pid, project: p.id, asset: aid, stage: 'render', input: { prompt: stArtPrompt(Object.assign({}, piece, { visual: stStr(piece.visual, 200), headline: copy.headline, support: copy.support }), direction, ctx, format, template, layout.design), aspect: format, size, note: 'background for ' + title }, idem: 'render:' + aid + ':' + v.id }, 'studio'); if (rj.job) renders.push(rj.job.id); }
     }
   }
   await env.MIND_DB.prepare("UPDATE studio_projects SET status='production', revision=revision+1, updated=? WHERE id=?").bind(Date.now(), p.id).run();
@@ -10456,9 +10578,11 @@ async function stExportStage(env, job, p, log) {
     if (rd && (cur.mode === 'finished' ? !rd.production : rd.technical !== 'passed')) { excluded.push({ asset: a.id, title: a.title, why: rd.reasons.join(' ') || 'not validated' }); continue; }
     const client = await stClientDecision(env, a);
     if (job.input.requireClient && !(client && client.kind === 'approve' && client.current)) { excluded.push({ asset: a.id, title: a.title, why: client && client.kind === 'changes' && client.current ? 'the client asked for changes to this version' : client && client.kind === 'approve' ? 'the client approved an earlier version, not this one' : 'not approved by the client' }); continue; }
-    const exportKey = cur.mode === 'finished' ? ((cur.image && cur.image.key) || '') : ((rd && rd.validation && rd.validation.exportKey) || 'studio/' + p.id + '/' + a.id + '/' + cur.id + '-export.png');
+    // S28: a composition is delivered as the PNG its passing measurement validated (content-addressed), never a file saved after it
+    const exportKey = cur.mode === 'finished' ? ((cur.image && cur.image.key) || '') : ((rd && rd.validation && rd.validation.exportKey) || '');
+    const exportHash = cur.mode === 'finished' ? '' : ((rd && rd.validation && rd.validation.exportHash) || '');
     let hasExport = false; try { hasExport = !!(exportKey && env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {}
-    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, finished: cur.mode === 'finished' || undefined, creationMode: cur.mode === 'finished' ? 'finished' : cur.mode === 'copy' ? undefined : 'editable', copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' , client: client ? { decision: client.kind, current: client.current, version: client.version, by: client.author, at: client.at } : null});
+    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, finished: cur.mode === 'finished' || undefined, creationMode: cur.mode === 'finished' ? 'finished' : cur.mode === 'copy' ? undefined : 'editable', copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', exportHash: hasExport && exportHash ? exportHash : undefined, checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' , client: client ? { decision: client.kind, current: client.current, version: client.version, by: client.author, nameVerified: false, via: client.via || 'review link', at: client.at } : null});
   }
   const id = stId('e'); const base = 'studio/' + p.id + '/export/' + id;
   const sheet = stCopySheet(p, items);
@@ -10466,7 +10590,7 @@ async function stExportStage(env, job, p, log) {
   if (env.MIND_DOCS) { await env.MIND_DOCS.put(base + '.json', JSON.stringify(manifest), { httpMetadata: { contentType: 'application/json' } }); await env.MIND_DOCS.put(base + '.txt', sheet, { httpMetadata: { contentType: 'text/plain; charset=utf-8' } }); }
   await log('out', items.length + ' asset' + (items.length === 1 ? '' : 's') + ' exported' + (excluded.length ? ', ' + excluded.length + ' left out (' + excluded.map(x => x.title + ': ' + x.why).join('; ') + ')' : '') + (items.some(it => it.mode !== 'copy' && !it.exportKey) ? '; some compositions have no rendered PNG yet - the browser renders and saves them before download' : ''));
   await stEvent(env, p.id, 'export', { text: 'Export ' + id + ': ' + items.length + ' approved asset' + (items.length === 1 ? '' : 's') + (excluded.length ? ', ' + excluded.length + ' not approved and left out' : '') + '. Files: manifest and copy sheet under studio/' + p.id + '/export/. Nothing was sent; a hand-off is its own step.', job: job.id, export: id }, job.who);
-  return { export: id, included: items.map(it => ({ asset: it.asset, version: it.version, exportKey: it.exportKey, finished: it.finished })), excluded, files: manifest.files, sheet: sheet.slice(0, 4000) };
+  return { export: id, included: items.map(it => ({ asset: it.asset, version: it.version, exportHash: it.exportHash, exportKey: it.exportKey, finished: it.finished })), excluded, files: manifest.files, sheet: sheet.slice(0, 4000) };
 }
 // -- Client review (build studio-p11) ---------------------------------------------------------------------
 // The agency shares chosen assets with a client through a private link: a random token shown once and stored only as
@@ -10510,10 +10634,12 @@ async function stShareCreate(env, p, body, who) {
   const refused = [];
   for (const id of want) { const pair = await stAsset(env, id); if (!pair || pair.project.id !== p.id) { refused.push({ asset: id, why: 'not an asset of this project' }); continue; } const r = await stReviewable(env, p, pair.asset); if (!r.ok) refused.push({ asset: id, title: pair.asset.title, why: r.why }); }
   if (refused.length) return { error: 'not_reviewable', status: 409, detail: 'Not shared: ' + refused.map(x => (x.title || x.asset) + ' (' + x.why + ')').join('; ') + '.', refused };
-  const days = Math.max(0, Math.min(90, parseInt(body.expiresDays, 10) || 0));
+  // S28: a review link always ends: 14 days unless asked, never more than STUDIO_SHARE_MAX_DAYS (30 by default); "0" no longer means never
+  const maxDays = stIntEnv(env.STUDIO_SHARE_MAX_DAYS, 1, 365, 30);
+  const days = Math.max(1, Math.min(maxDays, parseInt(body.expiresDays, 10) || 14));
   const token = stToken(); const id = stId('sh'); const now = Date.now();
   await env.MIND_DB.prepare('INSERT INTO studio_shares(id,project,ns,token_hash,label,assets,allow_approve,expires,revoked,created_by,created,last_seen,views) VALUES(?,?,?,?,?,?,?,?,0,?,?,0,0)').bind(id, p.id, p.ns, await stSha256Hex(token), stStr(body.label || 'Client review', 120), JSON.stringify(want), body.allowApprove ? 1 : 0, days ? now + days * 86400000 : 0, stStr(who, 40), now).run();
-  await stEvent(env, p.id, 'share', { text: 'Shared ' + want.length + ' asset' + (want.length === 1 ? '' : 's') + ' for client review ("' + stStr(body.label || 'Client review', 80) + '"' + (days ? ', expires in ' + days + ' days' : ', no expiry') + (body.allowApprove ? ', the client may approve' : ', comments only') + '). The link was shown once; only its hash is kept.', share: id, assets: want }, who);
+  await stEvent(env, p.id, 'share', { text: 'Shared ' + want.length + ' asset' + (want.length === 1 ? '' : 's') + ' for client review ("' + stStr(body.label || 'Client review', 80) + '"' + ', expires in ' + days + ' day' + (days === 1 ? '' : 's') + (body.allowApprove ? ', the client may approve' : ', comments only') + '). The link was shown once; only its hash is kept.', share: id, assets: want }, who);
   const row = await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE id=?').bind(id).first();
   return { ok: true, share: stShareView(row), token, note: 'Copy the link now: it is not shown again. Revoke it at any time.' };
 }
@@ -10573,7 +10699,7 @@ async function stReviewPost(env, share, p, body, kind) {
   const x = body.pin && kind === 'comment' ? num(Number(body.pin.x)) : null, y = body.pin && kind === 'comment' ? num(Number(body.pin.y)) : null;
   const rid = stId('rv'); const now = Date.now();
   await env.MIND_DB.prepare('INSERT INTO studio_review(id,share,project,asset,version,kind,text,x,y,author,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(rid, share.id, p.id, id, rv.v.id, kind, text, x, y, author, kind === 'approve' ? 'resolved' : 'open', now, now).run();
-  await stEvent(env, p.id, 'client_review', { text: (kind === 'approve' ? 'Client approved ' : kind === 'changes' ? 'Client requested changes to ' : 'Client comment on ') + pair.asset.title + ' (version ' + rv.v.id + ', from "' + author + '" as they gave their name' + (x != null ? ', pinned at ' + x + '%, ' + y + '%' : '') + ')' + (text ? ': ' + text.slice(0, 300) : '') + '.', asset: id, version: rv.v.id, review: rid, reviewKind: kind, share: share.id }, 'client');
+  await stEvent(env, p.id, 'client_review', { text: (kind === 'approve' ? 'Approved through the review link "' + stStr(share.label || 'Client review', 60) + '": ' : kind === 'changes' ? 'Changes requested through the review link "' + stStr(share.label || 'Client review', 60) + '" to ' : 'Comment through the review link "' + stStr(share.label || 'Client review', 60) + '" on ') + pair.asset.title + ' (version ' + rv.v.id + '; name as given, not verified: "' + author + '"' + (x != null ? ', pinned at ' + x + '%, ' + y + '%' : '') + ')' + (text ? ': ' + text.slice(0, 300) : '') + '.', asset: id, version: rv.v.id, review: rid, reviewKind: kind, share: share.id }, 'client');
   return { ok: true, id: rid };
 }
 async function stReviewResolve(env, p, body, who) {
@@ -10592,7 +10718,7 @@ async function stReviewResolve(env, p, body, who) {
 }
 /** The client's standing decision on an asset's current version (for the agency's views and the delivery manifest). */
 async function stClientDecision(env, a) {
-  try { await ensureReview(env); const r = await env.MIND_DB.prepare("SELECT * FROM studio_review WHERE asset=? AND kind IN ('approve','changes') ORDER BY created DESC LIMIT 1").bind(a.id).first(); if (!r) return null; return { kind: r.kind, version: r.version, current: r.version === a.current, author: r.author, at: r.created, text: r.text || '' }; } catch (e) { return null; }
+  try { await ensureReview(env); const r = await env.MIND_DB.prepare("SELECT * FROM studio_review WHERE asset=? AND kind IN ('approve','changes') ORDER BY created DESC LIMIT 1").bind(a.id).first(); if (!r) return null; let via = ''; try { const sh = await env.MIND_DB.prepare('SELECT label FROM studio_shares WHERE id=?').bind(r.share).first(); via = sh ? 'review link "' + stStr(sh.label || 'Client review', 60) + '"' : 'review link'; } catch (e) {} return { kind: r.kind, version: r.version, current: r.version === a.current, author: r.author, at: r.created, text: r.text || '', via, nameVerified: false }; } catch (e) { return null; }
 }
 // -- Phase 3: direction by instruction - the creative team answers a direction on an asset, a family or the set --
 // One model call reads the instruction against the targets, their locks, the ledger and the client context and
@@ -10823,6 +10949,8 @@ async function stRemember(env, p, body, who) {
   const eid = stClean(body.eid, 24);
   const scope = body.scope === 'campaign' ? 'campaign' : body.scope === 'client' ? 'client' : 'none';
   if (scope === 'none') { await stEvent(env, p.id, 'offer_declined', { eid, text: 'Not saved: applied to this work only.' }, who); return { ok: true, saved: false, eid }; }
+  // S28: a test project never changes the client's standing rules
+  if (stIsTest(env, p)) return { error: 'test_project', status: 409, detail: 'This is a test project: a preference is not saved as a lasting rule for the client. It applies to this work only.' };
   const rule = String(body.rule || '').trim().slice(0, 400);
   if (rule.length < 8) return { error: 'rule_required', status: 400, detail: 'The wording of the rule is needed.' };
   const campaign = scope === 'campaign' ? (stStr(body.campaign, 40) || p.campaign) : '';
@@ -10849,7 +10977,7 @@ async function stProposalDecide(env, p, body, who) {
     // the photograph follows the composition it will sit in: the applied layout's design (with the proposal's image brief), not a fixed lower third
     const spec = cur.layout && cur.layout.design ? Object.assign({}, cur.layout.design, prop.spec && prop.spec.image ? { image: prop.spec.image } : {}) : (prop.spec || null);
     const planPrompt = cur.layout && cur.layout.v === 5 ? stRegionPrompt(cur.layout, { role: 'background', prompt: stStr(prop.visual, 600) }, { headline: cur.copy.headline, support: cur.copy.support }, ctx, pair.asset.format) : null;
-    const r = await stJobCreate(env, { project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt: planPrompt || stArtPrompt({ visual: stStr(prop.visual, 300), headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, template, spec), aspect: pair.asset.format, size: env.IMAGE_SIZE || '2K', note: 'directed: ' + stStr(prop.instruction, 60) }, idem: 'render:' + eid + ':' + pair.asset.id }, who);
+    const r = await stJobCreate(env, { pid: body.__pid, project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt: planPrompt || stArtPrompt({ visual: stStr(prop.visual, 300), headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, template, spec), aspect: pair.asset.format, size: env.IMAGE_SIZE || '2K', note: 'directed: ' + stStr(prop.instruction, 60) }, idem: 'render:' + eid + ':' + pair.asset.id }, who);
     if (r.job) jobs.push(r.job.id);
   }
   await stEvent(env, p.id, 'decided', { eid, decision: 'do', jobs, text: 'Confirmed: ' + jobs.length + ' render' + (jobs.length === 1 ? '' : 's') + ' queued as jobs; text and layout stay as they are. Design approval on those assets will need renewing when the image lands.', render: true }, who);
@@ -11833,9 +11961,9 @@ function brKitDiff(a, b) {
   if (!same(a.platforms, b.platforms)) out.push('platform notes');
   return out;
 }
-async function brKitRevision(env, ns, before, after, who) {
+async function brKitRevision(env, ns, before, after, who, note) {
   if (!(await ensureBrand(env))) return null;
-  const summary = brKitDiff(before, after); if (!summary.length && before && before.updated) return null;
+  const summary = brKitDiff(before, after); if (note) summary.unshift(stStr(note, 300)); if (!summary.length && before && before.updated) return null;
   const id = stId('kr'); const snap = jsonFit(after || {}, 60000);
   await env.MIND_DB.prepare('INSERT INTO brand_revisions(id,ns,at,who,summary,kit) VALUES(?,?,?,?,?,?)').bind(id, ns, (after && after.updated) || Date.now(), stStr(who, 40), JSON.stringify(summary.length ? summary : ['first record of the kit']), snap).run();
   try { await env.MIND_DB.prepare('DELETE FROM brand_revisions WHERE ns=? AND id NOT IN (SELECT id FROM brand_revisions WHERE ns=? ORDER BY at DESC LIMIT 200)').bind(ns, ns).run(); } catch (e) {}
@@ -12018,7 +12146,8 @@ async function brandWorkspace(env, ns, campaignId) {
   // learned corrections from the team (Teach mode, the Content Desk, the Studio's Remember)
   let fixes = []; try { fixes = await engineFixes(env, ns, null, true); } catch (e) {}
   const preferences = fixes.filter(f => f.task === 'copy' || f.task === 'tiles' || f.task === 'any').filter(f => { const c = stCampaignOf(f); return !cid ? true : (!c || c === cid); }).map(f => item({ id: 'fix:' + f.id, kind: 'preference', authority: 'preference', status: f.active ? 'active' : 'retired', campaign: stCampaignOf(f), title: 'Learned (' + f.task + ')', body: f.rule, data: { task: f.task, hits: f.hits || 0, why: f.why || '' }, who: f.who, created: f.created, source: { type: 'engine_fix', id: f.id, label: 'taught by ' + (f.who || 'the team') + (f.source ? ' via ' + String(f.source).split(':')[0] : '') } }));
-  let outcomes = []; try { outcomes = (await env.MIND_DB.prepare('SELECT id, surface, ref, verdict, why, headline, who, created FROM engine_outcomes WHERE ns=? ORDER BY created DESC LIMIT 40').bind(ns).all()).results || []; } catch (e) {}
+  try { await ensureEngine(env); } catch (e) {}
+  let outcomes = []; try { outcomes = (await env.MIND_DB.prepare('SELECT id, surface, ref, verdict, why, headline, who, created FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 40').bind(ns).all()).results || []; } catch (e) {}
   const accepted = outcomes.map(o => item({ id: 'out:' + o.id, kind: /win|approve/i.test(o.verdict) ? 'accepted' : 'rejected', authority: 'decision', title: (o.headline || o.ref || 'work') + ' (' + o.surface + ')', body: o.why || '', who: o.who, created: o.created, source: { type: 'outcome', id: o.id, label: o.verdict + ' on ' + o.surface } }));
   let art = []; try { art = (await env.MIND_DB.prepare('SELECT id, title, meta, created FROM engine_art WHERE ns=? ORDER BY created DESC LIMIT 200').bind(ns).all()).results || []; } catch (e) {}
   const artworks = art.filter(a => { const c = String((pjs(a.meta, {}) || {}).campaign || ''); return !cid || c === cid || c === ''; }).slice(0, 60).map(a => ({ id: a.id, title: a.title, campaign: String((pjs(a.meta, {}) || {}).campaign || ''), url: '/engine/art?id=' + a.id, created: a.created }));
@@ -12508,17 +12637,17 @@ async function stPlanRenders(env, p, a, v, layout, planIn, opts) {
     const mf = opts.marks ? { marks: opts.marks, missing: [] } : await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
     if (mf.missing.length) throw new Error('mark_missing: ' + mf.missing.map(m => m.text).join('; ') + ' - a finished creative paints the mark from its file (not retried)');
     const marks = mf.marks.map(m => ({ role: m.role, key: m.key, name: m.name, variant: m.variant || undefined, v: m.v || undefined }));
-    const r = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stFinishedPrompt(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), promptParts: stFinishedPromptParts(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), finished: true, approach: 'artwork', marks, baked: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden).map(l => l.role).filter((x, i, arr) => arr.indexOf(x) === i), bakedText: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden && l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => ({ role: l.role || 'free', text: stStr(l.text, 200) })), copy: opts.copy || undefined, edit: !!opts.edit, instruction: opts.instruction ? stStr(opts.instruction, 1200) : undefined, aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'finished creative: ' + (layout.mediumName || 'the whole piece painted') }, idem: (opts.idem || 'plan:' + v.id) + ':finished' }, opts.who || 'studio');
+    const r = await stJobCreate(env, { pid: opts.pid, project: p.id, asset: a.id, stage: 'render', input: { prompt: stFinishedPrompt(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), promptParts: stFinishedPromptParts(layout, v.copy, ctx, a.format, marks, { instruction: opts.instruction }), finished: true, approach: 'artwork', marks, baked: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden).map(l => l.role).filter((x, i, arr) => arr.indexOf(x) === i), bakedText: (layout.layers || []).filter(l => l.type === 'text' && !l.hidden && l.text && ['headline', 'support', 'cta'].indexOf(l.role) < 0).map(l => ({ role: l.role || 'free', text: stStr(l.text, 200) })), copy: opts.copy || undefined, edit: !!opts.edit, instruction: opts.instruction ? stStr(opts.instruction, 1200) : undefined, aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'finished creative: ' + (layout.mediumName || 'the whole piece painted') }, idem: (opts.idem || 'plan:' + v.id) + ':finished' }, opts.who || 'studio');
     if (r.job) jobs.push(r.job.id); return jobs;
   }
   if (layout.approach === 'artwork') {
     const rg = (layout.regions || []).find(x => x.role === 'background') || { id: 'bg', role: 'background', prompt: layout.story, refs: [] };
-    const r = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stRegionPrompt(layout, rg, v.copy, ctx, a.format), referenceIds: rg.refs, approach: 'artwork', baked: layout.layers.filter(l => l.type === 'text').map(l => l.role), aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'full artwork: ' + layout.mediumName }, idem: (opts.idem || 'plan:' + v.id) + ':artwork' }, opts.who || 'studio');
+    const r = await stJobCreate(env, { pid: opts.pid, project: p.id, asset: a.id, stage: 'render', input: { prompt: stRegionPrompt(layout, rg, v.copy, ctx, a.format), referenceIds: rg.refs, approach: 'artwork', baked: layout.layers.filter(l => l.type === 'text').map(l => l.role), aspect: a.format, size, note: (opts.note ? opts.note + ' - ' : '') + 'full artwork: ' + layout.mediumName }, idem: (opts.idem || 'plan:' + v.id) + ':artwork' }, opts.who || 'studio');
     if (r.job) jobs.push(r.job.id); return jobs;
   }
   for (const rg of (layout.regions || [])) {
     if (!opts.forceAll && /keep the current/i.test(rg.prompt || '')) continue;
-    const r = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stRegionPrompt(layout, rg, v.copy, ctx, a.format), referenceIds: rg.refs, region: rg.id, regionRole: rg.role, aspect: rg.role === 'background' ? a.format : (rg.w >= rg.h * 1.3 ? '4:3' : rg.h >= rg.w * 1.3 ? '3:4' : '1:1'), size, note: (opts.note ? opts.note + ' - ' : '') + rg.role + ' image for ' + layout.mediumName }, idem: (opts.idem || 'plan:' + v.id) + ':' + rg.id }, opts.who || 'studio');
+    const r = await stJobCreate(env, { pid: opts.pid, project: p.id, asset: a.id, stage: 'render', input: { prompt: stRegionPrompt(layout, rg, v.copy, ctx, a.format), referenceIds: rg.refs, region: rg.id, regionRole: rg.role, aspect: rg.role === 'background' ? a.format : (rg.w >= rg.h * 1.3 ? '4:3' : rg.h >= rg.w * 1.3 ? '3:4' : '1:1'), size, note: (opts.note ? opts.note + ' - ' : '') + rg.role + ' image for ' + layout.mediumName }, idem: (opts.idem || 'plan:' + v.id) + ':' + rg.id }, opts.who || 'studio');
     if (r.job) jobs.push(r.job.id);
   }
   return jobs;
@@ -12545,9 +12674,9 @@ async function stImageryQueue(env, p, a, body, who) {
   const ctx = await stContext(env, p, { channels: [a.channel] });
   let jobs = [];
   try {
-    if (finished || L.v === 5 || L.approach === 'artwork') jobs = await stPlanRenders(env, p, a, v, L, (v.context || {}).planIn || null, { ctx, who, idem, note: 'imagery for ' + a.title + ' (asked in Design)', size, forceAll: true });
+    if (finished || L.v === 5 || L.approach === 'artwork') jobs = await stPlanRenders(env, p, a, v, L, (v.context || {}).planIn || null, { pid: body.__pid, ctx, who, idem, note: 'imagery for ' + a.title + ' (asked in Design)', size, forceAll: true });
     else {
-      const rj = await stJobCreate(env, { project: p.id, asset: a.id, stage: 'render', input: { prompt: stArtPrompt({ visual: stStr((v.context || {}).visual || '', 200), headline: (v.copy || {}).headline, support: (v.copy || {}).support }, null, ctx, a.format, L.template || '', L.design), aspect: a.format, size, note: 'background for ' + a.title + ' (asked in Design)' }, idem }, who);
+      const rj = await stJobCreate(env, { pid: body.__pid, project: p.id, asset: a.id, stage: 'render', input: { prompt: stArtPrompt({ visual: stStr((v.context || {}).visual || '', 200), headline: (v.copy || {}).headline, support: (v.copy || {}).support }, null, ctx, a.format, L.template || '', L.design), aspect: a.format, size, note: 'background for ' + a.title + ' (asked in Design)' }, idem }, who);
       if (rj.job) jobs.push(rj.job.id);
     }
   } catch (e) { const m = String((e && e.message) || e); return { error: m.split(':')[0].slice(0, 40) || 'imagery_failed', status: 409, detail: m.slice(0, 300) }; }
@@ -12605,8 +12734,8 @@ async function stConceptApply(env, p, body, who) {
   }
   if (render) {
     for (const t of targets) {
-      if (t.L.v === 5) jobs.push(...await stPlanRenders(env, p, t.a, t.v, t.L, o.planIn, { ctx, who, idem: 'render:' + eid + ':' + o.i + (src ? '+' + src.i : '') + ':' + t.a.id, note, size: body.size }));
-      else if ((src || o).needsImage) { const r = await stJobCreate(env, { project: p.id, asset: t.a.id, stage: 'render', input: { prompt: stArtPrompt({ visual: (src || o).prompt || (src || o).imagery, headline: t.v.copy.headline, support: t.v.copy.support }, null, ctx, t.a.format, (t.L && t.L.template) || 'plain', t.L && t.L.design), aspect: t.a.format, size: body.size || env.IMAGE_SIZE || '2K', note }, idem: 'render:' + eid + ':' + o.i + (src ? '+' + src.i : '') + ':' + t.a.id }, who); if (r.job) jobs.push(r.job.id); }
+      if (t.L.v === 5) jobs.push(...await stPlanRenders(env, p, t.a, t.v, t.L, o.planIn, { pid: body.__pid, ctx, who, idem: 'render:' + eid + ':' + o.i + (src ? '+' + src.i : '') + ':' + t.a.id, note, size: body.size }));
+      else if ((src || o).needsImage) { const r = await stJobCreate(env, { pid: body.__pid, project: p.id, asset: t.a.id, stage: 'render', input: { prompt: stArtPrompt({ visual: (src || o).prompt || (src || o).imagery, headline: t.v.copy.headline, support: t.v.copy.support }, null, ctx, t.a.format, (t.L && t.L.template) || 'plain', t.L && t.L.design), aspect: t.a.format, size: body.size || env.IMAGE_SIZE || '2K', note }, idem: 'render:' + eid + ':' + o.i + (src ? '+' + src.i : '') + ':' + t.a.id }, who); if (r.job) jobs.push(r.job.id); }
     }
   }
   const first = targets[0];
@@ -12656,7 +12785,7 @@ async function stFinishedRegenerate(env, p, a, body, who) {
   const size = ['1K', '2K', '4K'].indexOf(body.size) >= 0 ? body.size : (cur.image && cur.image.size) || env.IMAGE_SIZE || '2K';
   // words changed: a fresh painting from the brief; direction only: an edit that continues the conversation the bitmap came from
   const edit = !changed.length && !!instruction && !!(cur.image && cur.image.key);
-  const jobs = await stPlanRenders(env, p, a, Object.assign({}, cur, { copy }), Object.assign({}, cur.layout, { finished: true }), null, { ctx, who, idem: 'regen:' + a.id + ':' + cur.id + ':' + stSigHash(JSON.stringify([copy, instruction, size])), note: 'regenerated' + (changed.length ? ' with new ' + changed.join(', ') : '') + (instruction ? ': ' + instruction.slice(0, 60) : ''), size, marks: mf.marks, copy: changed.length ? want : undefined, instruction: instruction || undefined, edit });
+  const jobs = await stPlanRenders(env, p, a, Object.assign({}, cur, { copy }), Object.assign({}, cur.layout, { finished: true }), null, { pid: body.__pid, ctx, who, idem: 'regen:' + a.id + ':' + cur.id + ':' + stSigHash(JSON.stringify([copy, instruction, size])), note: 'regenerated' + (changed.length ? ' with new ' + changed.join(', ') : '') + (instruction ? ': ' + instruction.slice(0, 60) : ''), size, marks: mf.marks, copy: changed.length ? want : undefined, instruction: instruction || undefined, edit });
   await stEvent(env, p.id, 'regenerate', { asset: a.id, version: cur.id, job: jobs[0] || null, jobs, changed, instruction: instruction || undefined, edit, text: 'Regenerating ' + a.title + ' as a finished creative' + (changed.length ? ' with new ' + changed.join(', ') : '') + (instruction ? ' - "' + instruction.slice(0, 120) + '"' : '') + '. One image generation at ' + size + '; the words' + (mf.marks.length ? ', the ' + mf.marks.map(m => m.role).join(' and ') : '') + ' and the URL are painted again as one bitmap. The current version stays until the new one lands' + (edit ? '; the image model continues from the current bitmap' : '') + '.' }, who);
   return { ok: true, job: jobs[0] || null, jobs, changed, edit, size };
 }
@@ -12685,7 +12814,7 @@ async function stDerive(env, p, a, body, who) {
   const v = await stAppendVersion(env, na, { kind: 'layout', note: 'derived from the finished creative ' + a.title + ' (no render)', copy: cur.copy, layout, image: null, mode: 'composition', context: Object.assign({}, cur.context || {}, { creationMode: 'editable', planIn: how === 'plan' ? planIn : undefined, how, approach: 'editable', medium: layout.medium, derivedFrom: { asset: a.id, version: cur.id, mode: cur.mode, note }, marksSent: undefined }) }, who, { baseVersion: cur });
   await stVersionChecks(env, p, na, v);
   let jobs = [];
-  if (body.regenerate && layout.v === 5 && (layout.regions || []).length) { try { jobs = await stPlanRenders(env, p, na, v, layout, planIn, { ctx, who, idem: 'derive:' + aid, note: 'imagery for the editable derivation', size: body.size || (cur.image && cur.image.size) || undefined, forceAll: true }); } catch (e) { jobs = []; } }
+  if (body.regenerate && layout.v === 5 && (layout.regions || []).length) { try { jobs = await stPlanRenders(env, p, na, v, layout, planIn, { pid: body.__pid, ctx, who, idem: 'derive:' + aid, note: 'imagery for the editable derivation', size: body.size || (cur.image && cur.image.size) || undefined, forceAll: true }); } catch (e) { jobs = []; } }
   await stEvent(env, p.id, 'derived', { asset: aid, from: a.id, fromVersion: cur.id, version: v.id, jobs, text: 'Derived "' + title + '" in the family Editable from finished from ' + a.title + ' (' + (ST_MODES[cur.mode] ? ST_MODES[cur.mode].label : cur.mode) + '). ' + note + (jobs.length ? ' ' + jobs.length + ' imagery render queued.' : '') + ' The original is untouched.', changed: [aid] }, who);
   return { ok: true, asset: aid, version: v.id, from: a.id, how, note, jobs };
 }
@@ -12838,7 +12967,7 @@ async function stRenderJob(env, job, pair, done, fail) {
   }
   await stEvent(env, p.id, 'job', { text: stale ? 'Render finished after the asset had moved on: filed as version ' + v.id + ' branching from the version it was asked for, current left as it is.' : 'Render finished: ' + a.title + ' now at version ' + v.id + ' (' + out.model + (out.fallback ? ', fell back from ' + out.requested : '') + ', ' + image.size + (isRegion ? ', region ' + inp.region + (alpha === false ? ' - opaque, no transparency' : alpha === true ? ' - transparent' : '') : finished ? ', finished creative - the words' + (marksSent.length ? ', the ' + marksSent.join(' and ') : '') + ' and the URL are part of the one bitmap; nothing is composed over it' : inp.approach === 'artwork' ? ', hybrid artwork - the words are part of the bitmap, the mark is placed over it' : '') + (attachedRows.length ? ', ' + attachedRows.length + ' image' + (attachedRows.length === 1 ? '' : 's') + ' attached for the image model' + ((out.excluded || []).length ? ' (' + out.excluded.length + ' reference' + (out.excluded.length === 1 ? '' : 's') + ' left out at the model\'s input limit)' : '') : '') + (editOf ? (out.historyReplayed ? ', an edit continuing the conversation' : ', an edit of the earlier image (history not replayed)') : '') + (meta.capped ? ', asked ' + meta.capped + ' but capped at ' + meta.size + ' by IMAGE_SIZE_MAX' : '') + (meta.pixels ? ', ' + meta.pixels.w + 'x' + meta.pixels.h + ' px received' : '') + (meta.ms ? ', ' + (meta.ms / 1000).toFixed(1) + ' s' : '') + ').', job: job.id, asset: a.id, version: v.id, render: true, fallback: !!out.fallback, region: inp.region || undefined, alpha: alpha == null ? undefined : alpha }, 'studio');
   // the art director looks at what came back, once, unless switched off: at the composed export when the browser has saved one, else at the imagery
-  if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
+  if (!stale && env.ANTHROPIC_API_KEY && String(env.STUDIO_INSPECT || '1') !== '0') { try { await stJobCreate(env, { pid: job.pid, project: p.id, asset: a.id, stage: 'inspect', input: { version: v.id }, idem: 'inspect:' + v.id }, 'studio'); } catch (e) {} }
   return done('done', { result: { version: v.id, key, model: out.model, requested: out.requested, fallback: !!out.fallback, size: image.size, ms: meta.ms, usage: meta.usage, historyReplayed: meta.historyReplayed, alpha: alpha == null ? undefined : alpha, branch: stale, region: inp.region || 'bg', approach: inp.approach || 'editable', finished: finished || undefined, marksSent: finished ? marksSent : undefined }, cost: 1, progress: compiledKey ? { compiled: { key: compiledKey, calls: 1 } } : {} });
 }
 // -- inspection: the art director reads the rendered result against the concept and offers one bounded correction -------
@@ -12965,16 +13094,27 @@ async function stValidationSubmit(env, pair, body, who) {
   if (j.problems.length) return { error: 'report_mismatch', status: 422, detail: 'The measurement does not describe this version, so it was not recorded: ' + j.problems.slice(0, 4).join('; ') + '. Measure the current version again.', problems: j.problems };
   const kit = (await brandKit(env, p.ns)) || {}; const sig = stCompSig(a, v, kit);
   let exportKey = '';
-  if (body.imageB64 && env.MIND_DOCS) { const buf = bufFromB64(body.imageB64); if (buf.byteLength >= 64 && buf.byteLength <= 12 * 1024 * 1024) { exportKey = 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export.png'; await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } }); } }
+  // S28: the measured PNG is what a client sees and what is delivered: it must be a PNG at the composition's output size, and it is
+  // stored under its own hash, so nothing can later be put in its place under the same name
+  let exportHash = '', exportW = null, exportH = null;
+  if (body.imageB64 && env.MIND_DOCS) {
+    const buf = bufFromB64(body.imageB64);
+    if (buf.byteLength < 64 || buf.byteLength > 12 * 1024 * 1024) return { error: 'bad_image', status: 422, detail: 'The measured image must be between 64 bytes and 12 MB; nothing was recorded.' };
+    const sn = stImgSniff(buf); if (!sn || sn.type !== 'png') return { error: 'not_png', status: 422, detail: 'The measured image is not a PNG (judged by its bytes, not its name); nothing was recorded. Measure again in the Studio.' };
+    const stg = (v.layout && v.layout.stage) || null;
+    if (sn.w && sn.h && stg && stg.w && stg.h && (sn.w !== stg.w || sn.h !== stg.h)) return { error: 'image_size', status: 422, detail: 'The measured PNG is ' + sn.w + 'x' + sn.h + ' but this composition is drawn at ' + stg.w + 'x' + stg.h + '; nothing was recorded. Measure it again at its output size.' };
+    exportHash = await stBufSha(buf); exportW = sn.w || null; exportH = sn.h || null; exportKey = stExportKey(p, a, v, exportHash);
+    await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } });
+  }
   const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
   const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
   const id = stId('val'); const now = Date.now();
   const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), contract: ST_VALIDATION_CONTRACT, W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, contrastMin: b.contrastMin, asset: b.asset, opacity: b.opacity, occluded: b.occluded, vw: b.vw != null ? Math.round(b.vw) : undefined, vh: b.vh != null ? Math.round(b.vh) : undefined, markFill: b.markFill, inkLost: b.inkLost, inkWeak: b.inkWeak, inkCovered: b.inkCovered, inkLocal: b.inkLocal, inkRun: b.inkRun, inkWhere: b.inkWhere, inkBoundary: b.inkBoundary, clearWant: b.clearWant, ruleBasis: b.ruleBasis, ruleMandatory: b.ruleMandatory })), unresolved: j.unresolved };
-  await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now).run();
+  await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created,export_hash,export_w,export_h) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now, exportHash || null, exportW, exportH).run();
   try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
   const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
   if (!prev || prev.sig !== sig || !!prev.ok !== j.ok || JSON.stringify(pjs(prev.issues, []).map(i => i.code + ':' + (i.layers || []).join(','))) !== codes) await stEvent(env, p.id, 'validation', { asset: a.id, version: v.id, ok: j.ok, blocking: blocking.length, warnings: warnings.length, text: 'Technical validation of ' + a.title + ' (version ' + v.id + ', ' + j.W + 'x' + j.H + '): ' + (j.ok ? 'passed' + (warnings.length ? ' with ' + warnings.length + ' warning' + (warnings.length === 1 ? '' : 's') + ' (' + warnings.map(i => i.code).join(', ') + ')' : '') : 'failed - ' + blocking.map(i => i.code + (i.layers.length ? ' (' + i.layers.join(', ') + ')' : '')).join('; ')) + (j.fonts && j.fonts.fallback.length ? '. Fonts: ' + j.fonts.fallback.join('; ') : '') + '.' }, who);
-  return { ok: true, validation: { id, ok: j.ok, sig, issues: j.issues, exportKey, at: now }, readiness: await stReadiness(env, p, a, v, kit) };
+  return { ok: true, validation: { id, ok: j.ok, sig, issues: j.issues, exportKey, exportHash: exportHash || undefined, exportW: exportW || undefined, exportH: exportH || undefined, measuredIn: 'browser', at: now }, readiness: await stReadiness(env, p, a, v, kit) };
 }
 /** Where a version stands: technical validation, the art director's assessment, baked words, and whether it may be handed off. */
 async function stReadiness(env, p, a, v, kit) {
@@ -13011,7 +13151,7 @@ async function stReadiness(env, p, a, v, kit) {
     baked = { words: words.map(w => w.role), marks, verified: ok, markProblem, wordProblem, why: ok ? 'the inspection read every painted word' + (marks.length ? ' and the ' + marks.join(' and ') : '') + ' as approved' : !ins ? 'no inspection has read the painted ' + (finished ? 'words and marks' : 'words') + ' yet' : inspection.state === 'stale' ? 'the inspection is of an earlier ' + (finished ? 'bitmap' : 'composition') : 'the inspection could not confirm every painted ' + (finished ? 'word and mark' : 'word') + (ins.baked && ins.baked.missing && ins.baked.missing.length ? ' (not read: ' + ins.baked.missing.join(', ') + ')' : '') + (ins.words && ins.words.wrong && ins.words.wrong.length ? ' (unapproved: ' + ins.words.wrong.join(', ') + ')' : '') + markWhy };
     if (!ok) reasons.push('painted ' + (finished ? 'words and marks' : 'words') + ' not verified: ' + baked.why);
   }
-  return { sig, technical, finished, hybrid, mode: v.mode, markSources: markSources.length ? markSources : undefined, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '' } : null, inspection, baked, production: finished ? !!(v.image && v.image.key && baked && baked.verified) : technical === 'passed' && (!baked || baked.verified), reasons };
+  return { sig, technical, finished, hybrid, mode: v.mode, markSources: markSources.length ? markSources : undefined, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '', exportHash: row.export_hash || '', measuredIn: 'browser' } : null, inspection, baked, production: finished ? !!(v.image && v.image.key && baked && baked.verified) : technical === 'passed' && (!baked || baked.verified), reasons };
 }
 const ST_INSPECT_SYS = 'You are the art director inspecting a rendered social tile for an Australian political communications agency. You see the image (the generated imagery, or the whole artwork when the words are part of it) and are told the words, the plan and the campaign identity. Judge the actual result, not the intention. Answer as strict JSON only: {"fidelity":1,"hierarchy":1,"readability":1,"relevance":1,"identity":1,"reasons":{"fidelity":"<=20 words: why this score, naming what you see in this image","hierarchy":"<=20 words","readability":"<=20 words","relevance":"<=20 words","identity":"<=20 words"},"words":{"present":["words you can read in the image"],"wrong":["words in the image that are not in the approved copy, misspelt, duplicated or garbled"],"missing":["approved words you cannot find or cannot read"]},"marks":{"present":["logo|wordmark: a mark you can see that matches its attached file"],"missing":["logo|wordmark: a mark that should appear and does not"],"wrong":["logo|wordmark: a mark that is distorted, recoloured, redrawn, cropped, badged or another organisation\'s"]},"issues":[{"text":"<=16 words","severity":"blocking|material|cosmetic","element":"the id or role of the one layer it is about, exactly as the inventory names it (image for the photograph), or none"}],"verdict":"ship|fix|redo","fix":{"kind":"design|render|edit|copy|none","element":"the id or role of the layer it changes, as the inventory names it (image for the photograph), or none","instruction":"<=45 words: one precise, bounded correction the team can apply as written","keeps":"<=14 words: what the correction leaves exactly as it is"},"note":"<=40 words for the team"}. Look for: words that overlap each other or a mark, words missing, duplicated, misspelt or illegible, poor hierarchy, cramped spacing and awkward line breaks, low contrast against what is actually behind the words or the mark, a mark that is wrong, obscured, distorted or badly placed, lettering, logos or badges the image model invented, an important subject obscured or awkwardly cropped, imagery off the message or from another campaign, and for a carousel frame, inconsistency with its siblings. Severity: blocking = it cannot go out like this (overlapping or illegible words, a wrong or missing mark, invented lettering); material = a real defect a designer must fix; cosmetic = taste. The verdict is ship only when nothing blocking or material remains; the deterministic checks you are given are measurements of this exact tile, so do not contradict them. Scores are 1 to 5, each with its reason under reasons, specific to this tile (what you see that earned the score); a score you cannot judge from what is shown is null with the reason why. fidelity = the image carries the concept; hierarchy = what reads first is what should; readability = the words (or the room left for them) are legible against the ground; relevance = the imagery belongs to the message and the client\'s world; identity = the campaign\'s colours, devices and mark are right and no other client\'s. fix.kind: design = change the composition or type (no new image); render = make the image again with a changed brief; edit = a targeted edit of this image (keep everything else); copy = the words; none when the verdict is ship. Australian English, no exclamation marks.';
 async function stInspectStage(env, job, p, log) {
@@ -13408,6 +13548,17 @@ function axAuth(req, env) {
   }
   return { configured: true, ok: false, role: null, name: '' };
 }
+/* S28: a stable id for the person behind a key: a hash of the key (never the key itself), so per-person state - drafts, the daily
+ * cap - belongs to the person and not to a display name two people can share ("admin" for the single access key, "public" for every
+ * anonymous visitor, two roster entries both called Sam). Anonymous public visitors share one id and may not write in the Studio. */
+async function axPersonId(key) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('axiom-person:' + String(key || '')));
+  return 'k' + Array.from(new Uint8Array(d)).slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+/* S28: the namespaces kept for testing (synthetic clients): learning written there touches no live client. STUDIO_TEST_NS adds more. */
+const ST_TEST_NS = ['synthdemo'];
+function stTestNs(env, ns) { const extra = String((env && env.STUDIO_TEST_NS) || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean); return ST_TEST_NS.concat(extra).indexOf(String(ns || '').toLowerCase()) >= 0; }
+function stIsTest(env, p) { return !!(p && (p.test || stTestNs(env, p.ns))); }
 /* THE ROUTE POLICY - deny by default. Every request is one of:
  *   public  - answers without a key (aggregate counts, the health answer)
  *   token   - authenticated by the route's own token (a client review link, SIFA's bearer), never the AXIOM key
@@ -14217,6 +14368,16 @@ const AXIOM_WORKER = {
       if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: auth.publicEnded ? 'Open access to AXIOM has ended. Ask whoever sent the link for a sign-in link.' : 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
+      // S28: open access reads; it does not write creative work or brand memory, where every change must belong to a person
+      if (policy === 'full' && auth.public && /^\/(studio|brand|engine)\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') !== '1') return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only in the Creative Studio and the brand workspace. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
+    }
+    { const sk = req.headers.get('X-Axiom-Key') || ''; auth.pid = sk && auth.ok && !auth.public ? (auth.guest ? 'g' : '') + await axPersonId(sk) : (auth.public ? 'public' : auth.dev ? 'dev' : ''); }
+    // S28: a guest (a tester's sign-in link) works in test projects and the synthetic clients; it does not change a live client's
+    // brand kit, its taught rules, its brand items or its standing corrections (STUDIO_GUEST_BRAND=1 allows it)
+    if (auth.guest && req.method === 'POST' && String(env.STUDIO_GUEST_BRAND || '') !== '1' && /^\/(brand\/(kit|teach|item)|engine\/fix)/.test(path)) {
+      let gns = ''; try { const gb = await req.clone().json(); gns = String((gb && gb.ns) || ''); } catch (e) {}
+      if (!gns) gns = reqUrl.searchParams.get('ns') || '';
+      if (!stTestNs(env, relNs(gns))) return jsonResp({ error: 'guest_live_memory', detail: 'A guest link does not change a live client\'s brand memory. Use the synthetic test client (synthdemo), or ask the agency to make the change.' }, 403);
     }
 
     if (path === '/studio/versions' && req.method === 'GET') {
@@ -15240,6 +15401,7 @@ const AXIOM_WORKER = {
         if (path === '/brand/item/update' && req.method === 'POST') { const r = await brItemUpdate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/review' && req.method === 'POST') { const r = await brItemReview(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/teach' && req.method === 'POST') { const r = await brTeach(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/kit/restore' && req.method === 'POST') { const r = await brandRestore(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
           const kit = await brandSave(env, ns2, rbody2, auth.name);
           return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
@@ -15323,7 +15485,7 @@ const AXIOM_WORKER = {
         }
         if (path === '/engine/status') {
           const fx = (await env.MIND_DB.prepare("SELECT COUNT(*) n, SUM(active) live, SUM(hits) hits FROM engine_fixes WHERE ns=? OR scope='all'").bind(ens).first()) || {};
-          const oc = (await env.MIND_DB.prepare("SELECT SUM(verdict='approved') approved, SUM(verdict='killed') killed FROM engine_outcomes WHERE ns=?").bind(ens).first()) || {};
+          const oc = (await env.MIND_DB.prepare("SELECT SUM(verdict='approved') approved, SUM(verdict='killed') killed FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0").bind(ens).first()) || {};
           const ar = (await env.MIND_DB.prepare('SELECT COUNT(*) n FROM engine_art WHERE ns=?').bind(ens).first()) || {};
           let docs = [];
           try { docs = (await env.MIND_DB.prepare('SELECT kind, COUNT(*) n FROM mind_docs WHERE ns=? GROUP BY kind ORDER BY n DESC').bind(ens).all()).results || []; } catch (e) {}
@@ -15462,13 +15624,15 @@ const AXIOM_WORKER = {
     if (path === '/studio' || path.startsWith('/studio/')) {
       if (!env.MIND_DB) return jsonResp({ ok: false, error: 'mind_unbound', detail: 'Bind the D1 database as MIND_DB.' }, 501);
       let sb = {}; if (req.method === 'POST') { try { sb = await req.json(); } catch (e) { sb = {}; } }
+      if (!sb || typeof sb !== 'object' || Array.isArray(sb)) sb = {};
+      sb.__pid = auth.pid || '';   // S28: who asked, for the jobs this request queues (never taken from the body)
       try {
         await ensureStudio(env);
         const qf = k => reqUrl.searchParams.get(k) || '';
         const conflict = (row, want) => jsonResp({ ok: false, error: 'conflict', detail: 'This ' + (row.asset ? 'asset' : 'project') + ' changed since you read it (revision ' + row.revision + ', you sent ' + want + '). Reload and apply your change again; nothing was written.', revision: row.revision }, 409);
         if (req.method === 'GET') {
           if (path === '/studio/status') return jsonResp(await stStatus(env));
-          if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit') }));
+          if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit'), tests: qf('tests') }));
           if (path === '/studio/get') {
             const id = String(qf('id')).slice(0, 48);
             const p = /^(rp|cs|ks):/.test(id) ? await stLegacyGet(env, id) : await stGet(env, id, { light: qf('light') === '1' });
@@ -15477,11 +15641,12 @@ const AXIOM_WORKER = {
           }
           if (path === '/studio/inventory') return jsonResp(await stInventory(env));
           if (path === '/studio/context') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stContextView(env, p)); }
-          if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env)));
+          if (path === '/studio/feedback') { await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_feedback(id TEXT PRIMARY KEY, project TEXT, who TEXT, data TEXT, created INTEGER)').run(); const fr = (await env.MIND_DB.prepare('SELECT * FROM studio_feedback ORDER BY created DESC LIMIT 100').all()).results || []; return jsonResp({ ok: true, reports: fr.map(r => Object.assign({ id: r.id, project: r.project, who: r.who, created: r.created }, pjs(r.data, {}))) }); }
+          if (path === '/studio/budget') return jsonResp(Object.assign({ ok: true }, await stBudget(env), { you: auth.pid ? await stPersonUsage(env, auth.pid) : null }));
           if (path === '/studio/recipes') { await ensureRecipes(env); const ns = relNs(qf('ns')); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_recipes WHERE ns=? ORDER BY updated DESC').bind(ns).all()).results || []; return jsonResp({ ok: true, builtin: ST_BUILTIN_RECIPES, recipes: rows.map(r => ({ id: r.id, campaign: r.campaign || '', name: r.name, steps: pjs(r.steps, []), note: r.note || '', who: r.who, updated: r.updated })) }); }
           if (path === '/studio/recipe/estimate') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rc = await stRecipeGet(env, p.ns, qf('recipe')); if (!rc) return jsonResp({ error: 'unknown_recipe' }, 404); return jsonResp(Object.assign({ ok: true, recipe: rc }, await stRecipeEstimate(env, p, rc))); }
           if (path === '/studio/impact') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stImpact(env, p)); }
-          if (path === '/studio/metrics') { const ns = relNs(qf('ns')); return jsonResp(await stMetrics(env, ns, { days: qf('days') })); }
+          if (path === '/studio/metrics') { const ns = relNs(qf('ns')); return jsonResp(await stMetrics(env, ns, { days: qf('days'), tests: qf('tests') === '1' })); }
           if (path === '/studio/usage') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); return jsonResp(await stUsage(env, p)); }
           if (path === '/studio/shares') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_shares WHERE project=? ORDER BY created DESC').bind(p.id).all()).results || []; return jsonResp({ ok: true, shares: rows.map(stShareView) }); }
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
@@ -15515,7 +15680,7 @@ const AXIOM_WORKER = {
           if (path === '/studio/jobs') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? ORDER BY created DESC LIMIT 100').bind(p.id).all()).results || []; return jsonResp({ ok: true, jobs: rows.map(stJobRow) }); }
           if (path === '/studio/draft') {
             const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
-            const row = await env.MIND_DB.prepare('SELECT * FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, stStr(auth.name || 'operator', 60)).first();
+            const row = await env.MIND_DB.prepare('SELECT * FROM studio_drafts WHERE asset=? AND who=?').bind(pair.asset.id, auth.pid || stStr(auth.name || 'operator', 60)).first();   // S28: the person's draft, by the hash of their key
             if (!row) return jsonResp({ ok: true, draft: null });
             return jsonResp({ ok: true, draft: { version: row.version, current: row.version === pair.asset.current, layout: pjs(row.layout, null), copy: pjs(row.copy, {}), at: row.at, rev: row.rev || null, seq: row.seq || null } });
           }
@@ -15539,10 +15704,31 @@ const AXIOM_WORKER = {
           { const lim = jsonLimitProblem(sb.brief || {}, ST_BRIEF_MAX, ST_BRIEF_MAX, 'the brief'); if (lim) return jsonResp({ error: 'brief_too_large', detail: 'The project was not created: ' + lim + '. Put long material in a source instead.' }, 413); }
           // S24: a project made for a capped live test carries its allowance from the start, so nothing it runs can spend past it
           let alId = ''; if (sb.allowance) { const al = stAllowanceView(await stAllowanceRow(env, sb.allowance)); if (!al) return jsonResp({ error: 'unknown_allowance', detail: 'No allowance ' + stClean(sb.allowance, 30) + '.' }, 404); if (al.revoked || al.expired) return jsonResp({ error: 'allowance_inactive', detail: 'The allowance "' + al.label + '" is ' + (al.revoked ? 'withdrawn' : 'out of time') + '.' }, 409); alId = al.id; }
-          await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated,allowance) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now, alId || null).run();
-          await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' }, who);
+          // S28: a test project files nothing in the client's memory; a guest's projects are test projects (STUDIO_GUEST_TEST=0 lifts it)
+          const testP = sb.test === true || stTestNs(env, ns) || (!!auth.guest && String(env.STUDIO_GUEST_TEST || '1') !== '0');
+          await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated,allowance,test) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now, alId || null, testP ? 1 : 0).run();
+          await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' + (testP ? ' A test project: nothing it decides is filed in the client\'s memory.' : '') }, who);
           return jsonResp(Object.assign({ ok: true, existing: false }, await stGet(env, id, { light: true })));
+        }
+        // S28: a tester's problem report: what an engineer needs (release, project, piece, view, the last codes and request ids, browser),
+        // never a key; kept in studio_feedback and, when a project is open, on its thread
+        if (path === '/studio/feedback') {
+          await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_feedback(id TEXT PRIMARY KEY, project TEXT, who TEXT, data TEXT, created INTEGER)').run();
+          const clean = { at: stStr(sb.at, 40), page: stStr(sb.page, 20), build: stStr(sb.build, 60), project: stClean(sb.project, 24), test: !!sb.test, view: stStr(sb.view, 30), asset: stClean(sb.asset, 24), version: stClean(sb.version, 24),
+            issues: (Array.isArray(sb.issues) ? sb.issues : []).slice(0, 5).map(i => ({ at: stStr(i && i.at, 40), code: stStr(i && i.code, 60), requestId: stStr(i && i.requestId, 60) })), browser: stStr(sb.browser, 160), window: stStr(sb.window, 20), note: axRedact(stStr(sb.note, 2000)) };
+          if (!clean.note && !clean.issues.length) return jsonResp({ error: 'empty_report', detail: 'Say what happened, or report after a problem was shown.' }, 400);
+          const pr = clean.project ? await stProject(env, clean.project) : null; const fid = stId('fb');
+          await env.MIND_DB.prepare('INSERT INTO studio_feedback(id, project, who, data, created) VALUES(?,?,?,?,?)').bind(fid, pr ? pr.id : '', stStr(who, 40), JSON.stringify(clean), now).run();
+          if (pr) await stEvent(env, pr.id, 'feedback', { text: 'Problem reported' + (clean.note ? ': ' + stStr(clean.note, 300) : '') + (clean.issues.length ? ' (last: ' + clean.issues.map(i => i.code + (i.requestId ? ' ' + i.requestId : '')).join('; ') + ')' : ''), report: fid }, who);
+          return jsonResp({ ok: true, id: fid });
+        }
+        // S28: clear a client's test projects away in one go (archived, never deleted), each named in the answer and on its thread
+        if (path === '/studio/project/archive-tests') {
+          const ns = relNs(sb.ns); if (!sb.ns) return jsonResp({ error: 'missing_ns' }, 400);
+          const rows = (await env.MIND_DB.prepare("SELECT id, title FROM studio_projects WHERE ns=? AND COALESCE(test,0)=1 AND COALESCE(archived,0)=0 ORDER BY created").bind(ns).all()).results || [];
+          for (const r of rows) { await env.MIND_DB.prepare('UPDATE studio_projects SET archived=1, revision=revision+1, updated=? WHERE id=? AND COALESCE(test,0)=1').bind(now, r.id).run(); await stEvent(env, r.id, 'archived', { text: 'Archived with the other test projects of ' + ns + '.' }, who); }
+          return jsonResp({ ok: true, ns, archived: rows.map(r => ({ id: r.id, title: r.title })) });
         }
         if (path === '/studio/project/update' || path === '/studio/project/archive') {
           const p = await stProject(env, sb.id); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
@@ -15570,7 +15756,7 @@ const AXIOM_WORKER = {
           let name = '', text = '', prov = '', kind = 'url';
           if (path === '/studio/source/url') {
             const url = String(sb.url || '').trim(); const bad = axUrlProblem(url); if (bad) return jsonResp({ error: 'bad_url', detail: 'That address is not read: ' + bad + '.' }, 400);
-            const ft = await fullText(env, url, { light: true });
+            const ft = await fullText(env, url, { light: true, publicOnly: true });   // S28: every redirect and a decoded Google News link are checked too
             if (!ft.text || ft.text.length < 200) return jsonResp({ error: 'unreadable', detail: 'The page could not be read as an article (' + (ft.attempts || []).map(a => a.method + (a.ok ? '' : ' ' + (a.detail || a.status || 'failed'))).slice(0, 5).join('; ') + '). Paste the text instead.', paywall: !!ft.paywall }, 422);
             name = stStr(ft.title || url, 120); text = (ft.title ? ft.title + '\n\n' : '') + (ft.published ? 'Published ' + ft.published + (ft.author ? ' by ' + ft.author : '') + '\n\n' : '') + ft.text; prov = url;
           } else {
@@ -15677,16 +15863,21 @@ const AXIOM_WORKER = {
           if (path === '/studio/reference') {
             const id = stId('r'); const purpose = ['brand', 'composition', 'mood', 'imagery', 'typography', 'inspiration', 'approved'].indexOf(String(sb.purpose)) >= 0 ? String(sb.purpose) : 'inspiration';
             let key = '', prepKey = '', originalBytes = 0;
-            if (sb.imageB64 && env.MIND_DOCS) { const mime = String(sb.mime || 'image/png'); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP.' }, 400); const buf = bufFromB64(sb.imageB64); if (buf.byteLength > 12 * 1024 * 1024) return jsonResp({ error: 'too_large', detail: 'A reference is at most 12 MB.' }, 400); originalBytes = buf.byteLength; key = 'studio/' + p.id + '/refs/' + id + '.' + (mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } }); }
+            // S28: a reference is what its bytes say it is (never the declared type), and its size is recorded
+            let refDims = null;
+            if (sb.imageB64 && env.MIND_DOCS) { const buf = bufFromB64(sb.imageB64); if (buf.byteLength > 12 * 1024 * 1024) return jsonResp({ error: 'too_large', detail: 'A reference is at most 12 MB.' }, 400); const sn = stImgSniff(buf); if (!sn) return jsonResp({ error: 'bad_type', detail: 'A reference must be a PNG, JPEG or WebP image (judged by the file itself, not its name).' }, 400); const mime = sn.mime; refDims = sn.w && sn.h ? { w: sn.w, h: sn.h } : null; originalBytes = buf.byteLength; key = 'studio/' + p.id + '/refs/' + id + '.' + (mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } }); }
             // a prepared copy (the browser's smaller rendition of an original over the models' 4.5 MB limit) sits beside the original, which is kept exactly
-            if (sb.prepB64 && key && env.MIND_DOCS) { const pm = String(sb.prepMime || 'image/jpeg'); if (!/^image\/(png|jpeg|webp)$/.test(pm)) return jsonResp({ error: 'bad_type', detail: 'prepared copy: PNG, JPEG or WebP.' }, 400); const pb = bufFromB64(sb.prepB64); if (pb.byteLength >= 4500000) return jsonResp({ error: 'prep_too_large', detail: 'The prepared copy must be under 4.5 MB.' }, 400); prepKey = 'studio/' + p.id + '/refs/' + id + '-prep.' + (pm === 'image/png' ? 'png' : pm === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(prepKey, pb, { httpMetadata: { contentType: pm } }); }
+            // the prepared copy must be the same picture, only smaller: same kind of file check, and the same shape as the original
+            if (sb.prepB64 && key && env.MIND_DOCS) { const pb = bufFromB64(sb.prepB64); const ps = stImgSniff(pb); if (!ps) return jsonResp({ error: 'bad_type', detail: 'The prepared copy must be a PNG, JPEG or WebP image.' }, 400); const pm = ps.mime; if (pb.byteLength >= 4500000) return jsonResp({ error: 'prep_too_large', detail: 'The prepared copy must be under 4.5 MB.' }, 400);
+              if (refDims && ps.w && ps.h && Math.abs(refDims.w / refDims.h - ps.w / ps.h) > 0.02 * (refDims.w / refDims.h)) { try { await env.MIND_DOCS.delete(key); } catch (e) {} return jsonResp({ error: 'prep_mismatch', detail: 'The prepared copy is ' + ps.w + 'x' + ps.h + ' but the original is ' + refDims.w + 'x' + refDims.h + ': a different shape, so the models would see another picture than the one the team sees. Nothing was kept.' }, 422); }
+              prepKey = 'studio/' + p.id + '/refs/' + id + '-prep.' + (pm === 'image/png' ? 'png' : pm === 'image/webp' ? 'webp' : 'jpg'); await env.MIND_DOCS.put(prepKey, pb, { httpMetadata: { contentType: pm } }); }
             // S23: the record may come with the upload (paid or organic, format, channel, approval with its date, likes and dislikes)
             const m0 = sb.meta && typeof sb.meta === 'object' ? stRefMetaClean(sb.meta, {}) : null; if (m0 && m0.error) return jsonResp(m0, 400);
             await env.MIND_DB.prepare('INSERT INTO studio_references(id,project,kind,name,purpose,key,note,who,created,campaign,prep_key,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, stStr(sb.kind || 'image', 20), stStr(sb.name || 'Reference', 120), purpose, key, stStr(sb.note, 300) + (purpose === 'inspiration' ? (sb.note ? ' ' : '') + 'Inspiration only: no logos, claims or exact layouts reused.' : ''), who, now, stStr(sb.campaign != null ? sb.campaign : p.campaign, 40), prepKey, m0 ? JSON.stringify(Object.assign(m0.meta, { at: now, who: stStr(who, 60) })) : null).run();
             // the vision pass at upload, so the reference contributes more than its name: what a designer would note in it (a failure is recorded as the limitation it is)
             let analysis = null;
             let analyseJob = null;
-            if (key && env.ANTHROPIC_API_KEY && sb.analyse === 'job') { const r = await stJobCreate(env, { project: p.id, stage: 'refanalyse', input: { reference: id }, idem: 'refan:' + id }, who); analyseJob = r.job || null; }
+            if (key && env.ANTHROPIC_API_KEY && sb.analyse === 'job') { const r = await stJobCreate(env, { pid: auth.pid, project: p.id, stage: 'refanalyse', input: { reference: id }, idem: 'refan:' + id }, who); analyseJob = r.job || null; }
             else if (key && env.ANTHROPIC_API_KEY && sb.analyse !== false) { const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(id).first(); analysis = await stRefAnalyse(env, p, ref); }
             await stBump(env, p.id); await stEvent(env, p.id, 'reference', { text: 'Reference added: ' + stStr(sb.name || 'Reference', 120) + ' (' + purpose + ').' + (analysis ? (analysis.error ? ' Not analysed: ' + analysis.error + '; the models know its name and purpose only.' : ' Read: ' + analysis.summary) : ''), reference: id, analysed: !!(analysis && !analysis.error) }, who);
             return jsonResp({ ok: true, id, key, job: analyseJob || undefined, url: key ? '/studio/file?key=' + encodeURIComponent(key) : '', prepKey, prepared: !!prepKey, bytes: originalBytes, overLimit: originalBytes >= 4500000, note: originalBytes >= 4500000 && !prepKey ? 'The original is over 4.5 MB and cannot be shown to the models; upload a prepared copy (prepB64) and the original stays on file.' : undefined, analysis });
@@ -15766,7 +15957,7 @@ const AXIOM_WORKER = {
         }
         if (path === '/studio/draft' || path === '/studio/draft/discard') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
-          const me = stStr(who, 60);
+          const me = auth.pid || stStr(who, 60);   // S28: drafts belong to the person (a hash of their key), never to a shared display name
           if (path === '/studio/draft/discard') {
             // S19: after a version is saved the browser discards the draft that edit came from - only a draft made on the same base
             // version and written no later than the saved version, so a late acknowledgement never deletes newer work
@@ -15990,18 +16181,34 @@ const AXIOM_WORKER = {
             if (rd.inspection.state === 'inconsistent' && !sb.acknowledgeInspection) return jsonResp({ error: 'inspection_inconsistent', detail: 'The art director answered ship while naming unresolved problems. Review the inspection, then approve with acknowledgeInspection if you accept it.', readiness: rd }, 409);
             if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote = ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
           }
+          // S28: what a withdrawal takes back is the approval standing before it (its version may be an earlier one, carried)
+          const before = decision === 'withdraw' ? await stStanding(env, pair.asset) : null;
           // the approval names exactly the version that was looked at: it is filed only while that version is still current
           const apr = await env.MIND_DB.prepare('INSERT INTO studio_approvals(id,project,asset,part,version,sig,decision,reason,who,created) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM studio_assets WHERE id=? AND current=?)').bind(stId('ap'), pair.project.id, pair.asset.id, part, cur.id, stSig(part, cur), decision, stStr(stStr(sb.reason, 360) + ackNote, 400), who, now, pair.asset.id, cur.id).run();
           if (!(apr && apr.meta && apr.meta.changes)) return jsonResp({ ok: false, error: 'version_moved', detail: 'A newer version of ' + pair.asset.title + ' landed while you decided; nothing was recorded. Look at the current version and decide again.' }, 409);
           await stBump(env, pair.project.id);
-          let outcome = '';
-          if (decision !== 'withdraw') { try { const o = await engineOutcome(env, { ns: pair.project.ns, campaign: pair.project.campaign || '', surface: 'studio', ref: pair.asset.id, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who); outcome = o.id; } catch (e) {} }
-          if (decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4 && String(sb.reason || '').trim() !== 'copy ready') { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
-          await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome }, who);
+          // S28: what the client's memory learns. A final verdict is filed once per asset, version and part: a design decision, the copy
+          // decision of a copy-only piece, any rejection. The "ready for design" tick is a hand-off to Design, not a verdict, and files
+          // nothing; a withdrawal retracts the WIN it had filed; a test project files nothing at all.
+          let outcome = '', learned = '';
+          const isTest = stIsTest(env, pair.project);
+          const handoff = part === 'copy' && decision === 'approve' && cur.mode !== 'copy' && (sb.handoff === true || String(sb.reason || '').trim() === 'copy ready');
+          const lref = vid => pair.asset.id + ':' + vid + ':' + part;
+          if (isTest) learned = 'test';
+          else if (decision === 'withdraw') { const st0 = before && before[part]; if (st0) { try { if (await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(st0.version), verdict: 'approved' })) learned = 'retracted'; } catch (e) {} } }
+          else if (!handoff && (decision === 'reject' || part === 'design' || cur.mode === 'copy')) {
+            try {
+              await engineRetract(env, { ns: pair.project.ns, surface: 'studio', ref: lref(cur.id), verdict: decision === 'approve' ? 'killed' : 'approved' });
+              const o = await engineOutcome(env, { ns: pair.project.ns, campaign: pair.project.campaign || '', surface: 'studio', ref: lref(cur.id), dedupe: true, n: 0, verdict: decision === 'approve' ? 'approved' : 'killed', why: part + ': ' + stStr(sb.reason, 400), headline: cur.copy.headline || '', support: cur.copy.support || cur.copy.caption || '', cta: cur.copy.cta || '' }, who);
+              if (!o.existing) outcome = o.id; learned = o.existing ? 'already' : 'filed';
+            } catch (e) {}
+          }
+          if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4) { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
+          await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : learned === 'retracted' ? '; the WIN it had filed was taken out of the Mind' : learned === 'test' ? '; a test project, so nothing was filed in the client\'s memory' : handoff ? '; a hand-off to Design, so nothing was filed in the client\'s memory' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome, learned: learned || undefined, handoff: handoff || undefined }, who);
           // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope
           let proposal = null;
-          if (decision !== 'withdraw' && String(sb.reason || '').trim().length >= 12) proposal = await brPropose(env, pair.project.ns, pair.project.campaign || '', decision === 'approve' ? 'accepted' : 'rejected', (decision === 'approve' ? 'Accepted ' : 'Rejected ') + part + ': ' + stStr(pair.asset.title, 120), stStr(sb.reason, 600), { type: 'approval', id: pair.asset.id, label: (decision === 'approve' ? 'approval' : 'rejection') + ' of the ' + part + ' of ' + stStr(pair.asset.title, 80) + ' on project ' + stStr(pair.project.title, 80), project: pair.project.id, asset: pair.asset.id, version: cur.id }, who);
-          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal });
+          if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 12) proposal = await brPropose(env, pair.project.ns, pair.project.campaign || '', decision === 'approve' ? 'accepted' : 'rejected', (decision === 'approve' ? 'Accepted ' : 'Rejected ') + part + ': ' + stStr(pair.asset.title, 120), stStr(sb.reason, 600), { type: 'approval', id: pair.asset.id, label: (decision === 'approve' ? 'approval' : 'rejection') + ' of the ' + part + ' of ' + stStr(pair.asset.title, 80) + ' on project ' + stStr(pair.project.title, 80), project: pair.project.id, asset: pair.asset.id, version: cur.id }, who);
+          return jsonResp({ ok: true, approvals: await stStanding(env, pair.asset), proposal, learned: learned || undefined });
         }
         // the imagery a composition's current version plans, queued when a person asks (the guided flow: copy first, then design)
         if (path === '/studio/imagery') {
@@ -16044,7 +16251,7 @@ const AXIOM_WORKER = {
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project' }, 403);
           if (sb.job) {
             const v = await stCurrent(env, pair.asset); if (!v) return jsonResp({ error: 'no_version' }, 400); if (v.mode === 'copy') return jsonResp({ error: 'copy_only', detail: 'A copy-only asset has no composition to suggest for.' }, 400);
-            const r = await stJobCreate(env, { project: pair.project.id, asset: pair.asset.id, stage: 'suggest', input: { refresh: !!sb.refresh }, idem: 'suggest:' + pair.asset.id + ':' + v.id + (sb.refresh ? ':' + Date.now().toString(36) : '') }, who);
+            const r = await stJobCreate(env, { pid: auth.pid, project: pair.project.id, asset: pair.asset.id, stage: 'suggest', input: { refresh: !!sb.refresh }, idem: 'suggest:' + pair.asset.id + ':' + v.id + (sb.refresh ? ':' + Date.now().toString(36) : '') }, who);
             return r.error ? jsonResp(r, r.status || 400) : jsonResp({ ok: true, job: r.job, existing: !!r.existing });
           }
           const r = await stSuggest(env, pair.project, pair.asset, { refresh: !!sb.refresh });
@@ -16059,10 +16266,10 @@ const AXIOM_WORKER = {
           const pair = await stAsset(env, ins.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (ins.version && pair.asset.current && ins.version !== pair.asset.current && !sb.force) return jsonResp({ error: 'stale', detail: 'This inspection judged version ' + ins.version + '; the asset is now at ' + pair.asset.current + '. Inspect the current version instead, or send force:true to apply the correction anyway.', version: ins.version, current: pair.asset.current }, 409);
           const instruction = stStr(sb.instruction, 600).trim() || ins.fix.instruction; const kind = ins.fix.kind; let job = null;
-          if (kind === 'design' || kind === 'copy') { const r = await stJobCreate(env, { project: p.id, stage: 'revise', input: { target: 'asset', asset: pair.asset.id, instruction }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
+          if (kind === 'design' || kind === 'copy') { const r = await stJobCreate(env, { pid: auth.pid, project: p.id, stage: 'revise', input: { target: 'asset', asset: pair.asset.id, instruction }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
           else { const cur = await stCurrent(env, pair.asset); const ctx = await stContext(env, p, { channels: [] }); const L = (cur && cur.layout) || {}; const rg = (L.regions || []).find(x => x.role === 'background');
             const prompt = kind === 'edit' ? 'Edit the current image: ' + instruction + '. Keep everything else exactly as it is.' : (L.v === 5 && rg ? stRegionPrompt(L, rg, cur.copy, ctx, pair.asset.format) : stArtPrompt({ visual: (cur.context || {}).visual, headline: cur.copy.headline, support: cur.copy.support }, null, ctx, pair.asset.format, L.template || 'plain', L.design)) + '\nCORRECTION FROM THE ART DIRECTOR: ' + instruction;
-            const r = await stJobCreate(env, { project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt, edit: kind === 'edit', approach: cur && cur.mode === 'artwork' ? 'artwork' : undefined, baked: L.baked, referenceIds: rg ? rg.refs : [], aspect: pair.asset.format, size: (cur && cur.image && cur.image.size) || env.IMAGE_SIZE || '2K', note: (kind === 'edit' ? 'edit: ' : 're-brief: ') + instruction.slice(0, 60) }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
+            const r = await stJobCreate(env, { pid: auth.pid, project: p.id, asset: pair.asset.id, stage: 'render', input: { prompt, edit: kind === 'edit', approach: cur && cur.mode === 'artwork' ? 'artwork' : undefined, baked: L.baked, referenceIds: rg ? rg.refs : [], aspect: pair.asset.format, size: (cur && cur.image && cur.image.size) || env.IMAGE_SIZE || '2K', note: (kind === 'edit' ? 'edit: ' : 're-brief: ') + instruction.slice(0, 60) }, idem: 'fix:' + ins.eid }, who); job = r.job ? r.job.id : null; }
           await stEvent(env, p.id, 'inspection_applied', { eid: ins.eid, asset: pair.asset.id, fixKind: kind, instruction, job, round: ins.round, text: 'Correction applied (' + kind + ', round ' + ins.round + ' of 2): ' + instruction + (job ? ' - running as job ' + job : '') }, who);
           await stBump(env, p.id);
           return jsonResp({ ok: true, job, kind, round: ins.round });
@@ -16130,7 +16337,7 @@ const AXIOM_WORKER = {
         if (path === '/studio/reference/analyse') {
           const ref = await env.MIND_DB.prepare('SELECT * FROM studio_references WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!ref) return jsonResp({ error: 'unknown_reference' }, 404);
           const p = await stProject(env, ref.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
-          if (sb.job) { const r = await stJobCreate(env, { project: p.id, stage: 'refanalyse', input: { reference: ref.id }, idem: 'refan:' + ref.id + ':' + Date.now().toString(36) }, who); return r.error ? jsonResp(r, r.status || 400) : jsonResp({ ok: true, job: r.job }); }
+          if (sb.job) { const r = await stJobCreate(env, { pid: auth.pid, project: p.id, stage: 'refanalyse', input: { reference: ref.id }, idem: 'refan:' + ref.id + ':' + Date.now().toString(36) }, who); return r.error ? jsonResp(r, r.status || 400) : jsonResp({ ok: true, job: r.job }); }
           const analysis = await stRefAnalyse(env, p, ref);
           await stBump(env, p.id);
           return jsonResp({ ok: !analysis.error, id: ref.id, analysis });
@@ -16155,11 +16362,35 @@ const AXIOM_WORKER = {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           const v = await stVersion(env, sb.version); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404);
           if (!env.MIND_DOCS) return jsonResp({ error: 'mind_not_configured' }, 501);
-          const mime = String(sb.mime || 'image/png'); if (!/^image\/(png|jpeg|webp)$/.test(mime)) return jsonResp({ error: 'bad_type' }, 400);
           const buf = bufFromB64(sb.imageB64); if (buf.byteLength < 64 || buf.byteLength > 12 * 1024 * 1024) return jsonResp({ error: 'bad_image', detail: 'between 64 bytes and 12 MB' }, 400);
-          const key = 'studio/' + pair.project.id + '/' + pair.asset.id + '/' + v.id + '-export.png';
-          await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
-          return jsonResp({ ok: true, key, url: '/studio/file?key=' + encodeURIComponent(key), version: v.id });
+          // S28: the type comes from the bytes, a PNG must be the composition's output size, and the file a measurement validated is never
+          // replaced: once the design is approved or the asset is open to a client, other bytes are refused and the validated file named
+          const sn = stImgSniff(buf); if (!sn) return jsonResp({ error: 'bad_type', detail: 'PNG, JPEG or WebP, judged by the bytes.' }, 400);
+          const stg = v.layout && v.layout.stage; if (sn.type === 'png' && sn.w && sn.h && stg && stg.w && stg.h && (sn.w !== stg.w || sn.h !== stg.h)) return jsonResp({ error: 'image_size', detail: 'The PNG is ' + sn.w + 'x' + sn.h + '; this composition is drawn at ' + stg.w + 'x' + stg.h + '.' }, 422);
+          const hash = await stBufSha(buf); const url = k => '/studio/file?key=' + encodeURIComponent(k);
+          const kitS = (await brandKit(env, pair.project.ns)) || {}; const sigS = stCompSig(pair.asset, v, kitS);
+          const val = await env.MIND_DB.prepare('SELECT id, export_key, export_hash FROM studio_validations WHERE asset=? AND sig=? AND ok=1 ORDER BY created DESC, id DESC LIMIT 1').bind(pair.asset.id, sigS).first();
+          const standingS = v.id === pair.asset.current ? await stStanding(env, pair.asset) : {};
+          let shared = false; try { await ensureReview(env); const sh = (await env.MIND_DB.prepare('SELECT assets, expires FROM studio_shares WHERE project=? AND COALESCE(revoked,0)=0').bind(pair.project.id).all()).results || []; shared = sh.some(x => (!x.expires || x.expires > now) && pjs(x.assets, []).indexOf(pair.asset.id) >= 0); } catch (e) {}
+          const locked = !!standingS.design || shared;
+          const note = (what, key) => stEvent(env, pair.project.id, 'export_image', { asset: pair.asset.id, version: v.id, key, hash: hash.slice(0, 16), text: what }, who);
+          if (val && val.export_hash) {
+            if (hash === val.export_hash) return jsonResp({ ok: true, key: val.export_key, url: url(val.export_key), version: v.id, validated: true });
+            if (locked) return jsonResp({ ok: false, error: 'export_locked', detail: 'This version is ' + (standingS.design ? 'approved' : 'open to the client') + ' as the image its measurement validated; other bytes are not put in its place. The validated file is named here.', key: val.export_key, hash: val.export_hash, url: url(val.export_key), version: v.id }, 409);
+            const key = stExportKey(pair.project, pair.asset, v, hash); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: sn.mime } });
+            await note('A working image of ' + pair.asset.title + ' was saved beside the validated one (the validated file is unchanged).', key);
+            return jsonResp({ ok: true, key, url: url(key), version: v.id, validated: false, validatedKey: val.export_key });
+          }
+          const key = stExportKey(pair.project, pair.asset, v, hash); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: sn.mime } });
+          if (val && !val.export_key && sn.type === 'png') {
+            // a passing measurement filed without its image takes this one, once: from then on it is the validated file
+            const b = await env.MIND_DB.prepare("UPDATE studio_validations SET export_key=?, export_hash=?, export_w=?, export_h=? WHERE id=? AND COALESCE(export_key,'')=''").bind(key, hash, sn.w || null, sn.h || null, val.id).run();
+            if (b && b.meta && b.meta.changes) { await note('The image of ' + pair.asset.title + ' was bound to its passing measurement; it cannot be replaced from now on.', key); return jsonResp({ ok: true, key, url: url(key), version: v.id, validated: true, bound: true }); }
+          }
+          // no measurement yet: a working file, also under the version's working name, which the art director reads before one exists
+          await env.MIND_DOCS.put('studio/' + pair.project.id + '/' + pair.asset.id + '/' + v.id + '-export.png', buf, { httpMetadata: { contentType: sn.mime } });
+          await note('A working image of ' + pair.asset.title + ' was saved (no measurement holds it yet).', key);
+          return jsonResp({ ok: true, key, url: url(key), version: v.id, validated: false });
         }
         if (path === '/studio/import') {
           const r = await stImport(env, sb.legacy, who);
@@ -16168,7 +16399,7 @@ const AXIOM_WORKER = {
           return jsonResp(Object.assign({ ok: true, existing: r.existing }, await stGet(env, r.id, { light: true })));
         }
         if (path === '/studio/job') {
-          const r = await stJobCreate(env, sb, who);
+          const r = await stJobCreate(env, Object.assign({}, sb, { pid: auth.pid || '' }), who);
           if (r.error) return jsonResp({ ok: false, error: r.error, detail: r.detail || '', step: r.step, need: r.need }, r.status || 400);
           return jsonResp({ ok: true, existing: r.existing, job: r.job });
         }

@@ -12,7 +12,8 @@
     "check": "node tests/run.mjs check",
     "test": "node tests/run.mjs all",
     "test:backend": "node tests/run.mjs backend",
-    "test:browser": "node tests/run.mjs browser"
+    "test:browser": "node tests/run.mjs browser",
+    "test:release": "node tests/run.mjs all"
   },
   "engines": {
     "node": ">=22"

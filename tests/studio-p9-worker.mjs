@@ -55,7 +55,9 @@ const get = async P => (await req('GET', '/studio/get?id=' + P)).d;
 const curV = async (P, A) => { const g = await get(P); const a = g.assets.find(x => x.id === A); return { a, v: a.versions.find(x => x.id === a.current) }; };
 const readiness = async A => (await req('GET', '/studio/readiness?asset=' + A, null, 'read-key')).d;
 /** a measurement of the current version as the browser would file it; `tweak` edits the report before sending */
-const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: png(3) }); };
+/* S28: the measured PNG states the composition's output size in its header, as the renderer's does (the worker checks it) */
+const pngAt = (fill, st) => { const b = Buffer.from(png(fill), 'base64'); b.writeUInt32BE((st && st.w) || 1080, 16); b.writeUInt32BE((st && st.h) || 1080, 20); return b.toString('base64'); };
+const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngAt(3, v.layout && v.layout.stage) }); };
 const lastManifest = () => { const keys = Array.from(r2.keys()).filter(k => /\/export\/[^/]+\.json$/.test(k)); const m = JSON.parse(r2.get(keys[keys.length - 1]).v.toString()); m.assets = m.assets || m.items || []; m.excluded = m.excluded || []; return m; };
 const box = (rep, id) => rep.boxes.find(b => b.id === id);
 // the HOOF reconstruction with its headline really on three lines (as Chromium measured it in studio-layout-browser.mjs)
@@ -152,7 +154,7 @@ await t('a caption-only version shows the same tile: its validation and design a
   const { v } = await curV(P, A);
   await req('POST', '/studio/version', { asset: A, copy: Object.assign({}, v.copy, { caption: 'Not a subsidy. Never was.' }), layout: v.layout, note: 'caption' });
   const r1 = await readiness(A); eq(r1.technical, 'passed', 'caption-only: ' + JSON.stringify(r1.reasons));
-  ok(r1.validation.exportKey.endsWith(V_REPAIRED + '-export.png'), 'the export of the composition that was measured');
+  ok(new RegExp(V_REPAIRED + '-export-[0-9a-f]{16}\\.png$').test(r1.validation.exportKey), 'the export of the composition that was measured, under its own hash (S28): ' + r1.validation.exportKey);
   const g1 = (await get(P)).assets.find(a => a.id === A); ok(g1.approvals.design && g1.approvals.design.carried, 'design approval stands, carried: ' + JSON.stringify(g1.approvals));
   await req('POST', '/studio/version', { asset: A, copy: Object.assign({}, v.copy, { caption: 'Not a subsidy. Never was.', support: 'Fuel tax credits are not a subsidy. They return a road tax.' }), layout: v.layout, note: 'support shortened' });
   const r2v = await readiness(A); eq(r2v.technical, 'stale'); ok(r2v.reasons.some(x => /different words/.test(x)));

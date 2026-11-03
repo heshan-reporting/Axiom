@@ -51,7 +51,7 @@ def a_new_list():
     m = re.search(r'https://heshan-reporting\.github\.io/Axiom/#k=([A-Za-z0-9_-]{24,})&v=studio', out); assert m, out
     g = put(); assert g and list(g.keys()) == [m.group(1)], g
     v = g[m.group(1)]; want = (datetime.now(timezone.utc).date() + timedelta(days=30)).isoformat()
-    assert v == {'n': 'Laura', 'r': 'full', 'until': want}, v
+    assert v == {'n': 'Laura', 'r': 'read', 'until': want}, 'a guest link is read-only unless --full is asked for (S28): %r' % (v,)
     assert json.load(open(FILE)) == g, 'the file on this Mac matches what the worker got'
     assert stat.S_IMODE(os.stat(FILE).st_mode) == 0o600, oct(os.stat(FILE).st_mode)
 t('add makes a key, writes the whole list to the worker, keeps it in a 600 file and prints the sign-in link', a_new_list)
@@ -74,7 +74,7 @@ t('a second guest is added beside the first; the worker gets both', second_guest
 def renew_keeps_key():
     k = [k for k, v in json.load(open(FILE)).items() if v['n'] == 'Laura'][0]
     code, out = run('renew', 'Laura', '--until', '2999-12-31'); assert code == 0 and 'works again' in out, out
-    g = put(); assert g[k]['until'] == '2999-12-31' and g[k]['r'] == 'full', g[k]
+    g = put(); assert g[k]['until'] == '2999-12-31' and g[k]['r'] == 'read', 'renewing keeps the role: %r' % (g[k],)
     assert '#k=' not in out, 'renew sends nothing new'
 t('renew moves the end date on the same key, so the old link works again', renew_keeps_key)
 
@@ -114,6 +114,14 @@ def stop_without_file():
     finally:
         os.rename(FILE + '.away', FILE)
 t('STOP when the worker has guest keys but this Mac has no list (writing would end every old link)', stop_without_file)
+
+
+def full_on_request():
+    code, out = run('add', 'Kai', '--until', '2999-02-01', '--full'); assert code == 0, out
+    g = put(); assert [v for v in g.values() if v['n'] == 'Kai'][0]['r'] == 'full', g
+    code, out = run('renew', 'Kai', '--until', '2999-03-01', '--read'); assert code == 0, out
+    g = put(); assert [v for v in g.values() if v['n'] == 'Kai'][0]['r'] == 'read', 'renew --read lowers it'
+t('full access only on request (--full); renew --read lowers it', full_on_request)
 
 
 def past_date():

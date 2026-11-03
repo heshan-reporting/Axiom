@@ -721,3 +721,8 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-ask .st-ask-cost{margin:0 0 12px}
 #studio-root .st .st-ask .st-ask-min{min-height:16px;margin-top:4px}
 #studio-root .st .st-ask .st-ta{width:100%}
+/* S28: test projects, the stated ceiling of a paid question, Review's own measuring, the budget left today */
+#studio-root .st .st-test-chip{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font:600 10px/1.5 var(--sk-font);letter-spacing:.04em;text-transform:uppercase;color:var(--sk-warn);border:1px solid currentColor;vertical-align:middle}
+#studio-root .st .st-ask-ceiling{margin:2px 18px 10px;font-size:12px;line-height:1.45}
+#studio-root .st .st-measure-all{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;padding:8px 10px;border:1px solid var(--st-line, var(--line, #303741));border-radius:8px;font-size:13px}
+#studio-root .st .st-prov-left{opacity:.75;font-weight:500}

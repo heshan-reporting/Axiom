@@ -16,7 +16,7 @@ const env = {
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => { const b = r2.get(k).v; return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); }, text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
 };
-const png = fill => { const b = Buffer.alloc(160, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b[24] = 8; b[25] = 6; return b.toString('base64'); };
+const png = fill => { const b = Buffer.alloc(160, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b.fill(0, 16, 24);   /* S28: the header states no size, as this fake is no picture (the worker checks a stated size against the stage) */ b[24] = 8; b[25] = 6; return b.toString('base64'); };
 globalThis.fetch = async () => new Response('', { status: 404 });
 const mod = await import(WORKER); const handler = mod.default; const ctx = { waitUntil() {} };
 async function req(method, path, body, key = 'full-key', headers, ip) {
@@ -77,7 +77,7 @@ await t('a comment can be pinned to the tile; the agency sees it on the thread; 
   const g = (await rev('GET', '/review/get', null, TOKEN)).d; const a = g.assets[0];
   const c = await rev('POST', '/review/comment', { asset: A, version: a.version.id, text: 'Make the headline bigger', pin: { x: 30.25, y: 18 }, author: 'Tania' }, TOKEN); eq(c.status, 200, JSON.stringify(c.d));
   const rows = (await req('GET', '/studio/review?project=' + P, null, 'read-key')).d.review; eq(rows.map(x => [x.kind, x.text, x.pin, x.author, x.status]), [['comment', 'Make the headline bigger', { x: 30.3, y: 18 }, 'Tania', 'open']]);
-  ok((await req('GET', '/studio/get?id=' + P)).d.thread.some(e => e.kind === 'client_review' && /Client comment on Myth tile/.test(e.text) && /as they gave their name/.test(e.text)), 'on the thread, the name labelled as given');
+  ok((await req('GET', '/studio/get?id=' + P)).d.thread.some(e => e.kind === 'client_review' && /Comment through the review link .* on Myth tile/.test(e.text) && /name as given, not verified/.test(e.text)), 'on the thread, the name labelled as given');
   eq((await rev('POST', '/review/comment', { asset: A, version: 'vold', text: 'x' }, TOKEN)).d.error, 'stale_version');
   eq((await rev('POST', '/review/comment', { asset: HIDDEN, version: 'x', text: 'x' }, TOKEN)).status, 404);
   eq((await rev('POST', '/review/comment', { asset: A, version: a.version.id, text: '' }, TOKEN)).d.error, 'text_required');

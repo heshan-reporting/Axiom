@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r25` since S27 (4 November 2026).
+  with `?v=r26` since S28 (5 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2791,6 +2791,35 @@ backwards; `explain()` names refusals by kind (`TITLES`, `humanCode`). Harnesses
 `studio-explain-test.mjs` (11), the S27 cases in `studio-progress-test.mjs`; `tests/studio-s27-sweep.mjs` is an evidence tool
 (overflow and axe across views, widths and roles), not a harness.
 
+**Ready for testers (S28; build `2026-11-05.studio-p43`, page `?v=r26`; `CREATIVE-STUDIO.md` s.51, `TESTING.md`).** Learning is
+filed once and taken back: a final verdict (a design decision, the copy decision of a copy-only piece, any rejection) files one WIN or
+LOSS per asset, version and part (`engine_outcomes.doc`, `withdrawn`); the "ready for design" tick is a hand-off that files nothing; a
+withdrawal or a reversed verdict retracts the document (`engineRetract`, `mindRetract`: vectors deleted, `mind_docs.status`
+`retracted`); readers of outcomes leave withdrawn ones out. **Test projects** (`studio_projects.test`: asked for, a namespace in
+`ST_TEST_NS`/`STUDIO_TEST_NS` such as `synthdemo`, or made by a guest key unless `STUDIO_GUEST_TEST=0`) file nothing in a client's
+memory (outcomes, `studio_intel_log`, brand proposals, `/studio/remember` is 409 `test_project`), are left out of `/studio/metrics`
+unless `tests=1`, carry a badge, filter in the library (`/studio/list?tests=only|hide`) and are archived together (`POST
+/studio/project/archive-tests {ns}`). A guest key cannot change a live client's kit, taught rules, brand items or corrections
+(`guest_live_memory`; `STUDIO_GUEST_BRAND=1` allows it); `POST /brand/kit/restore {ns, revision, reason}` puts the kit back as a new
+revision. **Identity:** `auth.pid` is a hash of the key (`k...`, guests `gk...`), never the display name; drafts and the daily allowance
+belong to it; anonymous public mode does not write under `/studio`, `/brand` or `/engine` (`public_write_refused`;
+`STUDIO_PUBLIC_WRITE=1`). **Export integrity:** a measurement's PNG must be a PNG at the stage's size (`not_png`, `image_size`) and is
+stored under its hash (`<v>-export-<sha16>.png`, `studio_validations.export_hash/_w/_h`); `/studio/render/save` never replaces it
+(`export_locked` with the validated file named for an approved or shared version; the first image binds to a measurement filed
+without one; every save is an `export_image` event); the review link and the export use the validated file and the manifest names
+`exportHash`; image types come from the bytes (`stImgSniff`). **Spend:** `studio_person_usage` caps each person per Sydney day inside
+`stDispatchOpen` (`STUDIO_PERSON_DAILY_CALLS`/`_IMAGES` 120/40, guests `STUDIO_GUEST_DAILY_*` 40/12, 0 lifts;
+`person_budget_exhausted`); jobs carry `pid`; `/studio/budget` answers `you`; stage lines and the paid question state the worst case
+from `budget.policy` (`costCeil`, `costNote` in `docs/studio.js`). Review links last 14 days unless asked, at most
+`STUDIO_SHARE_MAX_DAYS` (30); a client decision is "through the review link ... name as given, not verified" (`via`,
+`nameVerified: false`); `docs/review.html` talks only to the configured worker. Review has **Measure them here**. The header chip
+says configured, budget left and each provider's last answer (`/studio/status` `lastProvider`). `/studio/source/url` checks every
+redirect (`fullText` `publicOnly`, `srcFetchPublic`). **Report a problem** (Help) files `POST /studio/feedback` (read back with `GET
+/studio/feedback`): release, project, piece, view, the last codes and request ids, browser; never a key. `tools/studio-test-kit.py
+seed|reset` (dry run by default) seeds and clears the synthetic client; `tools/guest-link.py` makes read-only links unless `--full`;
+`npm run test:release` is the gate. Harnesses: `studio-ready-worker.mjs` (10), `studio-ready2-worker.mjs` (8),
+`studio-ready-browser.mjs` (8), `studio-test-kit-test.py` (4), `guest-link-test.py` (11).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
@@ -3108,11 +3137,11 @@ date answers `401 link_expired` ("Your sign-in link has ended" in the Studio), e
 public mode is open, when it gets the public role, exactly what no key would (3 November
 2026: Laura's browser kept an old link and was shut out of an open worker); an unknown key
 is still 401. **Guest links are made on the Mac** with `python3 tools/guest-link.py add
-<name> [--until DATE | --days 30] [--read]` (also `renew`, `link`, `remove`, `list`): the
+<name> [--until DATE | --days 30] [--full]` (read-only unless `--full`, since S28; also `renew [--read|--full]`, `link`, `remove`, `list`): the
 key is made there, the list is kept in `~/.axiom-guests.json` (600) and written whole to the
 secret each time; it stops when the worker has guest keys but the Mac has no list, since
 writing would end every old link (`--fresh` does that on purpose). Harness:
-`tests/guest-link-test.py` (10, a stub in place of wrangler). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
+`tests/guest-link-test.py` (11, a stub in place of wrangler). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
 (optional `AXIOM_PUBLIC_UNTIL`, a date): a request with no key gets that role until the date
 (`axPublic`); a supplied key is still checked, a wrong one still 401; any other value opens
 nothing; after the date keyless requests answer `401 link_expired`. Off unless set. With no secret

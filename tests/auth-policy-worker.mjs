@@ -150,7 +150,10 @@ await T.t('an expired guest key is let in as the public role while open access i
 /* public mode: AXIOM_PUBLIC opens keyless requests with its role until AXIOM_PUBLIC_UNTIL; supplied keys are still checked */
 await T.t('AXIOM_PUBLIC: no key gets the public role, a wrong key is still refused, and anything but read or full opens nothing', async () => {
   const x = await workerEnv({ env: Object.assign({ AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2999-01-01' }, SECRETS) });
-  const a = await x.call('POST', '/studio/project', { ns: 'mca', title: 'public' }, null, ip()); ok(a.status === 200 || a.status === 201, 'no key writes in full public mode: ' + a.status + ' ' + a.text.slice(0, 100));
+  // S28: open access does not write creative work or brand memory, where every change must belong to a person; STUDIO_PUBLIC_WRITE=1 opens it
+  const a = await x.call('POST', '/studio/project', { ns: 'mca', title: 'public' }, null, ip()); eq([a.status, a.body.error], [403, 'public_write_refused'], 'no key does not write in the Studio, even in full public mode');
+  const xw = await workerEnv({ env: Object.assign({ AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2999-01-01', STUDIO_PUBLIC_WRITE: '1' }, SECRETS) });
+  const aw = await xw.call('POST', '/studio/project', { ns: 'mca', title: 'public' }, null, ip()); ok(aw.status === 200 || aw.status === 201, 'with STUDIO_PUBLIC_WRITE=1 it does: ' + aw.status + ' ' + aw.text.slice(0, 100)); xw.restore();
   eq((await x.call('GET', '/allnews', null, 'wrong-key-0001', ip())).status, 401, 'a wrong key is still refused');
   ok((await x.call('POST', '/studio/project', { ns: 'mca', title: 'k' }, 'full-key', ip())).status < 300, 'keys keep working'); x.restore();
   const r = await workerEnv({ keys: null, env: Object.assign({ AXIOM_PUBLIC: 'read' }, SECRETS) });

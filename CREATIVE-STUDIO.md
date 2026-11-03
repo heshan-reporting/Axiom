@@ -3235,3 +3235,60 @@ the Copy pair at 1920 differs only by the "Just finished" activity card, which s
 that window for the before capture. The loading and failed states exist only in the after set: the before run reached its time
 limit before them. Nothing here ran against a live model, image provider, the live worker or Cloudflare; nothing is claimed
 bug-free.
+
+## 51. S28 - ready for testers (build `2026-11-05.studio-p43`, page `?v=r26`)
+
+An audit for one question: can the Studio be handed to a group of testers without their activity damaging live client memory or
+spend, with results that can be trusted? It found four blockers, six high and six medium findings; each was reproduced by a test
+that fails on `d2a51b1` and passes now (51.2). `TESTING.md` at the repository root is the testers' page.
+
+### 51.1 Baseline (`d2a51b1`)
+
+CI run 138 on `d2a51b1`: the checks, every backend harness and 55 of 55 browser harnesses passed (providers mocked), the
+cross-engine harnesses 3 of 3 in Chromium, Firefox and WebKit.
+
+### 51.2 Findings ledger
+
+| Id | Severity | Where | What was wrong | Fix | Test (failing on `d2a51b1`) |
+|---|---|---|---|---|---|
+| B1 | blocker | `/studio/approve`, `engineOutcome` | Every approval and every "ready for design" tick filed a WIN or LOSS document in the client's own Mind; twice filed two; a withdrawal took nothing back; testers would also teach live rules (`/studio/remember`) and change the live kit (`/brand/teach`); the kit had revisions but no restore. | A final verdict is filed once per asset, version and part (a design decision, the copy decision of a copy-only piece, any rejection; `engine_outcomes.doc`, `withdrawn`); the ready tick is a hand-off and files nothing; a withdrawal retracts the document (`mindRetract`: vectors deleted, row `retracted`); test projects file nothing anywhere; a guest key cannot change a live client's brand memory (`guest_live_memory`); `POST /brand/kit/restore {ns, revision, reason}`. | `studio-ready-worker` B1 x5 |
+| B2 | blocker | `studio_drafts`, the gate | Drafts were keyed by the display name: everyone on the single access key was `admin`, every anonymous visitor `public`, two roster entries named Sam the same person. | `auth.pid`, a hash of the key (`k...`, guests `gk...`), keys drafts and the daily allowance; anonymous public mode cannot write in the Studio, the brand workspace or the engine (`public_write_refused`; `STUDIO_PUBLIC_WRITE=1` allows it). | B2 x2 |
+| B3 | blocker | `/studio/render/save`, validation, export, review | The validated PNG lived at `<v>-export.png`, which `render/save` overwrote at any time with any bytes (type declared, not sniffed); the review link and the export served that key. | The measured PNG must be a PNG at the stage's size (`not_png`, `image_size`) and is stored under its hash (`<v>-export-<sha16>.png`, `studio_validations.export_hash/_w/_h`); `render/save` never replaces it - other bytes for an approved or shared version are `export_locked` with the validated file named (the app's package then carries that file), a measurement filed without an image takes the first one once, every save is an `export_image` event; the export manifest names `exportHash`; readiness says the pixel figures were measured in the browser. | B3 x2 |
+| B4 | blocker | `stDispatchOpen` | One person could spend the agency's whole daily budget. | `studio_person_usage(day, pid, kind)`, reserved in the same gate before every request and given back when not sent; `STUDIO_PERSON_DAILY_CALLS`/`_IMAGES` (120/40), guests `STUDIO_GUEST_DAILY_*` (40/12), 0 lifts; `person_budget_exhausted`; `GET /studio/budget` answers `you`. Jobs carry `pid` (children inherit it). | B4 |
+| H1 | high | stage lines, wizard, paid questions | "1 model call" everywhere, while a stage may re-plan (2) and retry (3 attempts) and a render send 4 image requests. | The stage lines and the wizard state the worst case from `/studio/status` `budget.policy` (`costCeil`, `costNote`); the Studio's paid question says retries are counted; the job card already says what was sent. | `studio-ready-browser` H1 |
+| H2 | high | Copy step | "Ready for design is not approval" beside a checkbox that records the agency's copy approval and a Review column saying "ready / approved". | One meaning: the agency's approval of the words, handed to Design, filing nothing in the client's memory. | H2 |
+| H3 | high | `docs/review.html` | The worker address came from the link's `w=` unchecked: the agency's page could show anyone's content. | Only the configured worker (or a local one); another server is refused with nothing asked of it. | H3 |
+| H4 | high | `stShareCreate`, `stReviewPost` | Links could never expire; a client approval was recorded under any typed name as the client's. | 14 days unless asked, at most `STUDIO_SHARE_MAX_DAYS` (30); the thread, `stClientDecision` and the manifest say "through the review link ... name as given, not verified" (`via`, `nameVerified: false`). | `studio-ready2-worker` H4 x2 |
+| H5 | high | Review | A piece was measurable only by opening it in Design. | "Measure them here (free)": the same renderer and filing, with progress; never an approval. | H5 |
+| H6 | high | `tools/guest-link.py` | Guest links were full access by default. | Read-only unless `--full`; `renew --read` lowers. Per-key client scope: decision D1. | `guest-link-test` (3 failing before) |
+| M1 | medium | header chip | "Models ready" meant only that keys exist. | Configured, budget left today and the last answer of each provider (`/studio/status` `lastProvider`). | ready2 M1, browser M1 |
+| M2 | medium | `/studio/reference` | The declared type was trusted; the prepared copy could be another picture. | Type from the bytes (`stImgSniff`: PNG, JPEG and WebP with their sizes); a prepared copy of another shape is `prep_mismatch`. | ready2 M2 |
+| M3 | medium | `/studio/source/url` | Only the first address was checked; redirects and a decoded Google News link were followed unchecked. | `fullText(..., {publicOnly})` fetches through `srcFetchPublic` (every hop checked by `axFetchPublic`) and checks the decoded link. | ready2 M3 |
+| M4 | medium | `engineOutcome` | Exemplars were dated by the UTC day. | `auDayKey()` (Sydney). | ready2 M4 |
+| M5 | medium | `stMetrics` | Test work would count as outcomes; calls read as cost. | Test projects left out unless `tests=1`; `costUnit` says requests, not money. | ready2 M5 |
+| M6 | medium | library | Test work sat in live libraries with no way to clear it. | `studio_projects.test` (asked for, a test namespace in `ST_TEST_NS`/`STUDIO_TEST_NS`, or made by a guest), a badge, a filter, `POST /studio/project/archive-tests {ns}` (archived, never deleted). | ready2 M6, browser M6 |
+| C1-C5 | testing kit | - | - | `tools/studio-test-kit.py seed|reset` (the synthetic client, dry run by default; `studio-test-kit-test.py`, 4); Report a problem in Help (`POST/GET /studio/feedback`: release, project, piece, view, the last codes and request ids, browser; never a key); `TESTING.md`; `npm run test:release`; the capped smoke command for the agency. | browser C2 |
+
+Changed meaning, said plainly: a copy approval of a visual piece no longer files a WIN by itself (the design decision does);
+`studio-p3-worker` was adjusted to that rule. Older harnesses that sent fake PNGs whose headers claimed impossible sizes now state no
+size or the stage's (`p8`, `p9`, `p11`, `s11`); `auth-policy-worker` asserts the public-write refusal and the flag that lifts it;
+`p2`, `p9` and `studio-compose-test` expect the content-addressed export key.
+
+### 51.3 Decisions taken by default (each reversible; say if any should go the other way)
+
+- D1 testers are kept apart by the `test` flag (and the synthetic client), not by a separate deployment; per-key client scope is not
+  built. Proposal: an optional `ns: ["mca"]` on a roster or guest entry, checked in one place for every route that takes a namespace,
+  project, asset, share or file key; entries without it stay agency-wide.
+- D2 "ready for design" is the agency's approval of the words and files no learning; the design decision files the WIN.
+- D3 anonymous public mode does not write in the Studio (`STUDIO_PUBLIC_WRITE=1` allows it).
+- D4 review links last 14 days by default, 30 at most; no confirmation step for client approvals (wording only).
+- D5 test projects are archived, never deleted.
+- D6 per-person caps 120 calls and 40 images a day, guests 40 and 12.
+- D7 a WIN stays when the approved words are later edited (it records what was approved then); a withdrawal or a reversed verdict
+  retracts it.
+
+### 51.4 Not verified here
+
+Nothing ran against a live model, image provider, the live worker or Cloudflare. Vectorize `deleteByIds` is exercised against the
+fixture's in-memory index only. Drafts saved before S28 under display names are orphaned (not shown to anyone); the browser's own
+working copy still restores an unsaved edit. The per-person cap counts requests, not money.

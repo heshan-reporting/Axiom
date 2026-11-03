@@ -147,14 +147,15 @@ await t('a standing preference is offered, never saved on its own; "campaign" sa
   eq((await req('POST', '/studio/remember', { project: P, eid: 'e_x', scope: 'campaign', rule: 'short' })).status, 400);
   eq((await req('POST', '/studio/remember', { project: noc.d.id, eid: 'e_y', scope: 'campaign', rule: 'A rule for a campaign the project lacks.' })).d.error, 'no_campaign');
 });
-await t('approve and reject file WIN and LOSS exemplars with the reason; withdraw files nothing', async () => {
+await t('a final verdict files a WIN or LOSS exemplar with the reason, once: the copy approval of a visual piece waits for its design verdict (S28), a design rejection files a LOSS, a withdrawal files nothing', async () => {
   const n0 = db.prepare("SELECT COUNT(*) n FROM engine_outcomes").get().n;
   await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' });
   await req('POST', '/studio/approve', { asset: B, part: 'design', decision: 'reject', reason: 'truck again' });
   await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'withdraw' });
   const rows = db.prepare("SELECT surface, ref, verdict, why, headline FROM engine_outcomes ORDER BY created").all().slice(n0);
-  eq(rows.length, 2); eq(rows[0].surface, 'studio'); eq(rows[0].verdict, 'approved'); eq(rows[0].ref, A); ok(/copy: client asked/.test(rows[0].why)); eq(rows[0].headline, 'Not a subsidy. Never was.'); eq(rows[1].verdict, 'killed'); ok(/design: truck again/.test(rows[1].why));
-  ok((await events(P, 'approval')).some(e => /filed in the Mind as a WIN exemplar/.test(e.text)));
+  eq(rows.length, 1, 'the copy approval of a visual piece is not yet a verdict on the piece: ' + JSON.stringify(rows.map(r => [r.ref, r.verdict])));
+  eq(rows[0].surface, 'studio'); eq(rows[0].verdict, 'killed'); ok(rows[0].ref.indexOf(B + ':') === 0 && /:design$/.test(rows[0].ref), rows[0].ref); ok(/design: truck again/.test(rows[0].why));
+  ok((await events(P, 'approval')).some(e => /filed in the Mind as a LOSS exemplar/.test(e.text)));
 });
 await t('a direction needs a full key and a target: read keys are refused, an empty instruction and a missing asset fail without retry', async () => {
   eq((await req('POST', '/studio/job', { project: P, stage: 'revise', input: { instruction: 'x' } }, 'read-key')).status, 403);

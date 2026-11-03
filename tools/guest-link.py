@@ -7,7 +7,8 @@ writes the whole list to the worker each time. Keys are made here and never leav
 send the person.
 
   python3 tools/guest-link.py add Laura                  # her own full-access link, ending in 30 days
-  python3 tools/guest-link.py add Ben --until 2026-12-31 --read
+  python3 tools/guest-link.py add Ben --until 2026-12-31          # read-only (the default since S28)
+  python3 tools/guest-link.py add Kai --days 14 --full             # full access: creates projects and spends model calls
   python3 tools/guest-link.py renew Kai --until 2026-12-31   # his old link works again; nothing new to send
   python3 tools/guest-link.py link Laura                 # print her link again
   python3 tools/guest-link.py remove Ben                 # his link stops working
@@ -103,7 +104,8 @@ def main():
     p.add_argument('name', nargs='?')
     p.add_argument('--until', help='end date YYYY-MM-DD (default: --days from today)')
     p.add_argument('--days', type=int, default=30)
-    p.add_argument('--read', action='store_true', help='read-only (default: full, can create projects and run model calls)')
+    p.add_argument('--read', action='store_true', help='read-only (the default for a new link; on renew, lowers a full link to read-only)')
+    p.add_argument('--full', action='store_true', help='full access: creates projects and runs model calls (a guest\'s projects are test projects)')
     p.add_argument('--worker', default='newsaus')
     p.add_argument('--site', default=SITE)
     p.add_argument('--view', default='studio', help='view the link opens (empty for the front page)')
@@ -146,6 +148,8 @@ def main():
             g[k]['until'] = until
             if a.read:
                 g[k]['r'] = 'read'
+            elif a.full:
+                g[k]['r'] = 'full'
         save(g, a.file, a.worker, a.dry_run)
         print('%s\'s link works again until %s (midnight UTC at its start). Nothing new to send; they reload the page.'
               % (a.name, until))
@@ -154,7 +158,7 @@ def main():
         sys.exit('%s already has a link. Renew it (guest-link.py renew "%s" --until DATE) or print it '
                  '(guest-link.py link "%s").' % (a.name, a.name, a.name))
     k = secrets.token_urlsafe(24)
-    g[k] = {'n': a.name.strip(), 'r': 'read' if a.read else 'full', 'until': until}
+    g[k] = {'n': a.name.strip(), 'r': 'full' if a.full and not a.read else 'read', 'until': until}
     save(g, a.file, a.worker, a.dry_run)
     print('Send this to %s privately (it is their key; it ends %s, midnight UTC):\n%s' % (a.name.strip(), until, link(a, k)))
 

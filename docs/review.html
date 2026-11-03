@@ -51,7 +51,12 @@
   'use strict';
   var params = new URLSearchParams(location.hash.slice(1));
   var TOKEN = params.get('t') || '';
-  var BASE = (params.get('w') || 'https://newsaus.heshan-998.workers.dev').replace(/\/+$/, '');
+  /* S28: the page talks only to AXIOM's worker (or a local one while developing). A link that names another server is not followed:
+     otherwise anyone could dress this agency page with their own pictures and approve buttons. */
+  var DEFAULT_BASE = 'https://newsaus.heshan-998.workers.dev';
+  var BASE = DEFAULT_BASE, OTHER = '';
+  (function () { var w = params.get('w'); if (!w) return; try { var u = new URL(w); var local = (u.hostname === 'localhost' || u.hostname === '127.0.0.1') && (u.protocol === 'http:' || u.protocol === 'https:');
+    if (u.origin === DEFAULT_BASE || local) BASE = u.origin; else OTHER = u.origin; } catch (e) { OTHER = String(w).slice(0, 80); } })();
   var main = document.getElementById('main'), nameEl = document.getElementById('name');
   try { nameEl.value = sessionStorage.getItem('review_name') || ''; } catch (e) {}
   nameEl.addEventListener('input', function () { try { sessionStorage.setItem('review_name', nameEl.value); } catch (e) {} });
@@ -67,7 +72,7 @@
   }
   function fail(e) { main.innerHTML = ''; main.appendChild(el('div', { class: 'msg bad', role: 'alert', text: e.message || String(e) })); }
   var data = null;
-  function load() { if (!TOKEN) return fail(new Error('This page needs the private link the agency sent you.')); api('/review/get').then(function (d) { data = d; draw(); }).catch(fail); }
+  function load() { if (OTHER) return fail(new Error('This link points at another server (' + OTHER + '), so it was not opened. Only the agency\'s own links work here: ask them for a new one.')); if (!TOKEN) return fail(new Error('This page needs the private link the agency sent you.')); api('/review/get').then(function (d) { data = d; draw(); }).catch(fail); }
   function aest(ts) { try { return new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', day: 'numeric', month: 'short' }).format(new Date(ts)); } catch (e) { return ''; } }
   function draw() {
     var d = data; document.getElementById('title').textContent = d.client + ': ' + d.project;
