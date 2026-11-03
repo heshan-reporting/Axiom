@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r21` since the expired-link message (3 November 2026).
+  with `?v=r22` since the offline check (3 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2681,7 +2681,9 @@ Teach this brand with ambiguity resolved by a person; readiness names `scope_unc
 `wanted`; the identity audit lists each wordmark variant against storage (`docs/studio-brandmem.js`). **J** - failure
 contained: `PanelBoundary` around the workspace, the Creative Director, the context panel and the rail (Try again; the rest
 keeps working), `getRead()` retries reads on a dropped connection, 429 or 502-504 (writes are sent once), an offline banner
-and a re-read on reconnect, Try again after a failed open opens the project, the processing card reads the reconnecting
+and a re-read on reconnect (the banner is evidence, not the browser's guess: `navigator.onLine` and the `offline` event,
+which a VPN, a virtual adapter or a Mac waking from sleep get wrong, only prompt a check - a no-cors GET of the worker's
+public `/`; offline is said only when that request cannot be made, and asked again every 15 s; J-B2b, 3 November 2026), Try again after a failed open opens the project, the processing card reads the reconnecting
 state when it mounts (`STKit.linkNow()`), and suggestions that arrive after the version moved are shown, labelled outdated
 by the worker (`suggLanded`); axe-core 4.10.2 (dev dependency) finds no
 serious or critical violation; measured budgets (cold 347 ms, transitions p95 76 ms, no growth over 200 actions); the core

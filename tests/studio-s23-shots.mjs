@@ -108,7 +108,11 @@ for (const sz of sizes) {
     fx.failNext(/^\/studio\/get\?id=/, 500, { error: 'internal_error' }); await openProject(pg, PFX + ' at design').catch(() => {}); await wait(900); await shot(pg, 'failed', sz);
     const tryAgain = pg.locator(R + '.st-notice button:has-text("Try again"), ' + R + '.st-notice button:has-text("Retry")'); if (await tryAgain.count()) { await tryAgain.first().click().catch(() => {}); await wait(900); }
     await goTo(pg, 'Design').catch(() => {}); await wait(800); await shot(pg, 'recovered', sz);
+    // the page asks the worker before it says offline (3 November 2026); the fixture answers routed requests even offline, so drop the check
+    const W0 = (await pg.evaluate(() => csBase())).replace(/\/+$/, ''); const isCheck = u => u.href.replace(/\/+$/, '') === W0, drop = r => r.abort('internetdisconnected');
+    await pg.route(isCheck, drop);
     await pg.context().setOffline(true); await pg.evaluate(() => window.dispatchEvent(new Event('offline'))); await wait(400); await shot(pg, 'offline', sz);
+    await pg.unroute(isCheck, drop);
     await pg.context().setOffline(false); await pg.evaluate(() => window.dispatchEvent(new Event('online'))); await wait(600);
     await pg.evaluate(() => { window.__stCrashPanel = 'workspace'; }); await goTo(pg, 'Review').catch(() => {}); await wait(700); await shot(pg, 'panel-stopped', sz);
     await pg.evaluate(() => { window.__stCrashPanel = null; });

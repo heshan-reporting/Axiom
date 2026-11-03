@@ -82,12 +82,30 @@ await T.t('J-B1 a panel that throws stops alone: the Creative Director says what
 
 await T.t('J-B2 offline: the page says so, and reads the project again when the connection returns', async () => {
   await fresh(); await openProject(page, 'Reliability check'); await openTile(page, 'Steady tile');
+  // the page asks the worker before it says offline; the fixture answers routed requests even in Playwright's offline mode,
+  // so while "offline" every request the page makes to check is dropped here as a lost connection drops it
+  const W = (await page.evaluate(() => csBase())).replace(/\/+$/, '');
+  const isCheck = u => u.href.replace(/\/+$/, '') === W, drop = route => route.abort('internetdisconnected');
+  await page.route(isCheck, drop);
   await page.context().setOffline(true); await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await page.waitForSelector(R + '.st-offline', { timeout: 5000 });
   ok(/Unsaved edits stay in this browser/.test(await page.textContent(R + '.st-offline')), 'the offline line says what happens to the work');
+  await page.unroute(isCheck, drop);
   await page.context().setOffline(false); await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await page.waitForSelector(R + '.st-offline', { state: 'detached', timeout: 5000 });
   await page.waitForSelector(R + '.st-notice:has-text("Back online")', { timeout: 8000 });
+});
+
+/* 3 November 2026: "why does creative studio say I am offline when I am online" - the banner followed navigator.onLine and the
+ * 'offline' event, the browser's guess, which a VPN, a virtual network adapter or a Mac waking from sleep gets wrong */
+await T.t('J-B2b the browser guessing offline while the worker answers shows no offline line, from the start or later', async () => {
+  const p2 = await fx.open({ init: () => { try { Object.defineProperty(Navigator.prototype, 'onLine', { get: () => false, configurable: true }); } catch (e) {} } });
+  await p2.evaluate(() => go('studio')); await p2.waitForSelector(R + '.st-head', { timeout: 15000 }); await sleep(1500);
+  eq(await p2.evaluate(() => navigator.onLine), false, 'the browser says offline');
+  ok(!(await p2.$(R + '.st-offline')), 'but the worker answered, so the page does not say offline');
+  await p2.evaluate(() => window.dispatchEvent(new Event('offline'))); await sleep(1500);
+  ok(!(await p2.$(R + '.st-offline')), 'an offline event with the worker answering changes nothing');
+  await p2.context().close();
 });
 
 await T.t('J-B3 a read meeting a busy gateway is retried and the project opens; a write is not retried behind the person\'s back', async () => {

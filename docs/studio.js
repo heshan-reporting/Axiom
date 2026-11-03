@@ -3727,10 +3727,30 @@
     useEffect(() => { if (pid && p && p.id === pid && !p.readOnly) store.setPlace(clientId, { pid, view: view === 'export' ? 'review' : view, asset: selAsset, open: true, title: p.title }); }, [pid, view, selAsset, p && p.id]);
     /* the Release Desk, the Content Desk, the Sentinel and Client Central open the Studio's intake with their brief */
     useGoto('studio', q => { q = q || {}; resumed.current = true; if (q.ns && CLIENTS.some(c => c.id === q.ns) && q.ns !== clientId) setClientId(q.ns); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); if (q.intake) { setPreset({ start: q.intake, deliverable: q.deliverable, text: q.text, instruction: q.instruction, from: q.from, at: q.at || Date.now() }); setIntake(true); } });
-    // S23 slice J: the connection as the browser reports it; coming back reloads the open project and says so
-    const [online, setOnline] = useState(typeof navigator === 'undefined' || navigator.onLine !== false);
-    useEffect(() => { const off = () => setOnline(false); const on = () => { setOnline(true); if (pidRef.current) { reload(); setNotice({ kind: 'info', title: 'Back online.', text: 'The project was read again; anything saved while you were away is shown.' }); } else loadLib(); };
-      window.addEventListener('offline', off); window.addEventListener('online', on); return () => { window.removeEventListener('offline', off); window.removeEventListener('online', on); }; }, [loadLib]);
+    // S23 slice J: offline is said, and coming back reloads the open project and says so. 3 November 2026: the banner showed
+    // while the person was online - navigator.onLine and the 'offline' event are the browser's guess (a VPN, a virtual network
+    // adapter or a Mac waking from sleep can report offline while every request goes through), so they only prompt a check:
+    // the Studio asks the worker itself and says offline only when that request cannot be made at all, then asks again every
+    // 15 s until it can. Any answer, even an error status, means the connection works.
+    const [online, setOnline] = useState(true); const onlineRef = useRef(true);
+    useEffect(() => {
+      let dead = false, timer = null, seq = 0;
+      const back = () => { if (pidRef.current) { reload(); setNotice({ kind: 'info', title: 'Back online.', text: 'The project was read again; anything saved while you were away is shown.' }); } else loadLib(); };
+      const reach = async () => {
+        const base = String((typeof window.csBase === 'function' ? window.csBase() : '') || '').replace(/\/+$/, '');
+        if (!base) return typeof navigator === 'undefined' || navigator.onLine !== false;   // no worker to ask: the browser's word is all there is
+        try { await fetch(base + '/', { mode: 'no-cors', cache: 'no-store' }); return true; } catch (e) { return false; }
+      };
+      const check = async () => {
+        const my = ++seq; clearTimeout(timer); timer = null;
+        const ok = await reach(); if (dead || my !== seq) return;
+        if (ok) { if (!onlineRef.current) { onlineRef.current = true; setOnline(true); back(); } return; }
+        if (onlineRef.current) { onlineRef.current = false; setOnline(false); }
+        timer = setTimeout(check, 15000);
+      };
+      window.addEventListener('offline', check); window.addEventListener('online', check);
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) check();
+      return () => { dead = true; clearTimeout(timer); window.removeEventListener('offline', check); window.removeEventListener('online', check); }; }, [loadLib]);
     const reloadSeq = useRef(0), reloadApplied = useRef(0);
     const reload = useCallback(async (id) => {
       const want = id || pidRef.current; if (!want) return null;
