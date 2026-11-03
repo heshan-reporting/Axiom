@@ -89,6 +89,19 @@
   /* ------------------------------------------------------------ what went wrong, in words a producer can act on */
   /** An error from the worker or a failed job, explained: a title, what it means for the work, what to do. The raw
       message stays available as the diagnostic detail; nothing here pretends a failure was a success. */
+  /** S27: refusals the worker explains in its detail, given a title that says what kind of refusal it is. */
+  const TITLES = { mark_held: 'The mark is held by a campaign rule', mark_policy: 'That mark is not the campaign\'s', incomplete: 'The composition is incomplete', copy_not_ready: 'The copy is not marked ready for design', render_in_flight: 'An image is already being made for this asset', confirm_spend: 'This would spend: confirm first', direction_earlier: 'That direction was built on an earlier choice', has_imagery: 'This version already has imagery', not_reflowable: 'A painted bitmap cannot be resized into other formats', other_campaign: 'That belongs to another campaign', rule_exists: 'That rule is already in force', no_imagery_by_choice: 'This version has no imagery on purpose', already_applied: 'That was already applied', already_decided: 'That was already decided', copy_only: 'This asset is copy only', baked_text_unverified: 'The painted words have not been read back yet', not_ready_for_client: 'Not ready for the client yet', campaign_required: 'Choose the campaign first', asset_required: 'Name the asset this is for' };
+  const sentence = t => { t = String(t || '').trim(); return !t || /[.!?)]$/.test(t) ? t : t + '.'; };
+  /** A worker code in plain words: unknown_asset -> "That asset was not found"; missing_assets -> "Missing: assets". */
+  function humanCode(c) {
+    c = String(c || ''); const w = s => s.replace(/_/g, ' ');
+    if (/^unknown_/.test(c)) return 'That ' + w(c.slice(8)) + ' was not found';
+    if (/^missing_/.test(c)) return 'Missing: ' + w(c.slice(8));
+    if (/^no_/.test(c)) return 'No ' + w(c.slice(3)) + ' yet';
+    if (/^not_/.test(c)) return 'Not ' + w(c.slice(4));
+    if (/_required$/.test(c)) return w(c.replace(/_required$/, '')).replace(/^./, x => x.toUpperCase()) + ' is required';
+    return w(c).replace(/^./, x => x.toUpperCase());
+  }
   function explain(e, what) {
     const code = String((e && e.code) || ''); const msg = String((e && (e.message || e.error)) || e || '');
     const has = re => re.test(code) || re.test(msg); const status = e && e.status;
@@ -121,14 +134,69 @@
     if (has(/auth_not_configured/)) return out('The worker has no access keys set', 'An administrator must set AXIOM_KEYS (or AXIOM_ACCESS_KEY) on the worker before anything can be read or changed.');
     if (has(/auth_misconfigured/)) return out('The worker\'s key list is invalid', 'An administrator must fix AXIOM_KEYS on the worker (every key needs the role "read" or "full"). Nothing was changed.');
     if (status === 409 && /conflict/.test(code)) return out('This changed elsewhere since you read it', 'Someone, or a job, saved a newer version first. Nothing was overwritten; the latest version is now shown.', 'warn');
-    if (status === 409 && /locked/.test(code)) return out('That element is locked', 'Unlock it first (the lock beside the field), then make the change.', 'warn');
+    // S27: a step gate is not an element lock ("workflow_locked" used to match /locked/ and told people to unlock a field)
+    if (code === 'workflow_locked') return out('This step is not open yet', (msg && msg !== code ? msg.replace(/\.?$/, '.') + ' ' : '') + 'Nothing was changed; finish the step it names, then come back.', 'warn');
+    if (status === 409 && (code === 'locked' || code === 'layout_locked')) return out('That element is locked', 'Unlock it first (the lock beside the field), then make the change.', 'warn');
     if (status === 409 && /stale/.test(code)) return out('That suggestion was made for an earlier version', 'The asset has moved on since. Ask again on the current version.', 'warn');
     if (has(/link_expired/)) return out('Your sign-in link has ended', 'The key saved in this browser has passed its end date. Ask whoever sent the link for a new one, then open it here. Nothing was changed.');
     if (status === 401) return out('The access key was not accepted', 'Set a valid key in Settings, Access key. Nothing was changed.');
-    if (status === 403) return out('This key can read but not change', 'A full-access key is needed to make changes. Nothing was changed.');
+    // S27: only read_only is a read-only key; another 403 is a different refusal and says which
+    if (code === 'cross_project') return out('That belongs to another project', 'The item named is not part of this project, so nothing was written. Reload the project; if it happens again, reopen the project from All projects.', 'warn');
+    if (code === 'human_only') return out('Only a person can approve', (msg && msg !== code ? sentence(msg) + ' ' : '') + 'Nothing was recorded.', 'warn');
+    if (status === 403 && (code === 'read_only' || !code)) return out('This key can read but not change', 'A full-access key is needed to make changes. Nothing was changed.');
+    if (TITLES[code]) return out(TITLES[code], sentence(msg && msg !== code ? msg : humanCode(code)) + (/nothing|not changed|unchanged/i.test(msg) ? '' : ' Nothing was changed.'), 'warn');
+    if (status === 403) return out('That is not allowed', sentence(msg && msg !== code ? msg : humanCode(code)) + ' Nothing was changed.', 'warn');
+    if (status === 404 && /^unknown_|^not_|^no_/.test(code) && (!msg || msg === code)) return out(humanCode(code), 'It may have been archived, removed, or changed in another tab. Reload to see the current state; nothing was changed.', 'warn');
     if (has(/Failed to fetch|NetworkError|network|Load failed/i)) return out('Cannot reach the worker', 'Check the connection. Nothing you typed was lost; try again when the connection is back.');
     if (status >= 500 && status < 600 && !msg) return failedHere();
-    return out(what || 'That did not work', msg);
+    // a bare code (no sentence from the worker) is put into words rather than shown as an identifier
+    return out(what || 'That did not work', msg && /^[a-z]+(_[a-z0-9]+)+$/.test(msg) ? humanCode(msg) + '. Nothing was changed.' : msg);
+  }
+  /* S27: every Studio dialog takes the focus, keeps Tab inside it, closes on Escape (as its Cancel does) and gives the focus back
+     to what had it. Before, the dialogs said aria-modal but left the focus behind them on the page. */
+  function useDialogFocus(ref, onEscape) {
+    const escRef = useRef(onEscape); escRef.current = onEscape;
+    useEffect(() => {
+      const el = ref.current; if (!el) return;
+      const before = document.activeElement;
+      const focusables = () => Array.from(el.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(x => x.getClientRects().length > 0);
+      if (!el.contains(document.activeElement)) { const first = el.querySelector('[data-autofocus]') || focusables()[0]; if (first) { try { first.focus({ preventScroll: true }); } catch (e) {} } else { el.setAttribute('tabindex', '-1'); try { el.focus({ preventScroll: true }); } catch (e) {} } }
+      const onKey = e => {
+        if (e.key === 'Escape') { if (escRef.current) { e.preventDefault(); e.stopPropagation(); escRef.current(); } return; }
+        if (e.key !== 'Tab') return; const f = focusables(); if (!f.length) { e.preventDefault(); return; }
+        const i = f.indexOf(document.activeElement);
+        if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i < 0 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }
+      };
+      el.addEventListener('keydown', onKey);
+      return () => { el.removeEventListener('keydown', onKey); try { if (before && before.isConnected && before !== document.body && typeof before.focus === 'function') before.focus({ preventScroll: true }); } catch (e) {} };
+    }, []);
+  }
+  function FocusDialog({ label, onClose, className, children }) {
+    const dref = useRef(null); useDialogFocus(dref, onClose);
+    return html`<div class=${'st-dialog' + (className ? ' ' + className : '')} role="dialog" aria-modal="true" aria-label=${label} ref=${dref} onClick=${onClose}>${children}</div>`;
+  }
+  /* S27: the Studio's own question in place of the browser's confirm() and prompt(): styled, accessible, the cost said as a
+     chip, a reason held to its minimum length in view, Escape as Cancel. askStudio({title, text, ok, cancel, cost, paid,
+     reason, min, initial}) resolves true / false for a question, the reason or null for a reason. One question at a time. */
+  const ASK = { push: null };
+  function askStudio(spec) { return new Promise(res => { const q = Object.assign({ id: 'q' + Math.random().toString(36).slice(2, 9) }, spec, { res }); if (ASK.push) ASK.push(q); else { const v = spec.reason ? window.prompt(spec.text, spec.initial || '') : window.confirm(spec.text); res(spec.reason ? (v == null ? null : String(v).trim()) : !!v); } }); }
+  function AskDialog({ q, onDone }) {
+    const ref = useRef(null); const [why, setWhy] = useState(q.initial || ''); const min = q.reason ? Math.max(1, q.min || 1) : 0;
+    const cancel = () => onDone(q.reason ? null : false); useDialogFocus(ref, cancel);
+    const short = q.reason && why.trim().length < min;
+    return html`<div class=${'st-dialog st-ask' + (q.paid ? ' paid' : '')} role=${q.reason ? 'dialog' : 'alertdialog'} aria-modal="true" aria-labelledby=${'h-' + q.id} aria-describedby=${'t-' + q.id} data-kind=${q.reason ? 'prompt' : 'confirm'} ref=${ref}><div class="st-dialog-box narrow">
+      <div class="ov-title" id=${'h-' + q.id}>${q.title || (q.reason ? 'Say why' : 'Before you go on')}</div>
+      <div class="st-pad st-ask-text" id=${'t-' + q.id}>${String(q.text || '').split('\n\n').map((t, i) => html`<p key=${i}>${t}</p>`)}</div>
+      ${q.cost ? html`<div class="st-ask-cost"><${Chip} kind=${q.paid ? 'warn' : 'ok'}>${q.cost}</${Chip}></div>` : null}
+      ${q.reason ? html`<textarea class="st-ta" rows="3" aria-label=${q.title || 'Reason'} value=${why} onInput=${e => setWhy(e.target.value)} placeholder=${q.placeholder || 'A few words: recorded with the decision'} data-autofocus></textarea><div class="ov-dim st-ask-min" aria-live="polite">${short && min > 1 ? 'At least ' + min + ' characters; nothing is recorded without a reason.' : ''}</div>` : null}
+      <div class="st-dialog-acts"><button class="btn sm st-ask-ok" disabled=${short} onClick=${() => onDone(q.reason ? why.trim() : true)}>${q.ok || (q.reason ? 'Record' : 'Continue')}</button><button class="btn sm ghost st-ask-cancel" onClick=${cancel}>${q.cancel || 'Cancel'}</button></div>
+    </div></div>`;
+  }
+  function AskHost() {
+    const [qs, setQs] = useState([]);
+    useEffect(() => { ASK.push = q => setQs(l => l.concat([q])); return () => { ASK.push = null; }; }, []);
+    const q = qs[0]; if (!q) return null;
+    return html`<${AskDialog} key=${q.id} q=${q} onDone=${v => { setQs(l => l.slice(1)); q.res(v); }} />`;
   }
   const RUN_NOTE = 'Cancelling stops queued work and anything not yet sent, and a model call that is writing within half a minute (what it wrote so far may be billed); an image generation already sent may still finish and be billed.';
 
@@ -526,7 +594,8 @@
     }, [layout, JSON.stringify(c), comp.key, size]);
     if (!layout && !(v && v.image) && size === 'mini') return html`<div class="st-copycard thumb mini" aria-hidden="true"></div>`;
     if (!layout && !(v && v.image)) return html`<div class=${'st-copycard' + (size === 'thumb' ? ' thumb' : '')}><div class="st-copycard-h">${c.headline || c.title || '(no headline)'}</div>${size !== 'thumb' && size !== 'mini' ? html`<div class="st-copycard-b">${c.caption || c.body || ''}</div>` : null}<div class="st-comp-tag">copy only</div></div>`;
-    return html`<div class=${'st-comp' + (size === 'thumb' || size === 'mini' ? ' thumb' : '') + (size === 'mini' ? ' mini' : '')} role="img" aria-label=${c.alt || c.headline || ''}>
+    // S27: an image always has a name (a direction's sketch has no alt text or headline of its own yet)
+    return html`<div class=${'st-comp' + (size === 'thumb' || size === 'mini' ? ' thumb' : '') + (size === 'mini' ? ' mini' : '')} role="img" aria-label=${c.alt || c.headline || ((a && a.title ? a.title : 'Composition') + ' preview')}>
       <canvas class="st-canvas" ref=${ref}></canvas>
       ${hl.map(l => html`<div key=${'hl-' + l.id} class="st-hl" data-layer=${l.id} aria-hidden="true" style=${{ left: l.x + '%', top: l.y + '%', width: l.w + '%', height: l.h + '%' }}><span class="st-hl-lbl">${l.role || l.type}${l.id !== (l.role || l.type) ? ' ' + l.id : ''}</span></div>`)}
       ${size !== 'thumb' && size !== 'card' && size !== 'mini' && !tagOut ? html`<div class="st-comp-tag">${compTag(v, layout, comp)}</div>` : null}
@@ -607,7 +676,7 @@
         <div class="st-work-metrics">
           ${live.length ? html`<div><b>${running}</b><span>running</span></div><div><b>${queued}</b><span>queued</span></div>` : null}
           ${failed.length ? html`<div class="bad"><b>${failed.length}</b><span>failed</span></div>` : null}
-          ${run && run.total > 1 ? html`<div class="st-work-run" title=${run.text}><b>${run.done} of ${run.total}</b><span>steps done</span><div class=${'st-progress-track small' + (run.active ? ' active' : '')} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${run.percent} aria-valuetext=${run.done + ' of ' + run.total + ' steps finished'}><span style=${{ width: run.percent + '%' }}></span></div></div>` : null}
+          ${run && run.total > 1 ? html`<div class="st-work-run" title=${run.text}><b>${run.done} of ${run.total}</b><span>steps done</span><div class=${'st-progress-track small' + (run.active ? ' active' : '')} role="progressbar" aria-label="Steps finished in this run" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${run.percent} aria-valuetext=${run.done + ' of ' + run.total + ' steps finished'}><span style=${{ width: run.percent + '%' }}></span></div></div>` : null}
         </div>
       </div>
       ${open ? html`<div class="st-work-detail" id="st-work-detail"><div class="st-work-grid">${cards.map(j => { const x = S.job(j, now, dur[j.stage]); return html`<div key=${j.id} class=${'st-work-card ' + j.state + (x.slow ? ' slow' : '')} data-job=${j.id} data-stage=${j.stage} data-phase=${x.phase || ''}>
@@ -618,7 +687,7 @@
           ${x.cancelText ? html`<div class="st-work-cancel ov-dim" role="status">${x.cancelText}</div>` : null}
           ${x.running ? html`<${Drafting} compact=${true} draft=${((j.progress || {}).activity || {}).draft} />` : null}
           ${x.running && j.stage === 'render' ? html`<${RenderBrief} compact=${true} r=${((j.progress || {}).activity || {}).render} />` : null}
-          <div class=${'st-progress-track' + (x.percent == null ? ' indeterminate' : '') + (x.running ? ' active' : '')} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${x.percent == null ? undefined : x.percent} aria-valuetext=${x.percent == null ? (x.running ? 'in progress, no measurable share yet' : x.label) : x.percent + '%'}><span style=${{ width: (x.percent == null ? (j.state === 'done' ? 100 : 0) : x.percent) + '%' }}></span></div>
+          <div class=${'st-progress-track' + (x.percent == null ? ' indeterminate' : '') + (x.running ? ' active' : '')} role="progressbar" aria-label=${x.title + ' progress'} aria-valuemin="0" aria-valuemax="100" aria-valuenow=${x.percent == null ? undefined : x.percent} aria-valuetext=${x.percent == null ? (x.running ? 'in progress, no measurable share yet' : x.label) : x.percent + '%'}><span style=${{ width: (x.percent == null ? (j.state === 'done' ? 100 : 0) : x.percent) + '%' }}></span></div>
           <div class="st-work-meta"><span>${x.percent != null ? x.completed + ' of ' + x.total + ' (' + x.percent + '%)' : STAGE_NOTE[j.stage] || ''}</span><span>${x.time}${x.typical ? ' / typically ' + x.typical : ''}${x.attempt > 1 ? ' / attempt ' + x.attempt + ' of 3' : ''}</span></div>
           ${x.slow ? html`<div class="st-work-slow" data-state="stalled">Stalled? No update for ${Math.round((now - x.lastAt) / 1000)} s. A running job renews its claim every 30 s; if the worker stopped, the claim lapses within 2 minutes and the next step, or the worker's tick (at 7 and 37 minutes past the hour), takes it up as a new attempt.</div>` : null}
           ${j.state === 'failed' ? html`<div class="st-work-error">${explain({ message: j.error, code: (String(j.error || '').match(/^[a-z_0-9]+/) || [''])[0] }).title}</div>` : null}
@@ -1419,7 +1488,7 @@
     const v = vOf(sel); const flags = flagsOf(sel); const dirty = dirtyOf(sel); const isReady = ready(sel);
     const finished = v.mode === 'finished'; const max = (CHANNELS[sel.channel] || {}).max || 900;
     const alts = p.thread.filter(e => e.kind === 'alternatives' && e.asset === sel.id && e.options).slice(-1)[0];
-    const toggle = () => { if (dirty) return; if (!isReady && flags.length && !window.confirm(flags.length + ' check' + (flags.length === 1 ? '' : 's') + ' on these words still to look at (' + flags.map(c => CHECK_WORD[c.state] || c.state).join(', ') + '). Mark them ready for design anyway?')) return; onReady(sel, !isReady); };
+    const toggle = async () => { if (dirty) return; if (!isReady && flags.length && !(await askStudio({ title: 'Mark ready for design with checks open?', text: flags.length + ' check' + (flags.length === 1 ? '' : 's') + ' on these words still to look at (' + flags.map(c => CHECK_WORD[c.state] || c.state).join(', ') + '). Mark them ready for design anyway?', ok: 'Mark ready anyway' }))) return; onReady(sel, !isReady); };
     const quick = [['Shorter headline', 'Write a shorter headline for this piece: same claim, fewer words. Offer it as alternatives.'], ['Plainer words', 'Make the words plainer: shorter sentences, no jargon, the same claims and figures.'], ['Three headline options', 'Offer three different headlines for this piece as alternatives; keep every figure as it is.']];
     return html`<div class="st-centre-pad st-copystage">
       <${StageHead} ...${head}><span class="st-copy-count" role="status">${nReady} of ${n} ready for design</span>${nReady ? html`<button class=${'btn sm' + (nReady === n ? '' : ' ghost')} onClick=${() => onGo('design')}>Continue to Design</button>` : null}</${StageHead}>${activity}${banner || null}
@@ -1456,7 +1525,7 @@
     // pieces written from another direction: the worker asks about them in the impact dialog (S26), which also states the cost of
     // producing the new set, so the browser does not ask a second question first
     const fromOther = d => p.assets.some(a => { const vs = (a.versions || []).slice().reverse(); const v = vs.find(x => x && x.context && ((x.context.basis && x.context.basis.direction) || x.context.direction)); const from = v ? ((v.context.basis && v.context.basis.direction) || v.context.direction) : ''; return from && from !== d.id && !/^Narrative: /.test(a.family || ''); });
-    const choose = d => { if (p.assets.length && !fromOther(d) && !window.confirm('Produce a new set from "' + d.title + '"? The ' + p.assets.length + ' asset' + (p.assets.length === 1 ? '' : 's') + ' already made stay as they are; this writes new ones (model calls, and renders unless the brief says no imagery).')) return; onChoose(d.id); };
+    const choose = async d => { if (p.assets.length && !fromOther(d) && !(await askStudio({ title: 'Produce a new set from "' + d.title + '"?', text: 'The ' + p.assets.length + ' asset' + (p.assets.length === 1 ? '' : 's') + ' already made stay as they are; this writes new ones.', cost: 'model calls, and renders unless the brief says no imagery', paid: true, ok: 'Produce the new set' }))) return; onChoose(d.id); };
     return html`<div class="st-centre-pad">
       <${StageHead} ...${head}>${canWrite() && !p.readOnly && !p.directions.length ? html`<button class="btn sm" disabled=${!!busy || noClaude} onClick=${() => onMore(3)}>Propose three directions</button>` : null}</${StageHead}>
       <div class="ov-why">Genuinely different directions for an open brief, three by default: each with its idea, copy approach, medium, composition, type and colour, the references it draws on and the images it would need. Diversity is measured, not claimed. Choosing one starts production from it.</div>
@@ -1547,8 +1616,8 @@
     const recAct = r => {
       const a = r.action || {};
       if (a.route === '/brand/teach' && a.body) return html`<button class="btn sm" disabled=${!!busy} onClick=${() => teachOpen(a.body.kind, a.body.proposal, r.code)}>Teach</button>`;
-      if (a.route === '/engine/artwork/describe') return html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => { if (!confirm('Describe ' + (a.body.limit || 1) + ' artwork' + ((a.body.limit || 1) === 1 ? '' : 's') + ' with the vision model (' + (a.body.limit || 1) + ' paid call' + ((a.body.limit || 1) === 1 ? '' : 's') + ')?')) return; act('Not described', () => runOp('Describing ' + (a.body.limit || 1) + ' artwork' + ((a.body.limit || 1) === 1 ? '' : 's') + ' with the vision model', ({ signal }) => call('/engine/artwork/describe', { ns: p.ns, limit: a.body.limit || 1 }, { signal }), { paid: true })); }}>Describe (${a.body.limit || 1} paid)</button>`;
-      if (a.route === '/studio/reference/analyse' && a.ids) return html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => { if (!confirm('Analyse ' + a.ids.length + ' reference' + (a.ids.length === 1 ? '' : 's') + ' (' + a.ids.length + ' paid extraction call' + (a.ids.length === 1 ? '' : 's') + ')?')) return; act('Not analysed', () => runOp('Analysing ' + a.ids.length + ' reference' + (a.ids.length === 1 ? '' : 's'), async ({ signal, step, cancelled }) => { let n = 0; for (const id of a.ids) { if (cancelled()) break; await call('/studio/reference/analyse', { id }, { signal }); step(++n); } }, { paid: true, total: a.ids.length })); }}>Analyse (${a.ids.length} paid)</button>`;
+      if (a.route === '/engine/artwork/describe') return html`<button class="btn sm ghost" disabled=${!!busy} onClick=${async () => { if (!(await askStudio({ title: 'Describe ' + (a.body.limit || 1) + ' artwork' + ((a.body.limit || 1) === 1 ? '' : 's') + '?', text: 'The vision model catalogues each one: layout, palette, type and every word on it.', cost: (a.body.limit || 1) + ' paid call' + ((a.body.limit || 1) === 1 ? '' : 's'), paid: true, ok: 'Describe' }))) return; act('Not described', () => runOp('Describing ' + (a.body.limit || 1) + ' artwork' + ((a.body.limit || 1) === 1 ? '' : 's') + ' with the vision model', ({ signal }) => call('/engine/artwork/describe', { ns: p.ns, limit: a.body.limit || 1 }, { signal }), { paid: true })); }}>Describe (${a.body.limit || 1} paid)</button>`;
+      if (a.route === '/studio/reference/analyse' && a.ids) return html`<button class="btn sm ghost" disabled=${!!busy} onClick=${async () => { if (!(await askStudio({ title: 'Analyse ' + a.ids.length + ' reference' + (a.ids.length === 1 ? '' : 's') + '?', text: 'Each reference is read for its typography, colour, composition, mark and words, so the models can use it.', cost: a.ids.length + ' paid extraction call' + (a.ids.length === 1 ? '' : 's'), paid: true, ok: 'Analyse' }))) return; act('Not analysed', () => runOp('Analysing ' + a.ids.length + ' reference' + (a.ids.length === 1 ? '' : 's'), async ({ signal, step, cancelled }) => { let n = 0; for (const id of a.ids) { if (cancelled()) break; await call('/studio/reference/analyse', { id }, { signal }); step(++n); } }, { paid: true, total: a.ids.length })); }}>Analyse (${a.ids.length} paid)</button>`;
       return null;
     };
     if (ws === undefined) return html`<div class="st-centre-pad"><div class="ov-empty">Reading the ${p.ns} brand workspace...</div></div>`;
@@ -1676,9 +1745,9 @@
       <section class="st-brand-sec" aria-label="Kit history"><${Lbl}>Kit history</${Lbl}>
         ${ws.revisions.length ? html`<ul class="st-ul">${ws.revisions.slice(0, 15).map(r => html`<li key=${r.id}><span class="ov-dim">${aest(r.at)}${r.who ? ', ' + r.who : ''}:</span> ${r.summary.join('; ')}</li>`)}</ul>` : html`<div class="ov-dim">No recorded changes yet.</div>`}
       </section>
-      ${hist ? html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Item history" onClick=${() => setHist(null)}><div class="st-dialog-box" onClick=${e => e.stopPropagation()}><div class="ov-sechead"><span class="ov-title">${hist.item.title || hist.item.kind}: history</span></div>
+      ${hist ? html`<${FocusDialog} label="Item history" onClose=${() => setHist(null)}><div class="st-dialog-box" onClick=${e => e.stopPropagation()}><div class="ov-sechead"><span class="ov-title">${hist.item.title || hist.item.kind}: history</span></div>
         <ul class="st-ul">${hist.revisions.map(r => html`<li key=${r.rev + ':' + r.at}><b>rev ${r.rev}</b> <span class="ov-dim">${aest(r.at)}${r.who ? ', ' + r.who : ''}</span> - ${r.why}<div class="ov-dim">${r.data.authority} / ${r.data.status} / ${r.data.campaign ? 'campaign ' + r.data.campaign : 'whole client'}: ${r.data.body || r.data.title}</div></li>`)}</ul>
-        <div class="st-dialog-acts"><button class="btn sm ghost" onClick=${() => setHist(null)}>Close</button></div></div></div>` : null}
+        <div class="st-dialog-acts"><button class="btn sm ghost" onClick=${() => setHist(null)}>Close</button></div></div></${FocusDialog}>` : null}
     </div>`;
   }
   /** What the Studio used to make this version: references, rules, facts, marks, models, assumptions. Fetched when opened. */
@@ -1880,7 +1949,7 @@
         const e = est[rc.id] && !est[rc.id].error ? est[rc.id] : await estimate(rc.id); if (!e) return;
         if (e.missing && e.missing.length) { toastMsg('Cannot run: ' + e.missing.join('; '), true); return; }
         // anything that renders is said out loud first: images and calls, as an estimate
-        if (e.renders > 0 && !window.confirm('"' + rc.name + '" would generate about ' + e.renders + ' image' + (e.renders === 1 ? '' : 's') + ' and ' + e.calls + ' model call' + (e.calls === 1 ? '' : 's') + ' (an estimate; a plan with several image regions renders more). Run it?')) return;
+        if (e.renders > 0 && !(await askStudio({ title: 'Run "' + rc.name + '"?', text: 'It would generate about ' + e.renders + ' image' + (e.renders === 1 ? '' : 's') + ' and make ' + e.calls + ' model call' + (e.calls === 1 ? '' : 's') + '. This is an estimate; a plan with several image regions renders more. Each step is a job you can watch or cancel.', cost: 'about ' + e.renders + ' image' + (e.renders === 1 ? '' : 's') + ' and ' + e.calls + ' call' + (e.calls === 1 ? '' : 's'), paid: true, ok: 'Run it' }))) return;
         const r = await call('/studio/recipe/run', { project: p.id, recipe: rc.id, confirm: e.renders > 0 ? true : undefined });
         toastMsg('Recipe started: ' + r.jobs.length + ' step' + (r.jobs.length === 1 ? '' : 's') + ', each waiting for the one before'); await onRun(r); again();
       } catch (e) { toastMsg(e.message, true); } finally { setBusy(''); }
@@ -1893,7 +1962,7 @@
         else if (r.remedy === 'measure') onOpen(x.asset);
         else if (r.remedy === 'share') onReview();
         else if (r.remedy === 'keepdir') { await call('/studio/direction/keep', { project: p.id, assets: [x.asset] }); setDone(s => Object.assign({}, s, { [x.asset + ':direction_changed']: 'Kept as written under the chosen direction.' })); again(); }
-        else if (window.confirm(REMEDY[r.remedy] + ' for "' + x.title + '"?' + (x.locks.length ? ' Locked fields (' + x.locks.join(', ') + ') stay as they are.' : ''))) { await onRevise(x, r); again(); }
+        else if (await askStudio({ title: REMEDY[r.remedy] + '?', text: 'For "' + x.title + '".' + (x.locks.length ? ' Locked fields (' + x.locks.join(', ') + ') stay as they are.' : ''), cost: r.paid ? 'one model call' : 'free', paid: !!r.paid, ok: 'Go ahead' })) { await onRevise(x, r); again(); }
       } catch (e) { toastMsg(e.message, true); } finally { setBusy(''); }
     };
     if (!lib) return html`<div class="st-centre-pad"><div class="ov-empty">Reading recipes, impact and usage...</div></div>`;
@@ -2269,13 +2338,13 @@
     const roles = ((v.layout || {}).baked || ['headline', 'support', 'cta']).filter(r => r !== 'logo' && r !== 'wordmark'); const marks = ((v.layout || {}).baked || []).filter(r => r === 'logo' || r === 'wordmark');
     const changed = Object.keys(copy).filter(k => copy[k] != null && copy[k] !== (v.copy[k] || ''));
     const failed = lastRender && lastRender.state === 'failed' ? lastRender : null;
-    const go = () => { const o = { copy: {}, instruction: ins2.trim(), size }; changed.forEach(k => { o.copy[k] = copy[k]; }); if (!changed.length && !o.instruction) return; if (!window.confirm('Regenerate ' + a.title + ' as a finished creative? One image generation at ' + size + ': the whole piece is painted again' + (changed.length ? ' with the new ' + changed.join(', ') : '') + (marks.length ? ', the ' + marks.join(' and ') + ' file attached again' : '') + '. The current version stays until the new one lands; approvals do not carry to a new bitmap.')) return; onRegenerate(a, o); setOpen(false); };
+    const go = async () => { const o = { copy: {}, instruction: ins2.trim(), size }; changed.forEach(k => { o.copy[k] = copy[k]; }); if (!changed.length && !o.instruction) return; if (!(await askStudio({ title: 'Regenerate ' + a.title + '?', text: 'The whole piece is painted again' + (changed.length ? ' with the new ' + changed.join(', ') : '') + (marks.length ? ', the ' + marks.join(' and ') + ' file attached again' : '') + '. The current version stays until the new one lands; approvals do not carry to a new bitmap.', cost: 'one image generation at ' + size, paid: true, ok: 'Regenerate' }))) return; onRegenerate(a, o); setOpen(false); };
     return html`<div class="st-remedy st-finished" role="region" aria-label="Finished creative">
       <div class="st-remedy-row"><div><b>Finished creative</b> <${Chip} kind=${!v.image ? 'warn' : b && b.verified ? 'ok' : 'warn'}>${!v.image ? 'not generated yet' : b && b.verified ? 'words and ' + (marks.join(' and ') || 'mark') + ' read back' : 'not read back yet'}</${Chip}>
         <span class="ov-dim">${!v.image ? (renderJob ? (renderJob.state === 'running' ? 'The image model is painting it now.' : 'A render is queued.') : failed ? 'The render failed.' : 'No render is running.') : b && b.verified ? 'The Creative Director read every painted word' + (marks.length ? ' and compared the ' + marks.join(' and ') + ' with its file' : '') + '. Approval is still a person\'s decision (Review).' : 'Technical validation does not apply to a bitmap. Design approval waits for the Creative Director to read the ' + roles.join(', ') + (marks.length ? ' and the ' + marks.join(' and ') : '') + ' back from this exact image: press Review in the Creative Director panel.' + (b && !b.verified && ins.state !== 'none' ? ' Last reading: ' + b.why + '.' : '')}</span>
         ${failed ? html`<div class="st-remedy-fail"><${Chip} kind="bad">last render failed</${Chip}> <span class="ov-dim">${explain({ message: failed.error, code: (String(failed.error).match(/^[a-z_0-9]+/) || [''])[0] }).title}</span></div>` : null}
         ${b && (b.markProblem || b.wordProblem) ? html`<div class="st-remedy-fail st-fidelity" role="note"><${Chip} kind="bad">identity not shown to match</${Chip}> <span>${b.markProblem ? 'The reading of this exact image ' + ((b.markProblem.missing || []).length ? 'did not find the ' + b.markProblem.missing.join(' and ') : '') + ((b.markProblem.missing || []).length && (b.markProblem.wrong || []).length ? ', and ' : '') + ((b.markProblem.wrong || []).length ? 'found the ' + b.markProblem.wrong.join(' and ') + ' drawn wrongly' : '') + '. ' : ''}${b.wordProblem ? 'The painted words do not match the approved copy' + ((b.wordProblem.missing || []).length ? ' (not read: ' + b.wordProblem.missing.join(', ') + ')' : '') + ((b.wordProblem.wrong || []).length ? ' (unapproved: ' + b.wordProblem.wrong.join(', ') + ')' : '') + '. ' : ''}An image model redraws what it is shown; another painting may fail the same way. The editable creative places the ${marks.join(' and ') || 'mark'} from its file and sets the words as live type, so both are exact.</span></div>` : null}</div>
-        ${!ro ? html`<div class="st-remedy-acts">${failed && !v.image ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onRetry(failed)}>Retry the render (1 render)</button>` : null}<button class="btn sm" disabled=${!!busy || !!renderJob} onClick=${() => setOpen(!open)} aria-expanded=${open}>Regenerate (1 render)...</button><button class=${'btn sm' + (b && (b.markProblem || b.wordProblem) ? '' : ' ghost')} disabled=${!!busy} title="A derived asset in the editable mode: the words as live type, the mark placed from its file exactly; this finished original is kept" onClick=${() => { if (window.confirm('Switch to the editable Studio? A new asset is derived from this one: the words become live type again and the ' + (marks.join(' and ') || 'mark') + ' is placed from its file exactly. The painted bitmap is not reused as the ground (its lettering is part of it); the imagery is generated only when you ask. This finished creative stays as it is. No model call.')) onDerive(a, {}); }}>Switch to Editable (free)</button></div>` : null}</div>
+        ${!ro ? html`<div class="st-remedy-acts">${failed && !v.image ? html`<button class="btn sm" disabled=${!!busy} onClick=${() => onRetry(failed)}>Retry the render (1 render)</button>` : null}<button class="btn sm" disabled=${!!busy || !!renderJob} onClick=${() => setOpen(!open)} aria-expanded=${open}>Regenerate (1 render)...</button><button class=${'btn sm' + (b && (b.markProblem || b.wordProblem) ? '' : ' ghost')} disabled=${!!busy} title="A derived asset in the editable mode: the words as live type, the mark placed from its file exactly; this finished original is kept" onClick=${async () => { if (await askStudio({ title: 'Switch to the editable Studio?', text: 'A new asset is derived from this one: the words become live type again and the ' + (marks.join(' and ') || 'mark') + ' is placed from its file exactly. The painted bitmap is not reused as the ground (its lettering is part of it); the imagery is generated only when you ask. This finished creative stays as it is.', cost: 'free, no model call', ok: 'Make the editable copy' })) onDerive(a, {}); }}>Switch to Editable (free)</button></div>` : null}</div>
       ${open && !ro ? html`<div class="st-regen" aria-label="Regenerate the finished creative">
         <div class="ov-dim">New words replace the painted ones in the next bitmap; a direction alone continues from the current picture. Figures must come from the approved facts.</div>
         ${roles.map(k => html`<div key=${k} class="st-field"><label class="st-lbl" for=${'st-rg-' + k}>${k}${a.locks[k] ? ' (locked)' : ''}</label><input class="st-in" id=${'st-rg-' + k} disabled=${!!a.locks[k]} value=${copy[k] != null ? copy[k] : (v.copy[k] || '')} onInput=${e => setCopy(Object.assign({}, copy, { [k]: e.target.value }))} /></div>`)}
@@ -2405,10 +2474,10 @@
     const framed = x => { const v = current(x); return !!(v && v.layout && v.layout.frame && v.layout.frame.of != null); };
     // which tiles a change renumbers, and how many of them hold a design approval that a new version would drop
     const renumbered = action => action === 'move-left' ? mine.slice(Math.max(0, at - 1), at + 1) : action === 'move-right' ? mine.slice(at, at + 2) : mine.filter(x => !(action === 'delete' && x.id === a.id));
-    const ask = (action, question) => { const f = renumbered(action).filter(framed); const k = f.filter(x => standing(x, 'design')).length;
+    const askPage = async (action, question) => { const f = renumbered(action).filter(framed); const k = f.filter(x => standing(x, 'design')).length;
       const note = f.length ? 'The page number is drawn on ' + f.length + ' tile' + (f.length === 1 ? '' : 's') + ' of this set: each gets a layout version with its new number (no render)' + (k ? ', so ' + k + ' design approval' + (k === 1 ? '' : 's') + ' will need giving again' : '') + '.' : '';
-      if (!question && !k) return true; return window.confirm((question ? question + (note ? '\n\n' + note : '') : note)); };
-    const go = (action, extra) => { if (!onPage) return; if (action === 'delete' ? !ask('delete', 'Delete ' + a.title + ' from ' + (a.family || 'this set') + '? It is archived, not destroyed: it leaves the review and the export and can be restored in its place.') : !ask(action)) return; onPage(a, action === 'move-left' || action === 'move-right' ? 'move' : action, action === 'move-left' ? { to: at - 1 } : action === 'move-right' ? { to: at + 1 } : extra); };
+      if (!question && !k) return true; return askStudio({ title: action === 'delete' ? 'Delete ' + a.title + '?' : 'Renumber the pages?', text: question ? question + (note ? '\n\n' + note : '') : note, ok: action === 'delete' ? 'Delete (archive)' : 'Go ahead' }); };
+    const go = async (action, extra) => { if (!onPage) return; if (action === 'delete' ? !(await askPage('delete', 'It is archived, not destroyed: it leaves ' + (a.family || 'this set') + ', the review and the export, and can be restored in its place.')) : !(await askPage(action))) return; onPage(a, action === 'move-left' || action === 'move-right' ? 'move' : action, action === 'move-left' ? { to: at - 1 } : action === 'move-right' ? { to: at + 1 } : extra); };
     const pageNo = x => { const fam = list.filter(y => y.family === x.family); return fam.length > 1 ? fam.findIndex(y => y.id === x.id) + 1 : null; };
     const many = mine.length > 1 || deleted.length;
     return html`<nav class="st-pagestrip" aria-label="Pages in this project">${fams.map(f => html`<div key=${f} class="st-pagefam" role="group" aria-label=${f || 'Pages'} title=${(f || 'Pages') + ': ' + list.filter(x => x.family === f).length + ' page' + (list.filter(x => x.family === f).length === 1 ? '' : 's')}>${list.filter(x => x.family === f).map(x => { const m = (current(x) || {}).context || {}; const master = m.master ? p.assets.find(y => y.id === m.master) : null; const n = pageNo(x); return html`<button key=${x.id} class=${'st-pagechip st-assetpick' + (x.id === a.id ? ' on' : '')} aria-current=${x.id === a.id ? 'page' : undefined} onClick=${() => onOpen && onOpen(x.id)} title=${x.title + ' - ' + (f || 'pages') + (master ? ', adapted from ' + master.title : '') + (n ? ', page ' + n : '')}><${Composition} v=${current(x)} a=${x} ns=${p.ns} size="mini" /><span class="st-pagechip-l"><span class="st-pagechip-t">${n ? n + '. ' : ''}${x.title}</span><span class="st-pagechip-f">${(FORMATS[x.format] || {}).label || x.format}</span></span>${validOf(x) ? html`<span class="st-dot ok" aria-label="passes its checks"></span>` : null}</button>`; })}</div>`)}
@@ -2634,7 +2703,7 @@
         ${hasLayout && !v.image && !renderJob && (v.context || {}).imagery !== 'none' && (v.layout.regions || []).length ? html`<div class="st-flatnote">No imagery yet: the composition is drawn over its ground until a render lands.</div>` : null}
         ${(v.context || {}).imagery === 'none' && !hiddenImagery(v) ? html`<div class="st-flatnote">No imagery by choice: a typographic composition, nothing to render.</div>` : null}
         ${hiddenImagery(v) ? html`<div class="st-flatnote st-hidden-imagery">Imagery on file but not shown: ${hiddenImagery(v)}. Show the imagery (below) lifts it, no render.</div>` : null}` : null;
-    const genImagery = () => { if (window.confirm('Generate the imagery for ' + a.title + '? One image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K') + ', from the composition\'s own art direction. The words and marks stay live layers.')) onRender(a, bgPrompt(), false, (v.context || {}).size); };
+    const genImagery = async () => { if (await askStudio({ title: 'Generate the imagery for ' + a.title + '?', text: 'From the composition\'s own art direction. The words and marks stay live layers; the current version stays until the image lands.', cost: 'one image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K'), paid: true, ok: 'Generate' })) onRender(a, bgPrompt(), false, (v.context || {}).size); };
     const openTool = k => { setTool(tool === k ? '' : k); };
     // the contextual library: the tool chosen in the dock opens its panel beside the canvas; the page never scrolls to find it
     const library = tool && !preview ? html`<aside class="st-library" id="st-library" aria-label=${(toolName[tool] || tool) + ' tool'} data-tool=${tool}>
@@ -2674,7 +2743,7 @@
       </div>
     </aside>` : null;
     const work = html`<div class=${'st-design' + (preview ? ' preview' : '') + (library ? ' has-library' : '')} style=${{ '--st-lib-w': libW + 'px' }}>
-      ${!preview && !copyOnly ? html`<${DesignDock} tool=${tool} ro=${ro} canVary=${canVary} canEdit=${!!le} hasLayout=${!!hasLayout} finished=${finished} flat=${flat} onTool=${openTool} onEditable=${() => { if (window.confirm('Make an editable copy of ' + a.title + '? A new asset in the family "Editable from finished": the words become live type and the mark is placed from its file; this finished creative stays as it is. Free, no render.')) onDerive(a, {}); }} />` : null}
+      ${!preview && !copyOnly ? html`<${DesignDock} tool=${tool} ro=${ro} canVary=${canVary} canEdit=${!!le} hasLayout=${!!hasLayout} finished=${finished} flat=${flat} onTool=${openTool} onEditable=${async () => { if (await askStudio({ title: 'Make an editable copy of ' + a.title + '?', text: 'A new asset in the family "Editable from finished": the words become live type and the mark is placed from its file; this finished creative stays as it is.', cost: 'free, no render', ok: 'Make the copy' })) onDerive(a, {}); }} />` : null}
       ${library}
       <section class=${'st-canvas-col st-asset' + (preview ? ' preview' : '')} aria-label="Canvas">
         ${canvasBar}
@@ -2683,8 +2752,8 @@
         ${!preview ? html`<div class="st-canvas-foot">
           <div class="st-canvas-sub"><${PageStrip} p=${p} a=${a} onOpen=${onOpen} onPage=${onPage} ro=${ro} /><div class="st-canvas-subr">${le ? html`<div class="st-edfoot" ref=${setEdFoot}></div>` : null}</div><div class="st-comp-info st-asset-head ov-dim" aria-label="About this composition">${(() => { const ist = imageryState(a, v, comp, p.jobs); return ist ? html`<span class=${'st-imgstate ' + ist.kind} data-state=${ist.state} role="status" title=${ist.detail}>${ist.word}${ist.retry ? html` <button class="ov-link" onClick=${() => { if (v.image) { imgFailed.delete(v.image.url); imgCache.delete(v.image.url); } setNonce(n => n + 1); }}>load again</button>` : null}</span>` : null; })()}<span class="st-comp-facts"><b>${a.title}</b> - ${chanLabel(a.channel)} ${(FORMATS[a.format] || {}).label || a.format}${v.layout && v.layout.stage ? ', ' + v.layout.stage.w + ' x ' + v.layout.stage.h + ' px' : ''} - v${vnum(a, v)} of ${vtotal(a)}${v.note ? ': ' + v.note : ''}</span><span class="st-comp-tag">${tagText}</span></div></div>
           ${hasLayout ? html`<${ReadyStrip} compact=${true} a=${a} v=${v} val=${val} measuring=${measuring} ro=${ro} onRepair=${repair} onUndoRepair=${undoRepair} onCompareFix=${repairNote && repairNote.undo ? () => onCompare(repairNote.undo.from, a.current) : null} onMeasure=${measureAgain} onDraft=${draftPng} repairing=${repairing} repairNote=${repairNote} onDetail=${() => setTab('checks')} highlight=${hlIds} onHighlight=${ids => { toggleHl(ids); if (!overlays) setOverlays(true); if (preview) setPreview(false); }} onAction=${k => { if (k === 'imagery') genImagery(); }} onEditLayout=${le ? () => { try { stageRef.current.querySelector('.st-le').focus(); } catch (e) {} } : null} onVariations=${canVary ? () => setTool('design') : null} varsOk=${vars ? vars.filter(x => x.ok).length : null} varsN=${vars ? vars.length : 0} />` : null}
-          ${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} hidden=${hiddenImagery(v)} onShow=${() => onLayoutSave(a, showImagery(v.layout), v.id, 'show the imagery: the ground that hid it is lifted')} onGenerate=${genImagery} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
-          ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${j => { if (window.confirm('Run the render again? One image generation.')) onRetryJob(j); }} />` : null}
+          ${hasLayout && !measuring ? html`<${Remedies} a=${a} v=${v} val=${val} ro=${ro} renderJob=${imageJob} lastRender=${lastRender} typeOnly=${(vars || []).find(x => x.typeOnly) || null} hidden=${hiddenImagery(v)} onShow=${() => onLayoutSave(a, showImagery(v.layout), v.id, 'show the imagery: the ground that hid it is lifted')} onGenerate=${genImagery} onSolid=${() => { const x = (vars || []).find(y => y.typeOnly); if (x) useVariant(x); }} onRetry=${async j => { if (await askStudio({ title: 'Run the render again?', text: 'A new render job with its own attempts. The current version stays until the image lands.', cost: 'one image generation', paid: true, ok: 'Run it again' })) onRetryJob(j); }} onRefresh=${() => setNonce(n => n + 1)} />` : null}
+          ${finished ? html`<${FinishedPanel} p=${p} a=${a} v=${v} ro=${ro} busy=${busy} renderJob=${imageJob} lastRender=${lastRender} onRegenerate=${onRegenerate} onDerive=${onDerive} onRetry=${async j => { if (await askStudio({ title: 'Run the render again?', text: 'A new render job with its own attempts. The current version stays until the image lands.', cost: 'one image generation', paid: true, ok: 'Run it again' })) onRetryJob(j); }} />` : null}
           ${notes}
         </div>` : null}
       </section>
@@ -2739,7 +2808,7 @@
     const KEYS = ['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'];
     // an issue that names an element of this version: the element, and in Design a button that selects it on the canvas
     const elBtn = x => x && x.element ? html` <span class="st-cd-el">on <b>${x.element}</b></span>${(x.layers || []).length && canSelect && !old ? html` <button class="ov-link" onClick=${() => stSelectLayers(a.id, x.layers)}>select it</button>` : null}` : null;
-    const apply = async () => { if (applying) return; if (old && !window.confirm('This review judged v' + vn + '; the current version is v' + vtotal(a) + '. Apply its correction to the current version anyway?')) return; const ta = document.getElementById('fix-' + last.eid); setApplying(true); try { await onApplyInspection(last.eid, ta ? ta.value.trim() || last.fix.instruction : last.fix.instruction, old); } finally { setApplying(false); } };
+    const apply = async () => { if (applying) return; if (old && !(await askStudio({ title: 'Apply a correction made for v' + vn + '?', text: 'This review judged v' + vn + '; the current version is v' + vtotal(a) + '. Apply its correction to the current version anyway?', ok: 'Apply anyway' }))) return; const ta = document.getElementById('fix-' + last.eid); setApplying(true); try { await onApplyInspection(last.eid, ta ? ta.value.trim() || last.fix.instruction : last.fix.instruction, old); } finally { setApplying(false); } };
     return html`<div class="st-adreview st-cd-review" aria-label="Current review">
       <div class="st-adreview-head"><div><b>${a.title}</b> <span class="ov-dim">current v${vtotal(a)}</span></div>
         ${!ro ? html`<button class="btn sm" disabled=${reviewing || !!busy} onClick=${() => onReview(a)} title="The tile is composed exactly as it exports, then the Creative Director reads it: scores with reasons, the words it can read, a verdict and one bounded correction. One model call; it approves nothing.">${reviewing ? 'Reviewing...' : 'Review v' + vtotal(a) + ' (1 model call)'}</button>` : null}</div>
@@ -2765,7 +2834,7 @@
         ${sorted.length > 1 ? html`<details class="st-cd-more"><summary>${sorted.length - 1} more issue${sorted.length === 2 ? '' : 's'}</summary><ul class="st-ul">${sorted.slice(1).map((x, i) => html`<li key=${i}>${x.severity ? html`<${Chip} kind=${x.severity === 'blocking' ? 'bad' : x.severity === 'material' ? 'warn' : ''}>${x.severity}</${Chip}> ` : null}${x.text}${elBtn(x)}</li>`)}</ul></details>` : null}
         ${last.words ? html`<div class="ov-dim st-adreview-words">Words it read: ${(last.words.present || []).length ? (last.words.present || []).map(w => '"' + w + '"').join(', ') : 'none'}${(last.words.wrong || []).length ? html`; <span class="st-bad">not in the approved copy: ${last.words.wrong.map(w => '"' + w + '"').join(', ')}</span>` : null}${(last.words.missing || []).length ? html`; <span class="st-bad">approved words it could not find: ${last.words.missing.map(w => '"' + w + '"').join(', ')}</span>` : null}.</div>` : null}
         ${last.assessment === 'inconsistent' ? html`<div class="st-insp-incons"><${Chip} kind="bad">inconsistent</${Chip}> <span class="ov-dim">the verdict is ship, but ${last.technical === 'failed' ? 'the measured validation fails' : 'it names unresolved problems'}.</span></div>` : null}
-        ${last.fix ? done ? html`<div class="st-cd-fixdone"><${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}> <span class="ov-dim">${aest(done.at)}; review again to judge the result.</span>${!ro && onRestore && last.version && a.current !== last.version && a.versions.some(x => x.id === last.version) ? html` <button class="btn sm ghost" disabled=${!!busy} title="Restore the version this review judged, as a new version; nothing is deleted" onClick=${() => { if (window.confirm('Undo the correction? v' + vn + ' (the version this review judged) is restored as a new version; the corrected version stays in History.')) onRestore(a, last.version); }}>Undo: back to v${vn}</button>` : null}</div>` : !ro ? html`<div class="st-offer-box st-cd-fix">
+        ${last.fix ? done ? html`<div class="st-cd-fixdone"><${Chip} kind="ok">correction applied (${done.fixKind})</${Chip}> <span class="ov-dim">${aest(done.at)}; review again to judge the result.</span>${!ro && onRestore && last.version && a.current !== last.version && a.versions.some(x => x.id === last.version) ? html` <button class="btn sm ghost" disabled=${!!busy} title="Restore the version this review judged, as a new version; nothing is deleted" onClick=${async () => { if (await askStudio({ title: 'Undo the correction?', text: 'v' + vn + ' (the version this review judged) is restored as a new version; the corrected version stays in History.', cost: 'free, no model call', ok: 'Restore v' + vn })) onRestore(a, last.version); }}>Undo: back to v${vn}</button>` : null}</div>` : !ro ? html`<div class="st-offer-box st-cd-fix">
           <dl class="st-cd-fixfacts">
             <dt>Changes</dt><dd>${FIX_CHANGES[last.fix.kind] || last.fix.kind}${last.fix.element ? html` - <b>${last.fix.element}</b>${(last.fix.layers || []).length && canSelect ? html` <button class="ov-link" onClick=${() => stSelectLayers(a.id, last.fix.layers)}>select it</button>` : null}` : null}</dd>
             <dt>Keeps</dt><dd>${last.fix.keeps || FIX_KEEPS[last.fix.kind] || 'everything it does not name'}</dd>
@@ -2874,7 +2943,7 @@
         ${cur === 'ideas' && !design ? html`<div class="st-cd-ideas st-cd-elsewhere"><div class="ov-dim">${a && (current(a) || {}).mode === 'copy' ? a.title + ' is copy only: alternatives for its words are asked for in the Copy step (Shorter headline, Three headline options, Adapt for another channel).' : 'Explore works on the composition: suggestions read the artwork itself, and new directions and layout variations are drawn on the canvas. Open ' + (a ? a.title : 'the asset') + ' in Design to explore it.'}</div>${a && onOpenDesign && (current(a) || {}).mode !== 'copy' ? html`<button class="btn sm ghost" onClick=${() => onOpenDesign(a.id)}>Open ${a.title} in Design</button>` : null}</div>` : null}
         ${cur === 'ideas' && design ? html`<div class="st-cd-ideas">
           <div class="ov-dim">Suggestions for v${vtotal(a)}, asked for only when you want them. Each states what it changes and keeps, its scope, whether it needs a render, why, and what it rests on. Edit instruction puts it in the composer; Apply sends it as it stands and can be undone once it lands.</div>
-          ${!ro && sugg ? html`<div class="st-sugg-tabs" role="tablist" aria-label="Kinds of suggestion">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${sk === k} class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy || sending} onUse=${t => { setText(t); setTarget('asset'); setFailed(null); try { ta.current && ta.current.focus(); } catch (e) {} }} onApply=${async t => { const made = sugg && sugg.data && sugg.data.version; const stale = () => setFailed({ text: t, title: 'Not sent: this suggestion was made for an earlier version.', detail: 'The artwork has moved on since it was suggested. Ask for suggestions again for the current version, or use it as an instruction and edit it first.' }); if (made && made !== a.current) { stale(); return; } if (sendingRef.current) return; if (made) { try { const d = await call('/studio/versions?asset=' + encodeURIComponent(a.id) + '&limit=1'); if (d && d.current && d.current !== made) { stale(); return; } } catch (e) {} } if (window.confirm('Apply this suggestion to ' + a.title + ' v' + vtotal(a) + ' as it stands? One model call reads it against this composition only; the result lands as a new version of this asset (a render is only proposed, never spent without your yes).')) { setApplied({ kind: sk, text: t, asset: a.id, from: a.current, fromN: vtotal(a) }); send(t, { target: 'asset', asset: a.id, version: a.current }); } }} scopeLabel=${a ? a.title + ' v' + vtotal(a) + ' only' + (selLayers && selLayers.length ? ' (selected: ' + selLayers.join(', ') + ')' : '') : ''} applied=${applied} onCompare=${onCompare || null} onUndo=${onRestore ? d0 => { if (window.confirm('Restore v' + d0.fromN + ' of ' + a.title + ' as a new version? The applied change stays in the history.')) { onRestore(a, d0.from); setApplied(null); } } : null} onRefresh=${onSuggRefresh} />` : ro ? html`<div class="ov-dim">Suggestions need a full key.</div>` : null}
+          ${!ro && sugg ? html`<div class="st-sugg-tabs" role="tablist" aria-label="Kinds of suggestion">${[['design', 'Design'], ['typography', 'Type'], ['copy', 'Copy'], ['concept', 'Concepts']].map(([k, l]) => html`<button key=${k} role="tab" aria-selected=${sk === k} class=${'st-segbtn' + (sk === k ? ' on' : '')} onClick=${() => setSk(k)}>${l}${sugg.data && (sugg.data[k] || []).length ? ' ' + sugg.data[k].length : ''}</button>`)}</div><${Suggestions} kind=${sk} sugg=${sugg} busy=${busy || sending} onUse=${t => { setText(t); setTarget('asset'); setFailed(null); try { ta.current && ta.current.focus(); } catch (e) {} }} onApply=${async t => { const made = sugg && sugg.data && sugg.data.version; const stale = () => setFailed({ text: t, title: 'Not sent: this suggestion was made for an earlier version.', detail: 'The artwork has moved on since it was suggested. Ask for suggestions again for the current version, or use it as an instruction and edit it first.' }); if (made && made !== a.current) { stale(); return; } if (sendingRef.current) return; if (made) { try { const d = await call('/studio/versions?asset=' + encodeURIComponent(a.id) + '&limit=1'); if (d && d.current && d.current !== made) { stale(); return; } } catch (e) {} } if (await askStudio({ title: 'Apply this suggestion to ' + a.title + ' v' + vtotal(a) + '?', text: 'As it stands. It is read against this composition only, and the result lands as a new version of this asset; a render is only proposed, never spent without your yes.', cost: 'one model call', paid: true, ok: 'Apply' })) { setApplied({ kind: sk, text: t, asset: a.id, from: a.current, fromN: vtotal(a) }); send(t, { target: 'asset', asset: a.id, version: a.current }); } }} scopeLabel=${a ? a.title + ' v' + vtotal(a) + ' only' + (selLayers && selLayers.length ? ' (selected: ' + selLayers.join(', ') + ')' : '') : ''} applied=${applied} onCompare=${onCompare || null} onUndo=${onRestore ? async d0 => { if (await askStudio({ title: 'Restore v' + d0.fromN + ' of ' + a.title + '?', text: 'It comes back as a new version; the applied change stays in the history.', cost: 'free, no model call', ok: 'Restore v' + d0.fromN })) { onRestore(a, d0.from); setApplied(null); } } : null} onRefresh=${onSuggRefresh} />` : ro ? html`<div class="ov-dim">Suggestions need a full key.</div>` : null}
           <div class="st-cd-new"><span class="st-lbl">New directions</span><span class="ov-dim">Different ideas for this piece, not tweaks: the Images tool proposes three or four directions (one model call that sees the artwork); each card states its cost before anything is applied.</span>${onTool ? html`<button class="btn sm ghost" onClick=${() => onTool('images')}>Open art direction</button>` : null}<span class="ov-dim">Free alternatives of the same words and imagery are in the Design tool's layout variations.</span>${onTool ? html`<button class="btn sm ghost" onClick=${() => onTool('design')}>Open layout variations</button>` : null}</div>
         </div>` : null}
         ${cur === 'conversation' ? html`<div class="st-cd-conv">
@@ -2898,18 +2967,19 @@
 
   /* ------------------------------------------------------------ the Client panel: voice profile (the Content Desk's editor, reused) and learned rules */
   function ClientPanel({ p, kind, onClose, onChanged }) {
+    const dref = useRef(null); useDialogFocus(dref, onClose);
     const [kit, setKit] = useState(undefined); const [fixes, setFixes] = useState(null);
     const load = useCallback(async () => { try { const [k, f] = await Promise.all([call('/brand/kit?ns=' + encodeURIComponent(p.ns)), call('/engine/fixes?ns=' + encodeURIComponent(p.ns) + '&all=1')]); setKit(k.kit || {}); setFixes(f.fixes || []); } catch (e) { setKit({}); setFixes([]); toastMsg(e.message, true); } }, [p.ns]);
     useEffect(() => { load(); }, [load]);
     const AXC = window.AX_CONTENT;
-    if (kit === undefined || fixes === null) return html`<div class="st-dialog" role="dialog" aria-modal="true"><div class="st-dialog-box"><div class="ov-empty">Loading the client profile...</div></div></div>`;
+    if (kit === undefined || fixes === null) return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Loading the client profile" ref=${dref}><div class="st-dialog-box"><div class="ov-empty">Loading the client profile...</div></div></div>`;
     const toggle = async f => { try { await call('/engine/fix/update', { id: f.id, active: !f.active }); await load(); onChanged(); } catch (e) { toastMsg(e.message, true); } };
     const del = async f => { try { await call('/engine/fix/delete', { id: f.id }); await load(); onChanged(); } catch (e) { toastMsg(e.message, true); } };
     const campOf = f => (/:campaign:([a-z0-9_-]+)$/.exec(f.source || '') || [])[1] || '';
-    return html`<div class="st-dialog st-panel-dialog" role="dialog" aria-modal="true" aria-label=${kind === 'voice' ? 'Voice profile' : 'Learned rules'}><div class="st-dialog-box">
+    return html`<div class="st-dialog st-panel-dialog" role="dialog" aria-modal="true" aria-label=${kind === 'voice' ? 'Voice profile' : 'Learned rules'} ref=${dref}><div class="st-dialog-box">
       ${kind === 'voice' ? (AXC && AXC.VoicePanel ? html`<${AXC.VoicePanel} ns=${p.ns} kit=${kit} canWrite=${canWrite()} onSaved=${() => { load(); onChanged(); }} onClose=${onClose} />` : html`<div class="ov-empty">The voice profile editor (content.js) is not loaded on this page.</div><button class="btn sm ghost" onClick=${onClose}>Close</button>`)
       : html`<div class="ov-sechead"><span class="ov-title">What the Studio has learned for ${p.ns.toUpperCase()}</span><span class="ov-why">${fixes.filter(f => f.active).length} in force; rules are in the prompt within the minute, switched-off ones stay on record</span><button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${onClose}>Close</button></div>
-        ${!fixes.length ? html`<div class="ov-empty">Nothing taught yet. Direct the team; a standing preference is offered after the change and lands here when you save it.</div>` : html`<table class="ov-table"><thead><tr><th>Rule</th><th>Applies to</th><th>Task</th><th>From</th><th></th></tr></thead><tbody>${fixes.map(f => html`<tr key=${f.id} class=${f.active ? '' : 'st-legacy'}><td>${f.rule}${f.why ? html`<div class="ov-dim">${f.why.slice(0, 160)}</div>` : null}</td><td>${campOf(f) ? 'campaign ' + campOf(f) : f.scope === 'all' ? 'every client' : p.ns.toUpperCase()}</td><td class="ov-dim">${f.task}</td><td class="ov-dim">${f.who || ''}${f.source ? ' - ' + f.source.replace(/^studio:[a-z0-9]+/, 'studio') : ''}, ${ago(f.created)} ago, applied ${f.hits}x</td><td class="ov-go">${canWrite() ? html`<button class="ov-link" onClick=${() => toggle(f)}>${f.active ? 'switch off' : 'switch on'}</button> <button class="ov-link" onClick=${() => { if (window.confirm('Delete this rule? The Studio will forget it.')) del(f); }}>delete</button>` : null}</td></tr>`)}</tbody></table>`}`}
+        ${!fixes.length ? html`<div class="ov-empty">Nothing taught yet. Direct the team; a standing preference is offered after the change and lands here when you save it.</div>` : html`<table class="ov-table"><thead><tr><th>Rule</th><th>Applies to</th><th>Task</th><th>From</th><th></th></tr></thead><tbody>${fixes.map(f => html`<tr key=${f.id} class=${f.active ? '' : 'st-legacy'}><td>${f.rule}${f.why ? html`<div class="ov-dim">${f.why.slice(0, 160)}</div>` : null}</td><td>${campOf(f) ? 'campaign ' + campOf(f) : f.scope === 'all' ? 'every client' : p.ns.toUpperCase()}</td><td class="ov-dim">${f.task}</td><td class="ov-dim">${f.who || ''}${f.source ? ' - ' + f.source.replace(/^studio:[a-z0-9]+/, 'studio') : ''}, ${ago(f.created)} ago, applied ${f.hits}x</td><td class="ov-go">${canWrite() ? html`<button class="ov-link" onClick=${() => toggle(f)}>${f.active ? 'switch off' : 'switch on'}</button> <button class="ov-link" onClick=${async () => { if (await askStudio({ title: 'Delete this rule?', text: 'The Studio will forget it: no later brief, copy or design for this client reads it again. Switching it off keeps it for later instead.', ok: 'Delete the rule' })) del(f); }}>delete</button>` : null}</td></tr>`)}</tbody></table>`}`}
     </div></div>`;
   }
 
@@ -3369,7 +3439,7 @@
       setSaveSt({ state: r && r.status === 'conflict' ? 'conflict' : 'failed', msg: r && r.error ? (r.error.message || String(r.error)) : 'the version was not saved' });
       draftOn.current = true; if (draftSig.current !== sg) sendDraft(L).catch(() => {});   // keep a recovery copy of exactly what failed
     };
-    const cancel = () => { if (changed && !window.confirm('Discard the unsaved layout changes? The saved version stays as it is.')) return; discardDraft(); draftOn.current = true; onDone(null); };
+    const cancel = async () => { if (changed && !(await askStudio({ title: 'Discard the unsaved layout changes?', text: 'The saved version stays as it is.', ok: 'Discard changes', cancel: 'Keep editing' }))) return; discardDraft(); draftOn.current = true; onDone(null); };
     const one = selected().length === 1 ? selected()[0] : null;
     // the type panel follows the layer last clicked, even inside a group (type is set per layer)
     const typed = focusId && sel.length && byId(focusId) && byId(focusId).type === 'text' ? byId(focusId) : one;
@@ -3585,6 +3655,7 @@
 
   /* ------------------------------------------------------------ dialogs */
   function ClickupDialog({ ready, client, p, onClose }) {
+    const dref = useRef(null); useDialogFocus(dref, onClose);
     const [state, setState] = useState({ busy: false, msg: '' });
     const send = async () => {
       setState({ busy: true, msg: '' }); const done = [];
@@ -3594,7 +3665,7 @@
       }
       setState({ busy: false, msg: 'Created ' + done.length + ' task' + (done.length === 1 ? '' : 's') + ': ' + done.join('; ') }); toastMsg(done.length + ' ClickUp task' + (done.length === 1 ? '' : 's') + ' created');
     };
-    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Send to ClickUp"><div class="st-dialog-box narrow">
+    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="Send to ClickUp" ref=${dref}><div class="st-dialog-box narrow">
       <div class="ov-title">Send to ClickUp</div>
       <div class="st-pad">Destination: the worker's configured ClickUp list. One task per asset with the approved copy; images are downloaded from the bundle:</div>
       <ul class="st-ul">${ready.map(x => html`<li key=${x.a.id}>${x.a.title}, v${vnum(x.a, x.v)}</li>`)}</ul>
@@ -3603,10 +3674,10 @@
     </div></div>`;
   }
   function ReasonDialog({ title, prompt, onDone }) {
-    const [why, setWhy] = useState('');
-    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label=${title}><div class="st-dialog-box narrow">
+    const [why, setWhy] = useState(''); const dref = useRef(null); useDialogFocus(dref, () => onDone(null));
+    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label=${title} ref=${dref}><div class="st-dialog-box narrow">
       <div class="ov-title">${title}</div><div class="st-pad">${prompt}</div>
-      <textarea class="st-ta" rows="2" value=${why} onInput=${e => setWhy(e.target.value)} placeholder="Reason (recorded with the decision; client taste, not performance)" autoFocus></textarea>
+      <textarea class="st-ta" rows="2" value=${why} onInput=${e => setWhy(e.target.value)} placeholder="Reason (recorded with the decision; client taste, not performance)" aria-label="Reason" data-autofocus></textarea>
       <div class="st-dialog-acts"><button class="btn sm" disabled=${!why.trim()} onClick=${() => onDone(why.trim())}>Record</button><button class="btn sm ghost" onClick=${() => onDone(null)}>Cancel</button></div>
     </div></div>`;
   }
@@ -3615,10 +3686,10 @@
       they made it; nothing is written until a person chooses: keep mine, keep theirs, or choose item by item. Cancel keeps my
       edit on the canvas (and in the recovery draft) and writes nothing. */
   function ConflictDialog({ c, onDone }) {
-    const [per, setPer] = useState(false); const [ch, setCh] = useState({});
+    const [per, setPer] = useState(false); const [ch, setCh] = useState({}); const dref = useRef(null); useDialogFocus(dref, () => onDone(null));
     const show = (x, kind) => x === undefined ? html`<i class="ov-dim">removed</i>` : kind === 'order' ? html`<span class="ov-dim">${'front to back: ' + (x || []).slice().reverse().join(', ')}</span>` : kind === 'copy' ? (String(x) || html`<i class="ov-dim">empty</i>`) : kind === 'layer' ? html`<span class="ov-dim">${'x ' + x.x + ' y ' + x.y + ' w ' + x.w + (x.size ? ', size ' + x.size : '') + (x.hidden ? ', hidden' : '')}</span>` : html`<span class="ov-dim">${JSON.stringify(x).slice(0, 80)}</span>`;
     const all = c.m.conflicts.every(x => ch[x.id]);
-    return html`<div class="st-dialog st-conflict" role="dialog" aria-modal="true" aria-labelledby="st-conflict-h"><div class="st-dialog-box">
+    return html`<div class="st-dialog st-conflict" role="dialog" aria-modal="true" aria-labelledby="st-conflict-h" ref=${dref}><div class="st-dialog-box">
       <div class="ov-title" id="st-conflict-h">${c.as.title} changed while you edited</div>
       <div class="st-pad ov-dim">v${c.theirsN} changed ${c.m.conflicts.length === 1 ? 'something you changed too' : c.m.conflicts.length + ' things you changed too'}. Everything else from both of you is kept. Nothing is saved until you choose.</div>
       <table class="st-table st-conflict-t"><thead><tr><th>What</th><th>Before</th><th>Yours</th><th>Theirs</th>${per ? html`<th>Keep</th>` : null}</tr></thead><tbody>
@@ -3692,7 +3763,7 @@
     useEffect(() => { if (!liveIds && !recentDone) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [liveIds, recentDone]);
     useEffect(() => {
       if (!liveIds) return; let on = true;
-      const poll = async () => { for (const id of liveIds.split(',')) { if (!on) return; try { const r = await call('/studio/job?id=' + encodeURIComponent(id)); if (on && r && r.job) setP(prev => prev && prev.id === r.job.project ? Object.assign({}, prev, { jobs: (prev.jobs || []).map(j => j.id === r.job.id ? Object.assign({}, j, r.job) : j) }) : prev); } catch (e) {} } };
+      const poll = async () => { for (const id of liveIds.split(',')) { if (!on) return; try { const r = await call('/studio/job?id=' + encodeURIComponent(id)); if (on && r && r.job) setP(prev => prev && prev.id === r.job.project ? Object.assign({}, prev, { jobs: (prev.jobs || []).map(j => j.id === r.job.id ? (window.STProgress.fresher(j, r.job) === j ? j : Object.assign({}, j, r.job)) : j) }) : prev); } catch (e) {} } };
       const t = setInterval(poll, 2500); return () => { on = false; clearInterval(t); };
     }, [liveIds]);
     const pRef = useRef(null); const pSeen = useRef(null); if (pSeen.current !== p) { pSeen.current = p; pRef.current = p; }
@@ -3793,7 +3864,10 @@
       // reloads overlap (the poll, an action's own reload): an answer older than one already applied is never laid over it
       const seq = ++reloadSeq.current;
       // the ref moves with the answer, not with the next render: a write that follows a reload in the same handler sends the fresh revision
-      try { const d = await getRead('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < reloadApplied.current) return pRef.current; reloadApplied.current = seq; pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want && seq >= reloadApplied.current) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
+      try { const d = await getRead('/studio/get?id=' + encodeURIComponent(want)); if (pidRef.current === want) { if (seq < reloadApplied.current) return pRef.current; reloadApplied.current = seq;
+        // S27: a poll may have brought a job further on while this reload was in flight; the older snapshot does not replace it
+        const held = pRef.current && pRef.current.id === d.id ? pRef.current.jobs : null; if (held && Array.isArray(d.jobs)) d.jobs = window.STProgress.mergeJobs(held, d.jobs);
+        pRef.current = d; setP(d); } return d; } catch (e) { if (pidRef.current === want && seq >= reloadApplied.current) setNotice(Object.assign(explain(e, 'The project did not load'), { actions: [{ label: 'Try again', fn: () => reload(want) }] })); return null; }
     }, []);
     /* an error explained where the work is, with a real retry when one makes sense; a provider problem refreshes the status chips */
     const fail = (e, what, retry) => { const x = explain(e, what); setNotice(Object.assign(x, { actions: retry ? [{ label: 'Retry', fn: retry }] : [] })); setBusy(''); if (x.kind === 'provider') refreshStatus(); };
@@ -3992,15 +4066,15 @@
     /* the team's choices on the reading: each fills the brief and is recorded for the engine to learn from */
     const selectIntel = async (sel) => { try { setBusy('Saving the choice'); const d = await call('/studio/intel/select', Object.assign({ project: pRef.current.id }, sel)); await reload(); toastMsg(d.changed && d.changed.length ? 'The brief now carries the ' + Array.from(new Set(d.changed)).join(', ') : 'Choice recorded'); } catch (e) { fail(e, 'The choice was not saved'); } finally { setBusy(''); } };
     const intelDecision = async (kind, ref, noReason) => {
-      const reason = noReason ? '' : window.prompt(kind === 'no_response' ? 'Why not respond? (recorded; the engine learns from it)' : 'Why set this aside? (recorded; the engine learns from it)', '');
-      if (!noReason && (reason == null || reason.trim().length < 4)) { if (reason != null) toastMsg('Nothing recorded: a reason of a few words is needed', true); return; }
+      const reason = noReason ? '' : await askStudio({ reason: true, min: 4, title: kind === 'no_response' ? 'Why not respond?' : 'Why set this aside?', text: 'Recorded with the decision; the engine learns from it.' });
+      if (!noReason && (reason == null || reason.trim().length < 4)) return;
       try { setBusy('Recording the decision'); await call('/studio/intel/decision', { project: pRef.current.id, kind, ref, reason: reason || '' }); await reload(); toastMsg('Recorded'); } catch (e) { fail(e, 'The decision was not recorded'); } finally { setBusy(''); }
     };
     /* several narratives produced side by side: one production each, by its own route, in its own family on the Board */
     const produceVariants = (ids) => guard('variants:' + pidRef.current, async () => {
       const d = pRef.current; const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]);
       if (!channels.length) { setNotice({ kind: 'warn', title: 'No channels in the brief.', text: 'Choose at least one channel, then produce.', actions: [{ label: 'Open the brief', fn: () => setView('brief', true) }] }); return; }
-      if (!window.confirm('Produce ' + ids.length + ' narratives as variants? One model call each' + (b.imageryTiming === 'after_copy' || b.imagery === 'none' ? '; no imagery yet.' : ', and the imagery each plans.'))) return;
+      if (!(await askStudio({ title: 'Produce ' + ids.length + ' narratives as variants?', text: 'Each is produced by its own route in its own family on the Board.', cost: 'one model call each' + (b.imageryTiming === 'after_copy' || b.imagery === 'none' ? '; no imagery yet' : ', and the imagery each plans'), paid: true, ok: 'Produce them' }))) return;
       try {
         for (const id of ids) { const dir = d.directions.find(x => x.id === id); if (!dir) continue;
           await job('copy', { channels, deliverable: b.deliverable === 'copy' ? 'copy' : (b.deliverable || 'set'), formats: b.formats || {}, direction: id, variant: true, creationMode: dir.route || undefined, size: b.size || undefined, imagery: b.imagery === 'none' ? 'none' : undefined, acknowledge: true }, null, 'variant:' + id + ':' + Date.now(), 'Producing "' + dir.title + '" as a variant (' + (dir.route === 'finished' ? 'finished creative' : 'editable') + ')'); }
@@ -4009,7 +4083,7 @@
     });
     const writeKit = (direction, kinds) => guard('kit:' + pidRef.current, async () => { try { await job('kit', { direction, kinds }, null, 'kit:' + direction + ':' + Date.now(), 'Writing the message kit: ' + kinds.length + ' piece' + (kinds.length === 1 ? '' : 's')); await reload(); ready('copy', 'Message kit ready', kinds.length + ' piece' + (kinds.length === 1 ? '' : 's') + ', each traced and checked.', 'View the kit'); } catch (e) { fail(e, 'The message kit was not written', () => writeKit(direction, kinds)); } });
     const updateText = async (t, body) => { try { await call('/studio/text/update', { id: t.id, body, revision: t.revision }); await reload(); return true; } catch (e) { if (e.status === 409) await reload(); fail(e, 'The piece was not saved'); return false; } };
-    const textVerdict = async (t, verdict) => { const reason = window.prompt((verdict === 'approve' ? 'Approve' : 'Reject') + ' "' + t.label + '": why? (recorded; the engine learns from it)', ''); if (reason == null) return; if (reason.trim().length < 4) { toastMsg('Nothing recorded: a reason of a few words is needed', true); return; } try { await call('/studio/text/verdict', { id: t.id, verdict, reason }); await reload(); toastMsg(verdict === 'approve' ? 'Approved' : 'Rejected'); } catch (e) { fail(e, 'The verdict was not recorded'); } };
+    const textVerdict = async (t, verdict) => { const reason = await askStudio({ reason: true, min: 4, title: (verdict === 'approve' ? 'Approve' : 'Reject') + ' "' + t.label + '"', text: 'Why? Recorded with the verdict; the engine learns from it.', ok: verdict === 'approve' ? 'Approve' : 'Reject' }); if (reason == null || reason.trim().length < 4) return; try { await call('/studio/text/verdict', { id: t.id, verdict, reason }); await reload(); toastMsg(verdict === 'approve' ? 'Approved' : 'Rejected'); } catch (e) { fail(e, 'The verdict was not recorded'); } };
 
     /* ------------------------------------------------------------ S17: the guided workflow's own actions */
     /** A project from the wizard: the campaign made in the kit first when asked, the project as guided workflow 2, the material
@@ -4095,7 +4169,7 @@
     const duplicateDirection = async (d) => { try { await call('/studio/direction/duplicate', { id: d.id }); await reload(); toastMsg('Duplicated "' + d.title + '"'); } catch (e) { fail(e, 'The direction was not duplicated'); } };
     /** The production mode, chosen in Design once the words are ready: editable queues the planned imagery; finished paints each piece. */
     const produceMode = (mode, assets, size) => guard('production:' + pidRef.current, async () => {
-      if (!window.confirm((mode === 'finished' ? 'Paint ' : 'Generate the imagery for ') + assets.length + ' piece' + (assets.length === 1 ? '' : 's') + ' at ' + size + '? ' + (mode === 'finished' ? 'One paid painting per piece, words and mark included.' : 'One paid render per planned image.') + ' Each is a job you can watch or cancel.')) return;
+      if (!(await askStudio({ title: (mode === 'finished' ? 'Paint ' : 'Generate the imagery for ') + assets.length + ' piece' + (assets.length === 1 ? '' : 's') + ' at ' + size + '?', text: (mode === 'finished' ? 'Each piece is painted whole, words and mark included; changing its words later needs another painting.' : 'The words, marks and shapes stay live layers; only the planned imagery is generated.') + ' Each is a job you can watch or cancel.', cost: mode === 'finished' ? 'one paid painting per piece' : 'one paid render per planned image', paid: true, ok: mode === 'finished' ? 'Paint them' : 'Generate' }))) return;
       try {
         setBusy('Queuing the ' + (mode === 'finished' ? 'paintings' : 'imagery'));
         const r = await call('/studio/production', { project: pidRef.current, mode, assets, size });
@@ -4304,7 +4378,7 @@
     const generateImagery = (list) => guard('imagery:' + pidRef.current, async () => {
       const b0 = (pRef.current || {}).brief || {}; const size = b0.size || '2K';
       if (!list.length) return;
-      if (!window.confirm('Generate the imagery for ' + list.length + ' composition' + (list.length === 1 ? '' : 's') + ' (' + list.map(x => x.title).join(', ') + ')? One paid image generation per planned region at ' + size + (list.some(x => (current(x) || {}).mode === 'finished') ? '; a finished creative is one painting with the words and the mark' : '') + '. The words and marks stay as they are; each render is a job you can watch or cancel.')) return;
+      if (!(await askStudio({ title: 'Generate the imagery for ' + list.length + ' composition' + (list.length === 1 ? '' : 's') + '?', text: list.map(x => x.title).join(', ') + '. The words and marks stay as they are' + (list.some(x => (current(x) || {}).mode === 'finished') ? '; a finished creative is one painting with the words and the mark' : '') + '. Each render is a job you can watch or cancel.', cost: 'one paid image generation per planned region at ' + size, paid: true, ok: 'Generate' }))) return;
       let queued = 0; const refused = [];
       for (const as of list) { try { const r = await call('/studio/imagery', { project: pidRef.current, asset: as.id, size }); queued += (r.jobs || []).length; } catch (e) { refused.push(as.title + ': ' + (e.detail || e.message || e.code)); } }
       const d = await reload(); if (queued && d) pump(d);
@@ -4315,7 +4389,7 @@
       try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why }); await reload(); }
       catch (e) {
         // painted words nobody could verify, or an inconsistent inspection: a person may still approve, having looked
-        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && window.confirm((e.detail || e.message) + '\n\nApprove anyway, having checked the tile yourself?')) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
+        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && (await askStudio({ title: 'Approve anyway?', text: (e.detail || e.message) + '\n\nApprove only if you have checked the tile yourself; the decision is recorded as yours.', ok: 'Approve anyway' }))) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
         else fail(e, 'The decision was not recorded');
       }
     };
@@ -4438,7 +4512,7 @@
     const saveTitle = { bad: 'The last change was refused or did not reach the worker; your changes are still here (and the recovery draft is kept). Save again or retry.', busy: 'A change is being written as a new version', drafting: 'Your layout changes are being kept as a recovery draft for you only', draft: 'Your layout changes are kept as a draft for you only (they come back after a reload or when you return to this asset); Save layout makes them a version', warn: 'Layout changes that nothing holds yet: they are kept as a recovery draft in a moment, or Save layout keeps them as a version', ok: 'Every change is saved as a version' }[saveKind];
     const b0 = (p && p.brief) || {}; const g2h = b0.workflow === 2;
     const pmode = p && b0.deliverable !== 'copy' ? ((b0.production && b0.production.mode) || (g2h ? '' : b0.creationMode === 'finished' ? 'finished' : 'editable')) : null;
-    const backToAxiom = () => { const st = layoutDirtyRef.current; if ((st === 'saving' && !window.confirm('A version is still being saved. Leave the Studio anyway? Your changes stay as a recovery draft.')) || (st === 'failed' && !window.confirm('The last save failed. Leave the Studio? Your changes stay as a recovery draft for you, and come back when you open this asset.'))) return; try { if (typeof window.go === 'function') window.go('command'); } catch (e) {} };
+    const backToAxiom = async () => { const st = layoutDirtyRef.current; if ((st === 'saving' && !(await askStudio({ title: 'Leave while a version is saving?', text: 'Your changes stay as a recovery draft.', ok: 'Leave the Studio', cancel: 'Stay' }))) || (st === 'failed' && !(await askStudio({ title: 'Leave after a failed save?', text: 'Your changes stay as a recovery draft for you, and come back when you open this asset.', ok: 'Leave the Studio', cancel: 'Stay' })))) return; try { if (typeof window.go === 'function') window.go('command'); } catch (e) {} };
     const header = html`<header class="st-head">
       <button class="st-back" onClick=${backToAxiom} title="Back to AXIOM: the newsroom and every other view (the Studio keeps your place)" aria-label="Back to AXIOM"><${Icon} n="back" size=${15} /><span>AXIOM</span></button>
       <span class="st-hbrand" aria-hidden=${p ? 'true' : undefined}><span class="st-appname">Creative Studio</span></span>
@@ -4562,6 +4636,7 @@
       ${dialog && dialog.kind === 'clickup' && p ? html`<${ClickupDialog} ready=${dialog.ready} client=${client} p=${p} onClose=${() => setDialog(null)} />` : null}
       ${panel && p ? html`<${ClientPanel} p=${p} kind=${panel} onClose=${() => setPanel(null)} onChanged=${() => { setCtxTick(t => t + 1); loadLib(); }} />` : null}
       ${impactQ && F ? html`<${F.ImpactDialog} q=${impactQ} onAnswer=${answerImpact} />` : null}
+      <${AskHost} />
       ${editConflict ? html`<${ConflictDialog} c=${editConflict} onDone=${v => editConflict.res(v)} />` : null}
       ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.'} onDone=${recordDecision} />` : null}
     </div>`;
@@ -4569,7 +4644,7 @@
 
   /* S17: the parts the guided workflow (docs/studio-guided.js) builds on - one renderer, one set of chips and icons, one way of
      explaining an error - shared rather than copied; studio-guided.js loads after this file and registers window.STFlow */
-  window.STKit = { runOp, linkNow: () => LINK_NOW, html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Drafting, RenderBrief, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
+  window.STKit = { ask: askStudio, useDialogFocus, runOp, linkNow: () => LINK_NOW, html, call, blobUrl, toastMsg, ago, R, Chip, Icon, ICON, Lbl, Drafting, RenderBrief, Composition, useComposition, explain, canWrite, current, standing, chanLabel, CHANNELS, FORMATS, FORMAT_ICON, aest, keyedImage, StrategyPanel, TraceLine, WORD, INPUT_WORD, STRAT_WORD, BASIS_WORD, FIELD_WORD, KNOW_WORD, VIS_WORD, CLAIM_WORD, ANALYSE_KINDS, KIT_KINDS, sleep, vnum, vtotal, approvedOf, validOf, needsImagery };
   let mounted = false;
   window.studioInit = function () {
     const root = document.getElementById('studio-root');

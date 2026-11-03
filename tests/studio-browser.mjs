@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
-import { pngSolid, place, tool, arrange } from './studio-fixture.mjs';
+import { pngSolid, place, tool, arrange, studioAskBridge } from './studio-fixture.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 const PORT = 8776, W = 'https://newsaus.heshan-998.workers.dev';
@@ -93,7 +93,7 @@ const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
 const texts = async (page, sel) => (await page.$$eval(sel, els => els.map(e => e.textContent.trim())));
 const browser = await chromium.launch();
 async function open(role) {
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } }); await studioAskBridge(page);
   page.on('pageerror', e => console.log('  [pageerror] ' + String(e.stack || e.message).split('\n').slice(0, 3).join(' | ').slice(0, 400)));
   await page.addInitScript(({ W, role }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; }, { W, role });
   // the page's worker calls go to the module in this process; other hosts (fonts, charts) are dropped

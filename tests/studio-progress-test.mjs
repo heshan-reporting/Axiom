@@ -61,5 +61,32 @@ eq(sent.requestText, '4 requests sent of the 4 the policy allows; 1 with no answ
 const can = S.job({ id: 'q3', stage: 'render', state: 'cancelled', created: now - 9000, cancel: { requested: now - 100, by: 'Hesh', further: 'none', inFlight: 1, models: ['gemini-3-pro-image'], wasRunning: true } }, now);
 eq(can.cancelText, 'Cancel requested by Hesh. No further request will start. 1 request already sent could not be recalled (gemini-3-pro-image): it may still complete and be billed; nothing from it is filed.', 'a cancel said as its three facts');
 eq(S.job({ id: 'q4', stage: 'copy', state: 'cancelled', created: now, cancel: { requested: now, further: 'none', inFlight: 0, wasRunning: false } }, now).cancelText, 'Cancel requested. No further request will start. Nothing had been sent.', 'a cancel before anything was sent says so');
+// S27: snapshots of one job arrive out of order (a poll every 2.5 s, a step answer, a whole-project reload asked for before a
+// poll). Whatever order they land in, what is shown never goes backwards: the newer snapshot is kept.
+{
+  if (typeof S.fresher !== 'function') { ok(false, 'S27: STProgress.fresher exists (keeps the newer of two snapshots of one job)'); }
+  else {
+    const snap = (completed, at, extra) => Object.assign({ id: 'c1', stage: 'copy', state: 'running', created: now - 60000, attempts: 1, updated: at, progress: { activity: { phase: 'composing', label: 'composing', completed, total: 4, at, startedAt: now - 50000 } } }, extra || {});
+    const s1 = snap(1, now - 30000), s2 = snap(2, now - 20000), s3 = snap(3, now - 10000);
+    const done = snap(4, now - 5000, { state: 'done', progress: { activity: { phase: 'done', completed: 4, total: 4, at: now - 5000, endedAt: now - 5000 } } });
+    // every order of four arrivals: the shown count only grows, and the last thing shown is the finished job
+    const perms = a => a.length <= 1 ? [a] : a.reduce((acc, x, i) => acc.concat(perms(a.slice(0, i).concat(a.slice(i + 1))).map(p => [x].concat(p))), []);
+    let monotonic = true, endsDone = true;
+    for (const order of perms([s1, s2, s3, done])) { let held = null, last = -1; for (const x of order) { held = S.fresher(held, x); const c = S.job(held, now).completed; if (c < last) monotonic = false; last = c; } if (held.state !== 'done') endsDone = false; }
+    ok(monotonic, 'out-of-order snapshots: across all 24 arrival orders the count shown never goes backwards');
+    ok(endsDone, 'and whatever the order, the finished state is what stays');
+    eq(S.fresher(s3, s1).progress.activity.completed, 3, 'a delayed older poll answer does not replace a newer one');
+    eq(S.fresher(s1, s3).progress.activity.completed, 3, 'a newer answer replaces an older one');
+    // an earlier attempt (before a retry) never wins over the attempt now running, even with a later clock reading
+    const retry = snap(0, now - 25000, { attempts: 2 }); eq(S.fresher(retry, snap(3, now - 1000, { attempts: 1 })).attempts, 2, 'an older attempt does not replace the attempt now running');
+    // a tie on the stamp: a finished state is kept over a running one
+    eq(S.fresher(snap(4, now, { state: 'done' }), snap(3, now)).state, 'done', 'on a tie, finished wins over running');
+    // a partial snapshot (no progress at all, as a list row may carry) does not wipe a richer newer one
+    eq(S.fresher(s3, { id: 'c1', stage: 'copy', state: 'running', attempts: 1, updated: now - 40000 }).progress.activity.completed, 3, 'a partial older row does not wipe the progress');
+    // a whole list: each job keeps its newer snapshot, a new job is added, order follows the incoming list
+    const merged = S.mergeJobs([s3, { id: 'z', state: 'done', updated: now }], [s1, { id: 'n', state: 'queued', updated: now }, { id: 'z', state: 'done', updated: now }]);
+    eq(merged.map(j => j.id + ':' + (j.progress ? j.progress.activity.completed : j.state)), ['c1:3', 'n:queued', 'z:done'], 'a reload laid over the list keeps each job\'s newer snapshot');
+  }
+}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

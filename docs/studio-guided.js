@@ -89,9 +89,10 @@
   }
   /** The question a change to an earlier choice asks before anything is written: update the work built on it, keep it, or cancel. */
   function ImpactDialog({ q, onAnswer }) {
+    const dref = useRef(null); K.useDialogFocus(dref, () => onAnswer(null));
     if (!q) return null; const im = q.impact || {};
     // a change of direction (3 November 2026): the pieces written from the earlier one are named, and the choice is rewrite or keep
-    if (im.kind === 'direction') return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This direction change affects written pieces"><div class="st-dialog-box narrow st-impact" data-kind="direction">
+    if (im.kind === 'direction') return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This direction change affects written pieces" ref=${dref}><div class="st-dialog-box narrow st-impact" data-kind="direction">
       <span class="st-impact-ic" aria-hidden="true"><${Icon} n="alert" size=${22} /></span>
       <div class="ov-title">${q.title || 'Choosing "' + im.to + '" changes the direction your copy was written from'}</div>
       <div class="st-pad">${im.assets} piece${im.assets === 1 ? ' was' : 's were'} written from ${im.from ? '"' + im.from + '"' : 'another direction'}${im.approvals ? ' (' + im.approvals + ' with an approval)' : ''}: ${(im.items || []).slice(0, 6).map(x => x.title).join(', ')}${(im.items || []).length > 6 ? ' and ' + ((im.items || []).length - 6) + ' more' : ''}. Nothing is deleted either way.</div>
@@ -101,7 +102,7 @@
       <div class="st-dialog-acts"><button class="btn sm" onClick=${() => onAnswer('update')}>Choose it; rewrite later</button><button class="btn sm ghost" onClick=${() => onAnswer('keep')}>Choose it; keep them as written</button><button class="btn sm ghost" onClick=${() => onAnswer(null)}>Cancel</button></div>
     </div></div>`;
     const what = [im.directions ? im.directions + ' creative direction' + (im.directions === 1 ? '' : 's') + (im.chosen ? ' (one chosen)' : '') : '', im.assets ? im.assets + ' piece' + (im.assets === 1 ? '' : 's') + ' of copy and design' + (im.approvals ? ', ' + im.approvals + ' with an approval' : '') : ''].filter(Boolean).join(' and ');
-    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This change affects later work"><div class="st-dialog-box narrow st-impact">
+    return html`<div class="st-dialog" role="dialog" aria-modal="true" aria-label="This change affects later work" ref=${dref}><div class="st-dialog-box narrow st-impact">
       <span class="st-impact-ic" aria-hidden="true"><${Icon} n="alert" size=${22} /></span>
       <div class="ov-title">${q.title || 'Changing this may affect your current Creative Directions'}</div>
       <div class="st-pad">${what ? 'Built on the current choice: ' + what + '. ' : ''}Nothing is deleted either way.</div>
@@ -399,7 +400,7 @@
     const layout = useMemo(() => dirPreview(d, kit, i), [d.id, d.headline, d.hook, d.title, d.medium, JSON.stringify(d.sketch || null), kit]);
     const v = { id: 'preview-' + d.id, layout, copy: {}, mode: 'composition' };
     const vn = d.visualNarrative || {};
-    return html`<article class=${'st-dcard' + (d.chosen ? ' chosen' : '') + (picked ? ' picked' : '') + (earlier ? ' earlier' : '') + (d.saved ? ' saved' : '')} style=${{ '--i': i }} aria-label=${'Direction ' + d.title}>
+    return html`<article role="listitem" class=${'st-dcard' + (d.chosen ? ' chosen' : '') + (picked ? ' picked' : '') + (earlier ? ' earlier' : '') + (d.saved ? ' saved' : '')} style=${{ '--i': i }} aria-label=${'Direction ' + d.title}>
       <div class="st-dcard-art"><${Composition} v=${v} a=${{ id: d.id, format: '4:5', channel: 'instagram' }} ns=${p.ns} size="card" /><span class="st-dcard-note" title="Laid out from what the direction says it would draw; image areas are dashed boxes">sketch: ${SKETCH_WORD[dirSketch(d).image] || 'layout'}, words at the ${dirSketch(d).zone}${dirSketch(d).scale !== 'standard' ? ', ' + dirSketch(d).scale + ' type' : ''} - nothing generated</span>
         <span class="st-dcard-badges">${d.chosen ? html`<${Chip} kind="ok">selected</${Chip}>` : null}${d.saved ? html`<${Chip}>saved</${Chip}>` : null}${earlier ? html`<${Chip} kind="warn">earlier choice</${Chip}>` : null}${d.refinedFrom ? html`<${Chip}>refined</${Chip}>` : null}${d.mergedFrom ? html`<${Chip}>merged</${Chip}>` : null}${d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to another</${Chip}>` : null}${d.lookalike ? html`<${Chip} kind="warn" title=${'would look like "' + d.lookalike + '" on the page'}>looks like another</${Chip}>` : null}</span></div>
       <div class="st-dcard-body">
@@ -442,7 +443,7 @@
     const live = job && (job.state === 'queued' || job.state === 'running');
     const st = (wf && wf.steps && wf.steps.directions) || {};
     const togg = d => setPick(pick.indexOf(d.id) >= 0 ? pick.filter(x => x !== d.id) : pick.concat([d.id]));
-    const archive = d => { const why = window.prompt('Why set "' + d.title + '" aside? (recorded; the engine learns from it)', ''); if (why == null) return; if (why.trim().length < 4) { toastMsg('Nothing recorded: a reason of a few words is needed', true); return; } onUpdate(d, { archived: true }, why.trim()); };
+    const archive = async d => { const why = await K.ask({ reason: true, min: 4, title: 'Set "' + d.title + '" aside?', text: 'Why? Recorded with the decision; the engine learns from it. The direction is kept and can be brought back.', ok: 'Set it aside' }); if (why == null || why.trim().length < 4) return; onUpdate(d, { archived: true }, why.trim()); };
     const card = (d, i, earlier) => html`<${DirCard} key=${d.id} d=${d} i=${i} p=${p} kit=${kit} ro=${ro} busy=${busy} earlier=${earlier} picked=${pick.indexOf(d.id) >= 0} onPick=${togg} onChoose=${onChoose} onRefine=${(x, ins) => onDirect({ mode: 'refine', ids: [x.id], instruction: ins })} onUpdate=${onUpdate} onDuplicate=${onDuplicate} onArchive=${archive} onKeep=${onKeep} />`;
     const partList = Object.keys(parts).filter(k => parts[k]).map(k => ({ id: k.split(':')[0], part: k.split(':')[1] }));
     return html`<div class="st-dboard">
@@ -452,7 +453,7 @@
         return html`<div class="st-divline" role="note"><span><span class="st-lbl">Argument diversity</span> ${ev.argument != null ? ev.argument : ev.diversity}</span>${ev.composition != null ? html`<span><span class="st-lbl">Composition diversity</span> ${ev.composition}</span>` : html`<span class="ov-dim">composition not measured for this set (made before S20)</span>`}<span class="ov-dim">1 = nothing in common. Composition is read from what each direction says it would draw, not from rendered images.</span>${(ev.lookalikes || []).length ? html`<span class="st-divwarn">Would look alike on the page: ${ev.lookalikes.map(x => '"' + x.a + '" and "' + x.b + '" (' + (x.same || []).join(', ') + ')').join('; ')}</span>` : null}</div>`; })()}
       ${/* S23: one coherent set of cards - each with its own sketch and words - and no strip of the same previews above them */ ''}
       ${cur.length ? html`<div class=${'st-dgrid st-dgrid-n' + Math.min(cur.length, 4)} role="list" aria-label="Creative directions">${cur.map((d, i) => card(d, i, false))}</div>` : null}
-      ${saved.length ? html`<div class="st-dgroup"><span class="st-lbl">Saved for later (${saved.length})</span><div class="st-dgrid">${saved.map((d, i) => card(d, i, false))}</div></div>` : null}
+      ${saved.length ? html`<div class="st-dgroup"><span class="st-lbl">Saved for later (${saved.length})</span><div class="st-dgrid" role="list" aria-label="Directions saved for later">${saved.map((d, i) => card(d, i, false))}</div></div>` : null}
       ${old.length ? html`<div class="st-dgroup"><button class="st-tools-toggle" aria-expanded=${showOld} onClick=${() => setShowOld(!showOld)}><span class="st-lbl">Built on an earlier choice (${old.length})</span><span aria-hidden="true">${showOld ? '-' : '+'}</span></button>${showOld ? html`<div class="st-dgrid">${old.map((d, i) => card(d, i, true))}</div>` : null}</div>` : null}
       ${aside.length ? html`<div class="st-dgroup"><button class="st-tools-toggle" aria-expanded=${showAside} onClick=${() => setShowAside(!showAside)}><span class="st-lbl">Set aside (${aside.length})</span><span aria-hidden="true">${showAside ? '-' : '+'}</span></button>${showAside ? html`<ul class="st-ul">${aside.map(d => html`<li key=${d.id}><b>${d.title}</b> <span class="ov-dim">${d.idea || d.message}</span>${!ro ? html` <button class="ov-link" onClick=${() => onUpdate(d, { archived: false })}>restore</button>` : null}</li>`)}</ul>` : null}</div>` : null}
       ${picked.length >= 2 ? html`<section class="st-dcompare" aria-label="Picked directions"><div class="st-dcompare-h"><b>Comparing ${picked.length} directions</b><span class="ov-dim">compare them, merge them, or combine named parts of each into one direction</span></div>

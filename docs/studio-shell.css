@@ -716,4 +716,8 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvas-sub > .st-comp-info{flex:1 1 100%;order:3}
 #studio-root .st .st-canvas-sub > .st-canvas-subr{align-self:center}
 #studio-root .st .st-canvas-sub > .st-canvas-subr:empty{display:none}
-
+/* S27: the Studio's own question (AskDialog) where the browser's confirm and prompt were */
+#studio-root .st .st-ask .st-ask-text p{margin:0 0 8px}
+#studio-root .st .st-ask .st-ask-cost{margin:0 0 12px}
+#studio-root .st .st-ask .st-ask-min{min-height:16px;margin-top:4px}
+#studio-root .st .st-ask .st-ta{width:100%}

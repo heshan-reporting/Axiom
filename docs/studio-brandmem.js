@@ -83,7 +83,8 @@
     const camp = (campaigns || []).find(c => c.id === r.campaign);
     const active = obs.filter(o => o.status === 'active'), promoted = obs.filter(o => o.status === 'promoted'), retired = obs.filter(o => o.status === 'retired');
     const act = async (o, body) => { const ok = await onObs(r.id, Object.assign({ obs: o ? o.id : undefined }, body)); if (ok && ok.choice) { setChoice({ o, body, c: ok.choice, why: body.why || '' }); return false; } if (ok) { setEdit(null); setText(''); setWhy(''); setChoice(null); } return ok; };
-    const ask = (q, d) => { const v = window.prompt(q, d || ''); return v == null ? null : v.trim(); };
+    // S27: the Studio's own reason dialog (focus kept, Escape cancels) in place of the browser's prompt()
+    const ask = (q, d) => K.ask({ reason: true, title: 'A reason, please', text: q, initial: d || '', ok: 'Record' });
     const startTeach = async o => {
       if (!r.campaign) { setTeach({ o, error: 'This reference carries no campaign of its own: set its campaign in the record first, so the rule is taught to the right identity.' }); return; }
       const res = await onTeach({ campaign: r.campaign, kind: 'rule', proposal: { observation: { ref: r.id, obs: o.id } } });
@@ -101,13 +102,13 @@
       ${ro ? null : html`<span class="st-obs-acts">${o.status === 'active' ? (edit === o.id
         ? html`<button class="ov-link" disabled=${!!busy || !text.trim()} onClick=${() => act(o, { action: 'correct', text: text.trim(), why: why.trim() })}>save</button> <button class="ov-link" onClick=${() => setEdit(null)}>cancel</button>`
         : html`<button class="ov-link" onClick=${() => { setEdit(o.id); setText(o.text); setWhy(''); }}>correct</button>
-          ${o.authority === 'inferred' ? html` <button class="ov-link" disabled=${!!busy} title="Confirm what the vision pass concluded: it becomes an observation, and may then be taught as a rule" onClick=${() => { const w = ask('Who confirmed it, and where? (an inference is confirmed only with a reason)'); if (w) act(o, { action: 'authority', authority: 'observed', why: w }); }}>confirm</button>` : null}
-          <button class="ov-link" disabled=${!!busy} onClick=${() => { const w = ask('Why is it set aside? (kept, and restorable)'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>
+          ${o.authority === 'inferred' ? html` <button class="ov-link" disabled=${!!busy} title="Confirm what the vision pass concluded: it becomes an observation, and may then be taught as a rule" onClick=${async () => { const w = await ask('Who confirmed it, and where? (an inference is confirmed only with a reason)'); if (w) act(o, { action: 'authority', authority: 'observed', why: w }); }}>confirm</button>` : null}
+          <button class="ov-link" disabled=${!!busy} onClick=${async () => { const w = await ask('Why is it set aside? (kept, and restorable)'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>
           ${r.purpose === 'approved' || r.purpose === 'brand' ? html` <button class="ov-link" disabled=${!!busy} title="Teach it as a standing rule of this reference's campaign: a preview first, then your reason" onClick=${() => startTeach(o)}>make it a rule</button>` : null}`)
         : o.status === 'promoted' ? (edit === o.id
           ? html`<button class="ov-link" disabled=${!!busy || !text.trim() || !why.trim()} title="Replaces the rule: the corrected wording becomes the rule; the old one is switched off and kept" onClick=${() => act(o, { action: 'correct', text: text.trim(), why: why.trim(), rule: 'supersede' })}>replace the rule</button> <button class="ov-link" onClick=${() => setEdit(null)}>cancel</button>`
           : html`<button class="ov-link" title="This is a rule's evidence: correcting it replaces the rule (you will be asked why)" onClick=${() => { setEdit(o.id); setText(o.text); setWhy(''); }}>correct</button>
-            <button class="ov-link" disabled=${!!busy} onClick=${() => { const w = ask('Why is it set aside? You will then choose what happens to its rule.'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>`)
+            <button class="ov-link" disabled=${!!busy} onClick=${async () => { const w = await ask('Why is it set aside? You will then choose what happens to its rule.'); if (w != null) act(o, { action: 'retire', why: w }); }}>retire</button>`)
         : o.status === 'retired' ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => act(o, { action: 'restore' })}>restore</button>` : null}</span>`}
     </li>`;
     return html`<div class="st-obs-wrap" aria-label=${'Observations on ' + r.name}>

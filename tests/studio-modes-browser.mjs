@@ -13,6 +13,9 @@ const R = '#studio-root ';
 const T = runner('studio-modes-browser (Editable Studio and Gemini Finished Creative in the page; providers MOCKED)');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const latest = async ns => env.MIND_DB.db.prepare('SELECT id, title FROM studio_projects WHERE ns=? ORDER BY created DESC, rowid DESC LIMIT 1').get(ns);
+// S27: a paid action now asks in the Studio's own dialog, answered a moment after the click (the browser's confirm() blocked
+// the click itself): wait for the job the answer queues before waiting for the jobs to settle
+async function jobsAfter(pid, n0, ms = 15000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if ((d.jobs || []).length > n0 || Date.now() - t0 > ms) return d; await new Promise(r => setTimeout(r, 100)); } }
 async function settle(pid, ms = 90000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle: ' + JSON.stringify((d.jobs || []).map(j => j.stage + ':' + j.state))); await sleep(300); } }
 
 let page, pid, aid;
@@ -70,9 +73,9 @@ await T.t('Regenerate opens a form for the painted words and a direction, states
   await page.click(R + '.st-finished .btn:has-text("Regenerate (1 render)")'); await page.waitForSelector(R + '.st-regen');
   ok(await page.$(R + '.st-regen #st-rg-headline'), 'the painted headline is offered for regeneration');
   await page.fill(R + '.st-regen #st-rg-ins', 'warmer light');
-  const g0 = fx.calls.gemini;
+  const g0 = fx.calls.gemini; const j0 = (await api('GET', '/studio/get?id=' + pid)).jobs.length;
   await page.click(R + '.st-regen .btn:has-text("Regenerate now")');
-  const d = await settle(pid); ok(fx.calls.gemini > g0, 'one image generation ran'); const a = d.assets.find(x => x.id === aid); const v = a.versions[a.versions.length - 1];
+  await jobsAfter(pid, j0); const d = await settle(pid); ok(fx.calls.gemini > g0, 'one image generation ran'); const a = d.assets.find(x => x.id === aid); const v = a.versions[a.versions.length - 1];
   eq(v.mode, 'finished'); eq(v.layout.layers, []); ok(/regenerated/.test(v.note), v.note);
   ok(d.thread.some(e => e.kind === 'regenerate' && /Regenerating/.test(e.text)), 'the thread records the regeneration');
   // switch to editable

@@ -4,6 +4,7 @@
  * comment pinned to a point on the tile, a request for changes and an approval of that exact version; the agency sees
  * the pins, marks a comment addressed by the version that changed it, and withdraws the link.
  * Run: node --experimental-sqlite tests/studio-review-browser.mjs   (SHOT=1 writes screenshots) */
+import { studioAskBridge } from './studio-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { chromium, DOCS } from './pw.mjs';
 import { D1Lite } from './d1lite.mjs';
@@ -101,7 +102,7 @@ await t('in the Studio the agency sees the link and the pinned comment, makes th
   const g = await api('GET', '/studio/get?id=' + P); const a = g.assets.find(x => x.id === A); const v = a.versions.find(x => x.id === a.current);
   await api('POST', '/studio/version', { asset: A, copy: Object.assign({}, v.copy, { headline: 'Not a subsidy. Never was.' }), layout: Object.assign({}, v.layout, { layers: v.layout.layers.map(l => Object.assign({}, l, { size: 7 })) }), note: 'headline enlarged for the client' });
   await validate();
-  studio = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  studio = await browser.newPage({ viewport: { width: 1600, height: 1100 } }); await studioAskBridge(studio);
   studio.on('pageerror', e => console.log('  [pageerror studio] ' + e.message));
   await studio.addInitScript(({ W }) => { localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', 'full-key'); }, { W });
   await routeWorker(studio);

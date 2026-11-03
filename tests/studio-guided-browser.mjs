@@ -17,6 +17,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SHOTS = new URL('./shots/', import.meta.url).pathname; fs.mkdirSync(SHOTS, { recursive: true });
 const shot = async (pg, name) => { if (process.env.SHOT) await pg.screenshot({ path: SHOTS + 'guided-' + name + '.png' }); };
 const latest = async ns => env.MIND_DB.db.prepare('SELECT id FROM studio_projects WHERE ns=? ORDER BY created DESC, rowid DESC LIMIT 1').get(ns);
+// S27: a paid action now asks in the Studio's own dialog, answered a moment after the click (the browser's confirm() blocked
+// the click itself): wait for the job the answer queues before waiting for the jobs to settle
+async function jobsAfter(pid, n0, ms = 15000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if ((d.jobs || []).length > n0 || Date.now() - t0 > ms) return d; await new Promise(r => setTimeout(r, 100)); } }
 async function settle(pid, ms = 90000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle'); await sleep(250); } }
 const goStep = (pg, name) => pg.click(step(name));
 const cur = a => a.versions.find(v => v.id === a.current);
@@ -83,9 +86,10 @@ await T.t('Design: the production mode is chosen once the words are ready, its c
   await page.click(R + '.st-pmode:has-text("Editable creative")');
   const g0 = calls.gemini; let asked = '';
   page.removeAllListeners('dialog'); page.on('dialog', dl => { asked = dl.message(); dl.accept(); });
+  const j0 = (await api('GET', '/studio/get?id=' + pid)).jobs.length;
   await page.click(R + '.st-pmodes .st-stepbar button:has-text("Generate 1 piece")');
-  const d = await settle(pid);
-  ok(/One paid render per planned image/.test(asked), 'the cost was stated first: ' + asked);
+  await jobsAfter(pid, j0); const d = await settle(pid);
+  ok(/one paid render per planned image/i.test(asked), 'the cost was stated first: ' + asked);
   eq(calls.gemini - g0, 1, 'one image call');
   ok(cur(d.assets[0]).image && cur(d.assets[0]).image.key, 'the imagery landed on the composition');
   eq((d.brief.production || {}).mode, 'editable', 'the mode is recorded on the project');

@@ -65,6 +65,36 @@ export function sseAnswer(text, totalMs, model, signal) {
   }, cancel() { stopped = true; } }), { status: 200, headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
 }
 /* ------------------------------------------------------------ the fixture */
+/* S27: the Studio asks its own questions (AskDialog, .st-ask) where it used window.confirm and window.prompt. A harness's dialog
+     listeners answer them as before: each question is handed to page.on('dialog') listeners as a dialog-shaped object (type,
+     message, defaultValue, accept(text), dismiss()), and with no listener it is dismissed, as Playwright dismisses a browser
+     dialog. The answer is given by pressing the dialog's own buttons (and typing the reason), so the page's path is the real one.
+   A harness that opens its own pages (studio-browser, studio-review-browser) calls this for each. */
+export async function studioAskBridge(page) {
+  await page.exposeBinding('__fxStudioAsk', async (src, q) => new Promise(resolve => {
+    let settled = false; const done = v => { if (!settled) { settled = true; if (process.env.FX_DEBUG) console.log('  [fx ask] ' + q.type + ' answered ' + JSON.stringify(v) + ': ' + String(q.message).split('\n')[0].slice(0, 80)); resolve(v); } };
+    if (process.env.FX_DEBUG) console.log('  [fx ask] ' + q.type + ' asked; listeners ' + page.listenerCount('dialog') + ': ' + String(q.message).split('\n')[0].slice(0, 80));
+    const d = { type: () => q.type, message: () => q.message, defaultValue: () => q.defaultValue || '', accept: async v => done({ ok: true, value: v == null ? null : String(v) }), dismiss: async () => done({ ok: false }), page: () => page, studio: true };
+    if (page.listenerCount('dialog')) page.emit('dialog', d); else done({ ok: false });
+  }));
+  await page.addInitScript(() => {
+    const seen = new WeakSet();
+    const handle = async el => {
+      if (seen.has(el)) return; seen.add(el);
+      const type = el.getAttribute('data-kind') === 'prompt' ? 'prompt' : 'confirm';
+      const message = [el.querySelector('.ov-title'), el.querySelector('.st-ask-text'), el.querySelector('.st-ask-cost')].map(x => (x ? x.textContent.trim() : '')).filter(Boolean).join('\n');
+      const ta = el.querySelector('textarea');
+      const r = await window.__fxStudioAsk({ type, message, defaultValue: ta ? ta.value : '' });
+      if (!el.isConnected) return;
+      if (r && r.ok) {
+        if (ta) { const v = r.value != null && r.value !== '' ? r.value : (ta.value || 'a reason given by the test'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, v); ta.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(res => setTimeout(res, 40)); }
+        const b = el.querySelector('.st-ask-ok'); if (b) b.click();
+      } else { const c = el.querySelector('.st-ask-cancel'); if (c) c.click(); }
+    };
+    new MutationObserver(() => document.querySelectorAll('.st-ask').forEach(handle)).observe(document, { childList: true, subtree: true });
+  });
+}
+
 export async function makeStudio(opts) {
   opts = opts || {};
   const PORT = opts.port || 8790;
@@ -156,6 +186,7 @@ export async function makeStudio(opts) {
       return route.fulfill({ status: res.status, headers: hh, body: Buffer.from(await res.arrayBuffer()) });
     });
     if (o.init) await page.addInitScript(o.init);   // S23: a script the page runs before its own (a stubbed browser API)
+    await studioAskBridge(page);   // S27: the Studio's own questions reach this page's dialog listeners
     await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof go === 'function' && window.AXUI && window.STRender && typeof studioInit === 'function');
     if (o.go !== false) { await page.evaluate(() => go('studio')); await page.waitForSelector('#studio-root .st-head'); }

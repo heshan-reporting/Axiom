@@ -68,5 +68,19 @@
     const text = Object.keys(stages).map(s => stages[s] + ' ' + (names[s] || s).toLowerCase()).join(', ');
     return { total, done, failed, cancelled, active: live.length, percent: percent(done + cancelled, total), stages, text: done + ' of ' + total + ' steps finished (' + text + ')' + (failed ? '; ' + failed + ' failed' : '') };
   }
-  root.STProgress = { names, job, active, percent, jobsForDisplay, run, typical, fmt, thou };
+  /** S27: two snapshots of one job, from answers that can arrive out of order (a poll every 2.5 s, a step answer, a whole-project
+      reload that was asked for before a poll): keep the newer, so a count, a phase or a finished state never goes backwards. The
+      worker stamps `updated` on every progress write and state change, and counts attempts up; an older attempt never wins, a
+      later stamp wins, and on a tie a finished state wins over a running one. */
+  const stampOf = j => { const a = (j && j.progress && j.progress.activity) || {}; return Math.max(Number(j && j.updated) || 0, Number(a.at) || 0, Number(a.endedAt) || 0); };
+  function fresher(a, b) {
+    if (!a) return b; if (!b) return a;
+    const na = Number(a.attempts) || 0, nb = Number(b.attempts) || 0; if (na !== nb) return nb > na ? b : a;
+    const ta = stampOf(a), tb = stampOf(b); if (ta !== tb) return tb > ta ? b : a;
+    if (!active(a) && active(b)) return a;
+    return b;
+  }
+  /** A list of jobs answered by the worker, laid over the list already shown: each job keeps whichever snapshot is newer. */
+  function mergeJobs(held, incoming) { const by = {}; (held || []).forEach(j => { if (j && j.id) by[j.id] = j; }); return (incoming || []).map(j => { const h = j && by[j.id]; return h && fresher(h, j) === h ? h : j; }); }
+  root.STProgress = { names, job, active, percent, jobsForDisplay, run, typical, fmt, thou, fresher, mergeJobs };
 })(typeof window !== 'undefined' ? window : globalThis);

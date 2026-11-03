@@ -3164,3 +3164,50 @@ what it cannot is said plainly.
 - CI, `a34d185`: checks and backend 70 of 70, with `workerd-deploy-test` 3 of 3 on the GitHub runner. The browser job (Chromium,
   Firefox and WebKit) is recorded in the session report.
 - Nothing here ran against a live model, image provider or Cloudflare account; nothing is claimed bug-free.
+
+## 50. S27 - a production audit of the Studio (page `?v=r25`; the worker unchanged at `2026-11-04.studio-p42`)
+
+An audit of the Creative Studio as it stood at `94210a3` (branch `claude/peaceful-gates-g1t4ss`, working tree clean; `origin/main`
+at `908a03d`, seven commits behind it), done in this cloud session's checkout - the owner's Mac checkout was not reachable from
+here. Providers MOCKED throughout; nothing was committed, pushed, merged or deployed.
+
+### 50.1 Baseline (before any change)
+
+- Tests at `94210a3`: `node tests/run.mjs check` 24 of 24; `backend` 70 of 70; `browser` 53 of 53 in Chromium; the S26 cross-engine
+  harness 1 of 1 in Chromium. Firefox and WebKit cannot be installed in this sandbox (its network policy refuses Playwright's
+  browser downloads): unavailable here, never counted. CI run 136 (`94210a3`, this baseline) passed checks, backend 70 of 70 and
+  browser 54 of 54, with `studio-xbrowser-browser` and `studio-s26-xbrowser-browser` 3 of 3 each - Chromium, Firefox and WebKit.
+- Screenshots: `tests/studio-s24-shots.mjs` into `tests/shots/s27/before-*.png` (16 states x 5 sizes: 1440 x 900, 1920 x 1080,
+  1024 x 768, 834 x 1194, 390 x 844), ignored by git.
+- Sweep (`tests/studio-s27-sweep.mjs before`, an evidence tool, not a harness): the library, Brief, Explore, Copy, Design, Review
+  and Brand at 390, 834, 1024, 1366, 1440 and 1920 px, with a full key and a read-only key. No sideways page scroll anywhere. axe
+  serious or critical: Explore `aria-required-children` (critical, the directions grid) and `role-img-alt` x3 (serious, the
+  direction sketches); Copy `aria-progressbar-name` (serious, the activity panel). The existing axe harness (S23 J-B6) never
+  visited Explore or Copy.
+- Performance (the perf harnesses' last run on this code, `tests/shots/s27/perf-before/`): cold open median 420 ms; 50-layer drag
+  frame p95 16.8 ms, no long task; pointer-to-frame p95 17.1 to 18.4 ms.
+
+### 50.2 Findings ledger
+
+| # | Sev | Surface | Reproduction | Root cause | Fix | Regression test | Limit |
+|---|---|---|---|---|---|---|---|
+| F27-1 | P2 | every job's progress (activity panel, processing card) | a job at 3 of 4; a poll answer that left the worker earlier (1 of 4) arrives after it | the 2.5 s poller laid every answer over the job (`Object.assign`) and a whole-project reload replaced `p.jobs` wholesale (`docs/studio.js`, the poll effect and `reload`), so a delayed or reordered answer moved counts, phases and even a finished state backwards - the intermittent "count" the ledger recorded in S22/S25 | `STProgress.fresher` / `mergeJobs` (`docs/studio-progress.js`): an older attempt never wins, then the later `updated` / activity stamp, a finished state on a tie; the poller and `reload` keep the newer snapshot of each job | `studio-progress-test` (+8: all 24 arrival orders of four snapshots never go backwards and end finished; a partial row never wipes progress), `studio-s27-browser` P1 (the page keeps 75% against an older poll) | ordering trusts the worker's own stamps, which every progress write and state change sets |
+| F27-2 | P2 | every error notice | `explain({code:'workflow_locked',status:409})`; a 403 `cross_project`; a 404 `unknown_asset` with no detail | `explain()` matched `/locked/` (a step gate told people to "unlock the field"), called every 403 a read-only key, and showed a bare code as the explanation | the gate says which step is not open and what it needs; `cross_project` and `human_only` say what they are; `TITLES` names nineteen refusals the worker explains in its detail; `humanCode` puts a bare code into words | `studio-explain-test` (11; every Studio error code in the worker run through `explain()`: no bare code shown, no refusal misnamed; 7 fail on `94210a3`) | the code list is read from the worker's source by pattern; a code built at run time is not seen |
+| F27-3 | P2 (a11y) | the Studio's dialogs: direction change, earlier choice, conflict, reason, ClickUp, client panel, item history | open the direction-change dialog with the keyboard; press Tab, then Escape | they said `aria-modal` but left the focus behind them; Tab walked the page underneath; Escape did nothing; the focus was not returned | `useDialogFocus` (focus in, Tab kept inside, Escape as Cancel, focus returned) on every dialog, `FocusDialog` for the inline one | `studio-s27-browser` P2 | the shortcuts sheet keeps its own handling (it already took the focus) |
+| F27-4 | P2 | 24 questions in `docs/studio.js`, 1 in `studio-guided.js`, 3 in `studio-brandmem.js` | generate imagery, run a recipe, regenerate, produce variants, set a direction aside, approve a text, retire an observation | the browser's own `confirm()` / `prompt()`: unstyled, no cost said as such, a reason prompt that refused a short answer only after it was typed (a toast), the focus outside the Studio, while the Studio already had its own dialog pattern (`ReasonDialog`, `ImpactDialog`) | `askStudio` / `AskDialog` / `AskHost` (`STKit.ask`): the question, the cost as a chip, a reason held to its minimum in view, Escape as Cancel, one at a time; every call site moved to it. `tests/studio-fixture.mjs` hands each Studio question to a harness's `page.on('dialog')` listeners as a dialog-shaped object and answers by pressing the dialog's own buttons, so the existing harnesses keep their meaning | `studio-s27-browser` P3 (a recipe that renders asks in the Studio with "about N images and M calls"; Escape queues nothing), P4 (the reason's minimum in view), and the whole browser suite through the bridge | the `beforeunload` warning is the browser's by necessity. Three harnesses needed a change, each kept to its meaning: `studio-browser` and `studio-review-browser` open their own pages and now install the bridge (`studioAskBridge(page)`); `studio-guided-browser` and `studio-modes-browser` wait for the job the answer queues (the answer comes a moment after the click, where `confirm()` blocked it), and the guided one reads the cost from the chip (the bridge's message is title, text and cost) |
+| F27-5 | P2 (a11y) | Explore, Copy | axe on Explore and Copy | the directions grid said `role="list"` over `<article>` cards; a direction sketch was `role="img"` with an empty name; the activity panel's progress bars had no name | the cards are `role="listitem"` (the saved-for-later grid is a list too); a composition's name falls back to its title and "preview"; both progress bars are labelled | `studio-s27-browser` P5 | axe proves only what it checks |
+
+Hypotheses checked and **not** reproduced: clicking an open inspector tab folds the panel (it only switches tabs; the S26 test had
+been clicking a different button); a sideways page scroll at some width (none, 390 to 1920, either role); a page error in any
+swept view (none).
+
+Checked and left as they were, each held by its own harness: HOOF carries its wordmark and never the MCA logo, MCA its mark
+(`studio-s21-*`, `studio-s25-worker`); a measurement or a model verdict never approves (`studio-s24-*`, `studio-smoke-test`, the
+worker's `human_only` gate); advice made for another version is not applied to newer artwork (`studio-s20-browser` A3); a failed
+render keeps the last usable version (`studio-s19-*`, `studio-s24-worker`); offline is said only when the worker cannot be reached
+(`studio-s23j-browser` J-B2b); every acting route refuses a read key (`auth-policy-worker`); edits survive saves, conflicts,
+switches and reloads (`studio-s19/s20-browser`, `studio-merge-test`).
+
+Deferred, with the reason: the repeated `.st-canvas-sub .st-comp-info` overrides across `studio-shell.css` (four blocks) and
+`studio-polish.css` (P3, no visible defect; S26 changed this area and a consolidation should land with a pixel comparison of its
+own); an exhaustive guided-versus-classic parity audit beyond the direction change (S26) and the dialogs here.

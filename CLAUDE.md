@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r24` since S26 (4 November 2026).
+  with `?v=r25` since S27 (4 November 2026).
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2779,6 +2779,17 @@ deploy verifier against it over HTTP, plus the S26 routes on workerd's D1; it sa
 `studio-s26-worker.mjs` (4), `studio-s26-browser.mjs` (4), `studio-s26-xbrowser-browser.mjs` (the classic direction dialog, a
 dismissal and the artboard in Chromium, Firefox and WebKit; an engine not installed is skipped, never passed),
 `deploy-verify-test.mjs` (7), `workerd-deploy-test.mjs` (3).
+
+**The S27 audit (page `?v=r25`, worker unchanged; `CREATIVE-STUDIO.md` s.50).** The Studio asks its own questions:
+`STKit.ask` (`askStudio({title, text, ok, cancel, cost, paid, reason, min, initial})`, `AskDialog` in `AskHost`) in place of
+`window.confirm` / `window.prompt` - do not add a browser dialog. Every Studio dialog uses `useDialogFocus` (focus in, Tab kept
+inside, Escape as Cancel, focus returned). `tests/studio-fixture.mjs` hands each Studio question to a harness's `page.on('dialog')`
+listeners as a dialog-shaped object (`studio: true`) and answers by pressing its buttons; with no listener it is dismissed, as
+Playwright dismisses a browser dialog - so a harness that wants to answer a question by hand registers a listener that ignores
+`d.studio`. Job snapshots are merged by `STProgress.fresher` / `mergeJobs`, so a delayed poll or reload never moves progress
+backwards; `explain()` names refusals by kind (`TITLES`, `humanCode`). Harnesses: `studio-s27-browser.mjs` (6),
+`studio-explain-test.mjs` (11), the S27 cases in `studio-progress-test.mjs`; `tests/studio-s27-sweep.mjs` is an evidence tool
+(overflow and axe across views, widths and roles), not a harness.
 
 Phase 1, the ground:
 
