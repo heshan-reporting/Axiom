@@ -5,6 +5,7 @@
  * a held / drifted / changed verdict on the thread. An edit with nothing to edit, or no instruction, spends nothing.
  * Run: node --experimental-sqlite tests/studio-p17-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -17,7 +18,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0',
 };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = pngB64(4, 4, { fill: 0x5a });   // a whole PNG: the worker checks provider images before filing them (RC S4)
 const sent = [];
 globalThis.fetch = async (url, init) => {
   const u = String(url);

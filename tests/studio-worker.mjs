@@ -5,6 +5,7 @@
  * Run: node --experimental-sqlite tests/studio-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
 import { validateAsset } from './studio-measure-stub.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -19,7 +20,7 @@ const mkEnv = (over) => Object.assign({
 }, over || {});
 const env = mkEnv();
 let gemini = 'ok'; const calls = { gemini: 0, anthropic: 0 };
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.indexOf('generativelanguage') >= 0) {

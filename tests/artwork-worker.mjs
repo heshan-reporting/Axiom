@@ -2,6 +2,7 @@
  * reported, and POST /engine/artwork/describe fills the description in later;
  * the Mind document can go to the creative shelf. Run: node --experimental-sqlite artwork-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map(); const vecNs = [];
@@ -32,7 +33,7 @@ let pass = 0, fail = 0;
 async function t(name, fn) { try { await fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + (e && e.stack || e).toString().split('\n').slice(0, 3).join('\n       ')); } }
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error((m || 'expected') + ': ' + JSON.stringify(a) + ' !== ' + JSON.stringify(b)); };
 const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
-const png = Buffer.from('89504e470d0a1a0a' + '00'.repeat(120), 'hex').toString('base64');
+const png = pngB64(16, 16, { fill: 0x00 });
 
 console.log('artwork-worker harness');
 let id = '';

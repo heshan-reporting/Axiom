@@ -33,6 +33,20 @@
   const CHANNELS = { linkedin: { label: 'LinkedIn', format: '1:1', max: 900 }, facebook: { label: 'Facebook', format: '1:1', max: 900 }, instagram: { label: 'Instagram', format: '4:5', max: 700 }, x: { label: 'X', format: '16:9', max: 280 } };
   const FALLBACK_CLIENTS = [{ id: 'mca', name: 'Minerals Council of Australia', accent: '#c9a227' }, { id: 'aep', name: 'Australian Energy Producers', accent: '#2f7fd6' }, { id: 'pca', name: 'Property Council of Australia', accent: '#3c9a6e' }];
   const clientList = () => (Array.isArray(window.CC_CLIENTS) && window.CC_CLIENTS.length ? window.CC_CLIENTS : FALLBACK_CLIENTS).map(c => ({ id: c.id, name: c.name, accent: c.accent || '#c9a227' }));
+  /* RC (R3): the synthetic test clients the worker names (GET /studio/status testNs; a worker of S28 to p44 has synthdemo
+     without saying so), listed for every key under their own heading and labelled, so a tester can pick one. Nothing a test
+     client's projects decide is filed in a live client's memory. */
+  const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
+  /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
+     deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
+  const PAGE_NEEDS_BUILD = 45;
+  const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
+  const testClientsOf = s => {
+    if (!s || !s.build) return null;
+    const raw = Array.isArray(s.testNs) ? s.testNs : (buildN(s.build) >= 43 ? [{ ns: 'synthdemo', name: '' }] : []);
+    return raw.filter(t => t && /^[a-z0-9_-]{2,40}$/.test(String(t.ns || ''))).map(t => { const nm = String(t.name || '').trim() || t.ns; return { id: t.ns, name: /synthetic/i.test(nm) ? nm : nm + ' - synthetic test client', accent: '#8a94a6', test: true }; });
+  };
+  const mergeClients = (base, tests) => base.concat((tests || []).filter(t => t && t.id && !base.some(c => c.id === t.id)));
   const standing = (a, part) => (a && a.approvals && a.approvals[part]) || null;
   /* the current version is the one the worker names, always sent with the asset however old it is; if it is not there
      the asset has no current version to show (null), never an older version presented as current */
@@ -115,6 +129,8 @@
     if (has(/internal_error/)) return failedHere();
     if (has(/claude_not_configured/)) return out('Claude is not configured on the worker', 'Nothing that writes, plans or inspects can run until an administrator sets ANTHROPIC_API_KEY on the worker. Nothing was spent and your work is unchanged.', 'provider');
     if (has(/gemini_not_configured|GEMINI_KEY/)) return out('Image generation is not configured on the worker', 'No image can be made until an administrator sets GEMINI_KEY. Compositions, copy and layout work without it; choose "No imagery" to produce a complete typographic set.', 'provider');
+    // RC (U9): a person's own daily cap is not the agency's budget
+    if (has(/person_budget_exhausted/)) return out('Your own allowance for today is used up', 'Each person (and each guest link) may send a set number of model calls and image requests a day (STUDIO_PERSON_DAILY_CALLS and _IMAGES; guests STUDIO_GUEST_DAILY_*). It resets at midnight Sydney time. Nothing more was sent; the work so far is kept.');
     if (has(/budget_exhausted/)) return out('Today\'s Studio budget is used up', 'The worker allows a set number of model calls a day (STUDIO_DAILY_CALLS). It resets at midnight Sydney time, or an administrator can raise it. Nothing more was spent.', 'provider');
     if (has(/account_limit|credit balance|spend limit|usage limit|billing/i)) return out('The provider account has hit its spend limit', 'The Anthropic or Google account behind the worker refused the call. An administrator needs to raise the limit; retrying will not help until then.', 'provider');
     if (has(/brief_incomplete/)) return out('The brief is missing something mandatory', msg.replace(/^brief_incomplete:\s*/, '').replace(/\s*\(not retried\)\s*$/, '') + ' Resolve it in the Brief, or tick "Proceed on the stated assumptions".', 'warn');
@@ -471,13 +487,16 @@
   const relLum = c => { const t = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * t[0] + 0.7152 * t[1] + 0.0722 * t[2]; };
   const ratioOf = (a, b) => { const x = relLum(a), y = relLum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
   const THEME_PANEL = [27, 31, 34];   // --sk-panel, #1b1f22
+  const THEME_RAISED = [37, 42, 46];   // --sk-raised, #252a2e
   function studioTheme(kit, campaignId) {
     const ok = h => !!hexRgb(h);
     const camp = ((kit && kit.campaigns) || []).find(c => c && c.id === campaignId);
     const source = camp && ok(camp.accent) ? 'campaign' : kit && kit.palette && ok(kit.palette.primary) ? 'client' : 'neutral';
     const base = source === 'campaign' ? camp.accent : source === 'client' ? kit.palette.primary : '#5dd4e5';
     let c = hexRgb(base); let i = 0;
-    while (ratioOf(c, THEME_PANEL) < 4.5 && i++ < 40) c = c.map(v => v + (255 - v) * 0.08);
+    // RC (U4): links and labels sit on the raised surface too (a step bar, a card), which is lighter than the panel: the accent
+    // reads at 4.5:1 on both
+    while (Math.min(ratioOf(c, THEME_PANEL), ratioOf(c, THEME_RAISED)) < 4.5 && i++ < 40) c = c.map(v => v + (255 - v) * 0.08);
     const black = [8, 12, 16], white = [255, 255, 255];
     const ink = ratioOf(c, black) >= ratioOf(c, white) ? black : white; let j = 0;
     while (ratioOf(c, ink) < 4.5 && j++ < 40) c = ink === black ? c.map(v => v + (255 - v) * 0.06) : c.map(v => v * 0.92);
@@ -1234,6 +1253,8 @@
         <div class="st-an-card"><h3>Campaign</h3>
           ${c.id ? html`<div><b>${c.name}</b> <${Chip} kind=${c.confidence >= 0.7 ? 'ok' : 'warn'}>${Math.round(c.confidence * 100)}% match</${Chip}></div><div class="ov-dim">${c.why}</div>
             ${p.campaign === c.id ? html`<div><${Chip} kind="ok">the project's campaign</${Chip}></div>` : !ro ? html`<button class="btn sm" onClick=${() => onCampaign(c.id)}>Use ${c.name}</button>${p.campaign ? html` <span class="ov-dim">now: ${(camps.find(x => x.id === p.campaign) || {}).name || p.campaign}</span>` : null}` : null}`
+          : c.ambiguous && (c.candidates || []).length ? html`<div class="st-camp-ask" role="group" aria-label="Which campaign"><b>Which campaign is this for?</b> <span class="ov-dim">The reading cannot tell; you decide.</span>
+              <ul class="st-ul">${c.candidates.map(x => html`<li key=${x.id}><b>${x.name}</b> <${Chip} kind="warn">${Math.round(x.confidence * 100)}%</${Chip}> <span class="ov-dim">${x.why}${(x.evidence || []).length ? ' (' + x.evidence.join(', ') + ')' : ''}</span> ${!ro && p.campaign !== x.id ? html`<button class="btn sm ghost" onClick=${() => onCampaign(x.id)}>Use ${x.name}</button>` : null}</li>`)}</ul></div>`
           : html`<div class="ov-dim">No campaign of ${camps.length} matched${c.why ? ': ' + c.why : '.'}</div>`}
         </div>
         <div class="st-an-card"><h3>Proposed brief</h3>
@@ -2583,6 +2604,14 @@
     const pickLayer = ids => { setLayerSel(ids); if (ids.length) { if (tab !== 'director' && Date.now() - quietSelAt > 600) setTab('properties'); setHlIds(ids.slice()); } };
     // S9: the layers an issue names, outlined on the tile while the issue is shown; cleared when the version moves
     const [hlIds, setHlIds] = useState([]); useEffect(() => { setHlIds([]); }, [a.current]);
+    /* RC (U1): up to 1340 px the tool panel overlays the canvas: it takes the focus when it opens (its close button), closes on
+       Escape, and gives the focus back to the dock button that opened it */
+    const libRef = useRef(null); const libFrom = useRef(null);
+    const overlayLib = () => typeof window !== 'undefined' && window.innerWidth <= 1340;
+    useEffect(() => {
+      if (!tool) { const f = libFrom.current; libFrom.current = null; const ae = document.activeElement; if (f && f.isConnected && (!ae || ae === document.body || !ae.isConnected)) { try { f.focus(); } catch (e) {} } return; }
+      if (overlayLib() && libRef.current) { const ae = document.activeElement; if (!libRef.current.contains(ae)) libFrom.current = ae; const b = libRef.current.querySelector('.st-library-head button'); if (b) { try { b.focus(); } catch (e) {} } }
+    }, [tool]);
     // S19: showing an issue on the tile also selects its layers on the canvas, so the fix is one click away (an outline alone is not a selection)
     const toggleHl = ids => { const same = hlIds.length === ids.length && ids.every(x => hlIds.indexOf(x) >= 0); if (!same) stSelectLayers(a.id, ids); setHlIds(same ? [] : ids.slice()); };
     // the words being typed: shown at once on the canvas, saved after a pause as a text version; a key leaves the draft
@@ -2795,7 +2824,7 @@
     const genImagery = async () => { if (await askStudio({ title: 'Generate the imagery for ' + a.title + '?', text: 'From the composition\'s own art direction. The words and marks stay live layers; the current version stays until the image lands.', cost: 'one image generation at ' + ((v.image && v.image.size) || (v.context || {}).size || '2K'), paid: true, ok: 'Generate' })) onRender(a, bgPrompt(), false, (v.context || {}).size); };
     const openTool = k => { setTool(tool === k ? '' : k); };
     // the contextual library: the tool chosen in the dock opens its panel beside the canvas; the page never scrolls to find it
-    const library = tool && !preview ? html`<aside class="st-library" id="st-library" aria-label=${(toolName[tool] || tool) + ' tool'} data-tool=${tool}>
+    const library = tool && !preview ? html`<aside class="st-library" id="st-library" ref=${libRef} aria-label=${(toolName[tool] || tool) + ' tool'} data-tool=${tool} onKeyDown=${e => { if (e.key === 'Escape' && overlayLib() && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); setTool(''); } }}>
       <div class="st-panel-handle right" ...${libHandle} aria-label="Resize the tool panel (arrow keys; double-click resets)" title="Drag to resize; double-click resets"></div>
       <div class="st-library-head"><b>${toolName[tool] || tool}</b><button class="st-iconbtn sm" onClick=${() => setTool('')} aria-label=${'Close the ' + (toolName[tool] || tool) + ' panel'} title="Close"><${Icon} n="x" size=${14} /></button></div>
       <div class="st-library-body">
@@ -2932,7 +2961,7 @@
           </dl>
           <textarea class="st-ta" rows="2" id=${'fix-' + last.eid} defaultValue=${last.fix.instruction} aria-label="The correction to apply"></textarea><div class="ov-dim">Edit the wording before applying if it is not quite right.</div><div><button class=${'btn sm' + (old ? ' ghost' : '')} disabled=${!!busy || applying} onClick=${apply}>${applying ? 'Applying...' : old ? 'Apply the correction to the current version anyway' : 'Apply the correction'}</button>${last.fix.kind === 'render' || last.fix.kind === 'edit' ? html` <span class="ov-dim">spends one render</span>` : null}</div></div>` : null : null}
         ${last.verdict === 'stop' ? html`<div class="ov-dim">Bounded: two corrections have run on this line; the next step is a designer's eye.</div>` : null}
-        <div class="ov-dim st-cd-note">${last.composed ? 'It saw the composed tile as it exports.' : 'It saw the imagery only: the words and marks were not in the picture it judged.'} One read by one model; the scores are its opinion, not a measurement (Checks holds the measurements). Advice, not approval: a person approves in Reviewy; ship is not approval.</div>
+        <div class="ov-dim st-cd-note">${last.composed ? 'It saw the composed tile as it exports.' : 'It saw the imagery only: the words and marks were not in the picture it judged.'} One read by one model; the scores are its opinion, not a measurement (Checks holds the measurements). Advice, not approval: a person approves in Review.</div>
         <details class="st-cd-diag"><summary>Diagnostics</summary><dl class="st-cd-diagdl"><div><dt>Model</dt><dd>${last.model || 'not recorded'}</dd></div><div><dt>Review event</dt><dd><code>${last.eid || last.id || '-'}</code></dd></div><div><dt>Version judged</dt><dd><code>${last.version || '-'}</code>${vn ? ' (v' + vn + ')' : ''}</dd></div>${last.sig ? html`<div><dt>Composition signature</dt><dd><code>${String(last.sig).slice(0, 24)}</code></dd></div>` : null}${last.job ? html`<div><dt>Job</dt><dd><code>${last.job}</code></dd></div>` : null}<div><dt>Reviewed at</dt><dd>${aest(last.at)}</dd></div></dl></details>
       </div>` : last && last.verdict === 'stop' ? html`<div class="ov-dim">${last.text}</div>` : html`<div class="st-cd-empty ov-dim">Not reviewed yet: ${a.title} has no review. One runs after each render, or now on request; it reads the tile exactly as it exports.</div>`}
     </div>`;
@@ -3806,11 +3835,13 @@
 
   /* ------------------------------------------------------------ the app */
   function StudioApp() {
-    const CLIENTS = clientList();
+    const [testCl, setTestCl] = useState(() => { try { const v = JSON.parse(localStorage.getItem('ax_studio_testns') || '[]'); return Array.isArray(v) ? v.filter(t => t && t.id && t.test) : []; } catch (e) { return []; } });
+    const CLIENTS = mergeClients(clientList(), testCl);
     const saved0 = useMemo(() => store.get(), []);
     const [clientId, setClientId] = useState(saved0.client && CLIENTS.some(c => c.id === saved0.client) ? saved0.client : (CLIENTS[0] ? CLIENTS[0].id : 'mca'));
     const [lib, setLib] = useState(null); const [libErr, setLibErr] = useState('');
     const [status, setStatus] = useState(null);
+    useEffect(() => { const t = testClientsOf(status); if (!t) return; setTestCl(prev => (JSON.stringify(prev) === JSON.stringify(t) ? prev : t)); try { localStorage.setItem('ax_studio_testns', JSON.stringify(t)); } catch (e) {} }, [status]);
     const [kit, setKit] = useState(null);
     const [pid, setPid] = useState(null); const [p, setP] = useState(null);
     const [intake, setIntake] = useState(false);
@@ -4177,10 +4208,15 @@
     const produceVariants = (ids) => guard('variants:' + pidRef.current, async () => {
       const d = pRef.current; const b = d.brief || {}; const channels = (b.channels || []).filter(c => CHANNELS[c]);
       if (!channels.length) { setNotice({ kind: 'warn', title: 'No channels in the brief.', text: 'Choose at least one channel, then produce.', actions: [{ label: 'Open the brief', fn: () => setView('brief', true) }] }); return; }
+      /* RC (K2): the brief's mandatory gaps are answered by a person, never acknowledged on their behalf - above all the campaign,
+         which decides the facts, the URL and the mark (with two campaigns in the kit, nothing is produced until one is chosen) */
+      let chk = null; try { chk = await call('/studio/brief/check?project=' + encodeURIComponent(d.id)); } catch (e) { chk = null; }
+      const must = ((chk && chk.gaps) || []).filter(g => g.level === 'mandatory');
+      if (must.length) { setNotice({ kind: 'warn', title: must.some(g => g.code === 'campaign_unconfirmed') ? 'Choose the campaign before producing variants.' : 'The brief needs an answer before producing variants.', text: must.map(g => g.text).join(' ') + ' Nothing was produced.', actions: [{ label: 'Open the brief', fn: () => setView('brief', true) }] }); return; }
       if (!(await askStudio({ title: 'Produce ' + ids.length + ' narratives as variants?', text: 'Each is produced by its own route in its own family on the Board.', cost: 'one model call each' + (b.imageryTiming === 'after_copy' || b.imagery === 'none' ? '; no imagery yet' : ', and the imagery each plans'), paid: true, ok: 'Produce them' }))) return;
       try {
         for (const id of ids) { const dir = d.directions.find(x => x.id === id); if (!dir) continue;
-          await job('copy', { channels, deliverable: b.deliverable === 'copy' ? 'copy' : (b.deliverable || 'set'), formats: b.formats || {}, direction: id, variant: true, creationMode: dir.route || undefined, size: b.size || undefined, imagery: b.imagery === 'none' ? 'none' : undefined, acknowledge: true }, null, 'variant:' + id + ':' + Date.now(), 'Producing "' + dir.title + '" as a variant (' + (dir.route === 'finished' ? 'finished creative' : 'editable') + ')'); }
+          await job('copy', { channels, deliverable: b.deliverable === 'copy' ? 'copy' : (b.deliverable || 'set'), formats: b.formats || {}, direction: id, variant: true, creationMode: dir.route || undefined, size: b.size || undefined, imagery: b.imagery === 'none' ? 'none' : undefined }, null, 'variant:' + id + ':' + Date.now(), 'Producing "' + dir.title + '" as a variant (' + (dir.route === 'finished' ? 'finished creative' : 'editable') + ')'); }
         const d2 = await reload(); ready('design', ids.length + ' variants produced', 'Each in its own family on the Board.', 'View on the Board'); if (d2) pump(d2);
       } catch (e) { fail(e, 'The variants were not produced', () => produceVariants(ids)); }
     });
@@ -4630,7 +4666,7 @@
           <div class="st-psub"><span title="client">${client.name}</span>${campName ? html`<span class="st-dotsep" aria-hidden="true"></span><span title="campaign">${campName}</span>` : html`<span class="st-dotsep" aria-hidden="true"></span><span class="ov-dim">no campaign</span>`}<span class="st-dotsep" aria-hidden="true"></span><span title=${'Content type: ' + (b0.deliverable === 'copy' ? 'copy only, no tiles' : b0.deliverable === 'visual' ? 'visual creative' : 'a coordinated set') + ((b0.channels || []).length ? ' for ' + b0.channels.map(chanLabel).join(', ') : '')}>${b0.deliverable === 'copy' ? 'Copy only' : b0.deliverable === 'visual' ? 'Visual' : 'Set'}${(b0.channels || []).length ? ' - ' + b0.channels.map(chanLabel).join(', ') : ''}</span>
             ${pmode === null ? null : !pmode ? html`<${Chip} title="The production mode (Editable creative or Full AI creative) is chosen in Design once the copy is ready">mode: chosen in Design</${Chip}>` : html`<${Chip} kind=${pmode === 'finished' ? 'warn' : ''} title=${pmode === 'finished' ? 'Full AI creative: the image model paints the whole piece, words and mark included; one bitmap, nothing composed over it' : 'Editable: imagery generated, words and the exact mark composed as live layers'}>${pmode === 'finished' ? 'Finished creative' : 'Editable'}</${Chip}>`}
             ${p.readOnly ? (p.readOnlyWhy === 'guest_live' ? html`<${Chip} kind="warn" title="A guest link works in test projects only: it reads a live client's work and changes nothing in it or in the client's memory. Start a test project to try the same thing.">live client work, read-only for a guest link</${Chip}>` : html`<${Chip}>legacy, read-only</${Chip}>`) : !canWrite() ? html`<${Chip} title="This key can look, compare and export; it cannot change anything">read-only key</${Chip}>` : null}${p.legacy ? html`<${Chip} title="the original is untouched">imported from ${p.legacy.id}</${Chip}>` : null}</div>
-        </div>` : html`<div class="st-proj"><div class="st-proj-row"><b class="st-libword">Project library</b><select class="st-sel st-client" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</select></div></div>`}
+        </div>` : html`<div class="st-proj"><div class="st-proj-row"><b class="st-libword">Project library</b><select class="st-sel st-client" value=${clientId} onChange=${e => switchClient(e.target.value)} aria-label="Client">${CLIENTS.filter(c => !c.test).map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}${CLIENTS.some(c => c.test) ? html`<optgroup label="Synthetic test clients">${CLIENTS.filter(c => c.test).map(c => html`<option key=${c.id} value=${c.id}>${c.name}</option>`)}</optgroup>` : null}</select></div></div>`}
       ${p ? html`<${Flow} flow=${flow} at=${stage} onGo=${goStage} />` : null}
       <div class="st-head-r">
         ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save ' + saveKind} role="status" aria-live="polite" title=${saveTitle}>${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}
@@ -4699,7 +4735,7 @@
     else if (view === 'context') centre = html`<${ContextView} p=${p} tick=${ctxTick} onVoice=${() => setPanel('voice')} onLearned=${() => setPanel('learned')} />`;
     else if (a) { const i = p.assets.indexOf(a); const dt = tabsFor('design'); const dlead = html`<h2 class="st-vh" tabIndex="-1" ref=${titleRef}>Design: ${a.title}</h2><div class="st-subnav st-designtabs" role="tablist" aria-label="Design views">${dt.tabs.map(([k, l, n]) => html`<button key=${k} role="tab" aria-selected=${dt.tab === k} class=${'st-railbtn st-subtab' + (dt.tab === k ? ' on' : '')} onClick=${() => dt.onTab(k)}>${k === 'asset' ? 'Canvas' : k === 'production' ? 'Recipes' : l}${n != null ? html`<span class="st-n">${n}</span>` : null}</button>`)}</div>`;
       const dstep = (() => { const dq = stageQuestions(p, flow, 'design'); const sd = STAGES.find(x => x.id === 'design'); return dq ? html`<details class="st-dstep"><summary title=${'About the Design step: ' + (dq.missing ? 'missing ' + dq.missing : 'nothing missing')}><span class=${'st-dstep-dot' + (dq.missing ? ' warn' : ' ok')} aria-hidden="true"></span><${Icon} n="help" size=${14} /><span class="st-vh">About this step</span></summary><div class="st-dstep-pop" role="note"><dl class="st-five"><div class="st-five-doing"><dt>Doing</dt><dd>${sd.sub}: ${sd.purpose}</dd></div><div class="st-five-missing"><dt>Missing</dt><dd>${dq.missing || 'nothing'}</dd></div><div class="st-five-accepted"><dt>Accepted</dt><dd>${dq.accepted.length ? dq.accepted.join('; ') : 'nothing yet'}</dd></div><div class="st-five-act"><dt>Main action</dt><dd>${sd.act}</dd></div><div class="st-five-ai"><dt>AI</dt><dd>${sd.ai + costNote(sd.id)}</dd></div><div class="st-five-next"><dt>Next</dt><dd>${sd.then}</dd></div></dl></div></details>` : null; })();
-      const dprimary = html`${dstep}${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm st-primary" onClick=${() => goStage('review')}>Continue to Review</button>` : null}`;
+      const dprimary = html`${dstep}${flow.counts.valid === flow.counts.n && flow.counts.n ? html`<button class="btn sm st-primary" onClick=${() => goStage('review')} title="Continue to Review"><span class="st-cb-long">Continue to </span>Review</button>` : null}`;
       centre = html`<div class="st-centre-pad st-refine">${jobsLineLive}<${AssetView} key=${a.id} lead=${dlead} primary=${dprimary} p=${p} a=${a} kit=${kit} slot=${slot} tool=${tool} setTool=${setTool} preview=${preview} setPreview=${setPreview} onBrand=${() => setView('brand', true)} onContext=${() => setView('context', true)} tab=${tab} setTab=${setTab} conflict=${conflict && conflict.asset === a.id ? conflict : null} onConflict=${resolveConflict} neighbours=${{ prev: i > 0 ? p.assets[i - 1].id : null, next: i < p.assets.length - 1 ? p.assets[i + 1].id : null }} sel=${selField} setSel=${setSelField} onEdit=${editAsset} onDraftState=${onDraftState} onLayout=${editLayout} onLayoutSave=${saveLayout} onPropose=${propose} onApplyConcept=${applyConcept} onOpen=${openAsset} onValidate=${fileValidation} onMarkVariant=${markVariant} onRepair=${repairLayout} onUndoRepair=${undoRepair} onLayoutDirty=${setLayoutDirty} onLock=${toggleLock} onApprove=${approve} onCompare=${(x, y) => setCmp({ a: x, b: y })} onRestore=${restore} onRender=${render} onAreaEdit=${areaEdit} onRegenerate=${regenerateFinished} onDerive=${deriveEditable} onPreservation=${filePreservation} onVariant=${layoutVariant} onRetryJob=${retryJob} sugg=${sugg} onSuggRefresh=${r => fetchSugg(r !== false)} onSelection=${setSelLayers} onPage=${pageAction} onResize=${resizeAsset} resized=${resized[a.id]} busy=${busy} /></div>`; }
     else centre = Staged('design', null, html`<div class="st-empty-state"><b>${p.assets.length ? 'Choose an asset on the left.' : 'Nothing to design yet.'}</b><span>${p.assets.length ? 'Each asset opens here with its words, layout and imagery.' : p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, then write the copy.' : 'Write the copy first.'}</span>${!p.assets.length ? html`<button class="btn sm" onClick=${() => goStage(p.directions.length && !p.directions.some(d => d.chosen) ? 'directions' : 'copy')}>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Go to Direction' : 'Go to Copy'}</button>` : null}</div>`);
 
@@ -4733,6 +4769,7 @@
       ${header}
       ${helpPanel}
       ${busy && p && !inRefine ? html`<div class="st-busy" role="status" aria-live="polite"><span class="st-spin" aria-hidden="true"></span>${busy}<span class="ov-dim"> - a persistent job: it continues if you close the tab, and the worker's tick finishes it.</span></div>` : null}
+      ${status && status.build && buildN(status.build) && buildN(status.build) < PAGE_NEEDS_BUILD ? html`<div class="st-offline st-buildwarn" role="alert"><b>The worker is older than this page.</b> <span>It answers build ${status.build}; this page (release ${STUDIO_RELEASE}) expects studio-p${PAGE_NEEDS_BUILD} or later, so some actions will be refused or answer differently until the worker is deployed. Tell whoever deploys AXIOM; your work is not lost.</span></div>` : null}
       ${!online ? html`<div class="st-offline" role="status" aria-live="polite"><b>You are offline.</b> <span>Unsaved edits stay in this browser and are saved when the connection returns; nothing is generated, approved or exported until then.</span></div>` : null}
       <${Notice} n=${notice} onClose=${() => setNotice(null)} /><${OpsLine} />
       <div class=${'st-body' + (p ? '' : ' lib') + (inRefine ? ' design' : '') + (inRefine && inspMin ? ' inspmin' : '') + (p && !showAside ? ' noaside' : '') + (p && !showRail ? ' norail' : '') + (early ? ' early' : '')} style=${Object.assign({ '--st-insp-w': inspW + 'px' }, showRail ? { '--st-rail-w': railW + 'px' } : {})}>

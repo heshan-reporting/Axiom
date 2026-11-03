@@ -3,6 +3,7 @@
  * claimed about fonts beyond "fallback unknown". It stands in for docs/studio-render.js validate() + report(); the real
  * renderer is exercised by tests/studio-layout-browser.mjs. A report built here passes the worker's plausibility checks
  * only because it describes the version honestly at its output size. */
+import { pngForVersion } from './png.mjs';
 export function stubReport(version, asset, opts) {
   opts = opts || {}; const L = version.layout || {}; const st = L.stage || { w: 1080, h: 1080 }; const W = st.w, H = st.h;
   const copy = version.copy || {}; const baked = Array.isArray(L.baked) ? L.baked : [];
@@ -32,5 +33,6 @@ export async function validateAsset(req, project, assetId, opts) {
   const asset = g.d && g.d.assets ? g.d.assets.find(x => x.id === assetId) : null;
   if (!asset) throw new Error('validateAsset: asset ' + assetId + ' not found in project ' + project);
   const v = asset.versions.find(x => x.id === asset.current);
-  return req('POST', '/studio/validation', { asset: assetId, version: v.id, report: stubReport(v, asset, opts), imageB64: opts && opts.png });
+  // RC (S5): a measurement is filed with the image it measured; the stand-in shows a readable ground under each text box, as the stub claims
+  return req('POST', '/studio/validation', { asset: assetId, version: v.id, report: stubReport(v, asset, opts), imageB64: (opts && opts.png) || pngForVersion(v, { fill: (opts && opts.fill) || 0x30 }) });
 }

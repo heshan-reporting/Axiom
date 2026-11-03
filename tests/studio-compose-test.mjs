@@ -10,7 +10,7 @@ const kv = new Map(); const r2 = new Map();
 const env = { MIND_DB: new D1Lite(), AXIOM_KV: { get: async k => (kv.has(k) ? kv.get(k) : null), put: async (k, v) => { kv.set(k, String(v)); }, delete: async k => { kv.delete(k); }, list: async () => ({ keys: [], list_complete: true }) },
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => r2.get(k).v.buffer.slice(r2.get(k).v.byteOffset, r2.get(k).v.byteOffset + r2.get(k).v.byteLength), text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }) };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 // a mark with real ink (a white block): since S11 a mark is read per pixel against what is behind it, and a
 // scaled-up 4 x 4 placeholder has no strokes to read - the photograph stand-in stays the 4 x 4 image
 const MARK = pngSolid(40, 16, [255, 255, 255]).toString('base64');

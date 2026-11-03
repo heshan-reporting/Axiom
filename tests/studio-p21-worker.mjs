@@ -6,6 +6,7 @@
  * roles, the size and that no pixel mask exists; the capability registry states what each operation cannot do.
  * Run: node --experimental-sqlite tests/studio-p21-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -19,7 +20,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: SECRET, GEMINI_KEY: GSECRET, STUDIO_INSPECT: '0', IMAGE_SIZE_MAX: '2K',
 };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = pngB64(4, 4, { fill: 0x5a });   // a whole PNG: the worker checks provider images before filing them (RC S4)
 const T = (id, role, x, y, w, h, size) => ({ id, type: 'text', role, x, y, w, h, size, color: '#FFFFFF' });
 const PLAN = { medium: 'editorial', approach: 'editable', mark: 'campaign', bg: '#123456', regions: [], elements: [T('hl', 'headline', 6, 10, 60, 30, 7), T('sp', 'support', 6, 50, 60, 12, 3), T('cta', 'cta', 6, 80, 40, 6, 2.6)] };
 const Q = { copy: [], concepts: [] }; let gemini = 'ok';

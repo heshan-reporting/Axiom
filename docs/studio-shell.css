@@ -262,6 +262,9 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-le-foot .st-le-val.bad{color:var(--sk-bad)}
 #studio-root .st .st-le-draft{color:var(--sk-sub);white-space:nowrap}
 #studio-root .st .st-canvas-foot{flex-shrink:0;max-height:34%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 12px 10px;background:var(--sk-panel);border-top:1px solid #262c30}
+/* RC (U3): what sits under the canvas keeps its own height and the foot scrolls; a row shrunk below its content let the
+   readiness strip print over the composition's facts at 1181-1280 px */
+@media (min-width:701px){#studio-root .st .st-canvas-foot > *{flex-shrink:0;min-height:min-content}}
 #studio-root .st .st-pagestrip{display:flex;gap:10px;overflow-x:auto;padding:2px 0;scrollbar-width:thin;min-width:0;flex:0 1 auto}
 #studio-root .st .st-canvas-sub{display:flex;align-items:center;gap:8px 12px;min-width:0;flex-wrap:wrap}
 #studio-root .st .st-canvas-subr{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -367,12 +370,25 @@ body.in-studio #studio-root{height:100%}
   #studio-root .st .st-insp-toggle{display:inline-flex;position:fixed;right:14px;bottom:14px;z-index:60;box-shadow:var(--sk-sh-2)}
   #studio-root .st .st-insp-close{display:inline-grid;margin-left:4px;align-self:center}
   #studio-root .st .st-aside-open{display:none}
-  #studio-root .st .st-design.has-library{grid-template-columns:64px minmax(0,1fr)}
-  #studio-root .st .st-library{position:absolute;left:74px;top:0;bottom:10px;width:min(320px,calc(100% - 84px));z-index:15;box-shadow:var(--sk-sh-2)}
   #studio-root .st .st-stage-facts{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:1180px){
   #studio-root .st .st-body:not(.design) .st-inspector.open{transform:none}
+}
+/* RC (U1, U2): up to 1340 px the tool panel overlays the canvas rather than taking a column beside the inspector (which left
+   the canvas 440-600 px wide and its toolbar on two rows; at 1366 the column stays and the compact bar fits one row); the overlay sits above the canvas bar (z 25), so its title and close
+   are never covered, and it closes on Escape */
+@media (max-width:1340px){
+  #studio-root .st .st-design.has-library{grid-template-columns:64px minmax(0,1fr)}
+  #studio-root .st .st-library{position:absolute;left:74px;top:0;bottom:10px;width:min(320px,calc(100% - 84px));z-index:35;box-shadow:var(--sk-sh-2)}
+}
+/* a narrow canvas bar: the output width folds away and the main action keeps its verb; the spacers take only what is left,
+   and the empty title slot never claims a row of its own */
+#studio-root .st .st-canvasbar .st-cb-spacer{flex:1 1 0;min-width:0}
+#studio-root .st .st-canvasbar .st-canvasbar-l:not(:has(> :not(.st-vh))){flex:0 0 0!important;min-width:0;padding:0;margin:0}
+@container stcanvas (max-width: 900px){
+  #studio-root .st .st-canvasbar .st-canvas-meta{display:none}
+  #studio-root .st .st-canvasbar .st-cb-long{display:none}
 }
 /* a phone: one column everywhere; the dock runs along the top of the canvas */
 @media (max-width:700px){
@@ -744,7 +760,7 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-test-chip{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font:600 10px/1.5 var(--sk-font);letter-spacing:.04em;text-transform:uppercase;color:var(--sk-warn);border:1px solid currentColor;vertical-align:middle}
 #studio-root .st .st-ask-ceiling{margin:2px 18px 10px;font-size:12px;line-height:1.45}
 #studio-root .st .st-measure-all{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px;padding:8px 10px;border:1px solid var(--st-line, var(--line, #303741));border-radius:8px;font-size:13px}
-#studio-root .st .st-prov-left{opacity:.75;font-weight:500}
+#studio-root .st .st-prov-left{font-weight:500;color:var(--sk-sub)}   /* RC: no opacity, so it reads at 4.5:1 in both appearances */
 
 /* concept C: the Design views at the foot of the rail, under the tools, as the reference keeps its secondary places */
 #studio-root .st .st-dock-views{margin-top:auto;width:100%;padding:8px 6px 0;border-top:1px solid #262c30}

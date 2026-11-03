@@ -15,8 +15,10 @@ const run = (name, cmd, args, timeoutMs) => {
   const t0 = Date.now(); const r = spawnSync(cmd, args, { cwd: ROOT, encoding: 'utf8', timeout: timeoutMs || 900000, maxBuffer: 64 * 1024 * 1024 });
   const out = (r.stdout || '') + (r.stderr || ''); const m = out.match(/(\d+) passed, (\d+) failed/g); const last = m ? m[m.length - 1] : '';
   const ok = r.status === 0 && !/[1-9]\d* failed/.test(last);
-  results.push({ name, ok, summary: last || (r.error ? String(r.error.message) : 'exit ' + r.status), ms: Date.now() - t0 });
-  console.log((ok ? '  ok   ' : '  FAIL ') + name + '  ' + (last || 'exit ' + r.status) + '  (' + Math.round((Date.now() - t0) / 1000) + 's)');
+  // RC (Q3): a harness that skipped part of its work (an engine or runtime not installed) is reported as such, never as a plain pass
+  const sk = out.match(/skipped[^\n]{0,80}|\bSKIP\b[^\n]{0,80}/i); const skipped = sk ? sk[0].replace(/\s+/g, ' ').trim() : '';
+  results.push({ name, ok, skipped, summary: last || (r.error ? String(r.error.message) : 'exit ' + r.status), ms: Date.now() - t0 });
+  console.log((ok ? (skipped ? '  ok*  ' : '  ok   ') : '  FAIL ') + name + '  ' + (last || 'exit ' + r.status) + (skipped ? '  [' + skipped + ']' : '') + '  (' + Math.round((Date.now() - t0) / 1000) + 's)');
   if (!ok) { const L = out.split('\n'); const keep = []; L.forEach((l, i) => { if (/FAIL|Error/.test(l)) for (let j = i; j < Math.min(L.length, i + 4); j++) if (keep.indexOf(j) < 0) keep.push(j); }); console.log(keep.slice(0, 40).map(j => '       ' + L[j].slice(0, 260)).join('\n')); }
 };
 const check = (name, fn) => { try { const r = fn(); const ok = r === true || r === undefined; results.push({ name, ok, summary: ok ? 'ok' : String(r) }); console.log((ok ? '  ok   ' : '  FAIL ') + name + (ok ? '' : '  ' + r)); } catch (e) { results.push({ name, ok: false, summary: e.message }); console.log('  FAIL ' + name + '  ' + e.message); } };
@@ -48,5 +50,6 @@ if (mode === 'browser' || mode === 'all') {
   for (const f of suites.filter(f => BROWSER.test(f))) run(f, process.execPath, ['--experimental-sqlite', T(f)], 1500000);
 }
 const bad = results.filter(r => !r.ok);
-console.log('\n' + (results.length - bad.length) + ' of ' + results.length + ' passed' + (bad.length ? '; failing: ' + bad.map(r => r.name).join(', ') : ''));
+const skips = results.filter(r => r.ok && r.skipped);
+console.log('\n' + (results.length - bad.length) + ' of ' + results.length + ' passed' + (skips.length ? ' (' + skips.length + ' with parts skipped, not passed: ' + skips.map(r => r.name).join(', ') + ')' : '') + (bad.length ? '; failing: ' + bad.map(r => r.name).join(', ') : ''));
 process.exit(bad.length ? 1 : 0);

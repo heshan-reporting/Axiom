@@ -18,7 +18,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0',
 };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 let INSPECT = { fidelity: 4, hierarchy: 2, readability: 5, relevance: 4, reasons: { fidelity: 'The paddock at dusk carries the farming idea', hierarchy: 'The support line competes with the headline at the same weight', readability: 'White type on the dark sky reads cleanly', relevance: 'Farm imagery matches the message' }, words: { present: ['Not a subsidy.'], wrong: [], missing: [] }, issues: [{ text: 'Support competes with headline', severity: 'material' }], verdict: 'fix', fix: { kind: 'design', instruction: 'Make the support line lighter and smaller' }, note: 'n' };
 const SENT = []; const STRAT = [];
 const STRATEGY = { problem: 'p', audience: { who: 'w', now: 'n', wanted: 'x', insight: 'i' }, idea: 'It is a road tax refund', proposition: 'p', proof: [], tone: 't', avoid: [], risks: [], measures: [], questions: [] };

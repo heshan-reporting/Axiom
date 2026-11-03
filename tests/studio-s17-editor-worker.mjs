@@ -5,8 +5,9 @@
  * Providers MOCKED. Run: node --experimental-sqlite tests/studio-s17-editor-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { answerFor } from './studio-answers.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s17-editor-worker (resize, uploads, drafts, styling through re-composition, selection, remove and relight)');
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = pngB64(4, 4, { fill: 0x5a });   // a whole PNG: the worker checks provider images before filing them (RC S4)
 const anth = []; const gem = [];
 const w = await workerEnv({ keys: { 'full-key': { n: 'Hesh', r: 'full' }, 'other-key': { n: 'Steve', r: 'full' }, 'read-key': { n: 'Reader', r: 'read' } }, env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {

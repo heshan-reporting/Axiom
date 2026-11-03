@@ -8,10 +8,11 @@
  * Run: node --experimental-sqlite tests/studio-s7-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { answerFor, RELEASE } from './studio-answers.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s7-worker (one context compiler; what informed this creative, recorded on every generation path)');
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
-const PNG_LOGO = Buffer.from('89504e470d0a1a0a' + '11'.repeat(100), 'hex').toString('base64');
-const PNG_MARK = Buffer.from('89504e470d0a1a0a' + '22'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
+const PNG_LOGO = pngB64(16, 16, { fill: 0x11 });
+const PNG_MARK = pngB64(16, 16, { fill: 0x22 });
 const anth = { calls: [] };
 const w = await workerEnv({ env: { STUDIO_INSPECT: '0', ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' } });
 w.answer(/generativelanguage/, async (u) => {

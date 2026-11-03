@@ -19,10 +19,11 @@
  *      passed, as did a variant or revision that is not in storage.
  * Run: node --experimental-sqlite tests/studio-s24-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s24-worker (cancellation, attempt policy and accounting, suggestion fingerprint, reference authority, observation lifecycle, mark sources)');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const until = async (fn, ms, what) => { const t0 = Date.now(); while (!(await fn())) { if (Date.now() - t0 > (ms || 6000)) throw new Error('timed out waiting for ' + (what || 'a condition')); await sleep(5); } };
-const png = byte => Buffer.from('89504e470d0a1a0a' + byte.repeat(100), 'hex').toString('base64');
+const png = byte => pngB64(16, 16, { fill: parseInt(byte, 16) });
 const PNG = png('00'); const PNG_MARK = png('22'); const PNG_LOGO = png('11');
 
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0', STUDIO_IMAGE_BACKOFF_MS: '20', STUDIO_CANCEL_POLL_MS: '25' } });

@@ -15,7 +15,7 @@ const env = { MIND_DB: new D1Lite(), AXIOM_KV: { get: async k => (kv.has(k) ? kv
   AI: { run: async (m, { text }) => ({ data: text.map(() => new Array(8).fill(0.1)) }) }, MIND_VECTORS: { query: async () => ({ matches: [] }), insert: async () => ({}), upsert: async () => ({}) },
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => r2.get(k).v.buffer.slice(r2.get(k).v.byteOffset, r2.get(k).v.byteOffset + r2.get(k).v.byteLength), text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }), ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 // a mark with real ink (a white block): since S11 a mark is read per pixel against what is behind it, and a
 // scaled-up 4 x 4 placeholder has no strokes to read - the photograph stand-in stays the 4 x 4 image
 const MARK = pngSolid(40, 16, [255, 255, 255]).toString('base64');
@@ -73,6 +73,7 @@ ok(dj.separation.length >= 7 && dj.separation.every(x => x.ok), 'every mark is t
 ok(Object.values(hoof.marks).every(ms => ms.length && ms.every(m => /wordmark\?ns=mca&campaign=hoof/.test(m))) && Object.values(mca.marks).every(ms => ms.every(m => /\/brand\/logo\?ns=mca/.test(m))), 'HOOF carries the HOOF wordmark only; MCA national the MCA logo only');
 ok(Object.values(syn.marks).every(ms => ms.every(m => /ns=synthdemo/.test(m))) && syn.synthetic, 'the synthetic client carries its own placeholder logo and is labelled');
 ok(dj.isolation.mca.clean && dj.isolation.synthdemo.clean, 'the isolation audit is clean for both namespaces');
+{ const made = ((await api('GET', '/studio/list?ns=mca&archived=1')).projects || []).filter(p => !p.legacy); ok(made.length > 0 && made.every(p => p.test === true), 'every project the demonstration made in the live client is a test project, so nothing it decides is filed in its memory (RC K6): ' + made.map(p => p.title + '=' + p.test).join(', ')); }
 ok(seen.gemini === 0 && dj.spend.renders === 0, 'no image was generated');
 const idx = fs.readFileSync(path.join(run.out, 'index.html'), 'utf8');
 ok(/SYNTHETIC CLIENT/.test(idx) && /Separation/.test(idx) && /whether the work is good/.test(idx) && /<img src="hoof\/tiles/.test(idx), 'the page labels the synthetic client, shows the tiles, and says what it does not show');

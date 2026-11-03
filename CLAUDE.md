@@ -2883,6 +2883,29 @@ the guided processing card and the operations line for requests that are not job
 from the clock": a counted share is still only ever counted. Harnesses updated for the seven stages, the rail and the estimate;
 `tests/studio-progress-test.mjs` covers the estimate (49).
 
+**The release candidate for the team's test round (build `2026-11-07.studio-p45`, page `?v=r29`; `CREATIVE-STUDIO.md` s.54,
+`TESTING.md`).** Part A of `prompts/studio-rc-team-test.md`, run test-first with providers mocked; the owner's decisions D1-D7
+are in s.54.0. The synthetic test clients are named by `/studio/status` (`testNs`, from `ST_TEST_NS` and `STUDIO_TEST_NS`) and
+listed in the Studio for every key under "Synthetic test clients"; `tools/studio-test-kit.py seed` parks seven free projects
+(Brief, no campaign, Direction, Copy, Design with one tile passing and one blocked, Review), takes `--tester NAME`, prints the
+build and approves nothing. The page names a worker older than it needs in a banner (`PAGE_NEEDS_BUILD`). Open access never
+writes: every anonymous write or acting GET answers `public_write_refused` (`STUDIO_PUBLIC_WRITE=1` opens the Studio's own writes
+only), and `/studio/status` carries `posture` (public mode, guard flags, key counts by role; never a key). The retraction filter
+fails closed and checks every document. Provider image bytes are checked whole before filing (`stImageBytesCheck`; a broken one is
+`malformed`, retried within the policy) and a finished bitmap before delivery; a render may put only the chain's own models first.
+A measurement is filed with its PNG or refused (`png_required`), and the worker reads that PNG itself (`stPngDecode`,
+`stServerText`, `stServerMark`): its contrast and mark-ink figures replace the browser's when clearly worse (s.54.4). "Produce N
+as variants" asks for the campaign instead of acknowledging the gate; an explicit Standalone is a decision, scoped to client-wide
+facts at production and on recheck; the reading proposes campaign candidates and asks when they are close (`campaign.candidates`,
+`ambiguous`, `question`); facts and Mind passages reach the model labelled with campaign and approval. Photographic media are one
+family for look-alike directions, and compositional look-alikes get the one replanning round. Up to 1340 px the Design tool panel
+overlays the canvas above its bar, closes on Escape and returns the focus; the bar is one row from 1024 to 1920 with any panel
+open; nothing under the canvas overprints. Every project the demo, showcase, golden and smoke tools make is `test: true`.
+`tests/studio-a11y-browser.mjs` is the enforcing accessibility gate (both roles, three widths, light, panels, dialogs, wizard,
+review page); `run.mjs` reports skipped parts separately; `makeStudio` refuses a port already in use. Harnesses:
+`studio-rc-seed-worker` (8), `studio-rc-security-worker` (13), `studio-rc-brief-worker` (5), `studio-rc-creative-worker` (2),
+`studio-rc-browser` (4), `studio-a11y-browser` (10). Open after this release: U6-U8, Q2, S7 and P1 (measured, change proposed).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

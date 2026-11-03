@@ -14,20 +14,20 @@
 /* ---------------------------------------------------------------------------------------------- the light theme */
 #studio-root .st[data-st-theme="light"]{
   --sk-bg:#f4f6f9; --sk-panel:#ffffff; --sk-raised:#f0f2f6; --sk-hover:#e7ebf1; --sk-line:#dde2ea; --sk-line-2:#c9d0db;
-  --sk-ink:#12161c; --sk-ink-2:#2b333f; --sk-sub:#556070; --sk-quiet:#6a7584; --sk-canvas:#e6eaf0;
+  --sk-ink:#12161c; --sk-ink-2:#2b333f; --sk-sub:#556070; --sk-quiet:#5c6776; --sk-canvas:#e6eaf0;
   --sk-accent:var(--st-client-accent-light,#1f6f7c); --sk-accent-ink:var(--st-client-ink-light,#ffffff);
   --sk-soft:color-mix(in srgb,var(--sk-accent) 10%,#ffffff); --sk-soft-2:color-mix(in srgb,var(--sk-accent) 18%,#ffffff);
-  --sk-good:#1c7a4c; --sk-warn:#8f5600; --sk-bad:#b3381f;
+  --sk-good:#166640; --sk-warn:#8f5600; --sk-bad:#b3381f;
   --sk-sh-1:0 1px 2px rgba(18,22,28,.06); --sk-sh-2:0 10px 30px -14px rgba(18,22,28,.25); --sk-sh-art:0 2px 6px rgba(18,22,28,.12),0 22px 48px -22px rgba(18,22,28,.35);
   --hair:rgba(18,22,28,.06); color-scheme:light;
 }
 @media (prefers-color-scheme:light){
   #studio-root .st[data-st-theme="system"]{
     --sk-bg:#f4f6f9; --sk-panel:#ffffff; --sk-raised:#f0f2f6; --sk-hover:#e7ebf1; --sk-line:#dde2ea; --sk-line-2:#c9d0db;
-    --sk-ink:#12161c; --sk-ink-2:#2b333f; --sk-sub:#556070; --sk-quiet:#6a7584; --sk-canvas:#e6eaf0;
+    --sk-ink:#12161c; --sk-ink-2:#2b333f; --sk-sub:#556070; --sk-quiet:#5c6776; --sk-canvas:#e6eaf0;
     --sk-accent:var(--st-client-accent-light,#1f6f7c); --sk-accent-ink:var(--st-client-ink-light,#ffffff);
     --sk-soft:color-mix(in srgb,var(--sk-accent) 10%,#ffffff); --sk-soft-2:color-mix(in srgb,var(--sk-accent) 18%,#ffffff);
-    --sk-good:#1c7a4c; --sk-warn:#8f5600; --sk-bad:#b3381f;
+    --sk-good:#166640; --sk-warn:#8f5600; --sk-bad:#b3381f;
     --sk-sh-1:0 1px 2px rgba(18,22,28,.06); --sk-sh-2:0 10px 30px -14px rgba(18,22,28,.25); --sk-sh-art:0 2px 6px rgba(18,22,28,.12),0 22px 48px -22px rgba(18,22,28,.35);
     --hair:rgba(18,22,28,.06); color-scheme:light;
   }
@@ -35,7 +35,7 @@
 #studio-root .st .st-help-theme{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--sk-line)}
 #studio-root .st .st-theme{display:inline-flex;border:1px solid var(--sk-line);border-radius:999px;padding:2px;gap:2px;background:var(--sk-panel)}
 #studio-root .st .st-theme button{border:0;background:none;color:var(--sk-sub);font:600 11px/1 var(--sk-font);padding:6px 9px;border-radius:999px;cursor:pointer}
-#studio-root .st .st-theme button[aria-pressed="true"]{background:var(--sk-soft-2);color:var(--sk-ink)}
+#studio-root .st .st-theme button[aria-pressed="true"], #studio-root .st .st-theme button[aria-checked="true"]{background:var(--sk-soft-2);color:var(--sk-ink)}   /* RC (U5): the switch is a radiogroup: the chosen one shows */
 
 /* ---------------------------------------------------------------------------------------------- restrained glass */
 #studio-root .st .st-head{background:var(--sk-glass);backdrop-filter:saturate(1.3) blur(14px);-webkit-backdrop-filter:saturate(1.3) blur(14px);border-bottom-color:var(--sk-glass-line)}

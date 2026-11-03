@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import zlib from 'node:zlib';
 import { chromium, firefox, webkit, DOCS } from './pw.mjs';
+import net from 'node:net';
 import { D1Lite } from './d1lite.mjs';
 process.on('warning', () => {});
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
@@ -152,6 +153,9 @@ export async function makeStudio(opts) {
   await api('POST', '/brand/kit', { ns: 'aep', name: 'Australian Energy Producers', palette: { primary: '#2F7FD6' }, campaigns: [{ id: 'gas', name: 'Gas for the transition' }], facts: [{ text: 'Gas supplies a quarter of Australia\'s energy', source: 'DCCEEW', status: 'approved' }] });
   await api('GET', '/studio/status');
 
+  // RC: a static server left running on this port (an interrupted run) would serve another tree's pages and the run would pass or
+  // fail on the wrong page; the port must be free, or the harness stops and says so
+  await new Promise((resolve, reject) => { const probe = net.createServer(); probe.once('error', e => reject(new Error('port ' + PORT + ' is already in use (' + e.code + '): a static server from an earlier run may still be serving another tree; stop it, or pick another port'))); probe.once('listening', () => probe.close(resolve)); probe.listen(PORT, '0.0.0.0'); });
   const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', DOCS], { stdio: 'ignore' });
   await new Promise(r => setTimeout(r, 900));
   // S23: another engine when asked (firefox, webkit); Chromium by default

@@ -220,7 +220,7 @@ def run_case(base, key, args, cid, rec):
         ensure_synth(base, key)
     # 1. the brief, the knowledge and the references, before anything is spent
     brief = dict(c['brief'], channels=c['channels'], deliverable='set', campaignConfirmed=True, size=args.size)
-    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': c['title'], 'brief': brief, 'idem': 'demo:%s:%d' % (cid, int(time.time()))})
+    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': c['title'], 'brief': brief, 'test': True, 'idem': 'demo:%s:%d' % (cid, int(time.time()))})
     pid = rec['project'] = p['id']
     src = http(base, key, 'POST', '/studio/source', {'project': pid, 'kind': 'release', 'name': 'Demo release', 'text': c['release']})
     job(base, key, pid, 'extract', {'source': src['id']}, 'reading the release into a claim ledger')

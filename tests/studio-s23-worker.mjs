@@ -14,9 +14,10 @@
  *      than the model wrote it.
  * Run: node --experimental-sqlite tests/studio-s23-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s23-worker (engine defects A-E: required marks, filtered context, cache identity, approved examples, stream protocol)');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const png = byte => Buffer.from('89504e470d0a1a0a' + byte.repeat(100), 'hex').toString('base64');
+const png = byte => pngB64(16, 16, { fill: parseInt(byte, 16) });
 const PNG = png('00'); const PNG_MARK = png('22'); const PNG_LOGO = png('11');
 const REF = i => png((40 + i).toString(16).padStart(2, '0'));
 

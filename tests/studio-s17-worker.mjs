@@ -9,8 +9,9 @@
  * Run: node --experimental-sqlite tests/studio-s17-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { answerFor } from './studio-answers.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s17-worker (the guided workflow: states, gates, confirmations, basis, impact, production mode, clients, campaigns)');
-const PNG = Buffer.from('89504e470d0a1a0a' + '11'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x11 });
 const anth = { calls: [] };
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' } });
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {

@@ -15,7 +15,7 @@ const env = { MIND_DB: new D1Lite(), AXIOM_KV: { get: async k => (kv.has(k) ? kv
   AI: { run: async (m, { text }) => ({ data: text.map(() => new Array(8).fill(0.1)) }) }, MIND_VECTORS: { query: async () => ({ matches: [] }), insert: async () => ({}), upsert: async () => ({}) },
   MIND_DOCS: { put: async (k, v, o) => { r2.set(k, { v: Buffer.from(v instanceof ArrayBuffer ? new Uint8Array(v) : v), o }); }, get: async k => (r2.has(k) ? { body: r2.get(k).v, arrayBuffer: async () => r2.get(k).v.buffer.slice(r2.get(k).v.byteOffset, r2.get(k).v.byteOffset + r2.get(k).v.byteLength), text: async () => r2.get(k).v.toString(), httpMetadata: (r2.get(k).o || {}).httpMetadata } : null), delete: async k => { r2.delete(k); } },
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }), ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 // a mark with real ink (a white block): since S11 a mark is read per pixel against what is behind it, and a
 // scaled-up 4 x 4 placeholder has no strokes to read - the photograph stand-in stays the 4 x 4 image
 const MARK = pngSolid(40, 16, [255, 255, 255]).toString('base64');
@@ -101,6 +101,7 @@ ok(fr.painted === true && JSON.stringify(fr.marksSent) === '["wordmark"]', 'the 
 ok(!fr.export || (fr.export.included || []).length === 0, 'a painting is never approved by the tool, so nothing of it is exported');
 const finRep = JSON.parse(fs.readFileSync(path.join(fin.out, 'smoke.json'), 'utf8')).cases[0];
 const all = await api('GET', '/studio/list?ns=mca&archived=1'); const listed = (all.projects || []);
+ok(listed.filter(p => /^Smoke/.test(p.title)).length > 0 && listed.filter(p => /^Smoke/.test(p.title)).every(p => p.test === true) && listed.filter(p => p.title === 'Real client work').every(p => p.test !== true), 'every project the smoke run made is a test project; the client\'s own stays live (RC K6)');
 const realNow = await api('GET', '/studio/get?id=' + realP.id);
 ok(realNow && !realNow.archived, 'the client\'s own project was not archived: ' + JSON.stringify({ archived: realNow && realNow.archived }));
 ok((finRep.archived || []).length >= 1 && (finRep.archived || []).every(id => id === finRep.editable || id === finRep.finished), '--archive archived only the projects this run created: ' + JSON.stringify(finRep.archived));

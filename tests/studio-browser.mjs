@@ -22,7 +22,7 @@ const env = {
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
 // a real 4x4 PNG (teal) so the browser can decode the background and the logo
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 // the client logo is a mark with real ink (a white block), not the 4 x 4 photograph stand-in: since S11 a
 // mark is read per pixel against what is behind it, and a scaled-up 4 x 4 image has no strokes to read
 const LOGO = pngSolid(40, 16, [255, 255, 255]).toString('base64');

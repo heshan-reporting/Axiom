@@ -24,7 +24,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
-const png = (fill) => { const b = Buffer.alloc(160, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b[24] = 8; b[25] = 6; return b.toString('base64'); };
+const png = fill => pngB64(16, 16, { fill: fill || 0, alpha: true });   // whole PNGs: the worker checks provider images before filing them (RC S4)
 const anth = { calls: [] }; const gem = { calls: [], answer: 'image' };
 let INSPECT = { fidelity: 4, hierarchy: 4, readability: 4, relevance: 4, identity: 5, words: { present: [], wrong: [], missing: [] }, issues: [], verdict: 'ship', fix: { kind: 'none', instruction: '' }, note: 'ok' };
 let SUGGEST = {};
@@ -58,7 +58,7 @@ const readiness = async A => (await req('GET', '/studio/readiness?asset=' + A, n
 /** a measurement of the current version as the browser would file it; `tweak` edits the report before sending */
 /* S28: the measured PNG states the composition's output size in its header, as the renderer's does (the worker checks it) */
 const pngAt = (fill, st) => pngB64((st && st.w) || 1080, (st && st.h) || 1080, { fill });   // p44: a whole PNG that decodes to the stage's size
-const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngAt(3, v.layout && v.layout.stage) }); };
+const measure = async (P, A, tweak, opts) => { const { a, v } = await curV(P, A); const rep = stubReport(v, a, opts); if (tweak) tweak(rep, v); return req('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngForVersion(v, { fill: 3 }) }); };   // RC D3: the stand-in image shows a readable ground under each text box, as the stub report claims
 const lastManifest = () => { const keys = Array.from(r2.keys()).filter(k => /\/export\/[^/]+\.json$/.test(k)); const m = JSON.parse(r2.get(keys[keys.length - 1]).v.toString()); m.assets = m.assets || m.items || []; m.excluded = m.excluded || []; return m; };
 const box = (rep, id) => rep.boxes.find(b => b.id === id);
 // the HOOF reconstruction with its headline really on three lines (as Chromium measured it in studio-layout-browser.mjs)

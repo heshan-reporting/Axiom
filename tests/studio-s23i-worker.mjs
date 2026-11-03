@@ -17,6 +17,7 @@
  * Run: node --experimental-sqlite tests/studio-s23i-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
+import { pngForVersion } from './png.mjs';   // RC (S5): a measurement carries the PNG it measured
 const T = suite('studio-s23i-worker (render fingerprint, reference records and observations, promotion guard, gap report, identity audit)');
 const PNG2 = Buffer.from('89504e470d0a1a0a0000000d494844520000001000000010080200000090916836000000134944415478016360f8cfc0c0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000100000001008020000009091683600000013494441547801636060f8cfc0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
@@ -47,7 +48,7 @@ await T.t('I-W1 the render fingerprint: typeface, crop, turn, opacity, paint ord
     { id: 'headline', type: 'text', role: 'headline', x: 8, y: 74, w: 84, h: 12, size: 6, weight: 800, color: '#111418' },
     { id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: 'hoof', src: '/brand/wordmark?ns=mca&campaign=hoof&variant=white&v=' + wm.v, x: 70, y: 90, w: 24, h: 7, fit: 'contain', exact: true }] };
   const A = TILE = (await call('POST', '/studio/asset', { project: P, family: 'Set', channel: 'instagram', format: '4:5', title: 'Tile', copy: { headline: 'Hands off our fuel', caption: 'First caption' }, layout: base, mode: 'composition' })).body.asset.id;
-  const pass = async () => { const g = await get(); const a = g.assets.find(x => x.id === A); const v = curOf(a); const r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a) }); return r; };
+  const pass = async () => { const g = await get(); const a = g.assets.find(x => x.id === A); const v = curOf(a); const r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a), imageB64: pngForVersion(v) }); return r; };
   const tech = async () => (await call('GET', '/studio/readiness?asset=' + A, null, 'read-key')).body.technical;
   const v1 = await pass(); eq(v1.status, 200, JSON.stringify(v1.body).slice(0, 300)); eq(await tech(), 'passed', 'the first composition passes');
   await call('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve', reason: 'copy ready' });

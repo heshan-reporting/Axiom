@@ -151,7 +151,7 @@ def add_refs(base, key, pid, refs):
 
 
 def make_project(base, key, ns, campaign, title, channels, size='2K'):
-    p = http(base, key, 'POST', '/studio/project', {'ns': ns, 'campaign': campaign, 'title': title, 'brief': {'objective': 'Answer the subsidy framing while the credit is in the news', 'audience': 'Members, MPs and the public on Instagram and Facebook', 'message': 'Fuel tax credits are not a subsidy; businesses of all sizes use them', 'channels': channels, 'deliverable': 'set'}, 'idem': 'showcase:%s:%s:%d' % (ns, campaign, int(time.time()))})
+    p = http(base, key, 'POST', '/studio/project', {'test': True, 'ns': ns, 'campaign': campaign, 'title': title, 'brief': {'objective': 'Answer the subsidy framing while the credit is in the news', 'audience': 'Members, MPs and the public on Instagram and Facebook', 'message': 'Fuel tax credits are not a subsidy; businesses of all sizes use them', 'channels': channels, 'deliverable': 'set'}, 'idem': 'showcase:%s:%s:%d' % (ns, campaign, int(time.time()))})
     s = http(base, key, 'POST', '/studio/source', {'project': p['id'], 'kind': 'release', 'name': 'Showcase release', 'text': RELEASE})
     j = http(base, key, 'POST', '/studio/job', {'project': p['id'], 'stage': 'extract', 'input': {'source': s['id']}, 'idem': 'showcase-extract:' + p['id']})['job']
     step(base, key, j['id'], 'extract')

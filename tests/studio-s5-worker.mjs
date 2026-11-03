@@ -2,10 +2,11 @@
  * is refused with the element named (unless the lock is deliberately overridden), whatever client sent it. Providers MOCKED.
  * Run: node --experimental-sqlite tests/studio-s5-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s5-worker (locked layers and rule-held marks are refused on the server)');
 const w = await workerEnv({ env: { STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k || 'full-key');
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 await call('POST', '/brand/kit', { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel' }], logoB64: PNG, logoMime: 'image/png' });
 await call('GET', '/engine/status?ns=mca');
 

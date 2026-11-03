@@ -29,7 +29,23 @@ export function pngBytes(w, h, opts) {
   cache.set(key, b); return b;
 }
 export const pngB64 = (w, h, opts) => pngBytes(w, h, opts).toString('base64');
-export function pngForVersion(v, opts) { const s = (v && v.layout && v.layout.stage) || { w: 1080, h: 1080 }; return pngB64(s.w, s.h, opts); }
+/* the measured image of a version, as a stand-in: the stage at its size in a flat shade, and under each live text layer a ground
+   that contrasts with its colour (black under light words, white under dark ones), so the worker's own reading of the image
+   (RC D3) agrees with a stub report that claims readable words; a harness testing poor contrast says so in its report */
+export function pngForVersion(v, opts) {
+  const s = (v && v.layout && v.layout.stage) || { w: 1080, h: 1080 }; const o = opts || {};
+  const layers = (v && v.layout && Array.isArray(v.layout.layers) ? v.layout.layers : []).filter(l => l && l.type === 'text' && !l.hidden);
+  if (!layers.length || o.flat) return pngB64(s.w, s.h, opts);
+  const W = s.w, H = s.h; const fill = o.fill == null ? 0x30 : o.fill; const rowLen = 1 + W * 3; const raw = Buffer.alloc(rowLen * H, fill);
+  for (let y = 0; y < H; y++) raw[y * rowLen] = 0;
+  const lum = hex => { const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || '#ffffff')); if (!m) return 1; const h = m[1].length === 3 ? m[1].split('').map(c => c + c).join('') : m[1]; const c = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+  for (const l of layers) {
+    const g = lum(l.color) > 0.3 ? 0 : 255; const x0 = Math.max(0, Math.floor(l.x / 100 * W)), x1 = Math.min(W, Math.ceil((l.x + l.w) / 100 * W));
+    const hPct = Math.max(+l.h || 0, (+l.size || 4) * 1.12 * 3); const y0 = Math.max(0, Math.floor(l.y / 100 * H)), y1 = Math.min(H, Math.ceil((l.y + hPct) / 100 * H));
+    for (let y = y0; y < y1; y++) raw.fill(g, y * rowLen + 1 + x0 * 3, y * rowLen + 1 + x1 * 3);
+  }
+  return Buffer.concat([SIG, chunk('IHDR', ihdr(W, H, 2)), chunk('IDAT', zlib.deflateSync(raw, { level: 6 })), chunk('IEND', Buffer.alloc(0))]).toString('base64');
+}
 
 export function broken(kind, w, h) {
   w = w || 1080; h = h || 1080;

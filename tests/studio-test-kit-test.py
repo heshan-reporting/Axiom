@@ -19,6 +19,8 @@ class Stub(BaseHTTPRequestHandler):
 
     def do_GET(self):
         SEEN.append(('GET', self.path, None, self.headers.get('X-Axiom-Key')))
+        if self.path.startswith('/studio/status'):
+            return self._send(200, {'build': '2026-11-07.studio-p45', 'testNs': [{'ns': 'synthdemo', 'name': ''}]})
         if self.path.startswith('/studio/list'):
             return self._send(200, {'projects': [{'id': 'p1', 'title': 'TEST - one', 'test': True}, {'id': 'p2', 'title': 'TEST - two', 'test': True}]})
         self._send(404, {})
@@ -27,7 +29,11 @@ class Stub(BaseHTTPRequestHandler):
         n = int(self.headers.get('Content-Length') or 0); body = json.loads(self.rfile.read(n).decode() or '{}')
         SEEN.append(('POST', self.path, body, self.headers.get('X-Axiom-Key')))
         if self.path == '/studio/project':
-            return self._send(200, {'id': 'p' + str(len(SEEN)), 'existing': False})
+            return self._send(200, {'id': 'p' + str(len(SEEN)), 'existing': False, 'test': True})
+        if self.path in ('/studio/direction', '/studio/source', '/studio/reference'):
+            return self._send(200, {'ok': True, 'id': 'x' + str(len(SEEN))})
+        if self.path == '/studio/asset':
+            return self._send(200, {'ok': True, 'asset': {'id': 'a' + str(len(SEEN)), 'current': 'v1', 'revision': 1, 'versions': [{'id': 'v1', 'layout': {'layers': [{'id': 'h', 'role': 'headline', 'x': 6, 'y': 60}, {'id': 's', 'role': 'support', 'x': 6, 'y': 75}]}}]}})
         if self.path == '/studio/project/archive-tests':
             return self._send(200, {'archived': [{'id': 'p1', 'title': 'TEST - one'}, {'id': 'p2', 'title': 'TEST - two'}]})
         self._send(200, {'ok': True})
@@ -67,10 +73,15 @@ def seed():
     assert 'SYNTHETIC' in kits[0][2]['name'] and any(f['status'] == 'pending' for f in kits[0][2]['facts']), kits[0][2]
     import base64
     logo = base64.b64decode(kits[1][2]['logoB64']); assert logo[:8] == b'\x89PNG\r\n\x1a\n' and int.from_bytes(logo[16:20], 'big') == 320, 'a real PNG with its size'
-    assert len(projs) == 2 and all(s[2]['test'] is True and s[2]['ns'] == 'synthdemo' and s[2]['idem'] for s in projs), projs
+    assert len(projs) == 7 and all(s[2]['test'] is True and s[2]['ns'] == 'synthdemo' and s[2]['idem'] for s in projs), projs
+    vers = [s for s in posts if s[1] == '/studio/version']
+    assert len(vers) == 4 and all(v[2]['layout']['noImagery'] is True for v in vers), 'four tiles laid out on a solid ground: %r' % vers
+    blocked = [v for v in vers if v[2]['layout']['layers'][1]['y'] == v[2]['layout']['layers'][0]['y']]
+    assert len(blocked) == 1, 'exactly one tile laid out to block'
+    assert not [s for s in posts if s[1] == '/studio/approve'], 'the seed approves nothing'
     assert all(s[3] == 'full-key-test' for s in SEEN), 'the key goes in the header only'
     assert 'full-key-test' not in out, 'the key is never printed'
-t('seed --apply writes the synthetic kit (with real PNG marks) and two test projects to synthdemo', seed)
+t('seed --apply writes the synthetic kit (with real PNG marks) and seven parked test projects to synthdemo, approving nothing', seed)
 
 
 def live_refused():

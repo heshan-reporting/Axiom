@@ -19,7 +19,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0',
 };
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFklEQVR4nGNgWH2G4f9/BgYGhv//GRgAJJkFy2x6XLUAAAAASUVORK5CYII=';
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADklEQVR42mOIQgIMxHEAtwMQ4VNZN70AAAAASUVORK5CYII=';
 const T = (id, role, x, y, w, h, size, extra) => Object.assign({ id, type: 'text', role, x, y, w, h, size, color: '#FFFFFF' }, extra || {});
 const PLAN = { medium: 'editorial', approach: 'editable', story: 'big words over a quiet field', mark: 'campaign', bg: '#123456', regions: [], elements: [T('hl', 'headline', 6, 10, 60, 30, 7), T('sp', 'support', 6, 50, 60, 12, 3), T('cta', 'cta', 6, 80, 40, 6, 2.6), { id: 'bar', type: 'shape', role: 'device', shape: 'rect', x: 0, y: 0, w: 3, h: 100, fill: '#F2B134' }] };
 const seen = []; const Q = { copy: [], revise: [], seq: [] };

@@ -3064,7 +3064,9 @@ async function brandKit(env, ns) {
    pixels of a transparent file, or the pixels that differ from the file's own border colour when it is opaque. Answers
    {tone dark|light|colour, lum (relative luminance of the ink), fill (ink share of the file), opaque, field (luminance of an
    opaque file's own ground)} or null for anything it cannot read (JPEG, WebP, 16-bit, interlaced, very large). */
-async function stPngInk(buf) {
+/** An 8-bit, non-interlaced PNG decoded to its pixels: {W, H, at(i) -> [r, g, b, a]} for pixel i (row-major), or null for any
+ *  other kind. Used to read a mark file's ink (stPngInk) and, since the release candidate (D3), the measured export itself. */
+async function stPngDecode(buf) {
   try {
     const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     const sig = [137, 80, 78, 71, 13, 10, 26, 10]; if (u.length < 45 || sig.some((b, i) => u[i] !== b)) return null;
@@ -3096,6 +3098,13 @@ async function stPngInk(buf) {
       if (ct === 4) return [px[k], px[k], px[k], px[k + 1]];
       const ix = px[k]; return plte ? [plte[ix * 3] || 0, plte[ix * 3 + 1] || 0, plte[ix * 3 + 2] || 0, trns && ix < trns.length ? trns[ix] : 255] : [ix, ix, ix, 255];
     };
+    return { W, H, ct, at };
+  } catch (e) { return null; }
+}
+async function stPngInk(buf) {
+  try {
+    const d = await stPngDecode(buf); if (!d) return null;
+    const { W, H, at } = d;
     const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
     const lumOf = q => 0.2126 * lin(q[0]) + 0.7152 * lin(q[1]) + 0.0722 * lin(q[2]);
     const n = W * H; const step = Math.max(1, Math.floor(n / 60000)); let transparent = 0, seen = 0;
@@ -3194,6 +3203,18 @@ function stImgSniff(buf) {
 const ST_PNG_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function stCrc32(u, s, e) { let c = 0xffffffff; for (let i = s; i < e; i++) c = ST_PNG_CRC[(c ^ u[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 const ST_PNG_DEPTHS = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }, ST_PNG_CHANNELS = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+/** RC (S4): is this a whole image? A PNG through stPngCheck (every chunk, its CRC, the image data inflated to its stated size);
+ *  a JPEG by its end-of-image marker; a WebP by its RIFF length. Answers {ok, type, mime, w, h} or {ok:false, why}. */
+async function stImageBytesCheck(buf, want) {
+  const u = new Uint8Array(buf instanceof ArrayBuffer ? buf : (buf && buf.buffer ? buf.buffer.slice(buf.byteOffset || 0, (buf.byteOffset || 0) + buf.byteLength) : new ArrayBuffer(0)));
+  const sn = stImgSniff(u.buffer); if (!sn) return { ok: false, why: 'the bytes are not a PNG, JPEG or WebP image' };
+  if (!sn.w || !sn.h) return { ok: false, why: 'the ' + sn.type.toUpperCase() + ' states no size' };
+  if (sn.type === 'png') { const c = await stPngCheck(u.buffer, want || null); if (!c.ok) return { ok: false, why: c.why }; }
+  else if (sn.type === 'jpeg') { let end = false; for (let i = u.length - 2; i >= Math.max(0, u.length - 64); i--) if (u[i] === 0xff && u[i + 1] === 0xd9) { end = true; break; } if (!end) return { ok: false, why: 'the JPEG is cut short (no end-of-image marker)' }; }
+  else if (sn.type === 'webp') { const riff = (u[4] | (u[5] << 8) | (u[6] << 16) | (u[7] << 24)) >>> 0; if (riff + 8 !== u.length) return { ok: false, why: 'the WebP is ' + u.length + ' bytes, not the ' + (riff + 8) + ' it states' }; }
+  if (want && want.w && want.h && (sn.w !== want.w || sn.h !== want.h)) return { ok: false, why: 'it is ' + sn.w + 'x' + sn.h + ', not ' + want.w + 'x' + want.h };
+  return { ok: true, type: sn.type, mime: sn.mime, w: sn.w, h: sn.h };
+}
 async function stPngCheck(buf, want) {
   const u = new Uint8Array(buf instanceof ArrayBuffer ? buf : (buf && buf.buffer ? buf.buffer.slice(buf.byteOffset || 0, (buf.byteOffset || 0) + buf.byteLength) : new ArrayBuffer(0)));
   const bad = (why, extra) => Object.assign({ ok: false, why }, extra || {});
@@ -3665,12 +3686,17 @@ async function mindRetractPending(env, limit) {
 }
 /** p44: retrieval never returns a document being retracted or retracted (its vectors may outlive a failed deletion). */
 async function mindDropRetracted(env, hits) {
-  const ids = Array.from(new Set((hits || []).map(h => h && h.meta && h.meta.docId).filter(Boolean))).slice(0, 90);
+  // RC (S3): every document is checked (in slices under D1's variable limit, not the first ninety only), and the filter fails
+  // closed: a passage whose document could not be cleared is left out and the failure logged; a passage with no document stays
+  const ids = Array.from(new Set((hits || []).map(h => h && h.meta && h.meta.docId).filter(Boolean)));
   if (!ids.length || !env.MIND_DB) return hits;
-  try {
-    const gone = new Set(((await env.MIND_DB.prepare("SELECT id FROM mind_docs WHERE status IN ('retracting','retracted') AND id IN (" + ids.map(() => '?').join(',') + ')').bind(...ids).all()).results || []).map(r => r.id));
-    return gone.size ? hits.filter(h => !(h && h.meta && gone.has(h.meta.docId))) : hits;
-  } catch (e) { return hits; }
+  const gone = new Set();
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90);
+    try { ((await env.MIND_DB.prepare("SELECT id FROM mind_docs WHERE status IN ('retracting','retracted') AND id IN (" + part.map(() => '?').join(',') + ')').bind(...part).all()).results || []).forEach(r => gone.add(r.id)); }
+    catch (e) { part.forEach(id => gone.add(id)); try { console.log('mindDropRetracted: withdrawal record unreadable, ' + part.length + ' document(s) left out: ' + String(e && e.message || e).slice(0, 120)); } catch (e2) {} }
+  }
+  return gone.size ? hits.filter(h => !(h && h.meta && gone.has(h.meta.docId))) : hits;
 }
 /** Describe a piece of artwork with a vision model so it can be remembered and
  *  retrieved. Text only comes back; the image itself goes to R2. */
@@ -3872,6 +3898,8 @@ function contentKitBlock(kit, campaignId, segmentId, platforms, opts) {
   // Studio (opts.campaignOnly, S7) carries the campaign's own facts and the client-wide ones only: its figure checks judge
   // against the campaign's facts, so offering another campaign's invited figures the checks would then flag.
   if (camp) { const own = facts.filter(f => f.campaign === camp.id); const shared = facts.filter(f => !f.campaign); const rest = facts.filter(f => f.campaign && f.campaign !== camp.id); if (opts.campaignOnly) { excludedFacts = rest.length; facts = own.concat(shared); } else facts = own.concat(shared, rest); }
+  // RC (K3): Studio work with no campaign (standalone) carries the client-wide facts only, as its rechecks judge it
+  else if (opts.campaignOnly) { excludedFacts = facts.filter(f => f.campaign).length; facts = facts.filter(f => !f.campaign); }
   facts = facts.slice(0, 40);
   let s = '';
   if (kit.voice) s += '\n\nCLIENT VOICE:\n' + kit.voice;
@@ -7280,7 +7308,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-06.studio-p44';
+const AXIOM_BUILD = '2026-11-07.studio-p45';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -8307,7 +8335,10 @@ async function stStatus(env) {
   // S28: "configured" is not "working": the last answer each provider gave (from the dispatch record), so the header can say both
   const lastProvider = {};
   try { for (const k of ['text', 'image']) { const r = await env.MIND_DB.prepare('SELECT outcome, model, ended, at, detail FROM studio_dispatch WHERE kind=? AND ended IS NOT NULL ORDER BY ended DESC LIMIT 1').bind(k).first(); if (r) lastProvider[k === 'text' ? 'claude' : 'gemini'] = { ok: r.outcome === 'ok', outcome: r.outcome, model: r.model || '', at: r.ended || r.at, detail: stStr(r.detail || '', 160) }; } } catch (e) {}
-  return { ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, deploy: AXIOM_DEPLOY || undefined, phase: 2, budget, durations, aiAutomation, lastProvider, projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
+  // RC (R3): the synthetic test clients, so the Studio lists them for every key (labelled; nothing filed there reaches a live client)
+  const testNs = [];
+  for (const ns of stTestNsList(env)) { let name = ''; try { name = stStr(((await brandKit(env, ns)) || {}).name || '', 90); } catch (e) {} testNs.push({ ns, name }); }
+  return { ok: true, build: AXIOM_BUILD, rev: AXIOM_REV, deploy: AXIOM_DEPLOY || undefined, phase: 2, budget, durations, aiAutomation, lastProvider, testNs, posture: axPosture(env), projects: p.n || 0, imported: p.imported || 0, archived: p.archived || 0, versions: v.n || 0, jobs: { queued: j.queued || 0, running: j.running || 0, failed: j.failed || 0, done24: j.done24 || 0, total: j.total || 0 }, stages: ST_STAGES, leaseMs: ST_LEASE_MS, maxAttempts: ST_MAX_ATTEMPTS, bound: { d1: !!env.MIND_DB, r2: !!env.MIND_DOCS, ai: !!env.AI, vectors: !!env.MIND_VECTORS }, keys: { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_KEY, clickup: !!env.CLICKUP_TOKEN }, access: { enforced: !!(env.AXIOM_ACCESS_KEY || env.AXIOM_KEYS), model: 'agency-wide full and read roles; a project is one client and every child row is authorised through it' } };
 }
 
 // -- Phase 2: the production journey - context, ledger, directions, copy, layouts, renders, export ------
@@ -9263,7 +9294,9 @@ function stCompositionDiversity(dirs) {
   const pairs = []; let sum = 0, n = 0;
   for (let i = 0; i < ds.length; i++) for (let k = i + 1; k < ds.length; k++) {
     const a = ds[i], b = ds[k]; const same = [];
-    let dist = 0; if (a.medium !== b.medium || !a.medium) dist += 0.3; else same.push('medium');
+    // RC (C1): photographic media are one family - "photo-documentary" and "photo-cinematic" over the same layout look alike
+    const fam = m => (/^photo|photograph/i.test(String(m || '')) ? 'photographic' : String(m || ''));
+    let dist = 0; if (fam(a.medium) !== fam(b.medium) || !a.medium) dist += 0.3; else same.push(fam(a.medium) === a.medium ? 'medium' : 'medium (' + fam(a.medium) + ')');
     if (a.image !== b.image) dist += 0.25; else same.push('imagery ' + a.image);
     if (a.zone !== b.zone) dist += 0.2; else same.push('words at the ' + a.zone);
     if (a.scale !== b.scale) dist += 0.1; else same.push(a.scale + ' type');
@@ -9353,10 +9386,24 @@ function stStrs(v, n, each) { return (Array.isArray(v) ? v : v ? [v] : []).map(x
  *  Each item has an id the model can cite: K Mind passages, N live narratives on the client's issues, A Sentinel alerts,
  *  D recorded decisions (approvals and rejections with their reasons, engine outcomes), H the team's earlier choices in
  *  this engine, S how the conversation stands toward the client's own entities. Every part fails soft. */
+/* RC (K1): what a retrieved passage says about its scope and standing - the campaign from the pack source tag a voice pack
+ * writes (pack:<ns>:<campaign>:...) or the document's own metadata, and the approval its kind implies; unknown is said so */
+function stKnowCampaign(meta, ns) {
+  const m = /^pack:([a-z0-9_-]+):([a-z0-9_-]*):/i.exec(String((meta && meta.source) || ''));
+  if (m && m[1] === ns && m[2] && m[2] !== 'all' && m[2] !== 'client') return stStr(m[2], 40);
+  return stStr((meta && meta.campaign) || '', 40);
+}
+function stKnowApproval(meta) {
+  const k = String((meta && meta.kind) || '').toLowerCase(); const t = String((meta && (meta.title || meta.text || '')) || '');
+  if (k === 'outcome') return /\bLOSS\b|rejected|killed/i.test(t) ? 'rejected work (avoid)' : 'approved work';
+  if (k === 'copy' || k === 'release') return 'approved copy';
+  if (k === 'brief' || k === 'research' || k === 'brief_daily' || k === 'signal') return 'reference material, not approved copy';
+  return 'approval unknown';
+}
 async function stIntelKnowledge(env, p, q, log) {
   const out = { K: [], N: [], A: [], D: [], H: [], S: [] }; const ns = p.ns; const db = env.MIND_DB;
   const issueIds = CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => ci.id);
-  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 6, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 6).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
+  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 6, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 6).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), campaign: stKnowCampaign(h.meta, ns), approval: stKnowApproval(h.meta), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
   try {
     const rows = (await db.prepare("SELECT id,label,claim,counter_claim,side,status,n,velocity,issues,ns,last_ts FROM narratives WHERE COALESCE(label,'')<>'' AND COALESCE(status,'')<>'broad' AND COALESCE(scope,'')<>'off' AND COALESCE(muted,0)=0 AND last_ts>? ORDER BY last_ts DESC LIMIT 60").bind(Date.now() - 14 * 864e5).all()).results || [];
     out.N = rows.filter(r => r.ns === ns || pjs(r.issues, []).some(i => issueIds.indexOf(i) >= 0)).slice(0, 5).map((r, i) => ({ id: 'N' + (i + 1), ref: r.id, label: stStr(r.label, 140), claim: stStr(r.claim, 240), counter: stStr(r.counter_claim, 200), side: r.side || '', status: r.status || '', rows: r.n || 0 }));
@@ -9433,6 +9480,7 @@ async function stAnalyseStage(env, job, p, log) {
     : '(10) RECOMMENDATION: the strategy, objective, message and direction you would run, and why; then the next step: "copy" when the brief is clear, "directions" when the idea is open, "brief" when something essential is missing, "decide" when you recommend not responding. ';
   const sys = 'You are the strategy lead of an Australian political communications agency, working for ' + ctx.client + ' only - a creative strategist, issues manager, political analyst and brand guardian in one. You receive material that may or may not be a brief: a written brief, a pasted daily intelligence brief covering many clients, a news article, a competitor or government statement, a social post, a screenshot, a research finding, an email paragraph, or a situation that has just happened' + (multi ? ' - here, several pieces of material that together make one brief: read them as one situation and say where they disagree' : '') + '. You never jump from the material to copy. You work in order: '
     + '(1) INPUT: classify the input type. (2) UNDERSTANDING: extract or infer every brief field; for each say whether it was stated in the material, inferred from it, or taken from what Axiom knows about the client. (3) SITUATION: what happened (the facts only), why it matters to THIS client specifically (never generic - the same story means different things to different clients), the kind of opportunity or risk it is, and whether the client should respond (yes / no / monitor) - recommend not responding when engaging would amplify an attack, add nothing, or risk more than it gains. '
+    + '(3b) CAMPAIGN: name every campaign of THIS kit the material could belong to as a candidate, with a confidence from 0 to 1, the paragraph ids that point to it and why; judge only by what the material says, never by how much Axiom holds for a campaign; give no candidate when the work is client-wide; a person decides, so say when two are close. '
     + '(4) PARAGRAPHS: read paragraph by paragraph (ids P1..Pn); keep a paragraph that bears on this client and say what it is (client, campaign, background, fact, mandatory, evidence, quote, statistic); set the rest aside and say why (irrelevant, duplicate, other_client, unverified, misleading, outdated, contradictory). (5) TOPICS: every topic, issue and sub-issue the material raises, each judged high / potential / not relevant for this client against its issue lexicon and knowledge. '
     + '(6) COMPARISON with what Axiom knows (cite K, N, A, D, H, S, F ids): what is new, what is already known, what supports, what contradicts, which campaign it affects, whether a narrative is emerging or already running, whether the client has already said this, whether it is already being discussed publicly, messaging gaps, missing context, conflicts with current objectives, and how the brief itself could be better; then a short Creative Intelligence Summary. '
     + '(7) OBJECTIVES: three to five communication objectives derived from this situation and this client (never generic templates), ranked by strategic relevance, each with two or three key messages: primary, supporting, evidence (fact or paragraph ids), proof, audience takeaway, emotional takeaway, desired reaction, CTA. (8) RESPONSE STRATEGIES: several of direct, indirect, evidence, values, rapid, education, campaign, none (do not respond) - each with objective id, audience, key message, benefit, risk, urgency, platforms and format; mark exactly one recommended. '
@@ -9444,7 +9492,7 @@ async function stAnalyseStage(env, job, p, log) {
     + '"situation":{"what":"","whyItMatters":"","kinds":["communication|campaign|reputational_risk|misinformation|political|policy|competitor_response|community|media|none"],"respond":"yes|no|monitor","why":""},'
     + '"summary":"","relevant":[{"p":"P1","class":"client","why":""}],"filtered":[{"p":"P2","class":"other_client","why":""}],'
     + '"topics":[{"name":"","kind":"topic|issue|subissue","relevance":"high|potential|not","issue":"lexicon id or empty","why":""}],'
-    + '"campaign":{"id":null,"confidence":0,"why":""},'
+    + '"campaign":{"candidates":[{"id":"","confidence":0,"evidence":["P1"],"why":""}],"why":""},'
     + '"comparison":{"new":[""],"known":[""],"supports":[""],"contradicts":[""],"campaignAffected":"","narrative":{"state":"emerging|existing|none","ref":"N1","why":""},"alreadyCommunicated":"","publicDiscussion":"","gaps":[""],"missingContext":[""],"conflicts":[""],"briefImprovements":[""],"cites":["K1"]},'
     + '"intelSummary":"",'
     + '"brief":{"objective":"","audience":"","message":"","action":"","channels":[],"deliverable":"set","tone":""},'
@@ -9458,9 +9506,9 @@ async function stAnalyseStage(env, job, p, log) {
   const user = 'CLIENT CONTEXT (voice, rules, wording, facts in force):\n' + stStr(ctx.text, 9000)
     + '\n\nCLIENT ISSUE LEXICON: ' + (lexicon.map(x => x.id + '=' + x.label).join('; ') || '(none recorded)')
     + kn('CAMPAIGNS', camps, c => '- ' + c.id + ': ' + stStr(c.name, 80) + (c.tone ? ' | tone: ' + stStr(c.tone, 160) : '') + (c.notes ? ' | ' + stStr(c.notes, 240) : '') + (c.identity ? ' | identity: ' + stStr(c.identity, 160) : ''))
-    + kn('APPROVED FACTS', facts, f => '[' + f.id + '] ' + f.text + (f.campaign ? ' (campaign ' + f.campaign + ')' : '') + (f.source ? ' - ' + f.source : ''))
+    + kn('APPROVED FACTS (approved by the team)', facts, f => '[' + f.id + '] ' + f.text + ' [' + (f.campaign ? 'campaign ' + f.campaign : 'client-wide') + ']' + (f.source ? ' - ' + f.source : ''))
     + '\n\nBANNED TERMS: ' + (banned.join(', ') || '(none)')
-    + kn('KNOWLEDGE IN THE MIND', K, k => '[' + k.id + '] ' + k.title + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text)
+    + kn('KNOWLEDGE IN THE MIND (each labelled with its campaign and approval)', K, k => '[' + k.id + '] ' + k.title + ' [' + (k.campaign ? 'campaign ' + k.campaign : 'client-wide or unknown') + '; ' + (k.approval || 'approval unknown') + ']' + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text)
     + kn('LIVE NARRATIVES ON THE CLIENT\'S ISSUES', know.N, n => '[' + n.id + '] ' + n.label + ' - claim: ' + n.claim + (n.counter ? ' | counter: ' + n.counter : '') + ' (' + n.rows + ' rows, ' + (n.side || 'stance unknown') + ', ' + n.status + ')')
     + kn('SENTINEL ALERTS (14 days)', know.A, a => '[' + a.id + '] ' + a.label + ' x' + a.ratio + (a.angle ? ' - angle drafted: ' + a.angle : ''))
     + kn('RECORDED DECISIONS (approvals, rejections, outcomes)', know.D, d => '[' + d.id + '] ' + d.kind + ': ' + d.what + (d.why ? ' - ' + d.why : ''))
@@ -9483,8 +9531,20 @@ async function stAnalyseStage(env, job, p, log) {
   const relevant = (Array.isArray(j.relevant) ? j.relevant : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'client') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 240) }));
   const filtered = (Array.isArray(j.filtered) ? j.filtered : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'irrelevant') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 140) }));
   const unplaced = keys.map((k, i) => 'P' + (i + 1)).filter(id => !seen.has(id));
-  const cid = j.campaign && j.campaign.id && camps.some(c => c.id === j.campaign.id) ? j.campaign.id : null;
-  const campaign = { id: cid, name: cid ? stStr((camps.find(c => c.id === cid) || {}).name, 80) : '', confidence: cid ? Math.max(0, Math.min(1, Number(j.campaign.confidence) || 0)) : 0, why: stStr(j.campaign && j.campaign.why, 240), current: p.campaign || '' };
+  // RC (K1): the reading proposes, a person decides. Every campaign of the kit the material could belong to is a candidate with
+  // its confidence, evidence (paragraph ids that exist) and reason; the reading is ambiguous when the top two are within 0.2 or
+  // the top is under 0.6, and then nothing is detected - the question goes to the team. Volume is never a tie-break.
+  const jcamp = j.campaign && typeof j.campaign === 'object' ? j.campaign : {};
+  const rawC = Array.isArray(jcamp.candidates) ? jcamp.candidates : (jcamp.id ? [{ id: jcamp.id, confidence: jcamp.confidence, why: jcamp.why }] : []);
+  const pidSet = new Set(keys.map((k, i) => 'P' + (i + 1)));
+  const candidates = rawC.filter(c => c && camps.some(k => k.id === c.id)).filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i)
+    .map(c => ({ id: c.id, name: stStr((camps.find(k => k.id === c.id) || {}).name, 80), confidence: Math.round(Math.max(0, Math.min(1, Number(c.confidence) || 0)) * 100) / 100, evidence: (Array.isArray(c.evidence) ? c.evidence : []).map(x => String(x || '').toUpperCase()).filter(x => pidSet.has(x)).slice(0, 6), why: stStr(c.why, 240) }))
+    .sort((a, b) => b.confidence - a.confidence).slice(0, 4);
+  const topC = candidates[0] || null, nextC = candidates[1] || null;
+  const ambiguous = !!topC && (topC.confidence < 0.6 || (!!nextC && topC.confidence - nextC.confidence <= 0.2));
+  const cid = topC && !ambiguous ? topC.id : null;
+  const campaign = { id: cid, name: cid ? topC.name : '', confidence: cid ? topC.confidence : 0, why: stStr(cid ? topC.why : jcamp.why, 240), current: p.campaign || '', candidates, ambiguous,
+    question: ambiguous ? 'Which campaign is this for: ' + candidates.map(c => c.name + ' (' + Math.round(c.confidence * 100) + '%)').join(' or ') + ', or none (standalone)? The reading cannot tell, and the campaign decides the facts, the address and the mark.' : '' };
   const factIds = new Set(facts.map(f => f.id)); const STAT = ['matches_fact', 'conflicts_fact', 'new_unverified'];
   const claims = (Array.isArray(j.claims) ? j.claims : []).slice(0, 24).map(c => { const st = STAT.indexOf(c && c.status) >= 0 ? c.status : 'new_unverified'; const f = c && factIds.has(c.fact) ? c.fact : ''; return { text: stStr(c && c.text, 300), p: pid(c && c.p), status: st === 'new_unverified' || f ? st : 'new_unverified', fact: f, factText: f ? (facts.find(x => x.id === f) || {}).text : undefined }; }).filter(c => c.text);
   const known = new Set([].concat(K, know.N, know.A, know.D, know.H, know.S).map(x => x.id).concat(facts.map(f => f.id)));
@@ -10057,6 +10117,7 @@ async function stMarkSourceProblem(env, p, kit, l, opts) {
     if (variant && variant !== 'primary') { const ent = (kit.logoVariants || []).find(x => x.variant === variant); if (!ent) return bad('the kit has no ' + variant + ' variant of the client logo' + ((kit.logoVariants || []).length ? ' (on file: ' + kit.logoVariants.map(x => x.variant).join(', ') + ')' : '')); key = 'brand/' + ns + '/logo/' + variant + '/' + (rev || ent.v || ''); }
     else key = rev ? 'brand/' + ns + '/logo@' + rev : 'brand/' + ns + '/logo';
   }
+  if (opts.keyOut) opts.keyOut.key = key;
   if (opts.files && env.MIND_DOCS) {
     const cache = opts.cache || {}; if (cache[key] === undefined) { let o = null; try { o = await env.MIND_DOCS.get(key); } catch (e) { o = null; } if (!o && !variant && !rev && role === 'logo') { try { o = await brandLogo(env, ns); } catch (e) { o = null; } } cache[key] = !!o; }
     if (!cache[key]) return bad('the file it names (' + (variant ? variant + ' ' : '') + role + (rev ? ' revision ' + rev : '') + ') is not in storage, so it would not draw');
@@ -10270,20 +10331,30 @@ async function stDirectStage(env, job, p, log) {
   similar = mode === 'refine' || mode === 'merge' ? 0 : measure(dirs);
   // S8: genuinely different means different in what is drawn as well as what is argued - three or more directions in one medium are a narrow set
   const mediaOf = list => Array.from(new Set(list.map(d => d.medium).filter(Boolean)));
-  let narrow = mode !== 'refine' && mode !== 'merge' && dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
+  // RC (C1): photographic media are one family for narrowness ('photo-documentary', 'photo-cinematic', 'photograph')
+  const famOf = m => (/^photo|photograph/i.test(String(m || '')) ? 'photographic' : String(m || ''));
+  const famsOf = list => Array.from(new Set(list.map(d => famOf(d.medium)).filter(Boolean)));
+  const mediumWord = list => (mediaOf(list).length > 1 ? famOf(list[0].medium) + ' (' + mediaOf(list).join(', ') + ')' : list[0].medium);
+  let narrow = mode !== 'refine' && mode !== 'merge' && dirs.length >= 3 && famsOf(dirs).length <= 1 && !!dirs[0].medium;
+  // RC (C1): directions that would look the same on the page (the same layout with another background) are look-alikes too,
+  // measured on what each says it would draw; they go back in the same one replanning round
+  const lookClose = mode === 'refine' || mode === 'merge' || similar || narrow ? [] : stCompositionDiversity(dirs).pairs.filter(x => x.close);
   let replanned = 0, replanWhy = '', model2 = '';
-  if ((similar || narrow) && inp.replan !== false) {
+  if ((similar || narrow || lookClose.length) && inp.replan !== false) {
     // one bounded replanning round, like the concepts stage: the look-alikes (or the last direction of a one-medium set) go back with the measure
-    const dup = similar ? dirs.filter(d => d.similar) : [dirs[dirs.length - 1]];
+    const lookDup = lookClose.map(x => dirs.find(d => d.title === x.b)).filter((d, i, arr) => d && arr.indexOf(d) === i);
+    lookDup.forEach(d => { if (!d.similar) d.similar = (lookClose.find(x => x.b === d.title) || {}).a; });
+    const dup = similar || lookDup.length ? dirs.filter(d => d.similar) : [dirs[dirs.length - 1]];
+    if (!similar && lookDup.length) similar = lookDup.length;
     const stand = dirs.filter(d => dup.indexOf(d) < 0);
-    replanWhy = similar ? 'alike' : 'one medium';
+    replanWhy = lookDup.length && !narrow ? 'looks alike' : similar ? 'alike' : 'one medium';
     await log('info', (similar ? dup.length + ' direction' + (dup.length === 1 ? ' reads' : 's read') + ' as another in different words (' + dup.map(d => '"' + d.title + '" ~ "' + d.similar + '"').join(', ') + ')' : 'every direction is ' + dirs[0].medium) + '; asking once for ' + dup.length + ' replacement' + (dup.length === 1 ? '' : 's') + ' that differ in argument and medium');
     try {
-      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + dirs[0].medium + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + dirs[0].medium + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
+      const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (lookClose.length ? 'These would look the same on the page - the same layout with a different background: ' + lookClose.map(x => '"' + x.b + '" draws like "' + x.a + '" (same ' + x.same.join(', ') + ')').join('; ') + '. Replace them with directions whose composition differs: where the words sit, what the imagery is and how large the type is.' : '') + (lookClose.length ? '' : similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + mediumWord(dirs) + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + (mediaOf(dirs).length > 1 ? famOf(dirs[0].medium) : dirs[0].medium) + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
       const j2 = relJson(again.text); model2 = again.model;
       if (j2 && Array.isArray(j2.directions) && j2.directions.length) {
         const fresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model));
-        dirs = stand.concat(fresh).slice(0, n); replanned = fresh.length; similar = measure(dirs); narrow = dirs.length >= 3 && mediaOf(dirs).length <= 1 && !!dirs[0].medium;
+        dirs = stand.concat(fresh).slice(0, n); replanned = fresh.length; similar = measure(dirs); narrow = dirs.length >= 3 && famsOf(dirs).length <= 1 && !!dirs[0].medium;
         dirs.filter(d => d.similar).forEach(d => { d.replanFailed = true; });
       }
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
@@ -10348,6 +10419,9 @@ async function stBriefCheck(env, p, kit, opts) {
   const camp = p.campaign ? (kit.campaigns || []).find(c => c.id === p.campaign) || null : null;
   let campaign = null;
   if (p.campaign && !camp) gaps.push({ field: 'campaign', level: 'mandatory', code: 'campaign_unknown', text: 'The project names the campaign "' + p.campaign + '" but the ' + (kit.name || p.ns) + ' kit has no such campaign' + (camps.length ? ' (it has ' + camps.map(c => c.id).join(', ') + ')' : '') + '.' });
+  // RC (K3): "Standalone" (or a confirmed "no campaign") is a person's decision, not a gap: the work then carries the client's
+  // own records only - client-wide facts, the client logo under the house policy - at production and on every recheck alike
+  else if (!p.campaign && camps.length > 1 && (b.campaignMode === 'standalone' || b.campaignConfirmed === true)) assumptions.push({ field: 'campaign', text: 'Standalone work: no campaign. Only the client-wide facts and records apply; each campaign\'s own facts, URL and marks stay with that campaign.', source: 'team' });
   else if (!p.campaign && camps.length > 1) gaps.push({ field: 'campaign', level: 'mandatory', code: 'campaign_unconfirmed', text: 'No campaign is chosen and the kit has ' + camps.length + ' (' + camps.map(c => c.name || c.id).join(', ') + '). The first is not assumed: choose the campaign the work belongs to, or none.', options: camps.map(c => ({ id: c.id, name: c.name || c.id })) });
   else if (!p.campaign && camps.length === 1 && !b.campaignConfirmed) gaps.push({ field: 'campaign', level: 'preferred', code: 'campaign_unconfirmed', text: 'No campaign is chosen; the kit has one (' + (camps[0].name || camps[0].id) + '). Confirm it or confirm that this work belongs to no campaign.', options: camps.map(c => ({ id: c.id, name: c.name || c.id })) });
   if (camp) {
@@ -10650,6 +10724,14 @@ function stCopySheet(p, items) {
   });
   return L.join('\n');
 }
+/** RC (S4): a finished creative's bitmap, read from storage and checked whole before it is delivered: {ok, hash} or {ok:false, why} */
+async function stFinishedBitmapCheck(env, key) {
+  let buf = null; try { const o = await env.MIND_DOCS.get(key); buf = o ? await o.arrayBuffer() : null; } catch (e) { buf = null; }
+  if (!buf) return { ok: false, missing: true, why: 'the finished bitmap is not on file' };
+  const chk = await stImageBytesCheck(buf);
+  if (!chk.ok) return { ok: false, why: 'the finished bitmap on file is not a whole image (' + chk.why + '); regenerate it' };
+  return { ok: true, hash: await stBufSha(buf), w: chk.w, h: chk.h };
+}
 async function stExportStage(env, job, p, log) {
   const want = Array.isArray(job.input.assets) && job.input.assets.length ? new Set(job.input.assets.map(x => stClean(x, 24))) : null;
   const rows = stOrderAssets(((await env.MIND_DB.prepare('SELECT * FROM studio_assets WHERE project=? AND COALESCE(archived,0)=0 ORDER BY created').bind(p.id).all()).results || []).map(stAssetRow));
@@ -10669,9 +10751,15 @@ async function stExportStage(env, job, p, log) {
     if (job.input.requireClient && !(client && client.kind === 'approve' && client.current)) { excluded.push({ asset: a.id, title: a.title, why: client && client.kind === 'changes' && client.current ? 'the client asked for changes to this version' : client && client.kind === 'approve' ? 'the client approved an earlier version, not this one' : 'not approved by the client' }); continue; }
     // S28: a composition is delivered as the PNG its passing measurement validated (content-addressed), never a file saved after it
     const exportKey = cur.mode === 'finished' ? ((cur.image && cur.image.key) || '') : ((rd && rd.validation && rd.validation.exportKey) || '');
-    const exportHash = cur.mode === 'finished' ? '' : ((rd && rd.validation && rd.validation.exportHash) || '');
-    let hasExport = false; try { hasExport = !!(exportKey && env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {}
-    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, finished: cur.mode === 'finished' || undefined, creationMode: cur.mode === 'finished' ? 'finished' : cur.mode === 'copy' ? undefined : 'editable', copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', exportHash: hasExport && exportHash ? exportHash : undefined, checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' , client: client ? { decision: client.kind, current: client.current, version: client.version, by: client.author, nameVerified: false, via: client.via || 'review link', at: client.at } : null});
+    let exportHash = cur.mode === 'finished' ? '' : ((rd && rd.validation && rd.validation.exportHash) || '');
+    let hasExport = false, finHash = '';
+    // RC (S4): a finished creative is delivered as its bitmap, so the bitmap is read and checked whole before it is listed
+    if (cur.mode === 'finished' && exportKey && env.MIND_DOCS) {
+      const fb = await stFinishedBitmapCheck(env, exportKey);
+      if (!fb.ok && !fb.missing) { excluded.push({ asset: a.id, title: a.title, why: fb.why }); continue; }
+      if (fb.ok) { hasExport = true; finHash = fb.hash; }
+    } else { try { hasExport = !!(exportKey && env.MIND_DOCS && await env.MIND_DOCS.get(exportKey)); } catch (e) {} }
+    items.push({ asset: a.id, title: a.title, channel: a.channel, format: a.format, version: cur.id, mode: cur.mode, finished: cur.mode === 'finished' || undefined, creationMode: cur.mode === 'finished' ? 'finished' : cur.mode === 'copy' ? undefined : 'editable', copy: cur.copy, layout: cur.layout, image: cur.image, exportKey: hasExport ? exportKey : '', exportHash: hasExport && (exportHash || finHash) ? (exportHash || finHash) : undefined, checks: cur.checks || [], approvals: ap, context: cur.context || {}, validation: rd && rd.validation ? { id: rd.validation.id, at: rd.validation.at, sig: rd.sig, warnings: rd.validation.warnings.map(i => i.code) } : null, imagery: cur.image ? { model: cur.image.model, generated: cur.image.size || '', fallback: !!cur.image.fallback } : null, output: cur.layout && cur.layout.stage ? cur.layout.stage.w + 'x' + cur.layout.stage.h : '' , client: client ? { decision: client.kind, current: client.current, version: client.version, by: client.author, nameVerified: false, via: client.via || 'review link', at: client.at } : null});
   }
   const id = stId('e'); const base = 'studio/' + p.id + '/export/' + id;
   const sheet = stCopySheet(p, items);
@@ -13097,7 +13185,55 @@ const ST_TOL_PX = 1.6;
    constraints, double styling. A report from another contract is refused with the reason. */
 const ST_VALIDATION_CONTRACT = 2;
 /** Re-judge a browser's measurement report against the version it claims to be about; problems mean the report is refused. */
-function stValidationJudge(a, v, rep) {
+/* RC (D3): the worker's own reading of the measured PNG, so a technical pass rests on the image that was filed and not only on
+ * the browser's figures. For live words: the text colour (from the layout) against the pixels in the text box that are not that
+ * colour - the ground the words sit on - as a median and a tenth percentile; a box that is almost all the text's own colour is
+ * words the ground has swallowed. For a mark drawn from a transparent file: the file's own strokes laid over the image as the
+ * renderer contains them, each stroke pixel against the ground around it (where the mark draws nothing), and strokes painted
+ * over by a later layer counted as lost. The judge takes the worker's figure when it is clearly worse than the browser's (or the
+ * browser gave none); otherwise the browser's finer measure stands. Rotated, faded or cropped marks and non-hex text colours
+ * are left to the browser and said so (server: 'skipped'). */
+function stServerText(img, box, l) {
+  const tc = stHexRgb(l.color || '#FFFFFF'); if (!img || !tc || tc[3] < 0.95 || l.rotate) return null;
+  const W = img.W, H = img.H; const x0 = Math.max(0, Math.floor(box.x)), y0 = Math.max(0, Math.floor(box.y)), x1 = Math.min(W, Math.ceil(box.x + box.w)), y1 = Math.min(H, Math.ceil(box.y + box.h));
+  if (x1 - x0 < 4 || y1 - y0 < 4) return null;
+  const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 30000)));
+  const lt = stRelLum(tc); const far = []; const all = []; let n = 0, near = 0;
+  for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+    const q = img.at(y * W + x); const d = Math.abs(q[0] - tc[0]) + Math.abs(q[1] - tc[1]) + Math.abs(q[2] - tc[2]); const L = stRelLum(q); n++; all.push(L);
+    if (d < 60) near++; else far.push({ d, L });
+  }
+  if (n < 40) return null;
+  if (far.length < n * 0.1) { all.sort((a, b) => a - b); const c = stContrast(lt, all[all.length >> 1]); return { contrast: c, contrastMin: c, nearShare: near / n, swallowed: true }; }
+  far.sort((a, b) => a.d - b.d); const dMed = far[far.length >> 1].d; const ground = far.filter(f => f.d >= 0.6 * dMed);
+  const cs = ground.map(g => stContrast(lt, g.L)).sort((a, b) => a - b);
+  return { contrast: cs[cs.length >> 1], contrastMin: cs[Math.floor(cs.length * 0.1)], nearShare: near / n };
+}
+function stServerMark(img, file, l, b) {
+  if (!img || !file || l.rotate || (l.opacity != null && +l.opacity < 1) || l.fit === 'cover' || !(b.aw > 0 && b.ah > 0)) return null;
+  // only a transparent file: an opaque one would need its field colour told apart from its ink
+  let tr = 0, seen = 0; const n0 = file.W * file.H; const st0 = Math.max(1, Math.floor(n0 / 4000)); for (let i = 0; i < n0; i += st0) { seen++; if (file.at(i)[3] < 40) tr++; }
+  if (tr / Math.max(1, seen) < 0.05) return null;
+  const W = img.W, H = img.H; const s = Math.min(b.aw / file.W, b.ah / file.H); const dw = file.W * s, dh = file.H * s; const ox = b.ax + (b.aw - dw) / 2, oy = b.ay + (b.ah - dh) / 2;
+  const alphaAt = (X, Y) => { const fx = Math.floor((X + 0.5 - ox) / s), fy = Math.floor((Y + 0.5 - oy) / s); if (fx < 0 || fy < 0 || fx >= file.W || fy >= file.H) return 0; return file.at(fy * file.W + fx)[3]; };
+  const inkOf = (X, Y) => { const fx = Math.floor((X + 0.5 - ox) / s), fy = Math.floor((Y + 0.5 - oy) / s); return file.at(fy * file.W + fx); };
+  const x0 = Math.max(0, Math.floor(ox)), x1 = Math.min(W, Math.ceil(ox + dw)), y0 = Math.max(0, Math.floor(oy)), y1 = Math.min(H, Math.ceil(oy + dh));
+  const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 12000)));
+  const lostT = l.role === 'wordmark' ? 2 : 1.6, weakT = l.role === 'wordmark' ? 3 : 2.5; const cs = []; let covered = 0;
+  for (let Y = y0; Y < y1; Y += step) for (let X = x0; X < x1; X += step) {
+    if (alphaAt(X, Y) < 200 || alphaAt(X - 1, Y) < 200 || alphaAt(X + 1, Y) < 200 || alphaAt(X, Y - 1) < 200 || alphaAt(X, Y + 1) < 200) continue;   // well inside a stroke
+    const ink = inkOf(X, Y); const comp = img.at(Y * W + X);
+    if (Math.abs(comp[0] - ink[0]) + Math.abs(comp[1] - ink[1]) + Math.abs(comp[2] - ink[2]) > 90) { covered++; cs.push(1); continue; }   // painted over by a later layer
+    let gl = [];
+    for (const r of [3, 6, 10]) { const sp = Math.max(1, r >> 1); for (let dy = -r; dy <= r; dy += sp) for (let dx = -r; dx <= r; dx += sp) { const XX = X + dx, YY = Y + dy; if (XX < 0 || YY < 0 || XX >= W || YY >= H || alphaAt(XX, YY) >= 40) continue; gl.push(stRelLum(img.at(YY * W + XX))); } if (gl.length >= 4) break; gl = []; }
+    if (!gl.length) continue;
+    gl.sort((a, c) => a - c); cs.push(stContrast(stRelLum(ink), gl[gl.length >> 1]));
+  }
+  if (cs.length < 20) return null;
+  cs.sort((a, c) => a - c);
+  return { inkLost: cs.filter(c => c < lostT).length / cs.length, inkWeak: cs.filter(c => c < weakT).length / cs.length, inkLocal: cs[Math.floor(cs.length * 0.1)], inkCovered: covered / cs.length, samples: cs.length };
+}
+function stValidationJudge(a, v, rep, server) {
   const L = (v && v.layout) || {}; const stage = L.stage || ST_FORMATS[a.format] || { w: 1080, h: 1080 }; const W = stage.w, H = stage.h;
   const problems = [];
   if (!rep || typeof rep !== 'object' || !Array.isArray(rep.boxes)) return { problems: ['no measurement report'], issues: [], ok: false, W, H };
@@ -13128,8 +13264,15 @@ function stValidationJudge(a, v, rep) {
       const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * (l.lineHeight || 1.12));
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
       Object.assign(b, { x: ox, y: oy, w: ow, h: oh, lines, chars: text.length, text: text.slice(0, 160), px, contentH, overflowH: !!(b.ah && contentH > b.ah + 0.5), overflowW: !!rb.overflowW, broken: !!rb.broken, bg: l.bg || '', emphasis: l.emphasis || '' });
-      if (num(rb.contrast)) b.contrast = rb.contrast; else unmeasured.push(id);
+      if (num(rb.contrast)) b.contrast = rb.contrast;
       if (num(rb.contrastMin)) b.contrastMin = rb.contrastMin;
+      const sv = server && server.img ? stServerText(server.img, b, l) : null;
+      if (sv) {
+        const r2 = x => Math.round(x * 100) / 100;
+        b.server = { contrast: r2(sv.contrast), contrastMin: r2(sv.contrastMin), swallowed: sv.swallowed || undefined };
+        if (!num(b.contrast) || sv.contrast < b.contrast * 0.7) { b.contrast = sv.contrast; b.contrastMin = num(b.contrastMin) ? Math.min(b.contrastMin, sv.contrastMin) : sv.contrastMin; b.server.adopted = true; }
+      } else if (server) b.server = { skipped: true };
+      if (!num(b.contrast)) unmeasured.push(id);
       if (num(rb.opacity)) b.opacity = rb.opacity; if (num(rb.occluded)) { b.occluded = rb.occluded; b.occludedBy = Array.isArray(rb.occludedBy) ? rb.occludedBy.map(String) : []; }
     } else if (l.type === 'img') {
       b.mark = isMark; const sameSrc = String(rb.src || '') === String(l.src || '');
@@ -13152,7 +13295,13 @@ function stValidationJudge(a, v, rep) {
         const share = x => Math.max(0, Math.min(1, Number(x)));
         if (b.asset === 'loaded') {
           if (num(rb.inkLost) && num(rb.inkLocal)) { b.inkLost = share(rb.inkLost); b.inkWeak = num(rb.inkWeak) ? share(rb.inkWeak) : 0; b.inkCovered = num(rb.inkCovered) ? share(rb.inkCovered) : 0; b.inkRun = num(rb.inkRun) ? share(rb.inkRun) : 0; b.inkLocal = Math.max(1, Math.min(21, Number(rb.inkLocal))); b.inkMean = num(rb.inkMean) ? Math.max(1, Math.min(21, Number(rb.inkMean))) : undefined; b.inkWhere = stStr(rb.inkWhere, 20); b.inkBoundary = !!rb.inkBoundary; b.inkN = num(rb.inkN) ? Math.round(rb.inkN) : undefined; if (Array.isArray(rb.inkGround)) b.inkGround = rb.inkGround.slice(0, 2).map(Number); }
-          else unmeasured.push(id);
+          const sm = server && server.marks && server.marks[id] ? stServerMark(server.img, server.marks[id], l, b) : null;
+          if (sm) {
+            const r3 = x => Math.round(x * 1000) / 1000;
+            b.server = { inkLost: r3(sm.inkLost), inkLocal: r3(sm.inkLocal), inkCovered: r3(sm.inkCovered), samples: sm.samples };
+            if (!num(b.inkLost) || sm.inkLost > b.inkLost + 0.1) { b.inkLost = sm.inkLost; b.inkWeak = Math.max(num(b.inkWeak) ? b.inkWeak : 0, sm.inkWeak); b.inkLocal = num(b.inkLocal) ? Math.min(b.inkLocal, sm.inkLocal) : sm.inkLocal; b.inkCovered = Math.max(num(b.inkCovered) ? b.inkCovered : 0, sm.inkCovered); b.server.adopted = true; }
+          } else if (server) b.server = { skipped: true };
+          if (!num(b.inkLost)) unmeasured.push(id);
         }
         if (rb.multicolour != null) b.multicolour = !!rb.multicolour;
       }
@@ -13181,14 +13330,17 @@ async function stValidationSubmit(env, pair, body, who) {
   const p = pair.project, a = pair.asset;
   const v = await stVersion(env, body.version || a.current); if (!v || v.asset !== a.id) return { error: 'unknown_version', status: 404 };
   if (v.mode === 'copy' || !(v.layout && Array.isArray(v.layout.layers))) return { error: 'copy_only', status: 400, detail: 'A copy-only asset has no composition to validate.' };
-  const j = stValidationJudge(a, v, body.report);
-  if (j.problems.length) return { error: 'report_mismatch', status: 422, detail: 'The measurement does not describe this version, so it was not recorded: ' + j.problems.slice(0, 4).join('; ') + '. Measure the current version again.', problems: j.problems };
+  const j0 = stValidationJudge(a, v, body.report);
+  if (j0.problems.length) return { error: 'report_mismatch', status: 422, detail: 'The measurement does not describe this version, so it was not recorded: ' + j0.problems.slice(0, 4).join('; ') + '. Measure the current version again.', problems: j0.problems };
+  // RC (S5): a measurement is filed with the image it measured, or not at all - an image saved later is never bound to it
+  if (!body.imageB64) return { error: 'png_required', status: 422, detail: 'A measurement is filed with the PNG it measured (imageB64): the worker reads the contrast and the marks from it and delivers exactly that file. Nothing was recorded; measure again in the Studio.' };
+  if (!env.MIND_DOCS) return { error: 'storage_unbound', status: 501, detail: 'Bind the R2 bucket as MIND_DOCS: the measured image is kept with its measurement.' };
   const kit = (await brandKit(env, p.ns)) || {}; const sig = stCompSig(a, v, kit);
   let exportKey = '';
   // S28: the measured PNG is what a client sees and what is delivered: it must be a PNG at the composition's output size, and it is
   // stored under its own hash, so nothing can later be put in its place under the same name
-  let exportHash = '', exportW = null, exportH = null;
-  if (body.imageB64 && env.MIND_DOCS) {
+  let exportHash = '', exportW = null, exportH = null; let j = j0;
+  {
     const buf = bufFromB64(body.imageB64);
     if (buf.byteLength < 64 || buf.byteLength > 12 * 1024 * 1024) return { error: 'bad_image', status: 422, detail: 'The measured image must be between 64 bytes and 12 MB; nothing was recorded.' };
     const sn = stImgSniff(buf); if (!sn || sn.type !== 'png') return { error: 'not_png', status: 422, detail: 'The measured image is not a PNG (judged by its bytes, not its name); nothing was recorded. Measure again in the Studio.' };
@@ -13198,13 +13350,25 @@ async function stValidationSubmit(env, pair, body, who) {
     const pc = await stPngCheck(buf, { w: Number(stg.w), h: Number(stg.h) });
     if (!pc.ok) return pc.size ? { error: 'image_size', status: 422, detail: 'The measured PNG ' + pc.why + ': this composition is drawn at ' + stg.w + 'x' + stg.h + '. Nothing was recorded; measure it again at its output size.' }
       : { error: 'bad_png', status: 422, detail: 'The measured image is not a whole PNG: ' + pc.why + '. Nothing was recorded; measure again in the Studio.' };
+    // RC (D3): the worker reads the image itself - the words against their ground, each mark's strokes from its own file - and
+    // judges with its figure wherever the browser's is clearly better; an image it cannot decode leaves the pixels unresolved
+    const img = await stPngDecode(buf); const marks = {};
+    for (const l of (v.layout.layers || [])) {
+      if (!(l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && !l.hidden && l.src)) continue;
+      const ko = {}; let prob = null; try { prob = await stMarkSourceProblem(env, p, kit, l, { keyOut: ko }); } catch (e) { prob = { code: 'mark_source_invalid' }; }
+      if (prob || !ko.key) continue;
+      let o = null; try { o = await env.MIND_DOCS.get(ko.key); } catch (e) { o = null; } if (!o && l.role === 'logo') { try { o = await brandLogo(env, p.ns); } catch (e) { o = null; } }
+      if (o) { try { const mb = o.arrayBuffer ? await o.arrayBuffer() : (o.body ? await new Response(o.body).arrayBuffer() : null); const md = mb ? await stPngDecode(mb) : null; if (md) marks[String(l.id)] = md; } catch (e) {} }
+    }
+    j = stValidationJudge(a, v, body.report, img ? { img, marks } : null);
+    if (!img) { j.issues.push({ code: 'pixels_unmeasured', severity: 'blocking', layers: [], detail: 'the worker could not read the measured PNG\'s pixels (an 8-bit, non-interlaced PNG is read); measure again in the Studio' }); j.ok = false; }
     exportHash = await stBufSha(buf); exportW = pc.w; exportH = pc.h; exportKey = stExportKey(p, a, v, exportHash);
     await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } });
   }
   const blocking = j.issues.filter(i => i.severity === 'blocking'), warnings = j.issues.filter(i => i.severity === 'warning');
   const prev = await env.MIND_DB.prepare('SELECT sig, ok, issues FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first();
   const id = stId('val'); const now = Date.now();
-  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), contract: ST_VALIDATION_CONTRACT, W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, contrastMin: b.contrastMin, asset: b.asset, opacity: b.opacity, occluded: b.occluded, vw: b.vw != null ? Math.round(b.vw) : undefined, vh: b.vh != null ? Math.round(b.vh) : undefined, markFill: b.markFill, inkLost: b.inkLost, inkWeak: b.inkWeak, inkCovered: b.inkCovered, inkLocal: b.inkLocal, inkRun: b.inkRun, inkWhere: b.inkWhere, inkBoundary: b.inkBoundary, clearWant: b.clearWant, ruleBasis: b.ruleBasis, ruleMandatory: b.ruleMandatory })), unresolved: j.unresolved };
+  const rep = body.report || {}; const slim = { renderer: stStr(rep.renderer, 40), contract: ST_VALIDATION_CONTRACT, W: j.W, H: j.H, fonts: j.fonts, boxes: j.boxes.filter(b => !b.hidden && b.valid !== false).map(b => ({ id: b.id, role: b.role, type: b.type, x: Math.round(b.x || 0), y: Math.round(b.y || 0), w: Math.round(b.w || 0), h: Math.round(b.h || 0), lines: b.lines, contrast: b.contrast, contrastMin: b.contrastMin, asset: b.asset, opacity: b.opacity, occluded: b.occluded, vw: b.vw != null ? Math.round(b.vw) : undefined, vh: b.vh != null ? Math.round(b.vh) : undefined, markFill: b.markFill, inkLost: b.inkLost, inkWeak: b.inkWeak, inkCovered: b.inkCovered, inkLocal: b.inkLocal, inkRun: b.inkRun, inkWhere: b.inkWhere, inkBoundary: b.inkBoundary, clearWant: b.clearWant, ruleBasis: b.ruleBasis, ruleMandatory: b.ruleMandatory, server: b.server })), unresolved: j.unresolved, serverMeasured: true };
   await env.MIND_DB.prepare('INSERT INTO studio_validations(id,project,asset,version,sig,ok,blocking,warnings,issues,report,export_key,who,created,export_hash,export_w,export_h) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, p.id, a.id, v.id, sig, j.ok ? 1 : 0, blocking.length, warnings.length, jsonFit(j.issues, 12000), jsonFit(slim, 20000), exportKey, stStr(who, 40), now, exportHash || null, exportW, exportH).run();
   try { await env.MIND_DB.prepare('DELETE FROM studio_validations WHERE asset=? AND version=? AND id NOT IN (SELECT id FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC LIMIT 4)').bind(a.id, v.id, a.id, v.id).run(); } catch (e) {}
   const codes = JSON.stringify(j.issues.map(i => i.code + ':' + i.layers.join(',')));
@@ -13589,6 +13753,19 @@ function axGuests(env) {
   if (!env.AXIOM_GUEST_KEYS) return { roster: null, problem: '' };
   return axRosterParse(env.AXIOM_GUEST_KEYS, 'AXIOM_GUEST_KEYS', true);
 }
+/* RC (S2): how this worker is opened, for the team to check before a round - public mode and its end, which guard flags are
+ * set, how many roster and guest keys exist by role and how many guest links have ended. Names and counts only: never a key,
+ * never a name from the roster. */
+function axPosture(env) {
+  const pub = axPublic(env); const now = Date.now(); const count = (ro, guest) => { const out = { read: 0, full: 0, expired: 0 }; if (!ro) return out; for (const k of Object.keys(ro)) { const e = ro[k] || {}; if (guest && e.until && Date.parse(e.until) <= now) out.expired++; else if (e.r === 'read' || e.r === 'full') out[e.r]++; } return out; };
+  const rs = axRoster(env); const gs = axGuests(env); const flag = n => String(env[n] || '') !== '' && String(env[n]) !== '0';
+  return {
+    public: { role: pub.role || null, until: env.AXIOM_PUBLIC_UNTIL ? String(env.AXIOM_PUBLIC_UNTIL).slice(0, 40) : null, ended: !!pub.ended, problem: pub.problem || undefined },
+    flags: { STUDIO_PUBLIC_WRITE: String(env.STUDIO_PUBLIC_WRITE || '') === '1', STUDIO_GUEST_BRAND: String(env.STUDIO_GUEST_BRAND || '') === '1', STUDIO_GUEST_LIVE: String(env.STUDIO_GUEST_LIVE || '') === '1', STUDIO_GUEST_TEST_OFF: String(env.STUDIO_GUEST_TEST || '') === '0', AXIOM_GUEST_WRITE: String(env.AXIOM_GUEST_WRITE || '') === 'any', AXIOM_DEV_OPEN: flag('AXIOM_DEV_OPEN') },
+    roster: Object.assign(count(rs.roster, false), { accessKey: !!env.AXIOM_ACCESS_KEY, problem: rs.problem || undefined }),
+    guests: Object.assign(count(gs.roster, true), { problem: gs.problem || undefined }),
+  };
+}
 /* Public mode: AXIOM_PUBLIC "read" or "full" lets requests with no key in with that role; AXIOM_PUBLIC_UNTIL (a date, or a
  * date and time; a bare date is midnight UTC at its start) ends it. Any other value of AXIOM_PUBLIC, or an UNTIL that does
  * not parse, opens nothing. Off unless set; unset the var (or let the date pass) to close the worker again. */
@@ -13652,7 +13829,8 @@ async function axPersonId(key) {
 }
 /* S28: the namespaces kept for testing (synthetic clients): learning written there touches no live client. STUDIO_TEST_NS adds more. */
 const ST_TEST_NS = ['synthdemo'];
-function stTestNs(env, ns) { const extra = String((env && env.STUDIO_TEST_NS) || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean); return ST_TEST_NS.concat(extra).indexOf(String(ns || '').toLowerCase()) >= 0; }
+function stTestNsList(env) { const extra = String((env && env.STUDIO_TEST_NS) || '').toLowerCase().split(',').map(x => x.trim()).filter(x => /^[a-z0-9_-]{2,40}$/.test(x)); return ST_TEST_NS.concat(extra).filter((x, i, a) => a.indexOf(x) === i); }
+function stTestNs(env, ns) { return stTestNsList(env).indexOf(String(ns || '').toLowerCase()) >= 0; }
 function stIsTest(env, p) { return !!(p && (p.test || stTestNs(env, p.ns))); }
 /** p44: a client-wide read of a live client leaves its test projects out (in a test namespace every project is a test project). */
 function stLiveSql(env, ns, alias) { return stTestNs(env, ns) ? '' : ' AND COALESCE(' + (alias ? alias + '.' : '') + 'test,0)=0'; }
@@ -13982,8 +14160,12 @@ async function nanoRender(env, opts) {
   if (!key) return { ok: false, error: 'gemini_not_configured', detail: 'Set GEMINI_KEY as a Worker secret.', model: '' };
   const clean = m => String(m || '').replace(/^models\//, '').replace(/[^a-zA-Z0-9._-]/g, '');
   const chain = []; const pol = stImagePolicy(env);
-  [clean(opts.model) || ST_IMAGE_CHAIN[0]].concat(ST_IMAGE_CHAIN.slice(1))
+  // RC (S6): a caller may put one of the chain's own models first, nothing else (a job's input or a request body never names an
+  // arbitrary model); an unknown name falls back to the chain's head and is said so in the answer
+  const askedModel = clean(opts.model); const allowedModel = !askedModel || ST_IMAGE_CHAIN.indexOf(askedModel) >= 0;
+  [allowedModel && askedModel ? askedModel : ST_IMAGE_CHAIN[0]].concat(ST_IMAGE_CHAIN)
     .forEach(m => { if (m && chain.indexOf(m) === -1) chain.push(m); });
+  const modelRefused = allowedModel ? undefined : askedModel.slice(0, 60);
   // S24: one attempt policy. Before every request the caller's gate is asked (a Studio job: ownership, the job's cap, the
   // allowance, the day's budget - it throws to stop); every delay between tries ends at once when the signal aborts (a cancel);
   // the fetch carries the same signal, so a cancel stops waiting for an answer that can no longer be filed. Without a gate (Ad
@@ -14092,7 +14274,11 @@ async function nanoRender(env, opts) {
       const imgPart = imgParts[imgParts.length - 1];
       const inl = imgPart && (imgPart.inline_data || imgPart.inlineData);
       const um = data.usageMetadata || {}; const usage = { prompt: um.promptTokenCount || 0, output: um.candidatesTokenCount || 0, total: um.totalTokenCount || 0 };
-      if (inl && inl.data) { await done('ok', { usage }); return { ok: true, sent: lastSent, attached: b.attached, excluded: b.excluded, promptDropped: b.dropped, skipped: skipped.length ? skipped : undefined, imageB64: inl.data, mime: inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts: b.parts }, historyReplayed: b.replay, ms: Date.now() - t0, usage, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length, requests }; }
+      // RC (S4): the bytes are checked before anything is filed: a PNG whole with every chunk and its image data, a JPEG with its
+      // end marker, a WebP its stated length; anything else is malformed, retried within the policy, never filed as a version
+      let chk = null; if (inl && inl.data) { try { chk = await stImageBytesCheck(bufFromB64(inl.data)); } catch (e) { chk = { ok: false, why: 'the image data did not decode' }; } }
+      if (chk && !chk.ok) { lastDetail = 'the image model answered with an image that is not whole: ' + chk.why; lastCode = 0; await done('malformed', { detail: lastDetail, usage }); if (attempt + 1 >= pol.triesPerModel) lastFallbackWhy = model + ' answered with a broken image'; continue; }
+      if (inl && inl.data) { await done('ok', { usage }); return { ok: true, modelRefused, checked: { type: chk.type, w: chk.w, h: chk.h }, sent: lastSent, attached: b.attached, excluded: b.excluded, promptDropped: b.dropped, skipped: skipped.length ? skipped : undefined, imageB64: inl.data, mime: chk.mime || inl.mime_type || inl.mimeType || 'image/png', model, requested: chain[0], fallback: model !== chain[0], size, sizeAsked: asked, capped, pixels: imgPixels(inl.data), content: cand.content || null, turn: { role: 'user', parts: b.parts }, historyReplayed: b.replay, ms: Date.now() - t0, usage, thoughtImages: ((cand.content && cand.content.parts) || []).filter(p => (p.inline_data || p.inlineData) && p.thought).length, requests }; }
       lastDetail = String(cand.finishReason || 'model returned no image').slice(0, 120); await done('no_image', { detail: lastDetail, usage });
       if (attempt + 1 >= pol.triesPerModel) lastFallbackWhy = model + ' returned no image';
     }
@@ -14452,7 +14638,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -14530,8 +14716,10 @@ const AXIOM_WORKER = {
       if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: auth.publicEnded ? 'Open access to AXIOM has ended. Ask whoever sent the link for a sign-in link.' : 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
       if (policy === 'full' && auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Your key is read-only. Ask an admin for a full-access key to make changes.' }, 403);
-      // S28: open access reads; it does not write creative work or brand memory, where every change must belong to a person
-      if (policy === 'full' && auth.public && /^\/(studio|brand|engine)\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') !== '1') return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only in the Creative Studio and the brand workspace. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
+      // S28: open access reads; it does not write creative work or brand memory, where every change must belong to a person.
+      // RC (S2): nor anything else - the Mind, chat, images, research, collection and every GET that acts are refused to a
+      // request with no key too; STUDIO_PUBLIC_WRITE=1 is the only override, and it opens the Studio's own writes only
+      if (policy === 'full' && auth.public && !(/^\/(studio|brand|engine)\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') === '1')) return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
     }
     { const sk = req.headers.get('X-Axiom-Key') || ''; auth.pid = sk && auth.ok && !auth.public ? (auth.guest ? 'g' : '') + await axPersonId(sk) : (auth.public ? 'public' : auth.dev ? 'dev' : ''); }
     // S28, p44: a guest (a tester's sign-in link) writes only test work: test projects and the test namespaces. One guard, before
@@ -16556,6 +16744,9 @@ const AXIOM_WORKER = {
             return jsonResp({ ok: true, key, url: url(key), version: v.id, validated: false, validatedKey: val.export_key });
           }
           const key = stExportKey(pair.project, pair.asset, v, hash); await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: sn.mime } });
+          // RC (S5): a measurement filed before measurements carried their image is not given one after the design was approved or
+          // shared: what was approved was never this file. Measure the version again (the measurement now comes with its image).
+          if (val && !val.export_key && sn.type === 'png' && locked) return jsonResp({ ok: false, error: 'export_locked', detail: 'This version was ' + (standingS.design ? 'approved' : 'shared with the client') + ' on a measurement filed without its image, so no image is bound to it now. Measure it again in the Studio: the new measurement carries the image it measured.' }, 409);
           if (val && !val.export_key && sn.type === 'png') {
             // a passing measurement filed without its image takes this one, once: from then on it is the validated file
             const b = await env.MIND_DB.prepare("UPDATE studio_validations SET export_key=?, export_hash=?, export_w=?, export_h=? WHERE id=? AND COALESCE(export_key,'')=''").bind(key, hash, sn.w || null, sn.h || null, val.id).run();

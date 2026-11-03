@@ -10,8 +10,9 @@
  * Providers MOCKED. Run: node --experimental-sqlite tests/studio-s26-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { answerFor } from './studio-answers.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s26-worker (classic projects ask before a direction change; dismissals are the team\'s; the public / names no build)');
-const PNG = Buffer.from('89504e470d0a1a0a' + '11'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x11 });
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g' } });
 w.answer(/api\.anthropic\.com\/v1\/messages/, async (u, init) => {
   const body = JSON.parse(init.body); const sys = String(body.system || ''); const c0 = body.messages[0].content; const user = typeof c0 === 'string' ? c0 : c0.filter(x => x.type === 'text').map(x => x.text).join('');

@@ -15,8 +15,9 @@
  *        client logo; another client's or campaign's mark refused); a mark left as it was is not re-judged.
  * Run: node --experimental-sqlite tests/studio-s23h-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s23h-worker (pages as ordered assets, user guides, uploads)');
-const png = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const png = pngB64(16, 16, { fill: 0x00 });
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'full-key' : k);
 let gemini = 0, claude = 0;

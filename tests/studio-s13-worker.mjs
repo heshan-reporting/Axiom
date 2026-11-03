@@ -7,8 +7,9 @@
  * Providers MOCKED. Run: node --experimental-sqlite tests/studio-s13-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
 const T = suite('studio-s13-worker (renders keep edits made meanwhile; the judge agrees with the renderer on imagery)');
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 const w = await workerEnv({ env: { STUDIO_INSPECT: '0', GEMINI_KEY: 'g' } });
 let during = null;   // run inside the image call: the edit a person makes while the model works
 w.answer(/generativelanguage/, async (u) => {
@@ -59,13 +60,13 @@ await T.t('a render for a version the asset had moved past before the job ran is
 await T.t('the judge: a type-only ground with no photograph is not "imagery missing" (as the renderer says); a report saying the imagery did not load keeps that finding even with an image on record', async () => {
   const A = (await call('POST', '/studio/asset', { project: P, family: 'Set', channel: 'instagram', format: '4:5', title: 'Ground', copy: { headline: 'Not a subsidy' }, layout: typeOnly, mode: 'composition' })).body.asset.id;
   let { a, v } = await curV(P, A);
-  let r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a) });
+  let r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: stubReport(v, a), imageB64: pngForVersion(v) });
   eq(r.status, 200, JSON.stringify(r.body).slice(0, 300));
   ok(!(r.body.issues || r.body.validation && r.body.validation.issues || []).some(i => i.code === 'imagery_missing'), 'no imagery_missing on a type-only ground: ' + JSON.stringify(r.body).slice(0, 300));
   // the same tile with imagery: on record, but the browser could not load it
   const j = await run(P, A, { prompt: 'a road', size: '1K' }, 's13-r4'); eq(j.state, 'done', j.error);
   ({ a, v } = await curV(P, A)); const rep = stubReport(v, a); rep.imageryMissing = true;
-  r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: rep });
+  r = await call('POST', '/studio/validation', { asset: A, version: v.id, report: rep, imageB64: pngForVersion(v) });
   const issues = r.body.issues || (r.body.validation || {}).issues || [];
   ok(issues.some(i => i.code === 'imagery_missing'), 'the browser\'s finding stands: ' + JSON.stringify(r.body).slice(0, 300));
 });

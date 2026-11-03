@@ -6,6 +6,7 @@
  * lasting client rule; approvals and rejections file WIN/LOSS exemplars.
  * Run: node --experimental-sqlite tests/studio-p3-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -18,7 +19,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 const anth = { calls: [] }; const calls = { gemini: 0 };
 const ids = user => Array.from(user.matchAll(/^\[(a[a-z0-9]+)\]/gm)).map(m => m[1]);
 const CONCEPTS = A => ({ critique: 'The skate park photograph has nothing to do with fuel used off public roads; the teal panel and headline hold, the hierarchy is flat.', options: [

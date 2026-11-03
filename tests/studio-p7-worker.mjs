@@ -7,6 +7,7 @@
  * "Create a new design" that starts from the brief, uses the chosen references and does not inherit the panel.
  * Run: node --experimental-sqlite tests/studio-p7-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -19,7 +20,7 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 const anth = { calls: [] }; const gem = { calls: [], fail404Once: false };
 const textOf = body => typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
 const imagesOf = body => typeof body.messages[0].content === 'string' ? 0 : body.messages[0].content.filter(x => x.type === 'image').length;

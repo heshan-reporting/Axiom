@@ -138,7 +138,7 @@ def editable(base, key, args, cid, rec):
     c = CASES[cid]; out = os.path.join(args.out, cid, 'editable'); os.makedirs(out, exist_ok=True)
     no_img = LEDGER['cap_renders'] == 0
     brief = dict(c['brief'], channels=c['channels'], deliverable='visual', campaignConfirmed=True, size=args.size, creationMode='editable')
-    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': 'Smoke - ' + c['title'], 'brief': brief, 'allowance': LEDGER['allowance'], 'idem': 'smoke:%s:ed:%s' % (cid, LEDGER['allowance'])})
+    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': 'Smoke - ' + c['title'], 'brief': brief, 'test': True, 'allowance': LEDGER['allowance'], 'idem': 'smoke:%s:ed:%s' % (cid, LEDGER['allowance'])})
     pid = rec['editable'] = p['id']
     src = http(base, key, 'POST', '/studio/source', {'project': pid, 'kind': 'release', 'name': 'Smoke release', 'text': c['release']})
     job(base, key, pid, 'extract', {'source': src['id']}, 'reading the release')
@@ -166,7 +166,7 @@ def editable(base, key, args, cid, rec):
 def finished(base, key, args, cid, rec):
     c = CASES[cid]; out = os.path.join(args.out, cid, 'finished'); os.makedirs(out, exist_ok=True)
     brief = dict(c['brief'], channels=c['channels'][:1], deliverable='visual', campaignConfirmed=True, size=args.size, creationMode='finished')
-    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': 'Smoke (Full AI) - ' + c['title'], 'brief': brief, 'allowance': LEDGER['allowance'], 'idem': 'smoke:%s:fin:%s' % (cid, LEDGER['allowance'])})
+    p = http(base, key, 'POST', '/studio/project', {'ns': c['ns'], 'campaign': c['campaign'], 'title': 'Smoke (Full AI) - ' + c['title'], 'brief': brief, 'test': True, 'allowance': LEDGER['allowance'], 'idem': 'smoke:%s:fin:%s' % (cid, LEDGER['allowance'])})
     pid = rec['finished'] = p['id']
     j = job(base, key, pid, 'copy', {'channels': c['channels'][:1], 'deliverable': 'visual', 'size': args.size, 'render': True}, 'writing the words for one painting')
     if not j or j['state'] != 'done':

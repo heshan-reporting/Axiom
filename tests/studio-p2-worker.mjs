@@ -20,7 +20,7 @@ const mkEnv = (over) => Object.assign({
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 }, over || {});
 const env = mkEnv();
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
 const anth = { calls: [], mode: 'ok' }; const calls = { gemini: 0, other: [] };
 const RELEASE = 'MEDIA RELEASE - 30 September 2026\n\nFuel tax credits keep regional Australia moving\n\nThe Minerals Council of Australia today released new analysis showing that mining paid $74 billion in company tax and royalties in 2023-24, more than any other industry.\n\nMCA Chief Executive Officer Tania Constable said fuel tax credits were not a subsidy. "Businesses do not pay a road fuel tax on fuel used off-road. The credit simply returns a tax that was never meant to apply," Ms Constable said.\n\nThe analysis found the credit is used by more than 150,000 businesses of all sizes, including farmers, tradies and tourism operators. Removing it would add costs that pass on to consumers through the prices of goods and services.\n\nENDS';
 const LEDGER_ANSWER = { headline: 'Fuel tax credits keep regional Australia moving', spokesperson: { name: 'Tania Constable', title: 'Chief Executive Officer' }, claims: [
@@ -202,7 +202,7 @@ await t('export takes exactly the approved versions: an unapproved asset is left
   const vd = await validateAsset(req, P, fb.id); eq(vd.status, 200, JSON.stringify(vd.d)); ok(vd.d.validation.ok, JSON.stringify(vd.d.validation.issues));
   eq((await req('POST', '/studio/approve', { asset: fb.id, part: 'design', decision: 'approve', reason: 'fine' })).status, 200);
   let g = await req('GET', '/studio/get?id=' + P); const cur = g.d.assets.find(x => x.id === fb.id).current; const curVer = g.d.assets.find(x => x.id === fb.id).versions.find(x => x.id === cur);
-  const sv = await req('POST', '/studio/render/save', { asset: fb.id, version: cur, imageB64: pngForVersion(curVer), mime: 'image/png' }); eq(sv.status, 200, JSON.stringify(sv.d)); ok(/-export-[0-9a-f]{16}\.png$/.test(sv.d.key), 'bound to its passing measurement under its own hash (S28): ' + sv.d.key); ok(sv.d.bound, 'the measurement had no image: this one became its validated file'); ok(r2.has(sv.d.key));
+  const sv = await req('POST', '/studio/render/save', { asset: fb.id, version: cur, imageB64: pngForVersion(curVer), mime: 'image/png' }); eq(sv.status, 200, JSON.stringify(sv.d)); ok(/-export-[0-9a-f]{16}\.png$/.test(sv.d.key), 'bound to its passing measurement under its own hash (S28): ' + sv.d.key); ok(sv.d.validated, 'the measurement carried this image (RC S5): it is the validated file'); ok(r2.has(sv.d.key));
   eq((await req('POST', '/studio/render/save', { asset: fb.id, version: 'v_nope', imageB64: PNG })).status, 404);
   const j = await req('POST', '/studio/job', { project: P, stage: 'export', input: {}, idem: 'e1' }); const done = await run(j.d.job); eq(done.state, 'done', done.error);
   eq(done.result.included.length, 1); eq(done.result.included[0].asset, fb.id); eq(done.result.included[0].version, cur); eq(done.result.included[0].exportKey, sv.d.key);

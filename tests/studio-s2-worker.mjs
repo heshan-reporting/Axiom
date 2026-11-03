@@ -6,10 +6,11 @@
  * exactly by the Studio) stays as it was and is labelled as the hybrid it is. Providers MOCKED: nothing is spent.
  * Run: node --experimental-sqlite tests/studio-s2-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s2-worker (two creation modes: Editable Studio and Gemini Finished Creative, the hybrid labelled)');
-const PNG = Buffer.from('89504e470d0a1a0a' + '00'.repeat(100), 'hex').toString('base64');
-const PNG_LOGO = Buffer.from('89504e470d0a1a0a' + '11'.repeat(100), 'hex').toString('base64');
-const PNG_MARK = Buffer.from('89504e470d0a1a0a' + '22'.repeat(100), 'hex').toString('base64');
+const PNG = pngB64(16, 16, { fill: 0x00 });
+const PNG_LOGO = pngB64(16, 16, { fill: 0x11 });
+const PNG_MARK = pngB64(16, 16, { fill: 0x22 });
 const gem = { calls: [] }; const anth = { calls: [] }; let inspectAnswer = null;
 const PLAN = { medium: 'photo-documentary', approach: 'editable', mark: 'campaign', story: 'the credit, plainly', regions: [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, prompt: 'A quiet regional road at dusk' }],
   elements: [{ id: 'panel', type: 'shape', role: 'panel', shape: 'rect', x: 5, y: 56, w: 70, h: 36, fill: '#0E6A6E', opacity: 0.92 }, { id: 'hl', type: 'text', role: 'headline', x: 8, y: 59, w: 64, h: 16, size: 5.2, color: '#FFFFFF' }, { id: 'sp', type: 'text', role: 'support', x: 8, y: 76, w: 64, h: 8, size: 2.6, color: '#FFFFFF' }, { id: 'cta', type: 'text', role: 'cta', x: 8, y: 85, w: 40, h: 5, size: 2.4, color: '#FFFFFF' }] };

@@ -3437,3 +3437,117 @@ Providers mocked, in this sandbox, Chromium only (Firefox and WebKit are not ins
   inspector open is 581 px.
 
 Not run: the live worker or any live provider. Nothing is deployed; the page goes live when the branch is merged to main.
+
+## 54. The release candidate for the team's test round (build `2026-11-07.studio-p45`, page `?v=r29`)
+
+Part A of `prompts/studio-rc-team-test.md`, run in one session on 3 November 2026 with every provider mocked: the baseline
+first, then fixes test-first, then the test pack. Nothing was deployed, merged or spent; no live client was touched.
+
+### 54.0 The owner's decisions (3 November 2026)
+
+| Id | Question | Decision |
+| --- | --- | --- |
+| D1 | Deploy p44 and this release candidate's worker before the round? | Yes, by the owner, before the round |
+| D2 | Limit a key to named clients? | Not now: guest links stay with internal testers; clients see work only through review links |
+| D3 | Re-measure contrast and ink from the stored PNG in the worker? | Build it in this release (54.4) |
+| D4 | Public mode during the round? | Read-only, with an end date |
+| D5 | Keep the daily brief out of client analysis and creative retrieval (K4)? | Leave as is: `brief_daily` stays in `cmm` |
+| D6 | The Content Desk's "remember: auto" (K5)? | Keep auto |
+| D7 | Public mode's end date | Two weeks after the deploy |
+
+### 54.1 Baseline (before any edit)
+
+- Branch `claude/peaceful-gates-g1t4ss` at `d2ea1ba` (062251f plus the prompt); `origin/main` at `062251f`; `AXIOM_BUILD`
+  `2026-11-06.studio-p44`, `AXIOM_REV` `'dev'`, page `?v=r28`; worktree clean.
+- `node tests/run.mjs all` in a clean worktree of `d2ea1ba`: 156 of 157 suites in 28 min 42 s. The one failure,
+  `studio-s26-xbrowser-browser` (artboard 541 px), was environmental: a static server left by an interrupted run held port 8874
+  and served the working tree's pages. With the port free the base passes (603 px), and `studio-s23g-browser` (same port) passes
+  8 of 8. Firefox and WebKit are not installed in this sandbox (skipped, never passed; CI runs them).
+- `tests/studio-s27-sweep.mjs baseline`: one serious axe `color-contrast` on Message for full keys at all six widths (U4); read
+  keys clean; the sweep exits 0 whatever it finds (Q1).
+- CI: `d2ea1ba` run 41647799851, `062251f` (main) run 41643947711, `e53d10b` run 41637441141, all green in three engines.
+
+### 54.2 The system as it stands (the map the round tests against)
+
+- **Page** (GitHub Pages, `docs/`): the Studio island `docs/studio.js` with `studio-guided.js` (wizard and guided steps),
+  `studio-editor.js` and `studio-canvas.js` (the canvas), `studio-style.js` (Style panel, colour picker), `studio-render.js` (the
+  one renderer: preview, measurement, export; its RULES block is byte-identical in the worker), `studio-progress.js` (jobs and
+  estimates), `studio-merge.js` (three-way merge); frame CSS in `studio-shell.css` only. `docs/review.html` is the client's page.
+- **Worker** (`axiomworkerv4.js`, deployed as `newsaus` from the owner's Mac): every request passes `axRoutePolicy` (public `/`,
+  `/archive/stats`; token `/review/*`, `/sifa/*`; GETs read unless they act - `AX_GET_FULL`, `?probe=1`, `?live=1`, `?ai=1`;
+  every other method full), then `axAuth` (roster `AXIOM_KEYS`, `AXIOM_ACCESS_KEY`, guests `AXIOM_GUEST_KEYS` with `until`,
+  public mode `AXIOM_PUBLIC`/`_UNTIL`), then `axGuestGuard` for a guest's writes.
+- **Storage.** D1: `studio_projects` (with `test`), `_sources`, `_references`, `_directions`, `_assets`, `_versions`
+  (immutable), `_approvals`, `_events`, `_jobs`, `_dispatch`, `_validations`, `_drafts`, `_shares`, `_review`, `_intel`,
+  `_intel_log`, `_texts`, `_recipes`, `_suggestions`, `_dismissals`, `_allowances`, `_person_usage`, `_feedback`; `brand_items`,
+  `brand_revisions`, `engine_fixes`, `engine_outcomes`, `engine_art`, `mind_docs`, `ai_usage`. R2: `studio/<project>/...`
+  (versions, exports under their hash, references, sources, compiled calls, conversations), `brand/<ns>/logo|wordmark/...`,
+  `art/<ns>/`. KV: `brand_<ns>` (the kit), budgets and counters, `mark_ink_<v>`, `studio_dur_<stage>`. Vectorize: `<ns>`,
+  `<ns>_creative` (creative surfaces only), `cmm` (every client).
+- **Providers.** Claude (`CREATIVE_MODEL` default `claude-opus-5-5`, `EXTRACT_MODEL` default `claude-sonnet-5-5`), streamed,
+  adaptive thinking, every call reserved in `ai_usage` and gated by `stDispatchOpen`; Gemini images through `ST_IMAGE_CHAIN`
+  (`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-2.5-flash-image`) under `stImagePolicy`. No web search is configured;
+  briefs use client memory, the archive ("From Axiom") and pages a person supplies (`/studio/source/url`).
+- **Boundaries.** Client (namespace; every child row through its project), campaign (facts, URL, marks, references, rules),
+  test vs live (`test` projects and `ST_TEST_NS` file nothing in a client's memory), guest vs staff vs public (guests write test
+  work only; public mode never writes), page build vs worker build (54.3 R1).
+
+### 54.3 Findings ledger
+
+Status: fixed (with the harness case that failed on the base first), known limit, decision (the owner's), not reproduced.
+
+| Id | Sev | Finding | Fix | Test (fails on base, passes now) | Status |
+| --- | --- | --- | --- | --- | --- |
+| R3 | blocker | The synthetic client could not be chosen: the Studio listed the page's own clients only | `/studio/status` names `testNs` (`ST_TEST_NS` + `STUDIO_TEST_NS`, with the kit's name); the Studio lists them for every key under "Synthetic test clients" (a worker of S28-p44 implies `synthdemo`); the wizard marks them | `studio-rc-seed-worker` 1, `studio-rc-browser` R3/R4 | fixed |
+| R4 | blocker | The seed made two brief-only projects, so every later journey cost model calls first | `tools/studio-test-kit.py seed` parks seven projects (brief to read with the off-topic paragraph and the pending 99 figure; no campaign chosen; three directions; copy written; Design with one tile laid out to pass and one to block; Review with nothing approved), a reference per campaign, uneven material (harbour four facts, nightboat one), a mandatory wordmark rule on nightboat, transparent drawn marks; `--tester NAME`; prints the build; stops unless every project comes back `test: true`; approves nothing; a re-seed restores the kit and adds nothing twice | `studio-rc-seed-worker` (8), `studio-test-kit-test.py` (4), `studio-rc-browser` R3/R4 | fixed |
+| R1 | high | The page never compared the worker's build with the one it needs | `PAGE_NEEDS_BUILD` (45) in `docs/studio.js`; a banner names the worker's build and the page's release when it is older | `studio-rc-browser` R1 | fixed |
+| R2 | high | `TESTING.md` described p44 as live and cited s.51 | Rewritten for this release candidate (54.6) | - | fixed |
+| K6 | high | The demonstration, showcase, golden and smoke tools made live client projects | Every project a tool creates is `test: true` | `studio-demo-test` (K6 line), `studio-smoke-test` (K6 line) | fixed |
+| S2 | high | With `AXIOM_PUBLIC=full` anonymous writes were refused only under `/studio`, `/brand`, `/engine` | Every anonymous write and acting GET is refused (`public_write_refused`); `STUDIO_PUBLIC_WRITE=1` still opens the Studio's own writes, nothing else; a posture readout on `/studio/status` (public mode and end, guard flags, roster and guest counts by role, ended links; never a key) | `studio-rc-security-worker` S2 (3) | fixed |
+| S3 | high | The retraction filter failed open on a D1 error and checked only the first 90 documents | Every document is checked in slices of 90; a passage whose document cannot be cleared is left out and the failure logged | `studio-rc-security-worker` S3 (2) | fixed |
+| S4 | medium | Provider image bytes were filed unchecked; a finished creative exported its bitmap as is | `stImageBytesCheck` (a whole PNG through `stPngCheck`, a JPEG with its end marker, a WebP its stated length) before filing - a broken image is `malformed` and retried within the image policy, the stored type comes from the bytes; a finished bitmap is checked whole before delivery | `studio-rc-security-worker` S4 (3) | fixed |
+| S5 | medium | A measurement could be filed without its PNG and an image saved later bound to it, even after approval | `/studio/validation` requires the PNG (`png_required`); a measurement filed before this release gets no image after approval or sharing (`export_locked`) | `studio-rc-security-worker` S5 (2) | fixed |
+| D3 | (decision) | The worker took contrast and ink from the browser's report | The worker reads the filed PNG itself (54.4) | `studio-rc-security-worker` D3 (2) | fixed |
+| S6 | low | A render job could put any image model first | Only the chain's own models may go first; another name falls to the chain's head | `studio-rc-security-worker` S6 | fixed |
+| K2 | high | "Produce N as variants" sent `acknowledge: true`, skipping the campaign gate | The brief's mandatory gaps are read first; with one, nothing is produced and the notice asks for the campaign | `studio-rc-browser` K2 | fixed |
+| K3 | medium | An explicit Standalone still tripped the campaign gate with two campaigns; standalone work saw every campaign's facts at production and client-wide ones on a recheck | Standalone (or a confirmed "no campaign") is a recorded assumption, not a gap; the Studio's kit block with no campaign carries client-wide facts only, as the recheck does | `studio-rc-brief-worker` (2) | fixed |
+| U1 | high | Below 1180 px the tool panel sat under the canvas bar; Escape did not close it; focus never entered | Up to 1366 px the panel overlays the canvas above the bar (z 35), takes the focus, closes on Escape and returns the focus to its dock button | `studio-rc-browser` U1-U3 | fixed |
+| U2 | high | With a panel open from 1181 to 1366 px the canvas bar wrapped to two rows (75 px) | The overlay up to 1366 px; spacers take only what is left; the empty title slot claims no row; under 900 px of bar the output width folds and the main action reads "Review" | `studio-rc-browser` U1-U3 (one row, 40 px, at 1024-1920 with a selection and each panel) | fixed |
+| U3 | high | At 1181-1280 px the readiness strip printed over the composition's facts | What sits under the canvas keeps its height; the foot scrolls | `studio-rc-browser` U1-U3 (no overprint at eight sizes) | fixed |
+| K1 | high | The reading returned one campaign, and the knowledge it read carried no campaign or approval | The reading answers candidates (each with confidence, the paragraphs that point to it and why); ambiguous when the top two are within 0.2 or the top is under 0.6, and then nothing is detected and the question names the candidates and standalone; the reading proposes, a person chooses (the Brief and the guided understanding show the question with a Use button per candidate and Keep standalone); facts reach the model labelled with their campaign or client-wide and "approved by the team", Mind passages with the campaign of their pack and the approval their kind implies (`stKnowCampaign`, `stKnowApproval`). The judgement's quality is an owner-run live check | `studio-rc-brief-worker` K1 (3) | fixed (plumbing) |
+| C1 | medium | Directions that would draw the same tile under different photographic labels were never replanned | Photographic media are one family for narrowness and composition likeness; a set whose compositions look alike (and no other trigger) goes back in the one replanning round, named as looking the same on the page; a look-alike still standing is marked (`lookalike`), never hidden | `studio-rc-creative-worker` (2), `studio-s8-worker` unchanged (5) | fixed |
+| U4 | high | Serious axe contrast on Message (the "Set this objective aside" link) for full keys | The client accent is lightened until it reads at 4.5:1 on the raised surface as well as the panel (`studioTheme`) | `studio-a11y-browser` (full key, three widths) | fixed |
+| Q1 | high | The axe sweep was not enforcing and had holes (no light appearance, no panels, dialogs, wizard or review page) | `tests/studio-a11y-browser.mjs` (in `run.mjs`, so CI): the library and the seven stages for both roles at 390, 1024 and 1440; light at 1440; Design with a selection, every dock panel, the Style panel and the colour picker; a Studio question, the wizard, Help with Report a problem; the review page on a phone and at 1440. Its first run found the light appearance failing in five places (the muted text 4.31:1, the "ok" green on its tint 4.38:1, the models chip 3.25:1): the light tokens were darkened (`--sk-quiet` #5c6776, `--sk-good` #166640) and the chip's opacity removed | `studio-a11y-browser` (10) | fixed |
+| Q3 | low | `run.mjs` counted a harness that skipped engines as a plain pass | A harness that reports skipped parts is listed "ok*" with what was skipped, and the total names them as "with parts skipped, not passed" | the run output | fixed |
+| U5 | medium | The appearance switch never showed the chosen option (`aria-checked` set, `aria-pressed` styled) | Styled on `aria-checked` too | `studio-a11y-browser` light case | fixed |
+| U9 | low | "Reviewy" typo; `person_budget_exhausted` explained as the agency's budget | Fixed; a person's own daily cap is explained as theirs | `studio-explain-test` (11) | fixed in part (the image-call wording and "copy partner" remain) |
+| P1 | medium | Opening a project grows with assets x versions | Measured here (in-process SQLite, so no network latency): 2x5 29 queries, 11 KB, 3 ms; 10x20 109, 173 KB, 13 ms; 20x40 209, 575 KB, 33 ms. On D1 each serial query is a round trip. Proposed, not built in this release: build the asset views concurrently, carry the current version per asset with history on demand, and make the page's `reload()` single-flight | the measurement script in the session | known limit (measured) |
+| U6 | medium | Every movable layer shows a resize handle and a dotted box, selected or not | Not changed in this release | - | open (low risk, cosmetic) |
+| U7 | medium | Stage heads take 208-306 px at 1366x768 | Not changed in this release | - | open |
+| U8 | medium | At 1100 px and below a finished stage shows only a tick; the project subline clips without an ellipsis | Not changed in this release | - | open |
+| Q2 | medium | No browser harness signs in with a guest key | Not added in this release (the guest gates are proven in the worker harnesses) | - | open |
+| S7 | low | `innerHTML` sinks in `docs/index.html` | Not inventoried in this release; the Studio islands render through htm (escaped) | - | open |
+| ENV | - | A harness started while a static server from an interrupted run held its port tested another tree's pages | `makeStudio` refuses a port in use, naming it | checked by hand against an occupied port | fixed |
+| Q-PNG | - | Thirty harnesses stood in for images with a PNG signature and zeros, or a damaged 4x4 PNG | Whole PNGs (`tests/png.mjs`); `pngForVersion` paints a readable ground under each text box, as the stub report claims | the suites that use them | fixed |
+| K4 | medium | The daily brief (all clients) is in `cmm`, retrieved for every client | Owner's decision D5: leave as is | - | decision |
+| K5 | medium | The Content Desk's "remember: auto" saves a model-judged standing rule | Owner's decision D6: keep auto | - | decision |
+| D2 | - | A guest key reads every client's projects, briefs and Mind documents | Owner's decision: internal testers only; clients use review links | - | decision |
+
+
+### 54.4 What the worker judges itself (D3)
+
+`stValidationSubmit` now requires the PNG, checks it whole at the stage size, decodes it (`stPngDecode`, 8-bit, non-interlaced;
+anything else is `pixels_unmeasured`, blocking) and reads:
+
+- **Words**: the text colour from the layout against the pixels in each text box that are not that colour (the ground), as a
+  median and a tenth percentile; a box that is almost all the text's own colour is words the ground has swallowed
+  (`stServerText`).
+- **Marks** drawn from a transparent file: the file's own strokes laid over the image as the renderer contains them, each stroke
+  pixel against the ground around it where the mark draws nothing; a stroke painted over by a later layer counts as lost
+  (`stServerMark`).
+
+The judge takes the worker's figure when it is clearly worse than the browser's (text contrast under 70% of the reported; ink
+lost more than ten points above it) or when the browser gave none; otherwise the browser's finer measure stands. Both figures
+are kept on the stored report (`boxes[].server`). Still taken from the browser, bounded: occlusion, the photograph's subjects,
+the fonts that drew, and the readability of an opaque, rotated, faded or cropped mark (`server: {skipped: true}`). Geometry,
+displayed characters, type size and line counts were already re-judged by the worker.

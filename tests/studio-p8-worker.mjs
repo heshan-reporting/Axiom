@@ -10,7 +10,7 @@
  * verdict never approves; the identity audit reports exactly what is on file.
  * Run: node --experimental-sqlite tests/studio-p8-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
-import { pngB64, pngForVersion } from './png.mjs';
+import { pngB64, pngForVersion, pngBytes } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -24,7 +24,7 @@ const env = {
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
 // a PNG header whose IHDR colour type (byte 25) says whether it carries alpha: 6 = RGBA, 2 = RGB
-const png = (colourType, fill) => { const b = Buffer.alloc(120, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b.fill(0, 16, 24);   /* S28: the header states no size, as this fake is no picture (the worker checks a stated size against the stage) */ b[24] = 8; b[25] = colourType; return b; };
+const png = (colourType, fill) => pngBytes(16, 16, { fill: fill || 0, alpha: colourType === 6 || colourType === 4 });   // whole PNGs (RC S4: provider images are checked before filing); colour type 6 carries alpha
 const PNG = png(6).toString('base64');
 const anth = { calls: [] }; const gem = { calls: [], queue: [], fail404Once: false };
 const textOf = body => typeof body.messages[0].content === 'string' ? body.messages[0].content : body.messages[0].content.filter(x => x.type === 'text').map(x => x.text).join('');
@@ -235,7 +235,7 @@ await t('the final image is never a thought image; the record keeps usage and ti
   const A = BASE; const thought = png(6, 7).toString('base64'), final = png(6, 9).toString('base64');
   gem.queue.push([{ text: 'thinking', thought: true }, { inlineData: { mimeType: 'image/png', data: thought }, thought: true }, { inlineData: { mimeType: 'image/png', data: final }, thoughtSignature: 'sx' }]);
   const j = await jobRun(P, 'render', { prompt: 'A full background', aspect: '4:5', size: '2K' }, A); eq(j.state, 'done', j.error);
-  const v = cur(await get(P), A); eq(Buffer.from(r2.get(v.image.key).v)[50], 9, 'the final image, not the thought image'); eq(v.image.meta.usage, { prompt: 100, output: 1290, total: 1390 }); ok(v.image.meta.ms >= 0); eq(v.image.meta.model, 'gemini-3-pro-image');
+  const v = cur(await get(P), A); eq(Buffer.from(r2.get(v.image.key).v).equals(Buffer.from(final, 'base64')), true, 'the final image, not the thought image'); eq(v.image.meta.usage, { prompt: 100, output: 1290, total: 1390 }); ok(v.image.meta.ms >= 0); eq(v.image.meta.model, 'gemini-3-pro-image');
   ok(/-conv\.json$/.test(v.image.conv)); eq(JSON.parse(r2.get(v.image.conv).v).model, 'gemini-3-pro-image');
   // the edit: the primary model refuses, the fallback answers - it must not receive the other model's turns and signatures
   gem.fail404Once = true; const g0 = gem.calls.length;

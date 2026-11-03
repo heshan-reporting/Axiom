@@ -4,8 +4,9 @@
  *      request without a key.
  * Run: node --experimental-sqlite tests/studio-s23g-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s23g-worker (library thumbnails and what the workspace reads)');
-const png = byte => Buffer.from('89504e470d0a1a0a' + byte.repeat(100), 'hex').toString('base64');
+const png = byte => pngB64(16, 16, { fill: parseInt(byte, 16) });
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'full-key' : k);
 w.answer(/generativelanguage/, async () => new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ inlineData: { mimeType: 'image/png', data: png('00') } }] } }] }), { status: 200 }));

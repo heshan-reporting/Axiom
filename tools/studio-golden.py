@@ -55,7 +55,7 @@ def step_until_done(base, key, job_id, label):
 
 
 def run_case(base, key, name, case):
-    p = http(base, key, 'POST', '/studio/project', {'ns': case['ns'], 'campaign': case.get('campaign', ''), 'title': 'GOLDEN ' + case.get('title', name),
+    p = http(base, key, 'POST', '/studio/project', {'test': True, 'ns': case['ns'], 'campaign': case.get('campaign', ''), 'title': 'GOLDEN ' + case.get('title', name),
                                                     'brief': case.get('brief', {}), 'idem': 'golden:%s:%d' % (name, int(time.time()))})
     pid = p['id']
     if case.get('source'):

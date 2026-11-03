@@ -8,9 +8,10 @@
  *      attempt 2 and finishes it, and the dead attempt's late answer files nothing.
  * Run: node --experimental-sqlite tests/studio-s23f-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
+import { pngB64 } from './png.mjs';
 const T = suite('studio-s23f-worker (long operations: drafting preview, jobs for every model call, render details, recovery without a tab)');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const png = byte => Buffer.from('89504e470d0a1a0a' + byte.repeat(100), 'hex').toString('base64');
+const png = byte => pngB64(16, 16, { fill: parseInt(byte, 16) });
 const PNG = png('00'), PNG_REF = png('33');
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k || 'full-key');

@@ -7,6 +7,7 @@
  * Run: node --experimental-sqlite tests/studio-p14-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
+import { pngForVersion } from './png.mjs';   // RC (S5): a measurement carries the PNG it measured
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -84,7 +85,7 @@ await t('the impact view names what went stale and which remedy is free: kit fac
   const row = im.assets.find(x => x.asset === A.id); ok(row && row.reasons.some(r => r.code === 'kit_changed' && r.remedy === 'recheck' && r.paid === false && /facts/.test(r.text)), JSON.stringify(im.assets.map(x => [x.title, x.reasons.map(r => r.code)])));
   const n0 = calls.anth; const rc = await req('POST', '/studio/recheck', { asset: A.id }); eq(rc.status, 200); eq(calls.anth, n0, 're-check spends no model call');
   // a measured composition whose words change, an adaptation whose master moves on
-  const cur = A.versions.find(v => v.id === A.current); await req('POST', '/studio/validation', { asset: A.id, version: cur.id, report: stubReport(cur, A) });
+  const cur = A.versions.find(v => v.id === A.current); await req('POST', '/studio/validation', { asset: A.id, version: cur.id, report: stubReport(cur, A), imageB64: pngForVersion(cur) });
   await req('POST', '/studio/version', { asset: A.id, copy: Object.assign({}, cur.copy, { headline: 'Changed after measuring' }), layout: cur.layout, note: 'edit' });
   const B = (await req('POST', '/studio/asset', { project: P, family: 'F', channel: 'facebook', format: '1:1', title: 'Adapted', copy: cur.copy, layout: cur.layout, mode: 'composition', context: { master: A.id, masterVersion: cur.id } })).d.asset.id;
   const im2 = (await req('GET', '/studio/impact?project=' + P)).d;

@@ -248,6 +248,13 @@ server on a fixed port in the 8766-8776 range and kills it at the end.
   to the worker are routed into the worker module running in the harness
   process, so intake, extraction, production, the renderer's preview, hand
   edits, approvals, export and the read-only role are exercised end to end.
+- The release candidate (`CREATIVE-STUDIO.md` s.54): `studio-rc-seed-worker.mjs` (the test kit's seed against the worker),
+  `studio-rc-security-worker.mjs` (open access, retraction, image bytes, the model allow-list, measurements with their PNG, the
+  worker's own reading of it), `studio-rc-brief-worker.mjs` (standalone work, campaign candidates), `studio-rc-creative-worker.mjs`
+  (look-alike directions), `studio-rc-browser.mjs` (the synthetic client, the build banner, the Design panel and bar, the campaign
+  question) and `studio-a11y-browser.mjs` (the enforcing accessibility gate). `png.mjs` builds whole PNGs; `pngForVersion`
+  paints a readable ground under each text box so the worker's reading agrees with a stub report. `makeStudio` refuses a port
+  already in use.
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,
