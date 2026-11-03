@@ -6,7 +6,7 @@ Cloudflare cannot show a secret back, so this tool keeps the list in ~/.axiom-gu
 writes the whole list to the worker each time. Keys are made here and never leave this machine except as the link you
 send the person.
 
-  python3 tools/guest-link.py add Laura                  # her own full-access link, ending in 30 days
+  python3 tools/guest-link.py add Laura                  # her own read-only link, ending in 30 days
   python3 tools/guest-link.py add Ben --until 2026-12-31          # read-only (the default since S28)
   python3 tools/guest-link.py add Kai --days 14 --full             # full access: creates projects and spends model calls
   python3 tools/guest-link.py renew Kai --until 2026-12-31   # his old link works again; nothing new to send

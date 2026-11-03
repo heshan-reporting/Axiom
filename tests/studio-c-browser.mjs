@@ -114,7 +114,7 @@ await T.t('C6. the version strip: versions drawn small, the current one marked; 
   const cards = await page.$$eval(R + '.st-vstrip .st-vcard', x => x.map(e => ({ t: e.textContent.trim(), on: e.classList.contains('on') })));
   ok(cards.length >= 2 && cards.filter(x => x.on).length === 1, 'versions with the current one marked: ' + JSON.stringify(cards));
   const { a } = await layerOf('headline'); const cur0 = a.current;
-  await page.click(R + '.st-vstrip .st-vcard:not(.on) >> nth=0'); await page.waitForSelector(R + '.st-cmp', { timeout: 10000 });
+  await page.click(R + '.st-vstrip .st-vcard:not(.on) >> nth=0'); await page.waitForSelector(R + '.st-vcmp', { timeout: 10000 });
   eq((await layerOf('headline')).a.current, cur0, 'comparing changes nothing: the current version is the same');
 });
 

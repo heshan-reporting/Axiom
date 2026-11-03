@@ -132,8 +132,8 @@ await T.t('the learning loop: a decision not to respond needs a reason and is lo
   anth.calls.length = 0;
   const j = await stage(P2, 'analyse', { source: s2, kind: 'social' }); eq(j.state, 'done', j.error);
   const u = anCalls()[0].user;
-  ok(/THE TEAM'S EARLIER CHOICES IN THIS ENGINE \(\d+\):[\s\S]*reject_direction: One striking poster - because: painted posters read as old-fashioned/.test(u), 'the earlier choice is read');
-  ok(/\[H\d+\] objective: correct: Correct the subsidy claim/.test(u)); ok(/RECORDED DECISIONS[^\n]*\(\d+\):\n\[D1\] approved/.test(u), 'the approval is a recorded decision');
+  ok(/THE TEAM'S EARLIER CHOICES IN THIS ENGINE[^\n]*\(\d+\):[\s\S]*reject_direction( \[[^\]]*\])?: One striking poster - because: painted posters read as old-fashioned/.test(u), 'the earlier choice is read');
+  ok(/\[H\d+\] objective( \[[^\]]*\])?: correct: Correct the subsidy claim/.test(u)); ok(/RECORDED DECISIONS[^\n]*\(\d+\):\n\[D1\] approved/.test(u), 'the approval is a recorded decision');
   const g = await get(P2); eq([g.intel.situation.respond, g.intel.next.stage], ['no', 'decide']);
   const n = await call('POST', '/studio/intel/decision', { project: P2, kind: 'no_response', reason: 'it would amplify the claim' }); eq(n.status, 200); eq(n.body.brief.intel.noResponse.reason, 'it would amplify the claim');
 });

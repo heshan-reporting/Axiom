@@ -78,7 +78,7 @@ await T.t('M1 the header says what is configured, how much budget is left and ho
   const page = await lib(); await openProject(page, 'Ready at copy');
   const chip = page.locator(R + '.st-prov').first(); await chip.waitFor({ timeout: 10000 });
   const t = await chip.textContent(); ok(!/Models ready/.test(t) && /left today/.test(t), 'no blanket "ready": ' + t);
-  const title = await chip.getAttribute('title'); ok(/Budget left today/.test(title) && /Last answer: Claude/.test(title) && /Configured is not the same as working/.test(title), title);
+  const title = await chip.getAttribute('title'); ok(/(Budget )?[Ll]eft today/.test(title) && /Last answer: Claude/.test(title) && /Configured is not the same as working/.test(title), title);
   await page.ctxB.close();
 });
 

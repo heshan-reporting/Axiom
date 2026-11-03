@@ -62,11 +62,14 @@
     const px = (pc, d) => Math.round(pc / 100 * d);
     const T = px(l.y || 0, H), L = px(l.x || 0, W), Wd = px(l.w || 0, W), Hd = px(l.h || 0, H);
     const Rt = W - L - Wd, B = H - T - Hd;
+    // S29 (QA-6): a typed distance keeps part of the layer on the stage (at least 1% of it), so a stray number never throws it
+    // out of sight
+    const cx = v => Math.max(1 - (l.w || 0), Math.min(99, v)), cy = v => Math.max(1 - (l.h || 0), Math.min(99, v));
     const set = (edge, raw) => { const n = +raw; if (!isFinite(n)) return; const pcW = n / W * 100, pcH = n / H * 100;
-      if (edge === 't') onPatch({ y: r1(pcH) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the top');
-      else if (edge === 'l') onPatch({ x: r1(pcW) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the left');
-      else if (edge === 'r') onPatch({ x: r1(100 - (l.w || 0) - pcW) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the right');
-      else if (edge === 'b') onPatch({ y: r1(100 - (l.h || 0) - pcH) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the bottom'); };
+      if (edge === 't') onPatch({ y: r1(cy(pcH)) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the top');
+      else if (edge === 'l') onPatch({ x: r1(cx(pcW)) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the left');
+      else if (edge === 'r') onPatch({ x: r1(cx(100 - (l.w || 0) - pcW)) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the right');
+      else if (edge === 'b') onPatch({ y: r1(cy(100 - (l.h || 0) - pcH)) }, 'Move ' + layerName(l) + ' to ' + Math.round(n) + ' px from the bottom'); };
     // one move per edit: the field commits on Enter or when it is left, and is redrawn when the layer moves on the canvas
     const inp = (edge, val, label) => html`<input key=${edge + ':' + val} class=${'st-sty-e ' + edge} type="number" step="1" defaultValue=${val} disabled=${disabled} aria-label=${label} title=${disabled ? why : label + ': type a distance and press Enter to move the layer there'} onBlur=${e => { if (+e.target.value !== val) set(edge, e.target.value); }} onKeyDown=${e => { e.stopPropagation(); if (e.key === 'Enter' && +e.target.value !== val) set(edge, e.target.value); if (e.key === 'Escape') { e.target.value = val; e.target.blur(); } }} />`;
     return html`<div class="st-sty-box" role="group" aria-label="Distance to the edges of the artwork, output pixels">

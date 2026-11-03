@@ -39,7 +39,7 @@
   const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
   /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
      deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
-  const PAGE_NEEDS_BUILD = 45;
+  const PAGE_NEEDS_BUILD = 46;
   const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
   const testClientsOf = s => {
     if (!s || !s.build) return null;
@@ -125,7 +125,9 @@
     const has = re => re.test(code) || re.test(msg); const status = e && e.status;
     const rid = String((e && e.requestId) || '');
     const out = (title, text, kind) => ({ title, text, kind: kind || 'error', detail: (msg && msg !== title ? msg : '') + (rid ? (msg && msg !== title ? ' ' : '') + '(request ' + rid + ')' : '') });
-    const failedHere = () => out('Something failed on the worker', 'Nothing more was done and your work is as it was. Try again; if it fails again, quote ' + (rid ? 'request ' + rid : 'the time it happened') + ' when reporting it.');
+    // S29 (PM7): a failure after the worker began may have done part of the work (a job step can have called a model): the page
+    // re-reads the project rather than promising nothing happened
+    const failedHere = () => out('Something failed on the worker', 'Your work is kept. If this was a step of a job, the job may have run part of the way: the page shows its state when it re-reads. Try again; if it fails again, quote ' + (rid ? 'request ' + rid : 'the time it happened') + ' when reporting it.');
     if (has(/internal_error/)) return failedHere();
     if (has(/claude_not_configured/)) return out('Claude is not configured on the worker', 'Nothing that writes, plans or inspects can run until an administrator sets ANTHROPIC_API_KEY on the worker. Nothing was spent and your work is unchanged.', 'provider');
     if (has(/gemini_not_configured|GEMINI_KEY/)) return out('Image generation is not configured on the worker', 'No image can be made until an administrator sets GEMINI_KEY. Compositions, copy and layout work without it; choose "No imagery" to produce a complete typographic set.', 'provider');
@@ -133,15 +135,20 @@
     if (has(/person_budget_exhausted/)) return out('Your own allowance for today is used up', 'Each person (and each guest link) may send a set number of model calls and image requests a day (STUDIO_PERSON_DAILY_CALLS and _IMAGES; guests STUDIO_GUEST_DAILY_*). It resets at midnight Sydney time. Nothing more was sent; the work so far is kept.');
     if (has(/budget_exhausted/)) return out('Today\'s Studio budget is used up', 'The worker allows a set number of model calls a day (STUDIO_DAILY_CALLS). It resets at midnight Sydney time, or an administrator can raise it. Nothing more was spent.', 'provider');
     if (has(/account_limit|credit balance|spend limit|usage limit|billing/i)) return out('The provider account has hit its spend limit', 'The Anthropic or Google account behind the worker refused the call. An administrator needs to raise the limit; retrying will not help until then.', 'provider');
+    if (has(/finished_needs_imagery/)) return out('A finished creative needs imagery', 'It is painted as one image, so "No imagery" cannot make one. Choose Editable for type-only work, or allow imagery in the Brief. Nothing was spent.');
     if (has(/brief_incomplete/)) return out('The brief is missing something mandatory', msg.replace(/^brief_incomplete:\s*/, '').replace(/\s*\(not retried\)\s*$/, '') + ' Resolve it in the Brief, or tick "Proceed on the stated assumptions".', 'warn');
     if (has(/answer_truncated|unparseable/)) return out('The model\'s answer could not be read', 'Nothing was saved from it; your work is as it was. Retry: it is a new call and may be billed.');
-    if (has(/refus/i)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
+    // S29 (FS7): a refusal by the worker's open access is not the model declining
+    if (has(/public_write_refused/)) return out('Open access cannot change anything', 'This browser has no sign-in link, so the Studio is read-only here. Open your own sign-in link to make or change work. Nothing was changed.');
+    if (has(/refus/i) && !has(/reddit_blocked/)) return out('The model declined this request', 'Nothing was saved. Reword the instruction or brief and try again.');
     // S24: a render that used every request its attempt policy allows; the worker sends nothing more for that job, and a new one
     // is a person's choice (a new paid attempt with its own cap), offered with that said
     if (has(/image_attempts_exhausted/)) return out('The image provider kept failing', 'This render sent every request its policy allows (retries, fallbacks and job attempts included) and none returned an image, so nothing more is sent for it. Your work is kept. Retry render starts a new render job: a new paid attempt with its own cap.', 'provider');
     if (has(/stream_cap/)) return out('The model was still writing at its time limit', 'The call was stopped so it would not run on, and nothing from it was saved; your work is as it was. Shorten the material or the instruction, then retry.', 'warn');
     if (has(/stream_idle|stream_cut/)) return out('The model\'s answer stopped arriving', 'It went quiet, or the connection dropped mid-answer, so the call was given up and nothing from it was saved. The worker tries again by itself, up to three attempts; your work is as it was.', 'provider');
     if (has(/stream_protocol/)) return out('The model\'s answer arrived damaged', 'A piece of it could not be read, so none of it was used: an answer with a piece missing can say something the model did not. The worker asks again by itself, up to three attempts; your work is as it was.', 'provider');
+    // S29 (PM7): the worker itself asked to slow down (429 with no provider named): nothing reached a model
+    if (status === 429 && !/gemini|overloaded|anthropic|claude|provider|rate[ _-]?limit/i.test(code + ' ' + msg)) return out('The worker asked to slow down', 'Nothing was sent to a model and nothing was spent. Wait a moment and try again.', 'provider');
     if (has(/gemini_5\d\d|gemini_429|overloaded|\b529\b|\b503\b|rate[ _-]?limit|too many requests|\b429\b|TimeoutError|AbortError|timed out|timeout/i)) return out('The provider is busy or timed out', 'Your work is kept. Retry when ready; a retry is a new attempt and may be billed.', 'provider');
     if (has(/brief_too_large|input_too_large|data_too_large|layout_too_large|content_too_large/)) return out('That is too long to save', msg.replace(/^[a-z_]+:\s*/, '') + ' Nothing was saved and your text is still where you typed it; put long material in a Source instead.');
     if (has(/input_corrupt/)) return out('This job\'s stored instruction is damaged', 'It was not run with an empty instruction. Start the step again from here; the damaged job stays in Jobs as history.');
@@ -158,6 +165,7 @@
     if (code === 'workflow_locked') return out('This step is not open yet', (msg && msg !== code ? msg.replace(/\.?$/, '.') + ' ' : '') + 'Nothing was changed; finish the step it names, then come back.', 'warn');
     if (status === 409 && (code === 'locked' || code === 'layout_locked')) return out('That element is locked', 'Unlock it first (the lock beside the field), then make the change.', 'warn');
     if (status === 409 && /stale/.test(code)) return out('That suggestion was made for an earlier version', 'The asset has moved on since. Ask again on the current version.', 'warn');
+    if (has(/sign_in_required/)) return out('Client work needs your own sign-in link', 'Open access does not show client projects, kits or memory. Open the sign-in link you were sent, then try again. Nothing was changed.');
     if (has(/link_expired/)) return out('Your sign-in link has ended', 'The key saved in this browser has passed its end date. Ask whoever sent the link for a new one, then open it here. Nothing was changed.');
     if (status === 401) return out('The access key was not accepted', 'Set a valid key in Settings, Access key. Nothing was changed.');
     // S27: only read_only is a read-only key; another 403 is a different refusal and says which
@@ -305,7 +313,8 @@
     if (fs.every(f => f.state === 'done' || f.state === 'skipped')) { const last = fs[fs.length - 1]; return { state: fs.some(f => f.state === 'done') ? 'done' : 'skipped', note: last.note || '', blocked: '' }; }
     if (fs.every(f => f.state === 'locked' || f.state === 'blocked')) return { state: fs[0].state, note: '', blocked: fs[0].blocked || '' };
     const top = fs.slice().sort((x, y) => (STATE_RANK[x.state] - STATE_RANK[y.state]))[0];
-    return { state: top.state === 'locked' || top.state === 'blocked' ? 'current' : top.state, note: top.note || '', blocked: top.blocked || '', step: top.id };
+    // S29 (QA-7): a phase with one step done and the next to do is in progress, not "not started"
+    return { state: top.state === 'locked' || top.state === 'blocked' || (top.state === 'todo' && fs.some(f => f.state === 'done')) ? 'current' : top.state, note: top.note || '', blocked: top.blocked || '', step: top.id };
   }
   /** Where a click on a phase lands: the first of its steps that is not finished and is open, else its first step. */
   const phaseTarget = (flow, ph) => { if (!(flow && flow.wf && flow.wf.v === 2)) return ph.steps[0]; const open = ph.steps.find(id => { const f = (flow && flow[id]) || {}; return f.state && f.state !== 'done' && f.state !== 'skipped' && f.state !== 'locked' && f.state !== 'blocked'; }); return open || ph.steps[0]; };
@@ -788,7 +797,7 @@
     const objT = sel.objective && sel.objective.title; const msgT = sel.message && sel.message.primary; const strT = sel.strategy && (STRAT_WORD[sel.strategy.kind] || sel.strategy.kind);
     const done = s => s && (s.state === 'complete' || s.state === 'skipped');
     const accepted = []; let missing = '';
-    const need = f.blocked || st.need || '';
+    const need = (f.state === 'blocked' ? f.blocked : '') || st.need || '';   // S29 (FS6): a step's blocking reason only while it is blocked
     if (id === 'brief') { if (done(st)) accepted.push('the understanding' + (st.note ? ' (' + st.note + ')' : '')); else if ((p.sources || []).length) accepted.push(plural(p.sources.length, 'source') + ' added'); missing = done(st) ? '' : st.state === 'needs_review' ? 'a person to review Axiom\'s understanding' : st.state === 'processing' ? 'Axiom is still reading the material' : 'the brief or the material about the situation'; }
     else if (id === 'objectives') { if (done(steps.brief)) accepted.push('the understanding'); if (done(st) && objT) accepted.push('objective "' + objT + '"' + (msgT ? ' and its key message' : '')); missing = done(st) ? '' : need || 'one objective and one key message, confirmed'; }
     else if (id === 'strategy') { if (objT) accepted.push('objective "' + objT + '"'); if (msgT) accepted.push('the key message'); if (done(st)) accepted.push(st.noResponse ? 'a decision not to respond' : 'strategy: ' + (strT || 'chosen')); missing = done(st) ? '' : need || 'a response strategy, or a decision not to respond'; }
@@ -910,6 +919,12 @@
      this browser, skeletons while it loads, a failure that says what to do with Retry, and a plain answer when nothing matches.
      The rows stay a table (the cards are its rows), so assistive technology reads a list of projects with their columns. */
   const STAGE_ORDER = { brief: 0, directions: 1, production: 2, review: 3, approved: 4, exported: 5 };
+  /* S29 (UX6): a guided project carries the step it is at (`phase` from /studio/list), named as the header names the stages;
+     a project made before the guided workflow keeps its status words */
+  const PHASE_NEXT = { brief: 'review the understanding', objectives: 'confirm the objective and message', strategy: 'choose how to respond', directions: 'choose a direction', copy: 'mark the copy ready', design: 'build and measure', review: 'approve each piece', export: 'export' };
+  const PHASE_ORDER = { brief: 0, objectives: 1, strategy: 2, directions: 3, copy: 4, design: 5, review: 6, export: 7 };
+  const libStage = p => p.phase ? { key: 'p:' + phaseOf(p.phase).id, label: phaseOf(p.phase).label, next: PHASE_NEXT[p.phase] || '', order: PHASE_ORDER[p.phase] || 0, cls: p.phase }
+    : { key: p.status, label: p.status, next: NEXT_WORD[p.status] || '', order: STAGE_ORDER[p.status] || 0, cls: p.status };
   const recentKey = ns => 'ax_studio_recent_' + ns;
   const recentGet = ns => { try { const v = JSON.parse(localStorage.getItem(recentKey(ns)) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
   const recentPush = (ns, id) => { try { const v = recentGet(ns).filter(x => x !== id); v.unshift(id); localStorage.setItem(recentKey(ns), JSON.stringify(v.slice(0, 6))); } catch (e) {} };
@@ -923,29 +938,30 @@
     const [q, setQ] = useState(''); const [camp, setCamp] = useState(''); const [stg, setStg] = useState(''); const [sort, setSort] = useState('recent');
     const [tst, setTst] = useState('');   // S28: '' every project, 'live' live work only, 'test' test projects only
     const open = id => { recentPush(client.id, id); onOpen(id); };
-    if (err) return html`<div class="st-lib"><div class="st-lib-fail" role="alert"><b>The project library did not load.</b><span>${/not_found|404/.test(err) ? 'The worker does not have the Studio routes yet: it needs redeploying.' : /link_expired/.test(err) ? 'Your sign-in link has ended: the key saved in this browser has passed its end date. Ask whoever sent the link for a new one and open it here. Your projects are safe; nothing was changed.' : /unauthori[sz]ed|^401$|not accepted/i.test(err) ? 'The access key in this browser was not accepted. Open your sign-in link again, or set the key in Settings, Access key. Your projects are safe; nothing was changed.' : 'The worker did not answer (' + err + '). Your projects are safe; nothing was changed.'}</span>${onRetry ? html`<div><button class="btn sm" onClick=${onRetry}>Try again</button></div>` : null}</div></div>`;
+    if (err) return html`<div class="st-lib"><div class="st-lib-fail" role="alert"><b>The project library did not load.</b><span>${/not_found|404/.test(err) ? 'The worker does not have the Studio routes yet: it needs redeploying.' : /sign_in_required|not part of open access/.test(err) ? 'Client work is not part of open access: open the sign-in link you were sent (or set your key in Settings, Access key) to see the projects. Nothing was changed.' : /link_expired/.test(err) ? 'Your sign-in link has ended: the key saved in this browser has passed its end date. Ask whoever sent the link for a new one and open it here. Your projects are safe; nothing was changed.' : /unauthori[sz]ed|^401$|not accepted/i.test(err) ? 'The access key in this browser was not accepted. Open your sign-in link again, or set the key in Settings, Access key. Your projects are safe; nothing was changed.' : 'The worker did not answer (' + err + '). Your projects are safe; nothing was changed.'}</span>${onRetry ? html`<div><button class="btn sm" onClick=${onRetry}>Try again</button></div>` : null}</div></div>`;
     if (!data) return html`<div class="st-lib" aria-busy="true"><div class="st-lib-head"><h2 class="st-stage-title">Projects for ${client.name}</h2><span class="ov-why">loading...</span></div><div class="st-lib-skels" role="status" aria-label=${'Loading the projects for ' + client.name}>${[0, 1, 2, 3, 4, 5].map(i => html`<div key=${i} class="st-lib-skel" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></div>`)}</div></div>`;
     const mine = data.projects || [], legacy = data.legacy || [];
     const last = resume ? mine.find(p => p.id === resume.pid) : null;
     const camps = Array.from(new Set(mine.map(p => p.campaign).filter(Boolean))).sort();
-    const stages = Array.from(new Set(mine.map(p => p.status).filter(Boolean))).sort((a, b) => (STAGE_ORDER[a] || 0) - (STAGE_ORDER[b] || 0));
+    const stageMap = {}; mine.forEach(p => { const x = libStage(p); if (x.key && !stageMap[x.key]) stageMap[x.key] = x; });
+    const stages = Object.keys(stageMap).sort((a, b) => stageMap[a].order - stageMap[b].order);
     const needle = q.trim().toLowerCase();
     const nTest = mine.filter(p => p.test).length;
-    const shown = mine.filter(p => (!needle || (p.title + ' ' + (p.campaign || '')).toLowerCase().indexOf(needle) >= 0) && (!camp || p.campaign === camp) && (!stg || p.status === stg) && (!tst || (tst === 'test' ? p.test : !p.test)))
-      .sort((a, b) => sort === 'name' ? String(a.title).localeCompare(String(b.title)) : sort === 'stage' ? (STAGE_ORDER[a.status] || 0) - (STAGE_ORDER[b.status] || 0) || (b.updated || 0) - (a.updated || 0) : (b.updated || 0) - (a.updated || 0));
+    const shown = mine.filter(p => (!needle || (p.title + ' ' + (p.campaign || '')).toLowerCase().indexOf(needle) >= 0) && (!camp || p.campaign === camp) && (!stg || libStage(p).key === stg) && (!tst || (tst === 'test' ? p.test : !p.test)))
+      .sort((a, b) => sort === 'name' ? String(a.title).localeCompare(String(b.title)) : sort === 'stage' ? libStage(a).order - libStage(b).order || (b.updated || 0) - (a.updated || 0) : (b.updated || 0) - (a.updated || 0));
     const recent = recentGet(client.id).map(id => mine.find(p => p.id === id)).filter(Boolean).slice(0, 4);
     const filtered = !!(needle || camp || stg || tst);
     const archiveTests = async () => { const ok = await askStudio({ title: 'Archive every test project of ' + client.name + '?', text: nTest + ' test project' + (nTest === 1 ? '' : 's') + ' will be archived (not deleted: each can be brought back from the archive). Live work is not touched.', ok: 'Archive ' + nTest }); if (!ok) return;
       try { const r = await call('/studio/project/archive-tests', { ns: client.id }); toastMsg('Archived ' + (r.archived || []).length + ' test project' + ((r.archived || []).length === 1 ? '' : 's') + ': ' + (r.archived || []).map(x => x.title).slice(0, 4).join(', ') + ((r.archived || []).length > 4 ? '...' : '')); if (onRetry) onRetry(); } catch (e) { toastMsg('Not archived: ' + explain(e).title, true); } };
     return html`<div class="st-lib">
       <div class="st-lib-head"><h2 class="st-stage-title">Projects for ${client.name}</h2><span class="ov-why">${mine.length} project${mine.length === 1 ? '' : 's'}${legacy.length ? ', ' + legacy.length + ' legacy item' + (legacy.length === 1 ? '' : 's') : ''}</span>${canWrite() ? html`<button class="btn sm" onClick=${onNew}>New project</button>` : null}</div>
-      ${last ? html`<div class="st-resume" aria-label="Continue where you left off"><div><span class="st-lbl">Continue where you left off</span><div><b>${last.title}</b> <span class="ov-dim">${last.campaign || 'no campaign'}, ${last.assets} asset${last.assets === 1 ? '' : 's'}, last activity ${ago(last.updated)} ago; next: ${NEXT_WORD[last.status] || last.status}</span></div></div><button class="btn sm" onClick=${() => open(last.id)}>Continue</button></div>` : null}
+      ${last ? html`<div class="st-resume" aria-label="Continue where you left off"><div><span class="st-lbl">Continue where you left off</span><div><b>${last.title}</b> <span class="ov-dim">${last.campaign || 'no campaign'}, ${last.assets} asset${last.assets === 1 ? '' : 's'}, last activity ${ago(last.updated)} ago; next: ${libStage(last).next || libStage(last).label}</span></div></div><button class="btn sm" onClick=${() => open(last.id)}>Continue</button></div>` : null}
       ${!mine.length && !legacy.length ? html`<div class="st-empty-state st-first"><b>No projects yet for ${client.name}.</b><span>A project holds one piece of work from brief to export: its sources, objectives, strategy, directions, every version of every asset, the approvals and the exports. Start from what you have; the project wizard asks for the type, the client and the campaign first:</span>
         ${canWrite() ? html`<div class="st-first-acts">${[['analyse', 'A brief or article', 'today\'s brief, an article or a file: Axiom reads it against the client first'], ['release', 'A media release', 'Axiom reads its claims and figures before anything is written'], ['brief', 'A brief or one line', 'write what is needed; each step is confirmed before the next'], ['reference', 'Existing creative', 'start from artwork you already have']].map(([k, l, t]) => html`<button key=${k} class="st-first-btn" onClick=${() => onStart(k)}><b>${l}</b><span>${t}</span></button>`)}</div>` : html`<span class="ov-dim">This key can read only; a full key is needed to start a project.</span>`}</div>` : null}
       ${mine.length ? html`<div class="st-lib-tools" role="search" aria-label="Find a project">
         <label class="st-lib-search"><${Icon} n="search" size=${15} /><input type="search" value=${q} onInput=${e => setQ(e.target.value)} placeholder="Search projects by name or campaign" aria-label="Search projects" /></label>
         ${camps.length > 1 ? html`<select value=${camp} onChange=${e => setCamp(e.target.value)} aria-label="Filter by campaign"><option value="">All campaigns</option>${camps.map(c => html`<option key=${c} value=${c}>${c}</option>`)}</select>` : null}
-        ${stages.length > 1 ? html`<select value=${stg} onChange=${e => setStg(e.target.value)} aria-label="Filter by stage"><option value="">Every stage</option>${stages.map(x => html`<option key=${x} value=${x}>${x}</option>`)}</select>` : null}
+        ${stages.length > 1 ? html`<select value=${stg} onChange=${e => setStg(e.target.value)} aria-label="Filter by stage"><option value="">Every stage</option>${stages.map(x => html`<option key=${x} value=${x}>${stageMap[x].label}</option>`)}</select>` : null}
         ${nTest ? html`<select value=${tst} onChange=${e => setTst(e.target.value)} aria-label="Live work or test projects"><option value="">Live and test</option><option value="live">Live work only</option><option value="test">Test projects (${nTest})</option></select>` : null}
         <select value=${sort} onChange=${e => setSort(e.target.value)} aria-label="Sort projects"><option value="recent">Recent activity</option><option value="name">Name</option><option value="stage">Stage</option></select>
         ${nTest && tst === 'test' && canWrite() ? html`<button class="btn sm ghost" onClick=${archiveTests}>Archive all test projects (${nTest})</button>` : null}
@@ -953,7 +969,7 @@
       ${recent.length > 1 && !filtered ? html`<div class="st-lib-recent" aria-label="Opened recently in this browser"><span>Opened recently:</span>${recent.map(p => html`<button key=${p.id} onClick=${() => open(p.id)}>${p.title}</button>`)}</div>` : null}
       ${mine.length && !shown.length ? html`<div class="st-lib-nomatch" role="status"><span>No project matches ${needle ? '"' + q.trim() + '"' : 'these filters'}${camp ? ' in ' + camp : ''}${stg ? ' at the ' + stg + ' stage' : ''}.</span><button class="btn sm ghost" onClick=${() => { setQ(''); setCamp(''); setStg(''); setTst(''); }}>Clear the search and filters</button></div>` : null}
       ${shown.length || legacy.length ? html`<table class="ov-table"><thead><tr><th>Preview</th><th>Project</th><th>Campaign</th><th>Stage</th><th>Owner</th><th>Last activity</th><th></th></tr></thead><tbody>
-        ${shown.map(p => html`<tr key=${p.id}><td class="st-lib-th"><${LibThumb} p=${p} ns=${client.id} /></td><td class="st-lib-t"><button class="st-lib-open" onClick=${() => open(p.id)}>${p.title}</button>${p.test ? html` <span class="st-test-chip" title="A test project: nothing it decides is filed in the client's memory, and it is left out of the outcome metrics.">test</span>` : null}<div class="ov-dim">${p.assets} asset${p.assets === 1 ? '' : 's'}, ${p.sources} source${p.sources === 1 ? '' : 's'}${p.legacy ? ', imported from ' + p.legacy.id : ''}</div></td><td class="st-lib-c">${p.campaign || '-'}</td><td class="st-lib-s"><span class=${'st-status ' + p.status}>${p.status}</span><div class="ov-dim">next: ${NEXT_WORD[p.status] || '-'}</div></td><td class="st-lib-o">${p.owner}</td><td class="st-lib-w ov-dim">${ago(p.updated)} ago</td><td class="st-lib-go ov-go"><button class="ov-link" onClick=${() => open(p.id)} aria-label=${'Open ' + p.title}>open</button></td></tr>`)}
+        ${shown.map(p => html`<tr key=${p.id}><td class="st-lib-th"><${LibThumb} p=${p} ns=${client.id} /></td><td class="st-lib-t"><button class="st-lib-open" onClick=${() => open(p.id)}>${p.title}</button>${p.test ? html` <span class="st-test-chip" title="A test project: nothing it decides is filed in the client's memory, and it is left out of the outcome metrics.">test</span>` : null}<div class="ov-dim">${p.assets} asset${p.assets === 1 ? '' : 's'}, ${p.sources} source${p.sources === 1 ? '' : 's'}${p.legacy ? ', imported from ' + p.legacy.id : ''}</div></td><td class="st-lib-c">${p.campaign || '-'}</td><td class="st-lib-s"><span class=${'st-status ' + libStage(p).cls}>${libStage(p).label}</span><div class="ov-dim">next: ${libStage(p).next || '-'}</div></td><td class="st-lib-o">${p.owner}</td><td class="st-lib-w ov-dim">${ago(p.updated)} ago</td><td class="st-lib-go ov-go"><button class="ov-link" onClick=${() => open(p.id)} aria-label=${'Open ' + p.title}>open</button></td></tr>`)}
         ${legacy.map(l => html`<tr key=${l.id} class="st-legacy"><td class="st-lib-th"><div class="st-lib-thumb none" aria-hidden="true">${(l.title || '?').trim().slice(0, 1).toUpperCase()}</div></td><td class="st-lib-t"><b>${l.title}</b><div class="ov-dim">legacy ${l.kind === 'legacy_release' ? 'release pack' : 'content set'}, read-only; ${l.assets} ${l.kind === 'legacy_release' ? 'flattened tiles' : 'pieces'}${l.imported ? '; imported' : ''}</div></td><td class="st-lib-c">${l.campaign || '-'}</td><td class="st-lib-s"><span class="st-status legacy">${l.status}</span></td><td class="st-lib-o">${l.owner || '-'}</td><td class="st-lib-w ov-dim">${ago(l.updated)} ago</td><td class="st-lib-go ov-go">${l.imported ? html`<button class="ov-link" onClick=${() => open(l.imported)}>open import</button>` : html`<button class="ov-link" onClick=${() => onOpen(l.id)}>view</button>`}${canWrite() && !l.imported ? html` <button class="ov-link" onClick=${() => onImport(l)}>import to Studio</button>` : null}</td></tr>`)}
       </tbody></table>` : null}
       ${legacy.length ? html`<div class="ov-dim st-foot">Legacy items open read-only. Importing copies one into a Studio project under this client, keeps the original untouched, and is idempotent.</div>` : null}
@@ -1253,8 +1269,9 @@
         <div class="st-an-card"><h3>Campaign</h3>
           ${c.id ? html`<div><b>${c.name}</b> <${Chip} kind=${c.confidence >= 0.7 ? 'ok' : 'warn'}>${Math.round(c.confidence * 100)}% match</${Chip}></div><div class="ov-dim">${c.why}</div>
             ${p.campaign === c.id ? html`<div><${Chip} kind="ok">the project's campaign</${Chip}></div>` : !ro ? html`<button class="btn sm" onClick=${() => onCampaign(c.id)}>Use ${c.name}</button>${p.campaign ? html` <span class="ov-dim">now: ${(camps.find(x => x.id === p.campaign) || {}).name || p.campaign}</span>` : null}` : null}`
+          : c.ambiguous && (c.candidates || []).length && (p.campaign || (p.brief || {}).campaignConfirmed) ? html`<div><b>${p.campaign ? ((camps.find(x => x.id === p.campaign) || {}).name || p.campaign) : 'Standalone'}</b> <${Chip} kind="ok">your decision</${Chip}> <span class="ov-dim">The reading could not tell; you decided.</span></div>`
           : c.ambiguous && (c.candidates || []).length ? html`<div class="st-camp-ask" role="group" aria-label="Which campaign"><b>Which campaign is this for?</b> <span class="ov-dim">The reading cannot tell; you decide.</span>
-              <ul class="st-ul">${c.candidates.map(x => html`<li key=${x.id}><b>${x.name}</b> <${Chip} kind="warn">${Math.round(x.confidence * 100)}%</${Chip}> <span class="ov-dim">${x.why}${(x.evidence || []).length ? ' (' + x.evidence.join(', ') + ')' : ''}</span> ${!ro && p.campaign !== x.id ? html`<button class="btn sm ghost" onClick=${() => onCampaign(x.id)}>Use ${x.name}</button>` : null}</li>`)}</ul></div>`
+              <ul class="st-ul">${c.candidates.map(x => html`<li key=${x.id}><b>${x.name}</b> <${Chip} kind="warn">${Math.round(x.confidence * 100)}%</${Chip}> <span class="ov-dim">${x.why}${(x.evidence || []).length ? ' (' + x.evidence.join(', ') + ')' : ''}</span> ${!ro && p.campaign !== x.id ? html`<button class="btn sm ghost" onClick=${() => onCampaign(x.id)}>Use ${x.name}</button>` : null}</li>`)}</ul>${!ro ? html`<button class="ov-link" onClick=${() => onCampaign('')}>Keep it standalone</button>` : null}</div>`
           : html`<div class="ov-dim">No campaign of ${camps.length} matched${c.why ? ': ' + c.why : '.'}</div>`}
         </div>
         <div class="st-an-card"><h3>Proposed brief</h3>
@@ -1331,7 +1348,7 @@
       ${!ro && !p.assets.length ? html`<div class="st-produce st-actionbar" aria-label="Write the copy">
         <div class="st-actionbar-text"><b>${chosen ? 'Write the copy from "' + chosen.title + '"' : 'When the brief is ready'}</b><span class="ov-dim">${chosen ? 'The chosen direction decides the idea; the brief decides channels and claims.' : 'A clear, approved brief can go straight to the copy; an open one is better explored as directions first.'} ${chans ? 'Channels: ' + chans + '.' : 'No channels set.'}</span></div>
         ${imagery !== 'none' && b.deliverable !== 'copy' ? html`<div class="st-seg st-timing" role="group" aria-label="When the imagery is made"><span class="ov-dim">Imagery</span><button class=${'st-segbtn' + (b.imageryTiming !== 'after_copy' ? ' on' : '')} aria-pressed=${b.imageryTiming !== 'after_copy'} title="The renders are queued as soon as the copy is written" onClick=${() => setB(Object.assign({}, b, { imageryTiming: 'with_copy' }))}>With the copy</button><button class=${'st-segbtn' + (b.imageryTiming === 'after_copy' ? ' on' : '')} aria-pressed=${b.imageryTiming === 'after_copy'} title="The copy and layouts are made first; the imagery is generated in Design once the words are ready (no render is spent on words that change)" onClick=${() => setB(Object.assign({}, b, { imageryTiming: 'after_copy' }))}>After the copy is ready</button></div>` : null}
-        <label class="ov-dim st-size">Imagery <select class="st-sel" value=${imagery} onChange=${e => { setImagery(e.target.value); setB(Object.assign({}, b, e.target.value === 'none' ? { imagery: 'none' } : { size: e.target.value, imagery: '' })); }} aria-label="Imagery resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option><option value="none">No imagery (type and colour)</option></select></label>
+        <label class="ov-dim st-size">Imagery <select class="st-sel" value=${imagery} onChange=${e => { setImagery(e.target.value); setB(Object.assign({}, b, e.target.value === 'none' ? { imagery: 'none' } : { size: e.target.value, imagery: '' })); }} aria-label="Imagery resolution"><option value="1K">1K draft</option><option value="2K">2K</option><option value="4K">4K final</option>${b.creationMode === 'finished' && imagery !== 'none' ? null : html`<option value="none">No imagery (type and colour)</option>`}</select></label>${b.creationMode === 'finished' && imagery === 'none' ? html` <span class="ov-dim" style="color:var(--x-warn)" role="status">A finished creative is painted as one image and needs imagery: choose a resolution, or Editable for type-only work.</span>` : null}
         ${blocking.length ? html`<label class="st-check"><input type="checkbox" checked=${ack} onChange=${e => setAck(e.target.checked)} /> Proceed on the stated assumptions despite ${blocking.length} mandatory gap${blocking.length === 1 ? '' : 's'}</label>` : null}
         <div class="st-actionbar-acts">
           <button class=${'btn sm' + (chosen ? '' : ' ghost')} disabled=${!!busy || noClaude || !(b.channels || []).length || (blocking.length && !ack)} title=${noClaude ? 'Claude is not configured on the worker' : !(b.channels || []).length ? 'Choose channels first' : blocking.length && !ack ? 'Resolve the mandatory gaps, or tick to proceed on the assumptions' : ''} onClick=${() => go(() => onProduce(produceArgs()))}>Write the copy</button>
@@ -1543,14 +1560,20 @@
   function CopyStage({ p, a, head, activity, banner, prov, busy, onSel, onEdit, onReady, onDirect, onPick, onWrite, onGo, onDraftState }) {
     const ro = !canWrite() || p.readOnly; const noClaude = prov && prov.claude === false;
     const sel = (a && p.assets.indexOf(a) >= 0 ? a : null) || p.assets[0] || null;
-    const [draft, setDraft] = useState({}); const [ask, setAsk] = useState(''); const [asking, setAsking] = useState(false); const [askFail, setAskFail] = useState(''); const [adaptTo, setAdaptTo] = useState('');
+    /* S29 (QA-1, PM3): the words typed here stay in the field until a saved version holds them - a failed or slow save never
+       puts the old words back - and they are kept in this browser, so a reload brings them back to be saved */
+    const draftKey = 'ax_studio_copydraft_' + p.id;
+    const [draft, setDraft0] = useState(() => { try { return JSON.parse(localStorage.getItem(draftKey) || '{}') || {}; } catch (e) { return {}; } });
+    const setDraft = upd => setDraft0(o => { const y = typeof upd === 'function' ? upd(o) : upd; try { if (Object.keys(y).length) localStorage.setItem(draftKey, JSON.stringify(y)); else localStorage.removeItem(draftKey); } catch (e) {} return y; });
+    useEffect(() => { const byId = {}; p.assets.forEach(x => { byId[x.id] = x; }); setDraft(o => { const y = {}; let changed = false; Object.keys(o).forEach(k => { const i = k.lastIndexOf(':'); const x = byId[k.slice(0, i)]; if (!x) { changed = true; return; } if (((current(x) || {}).copy || {})[k.slice(i + 1)] === o[k]) { changed = true; return; } y[k] = o[k]; }); return changed ? y : o; }); }, [p.assets]);
+    const [ask, setAsk] = useState(''); const [asking, setAsking] = useState(false); const [askFail, setAskFail] = useState(''); const [adaptTo, setAdaptTo] = useState('');
     const key = (x, k) => x.id + ':' + k;
     const vOf = x => current(x) || {};
     const val = (x, k) => draft[key(x, k)] != null ? draft[key(x, k)] : (vOf(x).copy || {})[k] || '';
     const dirtyOf = x => COPY_FIELDS.some(([k]) => draft[key(x, k)] != null && draft[key(x, k)] !== ((vOf(x).copy || {})[k] || ''));
     useEffect(() => { if (onDraftState) onDraftState('copystage', Object.keys(draft).length > 0); }, [Object.keys(draft).length]);
     useEffect(() => () => { if (onDraftState) onDraftState('copystage', false); }, []);
-    const save = (x, k) => { const d = draft[key(x, k)]; if (d == null) return; if (d !== ((vOf(x).copy || {})[k] || '')) onEdit(x, { [k]: d }); setDraft(o => { const y = Object.assign({}, o); delete y[key(x, k)]; return y; }); };
+    const save = (x, k) => { const d = draft[key(x, k)]; if (d == null) return; if (d !== ((vOf(x).copy || {})[k] || '')) onEdit(x, { [k]: d }); else setDraft(o => { const y = Object.assign({}, o); delete y[key(x, k)]; return y; }); };
     const byChannel = useMemo(() => { const m = {}; p.assets.forEach(x => { (m[x.channel] = m[x.channel] || []).push(x); }); return m; }, [p.assets]);
     const flagsOf = x => (vOf(x).checks || []).filter(c => COPY_BAD[c.state]);
     const ready = x => !!standing(x, 'copy');
@@ -1607,7 +1630,7 @@
       ${!p.directions.length ? html`<div class="ov-empty">No directions yet.</div>` : null}
       <div class="st-dirs">${p.directions.map((d, i) => html`<div key=${d.id} class=${'st-dir' + (d.chosen ? ' chosen' : '')} style=${{ '--i': i }}>
         <div class=${'st-dir-art m-' + String(d.medium || 'type').replace(/[^a-z-]/gi, '').toLowerCase()} aria-hidden="true"><span class="st-dir-art-k">${(d.medium || 'Direction ' + String.fromCharCode(65 + i)).replace('photo-', '')}</span><span class="st-dir-art-h">${d.headline || d.title}</span><span class="st-dir-art-f">${String.fromCharCode(65 + i)}</span></div>
-        <div class="st-dir-title">${String.fromCharCode(65 + i)}) ${d.title}${d.chosen ? html`<${Chip} kind="ok">chosen</${Chip}>` : d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to ${d.similar}</${Chip}>` : null}</div>
+        <div class="st-dir-title">${String.fromCharCode(65 + i)}) ${d.title}${d.chosen ? html`<${Chip} kind="ok">chosen</${Chip}>` : d.similar ? html`<${Chip} kind="warn" title=${'reads close to ' + d.similar}>close to ${d.similar}</${Chip}>` : d.lookalike ? html`<${Chip} kind="warn" title=${'would look like ' + d.lookalike + ' on the page'}>looks like ${d.lookalike}</${Chip}>` : null}</div>
         <div class="st-dir-h">${d.headline}</div>
         <div class="st-dir-line"><b>Message</b> ${d.message}</div>
         <div class="st-dir-line"><b>Insight</b> ${d.insight}</div>
@@ -2087,7 +2110,7 @@
   function CompareView({ a, ns, vA, vB, onClose, onRestore }) {
     const rows = ['headline', 'support', 'cta', 'caption', 'alt'];
     return html`<div class="st-centre-pad"><div class="ov-sechead"><span class="ov-title">Compare</span><span class="ov-why">${a.title}: v${vnum(a, vA)} against v${vnum(a, vB)}</span><button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${onClose}>Back</button></div>
-      <div class="st-cmp">${[vA, vB].map(v => html`<div key=${v.id}><div class="ov-dim">v${vnum(a, v)}, ${v.note}, ${aest(v.created)}, ${v.who}</div><${Composition} v=${v} a=${a} ns=${ns} />${canWrite() && v.id !== a.current ? html`<button class="btn sm ghost" onClick=${() => onRestore(v.id)}>Restore this as a new version</button>` : v.id === a.current ? html`<${Chip} kind="ok">current</${Chip}>` : null}</div>`)}</div>
+      <div class="st-vcmp">${[vA, vB].map(v => html`<div key=${v.id}><div class="ov-dim">v${vnum(a, v)}, ${v.note}, ${aest(v.created)}, ${v.who}</div><${Composition} v=${v} a=${a} ns=${ns} />${canWrite() && v.id !== a.current ? html`<button class="btn sm ghost" onClick=${() => onRestore(v.id)}>Restore this as a new version</button>` : v.id === a.current ? html`<${Chip} kind="ok">current</${Chip}>` : null}</div>`)}</div>
       <table class="ov-table"><thead><tr><th>Field</th><th>Left</th><th>Right</th></tr></thead><tbody>${rows.map(k => html`<tr key=${k} class=${(vA.copy || {})[k] !== (vB.copy || {})[k] ? 'hot' : ''}><td class="ov-dim">${k}</td><td>${(vA.copy || {})[k]}</td><td>${(vB.copy || {})[k]}</td></tr>`)}<tr class=${((vA.image || {}).key) !== ((vB.image || {}).key) ? 'hot' : ''}><td class="ov-dim">image</td><td>${vA.image ? vA.image.key.split('/').pop() : '-'}</td><td>${vB.image ? vB.image.key.split('/').pop() : '-'}</td></tr><tr class=${JSON.stringify(vA.layout) !== JSON.stringify(vB.layout) ? 'hot' : ''}><td class="ov-dim">layout</td><td>${vA.layout && vA.layout.template ? vA.layout.templateName : '-'}</td><td>${vB.layout && vB.layout.template ? vB.layout.templateName : '-'}</td></tr></tbody></table>
     </div>`;
   }
@@ -2664,14 +2687,15 @@
       // version) leaves nothing recorded, so Measure again sends it again instead of doing nothing
       if (!ro && onValidate && (force || ((rd.technical !== 'passed' && rd.technical !== 'failed') || disagrees)) && (force || filed.current !== sigKey)) { setMeasuring(true); try { const sent = await onValidate(a, v, r, comp); if (sent) filed.current = sigKey; } finally { setMeasuring(false); } }
     }, [v && v.id, comp.key, comp.ready, a.readiness && a.readiness.technical]);
-    useEffect(() => { const f = forceNext.current; forceNext.current = false; measure(f); }, [measure]);
+    // S29 (PM5): Measure again is spent only once the reloaded images and fonts are ready, so the press always files
+    useEffect(() => { if (!comp.ready) return; const f = forceNext.current; forceNext.current = false; measure(f); }, [measure]);
     /* S24: Fix layout is measured, not believed. It runs only on a composition whose images and fonts have loaded (the measure
        it starts from is the real one), and a fix that was saved says "Checking the fix" until the saved version itself has been
        measured again with its own images and fonts: only that measurement may say Fixed. What the repair function claimed is
        never the outcome. */
     const repair = async () => {
       if (!comp.ready) { setRepairNote({ state: 'waiting', text: 'The images and fonts of this composition are still loading; Fix layout measures the real thing, so it waits. Nothing was changed.', conflict: true }); return; }
-      setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r && r.undo && (r.state === 'complete' || r.state === 'partial') ? Object.assign({}, r, { claimed: r.state, state: 'verifying', verify: { from: v.id }, did: r.text, text: 'Saved as a new version (no render); measuring it again with its images and fonts loaded before calling it fixed. ' + r.text }) : r); } finally { setRepairing(false); }
+      setRepairing(true); try { const r = await onRepair(a, v, comp); setRepairNote(r && r.undo && (r.state === 'complete' || r.state === 'partial') ? Object.assign({}, r, { claimed: r.state, state: 'verifying', verify: { from: v.id }, did: r.text, text: 'Saved as a new version (no render); measuring it again with its images and fonts loaded before calling it fixed. ' + r.text }) : (r && !r.undo && repairNote && repairNote.undo && (r.state === 'nothing' || r.state === 'blocked')) ? Object.assign({}, r, { undo: repairNote.undo }) : r); } finally { setRepairing(false); }   // S29: a press that changed nothing keeps the Undo of the fix before it
     };
     useEffect(() => {
       const n = repairNote; if (!n || n.state !== 'verifying' || !n.verify || !v || v.id === n.verify.from) return;
@@ -2769,7 +2793,7 @@
        one on the canvas in green; a click opens that piece on the same canvas), then the output width in pixels and the zoom the
        artwork is shown at, measured from the artboard on screen - never a guess */
     const famFormats = !copyOnly ? p.assets.filter(x => x.family === a.family && (current(x) || {}).mode !== 'copy') : [];
-    const fmtIcon = r => r < 0.7 ? 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z' : r < 0.92 ? 'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' : r < 1.1 ? 'M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z' : 'M3 7h18a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z';
+    const fmtIcon = r => r < 0.7 ? 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z' : r < 0.92 ? 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' : r < 1.1 ? 'M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z' : 'M3 7h18a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z';
     const ratioOfAsset = x => { const cv = current(x) || {}; const st0 = (cv.layout || {}).stage; return (st0 && st0.w / st0.h) || FORMAT_RATIO[x.format] || 1; };
     const fmtEl = famFormats.length && !preview ? html`<div class="st-fmts" role="group" aria-label=${'Formats of ' + (a.family || 'this piece')}>${famFormats.slice(0, 6).map(x => html`<button key=${x.id} class="st-fmt" aria-pressed=${x.id === a.id ? 'true' : 'false'} title=${x.title + (x.format ? ' (' + x.format + ')' : '') + (x.id === a.id ? ': on the canvas' : ': open on the canvas')} onClick=${() => { if (x.id !== a.id) onOpen(x.id); }}><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d=${fmtIcon(ratioOfAsset(x))} fill="none" stroke="currentColor" stroke-width="1.7"/></svg><span class="st-vh">${x.format || x.title}</span></button>`)}</div>` : null;
     const [shownPct, setShownPct] = useState(null);
@@ -3847,6 +3871,7 @@
     const [intake, setIntake] = useState(false);
     const [view, setView0] = useState('brief');
     const [selAsset, setSelAsset] = useState(null); const [selField, setSelField] = useState(null);
+    const selAssetRef = useRef(null); selAssetRef.current = selAsset;   // S29 (QA-7): a history entry remembers the piece on screen
     const [target, setTarget] = useState('asset');
     const [busy, setBusy] = useState('');
     // S23: the step connection to the worker dropped and is being re-read (shown as "reconnecting"), and the opt-in desktop notices
@@ -3897,7 +3922,9 @@
     useEffect(() => { if (!liveIds && !recentDone) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [liveIds, recentDone]);
     useEffect(() => {
       if (!liveIds) return; let on = true;
-      const poll = async () => { for (const id of liveIds.split(',')) { if (!on) return; try { const r = await call('/studio/job?id=' + encodeURIComponent(id)); if (on && r && r.job) setP(prev => prev && prev.id === r.job.project ? Object.assign({}, prev, { jobs: (prev.jobs || []).map(j => j.id === r.job.id ? (window.STProgress.fresher(j, r.job) === j ? j : Object.assign({}, j, r.job)) : j) }) : prev); } catch (e) {} } };
+      const poll = async () => { for (const id of liveIds.split(',')) { if (!on) return; try { const r = await call('/studio/job?id=' + encodeURIComponent(id)); if (on && r && r.job) setP(prev => prev && prev.id === r.job.project ? Object.assign({}, prev, { jobs: (prev.jobs || []).map(j => j.id === r.job.id ? (window.STProgress.fresher(j, r.job) === j ? j : Object.assign({}, j, r.job)) : j) }) : prev);
+        // S29 (FS4): a job another runner finished (the tick, another tab) brings its result in: the project is read again
+        if (on && r && r.job && r.job.state !== 'queued' && r.job.state !== 'running' && !stepping.current.has(id)) { reload(); return; } } catch (e) {} } };
       const t = setInterval(poll, 2500); return () => { on = false; clearInterval(t); };
     }, [liveIds]);
     const pRef = useRef(null); const pSeen = useRef(null); if (pSeen.current !== p) { pSeen.current = p; pRef.current = p; }
@@ -3913,7 +3940,7 @@
     /* browser history: a deliberate move (a step, a project opened or closed) is an entry, so the browser's Back returns to
        the previous step or project inside AXIOM; a move made by Back itself is not pushed again (histRestoring) */
     const histRestoring = useRef(false);
-    const pushHist = useCallback((pidV, viewV) => { if (histRestoring.current) return; try { const cur = history.state && history.state.studio; if (cur && cur.pid === (pidV || null) && cur.view === (viewV || null)) return; history.pushState({ ax: 1, v: 'studio', studio: { pid: pidV || null, view: viewV || null } }, '', location.pathname + location.search + '#v=studio'); } catch (e) {} }, []);
+    const pushHist = useCallback((pidV, viewV) => { if (histRestoring.current) return; try { const cur = history.state && history.state.studio; if (cur && cur.pid === (pidV || null) && cur.view === (viewV || null)) return; history.pushState({ ax: 1, v: 'studio', studio: { pid: pidV || null, view: viewV || null, asset: (pidV && selAssetRef.current) || null } }, '', location.pathname + location.search + '#v=studio'); } catch (e) {} }, []);
     const setView = useCallback((v, focus) => { viewRef.current = v; setView0(v); setCmp(null); if (focus) { focusNext.current = true; pushHist(pidRef.current, v); } }, []);
     /* S17: finished work is announced where the person is, with a button to go and see it - the Studio never moves them by itself */
     const ready = (stageId, title, text, label) => { if (stageOfView(viewRef.current) === stageId) { toastMsg(title); return; } setNotice({ kind: 'success', title, text: text || '', actions: [{ label: label || 'Go to ' + ((STAGES.find(x => x.id === stageId) || {}).label || stageId), fn: () => goStageRef.current(stageId) }] }); };
@@ -3949,14 +3976,14 @@
       const key = suggKey; call('/studio/suggest?asset=' + encodeURIComponent(key.split('|')[0])).then(d => { if (suggSig.current === key && d && d.ok && d.cached) setSugg({ loading: false, data: d, err: '' }); }).catch(() => {});
     }, [suggKey]);
 
-    const refreshStatus = useCallback(() => call('/studio/status').then(s => { if (s && s.budget && s.budget.policy) POLICY = s.budget.policy; if (s && s.build) window.__stBuild = s.build; setStatus(s); return s; }).catch(() => null), []);
+    const refreshStatus = useCallback(() => call('/studio/status').then(s => { if (s && s.budget && s.budget.policy) POLICY = s.budget.policy; if (s && s.build) window.__stBuild = s.build; if (s && (s.role === 'read' || s.role === 'full')) window.AX_ROLE = s.role; setStatus(s); return s; }).catch(() => null), []);
     /* the library of one client; a slower answer for a client no longer chosen is dropped, never shown */
     const loadLib = useCallback(async () => {
       const seq = ++libSeq.current; const ns = clientId; setLib(null); setLibErr(''); setKit(null);
       try {
         const [l, s, k] = await Promise.all([getRead('/studio/list?ns=' + encodeURIComponent(ns)), call('/studio/status').catch(() => null), call('/brand/kit?ns=' + encodeURIComponent(ns)).catch(() => null)]);
         if (seq !== libSeq.current || clientRef.current !== ns) return;
-        setLib(Object.assign({}, l, { status: s })); if (s) { if (s.budget && s.budget.policy) POLICY = s.budget.policy; if (s.build) window.__stBuild = s.build; setStatus(s); } setKit(k && k.kit ? k.kit : {});
+        setLib(Object.assign({}, l, { status: s })); if (s) { if (s.budget && s.budget.policy) POLICY = s.budget.policy; if (s.build) window.__stBuild = s.build; if (s.role === 'read' || s.role === 'full') window.AX_ROLE = s.role; setStatus(s); } setKit(k && k.kit ? k.kit : {});
         // reopen the project this browser had open for this client, where it was left (unless another desk sent work in)
         if (!resumed.current) { resumed.current = true; const pl = store.place(ns); if (pl && pl.open && !intakeRef.current && (l.projects || []).some(x => x.id === pl.pid)) { const d = await openProject(pl.pid, pl); if (d) setNotice({ kind: 'info', title: 'Resumed where you left off.', text: d.title + ': ' + ((STAGES.find(x => x.views.indexOf(pl.view) >= 0) || {}).label || 'Brief') + (pl.asset && d.assets.some(x => x.id === pl.asset) ? ', ' + d.assets.find(x => x.id === pl.asset).title : '') + '.', actions: [{ label: 'All projects', fn: () => closeProject() }] }); } }
       } catch (e) { if (seq === libSeq.current) setLibErr(e.code || e.message); }
@@ -4067,6 +4094,7 @@
     }, []);
     /* anything queued (renders the copy stage enqueued) is run in turn while the tab is open */
     const pump = useCallback(async (d) => {
+      if (!canWrite()) return;
       let cur = d || pRef.current; const seen = new Set();
       for (let round = 0; round < 10 && cur; round++) {
         const st = {}; (cur.jobs || []).forEach(j => { st[j.id] = j.state; });
@@ -4078,13 +4106,14 @@
     }, [runJob, reload, composeExport]);
     const openProject = async (id, place) => {
       setPid(id); pidRef.current = id; setCmp(null); setIntake(false); setP(null); setNotice(null); setConflict(null); setExportState(null); setTab('properties');
-      const d = await reload(id); if (!d) { setPid(null); pidRef.current = null; setNotice(n => n && n.actions ? Object.assign({}, n, { actions: [{ label: 'Try again', fn: () => openProject(id, place) }] }) : n); return null; }
+      const d = await reload(id); if (pidRef.current !== id) return null;   // S29 (PM9): left for the library while it opened
+      if (!d) { setPid(null); pidRef.current = null; setNotice(n => n && n.actions ? Object.assign({}, n, { actions: [{ label: 'Try again', fn: () => openProject(id, place) }] }) : n); return null; }
       const asset = place && place.asset && d.assets.some(x => x.id === place.asset) ? place.asset : d.assets[0] ? d.assets[0].id : null;
       setSelAsset(asset); setSelField(null);
       const want = place && place.view && stageOfView(place.view) && (place.view !== 'asset' || asset) ? place.view : d.assets.length ? 'asset' : d.directions.length ? 'directions' : 'brief';
       setView(want, true);
       refreshStatus();
-      if (!d.readOnly) pump(d);
+      if (!d.readOnly && canWrite()) pump(d);   // S29 (QA-2): a read-only key steps nothing
       return d;
     };
     const closeProject = () => { pushHist(null, null); const pl = store.place(clientRef.current); if (pl) store.setPlace(clientRef.current, Object.assign({}, pl, { open: false })); setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setSugg(null); loadLib(); };
@@ -4096,7 +4125,7 @@
         try {
           if (!d || !d.pid) { if (pidRef.current) histFns.current.closeProject(); done(); }
           else if (d.pid !== pidRef.current) Promise.resolve(histFns.current.openProject(d.pid, { view: d.view, open: true })).finally(done);
-          else { if (d.view) { setView0(d.view); setCmp(null); } done(); }
+          else { if (d.view) { setView0(d.view); setCmp(null); } if (d.asset && d.asset !== selAssetRef.current) setSelAsset(d.asset); done(); }
         } catch (err) { done(); }
       };
       window.addEventListener('ax:studio-history', h); return () => window.removeEventListener('ax:studio-history', h);
@@ -4104,8 +4133,20 @@
     /* switching client leaves nothing of the other client on screen: project, kit, suggestions, notices, export, dialogs */
     const switchClient = id => { if (id === clientId) return; resumed.current = true; setPid(null); pidRef.current = null; setP(null); setCmp(null); setNotice(null); setConflict(null); setExportState(null); setDialog(null); setPanel(null); setPreset(null); setIntake(false); setSelAsset(null); setSelField(null); setSugg(null); setKit(null); setLib(null); setTab('properties'); setClientId(id); };
 
+    /* S29 (FS3): a job request whose answer was lost may already exist on the worker. The same request is sent again with the
+       same key (the worker answers the job it already has), and a person's Retry of the same action within ten minutes reuses
+       that key too, so a dropped connection never becomes a second paid job. */
+    const lostJobs = useRef(new Map());
     const job = async (stage, input, asset, idem, label) => {
-      const r = await call('/studio/job', { project: pidRef.current, asset: asset || undefined, stage, input, idem });
+      const sig = stage + '|' + (asset || '') + '|' + pidRef.current + '|' + JSON.stringify(input || {}).slice(0, 4000);
+      const was = lostJobs.current.get(sig); if (was && Date.now() - was.at < 600000) idem = was.idem;
+      let r = null, last = null;
+      for (let t = 0; t < 3 && !r; t++) {
+        try { r = await call('/studio/job', { project: pidRef.current, asset: asset || undefined, stage, input, idem }); }
+        catch (e) { last = e; if (e && e.status) throw e; lostJobs.current.set(sig, { idem, at: Date.now() }); await sleep(800 * (t + 1)); }
+      }
+      if (!r) throw last;
+      lostJobs.current.delete(sig);
       // the job is on the page from the moment it exists: the processing cards and the activity panel show it queued, and the
       // poll (every 2.5 s while anything is live) shows it running with its phase while the step is still out
       if (r && r.job) setP(prev => prev && prev.id === r.job.project && !(prev.jobs || []).some(j => j.id === r.job.id) ? Object.assign({}, prev, { jobs: (prev.jobs || []).concat([r.job]) }) : prev);
@@ -4143,7 +4184,7 @@
         else if (o.clear) await produce({ instruction: o.start === 'release' ? o.instruction : o.text }); else await direct();
       } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); }
     });
-    const setCampaign = async (cid) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { campaign: cid || '', brief: { campaignConfirmed: true } } }); await reload(); } catch (e) { if (e.status === 409) { await reload(); fail(e); } else fail(e, 'The campaign was not set'); } };
+    const setCampaign = async (cid) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { campaign: cid || '', brief: cid ? { campaignConfirmed: true } : { campaignConfirmed: true, campaignMode: 'standalone' } } }); await reload();   /* S29 (PR3): standalone is recorded as the decision it is */ } catch (e) { if (e.status === 409) { await reload(); fail(e); } else fail(e, 'The campaign was not set'); } };
     /* the brief is saved on the latest revision; if a newer one arrived first, the team's changed fields are laid over it and
        saved again when nobody else changed the same field, and handed back as a clash when someone did - never overwritten */
     const saveBrief = async (b, base, force) => {
@@ -4249,8 +4290,10 @@
         if (m.fails.length) setNotice({ kind: 'warn', title: 'Some material was not added', text: m.fails.join('; ') });
         setStarting(x => x && Object.assign({}, x, { at: 2 }));
         await reload(pr.id);
-        if (!(o.analyse && m.ids.length)) setStarting(null);
-        if (o.analyse && m.ids.length) await job('analyse', { sources: m.ids, kind: m.ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + m.ids.join(','), 'Reading the brief against ' + ((CLIENTS.find(c => c.id === o.ns) || {}).name || o.ns));
+        // S29 (QA-4): part of the material could not be read: ask before the paid reading runs on the rest
+        const goOn = !(o.analyse && m.ids.length && m.fails.length) || await askStudio({ title: 'Analyse without ' + m.fails.length + ' piece' + (m.fails.length === 1 ? '' : 's') + '?', text: m.fails.join('; ') + '. The reading would run on the ' + m.ids.length + ' piece' + (m.ids.length === 1 ? '' : 's') + ' that were added. Cancel to fix the material first; the project stays at the Brief.', ok: 'Analyse without ' + (m.fails.length === 1 ? 'it' : 'them'), cancel: 'Fix the material first', cost: 'one model call', paid: true });
+        if (!(o.analyse && m.ids.length && goOn)) setStarting(null);
+        if (o.analyse && m.ids.length && goOn) await job('analyse', { sources: m.ids, kind: m.ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + m.ids.join(','), 'Reading the brief against ' + ((CLIENTS.find(c => c.id === o.ns) || {}).name || o.ns));
         await reload(pr.id);
       } catch (e) { fail(e, 'The project was not created'); } finally { setBusy(''); setStarting(null); }
     });
@@ -4264,6 +4307,8 @@
         if (m.fails.length) setNotice({ kind: 'warn', title: 'Some material was not added', text: m.fails.join('; ') });
         const ids = m.ids.concat(o.sources || []); await reload(); setBusy('');
         if (!ids.length) { setNotice({ kind: 'warn', title: 'Nothing to analyse', text: 'Write, paste, link or upload the brief first.' }); return false; }
+        // S29 (QA-4): a link or file that could not be read is never left out silently from a paid reading
+        if (m.fails.length && !(await askStudio({ title: 'Analyse without ' + m.fails.length + ' piece' + (m.fails.length === 1 ? '' : 's') + '?', text: m.fails.join('; ') + '. The reading would run on the ' + ids.length + ' source' + (ids.length === 1 ? '' : 's') + ' that are on the project. Cancel to fix the material first: what was added stays on the project.', ok: 'Analyse without ' + (m.fails.length === 1 ? 'it' : 'them'), cancel: 'Fix the material first', cost: 'one model call', paid: true }))) return false;
         await job('analyse', { sources: ids, kind: ids.length > 1 ? 'mixed' : (o.kind || 'brief') }, null, 'analyse:' + ids.join(',') + ':' + Date.now(), 'Reading the brief against ' + ((client && client.name) || 'the client'));
         await reload(); return true;
       } catch (e) { fail(e, 'The analysis did not run', () => analyseGuided(o)); return false; } finally { setBusy(''); }
@@ -4337,7 +4382,9 @@
           Object.keys(patch).forEach(k => { if ((curCopy[k] || '') !== patch[k]) changed[k] = patch[k]; });
           if (!Object.keys(changed).length) continue;
           const note = 'hand edit: ' + Object.keys(changed).join(', ');
-          try { await call('/studio/version', { asset: id, revision: as.revision, copy: changed, note }); Object.keys(changed).forEach(k => { q.known[k] = changed[k]; }); }
+          // S29 (FS8): one copy edit is one operation; a save that committed but whose answer was lost is never written twice
+          const op = 'c' + (MERGE ? MERGE.sig(JSON.stringify({ b: as.current, c: changed })).split(':')[0] : String(Date.now()));
+          try { await call('/studio/version', { asset: id, revision: as.revision, copy: changed, note, op }); Object.keys(changed).forEach(k => { q.known[k] = changed[k]; }); }
           catch (e) {
             if (e.status === 409 && e.code === 'conflict') {
               const d = await reload(); as = d && d.assets.find(x => x.id === id); if (!as) throw e;
@@ -4352,7 +4399,7 @@
         setSaveSt(s => Object.assign({}, s, { err: null, at: Date.now() }));
       } catch (e) {
         q.failed = true; setSaveSt(s => Object.assign({}, s, { err: { asset: id, message: explain(e).title } }));
-        fail(e, 'Your edit was not saved', () => flushCopy(id));
+        fail(e, 'Your edit was not saved (your words are still in the field)', () => flushCopy(id));
       } finally { q.running = false; bump(-1); if (Object.keys(q.patch).length && !q.failed) setTimeout(() => flushCopy(id), 0); }
     };
     const editAsset = (as, patch) => {
@@ -4371,19 +4418,24 @@
     const onDraftState = useCallback((id, on) => { if (on) typingSet.current.add(id); else typingSet.current.delete(id); setTyping(typingSet.current.size); }, []);
     // an open layout editor with unsaved changes: named in the header, and leaving the page asks first
     const [layoutDirty, setLayoutDirty] = useState(false); const layoutDirtyRef = useRef(false); layoutDirtyRef.current = layoutDirty;
-    useEffect(() => { const h = e => { /* S19: canvas edits survive a reload (the working store and the recovery draft); only a write in flight or a failed save needs a question */ if (typingSet.current.size || saveSt.pending || layoutDirtyRef.current === 'saving' || layoutDirtyRef.current === 'failed') { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending]);
+    useEffect(() => { const h = e => { /* S19: canvas edits survive a reload (the working store and the recovery draft); only a write in flight or a failed save needs a question */ if (typingSet.current.size || saveSt.pending || saveSt.err || layoutDirtyRef.current === 'saving' || layoutDirtyRef.current === 'failed') { e.preventDefault(); e.returnValue = ''; } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h); }, [saveSt.pending, saveSt.err]);   // S29 (PM3): a copy save that failed asks too
 
     const propose = (as, feedback, refine, opts) => guard('concepts:' + as.id, async () => { opts = opts || {}; try { await job('concepts', { asset: as.id, feedback, refine: refine || undefined, mode: opts.mode || 'explore', refs: opts.refs || undefined, refMode: opts.refMode || undefined, keep: opts.keep || undefined, size: opts.size || undefined }, as.id, 'concepts:' + as.id + ':' + Date.now(), (opts.mode === 'new' ? 'The Creative Director designs afresh from the brief for ' : opts.mode === 'refine' ? 'The Creative Director refines ' : 'The Creative Director explores variations of ') + as.title); await reload(); } catch (e) { fail(e, 'The Creative Director did not start', () => propose(as, feedback, refine, opts)); } });
     const applyInspection = (eid, instruction, force) => guard('inspection:' + eid, async () => { try { const r = await call('/studio/inspection/apply', { project: pRef.current.id, eid, instruction, force: force || undefined }); const d = await reload(); if (r.job) { await runJob(r.job, 'Applying the Creative Director\'s correction (' + r.kind + ')'); pump(await reload()); } else pump(d); } catch (e) { fail(e, 'The correction was not applied'); } });
     const applyConcept = (eid, index, render, imageFrom, size) => guard('apply:' + eid + ':' + index, async () => { try { const r = await call('/studio/concept/apply', { project: pRef.current.id, eid, index, render, imageFrom: imageFrom == null ? undefined : imageFrom, size: render ? size : undefined }); const d = await reload(); if (r.asset && r.fresh) setNotice({ kind: 'success', title: 'New design made', text: 'It is a new asset in the family "New designs".', actions: [{ label: 'Open it', fn: () => setSelAsset(r.asset) }] }); else if (r.asset) setSelAsset(r.asset); if (r.job) pump(d); } catch (e) { fail(e, 'The concept was not applied'); } });
     /* a measurement of one version at its output size, with the composed PNG: the worker re-judges it with the shared rules */
-    const fileValidation = async (as, v, val, comp) => {
+    const fileValidation = async (as, v, val, comp) => { if (!canWrite()) return false;   // S29 (FS1): a read-only key measures for itself and files nothing
       try {
         const blob = await R.toBlob(v.layout, v.copy, comp.imgs); const u8 = new Uint8Array(await blob.arrayBuffer());
         let bin = ''; for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
         await call('/studio/validation', { asset: as.id, version: v.id, report: R.report(v, val), imageB64: btoa(bin), mime: 'image/png' });
         await reload(); return true;
-      } catch (e) { if (!/report_mismatch|not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message + (e.requestId ? ' (request ' + e.requestId + ')' : '') + '. Measure again to retry.', true); return false; }
+      } catch (e) {
+        // S29 (FS5): a measurement the worker refused as not matching this version is said, with the way out; a version that has
+        // simply moved on (not_current, stale) is measured again on its own and stays quiet; a read-only key files nothing
+        if (e.status === 403) return false;
+        if (/report_mismatch/.test(e.code || '')) { setNotice({ kind: 'warn', title: 'The measurement was not filed', text: (e.detail || e.message || '') + ' This usually means this page is older than the worker: reload the page, then press Measure again.', actions: [{ label: 'Reload the page', fn: () => location.reload() }] }); return false; }
+        if (!/not_current|stale/.test(e.code || '')) toastMsg('Validation not filed: ' + e.message + (e.requestId ? ' (request ' + e.requestId + ')' : '') + '. Measure again to retry.', true); return false; }
     };
     /* S19: one canvas edit - the layout and the words typed on the canvas - is saved as one version. When the asset moved on since
        the edit began, the edit is merged three ways against the version it was made on (STMerge): independent changes combine,
@@ -4513,10 +4565,10 @@
     };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
-    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)) }); };
+    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)), versionId: (current(as) || {}).id }); };   // S29 (FS2): the decision names the version the dialog showed
     /* Copy: "ready for design" is the agency's copy approval of this exact version, recorded with a short reason (under the length
        that proposes a brand item); unticking withdraws it. Design: the imagery each composition plans, queued on request. */
-    const readyCopy = (as, on) => guard('ready:' + as.id, async () => { try { await call('/studio/approve', on ? { asset: as.id, part: 'copy', decision: 'approve', reason: 'copy ready' } : { asset: as.id, part: 'copy', decision: 'withdraw' }); await reload(); } catch (e) { if (e.status === 409) await reload(); fail(e, on ? 'The copy was not marked ready' : 'The mark was not withdrawn'); } });
+    const readyCopy = (as, on) => guard('ready:' + as.id, async () => { try { await call('/studio/approve', on ? { asset: as.id, part: 'copy', decision: 'approve', reason: 'copy ready', version: (current(as) || {}).id || undefined } : { asset: as.id, part: 'copy', decision: 'withdraw' }); await reload(); } catch (e) { if (e.status === 409) await reload(); fail(e, on ? 'The copy was not marked ready' : 'The mark was not withdrawn'); } });
     const generateImagery = (list) => guard('imagery:' + pidRef.current, async () => {
       const b0 = (pRef.current || {}).brief || {}; const size = b0.size || '2K';
       if (!list.length) return;
@@ -4528,10 +4580,10 @@
     });
     const recordDecision = async (why) => {
       const d = dialog; setDialog(null); if (!why) return;
-      try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why }); await reload(); }
+      try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, version: d.versionId || undefined }); await reload(); }
       catch (e) {
         // painted words nobody could verify, or an inconsistent inspection: a person may still approve, having looked
-        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && (await askStudio({ title: 'Approve anyway?', text: (e.detail || e.message) + '\n\nApprove only if you have checked the tile yourself; the decision is recorded as yours.', ok: 'Approve anyway' }))) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
+        if (e.status === 409 && /baked_text_unverified|inspection_inconsistent/.test(e.code || e.message) && (await askStudio({ title: 'Approve anyway?', text: (e.detail || e.message) + '\n\nApprove only if you have checked the tile yourself; the decision is recorded as yours.', ok: 'Approve anyway' }))) { try { await call('/studio/approve', { asset: d.asset, part: d.part, decision: d.what, reason: why, acknowledgeInspection: true, version: d.versionId || undefined }); await reload(); } catch (e2) { fail(e2, 'The decision was not recorded'); } }
         else fail(e, 'The decision was not recorded');
       }
     };
@@ -4575,7 +4627,10 @@
     const decideProposal = async (eid, decision) => { try { const r = await call('/studio/proposal', { project: pRef.current.id, eid, decision }); const d = await reload(); if (decision === 'do' && r.jobs && r.jobs.length) pump(d); } catch (e) { fail(e, 'The decision was not recorded'); } };
     const remember = async (eid, scope, offer) => { try { const ta = document.getElementById('offer-' + eid); const rule = ta ? ta.value.trim() : offer.rule; const r = await call('/studio/remember', { project: pRef.current.id, eid, scope, rule, task: offer.task, campaign: offer.campaign, instruction: offer.instruction }); toastMsg(r.saved ? 'Saved as ' + (r.scope === 'campaign' ? 'a campaign preference for ' + r.campaign : 'a lasting ' + pRef.current.ns.toUpperCase() + ' rule') : 'Not saved; applied to this work only'); await reload(); } catch (e) { fail(e, 'The preference was not recorded'); } };
     /* a retry is a new job named after the one that failed and how many retries it has had: pressing Retry twice runs it once */
-    const retryJob = (j) => guard('retry:' + j.id, async () => { try { const n = ((pRef.current || {}).jobs || []).filter(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && (x.state === 'failed' || x.state === 'cancelled')).length; const r = await call('/studio/job', { project: j.project || pidRef.current, asset: j.asset || undefined, stage: j.stage, input: j.input, idem: 'retry:' + j.id + ':' + n }); const done = await runJob(r.job.id, 'Retrying ' + j.stage); const d = await reload(); if (done && done.state === 'done') { setNotice({ kind: 'info', title: 'The ' + j.stage + ' step ran on retry.', text: 'Nothing was lost; the result is in place.' }); if (j.stage === 'copy' && d) { const fresh = d.assets[d.assets.length - 1]; if (fresh) setSelAsset(fresh.id); } pump(d); } } catch (e) { fail(e, 'The retry did not start'); } });
+    const retryJob = (j) => guard('retry:' + j.id, async () => { try { const n = ((pRef.current || {}).jobs || []).filter(x => (x.idem || '').indexOf('retry:' + j.id + ':') === 0 && (x.state === 'failed' || x.state === 'cancelled')).length; const r = await call('/studio/job', { project: j.project || pidRef.current, asset: j.asset || undefined, stage: j.stage, input: j.input, idem: 'retry:' + j.id + ':' + n }); const done = await runJob(r.job.id, 'Retrying ' + j.stage); const d = await reload(); if (done && done.state === 'done') {
+        // S29 (QA-5): one retry restarts one job; when other pieces are still without imagery the notice says so and offers them
+        const still = d && j.stage === 'render' ? d.assets.filter(x => x.id !== j.asset && needsImagery(x)) : [];
+        setNotice(still.length ? { kind: 'warn', title: 'The render ran on retry.', text: still.length + ' other piece' + (still.length === 1 ? '' : 's') + ' still ' + (still.length === 1 ? 'has' : 'have') + ' no imagery: ' + still.map(x => x.title).slice(0, 4).join(', ') + (still.length > 4 ? '...' : '') + '.', actions: canWrite() ? [{ label: 'Generate imagery (' + still.length + ')', fn: () => generateImagery(still) }] : [] } : { kind: 'info', title: 'The ' + j.stage + ' step ran on retry.', text: 'The result is in place.' }); if (j.stage === 'copy' && d) { const fresh = d.assets[d.assets.length - 1]; if (fresh) setSelAsset(fresh.id); } pump(d); } } catch (e) { fail(e, 'The retry did not start'); } });
     const cancelJob = async (id) => { try { const r = await call('/studio/job/cancel', { id }); await reload(); setNotice({ kind: 'info', title: 'Cancelled.', text: (r && r.note) || RUN_NOTE }); } catch (e) { fail(e, 'The job was not cancelled'); } };
     const importLegacy = async (l) => { try { setBusy('Importing ' + l.title); const r = await call('/studio/import', { legacy: l.id }); toastMsg(r.existing ? 'Already imported: opening that project' : 'Imported; the original is untouched'); await openProject(r.id); } catch (e) { fail(e, 'The import did not run'); } finally { setBusy(''); } };
 
@@ -4604,11 +4659,11 @@
                  the worker names that file and the package carries it, so what is delivered is what was validated and approved */
               try { await call('/studio/render/save', { asset: x.a.id, version: v.id, imageB64: btoa(bin), mime: 'image/png' }); }
               catch (e) { if (e.code !== 'export_locked' || !e.body || !e.body.url) throw e;
-                const vr = await fetch((typeof csBase === 'function' ? csBase() : '') + e.body.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); if (!vr.ok) throw new Error(x.a.title + ': the validated image did not download (HTTP ' + vr.status + '); no bundle was made.');
+                const vr = await fetch(window.AXUI.own(e.body.url), { headers: typeof axHeaders === 'function' ? axHeaders() : {} }); if (!vr.ok) throw new Error(x.a.title + ': the validated image did not download (HTTP ' + vr.status + '); no bundle was made.');
                 const vu = new Uint8Array(await vr.arrayBuffer()); files[files.length - 1] = { name: safe + '.png', data: vu }; list[list.length - 1] = Object.assign({ name: safe + '.png', bytes: vu.length, want: v.layout.stage ? { w: v.layout.stage.w, h: v.layout.stage.h } : null, validated: true }, dims(vu) || {}); } }
           } else if (v.image && v.image.url) {
             // the generated bitmap itself: a failed download stops the export (it used to be skipped in silence), and the file keeps its own type
-            const r = await fetch((typeof csBase === 'function' ? csBase() : '') + v.image.url, { headers: typeof axHeaders === 'function' ? axHeaders() : {} });
+            const r = await fetch(window.AXUI.own(v.image.url), { headers: typeof axHeaders === 'function' ? axHeaders() : {} });
             if (!r.ok) throw new Error(x.a.title + ': the image did not download (HTTP ' + r.status + '); no bundle was made.');
             const ct = r.headers.get('content-type') || ''; const ext = /jpe?g/.test(ct) ? '.jpg' : /webp/.test(ct) ? '.webp' : '.png';
             const u8 = new Uint8Array(await r.arrayBuffer()); files.push({ name: safe + ext, data: u8 }); list.push(Object.assign({ name: safe + ext, bytes: u8.length }, dims(u8) || {}));
@@ -4656,7 +4711,7 @@
        being written, a layout draft is kept for this person only (recoverable, not a version), or there are changes nothing holds */
     // S19: one vocabulary for the whole page: Unsaved, Saving recovery draft, Draft saved, Saving version, Version saved, Save failed
     const saveKind = saveSt.err || layoutDirty === 'failed' ? 'bad' : layoutDirty === 'saving' ? 'busy' : saveSt.pending || typing ? 'busy' : layoutDirty === 'drafting' ? 'drafting' : layoutDirty === 'draft' ? 'draft' : layoutDirty ? 'warn' : 'ok';
-    const saveWord = { bad: 'Save failed', busy: layoutDirty === 'saving' ? 'Saving version...' : 'Saving...', drafting: 'Saving recovery draft...', draft: 'Draft saved', warn: 'Unsaved', ok: 'Version saved' }[saveKind];
+    const saveWord = { bad: 'Save failed', busy: layoutDirty === 'saving' ? 'Saving version...' : 'Saving...', drafting: 'Saving recovery draft...', draft: 'Draft saved', warn: 'Unsaved', ok: (p && (p.assets || []).length) ? 'Version saved' : 'Saved' }[saveKind];   // S29 (QA-7): no versions yet, so none is claimed
     const saveTitle = { bad: 'The last change was refused or did not reach the worker; your changes are still here (and the recovery draft is kept). Save again or retry.', busy: 'A change is being written as a new version', drafting: 'Your layout changes are being kept as a recovery draft for you only', draft: 'Your layout changes are kept as a draft for you only (they come back after a reload or when you return to this asset); Save layout makes them a version', warn: 'Layout changes that nothing holds yet: they are kept as a recovery draft in a moment, or Save layout keeps them as a version', ok: 'Every change is saved as a version' }[saveKind];
     const b0 = (p && p.brief) || {}; const g2h = b0.workflow === 2;
     const pmode = p && b0.deliverable !== 'copy' ? ((b0.production && b0.production.mode) || (g2h ? '' : b0.creationMode === 'finished' ? 'finished' : 'editable')) : null;
@@ -4674,11 +4729,14 @@
       <div class="st-head-r">
         ${p && !p.readOnly && canWrite() ? html`<span class=${'st-save ' + saveKind} role="status" aria-live="polite" title=${saveTitle}>${saveWord}${saveSt.err ? html` <button class="ov-link" onClick=${() => { setSaveSt(s => Object.assign({}, s, { err: null })); flushCopy(saveSt.err.asset); }}>retry</button>` : null}</span>` : null}
         ${p ? html`<button class=${'st-activity' + (liveJobs.length ? ' on' : '') + ((p.jobs || []).some(j => j.state === 'failed') ? ' bad' : '')} onClick=${() => { setActOpen(true); const el = document.querySelector('#studio-root .st-workspace-activity'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); else setView('jobs', true); }} aria-label=${liveJobs.length ? liveJobs.length + ' job' + (liveJobs.length === 1 ? '' : 's') + ' running or queued; show the activity' : 'No jobs running; open Jobs'} title=${liveJobs.length ? 'Show what is running now' : 'Open the jobs list'}>${liveJobs.length ? html`<span class="st-work-beacon live small" aria-hidden="true"></span>${liveJobs.length} running` : (p.jobs || []).some(j => j.state === 'failed') ? html`<span class="st-work-beacon failed small" aria-hidden="true"></span>needs attention` : 'Jobs'}</button>` : null}
-        ${prov ? (() => { const bud = status.budget || {}; const left = bud.cap != null && bud.used != null ? Math.max(0, bud.cap - bud.used) : null; const lp = status.lastProvider || {};
+        ${prov ? (() => { const bud = status.budget || {}; const teamLeft = bud.cap != null && bud.used != null ? Math.max(0, bud.cap - bud.used) : null; const lp = status.lastProvider || {};
+          // S29 (PM4): the chip shows what this person can still spend today (their own allowance), the team's budget in the title
+          const yc = (status.you || {}).calls || null; const myLeft = yc && yc.cap > 0 ? Math.max(0, yc.cap - (yc.used || 0)) : null;
+          const left = myLeft != null && (teamLeft == null || myLeft < teamLeft) ? myLeft : teamLeft;
           const bad = k => lp[k] && !lp[k].ok; const kind = !prov.claude ? 'bad' : left === 0 || bad('claude') ? 'part' : prov.gemini && !bad('gemini') ? 'ok' : 'part';
           const word = !prov.claude ? 'Claude not configured' : left === 0 ? 'Daily model budget used' : bad('claude') ? 'Claude: last call failed' : !prov.gemini ? 'Images not configured' : bad('gemini') ? 'Images: last request failed' : 'Models configured';
           const last = k => lp[k] ? (lp[k].ok ? 'answered' : 'failed (' + lp[k].outcome + ')') + ' ' + ago(lp[k].at) + ' ago' + (lp[k].model ? ' (' + lp[k].model + ')' : '') : 'no request yet';
-          return html`<span class=${'st-prov ' + kind} data-prov=${word} title=${'Configured: Claude ' + (prov.claude ? 'yes' : 'no') + ', images ' + (prov.gemini ? 'yes' : 'no') + '. Budget left today: ' + (left == null ? 'unknown' : left + ' of ' + bud.cap + ' model calls') + '. Last answer: Claude ' + last('claude') + '; images ' + last('gemini') + '. Configured is not the same as working: a provider is only proven by its last answer. Build ' + status.build + '.'}>${word}${left != null && prov.claude ? html`<span class="st-prov-left"> - ${left} left today</span>` : null}</span>`; })() : null}
+          return html`<span class=${'st-prov ' + kind} data-prov=${word} title=${'Configured: Claude ' + (prov.claude ? 'yes' : 'no') + ', images ' + (prov.gemini ? 'yes' : 'no') + '. Left today: ' + (myLeft != null ? 'you ' + myLeft + ' of your ' + yc.cap + ' model calls' + (((status.you || {}).images || {}).cap > 0 ? ' and ' + Math.max(0, status.you.images.cap - (status.you.images.used || 0)) + ' of ' + status.you.images.cap + ' images' : '') + '; ' : '') + 'the team ' + (teamLeft == null ? 'unknown' : teamLeft + ' of ' + bud.cap + ' model calls') + '. Last answer: Claude ' + last('claude') + '; images ' + last('gemini') + '. Configured is not the same as working: a provider is only proven by its last answer. Build ' + status.build + '.'}>${word}${left != null && prov.claude ? html`<span class="st-prov-left"> - ${left} left today</span>` : null}</span>`; })() : null}
         ${!p ? html`<${ThemeSwitch} value=${appearance} onChange=${setAppearance} />` : null}
         ${status && !p ? html`<${Chip} title=${'Worker build; model calls today ' + (status.budget ? status.budget.used + ' of ' + status.budget.cap : '-')}>${status.build}</${Chip}>` : null}
         <button class=${'st-iconbtn' + (helpOpen ? ' on' : '')} aria-expanded=${helpOpen ? 'true' : 'false'} aria-controls="st-help" onClick=${() => setHelpOpen(!helpOpen)} title="How the Studio works: the steps, what costs a model call, the keyboard" aria-label="Help"><${Icon} n="help" size=${16} /></button>
@@ -4711,7 +4769,7 @@
     if (!pid && intake && F && F.Wizard) centre = html`<${F.Wizard} key=${'wiz:' + ((preset && preset.at) || 0)} clients=${CLIENTS} clientId=${clientId} preset=${wizPreset} busy=${busy} prov=${prov} onClient=${() => {}} onCreate=${o => { setPreset(null); createGuided(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />`;
     else if (!pid && starting) centre = html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>`;
     else if (!pid) centre = intake ? html`<${Intake} key=${'intake:' + clientId + ':' + ((preset && preset.at) || 0)} client=${client} kit=${kit} preset=${preset} onCreate=${o => { setPreset(null); createProject(o); }} onCancel=${() => { setIntake(false); setPreset(null); }} />` : html`<${Library} client=${client} data=${lib} err=${libErr} resume=${store.place(clientId)} onOpen=${openProject} onNew=${() => setIntake(true)} onStart=${k => { setPreset({ start: k, at: Date.now() }); setIntake(true); }} onImport=${importLegacy} onRetry=${loadLib} />`;
-    else if (!p) centre = starting ? html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>` : html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'}</div></div>`;
+    else if (!p) centre = starting ? html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>` : html`<div class="st-centre-pad" aria-busy="true"><div class="ov-empty">${busy || 'Opening the project...'} <button class="ov-link" onClick=${closeProject}>All projects</button></div></div>`;   // S29 (PM9): a slow open can be left
     else if (starting && view === 'brief') centre = html`<div class="st-centre-pad"><${StartingCard} s=${starting} /></div>`;
     else if (cmp && a) centre = html`<${CompareView} a=${a} ns=${p.ns} vA=${a.versions.find(v => v.id === cmp.a)} vB=${a.versions.find(v => v.id === cmp.b)} onClose=${() => setCmp(null)} onRestore=${vid => restore(a, vid)} />`;
     else if (lockedAt(stage) && view !== 'brand' && view !== 'context') centre = Staged(stage, null, html`<${F.LockedStage} step=${stage} wf=${p.workflow} onGo=${goStage} />`);
@@ -4726,7 +4784,7 @@
     else if ((view === 'copywrite' || view === 'copy') && guided && !p.assets.length) centre = Staged('copy', null, html`<${F.CopyStart} key=${'cs:' + p.id} p=${p} busy=${busy} prov=${prov} job=${lastJob('copy')} now=${now} durations=${(status || {}).durations} onGenerate=${() => produce({})} onSaveBrief=${saveBriefPatch} onRetry=${() => { const j = lastJob('copy'); if (j) retryJob(j); }} onGo=${goStage} />`);
     else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} banner=${guided ? html`<${F.StaleCopy} p=${p} wf=${p.workflow} busy=${busy} onRewrite=${() => produce({})} onKeep=${ids => keepEarlier(ids)} />` : null} prov=${prov} busy=${busy} onSel=${id => { setSelAsset(id); setSelField(null); }} onEdit=${editAsset} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
     else if (view === 'board' && guided && !(p.brief || {}).production && p.assets.some(x => { const v = current(x); return v && v.mode !== 'copy' && !(v.image && v.image.key); }) && !(p.jobs || []).some(j => j.stage === 'render')) centre = Staged('design', null, html`${jobsLine}<${F.ProductionModes} p=${p} busy=${busy} prov=${prov} onProduce=${produceMode} /><${BoardView} p=${p} onOpen=${openAsset} />`);
-    else if (view === 'board') { const wait = p.assets.filter(needsImagery); const imgRunning = (p.jobs || []).some(j => j.stage === 'render' && (j.state === 'queued' || j.state === 'running')); centre = Staged('design', p.assets.length ? html`${wait.length && canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.gemini) || imgRunning} title=${prov && !prov.gemini ? 'Image generation is not configured on the worker' : imgRunning ? 'Renders are already running' : 'One paid image generation per planned region, confirmed first'} onClick=${() => generateImagery(wait)}>Generate imagery (${wait.length})</button>` : null}${p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<button class=${'btn sm' + (wait.length ? ' ghost' : '')} onClick=${() => goStage('design')}>Open the canvas</button>` : html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>`}` : canWrite() && !p.readOnly ? html`<button class="btn sm" onClick=${() => goStage('copy')}>Write the copy first</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to design yet.</b><span>The words come first: write and check the copy, then build each creative here.</span></div>` : !p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<div class="st-empty-state"><b>Copy only: nothing to design.</b><span>This project's pieces are words for the channels, with no creative to build. Approve them in Review.</span></div>` : wait.length ? html`<div class="st-imagery-wait" role="status"><b>${wait.length} composition${wait.length === 1 ? '' : 's'} waiting for imagery.</b> <span class="ov-dim">${(p.brief || {}).imageryTiming === 'after_copy' ? 'The brief holds the imagery until the copy is ready: ' + p.assets.filter(x => wait.indexOf(x) >= 0 && standing(x, 'copy')).length + ' of them have their copy marked ready.' : 'Their renders have not landed (or did not run).'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`); }
+    else if (view === 'board') { const wait = p.assets.filter(needsImagery); const imgRunning = (p.jobs || []).some(j => j.stage === 'render' && (j.state === 'queued' || j.state === 'running')); centre = Staged('design', p.assets.length ? html`${wait.length && canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.gemini) || imgRunning} title=${prov && !prov.gemini ? 'Image generation is not configured on the worker' : imgRunning ? 'Renders are already running' : 'One paid image generation per planned region, confirmed first'} onClick=${() => generateImagery(wait)}>Generate imagery (${wait.length})</button>` : null}${p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<button class=${'btn sm' + (wait.length ? ' ghost' : '')} onClick=${() => goStage('design')}>Open the canvas</button>` : html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>`}` : canWrite() && !p.readOnly ? html`<button class="btn sm" onClick=${() => goStage('copy')}>Write the copy first</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to design yet.</b><span>The words come first: write and check the copy, then build each creative here.</span></div>` : !p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<div class="st-empty-state"><b>Copy only: nothing to design.</b><span>This project's pieces are words for the channels, with no creative to build. Approve them in Review.</span></div>` : wait.length ? html`<div class="st-imagery-wait" role="status"><b>${wait.length} composition${wait.length === 1 ? '' : 's'} waiting for imagery.</b> <span class="ov-dim">${(p.brief || {}).imageryTiming === 'after_copy' ? 'The brief holds the imagery until the copy is ready: ' + p.assets.filter(x => wait.indexOf(x) >= 0 && standing(x, 'copy')).length + ' of them have their copy marked ready' + (wait.some(x => standing(x, 'copy') && (p.jobs || []).some(jj => jj.stage === 'render' && jj.asset === x.id && jj.state === 'failed')) ? '; for those, the render failed: press Generate imagery to try again.' : '.') : 'Their renders have not landed (or did not run).'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`); }
     else if (view === 'kit') centre = Staged('copy', null, html`<${KitView} p=${p} busy=${busy} onWrite=${writeKit} onUpdate=${updateText} onVerdict=${textVerdict} />`);
     else if (view === 'sequence') centre = Staged('copy', null, html`<${SequenceView} p=${p} onPlan=${planSequence} onOpen=${openAsset} busy=${busy} />`);
     else if (view === 'production') centre = Staged('design', null, html`<${ProductionView} p=${p} onRun=${async () => pump(await reload())} onOpen=${openAsset} onReview=${() => setView('review', true)} onRevise=${reviseFromImpact} />`);

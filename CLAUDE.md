@@ -2907,6 +2907,28 @@ review page); `run.mjs` reports skipped parts separately; `makeStudio` refuses a
 `studio-rc-seed-worker` (8), `studio-rc-security-worker` (13), `studio-rc-brief-worker` (5), `studio-rc-creative-worker` (3),
 `studio-rc-browser` (5), `studio-a11y-browser` (10). Open after this release: U6-U8, Q2, S7 and P1 (measured, change proposed).
 
+**The fresh audit (S29; build `2026-11-08.studio-p46`, page `?v=r30`; `CREATIVE-STUDIO.md` s.55).** Six role agents audited p45
+with providers mocked; 54 findings, each fix reproduced by a failing test first. **Roles come from the worker**: the page asks
+`GET /auth/me` (any role; `/studio/status` also carries `role`, `guest` and `you`, the person's own allowance, which the header chip
+shows) and sets `window.AX_ROLE`; `tests/studio-fixture.mjs` no longer injects a role, so a read key in a harness is read-only the
+way it is in production. **Image addresses are the worker's own**: `stUserImageProblem` refuses an image key in another
+project's folder or outside the Studio's store, unless the project already holds it on a version (`image_not_owned`), and any image `url` or layer `src` that is not a worker route (`ST_OWN_URL_RX`, `not_worker_url`) on
+`/studio/asset` and `/studio/version`; the page fetches only through `AXUI.own()` (a single-slash path on the worker's origin), so
+a key is never sent elsewhere; a review link serves only the project's own files. `stPngDecode` inflates into an exact buffer
+(a decompression bomb is cancelled). **Open access does not show client work**: keyless requests under `/studio/`, `/brand/`,
+`/mind/`, `/engine/`, `/content/`, `/release/`, `/perf/` answer `401 sign_in_required` (`AX_CONFIDENTIAL_RX`; `STUDIO_PUBLIC_READ=1`
+reopens them on purpose); `STUDIO_PUBLIC_WRITE=1` opens `/studio/` (its reads and writes) and nothing else; a guest archives only the test projects it made
+(`studio_projects.creator_pid`). Approvals name their version (`409 version_moved`); a guided strategy is confirmed with the
+campaign decision when the kit has several (`409 campaign_required`; `campaign: ''` is standalone) and the directions gate refuses
+an undecided campaign; finished mode with no imagery is refused before spend (`finished_needs_imagery`); brand items kept as a rule
+or preference reach the models (`stContext`, campaign-scoped); the reading labels passages, decisions and earlier choices with
+their campaign; look-alike directions are matched by position. `/studio/list` carries each guided project's step
+(`stListPhase`), which the library names as the header does. An expired link that is still on the roster does not count toward the wrong-key lockout; a Fix
+layout press that changes nothing keeps the Undo of the fix before it. UI: light-appearance tokens for the colour picker, the Spacing box
+and the dock; the selection toolbar wraps and stays on the stage; the header's state chips come first; the version compare grid
+is `.st-vcmp`; art direction stays in its card; the review page fits a phone. Harnesses: `tests/studio-s29-worker.mjs` (16),
+`tests/studio-s29-browser.mjs` (7). Open: PM6 (two project reads per finished job), U6, U7.
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,
@@ -3231,7 +3253,9 @@ writing would end every old link (`--fresh` does that on purpose). Harness:
 `tests/guest-link-test.py` (11, a stub in place of wrangler). **Public mode** is the var `AXIOM_PUBLIC` = `read` or `full`
 (optional `AXIOM_PUBLIC_UNTIL`, a date): a request with no key gets that role until the date
 (`axPublic`); a supplied key is still checked, a wrong one still 401; any other value opens
-nothing; after the date keyless requests answer `401 link_expired`. Off unless set. With no secret
+nothing; after the date keyless requests answer `401 link_expired`. Off unless set. Since S29 public mode
+never shows client work: keyless requests under `/studio/`, `/brand/`, `/mind/`, `/engine/`, `/content/`, `/release/` and
+`/perf/` answer `401 sign_in_required` unless `STUDIO_PUBLIC_READ=1`. With no secret
 at all the worker is **closed** (`503 auth_not_configured`); `AXIOM_DEV_OPEN=1`
 opens only a localhost origin. `axRoutePolicy(path, method, query)` decides every request,
 deny by default: `/` and `/archive/stats` are public; `/review/*` and `/sifa/*`

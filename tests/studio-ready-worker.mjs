@@ -104,7 +104,8 @@ await T.t('B2 anonymous public mode cannot write in the Studio or the brand kit;
   const r = await pub.call('POST', '/studio/project', { ns: 'mca', title: 'Anonymous' });
   eq([r.status, r.body.error], [403, 'public_write_refused'], JSON.stringify(r.body));
   eq((await pub.call('POST', '/brand/kit', { ns: 'mca', voice: 'x' })).status, 403);
-  eq((await pub.call('GET', '/studio/list?ns=mca')).status, 200, 'reading is open in public mode');
+  eq((await pub.call('GET', '/allnews')).status, 200, 'reading is open in public mode');
+  eq((await pub.call('GET', '/studio/list?ns=mca')).status, 401, 'client work needs a link (S29, SEC-5)');
   eq((await pub.call('POST', '/studio/project', { ns: 'mca', title: 'Signed in' }, 'key-jo-full')).status, 200, 'a key still writes');
   } finally { pub.restore(); }
 });

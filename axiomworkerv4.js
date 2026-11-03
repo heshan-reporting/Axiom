@@ -3080,8 +3080,12 @@ async function stPngDecode(buf) {
     const bpp = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct];
     if (!bpp || depth !== 8 || inter || !W || !H || W * H > 6e6 || !idat.length) return null;
     const total = idat.reduce((a, c) => a + c.length, 0); const z = new Uint8Array(total); let o = 0; idat.forEach(c => { z.set(c, o); o += c.length; });
-    const raw = new Uint8Array(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
-    const stride = W * bpp; if (raw.length < (stride + 1) * H) return null;
+    // S29 (SEC-3): inflate into exactly the size the header states and stop the moment the stream would pass it, so a small file
+    // that inflates to hundreds of megabytes (a decompression bomb) is refused after one chunk instead of filling the isolate
+    const stride = W * bpp; const want = (stride + 1) * H; const raw = new Uint8Array(want); let got = 0;
+    const reader = new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).body.getReader();
+    for (;;) { const { done, value } = await reader.read(); if (done) break; if (got + value.length > want) { try { await reader.cancel(); } catch (e) {} return null; } raw.set(value, got); got += value.length; }
+    if (got < want) return null;
     const px = new Uint8Array(stride * H); const paeth = (a, b, c) => { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; };
     for (let y = 0; y < H; y++) {
       const f = raw[y * (stride + 1)]; const src = y * (stride + 1) + 1, dst = y * stride;
@@ -3943,7 +3947,7 @@ async function contentExemplars(env, ns, camp, platforms, brief, log) {
     const row = rows[id] || null; const own = h.ns === ns || h.ns === ns + '_creative';
     const kind = String((row && row.kind) || m.kind || '');
     let approval = row ? String(row.approval || '') : ''; let campaign = row ? String(row.campaign || '') : ''; let scope = row ? String(row.scope || '') : ''; let isLegacy = false;
-    if (!approval) { const tag = String((row && row.source) || m.source || '').split(':'); if (tag[0] === 'pack' && tag[1] === ns && (kind === 'copy' || kind === 'brief')) { approval = kind === 'copy' ? 'approved' : 'background'; campaign = cid && tag[2] === cid ? cid : (tag.length > 4 && tag[2] ? tag[2] : ''); scope = campaign ? 'campaign' : 'client'; isLegacy = true; } }
+    if (!approval) { const tag = String((row && row.source) || m.source || '').split(':'); if (tag[0] === 'pack' && tag[1] === ns && (kind === 'copy' || kind === 'brief')) { approval = kind === 'copy' ? 'approved' : 'background'; campaign = campaign || (cid && tag[2] === cid ? cid : (tag.length > 4 && tag[2] ? tag[2] : '')); scope = campaign ? 'campaign' : (scope || 'client'); isLegacy = true; } }   // S29 (PR1): a recorded campaign is never overwritten by the tag; a tag without a platform is ambiguous and is not guessed
     const entry = { kind, title: String((row && row.title) || m.title || ''), snippet: String(m.snippet || '').slice(0, 700), campaign };
     if (approval === 'background' || /^(brief|release|doc|slack|guide)$/.test(kind)) { if (own || h.ns === 'cmm') { if (!campaign || !cid || campaign === cid) G.background.push(entry); else otherCampaign++; } continue; }
     if (!/^(copy|outcome)$/.test(kind)) continue;
@@ -7308,7 +7312,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-07.studio-p45';
+const AXIOM_BUILD = '2026-11-08.studio-p46';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7379,7 +7383,7 @@ async function ensureStudio(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN meta TEXT').run(); } catch (e) {}   // S23: the reference's record (paid or organic, format, channel, approval, likes and dislikes) and its observations
   // S24: what each job has sent against its attempt policy (text and image requests, retries and fallbacks included), what a cancel
   // found already in flight, and the live-test allowance a project may carry - checked on the server before every dispatch
-  for (const [t, c, ty] of [['studio_jobs', 'text_sent', 'INTEGER'], ['studio_jobs', 'image_sent', 'INTEGER'], ['studio_jobs', 'cancel', 'TEXT'], ['studio_projects', 'allowance', 'TEXT'], ['studio_references', 'rev', 'INTEGER'], ['studio_projects', 'test', 'INTEGER'], ['studio_jobs', 'pid', 'TEXT'], ['studio_validations', 'export_hash', 'TEXT'], ['studio_validations', 'export_w', 'INTEGER'], ['studio_validations', 'export_h', 'INTEGER']]) { try { await env.MIND_DB.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + ty).run(); } catch (e) {} }
+  for (const [t, c, ty] of [['studio_jobs', 'text_sent', 'INTEGER'], ['studio_jobs', 'image_sent', 'INTEGER'], ['studio_jobs', 'cancel', 'TEXT'], ['studio_projects', 'allowance', 'TEXT'], ['studio_references', 'rev', 'INTEGER'], ['studio_projects', 'test', 'INTEGER'], ['studio_projects', 'creator_pid', 'TEXT'], ['studio_jobs', 'pid', 'TEXT'], ['studio_validations', 'export_hash', 'TEXT'], ['studio_validations', 'export_w', 'INTEGER'], ['studio_validations', 'export_h', 'INTEGER']]) { try { await env.MIND_DB.prepare('ALTER TABLE ' + t + ' ADD COLUMN ' + c + ' ' + ty).run(); } catch (e) {} }
   try { await env.MIND_DB.batch([
     env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_dispatch(id TEXT PRIMARY KEY, job TEXT, project TEXT, kind TEXT, model TEXT, attempt INTEGER, n INTEGER, retry INTEGER, fallback INTEGER, at INTEGER, ended INTEGER, outcome TEXT, ms INTEGER, detail TEXT)'),
     env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_dispatch_j ON studio_dispatch(job, at)'),
@@ -7402,6 +7406,33 @@ function stCopy(c) {
   return out;
 }
 function stImage(im) { if (!im || typeof im !== 'object') return null; const out = { key: stStr(im.key, 200), url: stStr(im.url, 300), model: stStr(im.model, 60), size: stStr(im.size, 8), label: stStr(im.label, 120) }; if (im.requested) out.requested = stStr(im.requested, 60); if (im.fallback != null) out.fallback = !!im.fallback; if (im.conv) out.conv = stStr(im.conv, 220); if (im.editOf) out.editOf = stStr(im.editOf, 24); if (im.meta && typeof im.meta === 'object') out.meta = { references: (Array.isArray(im.meta.references) ? im.meta.references : []).map(x => stStr(x, 120)).slice(0, 16), attached: Array.isArray(im.meta.attached) ? im.meta.attached.slice(0, 16).map(x => ({ kind: stStr(x && x.kind, 12), role: stStr(x && x.role, 160), name: stStr(x && x.name, 120), mark: x && x.mark ? stStr(x.mark, 12) : undefined, required: !!(x && x.required) })) : undefined, excludedRefs: Array.isArray(im.meta.excludedRefs) && im.meta.excludedRefs.length ? im.meta.excludedRefs.slice(0, 16).map(x => ({ name: stStr(x && x.name, 120), id: stStr(x && x.id, 60), reason: stStr(x && x.reason, 200) })) : undefined, promptDropped: Array.isArray(im.meta.promptDropped) && im.meta.promptDropped.length ? im.meta.promptDropped.slice(0, 12).map(x => stStr(x, 80)) : undefined, model: stStr(im.meta.model, 60), requested: stStr(im.meta.requested, 60), size: stStr(im.meta.size, 8), fallback: !!im.meta.fallback, ms: Number(im.meta.ms) || 0, usage: im.meta.usage && typeof im.meta.usage === 'object' ? { prompt: Number(im.meta.usage.prompt) || 0, output: Number(im.meta.usage.output) || 0, total: Number(im.meta.usage.total) || 0 } : undefined, historyReplayed: im.meta.historyReplayed != null ? !!im.meta.historyReplayed : undefined, alpha: im.meta.alpha != null ? !!im.meta.alpha : undefined, sizeAsked: im.meta.sizeAsked ? stStr(im.meta.sizeAsked, 8) : undefined, capped: im.meta.capped ? stStr(im.meta.capped, 8) : undefined, pixels: im.meta.pixels && Number(im.meta.pixels.w) > 0 ? { w: Number(im.meta.pixels.w), h: Number(im.meta.pixels.h) || 0 } : undefined, edit: im.meta.edit && typeof im.meta.edit === 'object' ? { kind: ST_EDIT_KINDS[im.meta.edit.kind] ? im.meta.edit.kind : 'area', area: im.meta.edit.area ? stEditArea(im.meta.edit.area) : null, instruction: stStr(im.meta.edit.instruction, 1200), of: stStr(im.meta.edit.of, 24), preservation: stStr(im.meta.edit.preservation, 20), limits: stStr(im.meta.edit.limits, 400) } : undefined, compiled: im.meta.compiled && typeof im.meta.compiled === 'object' ? { job: stStr(im.meta.compiled.job, 24), key: stStr(im.meta.compiled.key, 220) } : undefined, finished: im.meta.finished ? true : undefined, marksSent: im.meta.finished ? (Array.isArray(im.meta.marksSent) ? im.meta.marksSent : []).map(x => stStr(x, 12)).slice(0, 4) : undefined }; return out; }
+/* S29 (SEC-1, SEC-2): what a person sends as an image is held to this project. A stored address the page will fetch WITH the
+   access key must be one of the worker's own read routes (a relative path with one leading slash), never another host; an image
+   key must sit under this project's own folder in storage, or already be on one of its versions (a legacy import, a restore).
+   Anything else is refused, so a test project cannot point a reviewer's key at another server, nor a review link at another
+   client's file. */
+const ST_OWN_URL_RX = /^\/(studio\/file|release\/tile|session\/img|brand\/logo|brand\/wordmark|engine\/art)\?[^\s\\]*$/;
+async function stUserImageProblem(env, p, image, layout) {
+  const bad = (code, detail) => ({ error: code, detail });
+  const urls = [];
+  if (image && typeof image === 'object') {
+    // a key in the Studio's own store and not another project's folder (another client's brand files, packs, sessions, artwork
+    // and other projects' renders are refused unless this project already holds that very key on one of its versions)
+    const foreign = async k => { k = String(k || ''); if (!k || k.indexOf('studio/' + p.id + '/') === 0) return false;
+      const had = await env.MIND_DB.prepare("SELECT 1 AS x FROM studio_versions WHERE project=? AND (json_extract(image,'$.key')=? OR json_extract(image,'$.conv')=?) LIMIT 1").bind(p.id, k, k).first().catch(() => null);
+      if (had) return false;
+      const m = /^studio\/([A-Za-z0-9_-]+)\//.exec(k); if (!m || /\.\.|\/\//.test(k)) return true;
+      const other = await env.MIND_DB.prepare('SELECT 1 AS x FROM studio_projects WHERE id=? LIMIT 1').bind(m[1]).first().catch(() => null);
+      return !!other; };
+    if (await foreign(image.key)) return bad('image_not_owned', 'The image key is not this project\'s file; nothing was written.');
+    if (image.conv && await foreign(image.conv)) return bad('image_not_owned', 'The image conversation is not this project\'s file; nothing was written.');
+    if (image.url) urls.push(['the image', image.url]);
+  }
+  const layers = layout && typeof layout === 'object' && Array.isArray(layout.layers) ? layout.layers : [];
+  for (const l of layers) if (l && l.src) urls.push(['layer ' + String(l.id || l.role || '').slice(0, 40), l.src]);
+  for (const [what, u] of urls) if (!ST_OWN_URL_RX.test(String(u))) return bad('not_worker_url', 'The address for ' + what + ' is not one of the worker\'s own files; nothing was written.');
+  return null;
+}
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
 }
@@ -7631,8 +7662,33 @@ async function stList(env, f) {
       projects.forEach(p => { if (lead[p.id]) p.lead = lead[p.id]; if (counts[p.id]) p.pieces = counts[p.id]; });
     }
   } catch (e) {}
+  // S29 (UX6): a guided project's place among the steps the header names (brief, objectives, strategy, directions, copy,
+  // design, review, export), so the library never says "brief" of a project whose brief was reviewed long ago
+  try {
+    const g = projects.filter(p => stWfOn(p)).slice(0, 120); const dirs = {};
+    for (let i = 0; i < g.length; i += 90) {
+      const part = g.slice(i, i + 90).map(p => p.id);
+      const rs = (await env.MIND_DB.prepare('SELECT id, project, chosen, data FROM studio_directions WHERE project IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [];
+      rs.forEach(r => { (dirs[r.project] = dirs[r.project] || []).push(Object.assign({ id: r.id, chosen: !!r.chosen }, pjs(r.data, {}))); });
+    }
+    g.forEach(p => { try { p.phase = stListPhase(p, dirs[p.id] || []); } catch (e) {} });
+  } catch (e) {}
   const legacy = f.legacy === false ? [] : await stLegacyList(env, ns, projects);
   return { ok: true, ns, projects, legacy };
+}
+/** The step a guided project is at, for the library: worked out by stWorkflow from the brief and the directions; past the chosen
+ *  direction the pieces are in Copy until the production mode is chosen in Design, then Review and Deliver follow the status. */
+function stListPhase(p, dirs) {
+  const n = Number(p.sources) || 0;
+  const wf = stWorkflow(Object.assign({}, p, { directions: dirs, assets: [], jobs: [], sources: Array.from({ length: Math.min(n, 50) }, (x, i) => ({ id: 's' + i })) }));
+  const st = wf.steps || {}; const done = k => st[k] && st[k].state === 'complete';
+  if (!done('brief')) return 'brief';
+  if (!done('objectives')) return 'objectives';
+  if (!done('strategy')) return 'strategy';
+  if (!done('directions')) return 'directions';
+  if (p.status === 'exported') return 'export';
+  if (p.status === 'review' || p.status === 'approved') return 'review';
+  return ((p.brief || {}).production || {}).mode ? 'design' : 'copy';
 }
 // -- legacy adapters: release packs and content sets as read-only projects ---------------------
 async function stLegacyList(env, ns, imported) {
@@ -8633,8 +8689,15 @@ async function stContext(env, p, opts) {
   let ex = { text: '', count: 0 };
   try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log); } catch (e) {}
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
-  const text = block.text + ex.text + rulesCopy.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
-  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
+  // S29 (PR7): brand items the team kept as a rule or a preference reach the models - this campaign's and the client-wide ones
+  let kept = { text: '', ids: [] };
+  try {
+    await ensureBrand(env);
+    const rows = (await env.MIND_DB.prepare("SELECT id, campaign, kind, authority, title, body FROM brand_items WHERE ns=? AND status='active' AND authority IN ('rule','preference') AND (COALESCE(campaign,'')='' OR campaign=?) ORDER BY CASE authority WHEN 'rule' THEN 0 ELSE 1 END, updated DESC LIMIT 24").bind(p.ns, String(p.campaign || '')).all()).results || [];
+    if (rows.length) kept = { ids: rows.map(r => r.id), text: '\n\nKEPT BY THE TEAM (brand ' + (rows.some(r => r.authority === 'rule') ? 'rules and preferences' : 'preferences') + ' a person reviewed; a rule is to be followed, a preference to be honoured where it fits):\n' + rows.map(r => '- [' + r.authority + (r.campaign ? ', campaign ' + r.campaign : ', client-wide') + '] ' + stStr(r.title, 140) + (r.body && r.body !== r.title ? ': ' + stStr(r.body, 400) : '')).join('\n') };
+  } catch (e) {}
+  const text = block.text + ex.text + rulesCopy.text + kept.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
+  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, brandItems: kept.ids, examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
   await log('out', 'client context for ' + client + ': ' + (block.campaign ? 'campaign ' + block.campaign.name + ', ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms, ' + (rulesCopy.count + tilesOnly.length) + ' learned corrections, ' + ex.count + ' approved examples' + (kit.hasLogo ? ', logo on file' : ', no logo on file'));
   return { client, kit, block, text, snapshot, rules: { copy: rulesCopy, tiles: rulesTiles } };
 }
@@ -9304,7 +9367,7 @@ function stCompositionDiversity(dirs) {
     if (a.zone !== b.zone || a.zoneSaid === false || b.zoneSaid === false) dist += 0.2; else same.push('words at the ' + a.zone);
     if (a.scale !== b.scale) dist += 0.1; else same.push(a.scale + ' type');
     const u = new Set(a.palette.concat(b.palette)); const inter = a.palette.filter(x => b.palette.indexOf(x) >= 0).length; const pd = u.size ? 1 - inter / u.size : 0; dist += 0.15 * pd; if (u.size && pd < 0.5) same.push('palette');
-    dist = Math.round(dist * 100) / 100; pairs.push({ a: dirs[i].title, b: dirs[k].title, distance: dist, close: dist < 0.3, same }); sum += dist; n++;
+    dist = Math.round(dist * 100) / 100; pairs.push({ a: dirs[i].title, b: dirs[k].title, ia: i, ib: k, distance: dist, close: dist < 0.3, same }); sum += dist; n++;
   }
   return { score: Math.round(sum / n * 100) / 100, pairs, descriptors: ds, method: 'compared on what each direction says it would draw (medium, imagery, where the words sit, type scale, palette words); a reading of the descriptions, not of rendered images' };
 }
@@ -9406,19 +9469,31 @@ function stKnowApproval(meta) {
 async function stIntelKnowledge(env, p, q, log) {
   const out = { K: [], N: [], A: [], D: [], H: [], S: [] }; const ns = p.ns; const db = env.MIND_DB;
   const issueIds = CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => ci.id);
-  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 6, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 6).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), campaign: stKnowCampaign(h.meta, ns), approval: stKnowApproval(h.meta), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
+  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 6, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 6).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), campaign: stKnowCampaign(h.meta, ns), approval: stKnowApproval(h.meta), doc: String(h.meta.docId || ''), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
   try {
     const rows = (await db.prepare("SELECT id,label,claim,counter_claim,side,status,n,velocity,issues,ns,last_ts FROM narratives WHERE COALESCE(label,'')<>'' AND COALESCE(status,'')<>'broad' AND COALESCE(scope,'')<>'off' AND COALESCE(muted,0)=0 AND last_ts>? ORDER BY last_ts DESC LIMIT 60").bind(Date.now() - 14 * 864e5).all()).results || [];
     out.N = rows.filter(r => r.ns === ns || pjs(r.issues, []).some(i => issueIds.indexOf(i) >= 0)).slice(0, 5).map((r, i) => ({ id: 'N' + (i + 1), ref: r.id, label: stStr(r.label, 140), claim: stStr(r.claim, 240), counter: stStr(r.counter_claim, 200), side: r.side || '', status: r.status || '', rows: r.n || 0 }));
   } catch (e) {}
   try { const rows = (await db.prepare('SELECT id,label,issue,ratio,angle,detected_ts,acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? ORDER BY detected_ts DESC LIMIT 4').bind(ns, Date.now() - 14 * 864e5).all()).results || []; out.A = rows.map((r, i) => ({ id: 'A' + (i + 1), ref: r.id, label: stStr(r.label, 120), issue: r.issue || '', ratio: Math.round((r.ratio || 0) * 10) / 10, angle: stStr(r.angle, 240), at: r.detected_ts || 0 })); } catch (e) {}
   try {
-    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8" + stLiveSql(env, ns, 'p') + " ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
+    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title,p.campaign FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8" + stLiveSql(env, ns, 'p') + " ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
     try { await ensureEngine(env); } catch (e) {}
-    const eo = (await db.prepare('SELECT verdict,why,headline,surface,created FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
-    out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created }))).sort((a, b) => b.at - a.at).slice(0, 8).map((x, i) => Object.assign({ id: 'D' + (i + 1) }, x));
+    const eo = (await db.prepare('SELECT verdict,why,headline,surface,created,doc FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
+    out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created, campaign: r.campaign || '', scoped: true })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created, doc: r.doc || '' }))).sort((a, b) => b.at - a.at).slice(0, 8).map((x, i) => Object.assign({ id: 'D' + (i + 1) }, x));
   } catch (e) {}
-  try { const rows = (await db.prepare('SELECT kind,text,created FROM studio_intel_log WHERE ns=? ORDER BY created DESC LIMIT 12').bind(ns).all()).results || []; out.H = rows.map((r, i) => ({ id: 'H' + (i + 1), kind: r.kind, text: stStr(r.text, 220), at: r.created })); } catch (e) {}
+  try { const rows = (await db.prepare('SELECT l.kind,l.text,l.created,p.campaign AS campaign, p.id AS pid FROM studio_intel_log l LEFT JOIN studio_projects p ON p.id=l.project WHERE l.ns=? ORDER BY l.created DESC LIMIT 12').bind(ns).all()).results || []; out.H = rows.map((r, i) => ({ id: 'H' + (i + 1), kind: r.kind, text: stStr(r.text, 220), at: r.created, campaign: r.campaign || '', scoped: !!r.pid })); } catch (e) {}
+  // S29 (PR5): a passage, an outcome or an earlier choice says which campaign it belongs to (from the document's own record, or
+  // the project it was made in) and whether its approval is recorded, so the busier campaign's material is never read as general
+  try {
+    const ids = Array.from(new Set(out.K.map(k => k.doc).concat(out.D.map(d => d.doc || '')).filter(Boolean))).slice(0, 60);
+    if (ids.length) {
+      await mindSchema(env); const rows = {};
+      ((await db.prepare('SELECT id, campaign, approval FROM mind_docs WHERE id IN (' + ids.map(() => '?').join(',') + ')').bind(...ids).all()).results || []).forEach(r => { rows[r.id] = r; });
+      const word = a => a === 'approved' ? 'approved work' : a === 'rejected' ? 'rejected work (avoid)' : a === 'background' ? 'background, not approved copy' : '';
+      out.K.forEach(k => { const d = rows[k.doc]; if (!d) return; if (d.campaign) k.campaign = stStr(d.campaign, 40); if (word(d.approval)) k.approval = word(d.approval); else if (/^approved/.test(k.approval || '')) k.approval = 'approval not recorded'; });
+      out.D.forEach(x => { const d = x.doc && rows[x.doc]; if (d) { x.campaign = d.campaign || ''; x.scoped = true; } });
+    }
+  } catch (e) {}
   try {
     const rows = (await db.prepare("SELECT e.name AS name, COUNT(*) AS n, AVG(s.stance) AS net FROM sent_entities s JOIN entities e ON e.id=s.entity WHERE e.side='client' AND e.ns=? AND s.ts>? GROUP BY e.name ORDER BY n DESC LIMIT 4").bind(ns, Date.now() - 7 * 864e5).all()).results || [];
     out.S = rows.map((r, i) => ({ id: 'S' + (i + 1), entity: r.name, mentions: r.n, net: Math.round((r.net || 0) * 100) / 100 }));
@@ -9514,10 +9589,10 @@ async function stAnalyseStage(env, job, p, log) {
     + kn('KNOWLEDGE IN THE MIND (each labelled with its campaign and approval)', K, k => '[' + k.id + '] ' + k.title + ' [' + (k.campaign ? 'campaign ' + k.campaign : 'client-wide or unknown') + '; ' + (k.approval || 'approval unknown') + ']' + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text)
     + kn('LIVE NARRATIVES ON THE CLIENT\'S ISSUES', know.N, n => '[' + n.id + '] ' + n.label + ' - claim: ' + n.claim + (n.counter ? ' | counter: ' + n.counter : '') + ' (' + n.rows + ' rows, ' + (n.side || 'stance unknown') + ', ' + n.status + ')')
     + kn('SENTINEL ALERTS (14 days)', know.A, a => '[' + a.id + '] ' + a.label + ' x' + a.ratio + (a.angle ? ' - angle drafted: ' + a.angle : ''))
-    + kn('RECORDED DECISIONS (approvals, rejections, outcomes)', know.D, d => '[' + d.id + '] ' + d.kind + ': ' + d.what + (d.why ? ' - ' + d.why : ''))
-    + kn('THE TEAM\'S EARLIER CHOICES IN THIS ENGINE', know.H, h => '[' + h.id + '] ' + h.kind + ': ' + h.text)
+    + kn('RECORDED DECISIONS (approvals, rejections, outcomes; each labelled with its campaign)', know.D, d => '[' + d.id + '] ' + d.kind + ': ' + d.what + ' [' + (d.campaign ? 'campaign ' + d.campaign : d.scoped ? 'client-wide' : 'campaign not recorded') + ']' + (d.why ? ' - ' + d.why : ''))
+    + kn('THE TEAM\'S EARLIER CHOICES IN THIS ENGINE (each labelled with its campaign)', know.H, h => '[' + h.id + '] ' + h.kind + ' [' + (h.campaign ? 'campaign ' + h.campaign : h.scoped ? 'client-wide' : 'campaign not recorded') + ']: ' + h.text)
     + kn('SENTIMENT TOWARD THE CLIENT (7 days)', know.S, s => '[' + s.id + '] ' + s.entity + ': ' + s.mentions + ' judged mentions, net stance ' + s.net)
-    + '\n\nCURRENT BRIEF: ' + ['objective', 'audience', 'message', 'action'].map(k => k + '=' + ((p.brief || {})[k] || '-')).join('; ') + '; channels=' + (((p.brief || {}).channels || []).join(',') || '-') + '; campaign=' + (p.campaign || '-') + '; creation mode=' + ((p.brief || {}).creationMode || 'editable')
+    + '\n\nCURRENT BRIEF: ' + ['objective', 'audience', 'message', 'action'].map(k => k + '=' + ((p.brief || {})[k] || '-')).join('; ') + '; channels=' + (((p.brief || {}).channels || []).join(',') || '-') + '; campaign=' + (p.campaign || '-') + '; creation mode=' + ((p.brief || {}).creationMode || 'editable') + '; type of work=' + (ST_WF_TYPES[(p.brief || {}).projectType] || (p.brief || {}).projectType || '-') + '; deliverable=' + ((p.brief || {}).deliverable || '-') + (Array.isArray((p.brief || {}).deliverables) && (p.brief || {}).deliverables.length ? '; deliverables=' + (p.brief || {}).deliverables.map(d => typeof d === 'string' ? d : (d && (d.name || d.kind)) || '').filter(Boolean).join(', ') : '')   /* S29 (PR4): the kind of work the person chose is part of what the reading interprets */
     + (inp.instruction ? '\n\nTEAM NOTE: ' + stStr(inp.instruction, 800) : '')
     + (multi
       ? '\n\nMATERIAL: ' + srcs.length + ' sources that make one brief, ' + items.length + ' paragraphs numbered across them:' + srcs.map((s0, si) => '\n\n--- SOURCE ' + (si + 1) + ' "' + stStr(s0.name, 120) + '" (' + stStr(String(s0.kind || '').replace(/^analyse:/, ''), 30) + (s0.provenance ? ', from ' + stStr(s0.provenance, 160) : '') + ') ---\n' + items.map((x, i) => x.si === si ? '[P' + (i + 1) + '] ' + stStr(x.text, 1600) : '').filter(Boolean).join('\n\n')).join('')
@@ -9562,6 +9637,8 @@ async function stAnalyseStage(env, job, p, log) {
   const input = { type: stOneOf(ji.type, ST_INPUT_TYPES, 'other'), why: stStr(ji.why, 240) };
   const ju = j.understanding && typeof j.understanding === 'object' ? j.understanding : {};
   const understanding = {}; ST_UNDERSTAND_FIELDS.forEach(k => { const f = ju[k]; const v = f && typeof f === 'object' ? f.v : f; const basis = f && typeof f === 'object' ? stOneOf(f.basis, ['stated', 'inferred', 'knowledge'], 'inferred') : 'inferred'; const s = Array.isArray(v) ? v.map(x => stStr(x, 160)).join('; ') : stStr(v, 400); if (s.trim()) understanding[k] = { v: s, basis }; });
+  // S29 (PR3): when the campaign is undecided the understanding says so, rather than state the model's guess as understood
+  if (campaign.ambiguous) understanding.campaign = { v: 'undecided: ' + candidates.map(c => c.name).join(' or '), basis: 'inferred' };
   if (understanding.urgency) understanding.urgency.v = stOneOf(understanding.urgency.v, ['low', 'medium', 'high', 'critical'], 'medium');
   if (cid) understanding.campaign = { v: campaign.name, basis: understanding.campaign ? understanding.campaign.basis : 'inferred' };
   understanding.client = { v: ctx.client, basis: 'knowledge' };
@@ -9916,7 +9993,13 @@ async function stWfGate(env, p, what, input) {
   const no = (step, text) => ({ error: 'workflow_locked', status: 409, step, detail: text, need: text });
   if (what === 'objectives') return st.objectives.state === 'locked' ? no('objectives', st.objectives.need) : null;
   if (what === 'strategy') return st.strategy.state === 'locked' ? no('strategy', st.strategy.need) : null;
-  if (what === 'direct' || what === 'choose') return st.directions.state === 'locked' ? no('directions', st.directions.need) : null;
+  if (what === 'direct' || what === 'choose') {
+    if (st.directions.state === 'locked') return no('directions', st.directions.need);
+    // S29 (PR2): directions are paid work built on the campaign's identity; with two or more campaigns in the kit and none chosen
+    // (and no explicit standalone decision) the campaign is asked for first, before any model call
+    if (what === 'direct') { const chk = await stBriefCheck(env, p).catch(() => null); const g = chk && (chk.gaps || []).find(x => x.code === 'campaign_unconfirmed' && x.level === 'mandatory'); if (g) return no('directions', 'Choose the campaign (or keep this standalone) before the directions: ' + (g.text || 'the kit has more than one campaign and none is chosen') + '.'); }
+    return null;
+  }
   if (what === 'copy' || what === 'sequence' || what === 'kit') {
     if (st.directions.state === 'locked') return no('copy', st.directions.need);
     // a direction named in the input (a variant from the board) must be this project's and built on the current choice
@@ -9982,6 +10065,12 @@ async function stWfConfirm(env, p, sb, who) {
   }
   const changes = stWfKey(next) !== stWfKey(basis0);
   if (changes && wf.impact.any && !ack) return { error: 'affects_downstream', status: 409, step, impact: wf.impact, detail: (step === 'objectives' ? 'Changing the objective or key message' : 'Changing the strategy') + ' may affect your current work: ' + [wf.impact.directions ? wf.impact.directions + ' creative direction' + (wf.impact.directions === 1 ? '' : 's') + (wf.impact.chosen ? ' (one chosen)' : '') : '', wf.impact.assets ? wf.impact.assets + ' piece' + (wf.impact.assets === 1 ? '' : 's') + ' of copy and design' + (wf.impact.approvals ? ', ' + wf.impact.approvals + ' with an approval' : '') : ''].filter(Boolean).join(' and ') + '. Update them (they stay, marked as built on the earlier choice) or keep them under the new choice.' };
+  // S29 (PR2): with two or more campaigns in the kit and none chosen, the strategy is confirmed with the campaign decision (a
+  // campaign, or '' for standalone) - never left undecided for the paid directions to refuse later
+  if (step === 'strategy' && sb.campaign === undefined && !(p.campaign || '') && !(p.brief || {}).campaignConfirmed) {
+    const chk = await stBriefCheck(env, p).catch(() => null); const g = chk && (chk.gaps || []).find(x => x.code === 'campaign_unconfirmed' && x.level === 'mandatory');
+    if (g) return { error: 'campaign_required', status: 409, detail: 'Choose the campaign, or keep this standalone, with the strategy: ' + (g.text || 'the kit has more than one campaign and none is chosen') + '.' };
+  }
   const topics = (Array.isArray(sb.topics) ? sb.topics : []).map(t => stStr(t, 100)).filter(t => (it.topics || []).some(x => x.name === t)).slice(0, 12);
   const changed = [];
   await stBriefPatch(env, p.id, b => {
@@ -9997,6 +10086,8 @@ async function stWfConfirm(env, p, sb, who) {
   if (step === 'strategy' && sb.campaign !== undefined) {
     const cid = kitSlug(sb.campaign || ''); const kit = (await brandKit(env, p.ns)) || {};
     if (cid && !(kit.campaigns || []).some(c => c.id === cid)) return { error: 'unknown_campaign', status: 400, detail: 'The kit has no campaign "' + cid + '".' };
+    // S29 (PR2): keeping it standalone is a decision even when no campaign was set before
+    if (!cid && !(p.campaign || '')) await stBriefPatch(env, p.id, b => { b.campaignConfirmed = true; b.campaignMode = 'standalone'; return b; });
     if (cid !== (p.campaign || '')) { await env.MIND_DB.prepare('UPDATE studio_projects SET campaign=?, revision=revision+1, updated=? WHERE id=?').bind(cid, Date.now(), p.id).run(); await stBriefPatch(env, p.id, b => { b.campaignConfirmed = true; const i0 = b.intel || {}; if (i0.reviewed) i0.reviewed.campaign = cid; b.intel = i0; }); changed.push('campaign'); }
   }
   if (obj) { await stIntelLog(env, p.ns, p.id, 'objective', obj.id, obj.kind + ': ' + obj.title, who); await stIntelLog(env, p.ns, p.id, 'message', msg.id, msg.primary, who); }
@@ -10302,7 +10393,7 @@ async function stDirectStage(env, job, p, log) {
   const modeText = mode === 'alternatives' ? '\n\nALTERNATIVES. The team already has these directions:\n' + standing.map(d => '- ' + dirLine(d)).join('\n') + '\nPropose ' + n + ' new direction' + (n === 1 ? '' : 's') + ' that differ from every one of them in the argument AND in the medium.'
     : mode === 'refine' ? '\n\nREFINE this direction as the team asks, keeping everything they did not ask to change:\n' + dirLine(named[0]) + '\nTEAM: ' + (stStr(inp.instruction, 800) || 'make it stronger and more specific') + '\nAnswer with exactly one direction: the refined one.'
     : mode === 'merge' ? '\n\nMERGE these directions into one that keeps the strongest of each' + (Array.isArray(inp.parts) && inp.parts.length ? ', taking exactly: ' + inp.parts.slice(0, 8).map(x => (x && x.part ? stStr(x.part, 30) : '') + ' from "' + stStr((named.find(d => d.id === (x && x.id)) || {}).title || '?', 60) + '"').join('; ') : '') + ':\n' + named.map(d => '- ' + dirLine(d)).join('\n') + (inp.instruction ? '\nTEAM: ' + stStr(inp.instruction, 600) : '') + '\nAnswer with exactly one direction: the merged one.' : '';
-  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + (guided ? stAnalysisText(p) + ((p.brief || {}).topics || []).map((t, i) => (i ? ', ' : '\nTOPICS IN PLAY: ') + stStr(t, 80)).join('') : '') + (inp.instruction && mode === 'fresh' ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1200) : '')
+  const user = 'BRIEF:\n' + ['objective', 'audience', 'message', 'deliverables'].map(k => k + ': ' + ((p.brief || {})[k] || '(not given)')).join('\n') + stStrategyText(p) + stAnalysisText(p) + (guided ? ((p.brief || {}).topics || []).map((t, i) => (i ? ', ' : '\nTOPICS IN PLAY: ') + stStr(t, 80)).join('') : '')   /* S29 (PR10): classic directions read the brief analysis too */ + (inp.instruction && mode === 'fresh' ? '\n\nINSTRUCTION: ' + stStr(inp.instruction, 1200) : '')
     + '\n\nLEDGER (' + led.claims.length + ' claims):\n' + (led.claims.map(c => '[' + c.id + '] ' + c.text + (c.value != null ? ' {' + c.value + ' ' + c.unit + (c.period ? ', ' + c.period : '') + '}' : '') + (c.quote ? ' (quotation' + (c.who ? ', ' + c.who : '') + ')' : '') + (c.verified === false ? ' [UNVERIFIED]' : '')).join('\n') || '(no source yet: directions may not use figures)')
     + cc.refs.text + cc.mem.text + cc.identityText + modeText
     + '\n\nGive ' + n + ' direction' + (n === 1 ? '' : 's') + '.';
@@ -10345,8 +10436,9 @@ async function stDirectStage(env, job, p, log) {
   let replanned = 0, replanWhy = '', model2 = '';
   if ((similar || narrow || lookClose.length) && inp.replan !== false) {
     // one bounded replanning round, like the concepts stage: the look-alikes (or the last direction of a one-medium set) go back with the measure
-    const lookDup = lookClose.map(x => dirs.find(d => d.title === x.b)).filter((d, i, arr) => d && arr.indexOf(d) === i);
-    lookDup.forEach(d => { if (!d.similar) d.similar = (lookClose.find(x => x.b === d.title) || {}).a; });
+    // S29 (PR8): a look-alike is named by its place in the set, never by its title (two directions may share one)
+    const lookDup = lookClose.map(x => dirs[x.ib]).filter((d, i, arr) => d && arr.indexOf(d) === i);
+    lookDup.forEach(d => { if (!d.similar) d.similar = (lookClose.find(x => dirs[x.ib] === d) || {}).a; });
     const dup = similar || lookDup.length ? dirs.filter(d => d.similar) : [dirs[dirs.length - 1]];
     if (!similar && lookDup.length) similar = lookDup.length;
     const stand = dirs.filter(d => dup.indexOf(d) < 0);
@@ -10356,14 +10448,18 @@ async function stDirectStage(env, job, p, log) {
       const again = await stClaude(env, { role: 'creative', system: sys, user: user + '\n\nREPLAN. ' + (lookClose.length ? 'These would look the same on the page - the same layout with a different background: ' + lookClose.map(x => '"' + x.b + '" draws like "' + x.a + '" (same ' + x.same.join(', ') + ')').join('; ') + '. Replace them with directions whose composition differs: where the words sit, what the imagery is and how large the type is.' : '') + (lookClose.length ? '' : similar ? 'Of the directions you proposed, these argue the same thing in different words or share a medium with a near idea: ' + dup.map(d => '"' + d.title + '" resembles "' + d.similar + '"').join('; ') + '.' : 'Every direction you proposed is ' + mediumWord(dirs) + ': the set differs in words, not in what is drawn.') + ' The others stand: ' + stand.map(d => '"' + d.title + '" (' + d.message + '; ' + (d.medium || 'medium unstated') + ')').join(', ') + '. Propose ' + dup.length + ' replacement direction' + (dup.length === 1 ? '' : 's') + ' that differ from every standing one in the argument AND in the medium' + (narrow && !similar ? ' (not ' + (mediaOf(dirs).length > 1 ? famOf(dirs[0].medium) : dirs[0].medium) + ')' : '') + '. Answer with the same JSON shape, directions holding only the replacements.', maxTok: 7000, timeoutMs: 170000, log, phaseLabel: 'Replacing a look-alike direction', phaseStep: 'model', phaseCounts: { completed: 2, total: 4 } });
       const j2 = relJson(again.text); model2 = again.model;
       if (j2 && Array.isArray(j2.directions) && j2.directions.length) {
-        const fresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model));
-        dirs = stand.concat(fresh).slice(0, n); replanned = fresh.length; similar = measure(dirs); narrow = dirs.length >= 3 && famsOf(dirs).length <= 1 && !!dirs[0].medium;
+        // S29 (PR8): a replacement that brings back a standing direction (or repeats another) is not filed twice
+        //     the look-alike it was meant to replace stands instead, marked
+        const tkey = d => String(d.title || '').trim().toLowerCase(); const seenT = new Set(stand.map(tkey));
+        const rawFresh = j2.directions.slice(0, dup.length).map(d => norm(d, again.model)); const fresh = []; let newOnes = 0;
+        dup.forEach((old, jx) => { const f = rawFresh[jx]; const k = f && tkey(f); if (f && k && !seenT.has(k)) { seenT.add(k); fresh.push(f); newOnes++; } else { seenT.add(tkey(old)); old.replanFailed = true; fresh.push(old); } });
+        dirs = stand.concat(fresh).slice(0, n); replanned = newOnes; similar = measure(dirs); narrow = dirs.length >= 3 && famsOf(dirs).length <= 1 && !!dirs[0].medium;
         dirs.filter(d => d.similar).forEach(d => { d.replanFailed = true; });
       }
     } catch (e) { await log('info', 'replanning not possible: ' + String((e && e.message) || e).slice(0, 120) + '; the look-alike is marked, not hidden'); }
   }
   const diversity = stDiversity(dirs); const compDiv = stCompositionDiversity(dirs);
-  compDiv.pairs.filter(x => x.close).forEach(x => { const d = dirs.find(y => y.title === x.b); if (d) d.lookalike = x.a; });
+  compDiv.pairs.filter(x => x.close).forEach(x => { const d = dirs[x.ib]; if (d && d !== dirs[x.ia]) d.lookalike = x.a; });
   if (compDiv.score != null) await log('info', 'composition diversity ' + compDiv.score + ' (argument ' + diversity.score + ')' + (compDiv.pairs.some(x => x.close) ? '; would look alike on the page: ' + compDiv.pairs.filter(x => x.close).map(x => '"' + x.a + '" ~ "' + x.b + '" (' + x.same.join(', ') + ')').join('; ') : ''));
   if (log.phase) await log.phase('filing', 'Filing ' + dirs.length + ' direction' + (dirs.length === 1 ? '' : 's'), { step: 'filing', completed: 4, total: 4 });
   for (const d of dirs) { const id = stId('d'); ids.push(id); rows.push(env.MIND_DB.prepare('INSERT INTO studio_directions(id,project,data,chosen,who,created) VALUES(?,?,?,?,?,?)').bind(id, p.id, jsonFit(d, 12000), 0, 'studio', Date.now())); }
@@ -10598,7 +10694,11 @@ async function stCopyStage(env, job, p, log) {
   // S17: in a guided project the copy step writes the words and the visual narrative only; the production mode (editable, or the
   // whole piece painted by the image model) is chosen afterwards in Design, so nothing is rendered or painted here
   const guided = stWfOn(p);
-  const finished = deliverable !== 'copy' && (inp.creationMode === 'finished' || inp.creationMode === 'editable' ? inp.creationMode === 'finished' : !guided && (p.brief || {}).creationMode === 'finished') && inp.imagery !== 'none';
+  const wantsFinished = deliverable !== 'copy' && (inp.creationMode === 'finished' || inp.creationMode === 'editable' ? inp.creationMode === 'finished' : !guided && (p.brief || {}).creationMode === 'finished');
+  // S29 (PR6): a finished creative is a painted image; with no imagery it cannot be made, and it is never swapped for an editable
+  // composition in silence: the stage stops before any call and says what to change
+  if (wantsFinished && (inp.imagery === 'none' || (p.brief || {}).imagery === 'none')) throw new Error('finished_needs_imagery: A finished creative is painted as one image, so it cannot be made with "No imagery". Choose Editable for type-only work, or allow imagery (not retried)');
+  const finished = wantsFinished;
   // the brief may say the imagery waits for the copy: the words and layouts are made now, the renders when Design asks (render:true forces them)
   const afterCopy = guided || (p.brief || {}).imageryTiming === 'after_copy';
   let markFiles = null;
@@ -10802,7 +10902,11 @@ function stReviewRow(r) { return { id: r.id, share: r.share, asset: r.asset, ver
 async function stReviewable(env, p, a) {
   const v = await stCurrent(env, a); if (!v) return { ok: false, why: 'no version yet' };
   if (v.mode === 'copy') return { ok: true, v, kind: 'copy' };
-  if (!(v.layout && Array.isArray(v.layout.layers)) && v.image) return { ok: true, v, kind: 'image', key: v.image.key };   // a flattened import is shown as its image
+  if (!(v.layout && Array.isArray(v.layout.layers)) && v.image) {   // a flattened import is shown as its image - only one this project owns (S29, SEC-2)
+    const k = String(v.image.key || '');
+    if (k.indexOf('studio/' + p.id + '/') === 0 || /^packs\/[A-Za-z0-9_-]+\/\d+\.png$/.test(k)) return { ok: true, v, kind: 'image', key: k };
+    return { ok: false, v, why: 'its image is not a file this project owns' };
+  }
   const rd = await stReadiness(env, p, a, v);
   if (rd.technical !== 'passed' || !rd.validation || !rd.validation.exportKey) return { ok: false, v, why: 'the current version is ' + (rd.technical === 'failed' ? 'failing its technical validation' : 'not validated') + ': a client only sees a composition that passed, exactly as it will be delivered' };
   return { ok: true, v, kind: 'composition', key: rd.validation.exportKey, rd };
@@ -11135,6 +11239,8 @@ async function stRemember(env, p, body, who) {
   if (rule.length < 8) return { error: 'rule_required', status: 400, detail: 'The wording of the rule is needed.' };
   const campaign = scope === 'campaign' ? (stStr(body.campaign, 40) || p.campaign) : '';
   if (scope === 'campaign' && !campaign) return { error: 'no_campaign', status: 400, detail: 'This project has no campaign; save it as a client rule or not at all.' };
+  // S29 (PR9): a campaign preference belongs to this project's own campaign, never another or one the kit does not hold
+  if (scope === 'campaign' && campaign !== (p.campaign || '')) return { error: 'other_campaign', status: 400, detail: 'A campaign preference from this project can only be saved for its own campaign (' + (p.campaign || 'none') + ').' };
   const fix = await engineAddFix(env, { ns: p.ns, task: ['copy', 'tiles', 'any'].indexOf(body.task) >= 0 ? body.task : 'copy', scope: 'client', wrong: '', right: rule, why: stStr(body.why || body.instruction, 300) || 'a standing preference from the Studio', source: 'studio:' + p.id + (campaign ? ':campaign:' + campaign : ''), rule, exemplar: '' }, who);
   await stEvent(env, p.id, 'remembered', { eid, text: (scope === 'campaign' ? 'Saved as a campaign preference for ' + campaign : 'Saved as a lasting ' + p.ns.toUpperCase() + ' rule') + ': "' + rule + '". It shapes every later build' + (scope === 'campaign' ? ' on this campaign' : ' for this client') + ' and can be switched off in the Learned panel.', fix: fix.id, scope, campaign }, who);
   return { ok: true, saved: true, eid, fix: fix.id, scope, campaign };
@@ -13160,6 +13266,8 @@ async function stRenderJob(env, job, pair, done, fail) {
 // director's visual assessment (an opinion with a verdict), and a person's approval. Evidence is tied to the exact
 // composition: the version, the words actually displayed, the layout, the imagery, the mark files and their versions,
 // the fonts asked for and the output size (stCompSig). Anything older or different reads as stale, never as passed.
+/** The case change the renderer applies before it measures (docs/studio-render.js applyCase), so the judge counts what it counted. */
+function stApplyCase(t, l) { const c = l.case || (l.emphasis === 'caps' ? 'upper' : ''); if (c === 'upper') return t.toUpperCase(); if (c === 'lower') return t.toLowerCase(); if (c === 'title') return t.toLowerCase().replace(/(^|[\s\-"(\u2018\u201c])([a-z])/g, (m, a, b) => a + b.toUpperCase()); return t; }
 function stDisplayedText(L, l, copy) {
   if (!l || l.type !== 'text' || l.hidden) return '';
   if (l.role && Array.isArray(L && L.baked) && L.baked.indexOf(l.role) >= 0) return '';
@@ -13197,14 +13305,19 @@ const ST_VALIDATION_CONTRACT = 2;
  * browser gave none); otherwise the browser's finer measure stands. Rotated, faded or cropped marks and non-hex text colours
  * are left to the browser and said so (server: 'skipped'). */
 function stServerText(img, box, l) {
-  const tc = stHexRgb(l.color || '#FFFFFF'); if (!img || !tc || tc[3] < 0.95 || l.rotate) return null;
+  // S29 (SEC-4): rotated words are read over the axis-aligned bounds of their turned box, and words with some transparency
+  // (down to 60% opaque) by a tolerance that widens with it; only fainter words are left to the browser's figure
+  const tc = stHexRgb(l.color || '#FFFFFF'); if (!img || !tc || tc[3] < 0.6) return null;
+  const rot = Number(l.rotate) || 0;
+  if (rot) { const a = Math.abs(rot) * Math.PI / 180, cx = box.x + box.w / 2, cy = box.y + box.h / 2; const hw = (Math.abs(Math.cos(a)) * box.w + Math.abs(Math.sin(a)) * box.h) / 2, hh = (Math.abs(Math.sin(a)) * box.w + Math.abs(Math.cos(a)) * box.h) / 2; box = { x: cx - hw, y: cy - hh, w: 2 * hw, h: 2 * hh }; }
+  const tol = 60 + Math.round((1 - tc[3]) * 300);
   const W = img.W, H = img.H; const x0 = Math.max(0, Math.floor(box.x)), y0 = Math.max(0, Math.floor(box.y)), x1 = Math.min(W, Math.ceil(box.x + box.w)), y1 = Math.min(H, Math.ceil(box.y + box.h));
   if (x1 - x0 < 4 || y1 - y0 < 4) return null;
   const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 30000)));
   const lt = stRelLum(tc); const far = []; const all = []; let n = 0, near = 0;
   for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
     const q = img.at(y * W + x); const d = Math.abs(q[0] - tc[0]) + Math.abs(q[1] - tc[1]) + Math.abs(q[2] - tc[2]); const L = stRelLum(q); n++; all.push(L);
-    if (d < 60) near++; else far.push({ d, L });
+    if (d < tol) near++; else far.push({ d, L });
   }
   if (n < 40) return null;
   if (far.length < n * 0.1) { all.sort((a, b) => a - b); const c = stContrast(lt, all[all.length >> 1]); return { contrast: c, contrastMin: c, nearShare: near / n, swallowed: true }; }
@@ -13258,7 +13371,7 @@ function stValidationJudge(a, v, rep, server) {
     if (Math.abs(Number(rb.ax) - b.ax) > ST_TOL_PX || Math.abs(Number(rb.ay) - b.ay) > ST_TOL_PX || Math.abs(Number(rb.aw) - b.aw) > ST_TOL_PX) problems.push('layer ' + id + ' was measured at another position or width: the report belongs to another layout');
     if (l.type === 'text') {
       const px = l.size / 100 * W;
-      if (Number(rb.chars) !== text.length) problems.push('the ' + (l.role || 'text') + ' was measured with other words (' + rb.chars + ' characters; this version shows ' + text.length + ')');
+      if (Number(rb.chars) !== text.length && Number(rb.chars) !== stApplyCase(text, l).length) problems.push('the ' + (l.role || 'text') + ' was measured with other words (' + rb.chars + ' characters; this version shows ' + text.length + ')');   // S29 (FS5): the renderer counts after its case change (a ligature upper-cases to two letters)
       if (!num(rb.px) || Math.abs(rb.px - px) > 0.6) problems.push('the ' + (l.role || 'text') + ' was measured at another type size');
       const lines = Math.max(1, Math.round(Number(rb.lines) || 0));
       // even a very narrow face needs this many lines; fewer means the measurement is not of this text at this size
@@ -13858,6 +13971,7 @@ function axGuestRefusal(kind, detail) {
     guest_scope: 'A guest link is for testing the Creative Studio; it changes nothing else in AXIOM. Ask the agency for a staff key if you need to.' };
   return { status: 403, body: { ok: false, error: kind, detail: detail || words[kind] } };
 }
+const AX_CONFIDENTIAL_RX = /^\/(studio|brand|mind|engine|content|release|perf)\//;
 async function axGuestGuard(env, req, path, url) {
   const reads = req.method === 'GET' || req.method === 'HEAD';
   let body = {}; if (!reads) { try { const j = await req.clone().json(); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch (e) {} }
@@ -14641,7 +14755,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stServerMark, stServerText, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -14713,7 +14827,8 @@ const AXIOM_WORKER = {
         const fk = 'af_' + (req.headers.get('CF-Connecting-IP') || 'unknown').slice(0, 60);
         const fails = Number(await kvGet(env.AXIOM_KV, fk) || 0);
         if (fails >= 12) return jsonResp({ error: 'too_many_attempts', detail: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 429);
-        if (!auth.ok) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
+        // S29: a key that is on the roster but has ended (an old sign-in link) is not a guess, so it does not count toward the lockout
+        if (!auth.ok && !auth.expired) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
         else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
       }
       if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: auth.publicEnded ? 'Open access to AXIOM has ended. Ask whoever sent the link for a sign-in link.' : 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
@@ -14722,17 +14837,24 @@ const AXIOM_WORKER = {
       // S28: open access reads; it does not write creative work or brand memory, where every change must belong to a person.
       // RC (S2): nor anything else - the Mind, chat, images, research, collection and every GET that acts are refused to a
       // request with no key too; STUDIO_PUBLIC_WRITE=1 is the only override, and it opens the Studio's own writes only
-      if (policy === 'full' && auth.public && !(/^\/(studio|brand|engine)\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') === '1')) return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
+      if (policy === 'full' && auth.public && !(/^\/studio\//.test(path) && String(env.STUDIO_PUBLIC_WRITE || '') === '1'))   /* S29 (SEC-6): the flag opens the Studio's own writes only, never /brand or /engine */ return jsonResp({ error: 'public_write_refused', detail: 'Open access is read-only. Sign in with your own link to make changes, so the work is yours and attributable.' }, 403);
+      // S29 (SEC-5): open access never reads a client's confidential work - its projects, briefs, brand kit and history, the Mind,
+      // the engine's rules and outcomes, content sets, release packs, campaign performance or testers' reports - whatever role
+      // AXIOM_PUBLIC grants; those need a person's own link. STUDIO_PUBLIC_READ=1 is the deliberate override.
+      // (STUDIO_PUBLIC_WRITE=1, which opens the Studio's own writes on purpose, opens its reads too - and nothing beyond /studio/)
+      if (auth.public && AX_CONFIDENTIAL_RX.test(path) && String(env.STUDIO_PUBLIC_READ || '') !== '1' && !(String(env.STUDIO_PUBLIC_WRITE || '') === '1' && /^\/studio\//.test(path))) return jsonResp({ error: 'sign_in_required', detail: 'Client work is not part of open access. Sign in with your own link to see it.' }, 401);
     }
     { const sk = req.headers.get('X-Axiom-Key') || ''; auth.pid = sk && auth.ok && !auth.public ? (auth.guest ? 'g' : '') + await axPersonId(sk) : (auth.public ? 'public' : auth.dev ? 'dev' : ''); }
     // S28, p44: a guest (a tester's sign-in link) writes only test work: test projects and the test namespaces. One guard, before
     // any route runs, reading the client each route writes to as that route does (axGuestGuard); reads are unchanged
-    if (auth.guest && policy === 'full') {
+    if ((auth.guest || auth.public) && policy === 'full') {   // S29 (SEC-6): open access writing the Studio (STUDIO_PUBLIC_WRITE=1) is held to the guest's walls too
       const g = await axGuestGuard(env, req, path, reqUrl); if (g) return jsonResp(g.body, g.status);
       // the backstop: in a guest's Studio write, any live project the route still resolves reads as not there, and the request
       // is answered guest_live_project (the request wrapper reads the gate)
       if (path.startsWith('/studio/') && !AX_GUEST_STUDIO_FREE[path] && String(env.STUDIO_GUEST_LIVE || '') !== '1') { const gate = { refused: '' }; AX_GUEST_GATES.set(req, gate); env = Object.create(env, { __guestGate: { value: gate } }); }
     }
+    // S29 (FS1): who this key is, for the page to show only what the key may do (window.AX_ROLE); nothing else is said
+    if (path === '/auth/me' && req.method === 'GET') return jsonResp({ ok: true, role: auth.role === 'full' ? 'full' : 'read', guest: !!auth.guest, open: !!auth.public });
 
     if (path === '/studio/versions' && req.method === 'GET') {
       if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
@@ -15985,7 +16107,7 @@ const AXIOM_WORKER = {
         const qf = k => reqUrl.searchParams.get(k) || '';
         const conflict = (row, want) => jsonResp({ ok: false, error: 'conflict', detail: 'This ' + (row.asset ? 'asset' : 'project') + ' changed since you read it (revision ' + row.revision + ', you sent ' + want + '). Reload and apply your change again; nothing was written.', revision: row.revision }, 409);
         if (req.method === 'GET') {
-          if (path === '/studio/status') return jsonResp(await stStatus(env));
+          if (path === '/studio/status') return jsonResp(Object.assign(await stStatus(env), { role: auth.role, guest: !!auth.guest, you: auth.pid ? await stPersonUsage(env, auth.pid).catch(() => null) : null }));   // S29 (FS1): the page learns its role from the worker
           if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit'), tests: qf('tests') }));
           if (path === '/studio/get') {
             const id = String(qf('id')).slice(0, 48);
@@ -16064,8 +16186,8 @@ const AXIOM_WORKER = {
           // p44: a guest never gets a project it cannot work in - its projects are live only when both STUDIO_GUEST_TEST=0 and
           // STUDIO_GUEST_LIVE=1 say so (the guard keeps a guest out of live projects otherwise)
           const testP = sb.test === true || stTestNs(env, ns) || (!!auth.guest && !(String(env.STUDIO_GUEST_TEST || '1') === '0' && String(env.STUDIO_GUEST_LIVE || '') === '1'));
-          await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated,allowance,test) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now, alId || null, testP ? 1 : 0).run();
+          await env.MIND_DB.prepare('INSERT INTO studio_projects(id,ns,campaign,title,brief,status,owner,revision,legacy_kind,legacy_id,idem,archived,created,updated,allowance,test,creator_pid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(id, ns, stStr(sb.campaign, 40), stStr(sb.title, 140) || 'Untitled project', JSON.stringify(stBriefNorm(sb.brief)), 'brief', who, 1, null, null, idem, 0, now, now, alId || null, testP ? 1 : 0, auth.pid || '').run();
           await stEvent(env, id, 'created', { text: 'Project created for ' + ns + (sb.campaign ? ', campaign ' + stStr(sb.campaign, 40) : '') + '.' + (testP ? ' A test project: nothing it decides is filed in the client\'s memory.' : '') }, who);
           return jsonResp(Object.assign({ ok: true, existing: false }, await stGet(env, id, { light: true })));
         }
@@ -16084,7 +16206,9 @@ const AXIOM_WORKER = {
         // S28: clear a client's test projects away in one go (archived, never deleted), each named in the answer and on its thread
         if (path === '/studio/project/archive-tests') {
           const ns = relNs(sb.ns); if (!sb.ns) return jsonResp({ error: 'missing_ns' }, 400);
-          const rows = (await env.MIND_DB.prepare("SELECT id, title FROM studio_projects WHERE ns=? AND COALESCE(test,0)=1 AND COALESCE(archived,0)=0 ORDER BY created").bind(ns).all()).results || [];
+          // S29 (SEC-7): a guest archives only the test projects it made itself; the agency's key archives the namespace's test work
+          const mine = auth.guest || auth.public ? ' AND creator_pid=?' : '';
+          const rows = (await env.MIND_DB.prepare("SELECT id, title FROM studio_projects WHERE ns=? AND COALESCE(test,0)=1 AND COALESCE(archived,0)=0" + mine + " ORDER BY created").bind(...(auth.guest || auth.public ? [ns, auth.pid || '-'] : [ns])).all()).results || [];
           for (const r of rows) { await env.MIND_DB.prepare('UPDATE studio_projects SET archived=1, revision=revision+1, updated=? WHERE id=? AND COALESCE(test,0)=1').bind(now, r.id).run(); await stEvent(env, r.id, 'archived', { text: 'Archived with the other test projects of ' + ns + '.' }, who); }
           return jsonResp({ ok: true, ns, archived: rows.map(r => ({ id: r.id, title: r.title })) });
         }
@@ -16395,6 +16519,7 @@ const AXIOM_WORKER = {
         }
         if (path === '/studio/asset') {
           const p = await stProject(env, sb.project); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          { const ip = await stUserImageProblem(env, p, sb.image, sb.layout); if (ip) return jsonResp(ip, 400); }
           // S24: a new asset is held to the same mark rule as an edit: the policy, and a source that is this client's own file
           if (sb.layout && typeof sb.layout === 'object' && Array.isArray(sb.layout.layers)) { const marks = sb.layout.layers.filter(l => l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark')); if (marks.length) { const mp = await stMarkPolicyProblem(env, p, marks); if (mp) return jsonResp(Object.assign({ error: 'mark_policy' }, mp), 409); } }
           const id = stId('a');
@@ -16408,6 +16533,7 @@ const AXIOM_WORKER = {
         if (path === '/studio/version' || path === '/studio/lock') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The asset belongs to another project; nothing was written.' }, 403);
+          if (path === '/studio/version') { const ip = await stUserImageProblem(env, pair.project, sb.image, sb.layout); if (ip) return jsonResp(ip, 400); }
           // S19: a logical edit carries an op id (the browser keeps it across retries); a version already written for it is
           // answered as it stands, so a save that committed on the server but timed out in the browser is never written twice
           const opId = path === '/studio/version' && sb.op ? stClean(sb.op, 40) : '';
@@ -16530,6 +16656,8 @@ const AXIOM_WORKER = {
           if (!part || !decision) return jsonResp({ error: 'bad_decision', detail: 'part copy|design, decision approve|reject|withdraw' }, 400);
           if (decision !== 'withdraw' && !String(sb.reason || '').trim()) return jsonResp({ error: 'reason_required', detail: 'Record why: approval is client acceptance of this exact content, never performance.' }, 400);
           const cur = await stCurrent(env, pair.asset); if (!cur) return jsonResp({ error: 'no_version' }, 400);
+          // S29 (FS2): a decision names the version the person looked at; a newer one since is never decided on their behalf
+          if (sb.version && stClean(sb.version, 24) !== cur.id) return jsonResp({ error: 'version_moved', detail: 'This piece has a newer version than the one you decided on. Look at the current version, then decide again. Nothing was recorded.', current: cur.id }, 409);
           if (part === 'design' && decision === 'approve' && cur.layout && Array.isArray(cur.layout.incomplete) && cur.layout.incomplete.length) return jsonResp({ error: 'incomplete', detail: 'The composition is incomplete: ' + cur.layout.incomplete.map(i => i.text).join('; ') + '. Upload the mark and re-lay out, then approve.', incomplete: cur.layout.incomplete }, 409);
           if (/^(ai|model|inspection|studio)$/i.test(String(who))) return jsonResp({ error: 'human_only', detail: 'Approval is a person\'s decision; a model verdict never approves.' }, 403);
           let ackNote = '';

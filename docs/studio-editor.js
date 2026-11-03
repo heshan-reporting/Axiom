@@ -86,6 +86,10 @@
   function ContextToolbar({ sel, bbox, layout, ro, stageW: stageW0, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen, palette }) {
     const stageW = stageW0 || (layout && layout.stage && layout.stage.w) || 1080;
     const [pop, setPop] = useState('');
+    // S29 (UX2): the bar is measured against the stage it sits on and kept inside it (it starts at the selection's left edge and
+    // moves left as far as it must; it wraps when the stage is narrower than the bar)
+    const barRef = useRef(null);
+    useEffect(() => { const el = barRef.current; const par = el && el.offsetParent; if (!el || !par || !bbox) return; const P = par.clientWidth; const w = el.offsetWidth; const want = Math.max(0, Math.min(100, bbox.x)) / 100 * P; el.style.left = Math.max(0, Math.min(want, P - w)) + 'px'; });
     if (!sel.length || !bbox || ro) return null;
     const one = sel.length === 1 ? sel[0] : null; const pal = palette || (layout && layout.palette) || {};
     // above the selection, clear of its rotation handle; below it when the selection is at the top of the stage
@@ -97,7 +101,7 @@
     const fam = text ? (one.family || '') : '';
     const wordsLocked = text && COPY_ROLES.indexOf(one.role) >= 0 && locks && locks[one.role];
     const tb = (label, icon, fn, on, dis, title) => html`<button class=${'st-fbar-btn' + (on ? ' on' : '')} disabled=${!!dis} aria-pressed=${on ? true : undefined} title=${title || label} aria-label=${label} onClick=${fn}>${icon ? html`<${Icon} n=${icon} size=${15} />` : label}</button>`;
-    return html`<div class="st-fbar" role="toolbar" aria-label="Selection tools" style=${Object.assign({}, top, left)} onPointerDown=${e => e.stopPropagation()}>
+    return html`<div ref=${barRef} class="st-fbar" role="toolbar" aria-label="Selection tools" style=${Object.assign({}, top, left)} onPointerDown=${e => e.stopPropagation()}>
       ${mark ? html`<span class="st-fbar-note">${one.role}: placed from its file${one.rule && one.rule.mandatory ? ', held by the campaign rule' : ''}</span>` : null}
       ${textAll && !locked ? html`
         ${text ? html`<button class="st-fbar-font" onClick=${() => onFontOpen()} title=${'Font: ' + (fam || 'the brand font for this role')} aria-label=${'Font: ' + (fam || 'brand font')}>${fam || 'Brand font'}</button>` : null}

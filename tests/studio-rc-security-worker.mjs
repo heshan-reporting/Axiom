@@ -30,8 +30,10 @@ await S.t('S2: with AXIOM_PUBLIC=full an anonymous write is refused everywhere, 
       eq(r.body && r.body.error, 'public_write_refused', p);
     }
     eq(providers(w), 0, 'no refused request reached a provider');
-    const rd = await w.call('GET', '/studio/list?ns=mca', null, null);
+    const rd = await w.call('GET', '/allnews', null, null);
     eq(rd.status, 200, 'reading stays open');
+    // S29 (SEC-5): client work is not part of open access
+    eq((await w.call('GET', '/studio/list?ns=mca', null, null)).status, 401, 'client work needs a link');
     const withKey = await w.call('POST', '/mind/ingest', { namespace: 'cmm', title: 'with a key', text: 'material filed by a person with a key' }, 'full-key');
     ok(withKey.status !== 403 && withKey.status !== 401, 'a full key still writes: ' + withKey.status);
   } finally { w.restore(); }

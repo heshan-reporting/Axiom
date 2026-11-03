@@ -255,6 +255,11 @@ server on a fixed port in the 8766-8776 range and kills it at the end.
   question, background steps that never disable the person's own actions) and `studio-a11y-browser.mjs` (the enforcing accessibility gate). `png.mjs` builds whole PNGs; `pngForVersion`
   paints a readable ground under each text box so the worker's reading agrees with a stub report. `makeStudio` refuses a port
   already in use.
+- The fresh audit (`CREATIVE-STUDIO.md` s.55): `studio-s29-worker.mjs` (image addresses, review files, PNG bombs, the worker's own
+  reading, open access, guest archiving, campaign walls in memory and prompts, the campaign decision, finished mode, approvals by
+  version) and `studio-s29-browser.mjs` (roles from the worker, the header, the library's stages, the light appearance, the
+  selection toolbar, art direction, Fix layout off the stage, the review page on a phone). The fixture no longer injects
+  `AX_ROLE`: the page learns its role from `GET /auth/me`, as in production.
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,

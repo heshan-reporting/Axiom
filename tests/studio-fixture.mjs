@@ -171,7 +171,7 @@ export async function makeStudio(opts) {
     // S24: a harness's own guards attach here, before the page is loaded, so nothing it reports while loading is missed
     if (typeof o.onPage === 'function') await o.onPage(page);
     page.on('pageerror', e => { page.errors.push(String(e.message)); if (!o.quiet) console.log('  [pageerror] ' + String(e.stack || e.message).split('\n').slice(0, 3).join(' | ').slice(0, 400)); });
-    if (!o.keepStorage) await page.addInitScript(({ W, role, store }) => { if (!sessionStorage.getItem('__fx')) { sessionStorage.setItem('__fx', '1'); Object.keys(localStorage).filter(k => k.indexOf('ax_studio') === 0).forEach(k => localStorage.removeItem(k)); Object.keys(store || {}).forEach(k => localStorage.setItem(k, store[k])); } localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); if (role) window.AX_ROLE = role; }, { W, role: o.role, store: o.store });
+    if (!o.keepStorage) await page.addInitScript(({ W, role, store }) => { if (!sessionStorage.getItem('__fx')) { sessionStorage.setItem('__fx', '1'); Object.keys(localStorage).filter(k => k.indexOf('ax_studio') === 0).forEach(k => localStorage.removeItem(k)); Object.keys(store || {}).forEach(k => localStorage.setItem(k, store[k])); } localStorage.setItem('axiom_worker_url', W); localStorage.setItem('axiom_access_key', role === 'read' ? 'read-key' : 'full-key'); }, { W, role: o.role, store: o.store });   // S29 (FS1): no role is injected; the page learns it from the worker, as in production
     await page.route(/^https:\/\/(?!127\.0\.0\.1)[^/]+\//, async route => {
       const rq = route.request(); const u = rq.url();
       if (!u.startsWith(W)) return route.abort();

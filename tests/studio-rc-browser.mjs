@@ -85,7 +85,7 @@ await T.t('R1: a worker answering an older build is named in a banner; the match
   try {
     await page.waitForSelector(R + '.st-buildwarn', { timeout: 15000 });
     const t = await page.textContent(R + '.st-buildwarn');
-    ok(/studio-p38/.test(t) && /studio-p45 or later/.test(t), t);
+    ok(/studio-p38/.test(t) && /studio-p46 or later/.test(t), t);
   } finally { await page.ctxB.close(); fx.handler.fetch = orig; }
   const fresh = await fx.open();
   try { await fresh.waitForSelector(R + '.st-lib', { timeout: 15000 }); await fresh.waitForTimeout(800); eq(await fresh.$$eval(R + '.st-buildwarn', e => e.length), 0, 'no banner against this worker'); }

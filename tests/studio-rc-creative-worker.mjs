@@ -56,6 +56,9 @@ await S.t('C1: when the round brings back look-alikes again, they stand marked, 
     eq(x.sent.length, 2, 'still only one round');
     eq(x.g.directions.length, 3, 'three directions kept');
     ok(x.g.directions.some(d => d.lookalike), 'a look-alike is marked: ' + JSON.stringify(x.g.directions.map(d => [d.title, d.lookalike])));
+    // S29 (PR8): a replacement that brings back a standing direction is not filed twice, and nothing is "like" itself
+    const ts = x.g.directions.map(d => d.title); eq(new Set(ts).size, ts.length, 'titles are unique: ' + ts.join(', '));
+    ok(x.g.directions.every(d => d.lookalike !== d.title && d.similar !== d.title), 'no direction is marked as like itself: ' + JSON.stringify(x.g.directions.map(d => [d.title, d.lookalike, d.similar])));
   } finally { x.w.restore(); }
 });
 

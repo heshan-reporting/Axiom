@@ -178,18 +178,32 @@ def png(w, h, rgb):
 
 
 def ensure_synth(base, key):
-    """The synthetic client's kit: written only into an empty namespace or over this same synthetic kit, never a real one."""
+    """The synthetic client's kit: written only into an empty namespace or over this same synthetic kit, never a real one.
+    S29 (PM1): a kit already there (the test kit's seed) is kept - its campaigns, facts, rules, palette and logo stand - and the
+    demonstration's own campaign and facts are added beside them, because the kit route replaces any array it is sent."""
     k = http(base, key, 'GET', '/brand/kit?ns=' + SYNTH_NS)
     kit = k.get('kit') or k
     if kit and kit.get('name') and 'SYNTHETIC' not in str(kit.get('name')):
         raise Stop('namespace %s holds a kit named "%s", which is not the synthetic demo kit; nothing was written' % (SYNTH_NS, kit.get('name')))
-    http(base, key, 'POST', '/brand/kit', {'ns': SYNTH_NS, 'name': SYNTH_NAME, 'voice': 'Plain, warm and local. Invented for a demonstration.',
-                                           'palette': {'primary': '#1D4E89', 'secondary': '#F2B134', 'bg': '#F7F7F2', 'text': '#10161F'},
-                                           'campaigns': [{'id': 'latesail', 'name': 'Late sailing (synthetic)', 'logoPolicy': 'logo', 'identity': 'Navy ground, amber accent. Synthetic.'}],
-                                           'facts': [{'text': 'The new sailing leaves at 11.40pm', 'source': 'synthetic release', 'status': 'approved', 'campaign': 'latesail'},
-                                                     {'text': '2,300 commuters asked for a later sailing', 'source': 'synthetic release', 'status': 'approved', 'campaign': 'latesail'}],
-                                           'banned': [{'term': 'cheap', 'use': 'affordable', 'why': 'synthetic house style'}],
-                                           'logoB64': base64.b64encode(png(240, 80, (242, 177, 52))).decode(), 'logoMime': 'image/png'})
+    own_camp = {'id': 'latesail', 'name': 'Late sailing (synthetic)', 'logoPolicy': 'logo', 'identity': 'Navy ground, amber accent. Synthetic.'}
+    own_facts = [{'text': 'The new sailing leaves at 11.40pm', 'source': 'synthetic release', 'status': 'approved', 'campaign': 'latesail'},
+                 {'text': '2,300 commuters asked for a later sailing', 'source': 'synthetic release', 'status': 'approved', 'campaign': 'latesail'}]
+    own_banned = [{'term': 'cheap', 'use': 'affordable', 'why': 'synthetic house style'}]
+    camps = [c for c in (kit.get('campaigns') or []) if isinstance(c, dict)]
+    facts = [f for f in (kit.get('facts') or []) if isinstance(f, dict)]
+    banned = [b for b in (kit.get('banned') or []) if isinstance(b, dict)]
+    body = {'ns': SYNTH_NS, 'name': kit.get('name') or SYNTH_NAME,
+            'campaigns': camps + ([own_camp] if not any(c.get('id') == 'latesail' for c in camps) else []),
+            'facts': facts + [f for f in own_facts if not any(x.get('text') == f['text'] for x in facts)],
+            'banned': banned + [b for b in own_banned if not any(x.get('term') == b['term'] for x in banned)]}
+    if not kit.get('voice'):
+        body['voice'] = 'Plain, warm and local. Invented for a demonstration.'
+    if not (kit.get('palette') or {}).get('primary'):
+        body['palette'] = {'primary': '#1D4E89', 'secondary': '#F2B134', 'bg': '#F7F7F2', 'text': '#10161F'}
+    if not kit.get('logoV'):
+        body['logoB64'] = base64.b64encode(png(240, 80, (242, 177, 52))).decode()
+        body['logoMime'] = 'image/png'
+    http(base, key, 'POST', '/brand/kit', body)
 
 
 def add_refs(base, key, pid, refs, case_id):

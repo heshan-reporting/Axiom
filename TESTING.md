@@ -2,25 +2,27 @@
 
 This page is for the people running the team's test round of the AXIOM Creative Studio, and for the testers themselves. It
 says how the release goes live, who can do what, where to test, what to try, what costs money, what is known not to work yet,
-and how to report a problem. Release candidate: worker build `2026-11-07.studio-p45`, page release `?v=r29`. The findings and
-the evidence behind it are in `CREATIVE-STUDIO.md` s.54; the round's cases for people are Part B of
+and how to report a problem. Release candidate: worker build `2026-11-08.studio-p46`, page release `?v=r30`. The findings and
+the evidence behind it are in `CREATIVE-STUDIO.md` s.54 and s.55 (the fresh audit); the round's cases for people are Part B of
 `prompts/studio-rc-team-test.md`.
 
 ## The owner's release steps (in this order, from the Mac)
 
 1. `tools/deploy-worker.sh --dry-run`, then `tools/deploy-worker.sh`. It refuses a worker with no access key and fails unless the
    live worker answers the new deploy token.
-2. With `AXIOM_KEY` exported: `/studio/status` answers build `2026-11-07.studio-p45`, `testNs` names `synthdemo`, and `posture`
+2. With `AXIOM_KEY` exported: `/studio/status` answers build `2026-11-08.studio-p46`, `testNs` names `synthdemo`, and `posture`
    shows how the worker is opened (public mode, guard flags, roster and guest counts; never a key). The guard flags
    (`STUDIO_PUBLIC_WRITE`, `STUDIO_GUEST_BRAND`, `STUDIO_GUEST_LIVE`, `AXIOM_GUEST_WRITE`, `AXIOM_DEV_OPEN`) should all read false.
-3. Fast-forward merge the branch to `main`; check the page loads `?v=r29`. A page newer than its worker says so in a banner
+3. Fast-forward merge the branch to `main`; check the page loads `?v=r30`. A page newer than its worker says so in a banner
    ("The worker is older than this page") - if a tester sees it, the worker was not deployed.
 4. Public mode, if kept for the round (decisions D4 and D7): `AXIOM_PUBLIC=read` and `AXIOM_PUBLIC_UNTIL` set to the deploy date
-   plus 14 days. Open access never writes anything (every anonymous write and acting request answers `public_write_refused`).
+   plus 14 days. Open access never writes anything (every anonymous write and acting request answers `public_write_refused`),
+   and it does not show client work: the Studio, brand kits, the Mind, the Engine, the Content and Release desks and campaign
+   performance need a link (`401 sign_in_required`; `STUDIO_PUBLIC_READ=1` reopens them, which publishes client material).
 5. Seed the synthetic client: `python3 tools/studio-test-kit.py seed --key $AXIOM_KEY` (a dry run listing what it would write),
    then the same with `--apply`. Optionally one set per tester: `--tester "Name"`.
 6. Make each tester's link: `python3 tools/guest-link.py add "Name" --days 14` (read-only), `--full` only for named testers.
-7. The capped owner check, after the seed: `python3 tools/studio-smoke.py --key $AXIOM_KEY --cases synth --approve-calls 24
+7. The capped owner check, after the seed (it keeps the seeded kit and adds its own campaign to it): `python3 tools/studio-smoke.py --key $AXIOM_KEY --cases synth --approve-calls 24
    --approve-renders 0`. Read `smoke/index.html`.
 8. On the deployed page with a full key: open "TEST - parked at Review" and press Measure them here once. The worker now reads
    each measured PNG itself (about 0.1-0.2 s of CPU a tile); measurements that file are the live proof that the account's CPU
@@ -31,14 +33,14 @@ the evidence behind it are in `CREATIVE-STUDIO.md` s.54; the round's cases for p
 1. `npm run test:release` passes on the commit being tested (checks, every backend harness, every browser harness, the
    accessibility gate `studio-a11y-browser`), with providers mocked; a harness that skipped part of its work (an engine not
    installed) is listed as skipped, never passed. CI runs the same on every push in Chromium, Firefox and WebKit.
-2. No blocker or high finding open in `CREATIVE-STUDIO.md` s.54.
+2. No blocker or high finding open in `CREATIVE-STUDIO.md` s.54 and s.55.
 3. The release steps above are done; the scripted journeys below pass once by hand on the deployed page.
 
 ## Roles
 
 | Who | Key | Can | Cannot |
 |---|---|---|---|
-| Reviewer | guest link, read-only (the default) | open every stage, read projects, run Measure and Check, copy a problem report | create, change, approve or spend |
+| Reviewer | guest link, read-only (the default) | open every stage, read projects and the measurements a full key filed, copy a problem report | create, change, measure, approve or spend |
 | Tester | guest link with `--full` | create test projects, write, generate within their daily allowance, approve inside test projects, change the synthetic client's kit, send a problem report | change a live client's projects or memory by any route |
 | Agency | roster key | everything | - |
 

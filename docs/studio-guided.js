@@ -31,8 +31,10 @@
   const STEP_WORD = { not_started: 'Not started', in_progress: 'In progress', processing: 'Processing', needs_review: 'Needs review', complete: 'Complete', locked: 'Locked', error: 'Error', skipped: 'Skipped' };
   const STEP_LABEL = { brief: 'Brief', objectives: 'Objectives', strategy: 'Strategy', directions: 'Direction', copy: 'Copy', design: 'Design', review: 'Review' };
   // concept C: the seven stages the person moves between, over the worker's seven steps (Deliver has no worker step)
-  const PHASE_STEPS = [['Brief', ['brief']], ['Message', ['objectives', 'strategy']], ['Direction', ['directions']], ['Copy', ['copy']], ['Design', ['design']], ['Review', ['review']]];
+  const PHASE_STEPS = [['Brief', ['brief']], ['Message', ['objectives', 'strategy']], ['Direction', ['directions']], ['Copy', ['copy']], ['Design', ['design']], ['Review', ['review']], ['Deliver', ['export']]];   // S29 (UX11): the seven stages the header names
   const SUB_LABEL = { brief: 'Understanding', objectives: 'Objectives', strategy: 'Strategy' };
+  // the worker's workflow ends at Review; Deliver opens once Review is complete
+  const wfStep = (wf, id) => (wf.steps || {})[id] || (id === 'export' ? { state: ((wf.steps || {}).review || {}).state === 'complete' ? 'not_started' : 'locked' } : undefined);
   const STARTS = [
     ['brief', 'Paste a Brief', 'pen'], ['situation', 'Describe a Situation', 'chat'], ['article', 'Paste an Article', 'news'], ['url', 'Add a URL', 'link'],
     ['file', 'Upload Files', 'upload'], ['screenshot', 'Upload Screenshot', 'image'], ['campaign', 'Use Existing Campaign', 'flag'], ['axiom', 'Start With Axiom', 'sparkle'],
@@ -85,7 +87,8 @@
       <span class="st-locked-ic" aria-hidden="true"><${Icon} n="lock" size=${26} /></span>
       <h3>${STEP_LABEL[step]} is locked</h3>
       <p>${s.need || 'Complete the step before it to continue.'}</p>
-      ${unlock && onGo ? html`<button class="btn sm" onClick=${() => onGo(unlock)}>Go to ${STEP_LABEL[unlock]}</button>` : null}
+      ${!canWrite() ? html`<p class="ov-dim">This key is read-only: a teammate with a full key completes ${unlock ? STEP_LABEL[unlock] : 'the step before it'}. You can look at it in the meantime.</p>` : null}
+      ${unlock && onGo ? html`<button class=${'btn sm' + (canWrite() ? '' : ' ghost')} onClick=${() => onGo(unlock)}>${canWrite() ? 'Go to ' : 'Look at '}${STEP_LABEL[unlock]}</button>` : null}
     </div>`;
   }
   /** The question a change to an earlier choice asks before anything is written: update the work built on it, keep it, or cancel. */
@@ -249,7 +252,7 @@
     const topicsBy = r => (it.topics || []).filter(t => t.relevance === r);
     const st = (wf && wf.steps && wf.steps.brief) || {}; const reviewed = st.state === 'complete';
     const cl = it.claims || []; const L = (label, list) => (list || []).length ? html`<div class="st-cmp-row"><span class="st-lbl">${label}</span><ul class="st-ul">${list.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></div>` : null;
-    const detect = (c.id && c.id !== p.campaign) || (c.ambiguous && (c.candidates || []).length && !p.campaign);
+    const detect = (c.id && c.id !== p.campaign) || (c.ambiguous && (c.candidates || []).length && !p.campaign && !(p.brief || {}).campaignConfirmed);   // S29 (PR3): a decision taken closes the question
     return html`<div class="st-under" aria-label="Axiom Understanding">
       <div class="st-under-head"><div><span class="st-eyebrow-n">Axiom Understanding</span><h3>${it.summary || 'What Axiom read in the material'}</h3></div>
         <div class="st-under-chips"><${Chip}>${INPUT_WORD[(it.input || {}).type] || 'Material'}</${Chip}>${u.urgency ? html`<${Chip} kind=${u.urgency.v === 'critical' || u.urgency.v === 'high' ? 'warn' : ''}>urgency ${u.urgency.v}</${Chip}>` : null}<${Chip} kind=${sit.respond === 'no' ? 'bad' : sit.respond === 'monitor' ? 'warn' : 'ok'}>${sit.respond === 'no' ? 'recommends not responding' : sit.respond === 'monitor' ? 'monitor' : 'respond'}</${Chip}><span class="ov-dim">${(it.sources || [it.source]).length} source${(it.sources || [it.source]).length === 1 ? '' : 's'}, ${it.paragraphs} paragraphs</span></div></div>
@@ -343,6 +346,10 @@
     // the campaign Axiom matched is decided with the strategy: chosen here, written when the strategy is confirmed
     const [campPick, setCampPick] = useState(null);
     const campNow = campPick != null ? campPick : (p.campaign || '');
+    // S29 (PR2): an ambiguous reading leaves the campaign to a person; it is asked here again, before the paid directions
+    const kitCamps = ((kit && kit.campaigns) || []).filter(x => x && x.active !== false);
+    const undecided = !p.campaign && !(p.brief || {}).campaignConfirmed && (!!c.ambiguous || kitCamps.length > 1);
+    const candidates = ((c.candidates && c.candidates.length) ? c.candidates : kitCamps).filter(k => k && k.id && k.id !== c.id);
     const dirsReady = wf && wf.steps && wf.steps.directions && (wf.steps.directions.state === 'needs_review' || wf.steps.directions.state === 'complete');
     const recNo = (it.situation || {}).respond === 'no' || (noneS && noneS.recommended);
     return html`<div class="st-strategy-step">
@@ -352,12 +359,12 @@
         <span class="st-strat-top"><b>${STRAT_WORD[s.kind] || s.kind}</b>${s.recommended ? html`<${Chip} kind="ok">Axiom recommends</${Chip}>` : null}<${Chip} kind=${s.urgency === 'critical' || s.urgency === 'high' ? 'warn' : ''}>${s.urgency}</${Chip}></span>
         ${s.message ? html`<span class="st-strat-msg">${s.message}</span>` : null}
         <span class="st-strat-grid">${[['For', s.audience], ['Gains', s.benefit], ['Risk', s.risk], ['Where', (s.platforms || []).join(', ')], ['Format', s.format]].filter(x => x[1]).map(([l, v]) => html`<span key=${l}><span class="st-lbl">${l}</span>${v}</span>`)}</span></label>`)}</div>
-      ${c.id || p.campaign ? html`<div class="st-campdec" role="group" aria-label="Campaign"><span class="st-lbl">Campaign</span><span>${campNow ? html`Inside <b>${(((kit && kit.campaigns) || []).find(x => x.id === campNow) || {}).name || campNow}</b>` : 'Standalone'}${c.id && c.id !== campNow ? html` <span class="ov-dim">- Axiom matched ${c.name} (${Math.round((c.confidence || 0) * 100)}%)</span>` : null}${campPick != null && campPick !== (p.campaign || '') ? html` <${Chip} kind="warn">set when you confirm</${Chip}>` : null}</span>${!ro && c.id && c.id !== campNow ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => setCampPick(c.id)}>Use ${c.name}</button>` : null}${!ro && campNow ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => setCampPick('')}>Keep standalone</button>` : null}</div>` : null}
+      ${c.id || p.campaign || undecided ? html`<div class="st-campdec" role="group" aria-label="Campaign"><span class="st-lbl">Campaign</span><span>${undecided && campPick == null ? html`<b>Not chosen yet.</b> <span class="ov-dim">${c.question || (c.id ? 'Confirm the match or choose another.' : 'The kit has ' + kitCamps.length + ' campaigns and none is chosen.')} Directions wait for this choice.</span>` : campNow ? html`Inside <b>${(((kit && kit.campaigns) || []).find(x => x.id === campNow) || {}).name || campNow}</b>` : 'Standalone'}${c.id && c.id !== campNow ? html` <span class="ov-dim">- Axiom matched ${c.name} (${Math.round((c.confidence || 0) * 100)}%)</span>` : null}${campPick != null && campPick !== (p.campaign || '') ? html` <${Chip} kind="warn">set when you confirm</${Chip}>` : null}</span>${!ro && c.id && c.id !== campNow ? html`<button class="btn sm ghost" disabled=${!!busy} onClick=${() => setCampPick(c.id)}>Use ${c.name}</button>` : null}${!ro && undecided && campPick == null ? candidates.map(k => html`<button key=${k.id} class="btn sm ghost" disabled=${!!busy} onClick=${() => setCampPick(k.id)}>Use ${k.name || k.id}</button>`) : null}${!ro && (campNow || (undecided && campPick == null)) ? html`<button class="ov-link" disabled=${!!busy} onClick=${() => setCampPick('')}>Keep standalone</button>` : null}</div>` : null}
       <details class="st-cstrat"><summary><span class="st-lbl">Creative strategy (optional)</span> <span class="ov-dim">the problem, the insight and the campaign idea, as one paragraph the directions work within</span></summary>${StrategyPanel ? html`<${StrategyPanel} p=${p} onDraft=${onDraftStrategy} onSave=${onSaveStrategy} busy=${busy} />` : null}</details>
       ${job && (live || job.state === 'failed') ? html`<${ProcessingCard} job=${job} kind="direct" now=${now} durations=${durations} onRetry=${onRetry} />` : null}
       ${job && job.state === 'done' && dirsReady && st.state === 'complete' ? html`<div class="st-ready-card" role="status"><${Icon} n="check" size=${18} /><div><b>Creative Directions ready.</b> <span class="ov-dim">${(p.directions || []).filter(d => !d.archived && d.basis && wf && d.basis.strategy === (wf.basis || {}).strategy).length} built on this strategy.</span></div><button class="btn sm" onClick=${() => onGo('directions')}>View directions <${Icon} n="arrow" size=${14} /></button></div>` : null}
       ${!ro && !i0.noResponse ? html`<div class="st-stepbar sticky"><div><b>${same ? 'Strategy confirmed: ' + (STRAT_WORD[(S0 || {}).kind] || '') + '.' : S0 ? (STRAT_WORD[S0.kind] || S0.kind) + ' chosen' : 'Choose a response strategy'}</b><span class="ov-dim">${same ? 'Directions are built on the objective, the message and this strategy.' : 'Confirming opens Directions; generating them is one model call.'}</span></div>
-        <div class="st-stepbar-acts">${!same ? html`<button class="btn sm ghost" disabled=${!!busy || !S0} onClick=${() => onConfirm(Object.assign({ strategy: strat }, campPick != null ? { campaign: campPick } : {}), false)}>Confirm only</button>` : null}<button class="btn sm" disabled=${!!busy || !S0 || live} onClick=${() => same && campPick == null ? onConfirm(null, true) : onConfirm(Object.assign({ strategy: strat }, campPick != null ? { campaign: campPick } : {}), true)}><${Icon} n="sparkle" size=${14} /> ${same ? 'Generate creative directions' : 'Confirm and generate directions'} <span class="ov-dim">(1 model call)</span></button></div></div>` : null}
+        <div class="st-stepbar-acts">${!same ? html`<button class="btn sm ghost" disabled=${!!busy || !S0} onClick=${() => onConfirm(Object.assign({ strategy: strat }, campPick != null ? { campaign: campPick } : {}), false)}>Confirm only</button>` : null}<button class="btn sm" disabled=${!!busy || !S0 || live || (undecided && campPick == null)} title=${undecided && campPick == null ? 'Choose the campaign, or keep it standalone, first' : ''} onClick=${() => same && campPick == null ? onConfirm(null, true) : onConfirm(Object.assign({ strategy: strat }, campPick != null ? { campaign: campPick } : {}), true)}><${Icon} n="sparkle" size=${14} /> ${same ? 'Generate creative directions' : 'Confirm and generate directions'} <span class="ov-dim">(1 model call)</span></button></div></div>` : null}
     </div>`;
   }
 
@@ -533,7 +540,7 @@
       ${row('Strategy', sel.strategy && (STRAT_WORD[sel.strategy.kind] || sel.strategy.kind))}
       ${row('Direction', chosen && chosen.title)}
       ${row('Channels', (b.channels || []).map(chanLabel).join(', '))}
-      ${wf && wf.steps ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${PHASE_STEPS.map(([ph, ids]) => ids.length === 1 ? html`<li key=${ph} class=${(wf.steps[ids[0]] || {}).state}><span>${ph}</span><span class="ov-dim">${STEP_WORD[(wf.steps[ids[0]] || {}).state] || (wf.steps[ids[0]] || {}).state || ''}</span></li>`
+      ${wf && wf.steps ? html`<ol class="st-ctx-steps" aria-label="Where the project stands">${PHASE_STEPS.map(([ph, ids]) => ids.length === 1 ? html`<li key=${ph} class=${(wfStep(wf, ids[0]) || {}).state}><span>${ph}</span><span class="ov-dim">${STEP_WORD[(wfStep(wf, ids[0]) || {}).state] || (wfStep(wf, ids[0]) || {}).state || ''}</span></li>`
         : html`<li key=${ph} class="st-ctx-phase"><span>${ph}</span><ol class="st-ctx-sub">${ids.map(k => html`<li key=${k} class=${(wf.steps[k] || {}).state}><span>${SUB_LABEL[k]}</span><span class="ov-dim">${STEP_WORD[(wf.steps[k] || {}).state] || (wf.steps[k] || {}).state || ''}</span></li>`)}</ol></li>`)}</ol>` : null}
     </aside>`;
   }

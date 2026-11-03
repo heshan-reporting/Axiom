@@ -45,7 +45,7 @@ await T.t('a link without a key leaves the stored key alone; a malformed key is 
   await page.ctxB.close();
 });
 
-await T.t('a browser holding an expired sign-in key: the library says the link has ended; with open access on it simply opens', async () => {
+await T.t('a browser holding an expired sign-in key: the library says the link has ended; with open access on, client work still needs a live link', async () => {
   const saved = { g: fx.env.AXIOM_GUEST_KEYS, p: fx.env.AXIOM_PUBLIC, u: fx.env.AXIOM_PUBLIC_UNTIL };
   fx.env.AXIOM_GUEST_KEYS = JSON.stringify({ 'guest-old-00001': { n: 'Kai', r: 'full', until: '2020-01-01' } });
   delete fx.env.AXIOM_PUBLIC; delete fx.env.AXIOM_PUBLIC_UNTIL;
@@ -58,7 +58,8 @@ await T.t('a browser holding an expired sign-in key: the library says the link h
     ok(!/did not answer/.test(t1), 'not "the worker did not answer": it answered, and said why');
     fx.env.AXIOM_PUBLIC = 'read'; fx.env.AXIOM_PUBLIC_UNTIL = '2999-01-01';
     await page.click('#studio-root .st-lib-fail button');
-    await page.waitForFunction(() => !document.querySelector('#studio-root .st-lib-fail') && /Projects for/.test(document.querySelector('#studio-root').textContent), null, { timeout: 15000 });
+    // S29 (SEC-5): open access lets the old link read the open parts of AXIOM, but client work needs a live link of one's own
+    await page.waitForFunction(() => { const f = document.querySelector('#studio-root .st-lib-fail'); return f && /not part of open access/.test(f.textContent); }, null, { timeout: 15000 });
     await page.ctxB.close();
   } finally {
     if (saved.g === undefined) delete fx.env.AXIOM_GUEST_KEYS; else fx.env.AXIOM_GUEST_KEYS = saved.g;

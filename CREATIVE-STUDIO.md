@@ -3627,3 +3627,85 @@ Ready for the internal round once the owner has: deployed the worker (`tools/dep
 with its end date (D4, D7) or left it off, seeded the synthetic client (`tools/studio-test-kit.py seed --apply`), made each
 tester's link, and run the capped smoke check on the synthetic client only. Not ready for clients to sign in: a key cannot be
 limited to named clients (D2), so clients see work through review links only.
+
+## 55. S29 - a fresh six-role audit of the release candidate, and its fixes (build `2026-11-08.studio-p46`, page `?v=r30`)
+
+Asked for on 3 November 2026: "fresh full audit and then apply fixes. There are still UI errors there fix them too." Six role
+agents (QA, full-stack, UI/UX, security, product, project management) audited `efa309e` (build p45, page r29) with every provider
+mocked and reported 54 findings with evidence; each fix below was reproduced by a failing test first. On `efa309e` the new cases
+fail (`tests/studio-s29-worker.mjs` 0 of 16, `tests/studio-s29-browser.mjs` 0 of 7, the S29 line of
+`tests/studio-rc-creative-worker.mjs` and `tests/studio-rc-seed-worker.mjs` PM1); with the fixes they pass.
+
+### 55.1 Findings ledger
+
+| Id | Sev | Finding | Fix | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| SEC-1 | blocker | A version or asset could store an image `url` or a layer `src` outside the worker; the page fetched it with the person's key (a guest's test project could collect a staff key) | `stUserImageProblem`: an image key must be the project's own (or already on one of its versions), `image.conv` under the project, every URL and layer `src` one of the worker's own routes (`ST_OWN_URL_RX`), else `not_worker_url` / `image_not_owned`; the page fetches only through `AXUI.own()` (a single-slash path on the worker's origin) | `s29-worker` SEC-1; `s29-browser` FS1 + SEC-1 | fixed |
+| SEC-2 | high | A review link could serve any R2 object named on a flattened asset | `stReviewable` serves only the project's own folder (or a legacy pack tile key); asset writes refuse other keys | `s29-worker` SEC-2 | fixed |
+| SEC-3 | high | A PNG that inflates far past its header (a decompression bomb) was inflated whole | `stPngDecode` inflates into an exact buffer and cancels when the data exceeds or falls short of it | `s29-worker` SEC-3 (200 MB stated, under 40 MB used, under 3 s) | fixed |
+| SEC-4 | medium | The worker's own contrast reading skipped rotated or slightly transparent words | Opacity gate 0.6, the rotated box read as its bounds, the tolerance widened with transparency | `s29-worker` SEC-4 | fixed |
+| SEC-5 | high | `AXIOM_PUBLIC=read` published every client's Studio, brand, Mind and engine material | Keyless requests to `/studio/`, `/brand/`, `/mind/`, `/engine/`, `/content/`, `/release/`, `/perf/` answer `401 sign_in_required` (`AX_CONFIDENTIAL_RX`; `STUDIO_PUBLIC_READ=1` reopens them on purpose); the rest of AXIOM stays open | `s29-worker` SEC-5 | fixed |
+| SEC-6 | low | `STUDIO_PUBLIC_WRITE=1` opened `/brand` and `/engine` too, unguarded | It opens `/studio/` only (its reads and writes), and anonymous writes pass the guest guard (no live project, no client memory) | `s29-worker` SEC-6 | fixed |
+| SEC-7 | low | A guest could archive every test project of a client | `studio_projects.creator_pid`; a guest or public request archives only what it made | `s29-worker` SEC-7 | fixed |
+| FS1 | high | Nothing set `window.AX_ROLE` in production: a read key saw the full Studio (the harness injected it) | The page asks the worker (`GET /auth/me`; `/studio/status` carries `role`, `guest`); the fixture no longer injects a role | `s29-browser` FS1 | fixed |
+| FS2 | high | An approval was recorded on whatever version was current, not the one decided on | The page sends `version`; `/studio/approve` answers `409 version_moved` when it moved | `s29-worker` FS2 | fixed |
+| FS3 | high | A dropped answer to a job request could start a second paid job | The page retries with the same idempotency key and reuses it for the same request within ten minutes | (worker idempotency, `studio-worker`) | fixed |
+| FS4 | medium | A job stepped elsewhere finished, but its result appeared only on a manual reload | The poll re-reads the project when a job it watches ends | - | fixed |
+| FS5 | medium | A refused measurement was hidden; upper-cased words were judged by a different length | The judge accepts the displayed (cased) length (`stApplyCase`); `report_mismatch` is a notice with Reload | - | fixed |
+| FS6 | low | Deliver's "Missing" box always said no piece was ready | Reads the blocked reason of the step | - | fixed |
+| FS7 | low | `public_write_refused` was explained as the model declining | Explained as open access | `studio-explain-test` | fixed |
+| FS8 | low | A copy edit that timed out after committing wrote a duplicate version | Copy edits carry an operation id | - | fixed |
+| QA-1 / PM3 | high | A failed or slow copy save dropped the typed words on screen; leaving did not warn; a second edit dropped the first | The draft is kept per project in the browser until the server holds those words; leaving warns on a failed save | - | fixed |
+| QA-2 | medium | A read key tried to run queued jobs and showed an error | A read key steps nothing | `s29-browser` FS1 (no write from a read key) | fixed |
+| QA-3 | medium | Fix layout could not bring words dragged off the stage back | `repair()` brings a movable text block back inside the safe area (narrowed if wider), words untouched | `s29-browser` QA-3 | fixed |
+| QA-4 | medium | Analyse ran (paid) when part of the material could not be added | The Studio asks first; Cancel keeps the material to fix | - | fixed |
+| QA-5 | low | One Retry of several failed renders said everything was in place | The notice names the pieces still without imagery and offers Generate imagery for them; the Board says their render failed | - | fixed |
+| QA-6 | low | A typed edge distance could throw a layer far off the stage | Distances keep part of the layer on the stage | - | fixed |
+| QA-7 | low | Message read "not started" with one step done; "Version saved" with no versions; Back restored the wrong piece | In progress; "Saved"; history entries carry the asset | - | fixed |
+| PR1 | high | National voice-pack copy and guides filed without a platform were relabelled client-wide and reached HOOF prompts | The campaign from the pack tag is kept and scoped to the campaign | `s29-worker` PR1 | fixed |
+| PR2 | high | A guided project with no campaign decided reached paid directions | The strategy is confirmed with the campaign decision (`409 campaign_required` otherwise; `campaign: ''` records standalone); the directions gate refuses an undecided campaign; the Strategy step offers the kit's campaigns | `s29-worker` PR2 | fixed |
+| PR3 | medium | Understanding contradicted the campaign question; "Keep standalone" left it up | The reading says "undecided" when ambiguous; a decision clears the question; the classic view has Keep it standalone | - | fixed |
+| PR4 | medium | The reading never saw the project type or deliverable | Both are in CURRENT BRIEF | `s29-worker` PR10 + PR4 | fixed |
+| PR5 | medium | Knowledge in the reading was unlabelled or mislabelled by campaign | Passages labelled from their document record; decisions and earlier choices carry their project's campaign | `s29-worker` PR5 | fixed |
+| PR6 | medium | Finished mode with "No imagery" silently became editable | Refused before any spend (`finished_needs_imagery`); the Brief hides the option in finished mode | `s29-worker` PR6 | fixed |
+| PR7 | medium | Brand items kept as a rule or preference never reached a model | `stContext` reads the active rule and preference items of the campaign and the client-wide ones | `s29-worker` PR7 | fixed |
+| PR8 | low | Look-alikes were matched by title; a replan could file a direction twice; classic cards hid `lookalike` | Matched by position; a repeated replacement keeps the original, marked; classic cards show it | `rc-creative-worker` (S29 line) | fixed |
+| PR9 | low | `/studio/remember` saved a campaign rule for any campaign | Only the project's own campaign | `s29-worker` PR9 | fixed |
+| PR10 | low | Classic directions ignored the brief analysis | Read in | `s29-worker` PR10 + PR4 | fixed |
+| PM1 | blocker | Following TESTING.md in order, the smoke check overwrote the seeded test kit | `ensure_synth` merges into the existing kit | `rc-seed-worker` PM1 | fixed |
+| PM2 | high | The seeded Review tiles failed measurement | A type-only ground is painted (the exported PNG was transparent) | (the seeded tiles measure as passing) | fixed |
+| PM4 | medium | The header chip showed the team budget, not the person's allowance | `/studio/status` carries `you`; the chip shows the smaller | - | fixed |
+| PM5 | low | Measure again filed nothing when the worker agreed | Spent only once the composition is ready | - | fixed |
+| PM6 | low | Each finished job reads the project twice | Not changed (measured as no storm) | - | open |
+| PM7 | low | A worker 429 read as a provider limit; an internal error promised nothing was done | Worded by what happened | `studio-explain-test` | fixed |
+| PM8 | low | TESTING.md said a reviewer can Measure; the guest-link docstring said full access | Corrected | - | fixed |
+| PM9 | low | No way back while a project opened slowly | All projects is offered while it opens | - | fixed |
+| UX1 | high | In the light appearance the colour picker, the Spacing box and the dock icons were close to invisible (1.2-2.3:1) | Theme tokens in place of hard-coded dark colours | `s29-browser` UX1 | fixed |
+| UX2 | medium-high | The selection toolbar hid Lock, order, Delete and More behind an invisible scroll | It wraps, and is kept inside the stage | `s29-browser` UX2 | fixed |
+| UX3 | medium | The header subline was cut mid-word; the read-only and mode chips never showed (U8) | Chips first; names give way with an ellipsis | `s29-browser` UX3 | fixed (U8) |
+| UX4 | medium | A class clash laid "Compared with what Axiom knows" out as the version-compare grid | The compare grid is `.st-vcmp` | `s29-browser` UX4 | fixed |
+| UX5 | medium | Art direction ran out of its card; the resolution note was one word a line | Wraps inside the card | `s29-browser` UX5 | fixed |
+| UX6 | medium | The library used the old status words and the wrong next step | `/studio/list` carries each guided project's step (`stListPhase`), named as the header names it | `s29-browser` UX6 | fixed |
+| UX7 | medium | The review page scrolled sideways on a phone with a long address | Columns shrink; long words break | `s29-browser` UX7 | fixed |
+| UX8 | low-medium | A locked step told a read key to act | It says a teammate with a full key completes it | `s29-browser` UX8 | fixed |
+| UX9 | low | On a phone the dock hid the views | The dock wraps | - | fixed |
+| UX10 | low | Format buttons drew 1:1 landscape and 4:5 near square | Square and upright | `s29-browser` UX10 | fixed |
+| UX11 | low | The context panel listed six stages | Seven, Deliver included | `s29-browser` UX11 | fixed |
+| UX12 | low | The "selected" badge covered the direction sketch's words | A band above the sketch | - | fixed |
+| UX13 | low | The Creative Director's read-only note touched the panel edge | Padded | - | fixed |
+| U6, U7 | medium | Dotted boxes on unselected layers; tall stage heads | Not changed | - | open |
+
+### 55.2 Runs
+
+- `tests/studio-s29-worker.mjs` (16) and `tests/studio-s29-browser.mjs` (7): 0 of 23 on `efa309e` (the new files copied onto a
+  clean checkout of it), 23 of 23 with the fixes.
+- The full gate (`node tests/run.mjs all`) in a clean checkout of the commit: see the commit's report.
+- The first full gate on the fixes (`node tests/run.mjs all`, 165 suites) found what the new rules changed in older harnesses,
+  each settled on its merits: older fixtures used invented keys such as `studio/x/y.png`, so the image rule was narrowed to what
+  matters (a key in another existing project's folder, or outside `studio/`, is refused; review links serve only the project's
+  own folder); three harnesses read the Studio anonymously in public mode and now expect `sign_in_required` (`auth-policy`,
+  `studio-rc-security`, `studio-ready`); `s16` and `s24` accept the labelled knowledge lines and the earlier `not_worker_url`
+  refusal; `s23g` compares the stage filter by its label. Two real defects were found and fixed: an expired link that is still
+  on the roster counted toward the wrong-key lockout (the page's role check made it trip; `access-link-browser`), and a second
+  Fix layout press that changed nothing dropped the first fix's Undo (`studio-editor-browser`).
+- Nothing was deployed: the worker ships from the Mac with `tools/deploy-worker.sh` once this is merged.

@@ -115,5 +115,21 @@ await S.t('a live client is refused before anything is sent, and a dry run sends
   eq(w.outbound.length, before, 'nothing outbound');
 });
 
+await S.t('S29 (PM1): the smoke check after the seed keeps the seeded client: its kit step adds its own campaign, it does not replace the kit', async () => {
+  const before = (await get('/brand/kit?ns=synthdemo')).kit;
+  const code = "import importlib.util,sys; s=importlib.util.spec_from_file_location('demo', sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)\ntry:\n  m.ensure_synth(sys.argv[2], 'full-key'); print('ok')\nexcept Exception as e:\n  print('ERR', repr(e)[:400]); sys.exit(1)";
+  const out = await new Promise(resolve => { const p = spawn('python3', ['-c', code, path.join(ROOT, 'tools', 'studio-demo.py'), BASE], { stdio: ['ignore', 'pipe', 'pipe'] }); let o = ''; p.stdout.on('data', d => { o += d; }); p.stderr.on('data', d => { o += d; }); p.on('close', c => resolve({ c, o })); });
+  eq(out.c, 0, 'ensure_synth ran: ' + out.o.slice(-900));
+  const after = (await get('/brand/kit?ns=synthdemo')).kit;
+  const ids = (after.campaigns || []).map(c => c.id);
+  ok(ids.indexOf('harbour') >= 0 && ids.indexOf('nightboat') >= 0, 'the seeded campaigns stand: ' + ids.join(','));
+  ok(ids.indexOf('latesail') >= 0, 'the smoke\'s own campaign is added');
+  eq((after.facts || []).filter(f => f.campaign !== 'latesail').length, (before.facts || []).length, 'the seeded facts stand');
+  eq(after.logoV, before.logoV, 'the seeded logo stands');
+  const night = (after.campaigns || []).find(c => c.id === 'nightboat'); ok(night && night.markRule && night.markRule.mandatory, 'the night boat mark rule stands');
+  const lst = (await get('/studio/list?ns=synthdemo')).projects || [];
+  for (const pr of lst.filter(x => /^TEST/.test(x.title))) { const c = await get('/studio/brief/check?project=' + pr.id); ok(!(c.gaps || []).some(g => g.code === 'campaign_unknown'), pr.title + ': no unknown campaign'); }
+});
+
 srv.close(); w.restore();
 const r = S.done(); process.exit(r.fail ? 1 : 0);

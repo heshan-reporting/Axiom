@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Sans:wght@400..700&family=Spline+Sans+Mono:wght@400..600&display=swap" rel="stylesheet">
 <!-- the Studio's faces (DM Sans, Manrope) come with the page, not from Google: a blocked font host must not change the layout -->
-<link rel="stylesheet" href="vendor/fonts/fonts.css?v=r29">
+<link rel="stylesheet" href="vendor/fonts/fonts.css?v=r30">
 <link rel="stylesheet" href="axiom-ds.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js';document.head.appendChild(s)"></script>
 <!-- GSAP — the single motion library; every transition below degrades to CSS if it fails to load -->
@@ -24,22 +24,22 @@
 <script src="release.js" defer></script>
 <script src="topics.js" defer></script>
 <script src="content.js?v=r1" defer></script>
-<link rel="stylesheet" href="studio-progress.css?v=r29">
-<link rel="stylesheet" href="studio-flow.css?v=r29">
-<link rel="stylesheet" href="studio-skin.css?v=r29">
-<link rel="stylesheet" href="studio-guided.css?v=r29">
-<link rel="stylesheet" href="studio-editor.css?v=r29">
-<link rel="stylesheet" href="studio-shell.css?v=r29">
-<link rel="stylesheet" href="studio-polish.css?v=r29">
-<script src="studio-render.js?v=r29" defer></script>
-<script src="studio-progress.js?v=r29" defer></script>
-<script src="studio-merge.js?v=r29" defer></script>
-<script src="studio.js?v=r29" defer></script>
-<script src="studio-guided.js?v=r29" defer></script>
-<script src="studio-editor.js?v=r29" defer></script>
-<script src="studio-canvas.js?v=r29" defer></script>
-<script src="studio-style.js?v=r29" defer></script>
-<script src="studio-brandmem.js?v=r29" defer></script>
+<link rel="stylesheet" href="studio-progress.css?v=r30">
+<link rel="stylesheet" href="studio-flow.css?v=r30">
+<link rel="stylesheet" href="studio-skin.css?v=r30">
+<link rel="stylesheet" href="studio-guided.css?v=r30">
+<link rel="stylesheet" href="studio-editor.css?v=r30">
+<link rel="stylesheet" href="studio-shell.css?v=r30">
+<link rel="stylesheet" href="studio-polish.css?v=r30">
+<script src="studio-render.js?v=r30" defer></script>
+<script src="studio-progress.js?v=r30" defer></script>
+<script src="studio-merge.js?v=r30" defer></script>
+<script src="studio.js?v=r30" defer></script>
+<script src="studio-guided.js?v=r30" defer></script>
+<script src="studio-editor.js?v=r30" defer></script>
+<script src="studio-canvas.js?v=r30" defer></script>
+<script src="studio-style.js?v=r30" defer></script>
+<script src="studio-brandmem.js?v=r30" defer></script>
 <script src="sources.js" defer></script>
 <script src="sentiment.js" defer></script>
 <script src="narratives.js" defer></script>
@@ -1895,7 +1895,7 @@ body.kiosk .kprog{display:block}
 .st-appr{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;flex-wrap:wrap}.st-appr>span:last-child{display:flex;gap:6px}
 .st-hist{border-top:1px solid var(--x-line1);padding-top:8px;display:flex;flex-direction:column;gap:6px}
 .st-hist-row{display:grid;grid-template-columns:96px 1fr auto;gap:12px;align-items:center;padding:6px;border-radius:6px;font-size:12.5px}.st-hist-row.cur{background:var(--x-bg2)}
-.st-cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:10px 0}
+.st-vcmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:10px 0}
 .st-canvas{display:block;width:100%;height:auto;border-radius:4px;background:#0f171d}
 .st-copycard{position:relative;border:1px solid var(--x-line1);border-radius:6px;background:var(--x-bg2);padding:14px 16px 12px;color:var(--t0);min-height:80px}
 .st-copycard.thumb{width:96px;min-height:48px;padding:6px 8px;font-size:9px;overflow:hidden}
@@ -2972,6 +2972,10 @@ let AX_KEY = localStorage.getItem('axiom_access_key') || '';
 /* Worker access key header — private routes (Mind, sessions, archive content,
    conversation logs) require it once the AXIOM_ACCESS_KEY secret is set. */
 function axHeaders(){const h={'Content-Type':'application/json'};if(AX_KEY)h['X-Axiom-Key']=AX_KEY;return h;}
+/* S29 (FS1): the page asks the worker what this key may do and every island reads window.AX_ROLE ('read' hides each control
+   that writes); asked at load and again when the key changes. Nothing is assumed when the worker cannot say. */
+function axWhoAmI(){try{fetch(String(WORKER_URL||'').replace(/\/+$/,'')+'/auth/me',{headers:axHeaders()}).then(r=>r.ok?r.json():null).then(d=>{const role=d&&(d.role==='read'||d.role==='full')?d.role:null;if(role&&window.AX_ROLE!==role){window.AX_ROLE=role;try{window.dispatchEvent(new CustomEvent('ax:role',{detail:role}));}catch(e){}}}).catch(()=>{});}catch(e){}}
+axWhoAmI();
 /* Comms workflow config */
 let ORG_BRIEF = localStorage.getItem('axiom_org_brief') || '';
 let CLICKUP_LIST = localStorage.getItem('axiom_clickup_list') || '';
@@ -5565,7 +5569,7 @@ function saveSettings(){
   GEMINI_KEY=$('set-gemini').value.trim();
   GEMINI_MODEL=$('set-gemini-model').value.trim()||'gemini-3.6-flash';
   {const wa=$('set-wa');WA_RECIPIENTS=wa?wa.value.split(',').map(s=>s.trim()).filter(Boolean):WA_RECIPIENTS;localStorage.setItem('axiom_wa_to',JSON.stringify(WA_RECIPIENTS));}
-  {const ak=$('set-axkey');if(ak){AX_KEY=ak.value.trim();localStorage.setItem('axiom_access_key',AX_KEY);}}
+  {const ak=$('set-axkey');if(ak){AX_KEY=ak.value.trim();localStorage.setItem('axiom_access_key',AX_KEY);window.AX_ROLE=undefined;axWhoAmI();}}
   localStorage.setItem('axiom_claude_key',CLAUDE_KEY);
   localStorage.setItem('axiom_worker_url',WORKER_URL);
   localStorage.setItem('axiom_org_brief',ORG_BRIEF);

@@ -288,7 +288,8 @@
     const bgFill = layout.bg && typeof layout.bg === 'object' ? (() => { const d = layout.bg.dir || 'down'; const g = d === 'right' ? ctx.createLinearGradient(0, 0, W, 0) : d === 'left' ? ctx.createLinearGradient(W, 0, 0, 0) : d === 'up' ? ctx.createLinearGradient(0, H, 0, 0) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, layout.bg.from || '#0f171d'); g.addColorStop(1, layout.bg.to || layout.bg.from || '#0f171d'); return g; })() : layout.bg || null;
     const planNoBg = layout.v === 5 && !(layout.regions || []).some(r => r.role === 'background');
     if (!subset) {
-      if (ib || bgFill || planNoBg) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
+      // S29 (PM2): a tile with no imagery always has an opaque ground; without one it exported transparent behind its words and mark
+      if (ib || bgFill || planNoBg || layout.noImagery) { ctx.fillStyle = bgFill || pal.primary || '#0f171d'; ctx.fillRect(0, 0, W, H); }
       if (images.bg && !layout.noImagery) cover(ctx, images.bg, W, H, ib, layout.imageFocus);
       else if (!planNoBg && !layout.noImagery) { const g = ib ? ctx.createLinearGradient(0, ib.y, 0, ib.y + ib.h) : ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b2a33'); g.addColorStop(1, pal.primary && layout.template !== 'plain' ? pal.primary : '#0f171d'); ctx.fillStyle = g; if (ib) ctx.fillRect(ib.x, ib.y, ib.w, ib.h); else ctx.fillRect(0, 0, W, H); }
     }
@@ -1040,6 +1041,11 @@
     // 0. a mark outside the safe area comes in from the edge in its own corner (its placement is kept, only inset)
     const markOut = new Set(); layoutIssues(before).filter(i => i.code === 'safe_area' || i.code === 'off_canvas').forEach(i => i.layers.forEach(id => { if (isMark(byId[id]) && movable(byId[id])) markOut.add(id); }));
     markOut.forEach(id => { const mk = byId[id]; const nx = Math.min(Math.max(mk.x, sp.side), 100 - sp.side - mk.w), ny = Math.min(Math.max(mk.y, sp.top), 100 - sp.bottom - mk.h); if (Math.abs(nx - mk.x) > 0.05 || Math.abs(ny - mk.y) > 0.05) { mk.x = Math.round(nx * 10) / 10; mk.y = Math.round(ny * 10) / 10; steps.push('brought the ' + mk.role + ' inside the safe area in the same corner'); } });
+    // 0b. S29 (QA-3): words dragged partly off the stage (or into the interface's safe area) come back inside it, narrowed to the
+    //     safe box when wider than it; the words are never changed, and a locked layer is left where it is
+    let textIn = 0; const textOut = new Set(); layoutIssues(before).filter(i => i.code === 'safe_area' || i.code === 'off_canvas').forEach(i => i.layers.forEach(id => { const l = byId[id]; if (l && l.type === 'text' && !isMark(l) && movable(l)) textOut.add(id); }));
+    textOut.forEach(id => { const l = byId[id]; const bw = 100 - 2 * sp.side; if (l.w > bw) { l.w = Math.round(bw * 10) / 10; } const nx = Math.min(Math.max(l.x, sp.side), 100 - sp.side - l.w), ny = Math.min(Math.max(l.y, sp.top), Math.max(sp.top, 100 - sp.bottom - (l.h || 0))); if (Math.abs(nx - l.x) > 0.05 || Math.abs(ny - l.y) > 0.05) { l.x = Math.round(nx * 10) / 10; l.y = Math.round(ny * 10) / 10; } textIn++; });
+    if (textIn) steps.push('brought ' + textIn + ' text block' + (textIn === 1 ? '' : 's') + ' back inside the stage\'s safe area');
     if (settle()) steps.push('fitted each text box to its measured lines and restacked related blocks with explicit spacing');
     let now = validate(L, copy, images, vopts);
     // 3. widen a crowded column into free space on its open side

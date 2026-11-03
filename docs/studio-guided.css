@@ -235,7 +235,8 @@
 #studio-root .st .st-dcard-art .st-comp{border-radius:var(--sk-r);overflow:hidden;box-shadow:var(--sk-sh-art);max-width:300px;margin:0 auto}
 #studio-root .st .st-dcard-art .st-canvas{width:100%;height:auto;display:block}
 #studio-root .st .st-dcard-note{display:block;text-align:center;padding:6px 0 8px;font-size:10.5px;color:var(--sk-quiet)}
-#studio-root .st .st-dcard-badges{position:absolute;top:22px;left:22px;display:flex;gap:4px;flex-wrap:wrap}
+#studio-root .st .st-dcard-badges{display:flex;gap:4px;flex-wrap:wrap;padding:10px 16px 0}   /* S29 (UX12): a band above the sketch, never over its words */
+#studio-root .st .st-dcard-badges:empty{display:none}
 #studio-root .st .st-dcard-body{display:flex;flex-direction:column;gap:10px;padding:16px}
 #studio-root .st .st-dcard-h{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 #studio-root .st .st-dcard-h h4{margin:0;margin-right:auto;font:750 16px/1.25 var(--sk-display);letter-spacing:-.01em}

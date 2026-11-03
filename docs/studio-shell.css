@@ -20,7 +20,7 @@ body.in-studio #studio-root{height:100%}
 
 /* ---------------------------------------------------------------------------------------- header */
 #studio-root .st .st-head{display:flex;align-items:stretch;gap:12px;flex-shrink:0;min-height:54px;padding:0 12px;position:relative;z-index:30;
-  background:var(--sk-panel);border-bottom:1px solid #262c30}
+  background:var(--sk-panel);border-bottom:1px solid var(--sk-line)}
 #studio-root .st .st-head > *:not(.st-steps){align-self:center}
 #studio-root .st .st-back{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;height:36px;padding:0 12px 0 9px;border-radius:999px;border:0;background:var(--sk-raised);color:var(--sk-ink-2);font:600 12px/1 var(--sk-font);letter-spacing:.06em;cursor:pointer;transition:border-color .15s,color .15s}
 #studio-root .st .st-back:hover{color:var(--sk-ink);border-color:var(--sk-line-2)}
@@ -36,6 +36,10 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-sep{color:var(--sk-line-2)}
 #studio-root .st .st-psub{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:var(--sk-sub);white-space:nowrap;overflow:hidden}
 #studio-root .st .st-psub > *{flex-shrink:0}
+/* S29 (UX3): the state chips (mode, read-only, guest, legacy) come first and never shrink; the names and channels give way with an
+   ellipsis, so the line never ends in the middle of a word and the read-only state is always shown */
+#studio-root .st .st-psub > .st-chip{order:-1}
+#studio-root .st .st-psub > span:not(.st-chip):not(.st-dotsep){flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 #studio-root .st .st-psub .st-chip{padding:2px 6px;font-size:10px}
 #studio-root .st .st-dotsep{width:3px;height:3px;border-radius:50%;background:var(--sk-line-2);flex-shrink:0}
 #studio-root .st .st-libword{font:650 14px/1 var(--sk-display);color:var(--sk-ink)}
@@ -188,22 +192,22 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-body.design .st-centre{overflow:hidden;padding:0;display:flex;flex-direction:column}
 #studio-root .st .st-refine{flex:1;min-height:0;display:flex;flex-direction:column;padding:0;background:var(--sk-panel)}
 #studio-root .st .st-refine > .st-workspace-activity{flex-shrink:0;margin:8px 12px}
-#studio-root .st .st-design{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:64px minmax(0,1fr);gap:0;border-top:1px solid #262c30}
+#studio-root .st .st-design{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:64px minmax(0,1fr);gap:0;border-top:1px solid var(--sk-line)}
 #studio-root .st .st-design.has-library{grid-template-columns:64px var(--st-lib-w,296px) minmax(0,1fr)}
 #studio-root .st .st-design.preview{grid-template-columns:minmax(0,1fr)}
-#studio-root .st .st-dock{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0;align-self:stretch;min-height:0;overflow-y:auto;scrollbar-width:none;background:var(--sk-panel);border:0;border-right:1px solid #262c30;border-radius:0}
-#studio-root .st .st-dock-btn{position:relative;width:44px;height:44px;display:grid;place-items:center;padding:0;border:0;border-radius:12px;background:transparent;color:#c9d0d4;font:550 10.5px/1 var(--sk-font);cursor:pointer;transition:background-color .15s,color .15s,box-shadow .15s}
-#studio-root .st .st-dock-btn:hover:not(:disabled){background:#262b2f;color:var(--sk-ink)}
+#studio-root .st .st-dock{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 0;align-self:stretch;min-height:0;overflow-y:auto;scrollbar-width:none;background:var(--sk-panel);border:0;border-right:1px solid var(--sk-line);border-radius:0}
+#studio-root .st .st-dock-btn{position:relative;width:44px;height:44px;display:grid;place-items:center;padding:0;border:0;border-radius:12px;background:transparent;color:var(--sk-ink-2);font:550 10.5px/1 var(--sk-font);cursor:pointer;transition:background-color .15s,color .15s,box-shadow .15s}
+#studio-root .st .st-dock-btn:hover:not(:disabled){background:var(--sk-hover);color:var(--sk-ink)}
 #studio-root .st .st-dock-btn .st-dock-l{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 #studio-root .st .st-dock-btn.add{background:var(--sk-accent);color:var(--sk-accent-ink)}
 #studio-root .st .st-dock-btn.add:hover:not(:disabled){background:var(--sk-accent);color:var(--sk-accent-ink);filter:brightness(1.06)}
 #studio-root .st .st-dock-btn.add.on{background:var(--sk-accent);color:var(--sk-accent-ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--sk-accent) 28%,transparent)}
-#studio-root .st .st-dock-btn.on{background:#2b3135;color:#fff}
+#studio-root .st .st-dock-btn.on{background:var(--sk-soft-2);color:var(--sk-ink)}
 #studio-root .st .st-dock-btn:disabled{opacity:.35;cursor:not-allowed}
 #studio-root .st .st-dock-ic{display:grid;place-items:center}
-#studio-root .st .st-dock-mode{display:flex;flex-direction:column;align-items:center;gap:3px;margin-top:auto;padding:8px 4px 0;border-top:1px solid #262c30;text-align:center;font-size:10px;width:100%}
+#studio-root .st .st-dock-mode{display:flex;flex-direction:column;align-items:center;gap:3px;margin-top:auto;padding:8px 4px 0;border-top:1px solid var(--sk-line);text-align:center;font-size:10px;width:100%}
 #studio-root .st .st-dock-mode .st-lbl{margin:0;font-size:9px}
-#studio-root .st .st-library{position:relative;display:flex;flex-direction:column;min-height:0;background:var(--sk-panel);border:0;border-right:1px solid #262c30;border-radius:0;overflow:hidden}
+#studio-root .st .st-library{position:relative;display:flex;flex-direction:column;min-height:0;background:var(--sk-panel);border:0;border-right:1px solid var(--sk-line);border-radius:0;overflow:hidden}
 #studio-root .st .st-library-head{display:flex;align-items:center;justify-content:space-between;padding:16px 12px 10px 18px;border-bottom:0;flex-shrink:0}
 #studio-root .st .st-library-head b{font:500 20px/1.1 var(--sk-display);letter-spacing:-.01em;color:var(--sk-ink)}
 #studio-root .st .st-library-head .st-iconbtn{background:transparent}
@@ -211,14 +215,14 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-library[data-tool="elements"] .st-library-body{padding:0 0 18px}
 #studio-root .st .st-library .st-vars-grid, #studio-root .st .st-library .st-ad-cards{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
 #studio-root .st .st-canvas-col{display:flex;flex-direction:column;min-height:0;min-width:0;gap:0;padding:0;background:var(--sk-canvas)}
-#studio-root .st .st-canvasbar{display:flex;align-items:center;gap:6px;flex-shrink:0;min-height:48px;padding:4px 10px;background:var(--sk-panel);border:0;border-bottom:1px solid #262c30;border-radius:0}
+#studio-root .st .st-canvasbar{display:flex;align-items:center;gap:6px;flex-shrink:0;min-height:48px;padding:4px 10px;background:var(--sk-panel);border:0;border-bottom:1px solid var(--sk-line);border-radius:0}
 #studio-root .st .st-canvasbar-mid{display:flex;align-items:center;flex-shrink:0}
 #studio-root .st .st-canvas-col{container-type:inline-size;container-name:stcanvas}
 @container stcanvas (max-width:760px){#studio-root .st .st-canvasbar-mid{display:none}}
 #studio-root .st .st-fmts{display:flex;align-items:center;height:30px;border-radius:10px;overflow:hidden;background:var(--sk-bg)}
-#studio-root .st .st-fmt{width:42px;height:30px;display:grid;place-items:center;border:0;border-right:1px solid #262c30;background:transparent;color:var(--sk-ink-2);cursor:pointer;transition:background-color .15s,color .15s}
+#studio-root .st .st-fmt{width:42px;height:30px;display:grid;place-items:center;border:0;border-right:1px solid var(--sk-line);background:transparent;color:var(--sk-ink-2);cursor:pointer;transition:background-color .15s,color .15s}
 #studio-root .st .st-fmt:last-child{border-right:0}
-#studio-root .st .st-fmt:hover{background:#23282c;color:var(--sk-ink)}
+#studio-root .st .st-fmt:hover{background:var(--sk-hover);color:var(--sk-ink)}
 #studio-root .st .st-fmt[aria-pressed="true"]{background:var(--sk-accent);color:var(--sk-accent-ink)}
 #studio-root .st .st-canvas-meta{display:flex;align-items:center;gap:5px;padding:0 4px 0 6px;font:13px/1 var(--sk-font);color:var(--sk-ink);white-space:nowrap;font-variant-numeric:tabular-nums}
 #studio-root .st .st-canvas-meta i{font-style:normal;color:var(--sk-quiet);margin-right:6px}
@@ -261,7 +265,7 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-le-foot .st-le-val{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--sk-sub)}
 #studio-root .st .st-le-foot .st-le-val.bad{color:var(--sk-bad)}
 #studio-root .st .st-le-draft{color:var(--sk-sub);white-space:nowrap}
-#studio-root .st .st-canvas-foot{flex-shrink:0;max-height:34%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 12px 10px;background:var(--sk-panel);border-top:1px solid #262c30}
+#studio-root .st .st-canvas-foot{flex-shrink:0;max-height:34%;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 12px 10px;background:var(--sk-panel);border-top:1px solid var(--sk-line)}
 /* RC (U3): what sits under the canvas keeps its own height and the foot scrolls; a row shrunk below its content let the
    readiness strip print over the composition's facts at 1181-1280 px */
 @media (min-width:701px){#studio-root .st .st-canvas-foot > *{flex-shrink:0;min-height:min-content}}
@@ -763,11 +767,11 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-prov-left{font-weight:500;color:var(--sk-sub)}   /* RC: no opacity, so it reads at 4.5:1 in both appearances */
 
 /* concept C: the Design views at the foot of the rail, under the tools, as the reference keeps its secondary places */
-#studio-root .st .st-dock-views{margin-top:auto;width:100%;padding:8px 6px 0;border-top:1px solid #262c30}
+#studio-root .st .st-dock-views{margin-top:auto;width:100%;padding:8px 6px 0;border-top:1px solid var(--sk-line)}
 #studio-root .st .st-dock-views .st-designtabs{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0;background:none;border:0}
 #studio-root .st .st-dock-views .st-subtab{display:flex!important;flex-direction:column;align-items:center;justify-content:center;width:100%;padding:6px 2px!important;border-radius:8px;font:600 10.5px/1.1 var(--sk-font)!important;color:var(--sk-sub);white-space:normal!important;text-align:center}
 #studio-root .st .st-dock-views .st-subtab .st-n{display:block;margin:2px auto 0;font-size:9.5px}
-#studio-root .st .st-dock-views .st-subtab.on{background:#2b3135;color:#fff}
+#studio-root .st .st-dock-views .st-subtab.on{background:var(--sk-soft-2);color:var(--sk-ink)}
 #studio-root .st .st-dock-views + .st-dock-mode{margin-top:8px}
 #studio-root .st .st-canvasbar .st-zoom .st-sel{min-width:112px}
 /* the Style panel's typography in the narrow inspector: label and field side by side; weight and the colour take a whole row */
@@ -786,7 +790,7 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-canvasbar .st-le-tools .btn.sm, #studio-root .st .st-canvasbar .st-le-tools .st-iconbtn, #studio-root .st .st-canvasbar .st-le-tools summary{min-height:30px;height:30px}
 /* concept C: the version strip beside the pages under the canvas; the page chips are compact (drawing, number and format;
    the full name is kept for screen readers, search and the title) so both fit one row */
-#studio-root .st .st-vstrip{display:flex;align-items:center;gap:6px;flex-shrink:0;padding-left:10px;border-left:1px solid #262c30;min-width:0;overflow-x:auto;scrollbar-width:none}
+#studio-root .st .st-vstrip{display:flex;align-items:center;gap:6px;flex-shrink:0;padding-left:10px;border-left:1px solid var(--sk-line);min-width:0;overflow-x:auto;scrollbar-width:none}
 #studio-root .st .st-vstrip::-webkit-scrollbar{display:none}
 #studio-root .st .st-vstrip-l{font:600 10px/1 var(--sk-font);letter-spacing:.12em;text-transform:uppercase;color:var(--sk-quiet);margin-right:2px;white-space:nowrap}
 #studio-root .st .st-vcard{position:relative;flex:0 0 auto;width:34px;padding:0;border:2px solid transparent;border-radius:6px;overflow:hidden;background:none;cursor:pointer;line-height:0}
@@ -812,3 +816,18 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-stagehead .st-eyebrow-n{background:var(--sk-accent);color:var(--sk-accent-ink)}
 /* while the photograph is being reframed the crop bar takes the formats' room, so the bar stays one row */
 #studio-root .st .st-canvasbar:has(.st-cropbar) .st-canvasbar-mid{display:none}
+
+/* S29 (UX5): art direction in the Images panel stays inside its card at every width - the feedback field takes the row, the
+   action buttons wrap their words, and the resolution note sits under its select instead of a one-word-a-line column */
+#studio-root .st .st-ad-ask{min-width:0}
+#studio-root .st .st-ad-ask > .st-in{flex:1 1 100%;min-width:0;max-width:100%}
+#studio-root .st .st-ad-ask .st-ad-actions{display:flex;flex-wrap:wrap;gap:6px;max-width:100%;min-width:0}
+#studio-root .st .st-ad-ask .st-ad-actions .btn{white-space:normal;max-width:100%;height:auto;min-height:30px;text-align:left}
+#studio-root .st .st-ad-ask .st-size{display:flex;flex-wrap:wrap;max-width:100%}
+#studio-root .st .st-ad-ask .st-size > .ov-dim{flex-basis:100%}
+/* S29 (UX13): the Creative Director's notes keep the panel's margin */
+#studio-root .st .st-cd .st-pad{padding:8px 14px}
+/* S29 (UX9): on a phone the dock wraps onto a second row, so Canvas, Board, Recipes, Jobs and the mode stay reachable */
+@media (max-width:700px){
+  #studio-root .st .st-dock{flex-wrap:wrap;overflow-x:visible;justify-content:flex-start;gap:6px}
+}

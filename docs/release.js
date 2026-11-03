@@ -329,7 +329,7 @@
         const r = await fetch(img); const blob = await r.blob();
         const b64 = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1]); rd.onerror = rej; rd.readAsDataURL(blob); });
         let logo = null;
-        if (logoUrl) { try { const lr = await fetch(window.AXUI.base() + logoUrl, { headers: window.AXUI.hdrs() }); const lb = await lr.blob(); logo = { mime: lb.type || 'image/png', data: await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1]); rd.onerror = rej; rd.readAsDataURL(lb); }) }; } catch (e) { logo = null; } }
+        if (logoUrl) { try { const lr = await fetch(window.AXUI.own(logoUrl), { headers: window.AXUI.hdrs() }); const lb = await lr.blob(); logo = { mime: lb.type || 'image/png', data: await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1]); rd.onerror = rej; rd.readAsDataURL(lb); }) }; } catch (e) { logo = null; } }
         alSeedFromDesk({ ns, b64, mime: blob.type || 'image/png', headline: tile.headline, support: tile.support, cta: tile.cta, format: pack.format, logo, source: 'Release Desk - ' + (pack.title || '') });
       } catch (e) { toastMsg('Could not open the canvas: ' + e.message, true); }
     };

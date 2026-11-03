@@ -356,12 +356,12 @@ await T.t('06 a mark comes only from this client\'s own stored file: an outside 
   const layerWith = src => Object.assign({}, LAYOUT, { layers: LAYOUT.layers.concat([{ id: 'wordmark', type: 'img', role: 'wordmark', asset: 'wordmark', campaign: 'hoof', src, x: 70, y: 88, w: 24, h: 7, fit: 'contain', exact: true }]) });
   const save = src => call('POST', '/studio/version', { asset: A, project: P, layout: layerWith(src), note: 'mark' });
   for (const bad of ['https://untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof', '//untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof', 'https://untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof&variant=white&v=' + wm.v, '/brand/wordmark?ns=mca&campaign=hoof&ns=pca', '/brand/wordmark?ns=mca&campaign=hoof&variant=blue', '/brand/wordmark?ns=mca&campaign=hoof&variant=white&v=999999', 'data:image/png;base64,' + PNG_MARK, '/studio/file?key=' + encodeURIComponent(wmKey)]) {
-    const r = await save(bad); eq([r.status, r.body.error], [409, 'mark_policy'], bad + ': ' + JSON.stringify(r.body).slice(0, 200));
+    const r = await save(bad); ok((r.status === 409 && r.body.error === 'mark_policy') || (r.status === 400 && r.body.error === 'not_worker_url'), bad + ': refused as an outside mark (S29: an address off the worker is refused first): ' + JSON.stringify(r.body).slice(0, 200));
   }
   const good = await save('/brand/wordmark?ns=mca&campaign=hoof&variant=white&v=' + wm.v); eq(good.status, 200, 'the canonical source passes: ' + JSON.stringify(good.body).slice(0, 200));
   // creation is held to the same rule as editing
   const c = await call('POST', '/studio/asset', { project: P, family: 'F', channel: 'instagram', format: '1:1', title: 'Bad mark', copy: { headline: 'x' }, layout: layerWith('https://untrusted.invalid/brand/wordmark?ns=mca&campaign=hoof'), mode: 'composition' });
-  eq([c.status, c.body.error], [409, 'mark_policy'], 'a new asset with an outside mark is refused: ' + JSON.stringify(c.body).slice(0, 200));
+  ok((c.status === 409 && c.body.error === 'mark_policy') || (c.status === 400 && c.body.error === 'not_worker_url'), 'a new asset with an outside mark is refused: ' + JSON.stringify(c.body).slice(0, 200));
 });
 await T.t('06b an old version with an invalid mark source stays recoverable: restored with the mark hidden and the reason, and readiness explains it', async () => {
   const { P, A } = await fresh('hoof');

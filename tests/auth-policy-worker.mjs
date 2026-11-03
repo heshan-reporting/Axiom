@@ -141,7 +141,9 @@ await T.t('AXIOM_GUEST_KEYS alone configures the worker: guests open, no key is 
 await T.t('an expired guest key is let in as the public role while open access is on; a wrong key is still refused', async () => {
   const g = JSON.stringify({ 'guest-old-00001': { n: 'Kai', r: 'full', until: '2020-01-01' } });
   const x = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: g, AXIOM_PUBLIC: 'read', AXIOM_PUBLIC_UNTIL: '2999-01-01' }, SECRETS) });
-  const a = await x.call('GET', '/studio/list?ns=pca', null, 'guest-old-00001', ip()); eq(a.status, 200, 'the library opens: ' + a.text.slice(0, 120));
+  const a = await x.call('GET', '/allnews', null, 'guest-old-00001', ip()); eq(a.status, 200, 'the open part of AXIOM reads: ' + a.text.slice(0, 120));
+  // S29 (SEC-5): open access does not show client work, so the expired link reads the Studio no more than no key would
+  const al = await x.call('GET', '/studio/list?ns=pca', null, 'guest-old-00001', ip()); eq([al.status, al.body.error], [401, 'sign_in_required'], 'client work needs a live link');
   const w = await x.call('POST', '/studio/project', { ns: 'mca', title: 'x' }, 'guest-old-00001', ip()); eq([w.status, w.body.error], [403, 'read_only'], 'with the public role, not the key\'s old one');
   eq((await x.call('GET', '/allnews', null, 'guest-nope-0001', ip())).status, 401, 'an unknown key is still refused'); x.restore();
   const ended = await workerEnv({ env: Object.assign({ AXIOM_GUEST_KEYS: g, AXIOM_PUBLIC: 'full', AXIOM_PUBLIC_UNTIL: '2020-01-01' }, SECRETS) });

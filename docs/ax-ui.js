@@ -15,10 +15,21 @@
   const base = () => (typeof csBase === 'function' ? csBase() : String(window.WORKER_URL || '').replace(/\/+$/, ''));
   const hdrs = () => (typeof axHeaders === 'function' ? axHeaders() : { 'Content-Type': 'application/json' });
   const scrub = s => (typeof axScrub === 'function' ? axScrub(s) : String(s || ''));
+  /* S29 (SEC-1): every request that carries the access key goes to the worker itself. A path is the worker's only when it starts
+     with one slash and the address it makes keeps the worker's origin; anything else (".evil.example/x", "//evil", "@evil",
+     a path a stored record supplied) is refused before the key leaves the page. */
+  function own(path) {
+    const p = String(path == null ? '' : path); const b = base();
+    const refuse = () => { const e = new Error('Refused: that address is not the worker, so the access key was not sent'); e.code = 'not_worker_path'; e.status = 0; throw e; };
+    if (p.charAt(0) !== '/' || p.charAt(1) === '/' || p.charAt(1) === '\\') refuse();
+    let u, w; try { w = new URL(b + '/', location.href); u = new URL(b + p, location.href); } catch (x) { refuse(); }
+    if (u.origin !== w.origin) refuse();
+    return u.href;
+  }
   // o.signal (an AbortController's) lets a caller stop waiting; the request may still complete on the worker
   async function call(path, body, o) {
     const sig = o && o.signal ? { signal: o.signal } : {};
-    const r = await fetch(base() + path, Object.assign(body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() }, sig));
+    const r = await fetch(own(path), Object.assign(body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() }, sig));
     let d = {}; try { d = await r.json(); } catch (e) {}
     if (!r.ok || d.error) { const e = new Error(scrub(d.detail || d.error || ('HTTP ' + r.status))); e.code = d.error || ''; e.status = r.status; e.body = d; e.requestId = d.requestId || (r.headers && r.headers.get ? r.headers.get('X-Request-Id') : '') || ''; throw e; }
     return d;
@@ -27,7 +38,7 @@
      <img src> cannot fetch them. Pull the bytes with the key and hand back an
      object URL; callers revoke it when they are done. */
   async function blobUrl(path) {
-    const r = await fetch(base() + path, { headers: hdrs() });
+    const r = await fetch(own(path), { headers: hdrs() });
     if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
     return URL.createObjectURL(await r.blob());
   }
@@ -129,5 +140,5 @@
     }, []);
   }
   const scopeActive = s => Object.keys(SCOPE_DEF).filter(k => (s || scopeCur)[k]).length;
-  window.AXUI = { html, call, blobUrl, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto, scope, setScope, useScope, scopeActive, SCOPE_DEF };
+  window.AXUI = { html, call, blobUrl, own, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto, scope, setScope, useScope, scopeActive, SCOPE_DEF };
 })();

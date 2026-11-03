@@ -631,7 +631,7 @@ await t('P17: an area of the imagery is marked by typing it, edited with one ima
   const card = await page.textContent(R + '.st-preserve'); ok(/Area edit/.test(card) && /remove the sign on the fence/.test(card) && /(held|drifted|changed)/.test(card) && /compare v\d+ and this version/.test(card), card);
   const row = env.MIND_DB.db.prepare("SELECT v.copy, v.image FROM studio_versions v JOIN studio_assets a ON a.id=v.asset WHERE a.title='Facebook post' ORDER BY v.created DESC LIMIT 2").all();
   eq(row[0].copy, row[1].copy, 'the words were not touched'); ok(JSON.parse(row[0].image).meta.edit.area.x === 55, 'the area travelled to the worker');
-  await page.click(R + '.st-preserve .ov-link:has-text("compare")'); await page.waitForSelector(R + '.st-compare, ' + R + '.st-cmp', { timeout: 5000 }).catch(() => {});
+  await page.click(R + '.st-preserve .ov-link:has-text("compare")'); await page.waitForSelector(R + '.st-compare, ' + R + '.st-vcmp', { timeout: 5000 }).catch(() => {});
   await shot(page, 'studio-area-edit');
 });
 await t('P20: the canvas resizes a text box without changing its type, sets line height, panel opacity and the framing of the photograph with no render; Explore layouts proposes arrangements of the same photograph and words; a focused Partner edit names what moved and what was left', async () => {
