@@ -3521,6 +3521,7 @@ Status: fixed (with the harness case that failed on the base first), known limit
 | Q3 | low | `run.mjs` counted a harness that skipped engines as a plain pass | A harness that reports skipped parts is listed "ok*" with what was skipped, and the total names them as "with parts skipped, not passed" | the run output | fixed |
 | U5 | medium | The appearance switch never showed the chosen option (`aria-checked` set, `aria-pressed` styled) | Styled on `aria-checked` too | `studio-a11y-browser` light case | fixed |
 | U9 | low | "Reviewy" typo; `person_budget_exhausted` explained as the agency's budget | Fixed; a person's own daily cap is explained as theirs | `studio-explain-test` (11) | fixed in part (the image-call wording and "copy partner" remain) |
+| U10 | medium | Every step of a job the open tab ran in the background (a queued render, an inspection) set the shared busy label, which disables the person's own actions (Art direction among them) for the length of the step - a few milliseconds mocked, the whole render live - and its end cleared a busy label the person's own action had set; a click landing then did nothing and said nothing. Found by the release gate (`studio-browser`, about two runs in five; read as load at first) | Background steps (`pump`) run with `runJob(id, label, {background: true})`, which neither sets nor clears busy; their progress stays on the activity line. The worker already allows Explore and Refine while a render runs (S8) | `studio-rc-browser` U10 (fails before); `studio-browser` 5 of 5 in a clean checkout where it failed 3 of 5 | fixed |
 | P1 | medium | Opening a project grows with assets x versions | Measured here (in-process SQLite, so no network latency): 2x5 29 queries, 11 KB, 3 ms; 10x20 109, 173 KB, 13 ms; 20x40 209, 575 KB, 33 ms. On D1 each serial query is a round trip. Proposed, not built in this release: build the asset views concurrently, carry the current version per asset with history on demand, and make the page's `reload()` single-flight | the measurement script in the session | known limit (measured) |
 | U6 | medium | Every movable layer shows a resize handle and a dotted box, selected or not | Not changed in this release | - | open (low risk, cosmetic) |
 | U7 | medium | Stage heads take 208-306 px at 1366x768 | Not changed in this release | - | open |
@@ -3551,3 +3552,78 @@ lost more than ten points above it) or when the browser gave none; otherwise the
 are kept on the stored report (`boxes[].server`). Still taken from the browser, bounded: occlusion, the photograph's subjects,
 the fonts that drew, and the readability of an opaque, rotated, faded or cropped mark (`server: {skipped: true}`). Geometry,
 displayed characters, type size and line counts were already re-judged by the worker.
+
+### 54.5 Runs (what was run, on what, with what result)
+
+Every figure here was produced in this sandbox or by CI with providers mocked. No live worker was called, no model or image
+provider was reached, nothing was deployed, merged or spent.
+
+**Failing first.** Each new harness was run against `d2ea1ba` with the new test files copied in (a second clean worktree), then
+against the fix:
+
+| Harness | On the base (or before its fix) | Now |
+| --- | --- | --- |
+| `studio-rc-seed-worker` | 1 of 8 | 8 of 8 |
+| `studio-rc-security-worker` | 0 of 13 | 13 of 13 |
+| `studio-rc-brief-worker` | 0 of 2 (K3, base); 2 of 5 (K1, before its fix) | 5 of 5 |
+| `studio-rc-creative-worker` | 0 of 2 (C1, base); 2 of 3 (the follow-up, before its fix) | 3 of 3 |
+| `studio-rc-browser` | 0 of 4 (base); U10 0 of 1 before its fix | 5 of 5 |
+| `studio-a11y-browser` | 3 of 10 | 10 of 10 |
+
+**The release gate** (`node tests/run.mjs all`, the same as `npm run test:release`):
+
+- On the release-candidate commit `039bf49`, in the working tree: 161 of 163 suites in 32 min 25 s. `studio-s17-browser` failed
+  3 of 8 - a real regression of C1 (the follow-up in the C1 row: an unstated word placement was read as "bottom" and a
+  photographic direction was replanned away); fixed test-first in `9a3f2b4`, after which the harness passes 8 of 8.
+  `studio-editor-browser` failed 1 of 6 (a drag measured 7% for 10%) under the load of the full run; alone it passes 6 of 6, and
+  in CI on the same commit 6 of 6 - recorded as a timing flake, not changed.
+- In a clean checkout of `10aefb3` (a fresh worktree): 162 of 163 in 31 min 40 s. `studio-browser` failed 3 of 26 (Art
+  direction's cards never came). Alone it failed again there, about two runs in five; the base passed three of three. Traced in
+  the page: the "Explore variations" button turned disabled 179 ms after the probe began, the click landed on it at 182 ms and
+  was dropped, and it re-enabled at 231 ms - a background render's step had set the shared busy label (U10). Fixed test-first;
+  `studio-browser` then passed five of five in that checkout. The earlier full run in the previous session that showed the same
+  three cases failing was this defect, not load.
+- The run also showed the Q3 marker counting tests whose names contain "skip" ("skip ahead", "skip a level") as having skipped
+  parts; `10aefb3` counts only a harness's own skip lines or its summary.
+- **Final: a clean checkout of `eea6dd6` (a fresh worktree), 163 of 163 suites in 31 min 39 s.** The parts skipped are named,
+  not passed: Firefox and WebKit in `studio-xbrowser-browser` and `studio-s26-xbrowser-browser` (not installed here; CI runs
+  them). Against the baseline's 157 suites: six new harnesses (`studio-rc-seed-worker`, `-security-worker`, `-brief-worker`,
+  `-creative-worker`, `studio-rc-browser`, `studio-a11y-browser`).
+- `tests/studio-s27-sweep.mjs after` on the same checkout: 102 views (six widths, both roles), no serious or critical axe
+  finding (the baseline had six: Message's contrast for a full key at each width), no sideways scroll, no page error.
+
+**CI.** `039bf49` (run 41664222647): checks and every backend harness green; the browser job 58 of 59, the one failure
+`studio-s17-browser` as above, with Firefox and WebKit installed and both cross-browser harnesses passing in all three engines.
+`9a3f2b4` (run 41668606196): the browser job failed on `studio-browser` - the U10 defect, so CI saw it too. `7b8cc97` and
+`10aefb3` (runs 41668733533, 41669907100) green, U10's race not hit. **`eea6dd6` (run 41682220398): green** - checks, every
+backend harness and every browser harness in Chromium, Firefox and WebKit.
+
+**Performance (P1).** Opening a project (`GET /studio/get`) measured in process on SQLite for assets x versions: 2 x 5 - 29
+queries, 11 KB, 3 ms; 10 x 20 - 109 queries, 173 KB, 13 ms; 20 x 40 - 209 queries, 575 KB, 33 ms. The queries grow with the
+assets (about ten each, whatever the number of versions; the payload grows with both); on D1 each is a round trip, so a 20-asset project is about 200 sequential round trips. Proposed, not
+built: read the assets' versions in one query per project and page the thread. A tester opening a large project may wait;
+`TESTING.md` lists it under known limits.
+
+**Performance (D3).** `POST /studio/validation`, which now decodes and reads the measured PNG in the worker, timed in process
+(Node, the V8 engine workerd also runs) three times per format: 1080 x 1080 87-137 ms wall and 129-204 ms CPU; 1080 x 1350
+93-105 ms and 104-128 ms; 1080 x 1920 112-129 ms and 113-174 ms; 1920 x 1080 132-137 ms and 171-184 ms. That is inside a paid
+Workers plan's default CPU limit (30 s) and far over the free plan's 10 ms; the worker's other work (minutes-long cron passes,
+streamed model calls) already assumes a paid plan, but the first measurement filed after the deploy is the live proof. If it
+answers `exceededCpu`, the reading can move to the browser's figure with the worker sampling a subset of the boxes.
+
+**Proven only with mocks.** The image byte checks and the worker's reading of the measured PNG (D3) were proven on synthetic
+PNGs built by `tests/png.mjs` and on the providers' answers as the stubs give them, not on a real Gemini render. The campaign
+candidates (K1) were proven on scripted readings, not on a real Claude answer. Firefox and WebKit run in CI only. The guest
+gates are proven in the worker harnesses; no browser harness signs in with a guest key (Q2, open).
+
+### 54.6 The test pack and readiness
+
+`TESTING.md` is the round's page: the owner's release steps in order, the gate, the roles, the seeded projects and where each
+journey starts, the two synthetic briefs, six scripted journeys, the cost table, the known limits and how to report a problem.
+Part B of `prompts/studio-rc-team-test.md` holds the round's sixteen cases for people.
+
+Ready for the internal round once the owner has: deployed the worker (`tools/deploy-worker.sh`; `/studio/status` answers build
+`2026-11-07.studio-p45` with every guard flag false), merged the branch so the page serves `?v=r29`, set public mode read-only
+with its end date (D4, D7) or left it off, seeded the synthetic client (`tools/studio-test-kit.py seed --apply`), made each
+tester's link, and run the capped smoke check on the synthetic client only. Not ready for clients to sign in: a key cannot be
+limited to named clients (D2), so clients see work through review links only.

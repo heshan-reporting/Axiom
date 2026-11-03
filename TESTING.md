@@ -22,6 +22,9 @@ the evidence behind it are in `CREATIVE-STUDIO.md` s.54; the round's cases for p
 6. Make each tester's link: `python3 tools/guest-link.py add "Name" --days 14` (read-only), `--full` only for named testers.
 7. The capped owner check, after the seed: `python3 tools/studio-smoke.py --key $AXIOM_KEY --cases synth --approve-calls 24
    --approve-renders 0`. Read `smoke/index.html`.
+8. On the deployed page with a full key: open "TEST - parked at Review" and press Measure them here once. The worker now reads
+   each measured PNG itself (about 0.1-0.2 s of CPU a tile); measurements that file are the live proof that the account's CPU
+   limit allows it (`CREATIVE-STUDIO.md` s.54.5).
 
 ## The gate before a round
 
@@ -114,6 +117,8 @@ guest link (`STUDIO_PERSON_DAILY_*`, `STUDIO_GUEST_DAILY_*`).
   Content Desk saves standing preferences automatically (decision D6).
 - Imagery needs `GEMINI_KEY` and real renders; the journeys above need none except where marked.
 - Firefox and WebKit are proven in CI; a tester's Safari is the first live check of the review page on a phone.
+- Opening a project costs about ten database reads per asset, one after another, so a project of twenty or more assets may take
+  a moment to open (`CREATIVE-STUDIO.md` s.54.5, P1). The seeded projects are small.
 
 ## Reporting a problem
 
