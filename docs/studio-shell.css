@@ -837,9 +837,10 @@ body.in-studio #studio-root{height:100%}
 @media (max-width:700px){
   #studio-root .st .st-ro-phone{display:inline-flex;align-items:center;height:22px;padding:0 8px;border:1px solid var(--sk-line);border-radius:999px;font:600 11px/1 var(--sk-text);color:var(--sk-ink-2);white-space:nowrap}
 }
-/* S30 (UX-7): from 701 to 1100 px the stages keep their names (the names are the navigation; the numbers are decoration):
-   the numbers of the other stages step aside instead, and the type tightens */
-@media (min-width:701px) and (max-width:1100px){
+/* S30 (UX-7): from 1000 to 1100 px the stages keep their names (the names are the navigation; the numbers are decoration):
+   the numbers of the other stages step aside instead, and the type tightens. Below 1000 px the names would squeeze the
+   project's name in the header (CI's fonts cut it at 834), so there the other stages show their number, as in S24 */
+@media (min-width:1000px) and (max-width:1100px){
   #studio-root .st .st-step:not(.on) .st-step-l{display:inline;position:static;width:auto;height:auto;overflow:visible;clip:auto}
   #studio-root .st .st-step:not(.on) .st-step-n{display:none}
   #studio-root .st .st-step{min-width:0;padding:0 6px 0 4px;gap:4px}

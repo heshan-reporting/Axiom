@@ -11,7 +11,7 @@
  *   UX-3 below 1180 px the closed inspector drawer is out of the Tab order; opened, the focus goes in; Escape gives it back
  *   UX-9 a delete question starts on Cancel; Help closes on Escape; UX-5 the font picker gives the focus back; the wizard
  *        puts the focus on its question and leaves on Escape wherever the focus is
- *   UX-7 from 701 to 1100 px every stage keeps its name; UX-8 a read key sees "read-only" in the header on a phone
+ *   UX-7 from 1000 to 1100 px every stage keeps its name, and at 834 the project's name keeps its room (CI's fonts cut it); UX-8 a read key sees "read-only" in the header on a phone
  *   UX-4 a direction card says the words are placed by default when the direction never said where they go
  *   RM-4 the renderer's measured text box holds the ink of each line (Thai tone marks, Arabic harakat above the line box), so a
  *        block set into that space collides; RM-7 Arabic is set right to left (the full stop at the reader's end of the line)
@@ -211,6 +211,12 @@ await T.t('UX-7 + UX-8: at 1024 every stage shows its name in full; on a phone a
     ok(labels.every(l => l.w > 10 && !l.clip), 'every name shown in full: ' + JSON.stringify(labels));
     const nav = await page.$eval('#studio-root .st-steps', e => ({ sw: e.scrollWidth, cw: e.clientWidth })); ok(nav.sw <= nav.cw + 1, 'the navigator does not overflow: ' + JSON.stringify(nav));
   } finally { await page.ctxB.close(); }
+  const tab = await fx.open({ quiet: true, viewport: { width: 834, height: 1194 } });
+  try {
+    await openProject(tab, 'S30 at copy'); await sleep(600);
+    const pj = await tab.$eval('#studio-root .st-proj', e => e.getBoundingClientRect().width);
+    ok(pj >= 205, 'at 834 the project block keeps its room for the name (' + Math.round(pj) + ' px of 210)');
+  } finally { await tab.ctxB.close(); }
   const ph = await fx.open({ role: 'read', quiet: true, viewport: { width: 390, height: 844 } });
   try {
     await ph.waitForFunction(() => window.AX_ROLE === 'read', null, { timeout: 15000 });

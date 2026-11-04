@@ -213,7 +213,9 @@
     /* S30 (UX-5): the focus moves to each step's question as it opens (it was left on the page behind), and Escape leaves the
        wizard wherever the focus is, unless a Studio question is open over it */
     const titleRef = useRef(null);
-    useEffect(() => { const t = setTimeout(() => { try { if (titleRef.current) titleRef.current.focus({ preventScroll: true }); } catch (e) {} }, 30); return () => clearTimeout(t); }, [step]);
+    // at once, not on a timer (a late move took the focus from a field the person had already tabbed to, and their typing was
+    // lost), and never away from a field inside the wizard that already has it
+    useEffect(() => { const ae = document.activeElement; if (ae && ae.closest && ae.closest('.st-wiz') && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return; try { if (titleRef.current) titleRef.current.focus({ preventScroll: true }); } catch (e) {} }, [step]);
     useEffect(() => { const h = e => { if (e.key !== 'Escape' || e.defaultPrevented) return; if (document.querySelector('#studio-root [role="alertdialog"], #studio-root [role="dialog"][aria-modal="true"]')) return; const ae = document.activeElement; if (ae && ae.closest && ae.closest('.st-wiz')) return; e.preventDefault(); onCancel(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onCancel]);
     return html`<div class="st-wiz" onKeyDown=${keys} role="region" aria-label="Create a project">
       <div class="st-wiz-top"><div><span class="st-eyebrow-n">New project</span><h2 class="st-wiz-title" tabIndex="-1" ref=${titleRef}>${steps[step][1]}</h2></div><button class="ov-link" onClick=${onCancel}>Cancel</button></div>
