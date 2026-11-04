@@ -1557,7 +1557,7 @@
   const FORMAT_WORD = { '1:1': 'square creative', '4:5': 'portrait creative', '9:16': 'vertical creative', '16:9': 'landscape creative' };
   /** One channel's words at a time, beside the list of the set and a copy partner. "Ready for design" is the agency's copy
    *  approval of exactly this version (reason "copy ready"); an edit to the words makes a new version and the mark falls away. */
-  function CopyStage({ p, a, head, activity, banner, prov, busy, onSel, onEdit, onReady, onDirect, onPick, onWrite, onGo, onDraftState }) {
+  function CopyStage({ p, a, head, activity, banner, prov, busy, conflict, onConflict, onSel, onEdit, onReady, onDirect, onPick, onWrite, onGo, onDraftState }) {
     const ro = !canWrite() || p.readOnly; const noClaude = prov && prov.claude === false;
     const sel = (a && p.assets.indexOf(a) >= 0 ? a : null) || p.assets[0] || null;
     /* S29 (QA-1, PM3): the words typed here stay in the field until a saved version holds them - a failed or slow save never
@@ -1565,15 +1565,24 @@
     const draftKey = 'ax_studio_copydraft_' + p.id;
     const [draft, setDraft0] = useState(() => { try { return JSON.parse(localStorage.getItem(draftKey) || '{}') || {}; } catch (e) { return {}; } });
     const setDraft = upd => setDraft0(o => { const y = typeof upd === 'function' ? upd(o) : upd; try { if (Object.keys(y).length) localStorage.setItem(draftKey, JSON.stringify(y)); else localStorage.removeItem(draftKey); } catch (e) {} return y; });
-    useEffect(() => { const byId = {}; p.assets.forEach(x => { byId[x.id] = x; }); setDraft(o => { const y = {}; let changed = false; Object.keys(o).forEach(k => { const i = k.lastIndexOf(':'); const x = byId[k.slice(0, i)]; if (!x) { changed = true; return; } if (((current(x) || {}).copy || {})[k.slice(i + 1)] === o[k]) { changed = true; return; } y[k] = o[k]; }); return changed ? y : o; }); }, [p.assets]);
+    /* S30 (QA1): each draft remembers the words it was typed over ({t, b}); when the saved words have moved on since (a
+       teammate, another tab, a reload after their save), the draft is not saved over them: the stage says so and asks */
+    const dT = e => (e && typeof e === 'object' ? e.t : e); const dB = e => (e && typeof e === 'object' ? e.b : undefined);
+    useEffect(() => { const byId = {}; p.assets.forEach(x => { byId[x.id] = x; }); setDraft(o => { const y = {}; let changed = false; Object.keys(o).forEach(k => { const i = k.lastIndexOf(':'); const x = byId[k.slice(0, i)]; if (!x) { changed = true; return; } if ((((current(x) || {}).copy || {})[k.slice(i + 1)] || '') === dT(o[k])) { changed = true; return; } y[k] = o[k]; }); return changed ? y : o; }); }, [p.assets]);
     const [ask, setAsk] = useState(''); const [asking, setAsking] = useState(false); const [askFail, setAskFail] = useState(''); const [adaptTo, setAdaptTo] = useState('');
     const key = (x, k) => x.id + ':' + k;
     const vOf = x => current(x) || {};
-    const val = (x, k) => draft[key(x, k)] != null ? draft[key(x, k)] : (vOf(x).copy || {})[k] || '';
-    const dirtyOf = x => COPY_FIELDS.some(([k]) => draft[key(x, k)] != null && draft[key(x, k)] !== ((vOf(x).copy || {})[k] || ''));
+    const val = (x, k) => draft[key(x, k)] != null ? dT(draft[key(x, k)]) : (vOf(x).copy || {})[k] || '';
+    const dirtyOf = x => COPY_FIELDS.some(([k]) => draft[key(x, k)] != null && dT(draft[key(x, k)]) !== ((vOf(x).copy || {})[k] || ''));
+    // a field whose saved words changed after this draft began (a draft from before S30 has no base, so it is asked about too
+    // when the saved words are not the ones it would replace)
+    const movedOf = x => COPY_FIELDS.map(([k]) => k).filter(k => { const e = draft[key(x, k)]; if (e == null) return false; const srv = (vOf(x).copy || {})[k] || ''; const base = dB(e); return dT(e) !== srv && (base === undefined ? false : base !== srv); });
+    const type = (x, k, t) => setDraft(o => { const e = o[key(x, k)]; const b = e != null ? (dB(e) !== undefined ? dB(e) : ((vOf(x).copy || {})[k] || '')) : ((vOf(x).copy || {})[k] || ''); return Object.assign({}, o, { [key(x, k)]: { t, b } }); });
+    const keepMine = x => { const ks = movedOf(x); const patch = {}, base = {}; ks.forEach(k => { patch[k] = dT(draft[key(x, k)]); base[k] = (vOf(x).copy || {})[k] || ''; }); setDraft(o => { const y = Object.assign({}, o); ks.forEach(k => { y[key(x, k)] = { t: patch[k], b: base[k] }; }); return y; }); if (ks.length) onEdit(x, patch, base); };
+    const takeTheirs = (x, ks) => setDraft(o => { const y = Object.assign({}, o); ks.forEach(k => { delete y[key(x, k)]; }); return y; });
     useEffect(() => { if (onDraftState) onDraftState('copystage', Object.keys(draft).length > 0); }, [Object.keys(draft).length]);
     useEffect(() => () => { if (onDraftState) onDraftState('copystage', false); }, []);
-    const save = (x, k) => { const d = draft[key(x, k)]; if (d == null) return; if (d !== ((vOf(x).copy || {})[k] || '')) onEdit(x, { [k]: d }); else setDraft(o => { const y = Object.assign({}, o); delete y[key(x, k)]; return y; }); };
+    const save = (x, k) => { const e = draft[key(x, k)]; if (e == null) return; const d = dT(e); if (movedOf(x).indexOf(k) >= 0) return; if (d !== ((vOf(x).copy || {})[k] || '')) onEdit(x, { [k]: d }, dB(e) !== undefined ? { [k]: dB(e) } : null); else setDraft(o => { const y = Object.assign({}, o); delete y[key(x, k)]; return y; }); };
     const byChannel = useMemo(() => { const m = {}; p.assets.forEach(x => { (m[x.channel] = m[x.channel] || []).push(x); }); return m; }, [p.assets]);
     const flagsOf = x => (vOf(x).checks || []).filter(c => COPY_BAD[c.state]);
     const ready = x => !!standing(x, 'copy');
@@ -1583,6 +1592,8 @@
     if (!n) return html`<div class="st-centre-pad st-copystage"><${StageHead} ...${head}>${!ro ? html`<button class="btn sm" disabled=${!!busy || noClaude || !(b.channels || []).length} title=${noClaude ? 'Claude is not configured on the worker' : !(b.channels || []).length ? 'Choose at least one channel in the brief first' : 'One model call for the words and plans, then one composition per channel'} onClick=${onWrite}>Write the copy</button>` : null}</${StageHead}>${activity}
       <div class="st-empty-state"><b>Get the words right first.</b><span>${p.directions.length && !p.directions.some(d => d.chosen) ? 'Choose a direction, or write the copy straight from the brief.' : 'Writing the copy is one model call: one piece per channel in the brief (' + ((b.channels || []).map(chanLabel).join(', ') || 'none chosen yet') + '), each laid out as an editable composition. ' + (b.deliverable === 'copy' ? 'This project is copy only.' : afterCopy ? 'The imagery waits for Design, as the brief says.' : 'The imagery is queued with it, as the brief says; set "Imagery: after the copy" in the brief to hold it.')}</span>${!ro && p.directions.length && !p.directions.some(d => d.chosen) ? html`<button class="btn sm ghost" onClick=${() => onGo('directions')}>Go to Direction</button>` : null}</div></div>`;
     const v = vOf(sel); const flags = flagsOf(sel); const dirty = dirtyOf(sel); const isReady = ready(sel);
+    const moved = movedOf(sel); const clash = conflict && conflict.asset === sel.id ? conflict : null;
+    const fieldName = k => ((COPY_FIELDS.find(f => f[0] === k) || [])[1] || k).toLowerCase();
     const finished = v.mode === 'finished'; const max = (CHANNELS[sel.channel] || {}).max || 900;
     const alts = p.thread.filter(e => e.kind === 'alternatives' && e.asset === sel.id && e.options).slice(-1)[0];
     const toggle = async () => { if (dirty) return; if (!isReady && flags.length && !(await askStudio({ title: 'Mark ready for design with checks open?', text: flags.length + ' check' + (flags.length === 1 ? '' : 's') + ' on these words still to look at (' + flags.map(c => CHECK_WORD[c.state] || c.state).join(', ') + '). Mark them ready for design anyway?', ok: 'Mark ready anyway' }))) return; onReady(sel, !isReady); };
@@ -1594,12 +1605,14 @@
           <span class="st-copy-pick-ic"><${Icon} n=${FORMAT_ICON[x.format] || 'file'} size=${15} /></span><span class="st-copy-pick-t">${x.title}<small>${FORMAT_WORD[x.format] || x.format}${(vOf(x).mode === 'copy') ? ', copy only' : ''}${staleIds.has(x.id) ? html`<span class="st-mini-chip warn" title="Written on an earlier objective, message or strategy">earlier choice</span>` : null}</small></span>
           <span class=${'st-copy-state' + (ready(x) ? ' ok' : f ? ' warn' : '')}>${ready(x) ? 'Ready' : f ? f + ' to check' : 'Draft'}</span></button>`; })}</div>`)}</nav>
         <section class="st-copy-edit" aria-label=${'Copy for ' + sel.title}>
-          <div class="st-copy-title"><h3>${chanLabel(sel.channel)} copy <span class="ov-dim">${sel.title}, v${vnum(sel, v)}${v.note ? ' - ' + v.note : ''}</span></h3><span class=${'st-copy-badge' + (isReady ? ' ok' : '')} role="status">${isReady ? 'Ready for design' : dirty ? 'Unsaved words' : 'Working draft'}</span></div>
+          <div class="st-copy-title"><h3>${chanLabel(sel.channel)} copy <span class="ov-dim">${sel.title}, v${vnum(sel, v)}${v.note ? ' - ' + v.note : ''}</span></h3><span class=${'st-copy-badge' + (isReady ? ' ok' : moved.length || clash ? ' warn' : '')} role="status">${isReady ? 'Ready for design' : moved.length || clash ? 'Changed elsewhere' : dirty ? 'Unsaved words' : 'Working draft'}</span></div>
           ${v.context && v.context.trace ? html`<${TraceLine} tr=${v.context.trace} p=${p} />` : null}
+          ${moved.length && !clash ? html`<div class="st-notice warn" role="alert"><div class="st-notice-body"><b>The saved ${moved.map(fieldName).join(', ')} changed after you started typing.</b> <span>Your words were not saved over them. Now saved: ${moved.map(k => '"' + String((v.copy || {})[k] || '').slice(0, 90) + '"').join('; ')}.</span></div><div class="st-notice-acts"><button class="btn sm" disabled=${ro} onClick=${() => keepMine(sel)}>Keep mine</button><button class="btn sm ghost" onClick=${() => takeTheirs(sel, moved)}>Take theirs</button></div></div>` : null}
+          ${clash ? html`<div class="st-notice warn" role="alert"><div class="st-notice-body"><b>Changed elsewhere while you typed: ${clash.fields.map(fieldName).join(', ')}.</b> <span>Nothing was overwritten. Your words are still in the field${clash.fields.length === 1 ? '' : 's'}.</span></div><div class="st-notice-acts"><button class="btn sm" onClick=${() => onConflict('mine')}>Keep mine</button><button class="btn sm ghost" onClick=${() => { takeTheirs(sel, clash.fields); onConflict('theirs'); }}>Take theirs</button></div></div>` : null}
           ${finished ? html`<div class="st-flatnote" role="note">Finished creative: these words will be painted into the image. Settle them here first; changing them after the image is made means generating it again.</div>` : null}
           ${COPY_FIELDS.map(([k, l, help]) => { const t = val(sel, k); const locked = !!(sel.locks || {})[k]; const lim = k === 'caption' ? max : 0; return html`<div key=${k} class="st-copy-field">
             <div class="st-copy-flabel"><label for=${'st-cf-' + k}>${l}${locked ? html` <${Chip}>locked</${Chip}>` : null}</label><span class=${'ov-dim' + (lim && t.length > lim ? ' st-over' : '')}>${t.length}${lim ? ' of ' + lim : ''} characters</span></div>
-            <textarea id=${'st-cf-' + k} class=${'st-ta' + (k === 'headline' ? ' st-copy-hl' : '')} rows=${k === 'caption' ? 4 : k === 'headline' ? 3 : 2} disabled=${ro || locked} value=${t} onInput=${e => setDraft(Object.assign({}, draft, { [key(sel, k)]: e.target.value }))} onBlur=${() => save(sel, k)}></textarea>
+            <textarea id=${'st-cf-' + k} class=${'st-ta' + (k === 'headline' ? ' st-copy-hl' : '')} rows=${k === 'caption' ? 4 : k === 'headline' ? 3 : 2} disabled=${ro || locked} value=${t} onInput=${e => type(sel, k, e.target.value)} onBlur=${() => save(sel, k)}></textarea>
             <small class="ov-dim">${help}</small></div>`; })}
           <div class="st-copy-checks" aria-label="Checks on these words">${flags.length ? flags.map((c, i) => html`<div key=${i}><${Chip} kind=${CHECK_KIND[c.state] || 'warn'}>${CHECK_WORD[c.state] || c.state}</${Chip}> <span class="ov-dim">${c.text}</span></div>`) : html`<span><${Chip} kind="ok">checks clean</${Chip}> <span class="ov-dim">every figure traced to the facts, the brief or the source; no banned term; within the limits</span></span>`}</div>
           <label class=${'st-ready-check' + (isReady ? ' on' : '')}><input type="checkbox" checked=${isReady} disabled=${ro || dirty || !!busy} onChange=${toggle} /> <span><b>Mark this copy ready for design.</b> ${dirty ? 'Leave the field to save the words first. ' : ''}Records the agency's copy approval of version ${vnum(sel, v)}; editing the words afterwards clears it. The client's approval happens in Review.</span></label>
@@ -4381,6 +4394,8 @@
           const curCopy = (current(as) || {}).copy || {}; const changed = {};
           Object.keys(patch).forEach(k => { if ((curCopy[k] || '') !== patch[k]) changed[k] = patch[k]; });
           if (!Object.keys(changed).length) continue;
+          // S30 (QA1): the saved words moved on from the ones this edit was typed over - ask, never save over them
+          { const pre = Object.keys(changed).filter(k => q.known[k] != null && (curCopy[k] || '') !== q.known[k]); if (pre.length) { setConflict({ asset: id, fields: pre, mine: changed }); q.patch = {}; break; } }
           const note = 'hand edit: ' + Object.keys(changed).join(', ');
           // S29 (FS8): one copy edit is one operation; a save that committed but whose answer was lost is never written twice
           const op = 'c' + (MERGE ? MERGE.sig(JSON.stringify({ b: as.current, c: changed })).split(':')[0] : String(Date.now()));
@@ -4402,10 +4417,11 @@
         fail(e, 'Your edit was not saved (your words are still in the field)', () => flushCopy(id));
       } finally { q.running = false; bump(-1); if (Object.keys(q.patch).length && !q.failed) setTimeout(() => flushCopy(id), 0); }
     };
-    const editAsset = (as, patch) => {
+    const editAsset = (as, patch, base) => {
       const q = saveQ.current.get(as.id) || { patch: {}, known: {}, running: false };
       const cur = (((pRef.current || {}).assets || []).find(x => x.id === as.id) || as); const copy0 = (current(cur) || {}).copy || {};
-      Object.keys(patch).forEach(k => { if (q.known[k] == null) q.known[k] = copy0[k] || ''; q.patch[k] = patch[k]; });
+      // S30 (QA1): the words the edit was typed over, when the caller knows them, so a save over someone else's newer words is a conflict
+      Object.keys(patch).forEach(k => { if (base && base[k] != null) q.known[k] = base[k]; else if (q.known[k] == null) q.known[k] = copy0[k] || ''; q.patch[k] = patch[k]; });
       saveQ.current.set(as.id, q); flushCopy(as.id);
     };
     const resolveConflict = async (which) => {
@@ -4636,10 +4652,16 @@
 
     /* export: the renderer draws each approved composition at native size (fonts and imagery loaded first, as for the
        validation); a full key saves the PNGs and runs the export stage; the bundle downloads; the files are listed with their pixels */
-    const doExport = (ready) => guard('export:' + pidRef.current, async () => {
-      const p0 = pRef.current;
-      setExportState({ busy: true, msg: 'Drawing ' + ready.length + ' composition' + (ready.length === 1 ? '' : 's') + ' at native size...' });
+    const doExport = (ready0) => guard('export:' + pidRef.current, async () => {
+      setExportState({ busy: true, msg: 'Reading the project as it stands now...' });
       try {
+        /* S30 (QA2): the package is made from the project as the worker holds it now, not as this page last drew it: a piece that
+           moved to a newer version (an edit in another tab, a teammate's change) stops the export with its name */
+        const p0 = (await reload()) || pRef.current; if (!p0) throw new Error('the project did not load; no bundle was made.');
+        const ready = ready0.map(x => { const fa = (p0.assets || []).find(y => y.id === x.a.id); return { a: fa || x.a, v: fa ? (current(fa) || x.v) : x.v, gone: !fa, moved: !!fa && fa.current !== x.v.id }; });
+        const off = ready.filter(x => x.gone || x.moved);
+        if (off.length) throw new Error(off.map(x => x.a.title + (x.gone ? ' is no longer in the project' : ' moved to version ' + vnum(x.a, x.v) + ' since this list was drawn')).join('; ') + '. Look at the list again: approvals are of exactly one version. No bundle was made.');
+        setExportState({ busy: true, msg: 'Drawing ' + ready.length + ' composition' + (ready.length === 1 ? '' : 's') + ' at native size...' });
         const files = []; const sheet = []; const list = [];
         const dims = u8 => (u8 && u8.length > 24 && u8[1] === 80 && u8[2] === 78 && u8[3] === 71) ? { w: ((u8[16] << 24) | (u8[17] << 16) | (u8[18] << 8) | u8[19]) >>> 0, h: ((u8[20] << 24) | (u8[21] << 16) | (u8[22] << 8) | u8[23]) >>> 0 } : null;
         for (const x of ready) {
@@ -4671,7 +4693,10 @@
           sheet.push('== ' + x.a.title + ' (' + x.a.channel + ' ' + x.a.format + ') - version ' + v.id + ' ==', ...['headline', 'support', 'cta', 'caption', 'alt'].filter(k => v.copy[k]).map(k => k.toUpperCase() + ': ' + v.copy[k]), 'CHECKS: ' + ((v.checks || []).map(c => c.state + ' ' + c.text).join('; ') || 'none'), 'APPROVALS: ' + Object.keys(x.a.approvals || {}).map(k => k + ' by ' + x.a.approvals[k].by + ' - ' + x.a.approvals[k].reason).join('; '), '');
         }
         let manifest = null;
-        if (canWrite() && !p0.readOnly) { setExportState({ busy: true, msg: 'Recording the export on the project...' }); const j = await job('export', { assets: ready.map(x => x.a.id) }, null, 'export:' + p0.id + ':' + Date.now(), 'Recording the export'); if (!j || j.state !== 'done') throw new Error((j && j.error) || 'the export was not recorded'); manifest = j.result || null; }
+        if (canWrite() && !p0.readOnly) { setExportState({ busy: true, msg: 'Recording the export on the project...' }); const j = await job('export', { assets: ready.map(x => x.a.id) }, null, 'export:' + p0.id + ':' + Date.now(), 'Recording the export'); if (!j || j.state !== 'done') throw new Error((j && j.error) || 'the export was not recorded'); manifest = j.result || null;
+          // S30 (QA2): the worker's own judgement decides what is delivered; a piece it left out stops the bundle with the reason
+          const ex = ((manifest && manifest.excluded) || []).filter(e => ready.some(x => x.a.id === e.asset));
+          if (ex.length) throw new Error('The worker left out ' + ex.map(e => e.title + ' (' + e.why + ')').join('; ') + '. No bundle was made; nothing in it would have matched the record.'); }
         const sheetText = manifest && manifest.sheet && manifest.sheet.length < 4000 ? manifest.sheet : 'COPY SHEET - ' + p0.title + '\n\n' + sheet.join('\n');
         files.push({ name: 'copy-sheet.txt', data: sheetText });
         const man = JSON.stringify({ project: p0.id, ns: p0.ns, title: p0.title, campaign: p0.campaign, at: new Date().toISOString(), assets: ready.map(x => ({ asset: x.a.id, title: x.a.title, channel: x.a.channel, format: x.a.format, version: x.v.id, versionNumber: vnum(x.a, x.v), copy: x.v.copy, layout: x.v.layout, image: x.v.image, checks: x.v.checks, approvals: x.a.approvals, context: x.v.context })), export: manifest ? { id: manifest.export, files: manifest.files, excluded: manifest.excluded } : { note: 'downloaded by a read-only key; not recorded on the project' }, note: 'Approved versions only. This export created no task and sent nothing anywhere.' }, null, 2);
@@ -4782,7 +4807,7 @@
     else if (view === 'references') centre = Staged('brief', null, html`<${ReferencesView} p=${p} kit=${kit} onAdd=${addReference} onAnalyse=${analyseReference} onRecipe=${saveRecipe} onMeta=${saveRefMeta} onObs=${refObs} onTeach=${teachObs} busy=${busy} />`);
     else if (view === 'directions') centre = html`<${DirectionsView} p=${p} head=${headOf('directions')} prov=${prov} onChoose=${chooseDirection} onMore=${direct} busy=${busy} />`;
     else if ((view === 'copywrite' || view === 'copy') && guided && !p.assets.length) centre = Staged('copy', null, html`<${F.CopyStart} key=${'cs:' + p.id} p=${p} busy=${busy} prov=${prov} job=${lastJob('copy')} now=${now} durations=${(status || {}).durations} onGenerate=${() => produce({})} onSaveBrief=${saveBriefPatch} onRetry=${() => { const j = lastJob('copy'); if (j) retryJob(j); }} onGo=${goStage} />`);
-    else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} banner=${guided ? html`<${F.StaleCopy} p=${p} wf=${p.workflow} busy=${busy} onRewrite=${() => produce({})} onKeep=${ids => keepEarlier(ids)} />` : null} prov=${prov} busy=${busy} onSel=${id => { setSelAsset(id); setSelField(null); }} onEdit=${editAsset} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
+    else if (view === 'copywrite') centre = html`<${CopyStage} p=${p} a=${a} head=${headOf('copy', tabsFor('copy'))} activity=${jobsLine} banner=${guided ? html`<${F.StaleCopy} p=${p} wf=${p.workflow} busy=${busy} onRewrite=${() => produce({})} onKeep=${ids => keepEarlier(ids)} />` : null} prov=${prov} busy=${busy} onSel=${id => { setSelAsset(id); setSelField(null); }} onEdit=${editAsset} conflict=${conflict} onConflict=${resolveConflict} onReady=${readyCopy} onDirect=${directTeam} onPick=${pickAlternative} onWrite=${() => produce({})} onGo=${goStage} onDraftState=${onDraftState} />`;
     else if (view === 'board' && guided && !(p.brief || {}).production && p.assets.some(x => { const v = current(x); return v && v.mode !== 'copy' && !(v.image && v.image.key); }) && !(p.jobs || []).some(j => j.stage === 'render')) centre = Staged('design', null, html`${jobsLine}<${F.ProductionModes} p=${p} busy=${busy} prov=${prov} onProduce=${produceMode} /><${BoardView} p=${p} onOpen=${openAsset} />`);
     else if (view === 'board') { const wait = p.assets.filter(needsImagery); const imgRunning = (p.jobs || []).some(j => j.stage === 'render' && (j.state === 'queued' || j.state === 'running')); centre = Staged('design', p.assets.length ? html`${wait.length && canWrite() && !p.readOnly ? html`<button class="btn sm" disabled=${!!busy || (prov && !prov.gemini) || imgRunning} title=${prov && !prov.gemini ? 'Image generation is not configured on the worker' : imgRunning ? 'Renders are already running' : 'One paid image generation per planned region, confirmed first'} onClick=${() => generateImagery(wait)}>Generate imagery (${wait.length})</button>` : null}${p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<button class=${'btn sm' + (wait.length ? ' ghost' : '')} onClick=${() => goStage('design')}>Open the canvas</button>` : html`<button class="btn sm" onClick=${() => goStage('review')}>Continue to Review</button>`}` : canWrite() && !p.readOnly ? html`<button class="btn sm" onClick=${() => goStage('copy')}>Write the copy first</button>` : null, html`${jobsLine}${!p.assets.length ? html`<div class="st-empty-state"><b>Nothing to design yet.</b><span>The words come first: write and check the copy, then build each creative here.</span></div>` : !p.assets.some(x => (current(x) || {}).mode !== 'copy') ? html`<div class="st-empty-state"><b>Copy only: nothing to design.</b><span>This project's pieces are words for the channels, with no creative to build. Approve them in Review.</span></div>` : wait.length ? html`<div class="st-imagery-wait" role="status"><b>${wait.length} composition${wait.length === 1 ? '' : 's'} waiting for imagery.</b> <span class="ov-dim">${(p.brief || {}).imageryTiming === 'after_copy' ? 'The brief holds the imagery until the copy is ready: ' + p.assets.filter(x => wait.indexOf(x) >= 0 && standing(x, 'copy')).length + ' of them have their copy marked ready' + (wait.some(x => standing(x, 'copy') && (p.jobs || []).some(jj => jj.stage === 'render' && jj.asset === x.id && jj.state === 'failed')) ? '; for those, the render failed: press Generate imagery to try again.' : '.') : 'Their renders have not landed (or did not run).'}</span></div>` : null}<${BoardView} p=${p} onOpen=${openAsset} />`); }
     else if (view === 'kit') centre = Staged('copy', null, html`<${KitView} p=${p} busy=${busy} onWrite=${writeKit} onUpdate=${updateText} onVerdict=${textVerdict} />`);

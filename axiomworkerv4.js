@@ -10087,6 +10087,8 @@ async function stWfConfirm(env, p, sb, who) {
     const chk = await stBriefCheck(env, p).catch(() => null); const g = chk && (chk.gaps || []).find(x => x.code === 'campaign_unconfirmed' && x.level === 'mandatory');
     if (g) return { error: 'campaign_required', status: 409, detail: 'Choose the campaign, or keep this standalone, with the strategy: ' + (g.text || 'the kit has more than one campaign and none is chosen') + '.' };
   }
+  // S30 (QA7): an unknown campaign is refused before anything is written (it used to confirm the strategy and then answer 400)
+  if (step === 'strategy' && sb.campaign !== undefined && kitSlug(sb.campaign || '')) { const cid0 = kitSlug(sb.campaign); const kit0 = (await brandKit(env, p.ns)) || {}; if (!(kit0.campaigns || []).some(c => c.id === cid0)) return { error: 'unknown_campaign', status: 400, detail: 'The kit has no campaign "' + cid0 + '". Nothing was confirmed.' }; }
   const topics = (Array.isArray(sb.topics) ? sb.topics : []).map(t => stStr(t, 100)).filter(t => (it.topics || []).some(x => x.name === t)).slice(0, 12);
   const changed = [];
   await stBriefPatch(env, p.id, b => {
@@ -10329,6 +10331,8 @@ async function stProduction(env, p, sb, who) {
   const guided = stWfOn(p); const done = [], skipped = [], jobs = [];
   let ctx = null;
   if (mode === 'finished') {
+    // S30 (QA8): a brief that says no imagery cannot become a painting here either (the copy stage already refuses it)
+    if ((p.brief || {}).imagery === 'none') return { error: 'finished_needs_imagery', status: 409, detail: 'The brief says "No imagery", and a finished creative is painted as one image. Nothing was changed: choose Editable for type-only work, or allow imagery in the brief first.' };
     ctx = await stContext(env, p, { channels: [] });
     const mf = await stMarkImages(env, ctx.kit, p.ns, p.campaign, { bytes: false });
     if (mf.missing.length) return { error: 'mark_missing', status: 409, detail: mf.missing.map(m => m.text).join('; ') + '. A finished creative paints the mark from its file, so nothing was changed; upload it in Brand, or choose the editable mode, which places the mark as a layer.' };
@@ -12973,7 +12977,11 @@ async function stImageryQueue(env, p, a, body, who) {
   const live = await env.MIND_DB.prepare("SELECT id FROM studio_jobs WHERE asset=? AND stage='render' AND state IN ('queued','running') LIMIT 1").bind(a.id).first();
   if (live) return { error: 'render_in_flight', status: 409, detail: 'An image for this asset is already queued or being made (job ' + live.id + ').' };
   const size = /^(1K|2K|4K)$/.test(String(body.size || '')) ? body.size : ((p.brief || {}).size || undefined);
-  const attempt = Math.max(0, Math.min(99, parseInt(body.attempt, 10) || 0));
+  let attempt = Math.max(0, Math.min(99, parseInt(body.attempt, 10) || 0));
+  // S30 (QA3): nothing is in flight and the version has no image, so every earlier imagery job for it ended without one (failed,
+  // cancelled, or out of attempts); asking again is a new attempt, never the old key answering with the old failed job
+  if (!body.attempt) { const base = 'imagery:' + v.id; const rows = (await env.MIND_DB.prepare("SELECT idem FROM studio_jobs WHERE project=? AND asset=? AND (idem LIKE ? OR idem LIKE ?)").bind(p.id, a.id, p.id + '|' + base + '%', base + '%').all()).results || [];
+    rows.forEach(r => { const m = String(r.idem || '').replace(p.id + '|', '').slice(base.length).match(/^(?::(\d+))?(?::|$)/); if (m) attempt = Math.max(attempt, (m[1] ? Number(m[1]) : 0) + 1); }); attempt = Math.min(99, attempt); }
   const idem = 'imagery:' + v.id + (attempt ? ':' + attempt : '');
   const ctx = await stContext(env, p, { channels: [a.channel] });
   let jobs = [];
