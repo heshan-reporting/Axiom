@@ -3689,6 +3689,8 @@ async function ensureEngine(env) {
   // S24: where a rule came from, as data - an observation of a reference (ref, obs, area, campaign, the words it was taught from)
   // and what happened to it since (superseded by another rule, its evidence retired) - so a rule and its evidence stay linked
   try { await env.MIND_DB.prepare('ALTER TABLE engine_fixes ADD COLUMN origin TEXT').run(); } catch (e) {}
+  // P51 (Phase 4): when a rule was last applied (written into a prompt) and when a person last reviewed it
+  for (const c of ['last_hit INTEGER', 'reviewed INTEGER', 'reviewed_by TEXT']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_fixes ADD COLUMN ' + c).run(); } catch (e) {} }
   // S28: the Mind document an outcome filed, and when the outcome was withdrawn (its document retracted with it)
   for (const c of ['doc TEXT', 'withdrawn INTEGER', 'retract TEXT', 'retract_err TEXT']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_outcomes ADD COLUMN ' + c).run(); } catch (e) {} }
   // S30 (RM-1): a standing rule the Content Desk saved before rules carried their set's campaign is scoped to it now, once
@@ -3732,9 +3734,9 @@ async function engineAddFix(env, body, who) {
 }
 async function engineFixes(env, ns, task, all) {
   await ensureEngine(env);
-  const rows = (await env.MIND_DB.prepare("SELECT id,ns,task,scope,wrong,rightt,why,rule,exemplar,source,who,created,active,hits,origin FROM engine_fixes WHERE (ns=? OR scope='all') " + (all ? '' : 'AND active=1 ') + 'ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
+  const rows = (await env.MIND_DB.prepare("SELECT id,ns,task,scope,wrong,rightt,why,rule,exemplar,source,who,created,active,hits,origin,last_hit,reviewed,reviewed_by FROM engine_fixes WHERE (ns=? OR scope='all') " + (all ? '' : 'AND active=1 ') + 'ORDER BY created DESC LIMIT 200').bind(ns).all()).results || [];
   const t = engTask(task);
-  return rows.filter(r => !task || t === 'any' || r.task === t || r.task === 'any').map(r => ({ id: r.id, ns: r.ns, task: r.task, scope: r.scope, wrong: r.wrong, right: r.rightt, why: r.why, rule: r.rule, exemplar: r.exemplar, source: r.source, who: r.who, created: r.created, active: !!r.active, hits: r.hits || 0, origin: stFixOrigin(r) }));
+  return rows.filter(r => !task || t === 'any' || r.task === t || r.task === 'any').map(r => ({ id: r.id, ns: r.ns, task: r.task, scope: r.scope, wrong: r.wrong, right: r.rightt, why: r.why, rule: r.rule, exemplar: r.exemplar, source: r.source, who: r.who, created: r.created, active: !!r.active, hits: r.hits || 0, origin: stFixOrigin(r) , lastHit: r.last_hit || null, reviewed: r.reviewed || null, reviewedBy: r.reviewed_by || ''}));
 }
 /** The block that goes into a prompt: the team's standing corrections for this
  *  client and task, newest first, and a note of how many are in force. */
@@ -3744,8 +3746,57 @@ async function engineRules(env, ns, task, limit, opts) {
   if (!fixes.length) return { text: '', count: 0, ids: [] };
   const lines = fixes.map(f => '- ' + f.rule + (f.exemplar && f.exemplar !== f.rule ? ' (e.g. "' + f.exemplar.slice(0, 140) + '")' : ''));
   const text = '\n\nLEARNED CORRECTIONS - taught by the team, ' + fixes.length + ' in force; these outrank taste and any generic guideline:\n' + lines.join('\n');
-  try { await env.MIND_DB.batch(fixes.map(f => env.MIND_DB.prepare('UPDATE engine_fixes SET hits=hits+1 WHERE id=?').bind(f.id))); } catch (e) {}
+  { const now = Date.now(); try { await env.MIND_DB.batch(fixes.map(f => env.MIND_DB.prepare('UPDATE engine_fixes SET hits=COALESCE(hits,0)+1, last_hit=? WHERE id=?').bind(now, f.id))); } catch (e) {} }
   return { text, count: fixes.length, ids: fixes.map(f => f.id) };
+}
+/* P51 (Phase 4): memory that stays true. Every rule with how often and when it was last applied; contradictions between rules
+ * (observation rules that disagree, and text rules where one says use what another says avoid, or the same mistake corrected two
+ * ways); a rule not applied or reviewed for ENGINE_REVIEW_DAYS is proposed for review, never deleted; and a learning summary
+ * of the client's recorded verdicts: what was approved and killed, by surface and part, the reasons given, and the words the
+ * reasons share. Test projects and withdrawn verdicts are left out. */
+const ENGINE_REVIEW_DAYS = 90;
+function engNorm(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+function stRuleTextConflicts(fixes) {
+  const act = (fixes || []).filter(f => f.active); const out = [];
+  for (let a = 0; a < act.length; a++) for (let b = a + 1; b < act.length; b++) {
+    const x = act[a], y = act[b]; const xw = engNorm(x.wrong), yw = engNorm(y.wrong), xr = engNorm(x.right), yr = engNorm(y.right);
+    let why = '';
+    if (xw && xw === yw && xr && yr && xr !== yr) why = 'the same wording is corrected two ways ("' + stStr(x.right, 60) + '" and "' + stStr(y.right, 60) + '")';
+    else if ((xr && yw && xr === yw) || (yr && xw && yr === xw)) why = 'one rule asks for what the other corrects away ("' + stStr(xr === yw ? x.right : y.right, 60) + '")';
+    if (why && (stCampaignOf(x) || '') === (stCampaignOf(y) || '')) out.push({ code: 'rule_contradiction', campaign: stCampaignOf(x) || '', rules: [{ id: x.id, rule: x.rule }, { id: y.id, rule: y.rule }], text: 'Two rules in force disagree: ' + why + '. A person decides which stands; neither is applied less until then.' });
+  }
+  return out;
+}
+function engineReviewDue(f, now) { if (!f.active) return false; const last = Math.max(f.created || 0, f.lastHit || 0, f.reviewed || 0); return now - last > ENGINE_REVIEW_DAYS * 864e5; }
+async function engineMemory(env, ns, campaign) {
+  await ensureEngine(env); const now = Date.now(); campaign = String(campaign || '');
+  const all = (await engineFixes(env, ns, '', true)).filter(f => !campaign || !stCampaignOf(f) || stCampaignOf(f) === campaign);
+  const conflicts = stRuleConflicts(all, campaign).concat(stRuleTextConflicts(all));
+  const inConflict = new Set(conflicts.flatMap(c => (c.rules || []).map(r => r.id)));
+  const rules = all.map(f => ({ id: f.id, rule: f.rule, task: f.task, scope: f.scope, campaign: stCampaignOf(f) || '', active: f.active, who: f.who, created: f.created, hits: f.hits || 0, lastApplied: f.lastHit || null, reviewed: f.reviewed || null, reviewedBy: f.reviewedBy || '',
+    review: engineReviewDue(f, now), reviewWhy: engineReviewDue(f, now) ? (f.lastHit ? 'not applied since ' + new Date(f.lastHit).toISOString().slice(0, 10) : 'never applied since it was taught on ' + new Date(f.created || 0).toISOString().slice(0, 10)) + ': still true? Keep it or switch it off; nothing is deleted.' : '', conflict: inConflict.has(f.id) }));
+  // the verdicts: engine outcomes (Release Desk, Content Desk, Studio) and the Studio's approvals with their reasons
+  const db = env.MIND_DB; let oc = [], ap = [];
+  try { oc = (await db.prepare('SELECT o.surface, o.verdict, o.why, o.headline, o.created, d.campaign AS campaign FROM engine_outcomes o LEFT JOIN mind_docs d ON d.id=o.doc WHERE o.ns=? AND COALESCE(o.withdrawn,0)=0 ORDER BY o.created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) { try { oc = (await db.prepare('SELECT surface, verdict, why, headline, created FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e2) { oc = []; } }
+  try { ap = (await db.prepare("SELECT a.part, a.decision, a.reason, a.created, p.campaign AS campaign FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8 AND NOT EXISTS (SELECT 1 FROM studio_approvals b WHERE b.asset=a.asset AND b.part=a.part AND b.rowid>a.rowid)" + stLiveSql(env, ns, 'p') + ' ORDER BY a.created DESC LIMIT 400').bind(ns).all()).results || []; } catch (e) { ap = []; }
+  const rows = oc.map(o => ({ surface: o.surface || 'release', part: 'piece', ok: o.verdict === 'approved', why: o.why || '', what: o.headline || '', at: o.created, campaign: o.campaign || '' }))
+    .concat(ap.map(a => ({ surface: 'studio', part: a.part, ok: a.decision === 'approve', why: a.reason || '', what: '', at: a.created, campaign: a.campaign || '' })))
+    .filter(r => !campaign || !r.campaign || r.campaign === campaign).filter(r => !/^copy ready$/i.test(r.why.trim()));
+  const by = {}; rows.forEach(r => { const k = r.surface + ':' + r.part; const g = by[k] || (by[k] = { surface: r.surface, part: r.part, approved: 0, killed: 0 }); if (r.ok) g.approved++; else g.killed++; });
+  const shared = ok => { const cnt = {}; rows.filter(r => r.ok === ok && r.why).forEach(r => new Set(stContentWords(r.why)).forEach(w => { cnt[w] = (cnt[w] || 0) + 1; })); return Object.keys(cnt).filter(w => cnt[w] >= 2).sort((a, b) => cnt[b] - cnt[a] || (a < b ? -1 : 1)).slice(0, 10).map(w => ({ word: w, n: cnt[w] })); };
+  const reasons = ok => rows.filter(r => r.ok === ok && r.why).slice(0, 8).map(r => ({ why: stStr(r.why, 200), what: stStr(r.what, 100), surface: r.surface, part: r.part, campaign: r.campaign, at: r.at }));
+  return { ok: true, ns, campaign, rules, inForce: rules.filter(r => r.active).length, review: rules.filter(r => r.review).length, conflicts,
+    summary: { approved: rows.filter(r => r.ok).length, killed: rows.filter(r => !r.ok).length, by: Object.values(by).sort((a, b) => (b.approved + b.killed) - (a.approved + a.killed)), approvedFor: reasons(true), killedFor: reasons(false), approvedWords: shared(true), killedWords: shared(false), withReasons: rows.filter(r => r.why).length, note: 'From the recorded verdicts and the reasons people gave; withdrawn verdicts and test projects are left out. A pattern here is a reading of the reasons, not a rule until someone teaches it.' } };
+}
+/** A person's answer to a rule proposed for review: keep it (stamped reviewed, with who and why) or switch it off (never deleted). */
+async function engineFixReview(env, b, who) {
+  await ensureEngine(env); const id = String(b.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24); const why = stStr(b.reason, 300).trim();
+  if (!id) return { error: 'missing_id', status: 400 };
+  if (why.length < 6) return { error: 'reason_required', status: 400, detail: 'Say why the rule stays or goes (six characters or more).' };
+  const f = await env.MIND_DB.prepare('SELECT id, active FROM engine_fixes WHERE id=?').bind(id).first(); if (!f) return { error: 'unknown_rule', status: 404 };
+  const decision = b.decision === 'off' ? 'off' : 'keep';
+  await env.MIND_DB.prepare('UPDATE engine_fixes SET reviewed=?, reviewed_by=?' + (decision === 'off' ? ', active=0' : '') + ' WHERE id=?').bind(Date.now(), stStr(who, 40) + ': ' + why, id).run();
+  return { ok: true, id, decision };
 }
 async function engineOutcome(env, body, who) {
   await ensureEngine(env);
@@ -3961,7 +4012,8 @@ function kitStructured(body, cur) {
   out.campaigns = (camps || cur.campaigns || []).map(c => { if (!c || typeof c !== 'object') return null; const id = kitSlug(c.id) || kitSlug(c.name); const was = prev(id); return ({ id, name: pick(c.name, 90), url: pick(c.url, 120), signoff: pick(c.signoff, 160), cta: pick(c.cta, 160),
     sourceLine: pick(c.sourceLine, 260), tone: pick(c.tone, 700), structure: pick(c.structure, 700), notes: pick(c.notes, 1400), identity: pick(c.identity != null ? c.identity : was.identity, 600), accent: /^#[0-9a-f]{6}$/i.test(String(c.accent != null ? c.accent : was.accent || '')) ? String(c.accent != null ? c.accent : was.accent) : '', markRule: stMarkRuleClean(c.markRule !== undefined ? c.markRule : was.markRule), logoPolicy: ['logo', 'wordmark', 'both', 'none'].indexOf(c.logoPolicy) >= 0 ? c.logoPolicy : (was.logoPolicy || (was.hasWordmark ? 'wordmark' : 'logo')), hasWordmark: !!was.hasWordmark, wordmarkMime: was.wordmarkMime || '', wordmarkV: was.wordmarkV || '', wordmarks: Array.isArray(was.wordmarks) ? was.wordmarks : [], wordmarkDefault: was.wordmarkDefault || '', active: c.active !== false }); }).filter(c => c && c.id);
   const facts = arr(body.facts, 80);
-  out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? ({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }) : null).filter(f => f && f.text);
+  // P51 (Phase 3): a fact may carry a review date (reviewBy, YYYY-MM-DD) and its last confirmation (who, when)
+  out.facts = (facts || cur.facts || []).map(f => f && typeof f === 'object' ? Object.assign({ id: kitSlug(f.id) || arcHash(String(f.text || '')), text: pick(f.text, 280), source: pick(f.source, 220), status: f.status === 'pending' ? 'pending' : 'approved', campaign: kitSlug(f.campaign) }, /^\d{4}-\d{2}-\d{2}$/.test(String(f.reviewBy || '')) ? { reviewBy: String(f.reviewBy) } : {}, Number(f.confirmedAt) > 0 ? { confirmedAt: Number(f.confirmedAt), confirmedBy: pick(f.confirmedBy, 60) } : {}) : null).filter(f => f && f.text);
   const banned = arr(body.banned, 60);
   out.banned = (banned || cur.banned || []).map(b => typeof b === 'string' ? { term: pick(b, 80), use: '', why: '', allowNegated: false }
     : (b && typeof b === 'object' ? { term: pick(b.term, 80), use: pick(b.use, 160), why: pick(b.why, 240), allowNegated: !!b.allowNegated } : null)).filter(b => b && b.term);
@@ -4024,7 +4076,8 @@ function contentKitBlock(kit, campaignId, segmentId, platforms, opts) {
   kit = kit || {}; opts = opts || {};
   const camp = (kit.campaigns || []).find(c => c.id === campaignId) || null;
   const seg = (kit.segments || []).find(s => s.id === segmentId) || null;
-  let facts = (kit.facts || []).filter(f => f.status !== 'pending'); let excludedFacts = 0;
+  // P51 (Phase 3): a fact past its review date stays out of production until a person confirms it
+  let facts = (kit.facts || []).filter(f => f.status !== 'pending' && !brFactExpired(f)); let excludedFacts = 0;
   // the Content Desk offers every approved fact, the campaign's own first (a HOOF post may cite the national tax figure). The
   // Studio (opts.campaignOnly, S7) carries the campaign's own facts and the client-wide ones only: its figure checks judge
   // against the campaign's facts, so offering another campaign's invited figures the checks would then flag.
@@ -4082,7 +4135,7 @@ async function contentExemplars(env, ns, camp, platforms, brief, log, opts) {
         // named neither): a campaign the kit holds, or one it no longer holds, which then fits no project and is left out
         if (!campaign && tag.length >= 4) { const seg = String(tag[2] || '').toLowerCase().trim(); const platformish = seg.split(/[, ]+/).filter(Boolean).every(x => !!CONTENT_PLATFORMS[x]); if (seg && !platformish && !/[./]/.test(seg)) campaign = campIds.indexOf(seg) >= 0 ? seg : 'unknown:' + seg; }
         scope = campaign ? 'campaign' : (scope || 'client'); } }   // S29 (PR1): a recorded campaign is never overwritten by the tag; a tag without a platform is ambiguous and is not guessed
-    const entry = { kind, title: String((row && row.title) || m.title || ''), snippet: String(m.snippet || '').slice(0, 700), campaign };
+    const entry = { id, kind, title: String((row && row.title) || m.title || ''), snippet: String(m.snippet || '').slice(0, 700), campaign };
     if (approval === 'background' || /^(brief|release|doc|slack|guide)$/.test(kind)) { if (own || h.ns === 'cmm') { if (!campaign || (cid && campaign === cid) || (!cid && !opts.campaignOnly)) G.background.push(entry); else otherCampaign++; } continue; }   // S30 (RM-3): standalone Studio work reads client-wide background only
     if (!/^(copy|outcome)$/.test(kind)) continue;
     if (!own) continue;                                                   // the agency's namespace is never a client's example
@@ -4098,7 +4151,8 @@ async function contentExemplars(env, ns, camp, platforms, brief, log, opts) {
   const text = (sect('APPROVED EXAMPLES - approved by the team' + (cid ? ' for this campaign or for the client as a whole' : '') + '; match their shape, rhythm, sign-offs and source lines; do not copy them word for word:', A)
     + sect('AVOID - work the team rejected; never imitate it, and do not repeat what made it fail:', V)
     + sect('BACKGROUND - briefs and source material for context and facts, not examples of style:', B)).slice(0, 7000);
-  return { text, count: A.length, approved: A.length, avoid: V.length, background: B.length, unclassified, otherCampaign, legacy };
+  const docs = [].concat(A.map(e => Object.assign({ use: 'example' }, e)), V.map(e => Object.assign({ use: 'avoid' }, e)), B.map(e => Object.assign({ use: 'background' }, e))).map(e => ({ id: e.id, title: stStr(e.title, 120), kind: e.kind, campaign: e.campaign, use: e.use }));   // P51: the documents themselves, for What informed this creative
+  return { text, count: A.length, approved: A.length, avoid: V.length, background: B.length, unclassified, otherCampaign, legacy, docs };
 }
 function contentNorm(t, i, ns) {
   const platform = contentPlatform(t.platform) || 'facebook';
@@ -7447,7 +7501,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-05.studio-p50';
+const AXIOM_BUILD = '2026-11-05.studio-p51';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -8474,6 +8528,15 @@ async function stIsolationAudit(env, ns) {
     for (const id of ids.slice(0, 80)) { rules++; const f = await env.MIND_DB.prepare('SELECT ns, scope FROM engine_fixes WHERE id=?').bind(String(id)).first(); if (f && f.ns !== ns && f.scope !== 'all') violations.push({ version: r.id, asset: r.title, kind: 'rule', id, detail: 'a rule of ' + f.ns }); }
     const pack = ctx.refPack || null;
     for (const id of ((pack && pack.attached) || []).concat((pack && pack.read) || []).slice(0, 40)) { refs++; const f = await env.MIND_DB.prepare('SELECT r.project, r.campaign, p.ns FROM studio_references r JOIN studio_projects p ON p.id=r.project WHERE r.id=?').bind(String(id)).first(); if (!f) continue; if (f.ns !== ns) violations.push({ version: r.id, asset: r.title, kind: 'reference', id, detail: 'a reference of ' + f.ns }); else if (pack.mode === 'recommended' && f.campaign && r.campaign && f.campaign !== r.campaign) violations.push({ version: r.id, asset: r.title, kind: 'reference', id, detail: 'a ' + f.campaign + ' reference recommended for ' + r.campaign }); }
+    // P51 (Phase 4): campaign walls in what informed the words - the manifest names every fact, correction and example by its
+    // campaign; one of another campaign (or another client's context) is a leak
+    { const inf = ctx.informed || null; const pc = String(r.campaign || '');
+      if (inf) {
+        if (inf.ns && inf.ns !== ns) violations.push({ version: r.id, asset: r.title, kind: 'context', id: inf.ns, owner: inf.ns, text: 'the context was compiled for another client' });
+        ((inf.kit || {}).facts || []).forEach(f => { if (f.campaign && f.campaign !== pc) violations.push({ version: r.id, asset: r.title, kind: 'fact', id: f.id, owner: 'campaign ' + f.campaign, text: 'a fact of another campaign reached the words' }); });
+        (inf.corrections || []).forEach(c => { if (c.campaign && c.campaign !== pc) violations.push({ version: r.id, asset: r.title, kind: 'rule', id: c.id, owner: 'campaign ' + c.campaign, text: 'a correction of another campaign reached the words' }); });
+        (((inf.memory || {}).examples) || []).forEach(e => { if (e.use !== 'background' && e.campaign && e.campaign !== pc) violations.push({ version: r.id, asset: r.title, kind: 'example', id: e.id, owner: 'campaign ' + e.campaign, text: 'an example of another campaign reached the words' }); });
+      } }
     for (const l of (Array.isArray(L.layers) ? L.layers : [])) { const m = /\/brand\/(logo|wordmark)\?ns=([a-z0-9_-]+)(?:&campaign=([a-z0-9_-]+))?/.exec(String(l.src || '')); if (!m) continue; marks++; if (m[2] !== ns) violations.push({ version: r.id, asset: r.title, kind: 'mark', id: l.id, detail: 'the ' + m[1] + ' of ' + m[2] }); else if (m[1] === 'wordmark' && m[3] && r.campaign && m[3] !== r.campaign) violations.push({ version: r.id, asset: r.title, kind: 'mark', id: l.id, detail: 'the ' + m[3] + ' wordmark on a ' + r.campaign + ' asset' }); }
   }
   return { versions: vs.length, checked: { rules, references: refs, marks }, violations: violations.slice(0, 50), clean: !violations.length };
@@ -8865,7 +8928,7 @@ async function stWritingCore(env, o) {
   try {
     await ensureBrand(env);
     const rows = (await env.MIND_DB.prepare("SELECT id, campaign, kind, authority, title, body FROM brand_items WHERE ns=? AND status='active' AND authority IN ('rule','preference') AND (COALESCE(campaign,'')='' OR campaign=?) ORDER BY CASE authority WHEN 'rule' THEN 0 ELSE 1 END, updated DESC LIMIT 24").bind(ns, String(campaign || '')).all()).results || [];
-    if (rows.length) kept = { ids: rows.map(r => r.id), text: '\n\nKEPT BY THE TEAM (brand ' + (rows.some(r => r.authority === 'rule') ? 'rules and preferences' : 'preferences') + ' a person reviewed; a rule is to be followed, a preference to be honoured where it fits):\n' + rows.map(r => '- [' + r.authority + (r.campaign ? ', campaign ' + r.campaign : ', client-wide') + '] ' + stStr(r.title, 140) + (r.body && r.body !== r.title ? ': ' + stStr(r.body, 400) : '')).join('\n') };
+    if (rows.length) kept = { ids: rows.map(r => r.id), items: rows.map(r => ({ id: r.id, title: stStr(r.title || r.body, 120), authority: r.authority, campaign: r.campaign || '' })), text: '\n\nKEPT BY THE TEAM (brand ' + (rows.some(r => r.authority === 'rule') ? 'rules and preferences' : 'preferences') + ' a person reviewed; a rule is to be followed, a preference to be honoured where it fits):\n' + rows.map(r => '- [' + r.authority + (r.campaign ? ', campaign ' + r.campaign : ', client-wide') + '] ' + stStr(r.title, 140) + (r.body && r.body !== r.title ? ': ' + stStr(r.body, 400) : '')).join('\n') };
   } catch (e) {}
   const text = '\n\n=== CLIENT WRITING CORE (the same for every writing surface) ===' + block.text + ex.text + rulesCopy.text + kept.text + '\n=== END OF THE CLIENT WRITING CORE ===';
   return { kit, block, ex, rulesCopy, kept, text };
@@ -8880,7 +8943,7 @@ async function stContext(env, p, opts) {
   const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
   const text = core.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
-  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, brandItems: kept.ids, examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
+  const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, brandItems: kept.ids, keptItems: kept.items || [], exampleDocs: ex.docs || [], examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
   await log('out', 'client context for ' + client + ': ' + (block.campaign ? 'campaign ' + block.campaign.name + ', ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms, ' + (rulesCopy.count + tilesOnly.length) + ' learned corrections, ' + ex.count + ' approved examples' + (kit.hasLogo ? ', logo on file' : ', no logo on file'));
   return { client, kit, block, text, snapshot, rules: { copy: rulesCopy, tiles: rulesTiles } };
 }
@@ -8947,8 +9010,9 @@ async function stCompileContext(env, p, opts) {
   if (mem.otherCampaigns) omitted.push({ what: 'artwork', text: mem.otherCampaigns + ' catalogued artwork' + (mem.otherCampaigns === 1 ? '' : 's'), why: 'from other campaigns: another campaign\'s look is not this one\'s identity' });
   const sections = [{ id: 'kit', chars: ctx.block.text.length, what: 'voice, standing rules, campaign wording, approved facts, banned terms' }, { id: 'examples', chars: Math.max(0, ctx.text.length - ctx.block.text.length - ctx.rules.copy.text.length), what: 'approved examples from the creative shelf' }, { id: 'corrections', chars: ctx.rules.copy.text.length + (ctx.rules.tiles.ids.some(id => ctx.rules.copy.ids.indexOf(id) < 0) ? ctx.rules.tiles.text.length : 0), what: 'learned corrections' }, { id: 'identity', chars: identityText.length, what: 'campaign identity, palette, fonts, mark placement' }, { id: 'references', chars: pack ? pack.text.length : refs.text.length, what: 'the reference pack' }, { id: 'artMemory', chars: mem.text.length, what: 'catalogued past artwork' }].filter(s => s.chars > 0);
   const manifest = { v: 1, build: AXIOM_BUILD, stage: opts.stage || '', at: Date.now(), ns: p.ns, client: ctx.client, campaign: cid,
-    kit: { name: kit.name || '', updated: kit.updated || 0, voice: !!kit.voice, standingRules: String(kit.rules || '').split(/\n+/).filter(s => s.trim()).length, identity: camp ? stStr(camp.identity, 200) : '', policy: camp ? (camp.logoPolicy || 'logo') : (kit.hasLogo ? 'logo' : 'none'), facts: ctx.block.facts.map(f => ({ id: f.id, text: stStr(f.text, 100), source: stStr(f.source, 60) })).slice(0, 40), banned: ctx.block.banned.map(b => b.term).slice(0, 60) },
+    kit: { name: kit.name || '', updated: kit.updated || 0, voice: !!kit.voice, standingRules: String(kit.rules || '').split(/\n+/).filter(s => s.trim()).length, identity: camp ? stStr(camp.identity, 200) : '', policy: camp ? (camp.logoPolicy || 'logo') : (kit.hasLogo ? 'logo' : 'none'), facts: ctx.block.facts.map(f => ({ id: f.id, text: stStr(f.text, 100), source: stStr(f.source, 60), campaign: f.campaign || '' })).slice(0, 40), banned: ctx.block.banned.map(b => b.term).slice(0, 60) },
     corrections, examples: ctx.snapshot.examples || 0, exampleSets: ctx.snapshot.exampleSets || null,
+    memory: { examples: (ctx.snapshot.exampleDocs || []).slice(0, 16), kept: (ctx.snapshot.keptItems || []).slice(0, 24) },   // P51: every memory item that shaped the words, by id
     references: pack ? { mode: pack.mode, attached: pack.record.attached.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), read: pack.record.read.map(id => { const r = refs.rows.find(x => x.id === id) || {}; return { id, name: r.name || id, purpose: r.purpose || '' }; }), excluded: pack.record.excluded.length, unavailable: pack.record.unavailable.length } : (wantRefs ? { mode: 'all', attached: [], read: refs.used.filter(r => r.analysed).map(r => ({ id: r.id, name: r.name, purpose: r.purpose })), excluded: 0, unavailable: 0 } : null),
     artMemory: opts.art ? { count: mem.count || 0, sameCampaign: mem.sameCampaign || 0, otherCampaigns: mem.otherCampaigns || 0 } : null,
     placement: placement ? { basis: placement.basis, corner: placement.corner, confidence: placement.confidence, mandatory: !!placement.mandatory, evidence: placement.evidence.length, exceptions: placement.exceptions.length } : null,
@@ -9239,7 +9303,7 @@ function stChecks(copy, ledger, opts) {
     const needle = String(num.value).replace(/\.0+$/, '');
     // a fact still pending review, or approved for another campaign, is not evidence for this one
     const other = (Array.isArray(opts.otherFacts) ? opts.otherFacts : []).find(f => stNumbers(String(f.text || '')).some(n => n.value === num.value));
-    if (other) { out.push({ state: 'unsupported', text: num.raw, claim: null, note: other.status === 'pending' ? 'only in a fact still pending review ("' + stStr(other.text, 80) + '"); approve it first' : 'an approved fact of another campaign (' + (other.campaign || 'unscoped') + '), not of this one' }); return; }
+    if (other) { out.push({ state: 'unsupported', text: num.raw, claim: null, note: other.status === 'pending' ? 'only in a fact still pending review ("' + stStr(other.text, 80) + '"); approve it first' : brFactExpired(other) ? 'only in a fact past its review date (' + other.reviewBy + ', "' + stStr(other.text, 80) + '"); confirm it in the Brand workspace first' : 'an approved fact of another campaign (' + (other.campaign || 'unscoped') + '), not of this one' }); return; }
     // a number that only appears in the brief or the kit's prose is not a verified figure: it needs an approved fact or a source passage
     if (allowedFlat && allowedFlat.indexOf(needle) >= 0) { out.push({ state: 'unsupported', text: num.raw, claim: null, note: 'it appears in the brief or the kit text, but not in an approved fact or a source passage; add it as a fact for review or cite the source' }); return; }
     out.push({ state: 'unsupported', text: num.raw, claim: null, note: claims.length ? 'not supported by the supplied sources or the approved facts' : 'no source in this project supports it' });
@@ -9328,7 +9392,7 @@ async function stVersionChecks(env, project, asset, v) {
   const led = await stLedger(env, project.id);
   const kit = (await brandKit(env, project.ns)) || {};
   const allowed = [led.text, (kit.facts || []).map(f => f.text + ' ' + f.source).join(' '), JSON.stringify(project.brief || {})].join(' ');
-  const inScope = f => f.status !== 'pending' && (!f.campaign || f.campaign === project.campaign);
+  const inScope = f => f.status !== 'pending' && !brFactExpired(f) && (!f.campaign || f.campaign === project.campaign);
   const checks = stChecks(v.copy, led.claims, { allowed, banned: kit.banned || [], facts: (kit.facts || []).filter(inScope), otherFacts: (kit.facts || []).filter(f => !inScope(f)), channel: asset.channel, format: asset.format, layout: v.layout, url: stCampaignUrl(kit, project.campaign) });
   try { await env.MIND_DB.prepare('UPDATE studio_versions SET checks=? WHERE id=?').bind(jsonFit(checks, 8000), v.id).run(); } catch (e) {}
   return checks;
@@ -9712,22 +9776,36 @@ function stKnowApproval(meta) {
   if (k === 'brief' || k === 'research' || k === 'brief_daily' || k === 'signal') return 'reference material, not approved copy';
   return 'approval unknown';
 }
+/* P51 (Phase 4): retrieval that ranks for the task. Passages of the project's own campaign come first, then client-wide ones,
+ * then another campaign's (labelled, never presented as general); within that, approved work over unrecorded approval over
+ * background, and rejected work last and labelled avoid; then the retrieval score. How much a campaign holds never decides. */
+function stKnowTier(c, cur) { c = String(c || ''); cur = String(cur || ''); if (!cur) return c ? 1 : 0; return c === cur ? 0 : !c ? 1 : 2; }
+function stApprovalTier(a) { a = String(a || ''); return /^approved/.test(a) && !/not recorded/.test(a) ? 0 : /rejected|avoid/.test(a) ? 3 : /background|reference material/.test(a) ? 2 : 1; }
+function stRankKnowledge(items, campaign) {
+  return (items || []).map((k, i) => ({ k, i })).sort((a, b) => (stKnowTier(a.k.campaign, campaign) - stKnowTier(b.k.campaign, campaign)) || (stApprovalTier(a.k.approval) - stApprovalTier(b.k.approval)) || ((b.k.score || 0) - (a.k.score || 0)) || (a.i - b.i))
+    .map(x => Object.assign(x.k, { avoid: stApprovalTier(x.k.approval) === 3 || undefined }));
+}
+/** Decisions: the project's campaign first, then client-wide, then others; the newest first within each; a rejection is "avoid". */
+function stRankDecisions(items, campaign) {
+  return (items || []).map((d, i) => ({ d, i })).sort((a, b) => (stKnowTier(a.d.campaign, campaign) - stKnowTier(b.d.campaign, campaign)) || ((b.d.at || 0) - (a.d.at || 0)) || (a.i - b.i))
+    .map(x => Object.assign(x.d, { avoid: /^(rejected|reject|LOSS|killed|kill)$/i.test(String(x.d.kind || '')) || undefined }));
+}
 async function stIntelKnowledge(env, p, q, log) {
   const out = { K: [], N: [], A: [], D: [], H: [], S: [] }; const ns = p.ns; const db = env.MIND_DB;
   const issueIds = CLIENT_ISSUES.filter(ci => ci.ns === ns).map(ci => ci.id);
-  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 6, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 6).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), campaign: stKnowCampaign(h.meta, ns), approval: stKnowApproval(h.meta), doc: String(h.meta.docId || ''), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
+  try { const hits = await mindRetrieve(env, ns, String(q || '').slice(0, 1500), 12, { creative: true }); out.K = hits.filter(h => h && h.meta).slice(0, 24).map((h, i) => ({ id: 'K' + (i + 1), ns: h.ns, score: Math.round((h.score || 0) * 100) / 100, title: stStr(h.meta.title || h.meta.source || 'knowledge', 120), kind: stStr(h.meta.kind, 30), campaign: stKnowCampaign(h.meta, ns), approval: stKnowApproval(h.meta), doc: String(h.meta.docId || ''), text: stStr(h.meta.text || h.meta.chunk || h.meta.snippet || h.text || '', 600) })); } catch (e) {}
   try {
     const rows = (await db.prepare("SELECT id,label,claim,counter_claim,side,status,n,velocity,issues,ns,last_ts FROM narratives WHERE COALESCE(label,'')<>'' AND COALESCE(status,'')<>'broad' AND COALESCE(scope,'')<>'off' AND COALESCE(muted,0)=0 AND last_ts>? ORDER BY last_ts DESC LIMIT 60").bind(Date.now() - 14 * 864e5).all()).results || [];
     out.N = rows.filter(r => r.ns === ns || pjs(r.issues, []).some(i => issueIds.indexOf(i) >= 0)).slice(0, 5).map((r, i) => ({ id: 'N' + (i + 1), ref: r.id, label: stStr(r.label, 140), claim: stStr(r.claim, 240), counter: stStr(r.counter_claim, 200), side: r.side || '', status: r.status || '', rows: r.n || 0 }));
   } catch (e) {}
   try { const rows = (await db.prepare('SELECT id,label,issue,ratio,angle,detected_ts,acked_ts FROM arc_alerts WHERE ns=? AND detected_ts>? ORDER BY detected_ts DESC LIMIT 4').bind(ns, Date.now() - 14 * 864e5).all()).results || []; out.A = rows.map((r, i) => ({ id: 'A' + (i + 1), ref: r.id, label: stStr(r.label, 120), issue: r.issue || '', ratio: Math.round((r.ratio || 0) * 10) / 10, angle: stStr(r.angle, 240), at: r.detected_ts || 0 })); } catch (e) {}
   try {
-    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title,p.campaign FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8" + stLiveSql(env, ns, 'p') + " ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
+    const ap = (await db.prepare("SELECT a.decision,a.reason,a.part,a.created,p.title,p.campaign FROM studio_approvals a JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND a.decision IN ('approve','reject') AND LENGTH(COALESCE(a.reason,''))>=8 AND NOT EXISTS (SELECT 1 FROM studio_approvals b WHERE b.asset=a.asset AND b.part=a.part AND b.rowid>a.rowid)" + stLiveSql(env, ns, 'p') + " ORDER BY a.created DESC LIMIT 8").bind(ns).all()).results || [];
     try { await ensureEngine(env); } catch (e) {}
     const eo = (await db.prepare('SELECT verdict,why,headline,surface,created,doc FROM engine_outcomes WHERE ns=? AND COALESCE(withdrawn,0)=0 ORDER BY created DESC LIMIT 6').bind(ns).all().catch(() => ({ results: [] }))).results || [];
-    out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created, campaign: r.campaign || '', scoped: true })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created, doc: r.doc || '' }))).sort((a, b) => b.at - a.at).slice(0, 8).map((x, i) => Object.assign({ id: 'D' + (i + 1) }, x));
+    out.D = ap.map(r => ({ kind: r.decision === 'approve' ? 'approved' : 'rejected', what: r.part + ' in "' + stStr(r.title, 60) + '"', why: stStr(r.reason, 200), at: r.created, campaign: r.campaign || '', scoped: true })).concat(eo.map(r => ({ kind: r.verdict, what: stStr(r.headline || r.surface, 120), why: stStr(r.why, 200), at: r.created, doc: r.doc || '' }))).sort((a, b) => b.at - a.at).slice(0, 16);
   } catch (e) {}
-  try { const rows = (await db.prepare('SELECT l.kind,l.text,l.created,p.campaign AS campaign, p.id AS pid FROM studio_intel_log l LEFT JOIN studio_projects p ON p.id=l.project WHERE l.ns=? ORDER BY l.created DESC LIMIT 12').bind(ns).all()).results || []; out.H = rows.map((r, i) => ({ id: 'H' + (i + 1), kind: r.kind, text: stStr(r.text, 220), at: r.created, campaign: r.campaign || '', scoped: !!r.pid })); } catch (e) {}
+  try { const rows = (await db.prepare('SELECT l.kind,l.text,l.created,p.campaign AS campaign, p.id AS pid FROM studio_intel_log l LEFT JOIN studio_projects p ON p.id=l.project WHERE l.ns=? AND l.kind NOT LIKE \'withdrawn:%\' ORDER BY l.created DESC LIMIT 12').bind(ns).all()).results || []; out.H = rows.map((r, i) => ({ id: 'H' + (i + 1), kind: r.kind, text: stStr(r.text, 220), at: r.created, campaign: r.campaign || '', scoped: !!r.pid })); } catch (e) {}
   // S29 (PR5): a passage, an outcome or an earlier choice says which campaign it belongs to (from the document's own record, or
   // the project it was made in) and whether its approval is recorded, so the busier campaign's material is never read as general
   try {
@@ -9740,6 +9818,8 @@ async function stIntelKnowledge(env, p, q, log) {
       out.D.forEach(x => { const d = x.doc && rows[x.doc]; if (d) { x.campaign = d.campaign || ''; x.scoped = true; } });
     }
   } catch (e) {}
+  out.K = stRankKnowledge(out.K, p.campaign || '').slice(0, 6).map((k, i) => Object.assign(k, { id: 'K' + (i + 1) }));
+  out.D = stRankDecisions(out.D, p.campaign || '').slice(0, 8).map((d, i) => Object.assign(d, { id: 'D' + (i + 1) }));
   try {
     const rows = (await db.prepare("SELECT e.name AS name, COUNT(*) AS n, AVG(s.stance) AS net FROM sent_entities s JOIN entities e ON e.id=s.entity WHERE e.side='client' AND e.ns=? AND s.ts>? GROUP BY e.name ORDER BY n DESC LIMIT 4").bind(ns, Date.now() - 7 * 864e5).all()).results || [];
     out.S = rows.map((r, i) => ({ id: 'S' + (i + 1), entity: r.name, mentions: r.n, net: Math.round((r.net || 0) * 100) / 100 }));
@@ -9764,6 +9844,63 @@ async function stTranscribeSource(env, src, log) {
   if (log) await log('out', 'read ' + paras.length + ' paragraph' + (paras.length === 1 ? '' : 's') + ' from the ' + (pdf ? 'document' : 'image') + (j.unreadable ? '; could not read: ' + stStr(j.unreadable, 120) : ''));
   return { passages, image: pdf ? null : { b64, mime, name: src.name }, model: r.model };
 }
+/* P51 (Phase 4): relevance you can audit. A deterministic pre-pass over the paragraphs, before any model call: which of the
+ * client's CLIENT_ISSUES matchers fire (the tight Sentinel trigger or the wide collection matcher), which register entities are
+ * named, which campaign terms (the campaign's name, the places and names in its own approved facts) and which client names
+ * appear. A paragraph with none of them is unanchored: the reading may keep it only with a stated reason. */
+const ST_PREPASS_SKIP = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|The|This|That|A|An|It|We|Our|They)$/;
+function stRxEsc(t) { return String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'); }
+function stPrepassTerms(ns, kit) {
+  kit = kit || {}; const out = { client: [], campaigns: [] };
+  const nm = String(kit.name || '').split(/\s+-\s+/)[0].trim(); const ci = CLIENT_ISSUES.find(c => c.ns === ns);
+  [nm, nm.split(/\s+/)[0], ci ? ci.client : ''].forEach(t => { t = String(t || '').trim(); if (t.length >= 4 && out.client.indexOf(t) < 0) out.client.push(t); });
+  (kit.campaigns || []).filter(c => c && c.id && c.active !== false).forEach(c => {
+    const terms = [];
+    const add = t => { t = String(t || '').trim(); if (t.length >= 4 && !terms.some(x => x.toLowerCase() === t.toLowerCase())) terms.push(t); };
+    add(c.name); if (/^[a-z]{5,}$/.test(c.id)) add(c.id);
+    (kit.facts || []).filter(f => f && f.campaign === c.id && f.status === 'approved' && !brFactExpired(f)).forEach(f => {
+      const rx = /\b([A-Z][a-z]+(?:\s+(?:[A-Z][a-z]+|\d{1,3}))+)\b/g; let m;
+      while ((m = rx.exec(String(f.text || '')))) { const words = m[1].split(/\s+/).filter(w => !ST_PREPASS_SKIP.test(w)); if (words.length >= 2 || (words.length === 1 && /\d/.test(m[1]))) add(words.join(' ')); }
+    });
+    if (terms.length) out.campaigns.push({ id: c.id, name: stStr(c.name || c.id, 80), terms: terms.slice(0, 16) });
+  });
+  return out;
+}
+function stRelevancePrepass(texts, o) {
+  o = o || {}; const ns = o.ns; const terms = stPrepassTerms(ns, o.kit); const issues = CLIENT_ISSUES.filter(c => c.ns === ns);
+  const ent = o.entities && typeof o.entities.match === 'function' ? o.entities : null;
+  const word = t => new RegExp('(?<![A-Za-z0-9])' + stRxEsc(t) + '(?![A-Za-z0-9])', 'i');
+  return (texts || []).map(t0 => {
+    const t = String(t0 || ''); const ev = { issues: [], entities: [], campaign: [], client: [] };
+    issues.forEach(ci => { const a = ci.rx && ci.rx.exec(t); const b = !a && ci.wide && ci.wide.exec(t); if (a || b) ev.issues.push({ id: ci.id, label: ci.label, by: a ? 'trigger' : 'wide', match: stStr((a || b)[0], 60) }); });
+    if (ent) { try { ent.match(t).slice(0, 6).forEach(id => { const e = ent.byId && ent.byId[id]; ev.entities.push({ id, name: stStr(e ? e.name : id, 60), side: e ? e.side || '' : '' }); }); } catch (e) {} }
+    terms.campaigns.forEach(c => { const hit = c.terms.find(x => word(x).test(t)); if (hit) ev.campaign.push({ id: c.id, term: hit }); });
+    terms.client.forEach(x => { if (word(x).test(t) && ev.client.indexOf(x) < 0) ev.client.push(x); });
+    ev.anchored = !!(ev.issues.length || ev.entities.length || ev.campaign.length || ev.client.length);
+    return ev;
+  });
+}
+function stPrepassLine(ev) {
+  if (!ev || !ev.anchored) return 'NO ANCHOR (no client issue, entity, campaign term or client name)';
+  return [ev.issues.length ? 'issues ' + ev.issues.map(i => i.id + (i.by === 'trigger' ? ' (trigger)' : '') + ' "' + i.match + '"').join(', ') : '', ev.entities.length ? 'entities ' + ev.entities.map(e => e.name).join(', ') : '', ev.campaign.length ? 'campaign ' + ev.campaign.map(c => c.id + ' "' + c.term + '"').join(', ') : '', ev.client.length ? 'client ' + ev.client.join(', ') : ''].filter(Boolean).join('; ');
+}
+/** After the reading: a kept paragraph without an anchor must carry a stated reason (twenty characters or more), else it is set
+ *  aside; every kept and set-aside paragraph carries its pre-pass evidence and the facts its claims matched. */
+function stRelevanceAudit(relevant, filtered, prepass, keys, claims) {
+  const evOf = id => prepass[keys.indexOf(id)] || { anchored: false, issues: [], entities: [], campaign: [], client: [] };
+  const facts = id => (claims || []).filter(c => c.p === id && c.fact).map(c => c.fact);
+  const kept = [], aside = filtered.slice(); let demoted = 0;
+  relevant.forEach(x => { const ev = evOf(x.p); const why = String(x.why || '').trim();
+    if (!ev.anchored && why.length < 20) { demoted++; aside.push(Object.assign({}, x, { class: 'irrelevant', why: 'no client issue, entity, campaign term or client name, and the reading gave no reason to keep it' + (why ? ' (it said: "' + why + '")' : ''), demoted: true })); return; }
+    kept.push(Object.assign(x, { keptBy: ev.anchored ? 'evidence' : 'reason' })); });
+  const withEv = x => Object.assign(x, { evidence: { issues: evOf(x.p).issues, entities: evOf(x.p).entities, campaign: evOf(x.p).campaign, client: evOf(x.p).client, facts: facts(x.p), anchored: evOf(x.p).anchored } });
+  return { relevant: kept.map(withEv), filtered: aside.map(withEv), demoted };
+}
+function stTopicEvidence(topics, prepass, keys) {
+  return topics.map(t => { if (!t.issue) return Object.assign(t, { evidence: { paragraphs: [], by: 'reading' } });
+    const ps = []; let by = ''; prepass.forEach((ev, i) => { const h = ev.issues.find(x => x.id === t.issue); if (h) { ps.push(keys[i]); if (h.by === 'trigger' || !by) by = h.by; } });
+    return Object.assign(t, { evidence: { paragraphs: ps.slice(0, 12), by: ps.length ? by : 'reading', unsupported: !ps.length && t.relevance === 'high' } }); });
+}
 async function stAnalyseStage(env, job, p, log) {
   const inp = job.input || {}; const db = env.MIND_DB;
   // S17: one brief may arrive as several pieces - pasted text, links, files, screenshots and notes - each its own source; they are
@@ -9782,6 +9919,8 @@ async function stAnalyseStage(env, job, p, log) {
   const src = srcs[0]; const multi = srcs.length > 1; const guided = stWfOn(p);
   const keys = items.map((x, i) => 'P' + (i + 1));
   const passages = {}; items.forEach((x, i) => { passages[keys[i]] = x.text; });
+  let entM = null; try { entM = await entityMatcher(env); } catch (e) { entM = null; }
+  const prepass = stRelevancePrepass(items.map(x => x.text), { ns: p.ns, kit: (await brandKit(env, p.ns)) || {}, entities: entM });
   if (log.phase) await log.phase('reading', 'Reading ' + items.length + ' paragraph' + (items.length === 1 ? '' : 's') + (multi ? ' from ' + srcs.length + ' sources' : ' of "' + stStr(src.name, 60) + '"') + ' against the client', { step: 'reading', completed: 0, total: 4 });
   const cc = await stCompileContext(env, p, { channels: ((p.brief || {}).channels || []).filter(c => ST_CHANNELS[c]), log, stage: 'analyse', refs: null, art: 0 });
   const ctx = cc.ctx; const kit = ctx.kit || {};
@@ -9805,7 +9944,7 @@ async function stAnalyseStage(env, job, p, log) {
   const sys = 'You are the strategy lead of an Australian political communications agency, working for ' + ctx.client + ' only - a creative strategist, issues manager, political analyst and brand guardian in one. You receive material that may or may not be a brief: a written brief, a pasted daily intelligence brief covering many clients, a news article, a competitor or government statement, a social post, a screenshot, a research finding, an email paragraph, or a situation that has just happened' + (multi ? ' - here, several pieces of material that together make one brief: read them as one situation and say where they disagree' : '') + '. You never jump from the material to copy. You work in order: '
     + '(1) INPUT: classify the input type. (2) UNDERSTANDING: extract or infer every brief field; for each say whether it was stated in the material, inferred from it, or taken from what Axiom knows about the client. (3) SITUATION: what happened (the facts only), why it matters to THIS client specifically (never generic - the same story means different things to different clients), the kind of opportunity or risk it is, and whether the client should respond (yes / no / monitor) - recommend not responding when engaging would amplify an attack, add nothing, or risk more than it gains. '
     + '(3b) CAMPAIGN: name every campaign of THIS kit the material could belong to as a candidate, with a confidence from 0 to 1, the paragraph ids that point to it and why; judge only by what the material says, never by how much Axiom holds for a campaign; give no candidate when the work is client-wide; a person decides, so say when two are close. '
-    + '(4) PARAGRAPHS: read paragraph by paragraph (ids P1..Pn); keep a paragraph that bears on this client and say what it is (client, campaign, background, fact, mandatory, evidence, quote, statistic); set the rest aside and say why (irrelevant, duplicate, other_client, unverified, misleading, outdated, contradictory). (5) TOPICS: every topic, issue and sub-issue the material raises, each judged high / potential / not relevant for this client against its issue lexicon and knowledge. '
+    + '(4) PARAGRAPHS: read paragraph by paragraph (ids P1..Pn), with the PRE-PASS EVIDENCE beside each; a paragraph marked NO ANCHOR may be kept only with a stated reason that names how it bears on this client; keep a paragraph that bears on this client and say what it is (client, campaign, background, fact, mandatory, evidence, quote, statistic); set the rest aside and say why (irrelevant, duplicate, other_client, unverified, misleading, outdated, contradictory). (5) TOPICS: every topic, issue and sub-issue the material raises, each judged high / potential / not relevant for this client against its issue lexicon and knowledge. '
     + '(6) COMPARISON with what Axiom knows (cite K, N, A, D, H, S, F ids): what is new, what is already known, what supports, what contradicts, which campaign it affects, whether a narrative is emerging or already running, whether the client has already said this, whether it is already being discussed publicly, messaging gaps, missing context, conflicts with current objectives, and how the brief itself could be better; then a short Creative Intelligence Summary. '
     + '(7) OBJECTIVES: three to five communication objectives derived from this situation and this client (never generic templates), ranked by strategic relevance, each with two or three key messages: primary, supporting, evidence (fact or paragraph ids), proof, audience takeaway, emotional takeaway, desired reaction, CTA. (8) RESPONSE STRATEGIES: several of direct, indirect, evidence, values, rapid, education, campaign, none (do not respond) - each with objective id, audience, key message, benefit, risk, urgency, platforms and format; mark exactly one recommended. '
     + dirPart
@@ -9832,14 +9971,15 @@ async function stAnalyseStage(env, job, p, log) {
     + kn('CAMPAIGNS', camps, c => '- ' + c.id + ': ' + stStr(c.name, 80) + (c.tone ? ' | tone: ' + stStr(c.tone, 160) : '') + (c.notes ? ' | ' + stStr(c.notes, 240) : '') + (c.identity ? ' | identity: ' + stStr(c.identity, 160) : ''))
     + kn('APPROVED FACTS (approved by the team)', facts, f => '[' + f.id + '] ' + f.text + ' [' + (f.campaign ? 'campaign ' + f.campaign : 'client-wide') + ']' + (f.source ? ' - ' + f.source : ''))
     + '\n\nBANNED TERMS: ' + (banned.join(', ') || '(none)')
-    + kn('KNOWLEDGE IN THE MIND (each labelled with its campaign and approval)', K, k => '[' + k.id + '] ' + k.title + ' [' + (k.campaign ? 'campaign ' + k.campaign : 'client-wide or unknown') + '; ' + (k.approval || 'approval unknown') + ']' + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text)
+    + kn('KNOWLEDGE IN THE MIND (each labelled with its campaign and approval; this campaign first, approved before background; AVOID marks rejected work)', K, k => '[' + k.id + '] ' + (k.avoid ? 'AVOID - ' : '') + k.title + ' [' + (k.campaign ? 'campaign ' + k.campaign : 'client-wide or unknown') + '; ' + (k.approval || 'approval unknown') + ']' + (k.kind ? ' (' + k.kind + ')' : '') + ': ' + k.text)
     + kn('LIVE NARRATIVES ON THE CLIENT\'S ISSUES', know.N, n => '[' + n.id + '] ' + n.label + ' - claim: ' + n.claim + (n.counter ? ' | counter: ' + n.counter : '') + ' (' + n.rows + ' rows, ' + (n.side || 'stance unknown') + ', ' + n.status + ')')
     + kn('SENTINEL ALERTS (14 days)', know.A, a => '[' + a.id + '] ' + a.label + ' x' + a.ratio + (a.angle ? ' - angle drafted: ' + a.angle : ''))
-    + kn('RECORDED DECISIONS (approvals, rejections, outcomes; each labelled with its campaign)', know.D, d => '[' + d.id + '] ' + d.kind + ': ' + d.what + ' [' + (d.campaign ? 'campaign ' + d.campaign : d.scoped ? 'client-wide' : 'campaign not recorded') + ']' + (d.why ? ' - ' + d.why : ''))
+    + kn('RECORDED DECISIONS (approvals, rejections, outcomes; each labelled with its campaign; this campaign first, the newest first; AVOID marks work that was rejected: learn from it, never imitate it)', know.D, d => '[' + d.id + '] ' + (d.avoid ? 'AVOID - ' : '') + d.kind + ': ' + d.what + ' [' + (d.campaign ? 'campaign ' + d.campaign : d.scoped ? 'client-wide' : 'campaign not recorded') + ']' + (d.why ? ' - ' + d.why : ''))
     + kn('THE TEAM\'S EARLIER CHOICES IN THIS ENGINE (each labelled with its campaign)', know.H, h => '[' + h.id + '] ' + h.kind + ' [' + (h.campaign ? 'campaign ' + h.campaign : h.scoped ? 'client-wide' : 'campaign not recorded') + ']: ' + h.text)
     + kn('SENTIMENT TOWARD THE CLIENT (7 days)', know.S, s => '[' + s.id + '] ' + s.entity + ': ' + s.mentions + ' judged mentions, net stance ' + s.net)
     + '\n\nCURRENT BRIEF: ' + ['objective', 'audience', 'message', 'action'].map(k => k + '=' + ((p.brief || {})[k] || '-')).join('; ') + '; channels=' + (((p.brief || {}).channels || []).join(',') || '-') + '; campaign=' + (p.campaign || '-') + '; creation mode=' + ((p.brief || {}).creationMode || 'editable') + '; type of work=' + (ST_WF_TYPES[(p.brief || {}).projectType] || (p.brief || {}).projectType || '-') + '; deliverable=' + ((p.brief || {}).deliverable || '-') + (Array.isArray((p.brief || {}).deliverables) && (p.brief || {}).deliverables.length ? '; deliverables=' + (p.brief || {}).deliverables.map(d => typeof d === 'string' ? d : (d && (d.name || d.kind)) || '').filter(Boolean).join(', ') : '')   /* S29 (PR4): the kind of work the person chose is part of what the reading interprets */
     + (inp.instruction ? '\n\nTEAM NOTE: ' + stStr(inp.instruction, 800) : '')
+    + '\n\nPRE-PASS EVIDENCE (deterministic: client issue matchers, register entities, campaign terms, client names):\n' + keys.map((k, i) => k + ': ' + stPrepassLine(prepass[i])).join('\n')
     + (multi
       ? '\n\nMATERIAL: ' + srcs.length + ' sources that make one brief, ' + items.length + ' paragraphs numbered across them:' + srcs.map((s0, si) => '\n\n--- SOURCE ' + (si + 1) + ' "' + stStr(s0.name, 120) + '" (' + stStr(String(s0.kind || '').replace(/^analyse:/, ''), 30) + (s0.provenance ? ', from ' + stStr(s0.provenance, 160) : '') + ') ---\n' + items.map((x, i) => x.si === si ? '[P' + (i + 1) + '] ' + stStr(x.text, 1600) : '').filter(Boolean).join('\n\n')).join('')
       : '\n\nMATERIAL "' + stStr(src.name, 120) + '" (' + (ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'unknown kind') + (src.provenance ? ', from ' + stStr(src.provenance, 160) : '') + '), ' + keys.length + ' paragraphs:\n' + items.map((x, i) => '[P' + (i + 1) + '] ' + stStr(x.text, 1600)).join('\n\n'));
@@ -9852,8 +9992,8 @@ async function stAnalyseStage(env, job, p, log) {
   const pid = x => { const m = String(x || '').match(/^P?(\d{1,3})$/i); const n = m ? parseInt(m[1], 10) : 0; return n >= 1 && n <= keys.length ? 'P' + n : ''; };
   const para = id => passages[id] || '';
   const seen = new Set();
-  const relevant = (Array.isArray(j.relevant) ? j.relevant : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'client') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 240) }));
-  const filtered = (Array.isArray(j.filtered) ? j.filtered : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'irrelevant') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 140) }));
+  let relevant = (Array.isArray(j.relevant) ? j.relevant : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'client') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 240) }));
+  let filtered = (Array.isArray(j.filtered) ? j.filtered : []).map(x => ({ p: pid(x && x.p), why: stStr(x && x.why, 200), class: stOneOf(x && x.class, ST_PARA_CLASSES, 'irrelevant') })).filter(x => x.p && !seen.has(x.p) && seen.add(x.p)).slice(0, 60).map(x => Object.assign(x, { text: stStr(para(x.p), 140) }));
   const unplaced = keys.map((k, i) => 'P' + (i + 1)).filter(id => !seen.has(id));
   // RC (K1): the reading proposes, a person decides. Every campaign of the kit the material could belong to is a candidate with
   // its confidence, evidence (paragraph ids that exist) and reason; the reading is ambiguous when the top two are within 0.2 or
@@ -9871,6 +10011,8 @@ async function stAnalyseStage(env, job, p, log) {
     question: ambiguous ? 'Which campaign is this for: ' + candidates.map(c => c.name + ' (' + Math.round(c.confidence * 100) + '%)').join(' or ') + ', or none (standalone)? The reading cannot tell, and the campaign decides the facts, the address and the mark.' : '' };
   const factIds = new Set(facts.map(f => f.id)); const STAT = ['matches_fact', 'conflicts_fact', 'new_unverified'];
   const claims = (Array.isArray(j.claims) ? j.claims : []).slice(0, 24).map(c => { const st = STAT.indexOf(c && c.status) >= 0 ? c.status : 'new_unverified'; const f = c && factIds.has(c.fact) ? c.fact : ''; return { text: stStr(c && c.text, 300), p: pid(c && c.p), status: st === 'new_unverified' || f ? st : 'new_unverified', fact: f, factText: f ? (facts.find(x => x.id === f) || {}).text : undefined }; }).filter(c => c.text);
+  const aud = stRelevanceAudit(relevant, filtered, prepass, keys, claims); relevant = aud.relevant; filtered = aud.filtered;
+  if (aud.demoted) await log('info', aud.demoted + ' paragraph' + (aud.demoted === 1 ? '' : 's') + ' kept by the reading had no client issue, entity, campaign term or client name and no stated reason, and ' + (aud.demoted === 1 ? 'was' : 'were') + ' set aside');
   const known = new Set([].concat(K, know.N, know.A, know.D, know.H, know.S).map(x => x.id).concat(facts.map(f => f.id)));
   const cite = list => (Array.isArray(list) ? list : []).map(x => String(x || '').trim()).filter(x => known.has(x) || pid(x)).map(x => pid(x) || x).slice(0, 8);
   const knowledge = (Array.isArray(j.knowledge) ? j.knowledge : []).filter(k => k && K.some(x => x.id === k.k)).slice(0, 8).map(k => { const kk = K.find(x => x.id === k.k); return { k: k.k, use: stStr(k.use, 200), title: kk.title, kind: kk.kind, ns: kk.ns }; });
@@ -9892,6 +10034,7 @@ async function stAnalyseStage(env, job, p, log) {
   const situation = { what: stStr(js.what, 600), whyItMatters: stStr(js.whyItMatters, 800), kinds: (Array.isArray(js.kinds) ? js.kinds : [js.kinds]).map(x => stOneOf(x, ST_OPPORTUNITY, '')).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, 4), respond: stOneOf(js.respond, ['yes', 'no', 'monitor'], 'yes'), why: stStr(js.why, 500) };
   const lexIds = new Set(lexicon.map(x => x.id));
   const topics = (Array.isArray(j.topics) ? j.topics : []).slice(0, 20).map(t => ({ name: stStr(t && t.name, 100), kind: stOneOf(t && t.kind, ['topic', 'issue', 'subissue'], 'topic'), relevance: stOneOf(t && t.relevance, ['high', 'potential', 'not'], 'potential'), issue: t && lexIds.has(t.issue) ? t.issue : '', why: stStr(t && t.why, 200) })).filter(t => t.name);
+  stTopicEvidence(topics, prepass, keys);
   const jc = j.comparison && typeof j.comparison === 'object' ? j.comparison : {};
   const nRef = jc.narrative && know.N.find(n => n.id === jc.narrative.ref);
   const comparison = { new: stStrs(jc.new, 6), known: stStrs(jc.known, 6), supports: stStrs(jc.supports, 6), contradicts: stStrs(jc.contradicts, 6), campaignAffected: stStr(jc.campaignAffected, 200),
@@ -9935,7 +10078,7 @@ async function stAnalyseStage(env, job, p, log) {
   const narratives = directions.map(d => ({ name: d.name, idea: d.core, medium: d.medium, route: d.route, composition: d.visual.composition || '', imagery: d.visual.scene || d.visualIdea, headline: d.headlines[0] || '', why: d.routeWhy || d.relevance }));
   const intelId = stId('i');
   const record = { v: 2, id: intelId, at: Date.now(), job: job.id, source: src.id, sources: srcs.map(s0 => s0.id), sourceName: multi ? stStr(srcs.length + ' sources: ' + srcs.map(s0 => s0.name).join('; '), 120) : stStr(src.name, 120), provenance: stStr(multi ? srcs.map(s0 => s0.provenance).filter(Boolean).join('; ') : src.provenance, 200), kind: multi ? 'mixed' : ST_ANALYSE_KINDS.indexOf(inp.kind) >= 0 ? inp.kind : 'other', guided: guided || undefined, input, understanding, situation, summary: stStr(j.summary, 600),
-    paragraphs: keys.length, relevant, filtered, unplaced, topics, campaign, claims, knowledge, retrieved: { K: K.length, N: know.N.length, A: know.A.length, D: know.D.length, H: know.H.length, S: know.S.length, F: facts.length }, knowItems: know,
+    paragraphs: keys.length, relevant, filtered, unplaced, topics, relevance: { anchored: prepass.filter(x => x.anchored).length, unanchored: prepass.filter(x => !x.anchored).length, demoted: aud.demoted, keptByReason: relevant.filter(x => x.keptBy === 'reason').length }, campaign, claims, knowledge, retrieved: { K: K.length, N: know.N.length, A: know.A.length, D: know.D.length, H: know.H.length, S: know.S.length, F: facts.length }, knowItems: know,
     comparison, intelSummary: stStr(j.intelSummary, 1200), brief, objectives, strategies, directions, recommendation, angles, narratives, risks: stStrs(j.risks, 6), gaps: stStrs(j.gaps, 6), next, model: r.model,
     counts: { facts: facts.length, campaigns: camps.length, banned: banned.length, corrections: ((cc.manifest || {}).corrections || []).length } };
   // the directions to choose from (the Direction step), each with its route, its visual narrative and its trace
@@ -10794,6 +10937,8 @@ async function stBriefCheck(env, p, kit, opts) {
   if (!String(b.action || '').trim()) { const cta = camp ? (camp.cta || camp.url || '') : ''; gaps.push({ field: 'action', level: 'preferred', code: 'action_missing', text: 'No action is named: what the audience should do.' + (cta ? ' The campaign\'s call to action is "' + cta + '".' : '') }); assumptions.push({ field: 'action', text: cta ? 'action assumed from the campaign: ' + cta : 'action assumed: none beyond reading the message' }); }
   if (!String(b.deliverables || '').trim() && !(Array.isArray(b.channels) && b.channels.length)) { gaps.push({ field: 'deliverables', level: 'preferred', code: 'deliverables_missing', text: 'No deliverables are named.' }); assumptions.push({ field: 'deliverables', text: 'deliverables assumed: one tile per chosen channel' }); }
   if (!b.requirements.mandatory.length && !b.requirements.preferred.length) assumptions.push({ field: 'requirements', text: 'no design requirements recorded: the campaign identity' + (camp && camp.identity ? ' ("' + camp.identity.slice(0, 80) + '")' : '') + ', the brand and approved references and the learned corrections stand in for them' });
+  { const exp = (Array.isArray(kit.facts) ? kit.facts : []).filter(f => f && f.status === 'approved' && (!f.campaign || !p.campaign || f.campaign === p.campaign) && brFactExpired(f));
+    if (exp.length) gaps.push({ field: 'facts', level: 'preferred', code: 'facts_expired', text: exp.length + ' approved fact' + (exp.length === 1 ? ' is' : 's are') + ' past the review date and held out of production until a person confirms ' + (exp.length === 1 ? 'it' : 'them') + ': ' + exp.slice(0, 3).map(f => '"' + String(f.text || '').slice(0, 60) + '"').join(', ') + (exp.length > 3 ? ' and ' + (exp.length - 3) + ' more' : '') + '.' }); }
   const blocking = gaps.filter(g => g.level === 'mandatory');
   return { ok: !blocking.length, gaps, blocking: blocking.map(g => g.code), assumptions, campaign, requirements: b.requirements, fields: ST_BRIEF_FIELDS.reduce((acc, k) => Object.assign(acc, { [k]: b[k] || '' }), {}) };
 }
@@ -12534,6 +12679,84 @@ async function brItemGet(env, id) { await ensureBrand(env); return brItemRow(awa
 async function brItemRevise(env, item, why, who) {
   await env.MIND_DB.prepare('INSERT INTO brand_item_revisions(id,item,ns,rev,data,why,who,at) VALUES(?,?,?,?,?,?,?,?)').bind(stId('br'), item.id, item.ns, item.rev, jsonFit({ kind: item.kind, authority: item.authority, status: item.status, title: item.title, body: item.body, campaign: item.campaign, data: item.data, source: item.source }, 8000), stStr(why, 300), stStr(who, 40), Date.now()).run();
 }
+/* P51 (Phase 3): the client knowledge engine. One view per client (or one campaign of it) of everything the Studio knows -
+ * facts, banned terms, voice, standing rules, campaign wording, brand items, learned corrections and marks - each with its
+ * authority (rule / observation / preference / decision / inference), scope (client, or campaign:<id>), status, source, last
+ * confirmation and use count (how many versions it informed, from their `informed` manifests). Duplicates across the kit, the
+ * brand items and the corrections are found and shown; a person merges them, never the engine. */
+function brFactExpired(f, now) { const d = String((f && f.reviewBy) || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false; return d < new Date(now || Date.now()).toISOString().slice(0, 10); }
+function brKnowTokens(t) { return new Set((String(t || '').toLowerCase().replace(/(\d),(\d)/g, '$1$2').match(/[a-z]{3,}|\d+(?:\.\d+)?/g) || []).filter(w => ['the', 'and', 'for', 'are', 'that', 'this', 'with', 'from', 'than', 'more', 'use', 'uses'].indexOf(w) < 0).map(w => /^\d/.test(w) ? w : w.replace(/(ing|ed|es|s)$/, ''))); }
+function brKnowSim(a, b) { const A = brKnowTokens(a), B = brKnowTokens(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach(x => { if (B.has(x)) n++; }); return n / Math.min(A.size, B.size) * (2 * n / (A.size + B.size) >= 0.5 ? 1 : 0.8); }
+async function brKnowledge(env, ns, campaignId) {
+  await ensureBrand(env); try { await ensureEngine(env); } catch (e) {}
+  const kit = (await brandKit(env, ns)) || {}; const camp = (kit.campaigns || []).find(c => c.id === campaignId) || null; const cid = camp ? camp.id : '';
+  const inView = c => !cid || !c || c === cid;
+  // uses: how many versions each fact, banned term and correction informed (from the versions' manifests)
+  const uses = { fact: {}, banned: {}, correction: {} };
+  try {
+    const rows = (await env.MIND_DB.prepare("SELECT v.context FROM studio_versions v JOIN studio_assets a ON a.id=v.asset JOIN studio_projects p ON p.id=a.project WHERE p.ns=? AND COALESCE(p.test,0)=0 AND v.context LIKE '%informed%' ORDER BY v.created DESC LIMIT 3000").bind(ns).all()).results || [];
+    rows.forEach(r => { const inf = (pjs(r.context, {}) || {}).informed; if (!inf) return; ((inf.kit || {}).facts || []).forEach(f => { if (f && f.id) uses.fact[f.id] = (uses.fact[f.id] || 0) + 1; }); ((inf.kit || {}).banned || []).forEach(b => { const k = String(b).toLowerCase(); uses.banned[k] = (uses.banned[k] || 0) + 1; }); (inf.corrections || []).forEach(c => { if (c && c.id) uses.correction[c.id] = (uses.correction[c.id] || 0) + 1; }); });
+  } catch (e) {}
+  const items = [];
+  (kit.facts || []).filter(f => inView(f.campaign)).forEach(f => items.push({ kind: 'fact', id: f.id, text: f.text, authority: 'rule', scope: f.campaign ? 'campaign:' + f.campaign : 'client', status: f.status === 'pending' ? 'pending' : brFactExpired(f) ? 'expired' : 'active', source: f.source || '', lastConfirmed: f.confirmedAt || null, confirmedBy: f.confirmedBy || '', reviewBy: f.reviewBy || '', uses: uses.fact[f.id] || 0 }));
+  (kit.banned || []).forEach(b => items.push({ kind: 'banned', id: b.term, text: 'never "' + b.term + '"' + (b.use ? ', say "' + b.use + '"' : ''), authority: 'rule', scope: 'client', status: 'active', source: b.why || 'the kit', lastConfirmed: kit.updated || null, uses: uses.banned[String(b.term).toLowerCase()] || 0 }));
+  if (kit.voice) items.push({ kind: 'voice', id: 'voice', text: stStr(kit.voice, 400), authority: 'rule', scope: 'client', status: 'active', source: 'the kit', lastConfirmed: kit.updated || null, uses: null });
+  String(kit.rules || '').split(/\n+/).map(x => x.trim()).filter(Boolean).forEach((r, i) => items.push({ kind: 'standing_rule', id: 'rule' + (i + 1), text: stStr(r, 300), authority: 'rule', scope: 'client', status: 'active', source: 'the kit', lastConfirmed: kit.updated || null, uses: null }));
+  (kit.campaigns || []).filter(c => inView(c.id)).forEach(c => { const w = [c.signoff && 'sign-off "' + c.signoff + '"', c.cta && 'call to action "' + c.cta + '"', c.sourceLine && 'source line "' + c.sourceLine + '"', c.tone && 'tone: ' + c.tone, c.url && 'address ' + c.url].filter(Boolean); if (w.length) items.push({ kind: 'campaign_wording', id: c.id, text: c.name + ': ' + w.join('; '), authority: 'rule', scope: 'campaign:' + c.id, status: c.active === false ? 'retired' : 'active', source: 'the kit', lastConfirmed: kit.updated || null, uses: null }); });
+  try {
+    const rows = (await env.MIND_DB.prepare("SELECT id, campaign, kind, authority, status, title, body, source, who, updated FROM brand_items WHERE ns=? ORDER BY updated DESC LIMIT 400").bind(ns).all()).results || [];
+    rows.filter(r => inView(r.campaign)).forEach(r => { const src = pjs(r.source, {}) || {}; items.push({ kind: 'item', id: r.id, text: stStr(r.title + (r.body && r.body !== r.title ? ': ' + r.body : ''), 400), itemKind: r.kind, authority: r.authority, scope: r.campaign ? 'campaign:' + r.campaign : 'client', status: r.status, source: src.label || src.type || r.who || '', lastConfirmed: r.updated || null, uses: null }); });
+  } catch (e) {}
+  try {
+    const rows = (await env.MIND_DB.prepare("SELECT id, task, scope, rule, why, source, who, created, active, hits FROM engine_fixes WHERE ns=? ORDER BY created DESC LIMIT 400").bind(ns).all()).results || [];
+    rows.filter(r => inView(stCampaignOf(r))).forEach(r => { const c = stCampaignOf(r); items.push({ kind: 'correction', id: r.id, text: stStr(r.rule, 400), task: r.task, authority: 'preference', scope: c ? 'campaign:' + c : r.scope === 'all' ? 'every client' : 'client', status: Number(r.active) ? 'active' : 'off', source: (r.who ? 'taught by ' + r.who : '') + (r.why ? (r.who ? ': ' : '') + stStr(r.why, 120) : ''), lastConfirmed: r.created || null, uses: uses.correction[r.id] || 0, hits: Number(r.hits) || 0 }); });
+  } catch (e) {}
+  try { const mk = await brMarks(env, ns, kit, camp); if (mk && mk.logo && mk.logo.onFile) items.push({ kind: 'mark', id: 'logo', text: 'the client logo', authority: 'rule', scope: 'client', status: 'active', source: 'brand kit file', lastConfirmed: kit.logoV || null, uses: null }); ((mk && mk.wordmarks) || []).forEach(wm => items.push({ kind: 'mark', id: 'wordmark:' + (wm.campaign || '') + ':' + (wm.variant || ''), text: 'wordmark ' + (wm.variant || '') + ' for ' + (wm.campaign || ''), authority: 'rule', scope: 'campaign:' + (wm.campaign || ''), status: 'active', source: 'brand kit file', lastConfirmed: wm.v || null, uses: null })); } catch (e) {}
+  // duplicates: the same knowledge said twice (a fact, a brand item, a correction), both still standing
+  const live = items.filter(x => ['fact', 'item', 'correction'].indexOf(x.kind) >= 0 && ['active', 'pending', 'proposed', 'expired'].indexOf(x.status) >= 0);
+  const duplicates = [];
+  for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) { const sim = Math.round(brKnowSim(live[i].text, live[j].text) * 100) / 100; if (sim >= 0.75) duplicates.push({ a: { kind: live[i].kind, id: live[i].id, text: stStr(live[i].text, 160) }, b: { kind: live[j].kind, id: live[j].id, text: stStr(live[j].text, 160) }, similarity: sim }); }
+  const count = k => items.filter(x => x.kind === k).length;
+  return { ok: true, ns, campaign: cid, items, duplicates: duplicates.slice(0, 60), counts: { facts: count('fact'), banned: count('banned'), items: count('item'), corrections: count('correction'), marks: count('mark'), expired: items.filter(x => x.status === 'expired').length, pending: items.filter(x => x.status === 'pending' || x.status === 'proposed').length } };
+}
+/** A person merges two pieces of knowledge: the one dropped is retired (an item), switched off (a correction) or taken out of
+    the kit (a fact) - never deleted from its history - and the reason is recorded. */
+async function brKnowledgeMerge(env, ns, body, who) {
+  const reason = stStr(body.reason, 300).trim(); if (reason.length < 8) return { error: 'reason_required', status: 400, detail: 'Say why the two are the same and why this one is kept.' };
+  const keep = body.keep || {}, drop = body.drop || {}; if (!drop.kind || !drop.id) return { error: 'drop_required', status: 400, detail: 'Name the knowledge to drop (kind and id).' };
+  if (drop.kind === 'item') {
+    const cur = await brItemGet(env, stClean(drop.id, 30)); if (!cur || cur.ns !== ns) return { error: 'unknown_item', status: 404 };
+    const now = Date.now(); await env.MIND_DB.prepare("UPDATE brand_items SET status='retired', updated=?, rev=COALESCE(rev,1)+1 WHERE id=?").bind(now, cur.id).run();
+    await brItemRevise(env, Object.assign({}, cur, { status: 'retired', rev: (cur.rev || 1) + 1 }), 'merged into ' + (keep.kind || '') + ' ' + (keep.id || '') + ': ' + reason, who);
+  } else if (drop.kind === 'correction') {
+    const r = await env.MIND_DB.prepare('UPDATE engine_fixes SET active=0 WHERE id=? AND ns=?').bind(stClean(drop.id, 30), ns).run(); if (!(r.meta && r.meta.changes)) return { error: 'unknown_correction', status: 404 };
+  } else if (drop.kind === 'fact') {
+    const kit = (await brandKit(env, ns)) || {}; const facts = kit.facts || []; if (!facts.some(f => f.id === drop.id)) return { error: 'unknown_fact', status: 404 };
+    await brandSave(env, ns, { facts: facts.filter(f => f.id !== drop.id), summary: 'merged the fact ' + drop.id + ' into ' + (keep.kind || '') + ' ' + (keep.id || '') + ': ' + reason }, who);
+  } else return { error: 'bad_kind', status: 400, detail: 'A fact, a brand item or a correction can be merged away.' };
+  return { ok: true, kept: keep, dropped: drop, reason };
+}
+/** A person confirms a fact (after its review date, or before): it carries the new date and who confirmed it. */
+async function brKnowledgeConfirm(env, ns, body, who) {
+  const kit = (await brandKit(env, ns)) || {}; const facts = (kit.facts || []).map(f => Object.assign({}, f)); const f = facts.find(x => x.id === stClean(body.id, 60));
+  if (!f) return { error: 'unknown_fact', status: 404 };
+  const reviewBy = /^\d{4}-\d{2}-\d{2}$/.test(String(body.reviewBy || '')) ? String(body.reviewBy) : ''; const reason = stStr(body.reason, 300).trim();
+  if (!reviewBy || reason.length < 6) return { error: 'review_required', status: 400, detail: 'Confirming a fact sets its next review date (reviewBy, YYYY-MM-DD) and says what it was checked against (reason).' };
+  if (reviewBy <= new Date().toISOString().slice(0, 10)) return { error: 'review_in_past', status: 400, detail: 'The next review date must be in the future.' };
+  f.reviewBy = reviewBy; f.confirmedAt = Date.now(); f.confirmedBy = String(who || '').slice(0, 60); if (f.status === 'pending') f.status = 'approved';
+  await brandSave(env, ns, { facts, summary: 'confirmed the fact ' + f.id + ' until ' + reviewBy + ': ' + reason }, who);
+  return { ok: true, fact: f };
+}
+/** What a kit save added, proposed for review and left out, said back to the person (a receipt). */
+function brKitReceipt(before, after) {
+  before = before || {}; after = after || {}; const out = { added: [], proposed: [], removed: [], refused: [] };
+  const bf = {}; (before.facts || []).forEach(f => { bf[f.id] = f; });
+  (after.facts || []).forEach(f => { if (!bf[f.id]) (f.status === 'pending' ? out.proposed : out.added).push('fact ' + f.id + ': "' + stStr(f.text, 100) + '"' + (f.status === 'pending' ? ' (pending review: not used until approved)' : '')); else if (bf[f.id].status === 'pending' && f.status !== 'pending') out.added.push('fact ' + f.id + ' approved'); });
+  (before.facts || []).forEach(f => { if (!(after.facts || []).some(x => x.id === f.id)) out.removed.push('fact ' + f.id); });
+  const bb = new Set((before.banned || []).map(b => String(b.term).toLowerCase()));
+  (after.banned || []).forEach(b => { if (!bb.has(String(b.term).toLowerCase())) out.added.push('banned term "' + b.term + '"'); });
+  return out;
+}
 /** A new knowledge item. An AI inference can only be created as a proposal; a person's item can carry any other authority. */
 async function brItemCreate(env, ns, body, who) {
   await ensureBrand(env); const c = brClean(body);
@@ -12889,6 +13112,9 @@ async function brTeach(env, ns, body, who) {
   if (kind === 'banned') {
     const term = stStr(proposal.term, 80).trim(); if (!term) return { error: 'term_required', status: 400 };
     const entry = { term, use: stStr(proposal.use, 160), why: stStr(proposal.why, 240) || reason, allowNegated: !!proposal.allowNegated };
+    // P51: a term already held (with the same replacement) is not written again; the receipt says so
+    const had = (kit.banned || []).find(b => String(b.term).toLowerCase() === term.toLowerCase());
+    if (confirm && had && String(had.use || '') === String(entry.use || '')) return { ok: true, written: true, already: true, banned: had };
     const banned = (kit.banned || []).filter(b => String(b.term).toLowerCase() !== term.toLowerCase()).concat([entry]);
     if (!confirm) return { ok: true, written: false, preview: { banned: entry, writes: ['the kit banned terms (a kit revision): never "' + term + '"' + (entry.use ? ', say "' + entry.use + '"' : '')] } };
     await brandSave(env, ns, { banned }, who);
@@ -14300,7 +14526,7 @@ async function axScopeGuard(env, req, path, url, scope) {
   if (path === '/studio/compiled') await addRow('studio_jobs', q('job'));
   if (path === '/studio/file') { const k = String(q('key') || ''); const m = /^studio\/([A-Za-z0-9_-]+)\//.exec(k) || null; const b = /^(?:brand|art)\/([a-z0-9_-]+)\//.exec(k); if (m) await addProject(m[1]); else if (b) addNs(b[1]); else unresolved = true; }
   if (path === '/engine/art' || path === '/engine/artwork/describe') { const id = q('id') || body.id; if (id) { const r = await one('SELECT ns FROM engine_art WHERE id=?', String(id).replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (r) addNs(r.ns); else unresolved = true; } }
-  if (path === '/engine/fix/update' || path === '/engine/fix/delete') { const r = await one('SELECT ns, scope FROM engine_fixes WHERE id=?', String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (r && r.scope !== 'all') addNs(r.ns); else unresolved = true; }
+  if (path === '/engine/fix/update' || path === '/engine/fix/delete' || path === '/engine/fix/review') { const r = await one('SELECT ns, scope FROM engine_fixes WHERE id=?', String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (r && r.scope !== 'all') addNs(r.ns); else unresolved = true; }
   if (unresolved || !found.length) return deny('This sign-in link reads ' + scope.join(', ') + ' only, and this request does not say which client it is for.');
   const out = found.filter(n => scope.indexOf(n) < 0);
   return out.length ? deny() : null;
@@ -14333,7 +14559,7 @@ async function axGuestGuard(env, req, path, url) {
   if (path.startsWith('/brand/')) return memory(testNs(url.searchParams.get('ns') || body.ns));   // ns2 in the /brand block: the address first
   if (path.startsWith('/engine/')) {
     if (path === '/engine/fix') return String(body.scope || '') === 'all' ? axGuestRefusal('guest_live_memory', 'A guest link does not teach a rule for every client.') : memory(testNs(body.ns));
-    if (path === '/engine/fix/update' || path === '/engine/fix/delete') {
+    if (path === '/engine/fix/update' || path === '/engine/fix/delete' || path === '/engine/fix/review') {
       const r = await one('SELECT ns, scope FROM engine_fixes WHERE id=?', String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (!r) return null;
       return r.scope === 'all' ? axGuestRefusal('guest_live_memory', 'A guest link does not change a rule that applies to every client.') : memory(testNs(r.ns));
     }
@@ -15088,7 +15314,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, stCraft, stVoice, stReadingGrade, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -16212,15 +16438,26 @@ const AXIOM_WORKER = {
         }
         if (auth.role !== 'full') return jsonResp({ error: 'read_only', detail: 'Building packs, rendering tiles and editing the brand kit need a full-access key.' }, 403);
         if (path === '/brand/item' && req.method === 'POST') { const r = await brItemCreate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        // P51 (Phase 3): the knowledge view; a person merges duplicates and confirms facts
+        if (path === '/brand/knowledge' && req.method === 'GET') return jsonResp(await brKnowledge(env, ns2, kitSlug(reqUrl.searchParams.get('campaign') || '')));
+        if (path === '/brand/knowledge/merge' && req.method === 'POST') { const r = await brKnowledgeMerge(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/knowledge/confirm' && req.method === 'POST') { const r = await brKnowledgeConfirm(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/update' && req.method === 'POST') { const r = await brItemUpdate(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/item/review' && req.method === 'POST') { const r = await brItemReview(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
-        if (path === '/brand/teach' && req.method === 'POST') { const r = await brTeach(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
+        if (path === '/brand/teach' && req.method === 'POST') {
+          // P51 (Phase 3): teaching answers a receipt - added, proposed for review, refused and why
+          const r = await brTeach(env, ns2, rbody2, auth.name);
+          const what = r.banned ? 'banned term "' + r.banned.term + '"' : r.fact ? 'fact ' + r.fact.id : r.rule ? 'placement rule' : r.item ? 'brand item ' + (r.item.title || r.item.id) : r.correction ? 'learned correction' : String(rbody2.kind || 'item');
+          r.receipt = r.error ? { added: [], proposed: [], refused: [{ what, why: r.detail || r.error }] } : r.written ? (r.already ? { added: [], proposed: [], refused: [{ what, why: 'already held: nothing changed' }] } : { added: [what], proposed: [], refused: [] }) : { added: [], proposed: [what + ' (preview: confirm to write)'], refused: [] };
+          return jsonResp(r, r.status || 200);
+        }
         if (path === '/brand/kit/restore' && req.method === 'POST') { const r = await brandRestore(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
           // P50: an editor that read the kit says when (ifUpdated); a kit saved by someone else since is not overwritten silently
           if (rbody2.ifUpdated != null) { const cur0 = (await brandKit(env, ns2)) || {}; if (Number(cur0.updated || 0) !== Number(rbody2.ifUpdated || 0)) return jsonResp({ error: 'kit_changed', detail: 'The brand kit was saved' + (cur0.by ? ' by ' + cur0.by : '') + ' after you opened it. Nothing was saved: reload it, then make your change again.', updated: cur0.updated || 0, by: cur0.by || '' }, 409); }
+          const kitBefore = (await brandKit(env, ns2)) || {};
           let kit; try { kit = await brandSave(env, ns2, rbody2, auth.name); } catch (e) { const m = String(e && e.message || e); if (/\(bad_image\)|file is empty/.test(m)) return jsonResp({ error: 'bad_image', detail: m.replace(/ \(bad_image\)$/, '') + '. Nothing was saved.' }, 422); throw e; }
-          return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
+          return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '', receipt: brKitReceipt(kitBefore, kit) });   // P51: what the save added, proposed and removed
         }
         if (path === '/release/pack' && req.method === 'POST') {
           if (!env.ANTHROPIC_API_KEY) return jsonResp({ error: 'analysis_not_configured', detail: 'Set ANTHROPIC_API_KEY.' }, 501);
@@ -16281,6 +16518,7 @@ const AXIOM_WORKER = {
           const fixes = await engineFixes(env, ens, reqUrl.searchParams.get('task') || '', !!reqUrl.searchParams.get('all'));
           return jsonResp({ ok: true, ns: ens, fixes, inForce: fixes.filter(f => f.active).length });
         }
+        if (path === '/engine/memory') return jsonResp(await engineMemory(env, ens, String(reqUrl.searchParams.get('campaign') || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40)));
         if (path === '/engine/outcomes') {
           const lim = Math.min(parseInt(reqUrl.searchParams.get('limit') || '50', 10) || 50, 200);
           const rows = (await env.MIND_DB.prepare('SELECT id,ns,surface,ref,n,verdict,why,headline,support,cta,who,created FROM engine_outcomes WHERE ns=? ORDER BY created DESC LIMIT ?').bind(ens, lim).all()).results || [];
@@ -16312,6 +16550,7 @@ const AXIOM_WORKER = {
           const fix = await engineAddFix(env, ebody, auth.name);
           return jsonResp({ ok: true, fix: Object.assign({}, fix, { active: true, hits: 0 }) });
         }
+        if (path === '/engine/fix/review' && req.method === 'POST') { const r = await engineFixReview(env, ebody, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/engine/fix/update' && req.method === 'POST') {
           const id = String(ebody.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
           if (!id) return jsonResp({ error: 'missing_id' }, 400);
@@ -17040,7 +17279,10 @@ const AXIOM_WORKER = {
               if (!o.existing) outcome = o.id; learned = o.existing ? 'already' : 'filed';
             } catch (e) {}
           }
-          if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4) { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
+          // P51 (Phase 4): a withdrawal takes the decision back out of the learning record too - the earlier approve or reject entry
+          // for this asset and part is marked withdrawn (kept, never read as an earlier choice again); also a new decision supersedes
+          if (!handoff) { try { await env.MIND_DB.prepare("UPDATE studio_intel_log SET kind='withdrawn:' || kind WHERE project=? AND kind IN ('approved','rejected') AND (ref=? OR (ref=? AND text LIKE ?))").bind(pair.project.id, part + ':' + pair.asset.id, part, part + ' of "' + stStr(pair.asset.title, 60).replace(/[%_]/g, '') + '"%').run(); } catch (e) {} }
+          if (!isTest && !handoff && decision !== 'withdraw' && String(sb.reason || '').trim().length >= 4) { const cv = (pair.asset.versions || []).find(x => x.id === pair.asset.current) || {}; await stIntelLog(env, pair.project.ns, pair.project.id, decision === 'approve' ? 'approved' : 'rejected', part + ':' + pair.asset.id, part + ' of "' + stStr(pair.asset.title, 60) + '" ' + (decision === 'approve' ? 'approved' : 'rejected') + ((cv.copy || {}).headline ? ' ("' + stStr(cv.copy.headline, 100) + '")' : '') + ': ' + stStr(sb.reason, 240), who); }
           await stEvent(env, pair.project.id, 'approval', { text: (decision === 'approve' ? 'Approved ' : decision === 'reject' ? 'Rejected ' : 'Withdrew approval of ') + part + ' on ' + pair.asset.title + (sb.reason ? ': ' + stStr(sb.reason, 200) : '') + '. Recorded as client acceptance or feedback, not performance' + (outcome ? '; filed in the Mind as a ' + (decision === 'approve' ? 'WIN' : 'LOSS') + ' exemplar for future briefs' : learned === 'retracted' ? '; the WIN it had filed was taken out of the Mind' : learned === 'test' ? '; a test project, so nothing was filed in the client\'s memory' : handoff ? '; a hand-off to Design, so nothing was filed in the client\'s memory' : '') + '.', asset: pair.asset.id, version: cur.id, part, decision, outcome, learned: learned || undefined, handoff: handoff || undefined }, who);
           // the reason becomes a proposed memory update for the Brand Workspace - nothing standing until a person keeps it, with a scope
           let proposal = null;

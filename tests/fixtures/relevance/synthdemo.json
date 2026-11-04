@@ -1,0 +1,55 @@
+{
+  "ns": "synthdemo",
+  "note": "SYNTHETIC: an invented ferry operator (Harbourline Ferries) for testing the relevance engine. Labels are a person's judgement of which paragraphs bear on the client and which topics matter to it. answer is a mocked reading with the mistakes a reading makes (a paragraph kept with no reason), used in CI; a live run (tools/relevance-eval.mjs --worker) replaces it with the model's own.",
+  "kit": {
+    "name": "Harbourline Ferries - SYNTHETIC DEMO CLIENT",
+    "voice": "Plain, warm and local.",
+    "campaigns": [
+      { "id": "harbour", "name": "Harbour crossings", "logoPolicy": "logo", "cta": "Plan your crossing" },
+      { "id": "nightboat", "name": "Night boat", "logoPolicy": "wordmark", "cta": "Ride the night boat" }
+    ],
+    "facts": [
+      { "id": "f1", "text": "A crossing takes 12 minutes from Circular Wharf to Point Lane", "source": "synthetic timetable", "status": "approved", "campaign": "harbour" },
+      { "id": "f2", "text": "Two extra morning crossings start Monday 3 March", "source": "synthetic timetable", "status": "approved", "campaign": "harbour" },
+      { "id": "f3", "text": "The night boat leaves Pier 3 at 9.40pm", "source": "synthetic timetable", "status": "approved", "campaign": "nightboat" }
+    ]
+  },
+  "cases": [
+    {
+      "id": "morning-crossings",
+      "campaign": "harbour",
+      "paragraphs": [
+        "Harbourline will add two morning crossings from Circular Wharf from Monday.",
+        "Commuters at Point Lane have complained about crowding on the 7am service.",
+        "The night boat from Pier 3 will run on public holidays this summer.",
+        "The council approved a new skate park beside the library.",
+        "Interest rates are expected to stay on hold this month.",
+        "Weekend rain is forecast across the city.",
+        "Riders say the new timetable app keeps crashing on older phones.",
+        "A rival bus operator cut fares on the eastern route from Monday."
+      ],
+      "labels": { "keep": ["P1", "P2", "P3", "P7", "P8"], "topics": [ { "name": "morning crossings", "relevance": "high" }, { "name": "interest rates", "relevance": "not" }, { "name": "skate park", "relevance": "not" }, { "name": "timetable app", "relevance": "potential" } ] },
+      "answer": {
+        "relevant": [
+          { "p": "P1", "class": "client", "why": "the client's own service change" },
+          { "p": "P2", "class": "client", "why": "riders on the harbour run" },
+          { "p": "P3", "class": "campaign", "why": "the night boat campaign" },
+          { "p": "P5", "class": "background", "why": "context" },
+          { "p": "P7", "class": "client", "why": "riders of the client's ferries report its app failing; a service complaint the operator must answer" },
+          { "p": "P8", "class": "background", "why": "a competing operator's fare cut on the eastern route could draw the client's riders away" }
+        ],
+        "filtered": [ { "p": "P4", "class": "irrelevant", "why": "local news" }, { "p": "P6", "class": "irrelevant", "why": "weather" } ],
+        "topics": [
+          { "name": "Morning crossings", "kind": "topic", "relevance": "high", "issue": "", "why": "the news" },
+          { "name": "Interest rates", "kind": "topic", "relevance": "potential", "issue": "", "why": "costs" },
+          { "name": "Skate park", "kind": "topic", "relevance": "not", "issue": "", "why": "local" },
+          { "name": "Timetable app", "kind": "issue", "relevance": "potential", "issue": "", "why": "complaints" }
+        ],
+        "campaign": { "candidates": [ { "id": "harbour", "confidence": 0.9, "evidence": ["P1", "P2"], "why": "morning crossings" } ] },
+        "brief": { "objective": "Tell riders about the extra crossings", "message": "Two more morning crossings from Monday", "action": "Plan your crossing" },
+        "objectives": [], "strategies": [], "directions": [], "claims": [], "knowledge": [],
+        "recommendation": { "why": "" }, "next": { "stage": "copy", "why": "" }
+      }
+    }
+  ]
+}

@@ -953,3 +953,18 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-craft-score{font-variant-numeric:tabular-nums;font-weight:700}
 /* P50: the cost a paid button states, quiet beside its words */
 #studio-root .st .st-cost{font-size:11px;font-weight:500;opacity:.78;margin-left:4px;white-space:nowrap}
+
+/* P51: the client knowledge view in the Brand workspace */
+#studio-root .st-know-strip { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 0; border-bottom: 1px solid var(--st-line, #262c30); margin-bottom: 8px; font-size: 12px; }
+#studio-root .st-know-strip .warn b { color: var(--x-warn, #e0b341); }
+#studio-root .st-know-dups { margin: 8px 0 12px; }
+#studio-root .st-know-filter { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+#studio-root .st-know-table td { vertical-align: top; }
+#studio-root .st-gaps { border: 1px solid var(--x-warn, #e0b341); border-radius: 8px; padding: 12px 16px; margin: 0 0 16px; }
+#studio-root .st-gaps li { margin: 4px 0; }
+#studio-root .st-gaps .st-gap-act { margin-left: 8px; }
+#studio-root .st-evs { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+#studio-root .st-ev { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--st-line, #2e3438); white-space: nowrap; }
+#studio-root .st-rel-counts { margin: 4px 0 8px; }
+#studio-root .st-mem-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 8px 0; }
+#studio-root .st-mem-conf, #studio-root .st-mem-review { margin: 8px 0 12px; }

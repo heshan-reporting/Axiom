@@ -9,6 +9,7 @@
  *   K2     "Produce N as variants" asks for the campaign when the kit has two and none is chosen; nothing is produced
  *   U10    a job the open tab steps in the background never disables the person's own actions; a click during it starts its job
  * Run: node --experimental-sqlite tests/studio-rc-browser.mjs   (RC_PORT picks the static server's port, default 8934) */
+import fs from 'node:fs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -85,7 +86,8 @@ await T.t('R1: a worker answering an older build is named in a banner; the match
   try {
     await page.waitForSelector(R + '.st-buildwarn', { timeout: 15000 });
     const t = await page.textContent(R + '.st-buildwarn');
-    ok(/studio-p38/.test(t) && /studio-p48 or later/.test(t), t);
+    const need = +(/const PAGE_NEEDS_BUILD = (\d+);/.exec(fs.readFileSync(new URL('../docs/studio.js', import.meta.url), 'utf8')) || [])[1];   // the build the page itself says it needs
+    ok(/studio-p38/.test(t) && new RegExp('studio-p' + need + ' or later').test(t), t);
   } finally { await page.ctxB.close(); fx.handler.fetch = orig; }
   const fresh = await fx.open();
   try { await fresh.waitForSelector(R + '.st-lib', { timeout: 15000 }); await fresh.waitForTimeout(800); eq(await fresh.$$eval(R + '.st-buildwarn', e => e.length), 0, 'no banner against this worker'); }

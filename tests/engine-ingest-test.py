@@ -11,7 +11,8 @@ calls = []
 def fake_http(url, key=None, body=None, timeout=60):
     calls.append((url.split('workers.dev')[-1], body))
     if url.endswith('/engine/fixes?ns=mca&all=1'): return {'ok': True, 'fixes': [{'rule': "Write 'Minerals Council' with the plural - never 'Mineral Council'.", 'active': True}]}
-    if url.endswith('/brand/kit'): return {'ok': True, 'kit': {'campaigns': body.get('campaigns', []), 'facts': body.get('facts', []), 'banned': body.get('banned', []), 'voice': body.get('voice', ''), 'rules': body.get('rules', '')}}
+    if url.endswith('/brand/kit'): return {'ok': True, 'kit': {'campaigns': body.get('campaigns', []), 'facts': body.get('facts', []), 'banned': body.get('banned', []), 'voice': body.get('voice', ''), 'rules': body.get('rules', '')},
+                                           'receipt': {'added': ['fact f1: "x"'], 'proposed': ['fact p1: "y" (pending review: not used until approved)'], 'refused': [], 'removed': []}}
     if url.endswith('/engine/fix'): return {'ok': True, 'fix': {'id': 'f' + str(len(calls))}}
     if url.endswith('/mind/ingest'): return {'ok': True, 'docId': 'd' + str(len(calls)), 'chunks': 1}
     if url.endswith('/engine/artwork'):
@@ -94,6 +95,14 @@ arts = [c[1] for c in calls if c[0] == '/engine/artwork']
 t('artwork uploads carry the shelf for their Mind document and the campaign from the folder', len(arts) == 3 and all(a['mindNs'] == 'mca_creative' and a['meta']['campaign'] == 'art' for a in arts), arts and {k: v for k, v in arts[0].items() if k != 'imageB64'})
 state2 = json.load(open(os.path.join(pack2, mod.STATE)))
 t('the failed image is not remembered, so the next run retries it', set(state2) == {'art/stored-only.png', 'art/fine.png'}, list(state2))
+# -- P51: the run ends with a receipt of what the Studio learned, read from the worker's answers --
+calls.clear(); out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    mod.main([pack, '--ns', 'mca', '--key', 'k', '--pace', '0', '--force'])
+rtext = out.getvalue()
+t('the run ends with what the Studio learned: added, waiting for review', 'What the Studio learned this run:' in rtext and 'added: 1 from the kit' in rtext and 'waiting for a person to review' in rtext and 'fact p1' in rtext, rtext[-600:])
+lines = mod.receipt_lines([('kit', 'k.json', {'receipt': {'added': [], 'proposed': [], 'refused': [{'what': 'banned term "x"', 'why': 'already held'}], 'removed': ['fact old']}}), ('artwork', 'a.png', {'warning': 'quota'})])
+t('refused and removed are said with the reason; an undescribed artwork is named', any('refused: banned term "x" (already held)' in l for l in lines) and any('removed by this kit file' in l for l in lines) and any('not yet described' in l for l in lines), lines)
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)
 sys.exit(1 if failed else 0)

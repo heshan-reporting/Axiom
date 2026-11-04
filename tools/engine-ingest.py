@@ -217,7 +217,11 @@ def file_kit(worker, key, ns, path, rel):
     d = http(worker.rstrip('/') + '/brand/kit', key, body, timeout=120)
     if d.get('error'): raise RuntimeError('%s %s' % (d.get('error'), d.get('detail', '')))
     k = d.get('kit') or {}
-    return {'campaigns': len(k.get('campaigns') or []), 'facts': len(k.get('facts') or []), 'banned': len(k.get('banned') or []), 'voice': len(k.get('voice') or ''), 'rules': len(k.get('rules') or '')}
+    rc = d.get('receipt') or {}
+    return {'campaigns': len(k.get('campaigns') or []), 'facts': len(k.get('facts') or []), 'banned': len(k.get('banned') or []), 'voice': len(k.get('voice') or ''), 'rules': len(k.get('rules') or ''),
+            'receipt': {'added': [str(x) for x in (rc.get('added') or [])][:200], 'proposed': [str(x) for x in (rc.get('proposed') or [])][:200],
+                        'refused': [x if isinstance(x, dict) else {'what': str(x), 'why': ''} for x in (rc.get('refused') or [])][:200],
+                        'removed': [str(x) for x in (rc.get('removed') or [])][:200]}}
 
 
 def file_fixes(worker, key, ns, path, rel, pace=0.3):
@@ -254,7 +258,9 @@ def file_fixes(worker, key, ns, path, rel, pace=0.3):
 
 def describe(kind, res):
     if kind == 'artwork': return ' - ' + (('STORED, NOT DESCRIBED: ' + res['warning']) if res.get('warning') else res['description'])
-    if kind == 'kit': return ' - %d campaigns, %d facts, %d banned terms, voice %d chars, rules %d chars' % (res['campaigns'], res['facts'], res['banned'], res['voice'], res['rules'])
+    if kind == 'kit':
+        rc = res.get('receipt') or {}
+        return ' - %d campaigns, %d facts, %d banned terms, voice %d chars, rules %d chars; %d added, %d waiting for review, %d refused' % (res['campaigns'], res['facts'], res['banned'], res['voice'], res['rules'], len(rc.get('added') or []), len(rc.get('proposed') or []), len(rc.get('refused') or []))
     if kind == 'fixes': return ' - %d rules taught, %d already in force' % (res['added'], res['already'])
     return ' - %s, %d chars, %d chunks' % (res['kind'], res['chars'], res['chunks'])
 
@@ -288,6 +294,7 @@ def main(argv=None):
     print('%s  %s: %d documents%s, %d images, %s%s%d other files in %s' % (stamp, ns, n('doc'), (' -> ' + mns) if mns != ns else '', n('artwork'), '1 brand kit, ' if n('kit') else '', '1 fixes list, ' if n('fixes') else '', len(skipped), folder))
     if skipped[:5]: print('  not filed (type not handled): ' + ', '.join(skipped[:5]) + (' ...' if len(skipped) > 5 else ''))
     done = failed = same = 0
+    results = []
     for i, (kind, path, rel) in enumerate(todo):
         if a.max and done + failed >= a.max: break
         h = sha(path)
@@ -301,6 +308,7 @@ def main(argv=None):
             elif kind == 'doc': res = file_doc(a.worker, a.key, mns, path, rel)
             else: res = file_artwork(a.worker, a.key, ns, path, rel, mns)
             state[rel] = {'sha': h, 'kind': kind, 'filed': stamp, 'result': res}
+            results.append((kind, rel, res))
             save_state(folder, state)
             done += 1
             print('  filed %-8s %s%s' % (kind, rel, describe(kind, res)))
@@ -310,7 +318,37 @@ def main(argv=None):
             if 'HTTP 401' in str(e) or 'HTTP 403' in str(e): sys.exit('AXIOM refused the key; use a full-access key')
         time.sleep(a.pace)
     print('%s  %s: %d filed, %d unchanged since last run, %d failed' % (datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC'), ns, done, same, failed))
+    if not a.dry_run:
+        for line in receipt_lines(results): print(line)
     return 1 if failed and not done else 0
+
+
+def receipt_lines(results):
+    """What this run taught the Studio, from the worker's own answers: what was added, what waits for a person's review,
+    what was refused and why. results is a list of (kind, rel, res) for the files filed in this run."""
+    added, proposed, refused, removed = [], [], [], []
+    docs = chunks = art = undescribed = taught = already = 0
+    for kind, rel, res in results:
+        if kind == 'kit':
+            rc = res.get('receipt') or {}
+            added += rc.get('added') or []; proposed += rc.get('proposed') or []; removed += rc.get('removed') or []
+            refused += [(r.get('what') or r.get('text') or '?', r.get('why') or '') for r in (rc.get('refused') or [])]
+        elif kind == 'fixes':
+            taught += res.get('added', 0); already += res.get('already', 0)
+        elif kind == 'doc':
+            docs += 1; chunks += res.get('chunks', 0)
+        elif kind == 'artwork':
+            art += 1
+            if res.get('warning'): undescribed += 1
+    out = ['What the Studio learned this run:']
+    out.append('  added: %d from the kit%s, %d corrections taught, %d documents (%d passages), %d artworks' % (len(added), (' (' + ', '.join(added[:6]) + (' ...' if len(added) > 6 else '') + ')') if added else '', taught, docs, chunks, art))
+    if proposed: out.append('  waiting for a person to review (used nowhere until approved): %d - %s' % (len(proposed), ', '.join(proposed[:6]) + (' ...' if len(proposed) > 6 else '')))
+    if already: out.append('  already held, not added again: %d corrections' % already)
+    if removed: out.append('  removed by this kit file (it replaces the lists it carries): %d - %s' % (len(removed), ', '.join(removed[:6]) + (' ...' if len(removed) > 6 else '')))
+    if refused: out.append('  refused: ' + '; '.join('%s (%s)' % (w, y) if y else w for w, y in refused[:6]) + (' ...' if len(refused) > 6 else ''))
+    if undescribed: out.append('  stored but not yet described (the models cannot read them until they are): %d artworks' % undescribed)
+    if len(out) == 2 and not (added or taught or docs or art): out.append('  nothing new.')
+    return out
 
 
 if __name__ == '__main__':

@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r37` since P50.
+  with `?v=r38` since P51.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2995,6 +2995,29 @@ Plainer, More urgent, Fix to the facts, In the campaign's tone) is one revise ca
 `st:rewrite`). The copy golden set: `tests/fixtures/copy-golden/` (synthetic client) and `tools/copy-eval.mjs` (live only with
 `--approve-calls N`). `tests/d1lite.mjs` enforces D1's 100 bound variables when `maxVars` is set. Harnesses:
 `tests/studio-p50-worker.mjs` (8), `tests/studio-r4-browser.mjs` (4).
+
+**The engines release, part 2: client knowledge, relevance and memory (P51; build `2026-11-05.studio-p51`, page `?v=r38`;
+`CREATIVE-STUDIO.md` s.61.3-61.4).** **Knowledge**: `GET /brand/knowledge?ns=&campaign=` (`brKnowledge`) lists every fact,
+banned term, voice and rule, campaign wording, kept brand item, learned correction and mark with authority, scope, status,
+source, last confirmation and uses (versions it informed); possible duplicates (`brKnowSim` >= 0.75) are listed and merged only
+by a person (`POST /brand/knowledge/merge {keep, drop, reason}`: retired, switched off or removed through `brandSave`, never by
+the engine); a kit fact may carry `reviewBy` - past it (`brFactExpired`) it is expired, out of the writing core and context, and
+a figure only in it is `unsupported` until `POST /brand/knowledge/confirm {id, reviewBy, reason}`. `/brand/kit` and Teach this
+brand answer `receipt {added, proposed, removed, refused}`; `tools/engine-ingest.py` ends with "What the Studio learned this
+run". The guided Brief opens with **Before anything is spent** (`GapsFirst`: the brief check's blocking and mandatory gaps,
+the brand's blocking items, `facts_expired`, each with its one action). **Relevance**: `stRelevancePrepass` (CLIENT_ISSUES
+trigger or wide matcher, register entities, campaign terms from the campaign's name and its own facts, the client's name) is
+given to the reading as PRE-PASS EVIDENCE; `stRelevanceAudit` sets aside an unanchored paragraph kept with no reason; kept,
+set-aside and topics carry `evidence`; the labelled set `tests/fixtures/relevance/synthdemo.json` and `tools/relevance-eval.mjs`
+(precision, recall, topic accuracy; live only with `--approve-calls N`). **Retrieval**: `stRankKnowledge` (this campaign, then
+client-wide, then others; approved, unrecorded, background, rejected marked AVOID; then score) and `stRankDecisions`.
+**Memory**: `engine_fixes.last_hit` / `reviewed`; `GET /engine/memory?ns=&campaign=` (rules with hits and last applied,
+90-day review, contradictions from `stRuleConflicts` and `stRuleTextConflicts`, the learning summary from recorded verdicts);
+`POST /engine/fix/review {id, decision keep|off, reason}`; the Brand workspace's What the Studio knows and What the Studio has
+learned. `informed.memory` names the examples (example / avoid / background) and kept items by id. A withdrawal is exact: only
+the latest decision per asset and part is read, and the log entry it supersedes is marked `withdrawn:`. `stIsolationAudit` also
+reads each version's `informed` for another campaign's facts, corrections and examples. Harnesses: `tests/studio-p51-worker.mjs`
+(13), `tests/studio-r5-browser.mjs` (4), `tests/engine-ingest-test.py` (23).
 
 Phase 1, the ground:
 
