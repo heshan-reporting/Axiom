@@ -3496,15 +3496,7 @@
     // the handles sit on what the renderer measured - the words' ink, a mark's visible pixels - not on the layer box, so what you
     // grab is what you see; the layer box is drawn faintly behind when it differs (the same scene the rules judge). A turned layer
     // is framed by its own box, turned with it, so its handles resize along its own sides.
-    /* S30: while the images and fonts reload (after a save, a reload of the project) the handles keep the last measurement of
-       every layer that has not changed since - they used to fall back to the whole layer box for that moment, so a press could
-       land on the neighbouring layer; a layer that changed has no ink until it is measured again */
-    const inkLast = useRef({ map: {}, sig: {} });
-    const inkSig = l => JSON.stringify([l.x, l.y, l.w, l.h, l.size, l.weight, l.text, l.role, l.family, l.lineHeight, l.letterSpacing, l.align, l.src, l.rotate, l.hidden, l.role && wcopy ? wcopy[l.role] : null]);
-    const ink = useMemo(() => { const o = {}; if (!layout.stage) return o;
-      if (!comp.ready) { const last = inkLast.current; (layout.layers || []).forEach(l => { if (last.map[l.id] && last.sig[l.id] === inkSig(l)) o[l.id] = last.map[l.id]; }); return o; }
-      try { const W = layout.stage.w, H = layout.stage.h; R.measure(layout, wcopy, comp.imgs, W, H).forEach(b => { if (b.hidden || b.empty || b.valid === false) return; if (b.type === 'text' || (b.mark && b.asset === 'loaded')) o[b.id] = { x: b.x / W * 100, y: b.y / H * 100, w: b.w / W * 100, h: b.h / H * 100 }; }); } catch (e) {}
-      const sig = {}; (layout.layers || []).forEach(l => { sig[l.id] = inkSig(l); }); inkLast.current = { map: o, sig }; return o; }, [layout, comp.key, comp.ready]);
+    const ink = useMemo(() => { const o = {}; if (!comp.ready || !layout.stage) return o; try { const W = layout.stage.w, H = layout.stage.h; R.measure(layout, wcopy, comp.imgs, W, H).forEach(b => { if (b.hidden || b.empty || b.valid === false) return; if (b.type === 'text' || (b.mark && b.asset === 'loaded')) o[b.id] = { x: b.x / W * 100, y: b.y / H * 100, w: b.w / W * 100, h: b.h / H * 100 }; }); } catch (e) {} return o; }, [layout, comp.key, comp.ready]);
     const geo = l => { const bx0 = { x: l.x, y: l.y, w: l.w, h: l.h || 4 }; if (l.rotate) return { on: bx0, box: null, turned: true }; const b = ink[l.id]; if (!b || b.w <= 0 || b.h <= 0) return { on: bx0, box: null }; const same = Math.abs(b.x - bx0.x) < 0.3 && Math.abs(b.y - bx0.y) < 0.3 && Math.abs(b.w - bx0.w) < 0.3 && Math.abs(b.h - bx0.h) < 0.3; return { on: b, box: same ? null : bx0 }; };
     const sa = R.safeArea ? R.safeArea(a.format, a.channel) : { top: 0.03, bottom: 0.03, side: 0.03, hard: false }; const story = sa.hard;
     /* framing by dragging: the photograph (or the selected region's image) is panned inside its box through the renderer's own

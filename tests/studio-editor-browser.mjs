@@ -80,7 +80,11 @@ await T.t('the editor\'s handles sit on what the renderer measured (the words\' 
   // a drag still moves the layer by the same distance, whatever the handle covers
   // the canvas sits lower in the S14 desk: bring the handle to the middle of the view first, as a person would scroll to it
   await page.$eval(R + '.st-le-layer[aria-label="Layer headline"]', el => el.scrollIntoView({ block: 'center' })); await page.waitForTimeout(150);
-  const h = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); const hb = await h.boundingBox();
+  // the artboard settles (its fit and the stage's entrance) after the scroll: read the handle once it stops moving, so the press
+  // lands on the headline and not on whatever is under where it was a moment ago (the panel behind it, which then moved 10%)
+  const h = await page.$(R + '.st-le-layer[aria-label="Layer headline"]'); let hb = await h.boundingBox();
+  for (let i = 0; i < 40; i++) { await page.waitForTimeout(100); const b2 = await h.boundingBox(); const same = ['x', 'y', 'width', 'height'].every(k => Math.abs(b2[k] - hb[k]) < 0.5); hb = b2; if (same) break; }
+  ok(await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest && e.closest('.st-le-layer[aria-label="Layer headline"]')); }, [hb.x + hb.width / 2, hb.y + hb.height / 2]), 'the press point is on the headline');
   const box = await page.$eval(R + '.st-le', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + box.w * 0.1, hb.y + hb.height / 2, { steps: 4 }); await page.mouse.up(); await page.waitForTimeout(200);
   const xField = await page.inputValue(R + 'input[aria-label="X, per cent of the stage"]');

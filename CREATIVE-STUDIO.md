@@ -3780,8 +3780,10 @@ Three causes, each reproduced:
   from the source, the copy was flagged and "mark ready" asked a question the journey does not answer. Reproduced here by
   stretching the timer to 400 ms (journey 8 fails exactly as in CI). The focus now moves at once and never off a field
   inside the wizard.
-- `studio-editor-browser` (intermittent before S30 too, 1 in 3 here): not a drag defect and not timing in the test. While
-  the canvas reloaded its images and fonts, every layer's measured ink was cleared and the handles fell back to whole layer
-  boxes, so the headline's handle briefly covered its neighbour and the press picked the wrong layer (which moved the full
-  10%). The handles keep the last measurement of every unchanged layer while the reload runs.
+- `studio-editor-browser` (intermittent before S30 too): not a Studio defect. The test read the headline's handle while the
+  artboard was still settling after its scroll (the box 20% larger and offset), then pressed there once it had settled: the
+  press landed on the panel behind the headline, which the drag moved the full 10% (6 to 16). Logged pointer events, the
+  layers and the element under the press point showed it; the drag itself always moved the pressed layer exactly. The test
+  now reads the handle once it stops moving and checks the press point is on the headline. (A first attempt that kept the
+  canvas's ink measurement through image reloads changed nothing and was taken out.)
 

@@ -2945,8 +2945,8 @@ right to left; inspection scores off the 1-5 scale are not scored. The legacy vi
 `jsAttr()` (`tests/index-handlers-test.mjs`), and `tests/asset-versions.mjs` (in `run.mjs check`; `--write` after a bump)
 fails when a versioned page asset changes without a new `?v=`. Follow-up (page `r32`): the other stages show their names
 from 1000 px only (below, they squeezed the project name); the wizard moves the focus at once and never off a field the
-person reached (a late timer lost typing in CI); the canvas handles keep the last ink measurement of unchanged layers while
-images and fonts reload. Harnesses: `tests/studio-s30-worker.mjs` (11),
+person reached (a late timer lost typing in CI); the intermittent editor test read a handle while the
+artboard was still settling and now waits for it to stop moving. Harnesses: `tests/studio-s30-worker.mjs` (11),
 `tests/studio-s30-browser.mjs` (15).
 
 Phase 1, the ground:
