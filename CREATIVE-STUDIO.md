@@ -3803,7 +3803,7 @@ and approval stays possible. Each fix was reproduced by a failing test first: `t
 | 2 | Mark readability trusted from the browser | `stPngDecode` reads every legal PNG (1, 2, 4, 8, 16 bits; grey, RGB, palette, grey-alpha, RGBA; Adam7), keeping the exact-size inflate guard. `stServerMark` maps the file through the renderer's own transform (contain, or cover with focus and zoom; the turn about the box centre; the layer's opacity composited over the ground), so faded, turned and cropped marks are measured by the worker. What it still cannot read (an opaque file, a JPEG or WebP mark, a flip, mask, adjustment or effect, too few strokes) answers why; the judge files `server: {skipped, why}`; readiness lists them as `browserOnly` (unless stale); Checks and the approval dialog say "checked in the browser only"; the design approval's stored reason records it. Approval stays possible | MK (3 worker, 1 browser) | fixed |
 | 3 | JPEG and WebP checked by signature or length | `stJpegWalk` (segments inside the file; a frame with real size and 1-4 components; Huffman tables unless lossless or arithmetic; a scan with entropy data) and `stWebpWalk` (chunks inside the file; a VP8 frame with its start code and size, a VP8L header, or an animation) run inside `stImageBytesCheck`; `brImageType` (logo, wordmark, artwork uploads) now checks the whole file, so a PNG mark is decoded end to end. A refused kit upload is `422 bad_image` (it was a 500); an artwork upload keeps its `400` | IMG | fixed |
 | 4 | TESTING.md stale (p46 / r30, s.54-55) | Brought to p48 / r33 and s.54-57, the scope option, the new known limits; the build date question answered (below) | - | fixed |
-| 5 | Open UI debt (PM6, U6, U7, project-open reads) | Not changed in this release | - | open |
+| 5 | Open UI debt (PM6, U6, U7, project-open reads) | Not changed in this release; PM6, U6 and U7 closed in s.58 | - | PM6, U6, U7 fixed (s.58); project-open reads open |
 
 ### 57.2 Notes
 
@@ -3817,3 +3817,14 @@ and approval stays possible. Each fix was reproduced by a failing test first: `t
   scope), but an analysis it runs for its own client still retrieves `cmm` passages beside the client's, as every analysis does
   (decision D5: the daily brief covers every client). A link meant for someone outside the agency needs D5 revisited first.
 - The page asks for worker p48 (`PAGE_NEEDS_BUILD`). Deploy order: the worker first, then the page.
+
+## 58. S32 - the UI debt closed (page `?v=r34`, worker unchanged at p48)
+
+The three items open since p45 (PM6, U6, U7), each measured first and reproduced by `tests/studio-s32-browser.mjs` (0 of 3 on
+`5dccf1c`, 3 of 3 now).
+
+| # | Finding | Measured before | Fix | After |
+|---|---|---|---|---|
+| PM6 | Each finished job read the project twice | one inspect job: step, then `GET /studio/get` twice back to back (`runJob` reloads after its last step and nearly every caller reloads again) | `AXUI.writes()` counts every write sent through `call()`; `runJob` remembers the project its last step loaded, and the next `reload()` takes that snapshot instead of reading again - once, within 1.5 s, only when no write went out and no other read landed in between | one read per finished job |
+| U6 | Every movable layer showed a resize handle and a dotted box, selected or not | with nothing selected, 5 of 5 layers showed the corner handle and 4 dotted ink boxes; hovering anywhere on the artboard outlined every layer | the corner handle is drawn on the selection only; the dotted ink box shows for the selected layer or the one under the pointer; the artboard no longer outlines every layer on hover | no handle or box with nothing selected; the hovered layer alone outlined; a selected layer keeps its eight handles |
+| U7 | Stage heads took 208-306 px at 1366 x 768 | Brief 250, Message 250, Direction 225, Copy 306, Review 225, Deliver 210 | the four status answers sit on one row with Missing and Accepted wide and Main action and Next to one line (each cell's full words in its title and under the help toggle); the phase line no longer repeats "nothing waiting" or the decision when the cells say it; the head's top row does not wrap from 1100 px (the views scroll sideways if they must); the "Changing a choice here" note is one line | every head 163-180 px; the earlier-work note, when shown, one line (29 px) |

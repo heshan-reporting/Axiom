@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r32` since the S30 follow-up.
+  with `?v=r34` since S32.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2958,6 +2958,14 @@ Adam7) and measures faded, turned and cropped marks itself (`stServerMark` throu
 read answers why, readiness lists it as `browserOnly`, Checks and the approval dialog say "checked in the browser only", the
 approval's reason records it, and approval stays possible. Brand uploads are checked whole (`stJpegWalk`, `stWebpWalk`, PNG
 decoded; a kit upload that fails is `422 bad_image`, an artwork upload stays `400`). Harnesses: `tests/studio-s31-worker.mjs` (7), `tests/studio-s31-browser.mjs` (2).
+
+**The UI debt closed (S32; page `?v=r34`, worker unchanged at p48; `CREATIVE-STUDIO.md` s.58).** A finished job is read once:
+`AXUI.writes()` counts writes through `call()`, and `reload()` straight after `runJob` takes the snapshot the job's last step loaded
+when nothing was written since (PM6). With nothing selected the canvas shows only the artwork: the corner handle is the selection's,
+the dotted ink box shows for the selected or hovered layer, and hovering the artboard outlines only the layer under the pointer (U6).
+Stage heads are at most 180 px at 1366 x 768: the four status cells on one row with the long answers held to a line (full words in
+the title and under help), no repeated "nothing waiting", a top row that does not wrap from 1100 px (U7). Harness:
+`tests/studio-s32-browser.mjs` (3).
 
 Phase 1, the ground:
 

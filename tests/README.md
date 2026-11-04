@@ -271,6 +271,8 @@ server on a fixed port in the 8766-8776 range and kills it at the end.
   uploads checked whole, PNGs at every bit depth and interlaced, faded / turned / cropped marks read by the worker, a mark it
   cannot read listed as checked in the browser only) and `studio-s31-browser.mjs` (a scoped guest's client list, the
   browser-only note in Checks and on the approval).
+- The UI debt closed (`CREATIVE-STUDIO.md` s.58): `studio-s32-browser.mjs` (one project read per finished job, a quiet canvas
+  with nothing selected, stage heads under 180 px at 1366 x 768).
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,

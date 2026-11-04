@@ -27,8 +27,11 @@
     return u.href;
   }
   // o.signal (an AbortController's) lets a caller stop waiting; the request may still complete on the worker
+  // S32 (PM6): every write through call() is counted, so a reader can tell whether anything changed since it last loaded
+  let WRITES = 0; const writes = () => WRITES;
   async function call(path, body, o) {
     const sig = o && o.signal ? { signal: o.signal } : {};
+    if (body) WRITES++;
     const r = await fetch(own(path), Object.assign(body ? { method: 'POST', headers: hdrs(), body: JSON.stringify(body) } : { headers: hdrs() }, sig));
     let d = {}; try { d = await r.json(); } catch (e) {}
     if (!r.ok || d.error) { const e = new Error(scrub(d.detail || d.error || ('HTTP ' + r.status))); e.code = d.error || ''; e.status = r.status; e.body = d; e.requestId = d.requestId || (r.headers && r.headers.get ? r.headers.get('X-Request-Id') : '') || ''; throw e; }
@@ -140,5 +143,5 @@
     }, []);
   }
   const scopeActive = s => Object.keys(SCOPE_DEF).filter(k => (s || scopeCur)[k]).length;
-  window.AXUI = { html, call, blobUrl, own, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto, scope, setScope, useScope, scopeActive, SCOPE_DEF };
+  window.AXUI = { html, call, writes, blobUrl, own, base, hdrs, scrub, toastMsg, fmtN, ago, clock, toneKey, toneWord, Stat, Console, tailJob, goto, consume, useGoto, scope, setScope, useScope, scopeActive, SCOPE_DEF };
 })();

@@ -152,6 +152,21 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-five dt{font:650 9.5px/1 var(--sk-font);letter-spacing:.14em;text-transform:uppercase;color:var(--sk-quiet)}
 #studio-root .st .st-five dd{margin:0;font-size:12px;line-height:1.45;color:var(--sk-ink-2);overflow-wrap:anywhere}
 #studio-root .st .st-five-missing dd:not(:has(.ov-dim)){color:var(--sk-ink)}
+/* S32 (U7): in a stage head each answer is held to two lines (its full words in its title and under the help toggle), so the head
+   stays under 180 px at 1366 x 768 and the work starts higher; the Design step popover keeps the answers whole */
+#studio-root .st .st-stagehead{gap:5px;padding-bottom:8px}
+@media (min-width:1181px){#studio-root .st .st-stagehead .st-five{grid-template-columns:minmax(0,2fr) minmax(0,2fr) minmax(0,1.3fr) minmax(0,1.3fr)}}
+#studio-root .st .st-stagehead .st-five > div{padding:5px 9px;gap:2px}
+#studio-root .st .st-stagehead .st-five dd{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;line-height:1.4}
+#studio-root .st .st-stagehead .st-five-act dd, #studio-root .st .st-stagehead .st-five-next dd{-webkit-line-clamp:1;line-clamp:1}
+#studio-root .st .st-stagehead .st-downstream{padding:5px 10px;gap:2px;line-height:1.4}
+@media (min-width:1100px){
+  #studio-root .st .st-stagehead:not(.compact) .st-stagehead-row{flex-wrap:nowrap}
+  #studio-root .st .st-stagehead:not(.compact) .st-subnav{flex:0 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none}
+  #studio-root .st .st-stagehead:not(.compact) .st-stagehead-acts{flex:0 0 auto;flex-wrap:nowrap}
+  #studio-root .st .st-stagehead:not(.compact) .st-stagehead-main{flex:0 0 auto}
+  #studio-root .st .st-stagehead:not(.compact) .st-stage-title{white-space:nowrap}
+}
 #studio-root .st .st-five-missing:has(dd:not(:has(.ov-dim))){border-color:color-mix(in srgb,var(--sk-warn) 45%,var(--sk-line))}
 #studio-root .st .st-downstream{display:flex;flex-direction:column;gap:4px;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.5;color:var(--sk-ink-2);border:1px solid color-mix(in srgb,var(--sk-warn) 40%,var(--sk-line));background:color-mix(in srgb,var(--sk-warn) 7%,var(--sk-panel))}
 #studio-root .st .st-downstream b{color:var(--sk-ink)}
@@ -256,7 +271,10 @@ body.in-studio #studio-root{height:100%}
 /* while working, a layer shows its outline and name only when it is hovered, focused or selected; previews show nothing */
 #studio-root .st .st-le-layer{border-color:transparent}
 #studio-root .st .st-le-layer .st-le-lbl{opacity:0;transition:opacity .12s}
-#studio-root .st .st-le:hover .st-le-layer{border-color:rgba(255,255,255,.28)}
+/* S32 (U6): the artboard shows the artwork; only the layer under the pointer or the selection is outlined, and the dotted box of
+   a layer's frame (where its ink is smaller than its box) shows only for that layer */
+#studio-root .st .st-le-box{display:none}
+#studio-root .st .st-le-box.on, #studio-root .st .st-le-box:has(+ .st-le-layer:hover){display:block}
 #studio-root .st .st-le-layer:hover, #studio-root .st .st-le-layer:focus-visible, #studio-root .st .st-le-layer.sel, #studio-root .st .st-le-layer.bad{border-color:rgba(255,255,255,.7)}
 #studio-root .st .st-le-layer:hover .st-le-lbl, #studio-root .st .st-le-layer.sel .st-le-lbl, #studio-root .st .st-le-layer:focus-visible .st-le-lbl{opacity:1}
 #studio-root .st .st-le-layer.bad{border-color:var(--sk-bad)}
