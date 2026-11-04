@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r35` since the R2 redesign.
+  with `?v=r36` since P49.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2966,6 +2966,17 @@ the dotted ink box shows for the selected or hovered layer, and hovering the art
 Stage heads are at most 180 px at 1366 x 768: the four status cells on one row with the long answers held to a line (full words in
 the title and under help), no repeated "nothing waiting", a top row that does not wrap from 1100 px (U7). Harness:
 `tests/studio-s32-browser.mjs` (3).
+
+**The production-readiness audit (P49; build `2026-11-04.studio-p49`, page `?v=r36`; `CREATIVE-STUDIO.md` s.60,
+`prompts/studio-production-ready.md`).** Copy checks are advisory: Review lists `differs`, `banned`, `unsupported` and
+`url_mismatch` as serious warnings a person decides on, the copy approval dialog names them, and the worker appends "(approved
+with unresolved copy checks: ...)" to the approval's reason (`ST_COPY_OPEN`). The brief form (`BriefFields`) keeps the person's
+edits field by field over the saved brief in localStorage `ax_studio_bf_<project>` (restored on return, cleared when saved);
+a save that meets a 409 re-reads, sets aside a field someone else changed (named, Keep mine / Take theirs) and sends the rest
+once more (`saveBriefPatch(patch, {quiet409})`). The wizard's "One visual" is one chosen channel. `stBriefNorm` keeps known
+channels and formats only. D1's limit of 100 bound variables: `stList` and `sourceSweep` read in parts of 90, and
+`tests/d1lite.mjs` enforces the limit when `maxVars` is set. `stGet` builds the asset views six at a time, in order (P1).
+Harnesses: `tests/studio-p49-worker.mjs` (5), `tests/studio-r3-browser.mjs` (5).
 
 Phase 1, the ground:
 

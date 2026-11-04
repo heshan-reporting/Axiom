@@ -3862,3 +3862,26 @@ still the one renderer for preview and export.
   `tests/studio-r2-shots.mjs <label> [1440,390]` into the ignored `tests/shots/r2/`.
 - Not done here: the art-direction action names ("Explore variations") are unchanged; deliverable quantities have no
   structured field; Firefox and WebKit were not installed in this sandbox (the cross-browser harnesses skip them).
+
+## 60. P49 - the production-readiness audit of R2 and the worker (build `2026-11-04.studio-p49`, page `?v=r36`)
+
+An audit of the latest page (r35) and worker (p48) on 4 November 2026: the S27 sweep (102 view / width / role combinations:
+no horizontal scroll, no serious or critical axe finding, no page error), a read of the R2 code, and a pass over the worker's
+D1 queries and the project-open path. The Claude Code prompt that states these findings and the checks still to run is
+`prompts/studio-production-ready.md`. Each fix was reproduced by a failing test first (all ten fail on `0e1590f`).
+
+| id | severity | what | fix | test |
+|---|---|---|---|---|
+| F1 | medium | Review's checks labelled each piece `v<number of versions>`, not the version judged | `vnum(a, current(a))` | `studio-r3-browser` F1 |
+| F2 | high | Copy checks (`differs`, `banned`, `url_mismatch`) were listed as blocking though the worker approves over them; the approval dialog and record said nothing | Warnings, the serious ones said as such ("a person decides"); the copy approval dialog names them; the worker appends "(approved with unresolved copy checks: ...)" to the reason (`ST_COPY_OPEN`) | `studio-r3-browser` F2, `studio-p49-worker` F2 |
+| F3 | high | The brief form held edits in component state: leaving the step or reloading lost them | Field-by-field edits over the saved brief, kept in localStorage `ax_studio_bf_<project>` as typed, cleared when saved | `studio-r3-browser` F3 |
+| F4 | high | Saving the brief always sent the revision, so any job or rename meanwhile refused it | On 409 the form re-reads, sets aside a field someone else changed (named, the person's words kept, Keep mine / Take theirs) and sends the rest once more | `studio-r3-browser` F4 |
+| F5 | medium | The wizard's "One visual" was always Instagram, the choice hidden; the recap named neither | One channel chosen for one visual; the recap names the deliverable and channels | `studio-r3-browser` F5 |
+| F6 | medium | `stBriefNorm` stored `channels` and `formats` as sent | Known channels once each; known formats for chosen channels only | `studio-p49-worker` F6 |
+| F7 | medium | The library read the current versions of the 24 recent projects in one capped query of 90: busy clients lost leads and piece counts | Read in parts of 90 (up to 1200) | `studio-p49-worker` F7 |
+| F8 | medium | `sourceSweep` bound up to 150 ids in one `IN`, past D1's 100 variables | Read in parts of 90 | `studio-p49-worker` F8 |
+| F9 | medium | Opening a project built each asset's view after the one before (P1, open since p45) | Six at a time, in order; reads only | `studio-p49-worker` F9 |
+
+`tests/d1lite.mjs` takes `maxVars` (D1 refuses a statement with more than 100 bound variables) so a harness can hold the
+fixture to that limit. U8 (the subline without an ellipsis) was found already fixed. Not done: the evaluation of live model
+quality, which needs an owner-approved allowance (the prompt states the plan to write).

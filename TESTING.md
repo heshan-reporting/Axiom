@@ -2,7 +2,7 @@
 
 This page is for the people running the team's test round of the AXIOM Creative Studio, and for the testers themselves. It
 says how the release goes live, who can do what, where to test, what to try, what costs money, what is known not to work yet,
-and how to report a problem. Release candidate: worker build `2026-11-04.studio-p48`, page release `?v=r35`. The findings and
+and how to report a problem. Release candidate: worker build `2026-11-04.studio-p49`, page release `?v=r36`. The findings and
 the evidence behind it are in `CREATIVE-STUDIO.md` s.54 to s.58 (s.56 the p46 audit fixed, s.57 the p47 audit fixed, s.58 the UI
 debt closed); the round's
 cases for people are Part B of `prompts/studio-rc-team-test.md`. Build ids carry the date the build was made; p46 and p47 were
@@ -15,7 +15,7 @@ stamped with dates ahead of their commits, so from p48 on the date is the commit
 2. With `AXIOM_KEY` exported: `/studio/status` answers build `2026-11-04.studio-p48`, `testNs` names `synthdemo`, and `posture`
    shows how the worker is opened (public mode, guard flags, roster and guest counts; never a key). The guard flags
    (`STUDIO_PUBLIC_WRITE`, `STUDIO_GUEST_BRAND`, `STUDIO_GUEST_LIVE`, `AXIOM_GUEST_WRITE`, `AXIOM_DEV_OPEN`) should all read false.
-3. Fast-forward merge the branch to `main`; check the page loads `?v=r35`. A page newer than its worker says so in a banner
+3. Fast-forward merge the branch to `main`; check the page loads `?v=r36`. A page newer than its worker says so in a banner
    ("The worker is older than this page") - if a tester sees it, the worker was not deployed.
 4. Public mode, if kept for the round (decisions D4 and D7): `AXIOM_PUBLIC=read` and `AXIOM_PUBLIC_UNTIL` set to the deploy date
    plus 14 days. Open access never writes anything (every anonymous write and acting request answers `public_write_refused`),

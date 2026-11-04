@@ -102,7 +102,7 @@ await t('a supplied namespace or project id cannot cross a boundary: the asset\'
 });
 await t('approvals name the content they accept: design approval needs a passing validation of this composition; a caption edit drops the copy approval and leaves design standing; a displayed-copy edit drops design too; withdraw and reject record reasons; restore keeps history', async () => {
   eq((await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve' })).status, 400, 'a reason is required');
-  const ap = await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' }); eq(ap.status, 200); ok(ap.d.approvals.copy && ap.d.approvals.copy.reason === 'client asked for the plain ask');
+  const ap = await req('POST', '/studio/approve', { asset: A, part: 'copy', decision: 'approve', reason: 'client asked for the plain ask' }); eq(ap.status, 200); ok(ap.d.approvals.copy && ap.d.approvals.copy.reason.indexOf('client asked for the plain ask') === 0);   // P49 (F2): a copy check standing is noted after the person's words
   const nv = await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'fine' }); eq(nv.status, 409); eq(nv.d.error, 'not_validated', 'no measurement, no design approval');
   const vd = await validateAsset(req, P, A); eq(vd.status, 200, JSON.stringify(vd.d)); ok(vd.d.validation.ok, JSON.stringify(vd.d.validation.issues));
   eq((await req('POST', '/studio/approve', { asset: A, part: 'design', decision: 'approve', reason: 'fine' })).status, 200);

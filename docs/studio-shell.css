@@ -940,3 +940,6 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st .st-bf-add{display:flex;gap:6px;align-items:flex-start}
 #studio-root .st .st-bf-add .st-combo{flex:1;min-width:0}
 @media (max-width:900px){#studio-root .st .st-bf-grid, #studio-root .st .st-bf-bands{grid-template-columns:minmax(0,1fr)}}
+/* P49 (F4): a brief field someone else changed while it was being edited */
+#studio-root .st .st-bf-clash{border:1px solid var(--x-warn, #e3b341);border-radius:8px;padding:8px 12px;margin:8px 0;display:grid;gap:6px;font-size:13px}
+#studio-root .st .st-bf-clash .btn{margin-left:4px}

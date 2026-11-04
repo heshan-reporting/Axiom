@@ -91,7 +91,7 @@ await T.t('1. the wizard, the understanding, the objective, the strategy and a d
   ok(asked.every(m => /still to look at/.test(m) && /Mark them ready for design anyway/.test(m)), 'any question named the checks: ' + asked.join(' | '));
   await page.waitForSelector(R + '.st-step.done:has(.st-step-l:text-is("Copy"))', { timeout: 15000 });
   d = await api('GET', '/studio/get?id=' + pr.id);
-  ok(d.assets.every(a => a.approvals.copy && a.approvals.copy.version === a.current && a.approvals.copy.reason === 'copy ready'), 'ready for design is the copy approval of the current version');
+  ok(d.assets.every(a => a.approvals.copy && a.approvals.copy.version === a.current && a.approvals.copy.reason.indexOf('copy ready') === 0), 'ready for design is the copy approval of the current version');
   await shot(page, 'copy');
   // the production mode, then the imagery as jobs the page runs
   await produce(page, 'editable');

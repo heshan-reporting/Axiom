@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 function fix(v) { if (v === undefined) return null; if (typeof v === 'boolean') return v ? 1 : 0; if (typeof v === 'object' && v !== null) return JSON.stringify(v); return v; }
 export class D1Lite {
-  constructor(file) { this.db = new DatabaseSync(file || ':memory:'); this.log = []; this.delay = 0; }  // delay (ms) after every read, before its answer returns: two requests started together both read before either writes
+  constructor(file) { this.db = new DatabaseSync(file || ':memory:'); this.log = []; this.delay = 0; this.maxVars = 0; }   // maxVars: D1 refuses a statement with more than 100 bound variables; set it to hold the fixture to that  // delay (ms) after every read, before its answer returns: two requests started together both read before either writes
   prepare(sql) { return new D1Stmt(this, sql); }
   // D1 runs a batch as one transaction: every statement applies, or (on an error) none does
   async batch(stmts) { this.db.exec('BEGIN'); try { const out = []; for (const s of stmts) out.push(s._runSync()); this.db.exec('COMMIT'); return out; } catch (e) { try { this.db.exec('ROLLBACK'); } catch (x) {} throw e; } }
@@ -14,7 +14,7 @@ export class D1Lite {
 class D1Stmt {
   constructor(d1, sql) { this.d1 = d1; this.sql = sql; this.args = []; }
   bind(...a) { const s = new D1Stmt(this.d1, this.sql); s.args = a.map(fix); return s; }
-  _st() { this.d1.log.push(this.sql.slice(0, 80)); return this.d1.db.prepare(this.sql); }
+  _st() { this.d1.log.push(this.sql.slice(0, 80)); if (this.d1.maxVars && this.args.length > this.d1.maxVars) throw new Error('D1_ERROR: too many SQL variables (' + this.args.length + ' > ' + this.d1.maxVars + '): ' + this.sql.slice(0, 60)); return this.d1.db.prepare(this.sql); }
   async run() { const r = this._runSync(); if (this.d1.delay && /^\s*(SELECT|WITH)/i.test(this.sql)) await new Promise(res => setTimeout(res, this.d1.delay)); return r; }
   _runSync() {
     const st = this._st();

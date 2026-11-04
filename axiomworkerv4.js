@@ -5133,7 +5133,7 @@ async function sourceSweep(env, opts) {
   const ids = Array.isArray(opts.ids) ? opts.ids.map(sourceIdClean).filter(Boolean).slice(0, 150) : [];
   const limit = Math.min(Math.max(parseInt(opts.limit, 10) || (opts.all ? 150 : SOURCES_PER_TICK), 1), 150);
   let rows = [];
-  if (ids.length) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE id IN (' + ids.map(() => '?').join(',') + ')').bind(...ids).all()).results || [];
+  if (ids.length) { for (let i = 0; i < ids.length; i += 90) { const part = ids.slice(i, i + 90); rows.push(...((await env.MIND_DB.prepare('SELECT * FROM sources WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [])); } }   // P49 (F8): under D1's 100 bound variables
   else if (opts.all) rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 ORDER BY COALESCE(last_try,0) LIMIT ?').bind(limit).all()).results || [];
   else rows = (await env.MIND_DB.prepare('SELECT * FROM sources WHERE enabled=1 AND core=0 AND COALESCE(next_due,0)<=? ORDER BY COALESCE(next_due,0) LIMIT ?').bind(now, limit).all()).results || [];
   const srcs = rows.map(sourceRow).filter(s => s.methods.length);
@@ -7380,7 +7380,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-04.studio-p48';
+const AXIOM_BUILD = '2026-11-04.studio-p49';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7707,7 +7707,11 @@ async function stGet(env, id, opts) {
   });
   const kitR = (assets.results || []).length ? (await brandKit(env, p.ns)) || {} : {};
   const rowsA = stOrderAssets((assets.results || []).map(stAssetRow));
-  for (const a of rowsA.filter(x => !x.archived)) out.assets.push(await stAssetView(env, a, { project: p, kit: kitR }));
+  // P49 (F9): the asset views are reads with no side effects, so they are built a few at a time and kept in their order (one
+  // after another, every query of every asset waited its turn: on D1 each is a round trip)
+  { const live = rowsA.filter(x => !x.archived); const views = new Array(live.length); let next = 0;
+    const worker = async () => { while (next < live.length) { const i = next++; views[i] = await stAssetView(env, live[i], { project: p, kit: kitR }); } };
+    await Promise.all(Array.from({ length: Math.min(6, live.length) }, worker)); out.assets.push(...views); }
   // S23: a deleted page is archived, not destroyed: listed here so it can be restored in its place
   out.archivedAssets = rowsA.filter(x => x.archived).map(a => ({ id: a.id, title: a.title, family: a.family, format: a.format, channel: a.channel, ord: a.ord, updated: a.updated }));
   // S16: the latest whole reading of the material and the message kit
@@ -7733,8 +7737,10 @@ async function stList(env, f) {
     const recent = projects.slice(0, 24).map(p => p.id);
     if (recent.length) {
       const assets = (await env.MIND_DB.prepare('SELECT id, project, title, format, channel, current, created FROM studio_assets WHERE project IN (' + recent.map(() => '?').join(',') + ') AND COALESCE(archived,0)=0 ORDER BY created').bind(...recent).all()).results || [];
-      const cur = assets.map(a => a.current).filter(Boolean).slice(0, 90);
-      const vers = cur.length ? (await env.MIND_DB.prepare('SELECT id, asset, layout, copy, image, mode FROM studio_versions WHERE id IN (' + cur.map(() => '?').join(',') + ')').bind(...cur).all()).results || [] : [];
+      // P49 (F7): every recent project's current versions, read in parts under D1's 100 bound variables (one capped read of 90
+      // left the later projects of a busy client with no lead and short piece counts)
+      const cur = assets.map(a => a.current).filter(Boolean).slice(0, 1200); const vers = [];
+      for (let i = 0; i < cur.length; i += 90) { const part = cur.slice(i, i + 90); vers.push(...((await env.MIND_DB.prepare('SELECT id, asset, layout, copy, image, mode FROM studio_versions WHERE id IN (' + part.map(() => '?').join(',') + ')').bind(...part).all()).results || [])); }
       const byId = {}; vers.forEach(v => { byId[v.id] = v; });
       const lead = {}; const counts = {};
       for (const a of assets) {
@@ -10574,6 +10580,8 @@ async function stDirectStage(env, job, p, log) {
 // in so many words; assumptions are written down and travel with the versions. The first campaign in the kit is
 // never assumed: with more than one campaign the project must name its own.
 const ST_BRIEF_FIELDS = ['objective', 'audience', 'message', 'action', 'deliverables'];
+// P49 (F2): the copy checks a copy approval names when it is made over them (the words the record uses)
+const ST_COPY_OPEN = { differs: 'a figure differs from its source', unsupported: 'a claim not supported by the source', banned: 'a banned term', url_mismatch: 'another campaign\'s address' };
 const ST_REQ_SOURCES = ['approved', 'preference', 'previous', 'reference', 'team', 'ai'];
 function stReqItems(v) { return (Array.isArray(v) ? v : []).slice(0, 24).map(x => typeof x === 'string' ? { text: stStr(x, 300).trim(), source: 'team', from: '' } : x && typeof x === 'object' ? { text: stStr(x.text, 300).trim(), source: ST_REQ_SOURCES.indexOf(x.source) >= 0 ? x.source : 'team', from: stStr(x.from, 120) } : null).filter(x => x && x.text); }
 function stBriefNorm(b) {
@@ -10582,6 +10590,10 @@ function stBriefNorm(b) {
   const rq = b.requirements && typeof b.requirements === 'object' ? b.requirements : {};
   out.requirements = { mandatory: stReqItems(rq.mandatory), preferred: stReqItems(rq.preferred), open: stReqItems(rq.open) };
   if (b.campaignConfirmed != null) out.campaignConfirmed = !!b.campaignConfirmed;
+  // P49 (F6): the channels are known channels, once each, and each format a known format for a chosen channel - stored as sent
+  // before, so a bad value travelled into production planning
+  if (b.channels !== undefined) out.channels = Array.from(new Set((Array.isArray(b.channels) ? b.channels : []).filter(c => typeof c === 'string' && ST_CHANNELS[c])));
+  if (b.formats !== undefined) { const fm = {}; const fs = b.formats && typeof b.formats === 'object' && !Array.isArray(b.formats) ? b.formats : {}; (out.channels || []).forEach(c => { if (typeof fs[c] === 'string' && ST_FORMATS[fs[c]]) fm[c] = fs[c]; }); out.formats = fm; }
   // the strategy: a team edit keeps its status (proposed, or confirmed by a person); its fields are bounded like the model's
   if (b.strategy && typeof b.strategy === 'object') out.strategy = Object.assign(stStrategyNorm(b.strategy, null), { status: b.strategy.status === 'confirmed' ? 'confirmed' : 'proposed', model: stStr(b.strategy.model, 60), at: Number(b.strategy.at) || 0, job: stStr(b.strategy.job, 30), source: b.strategy.source === 'ai' ? 'ai' : 'team', confirmedBy: stStr(b.strategy.confirmedBy, 40) || undefined });
   ['objective', 'audience', 'message', 'action'].forEach(k => { const s = b[k + 'Source']; if (s && ST_REQ_SOURCES.indexOf(s) >= 0) out[k + 'Source'] = s; });
@@ -14921,7 +14933,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { sourceSweep, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -16845,6 +16857,8 @@ const AXIOM_WORKER = {
             if (rd.browserOnly && rd.browserOnly.length && decision === 'approve') ackNote += ' (the ' + rd.browserOnly.map(m => m.role).join(' and ') + ' checked in the browser only: the worker could not read ' + (rd.browserOnly.length === 1 ? 'it' : 'them') + ')';
             if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote += ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
           }
+          // P49 (F2): copy checks are advisory and approval stays a person's decision, but the record says what was approved over
+          if (part === 'copy' && decision === 'approve') { const open = (Array.isArray(cur.checks) ? cur.checks : []).filter(c => c && ST_COPY_OPEN[c.state]); if (open.length) { const kinds = Array.from(new Set(open.map(c => ST_COPY_OPEN[c.state]))); ackNote += ' (approved with unresolved copy checks: ' + kinds.join(', ') + ')'; } }
           // S28: what a withdrawal takes back is the approval standing before it (its version may be an earlier one, carried)
           const before = decision === 'withdraw' ? await stStanding(env, pair.asset) : null;
           // the approval names exactly the version that was looked at: it is filed only while that version is still current

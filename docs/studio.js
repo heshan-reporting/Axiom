@@ -1115,9 +1115,21 @@
      on the project as it was given. Used by the guided Brief stage. */
   function BriefFields({ p, onSave, busy }) {
     const ro = !canWrite() || p.readOnly;
-    const [b, setB] = useState(p.brief || {}); const base = useRef(p.brief || {});
-    const dirty = JSON.stringify(b) !== JSON.stringify(base.current);
-    useEffect(() => { if (!dirty) { base.current = p.brief || {}; setB(p.brief || {}); } }, [p.revision]);
+    /* P49 (F3, F4): the form holds the person's edits field by field over the saved brief, with the value each field had when they
+       began editing it (`from`). The edits are kept in this browser (localStorage ax_studio_bf_<project>, never the key) as they
+       are typed, so leaving the step, opening another project or reloading loses nothing. A save sends only the edited fields; a
+       field someone else changed meanwhile is not overwritten silently: it is named, the person's words stay, and they choose. */
+    const SK = 'ax_studio_bf_' + p.id;
+    const load = () => { try { const j = JSON.parse(localStorage.getItem(SK) || 'null'); return j && j.edits && typeof j.edits === 'object' ? j : null; } catch (e) { return null; } };
+    const [w0] = useState(load);
+    const [edits, setEdits] = useState((w0 && w0.edits) || {}); const from = useRef((w0 && w0.from) || {});
+    const [clash, setClash] = useState([]);
+    const srv = p.brief || {}; const J = x => JSON.stringify(x === undefined ? null : x);
+    const b = Object.assign({}, srv, edits);
+    const dirty = Object.keys(edits).some(k => J(edits[k]) !== J(srv[k]));
+    useEffect(() => { try { if (Object.keys(edits).length) localStorage.setItem(SK, JSON.stringify({ edits, from: from.current, at: Date.now() })); else localStorage.removeItem(SK); } catch (e) {} }, [edits]);
+    const edit = patch => { const nx = Object.assign({}, edits); Object.keys(patch).forEach(k => { if (!(k in from.current)) from.current[k] = srv[k] === undefined ? null : srv[k]; nx[k] = patch[k]; }); setEdits(nx); };
+    const setB = nb => { const patch = {}; Object.keys(nb).forEach(k => { if (J(nb[k]) !== J(b[k])) patch[k] = nb[k]; }); if (Object.keys(patch).length) edit(patch); };
     const [sugg, setSugg] = useState(null); const [saving, setSaving] = useState(false); const [addTo, setAddTo] = useState({ mandatory: '', preferred: '', open: '' });
     useEffect(() => { let live = true; call('/studio/brief/suggest?project=' + encodeURIComponent(p.id)).then(d => { if (live) setSugg(d); }).catch(e => { if (live) setSugg({ error: e.message }); }); return () => { live = false; }; }, [p.id, p.campaign]);
     const fields = (sugg && !sugg.error && sugg.fields) || {};
@@ -1127,13 +1139,29 @@
     const chans = b.channels || [];
     const toggleChan = k => { const on = chans.indexOf(k) >= 0; const next = on ? chans.filter(x => x !== k) : chans.concat([k]); const f = Object.assign({}, b.formats || {}); if (!on && !f[k]) f[k] = CHANNELS[k].format; setB(Object.assign({}, b, { channels: next, formats: f })); };
     const setFmt = (k, fmt) => setB(Object.assign({}, b, { formats: Object.assign({}, b.formats || {}, { [k]: fmt }) }));
-    const save = async () => { setSaving(true); try { const patch = {}; ['objective', 'audience', 'message', 'action', 'deliverables', 'channels', 'formats', 'requirements', 'objectiveSource', 'audienceSource', 'messageSource', 'actionSource'].forEach(k => { if (JSON.stringify(b[k]) !== JSON.stringify(base.current[k])) patch[k] = b[k]; }); const ok = await onSave(patch); if (ok !== false) base.current = Object.assign({}, base.current, patch); } finally { setSaving(false); } };
+    const NAMES = { objective: 'Objective', audience: 'Audience', message: 'Message', action: 'Action', deliverables: 'Deliverables in words', channels: 'Channels', formats: 'Formats', requirements: 'Design requirements' };
+    // a field clashes when the saved brief moved away from where the person began, to something other than their own words
+    const split = brief => { const patch = {}, cl = []; Object.keys(edits).forEach(k => { if (J(edits[k]) === J(brief[k])) return; if (J(brief[k]) !== J(from.current[k]) && !/Source$/.test(k)) cl.push({ k, theirs: brief[k] }); else patch[k] = edits[k]; }); cl.forEach(c => { delete patch[c.k + 'Source']; }); return { patch, cl }; };
+    const settle = (brief, sent) => { const nx = {}; Object.keys(edits).forEach(k => { if (!(k in sent) && J(edits[k]) !== J(brief[k])) nx[k] = edits[k]; }); Object.keys(from.current).forEach(k => { if (!(k in nx)) delete from.current[k]; }); setEdits(nx); };
+    const save = async (force) => { setSaving(true); try {
+        let { patch, cl } = split(srv); if (force) { force.forEach(k => { patch[k] = edits[k]; if (edits[k + 'Source'] !== undefined) patch[k + 'Source'] = edits[k + 'Source']; }); cl = cl.filter(c => force.indexOf(c.k) < 0); }
+        if (!Object.keys(patch).length) { setClash(cl); return; }
+        let r = await onSave(patch, { quiet409: true });
+        // the project moved meanwhile (a job, a rename, someone else's edit): read it again, set aside any field that now clashes, send the rest once more
+        if (r && r.conflict && r.p) { const again = split(r.p.brief || {}); if (force) force.forEach(k => { again.patch[k] = edits[k]; }); cl = cl.concat(again.cl.filter(c => !force || force.indexOf(c.k) < 0)); patch = again.patch; r = Object.keys(patch).length ? await onSave(patch) : true; }
+        if (r && r.conflict) r = false;
+        if (r !== false) settle(Object.assign({}, srv, patch), patch);
+        setClash(cl);
+      } finally { setSaving(false); } };
+    const keepMine = k => { from.current[k] = (clash.find(c => c.k === k) || {}).theirs; save([k]); };
+    const takeTheirs = k => { const nx = Object.assign({}, edits); delete nx[k]; delete nx[k + 'Source']; delete from.current[k]; setEdits(nx); setClash(clash.filter(c => c.k !== k)); };
     const LABEL = { objective: 'Objective', audience: 'Audience', message: 'Message', action: 'Action', deliverables: 'Deliverables in words' };
     const HINT = { objective: 'What the work must achieve', audience: 'Who it is for, and what they think now', message: 'The one thing they should take away', action: 'What they should do next', deliverables: 'Quantities and anything the channels and formats do not say, e.g. "three tiles per channel, one carousel"' };
     const inferredOf = k => b[k + 'Source'] === 'ai' || (b.proposed || []).indexOf(k) >= 0;
     return html`<section class="st-bf" aria-label="The brief">
       <div class="st-bf-head"><div><h3>The brief</h3><span class="ov-dim">Type freely or pick a suggestion from ${p.ns.toUpperCase()}'s own knowledge; each says where it came from. Inferred details are marked for you to confirm. This is the project's brief, never a lasting client rule.</span></div>
-        ${!ro ? html`<span class="st-bf-save">${dirty ? html`<span class="st-dirty" role="status">Unsaved brief</span>` : html`<span class="ov-dim" role="status">Brief saved</span>`}<button class="btn sm" disabled=${!dirty || saving || !!busy} onClick=${save}>${saving ? 'Saving...' : 'Save the brief'}</button></span>` : html`<span class="ov-dim">read-only</span>`}</div>
+        ${!ro ? html`<span class="st-bf-save">${dirty ? html`<span class="st-dirty" role="status">Unsaved brief</span>` : html`<span class="ov-dim" role="status">Brief saved</span>`}<button class="btn sm" disabled=${!dirty || saving || !!busy} onClick=${() => save()}>${saving ? 'Saving...' : 'Save the brief'}</button></span>` : html`<span class="ov-dim">read-only</span>`}</div>
+      ${clash.length ? html`<div class="st-bf-clash" role="alert">${clash.map(c => html`<div key=${c.k}><b>${NAMES[c.k] || c.k}</b> was changed by someone else while you edited it (now: "${String(typeof c.theirs === 'string' ? c.theirs : JSON.stringify(c.theirs) || 'empty').slice(0, 120)}"). Your words are kept here and were not saved. <button class="btn sm ghost" onClick=${() => keepMine(c.k)}>Keep mine</button> <button class="btn sm ghost" onClick=${() => takeTheirs(c.k)}>Take theirs</button></div>`)}</div>` : null}
       ${sugg && !sugg.error ? html`<div class="ov-dim st-bf-src">Suggestions from ${['approved', 'preference', 'previous', 'reference', 'ai'].filter(k => sugg.sources && sugg.sources[k]).map(k => sugg.sources[k] + ' ' + (SRC_WORD[k] || k) + (sugg.sources[k] === 1 ? '' : 's')).join(', ') || 'nothing on file yet for this campaign'}.${sugg.campaignNeeded ? ' ' + sugg.campaignNeeded : ''}</div>` : sugg && sugg.error ? html`<div class="ov-dim st-bf-src" role="note">Suggestions could not be read (${sugg.error}); type the brief, nothing is lost.</div>` : html`<div class="ov-dim st-bf-src">Reading ${p.ns.toUpperCase()}'s knowledge for suggestions...</div>`}
       <div class="st-bf-grid">${['objective', 'audience', 'message', 'action'].map(k => html`<div key=${k} class="st-field st-bf-field"><${Lbl}>${LABEL[k]}${b[k + 'Source'] && b[k + 'Source'] !== 'team' ? html` <${Chip} kind=${SRC_KIND[b[k + 'Source']]} title=${SRC_AUTH[b[k + 'Source']] || ''}>${SRC_WORD[b[k + 'Source']]}</${Chip}>` : null}${inferredOf(k) ? html` <${Chip} kind="warn" title="Inferred: confirm it or change it">confirm</${Chip}>` : null}</${Lbl}>
         <${Combo} id=${'bf-' + k} label=${LABEL[k]} rows=${2} value=${b[k] || ''} items=${fields[k] || []} disabled=${ro} placeholder=${HINT[k]} none=${sugg && sugg.empty && sugg.empty[k] ? sugg.empty[k] : ''} onChange=${(v, src) => set(k, v, src)} /></div>`)}</div>
@@ -1601,6 +1629,9 @@
   /* ------------------------------------------------------------ Copy: get the words right before the design is built (S13) */
   const COPY_FIELDS = [['headline', 'Headline', 'The one thing they should remember'], ['support', 'Supporting line', 'Context, without repeating the headline'], ['cta', 'Call to action', 'One clear next step'], ['caption', 'Post caption', 'The words that go with the creative on the platform'], ['alt', 'Alt text', 'What the creative shows, for people using a screen reader']];
   const COPY_BAD = { differs: 1, unsupported: 1, banned: 1, over_limit: 1, too_many_hashtags: 1, exclamation: 1 };
+  // P49 (F2): the copy checks a copy approval is recorded over, in the worker's words (ST_COPY_OPEN)
+  const COPY_OPEN = { differs: 'a figure differs from its source', unsupported: 'a claim not supported by the source', banned: 'a banned term', url_mismatch: 'another campaign\'s address' };
+  const copyOpen = v => Array.from(new Set(((v && v.checks) || []).filter(c => c && COPY_OPEN[c.state]).map(c => COPY_OPEN[c.state])));
   const FORMAT_WORD = { '1:1': 'square creative', '4:5': 'portrait creative', '9:16': 'vertical creative', '16:9': 'landscape creative' };
   /** One channel's words at a time, beside the list of the set and a copy partner. "Ready for design" is the agency's copy
    *  approval of exactly this version (reason "copy ready"); an edit to the words makes a new version and the mark falls away. */
@@ -2018,7 +2049,9 @@
       (r.browserOnly || []).forEach(m => push('info', 'Logo and wordmark', m.role, 'checked in the browser only: ' + m.why + '. The worker did not confirm it; look at it before approving', { kind: 'show', label: 'Show on the canvas', layers: [m.element] }));
       if (t === 'passed' && !(val.blocking || []).length && !(val.warnings || []).length) push('info', 'Imagery and export', 'the whole composition', 'measured at ' + (L.stage ? L.stage.w + ' x ' + L.stage.h + ' px' : 'its output size') + ': no clipping, overlap, safe-area, contrast or mark finding', null);
     }
-    (v.checks || []).filter(c => COPY_BAD[c.state] || /^url_/.test(c.state || '')).forEach(c => { const hard = c.state === 'differs' || c.state === 'banned' || c.state === 'url_mismatch'; push(hard ? 'blocking' : 'warning', /^url_/.test(c.state) ? 'URL' : 'Copy', (c.field || c.role || 'the words') + (c.text ? ': "' + String(c.text).slice(0, 60) + '"' : ''), (CHECK_WORD[c.state] || c.state) + (c.why || c.detail ? ' - ' + (c.why || c.detail) : ''), { kind: 'copy', label: 'Edit the copy' }); });
+    // P49 (F2): the copy checks are advisory - the worker approves over them and records that it did - so they are warnings a
+    // person decides on, the serious ones said as such; calling them blocking promised a gate that does not exist
+    (v.checks || []).filter(c => COPY_BAD[c.state] || /^url_/.test(c.state || '')).forEach(c => { const hard = !!COPY_OPEN[c.state]; push('warning', /^url_/.test(c.state) ? 'URL' : 'Copy', (c.field || c.role || 'the words') + (c.text ? ': "' + String(c.text).slice(0, 60) + '"' : ''), (hard ? 'Serious: ' : '') + (CHECK_WORD[c.state] || c.state) + (c.why || c.detail ? ' - ' + (c.why || c.detail) : '') + (hard ? '. A person decides: approving the copy over it is possible and the approval records it' : ''), { kind: 'copy', label: 'Edit the copy' }); });
     if (v.mode !== 'copy' && !String((v.copy || {}).alt || '').trim()) push('warning', 'Legibility and contrast', 'alt text', 'no alt text: a screen reader user gets nothing from the image', { kind: 'copy', label: 'Write the alt text' });
     return out;
   }
@@ -2032,7 +2065,7 @@
       <div class="st-issues-sum" role="status">${SEV.map(([k, l]) => html`<span key=${k} class=${'st-issues-n ' + k}><b>${total(k)}</b> ${l.toLowerCase()}</span>`)}</div>
       ${SEV.map(([k, l, d]) => { const list = rows.filter(x => x.iss[k].length); return html`<div key=${k} class=${'st-issue-group ' + k} data-sev=${k}>
         <div class="st-issue-gh"><span class=${'st-pf-chip ' + (k === 'blocking' ? 'bad' : k === 'warning' ? 'warn' : 'ok')}>${l}</span> <span class="ov-dim">${d}</span></div>
-        ${list.length ? html`<ul class="st-issue-list">${list.map(({ a, iss }) => iss[k].map((x, i) => html`<li key=${a.id + k + i} class="st-issue"><div class="st-issue-main"><span class="st-issue-where"><b>${a.title}</b> <span class="ov-dim">v${vtotal(a)}</span> <span class="st-mini-chip">${x.area}</span></span><span class="st-issue-what">${x.what}</span><span class="st-issue-why">${x.why}</span></div><div class="st-issue-act">${act(a, x.act)}</div></li>`))}</ul>` : html`<div class="ov-dim st-issue-none">None.</div>`}
+        ${list.length ? html`<ul class="st-issue-list">${list.map(({ a, iss }) => iss[k].map((x, i) => html`<li key=${a.id + k + i} class="st-issue"><div class="st-issue-main"><span class="st-issue-where"><b>${a.title}</b> <span class="ov-dim">v${vnum(a, current(a))}</span> <span class="st-mini-chip">${x.area}</span></span><span class="st-issue-what">${x.what}</span><span class="st-issue-why">${x.why}</span></div><div class="st-issue-act">${act(a, x.act)}</div></li>`))}</ul>` : html`<div class="ov-dim st-issue-none">None.</div>`}
       </div>`; })}
     </section>`;
   }
@@ -4491,7 +4524,7 @@
         setNotice({ kind: r.skipped && r.skipped.length ? 'warn' : 'info', title: (r.done || []).length + ' piece' + ((r.done || []).length === 1 ? '' : 's') + ' in production (' + (mode === 'finished' ? 'full AI creative' : 'editable') + ')', text: (r.jobs || []).length + ' render' + ((r.jobs || []).length === 1 ? '' : 's') + ' queued at ' + r.size + '.' + (r.skipped && r.skipped.length ? ' Not queued: ' + r.skipped.map(x => x.title + ' (' + x.why + ')').join('; ') + '.' : '') });
       } catch (e) { fail(e, 'Production did not start'); } finally { setBusy(''); }
     });
-    const saveBriefPatch = async (patch) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { brief: patch } }); await reload(); return true; } catch (e) { if (e.status === 409) await reload(); fail(e, 'The brief was not saved'); return false; } };
+    const saveBriefPatch = async (patch, o) => { try { await call('/studio/project/update', { id: pRef.current.id, revision: pRef.current.revision, patch: { brief: patch } }); await reload(); return true; } catch (e) { if (e.status === 409) { const d = await reload(); if (o && o.quiet409) return { conflict: true, p: d || pRef.current }; } fail(e, 'The brief was not saved'); return false; } };   // P49 (F4): the brief form re-reads and sends again itself
     /** Pieces (or directions) written on an earlier choice, kept under the current one: nothing regenerated, nothing deleted. */
     const keepEarlier = async (assets, directions) => { try { setBusy('Keeping the earlier work'); const r = await call('/studio/workflow/confirm', { project: pRef.current.id, step: 'keep', assets: assets || undefined, directions: directions || undefined }); await reload(); toastMsg('Kept ' + [r.keptAssets ? r.keptAssets + ' piece' + (r.keptAssets === 1 ? '' : 's') : '', r.keptDirections ? r.keptDirections + ' direction' + (r.keptDirections === 1 ? '' : 's') : ''].filter(Boolean).join(' and ') + ' under the current choice'); } catch (e) { if (e.status === 409) await reload(); fail(e, 'Nothing was kept'); } finally { setBusy(''); } };
 
@@ -4695,7 +4728,7 @@
     };
     const editLayout = async (as, delta) => { try { const cur = current(as); const layout = JSON.parse(JSON.stringify(cur.layout)); const hl = layout.layers.find(l => l.role === 'headline'); hl.size = Math.max(2.4, Math.round((hl.size + delta) * 10) / 10); hl.h = Math.round(hl.h * (hl.size / (hl.size - delta)) * 10) / 10; await putLayout(as, layout, cur.id, 'headline ' + (delta > 0 ? 'larger' : 'smaller') + ' (' + hl.size + '%)'); } catch (e) { fail(e, 'The layout was not saved'); } };
     const toggleLock = async (as, k, locked) => { try { await call('/studio/lock', { asset: as.id, element: k, locked }); await reload(); } catch (e) { fail(e, 'The lock was not changed'); } };
-    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)), versionId: (current(as) || {}).id, browserOnly: part === 'design' && what === 'approve' && as.readiness && Array.isArray(as.readiness.browserOnly) ? as.readiness.browserOnly : null }); };   // S29 (FS2): the decision names the version the dialog showed
+    const approve = (as, part, what) => { if (what === 'withdraw') { call('/studio/approve', { asset: as.id, part, decision: 'withdraw' }).then(() => reload()).catch(e => fail(e, 'The approval was not withdrawn')); return; } setDialog({ kind: 'reason', part, what, asset: as.id, title: as.title, version: vnum(as, current(as)), versionId: (current(as) || {}).id, browserOnly: part === 'design' && what === 'approve' && as.readiness && Array.isArray(as.readiness.browserOnly) ? as.readiness.browserOnly : null, copyOpen: part === 'copy' && what === 'approve' ? copyOpen(current(as)) : null }); };   // S29 (FS2): the decision names the version the dialog showed
     /* Copy: "ready for design" is the agency's copy approval of this exact version, recorded with a short reason (under the length
        that proposes a brand item); unticking withdraws it. Design: the imagery each composition plans, queued on request. */
     const readyCopy = (as, on) => guard('ready:' + as.id, async () => { try { await call('/studio/approve', on ? { asset: as.id, part: 'copy', decision: 'approve', reason: 'copy ready', version: (current(as) || {}).id || undefined } : { asset: as.id, part: 'copy', decision: 'withdraw' }); await reload(); } catch (e) { if (e.status === 409) await reload(); fail(e, on ? 'The copy was not marked ready' : 'The mark was not withdrawn'); } });
@@ -4994,7 +5027,7 @@
       ${impactQ && F ? html`<${F.ImpactDialog} q=${impactQ} onAnswer=${answerImpact} />` : null}
       <${AskHost} />
       ${editConflict ? html`<${ConflictDialog} c=${editConflict} onDone=${v => editConflict.res(v)} />` : null}
-      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.' + (dialog.browserOnly && dialog.browserOnly.length ? ' The ' + dialog.browserOnly.map(m => m.role).join(' and ') + ' ' + (dialog.browserOnly.length === 1 ? 'was' : 'were') + ' checked in the browser only (' + dialog.browserOnly.map(m => m.why).join('; ') + '): look at ' + (dialog.browserOnly.length === 1 ? 'it' : 'them') + ' on the tile first. The approval records this.' : '')} onDone=${recordDecision} />` : null}
+      ${dialog && dialog.kind === 'reason' ? html`<${ReasonDialog} title=${(dialog.what === 'approve' ? 'Approve ' : 'Reject ') + dialog.part} prompt=${'On ' + dialog.title + ', version ' + dialog.version + ' (the current one). Approval is recorded as client acceptance of this exact version, never as performance.' + (dialog.browserOnly && dialog.browserOnly.length ? ' The ' + dialog.browserOnly.map(m => m.role).join(' and ') + ' ' + (dialog.browserOnly.length === 1 ? 'was' : 'were') + ' checked in the browser only (' + dialog.browserOnly.map(m => m.why).join('; ') + '): look at ' + (dialog.browserOnly.length === 1 ? 'it' : 'them') + ' on the tile first. The approval records this.' : '') + (dialog.copyOpen && dialog.copyOpen.length ? ' The copy still carries ' + dialog.copyOpen.join(', ') + ' (see the checks): approve only if that is what the client accepted. The approval records it.' : '')} onDone=${recordDecision} />` : null}
     </div>`;
   }
 
