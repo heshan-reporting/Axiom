@@ -3787,3 +3787,33 @@ Three causes, each reproduced:
   now reads the handle once it stops moving and checks the press point is on the headline. (A first attempt that kept the
   canvas's ink measurement through image reloads changed nothing and was taken out.)
 
+
+## 57. S31 - the p47 audit's findings (build `2026-11-04.studio-p48`, page `?v=r33`)
+
+An external audit of p47 (run on `1d9009f`) named five findings. The owner chose, on 4 November 2026: guest keys may be
+scoped to named clients, unscoped keys keep decision D2; a mark the worker cannot read is flagged, never passed by the worker,
+and approval stays possible. Each fix was reproduced by a failing test first: `tests/studio-s31-worker.mjs` (7) and
+`tests/studio-s31-browser.mjs` (2) fail 9 of 9 on `ac22dd1` and pass now.
+
+### 57.1 Findings ledger
+
+| # | Finding | Fix | Test | State |
+|---|---|---|---|---|
+| 1 | Guest links read every client (D2) | Optional `"ns"` on an `AXIOM_GUEST_KEYS` entry (a client id or a list; anything else closes the guest list, never the roster). `axScopeGuard` runs before the guest write guard: a scoped key reaches `/studio/`, `/brand/`, `/engine/` and `/mind/` only, every request must say which client it is for (address, body, or the stored project, asset, job, share, reference, rule, artwork or file it names), and a client outside the scope is `403 guest_client_scope`; `stProject` answers nothing for an out-of-scope project as a backstop. `/auth/me` and `/studio/status` carry `scope`; the Studio lists only those clients and moves onto one. `tools/guest-link.py --ns` | SC (3 worker, 1 browser), `guest-link-test.py` scoped | fixed |
+| 2 | Mark readability trusted from the browser | `stPngDecode` reads every legal PNG (1, 2, 4, 8, 16 bits; grey, RGB, palette, grey-alpha, RGBA; Adam7), keeping the exact-size inflate guard. `stServerMark` maps the file through the renderer's own transform (contain, or cover with focus and zoom; the turn about the box centre; the layer's opacity composited over the ground), so faded, turned and cropped marks are measured by the worker. What it still cannot read (an opaque file, a JPEG or WebP mark, a flip, mask, adjustment or effect, too few strokes) answers why; the judge files `server: {skipped, why}`; readiness lists them as `browserOnly` (unless stale); Checks and the approval dialog say "checked in the browser only"; the design approval's stored reason records it. Approval stays possible | MK (3 worker, 1 browser) | fixed |
+| 3 | JPEG and WebP checked by signature or length | `stJpegWalk` (segments inside the file; a frame with real size and 1-4 components; Huffman tables unless lossless or arithmetic; a scan with entropy data) and `stWebpWalk` (chunks inside the file; a VP8 frame with its start code and size, a VP8L header, or an animation) run inside `stImageBytesCheck`; `brImageType` (logo, wordmark, artwork uploads) now checks the whole file, so a PNG mark is decoded end to end. A refused kit upload is `422 bad_image` (it was a 500); an artwork upload keeps its `400` | IMG | fixed |
+| 4 | TESTING.md stale (p46 / r30, s.54-55) | Brought to p48 / r33 and s.54-57, the scope option, the new known limits; the build date question answered (below) | - | fixed |
+| 5 | Open UI debt (PM6, U6, U7, project-open reads) | Not changed in this release | - | open |
+
+### 57.2 Notes
+
+- Build dates: p46 and p47 carried dates ahead of their commits (11-08, 11-09). From p48 the date is the commit's; only the
+  `pNN` number orders builds (`buildN` in the page, the deploy verifier's exact match).
+- Fixtures that uploaded a signature over padding as a logo or wordmark (`studio-p10`, `studio-p19`, `studio-s6`,
+  `studio-s23i`) now send whole PNGs from `tests/png.mjs`; nothing in the product changed for them.
+- A scoped guest sees the Studio of its clients only; the newsroom, narratives, sentiment and the daily brief answer
+  `guest_client_scope`, by design (they mix every client).
+- A scoped guest is refused direct reads of the shared `cmm` memory (`/mind/docs?namespace=cmm` names a client outside its
+  scope), but an analysis it runs for its own client still retrieves `cmm` passages beside the client's, as every analysis does
+  (decision D5: the daily brief covers every client). A link meant for someone outside the agency needs D5 revisited first.
+- The page asks for worker p48 (`PAGE_NEEDS_BUILD`). Deploy order: the worker first, then the page.

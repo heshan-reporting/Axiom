@@ -17,10 +17,11 @@
  * Run: node --experimental-sqlite tests/studio-s23i-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { stubReport } from './studio-measure-stub.mjs';
-import { pngForVersion } from './png.mjs';   // RC (S5): a measurement carries the PNG it measured
+import { pngForVersion, pngB64 } from './png.mjs';   // RC (S5): a measurement carries the PNG it measured
 const T = suite('studio-s23i-worker (render fingerprint, reference records and observations, promotion guard, gap report, identity audit)');
-const PNG2 = Buffer.from('89504e470d0a1a0a0000000d494844520000001000000010080200000090916836000000134944415478016360f8cfc0c0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
-const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000100000001008020000009091683600000013494441547801636060f8cfc0c0c03003000016001101a3cf2b0000000049454e44ae426082', 'hex').toString('base64');
+// S31: whole PNGs (a brand mark is checked by its structure now, not its signature)
+const PNG2 = pngB64(16, 16, { fill: 41 });
+const PNG = pngB64(16, 16, { fill: 23 });
 const w = await workerEnv({ env: { ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g', STUDIO_INSPECT: '0' } });
 const call = (m, p, b, k) => w.call(m, p, b, k === undefined ? 'full-key' : k);
 let analysisCalls = 0; let analysis = null; const sent = [];

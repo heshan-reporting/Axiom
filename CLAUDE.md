@@ -2949,6 +2949,16 @@ person reached (a late timer lost typing in CI); the intermittent editor test re
 artboard was still settling and now waits for it to stop moving. Harnesses: `tests/studio-s30-worker.mjs` (11),
 `tests/studio-s30-browser.mjs` (15).
 
+**The p47 audit fixed (S31; build `2026-11-04.studio-p48`, page `?v=r33`; `CREATIVE-STUDIO.md` s.57).** A guest key may name its
+clients: `"ns"` on an `AXIOM_GUEST_KEYS` entry (`tools/guest-link.py add NAME --ns mca`); `axScopeGuard` lets a scoped key reach
+`/studio/`, `/brand/`, `/engine/` and `/mind/` only, for a request that says which client it is for (address, body, or the stored
+row it names), and refuses another client with `403 guest_client_scope`; `stProject` is the backstop (`env.__scope`); the
+Studio lists only those clients. Unscoped guest keys keep decision D2. The worker reads every legal PNG (`stPngDecode`: 1-16 bits,
+Adam7) and measures faded, turned and cropped marks itself (`stServerMark` through the renderer's transform); a mark it cannot
+read answers why, readiness lists it as `browserOnly`, Checks and the approval dialog say "checked in the browser only", the
+approval's reason records it, and approval stays possible. Brand uploads are checked whole (`stJpegWalk`, `stWebpWalk`, PNG
+decoded; a kit upload that fails is `422 bad_image`, an artwork upload stays `400`). Harnesses: `tests/studio-s31-worker.mjs` (7), `tests/studio-s31-browser.mjs` (2).
+
 Phase 1, the ground:
 
 - **Projects own everything.** D1 `studio_projects` (ns, campaign, title,

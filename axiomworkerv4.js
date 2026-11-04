@@ -3060,11 +3060,11 @@ async function brandKit(env, ns) {
   return kit;
 }
 /* What a mark file looks like as ink, read from its own pixels (S21): the live demonstration put a dark logo on a dark ground
-   because nothing said what the logo was. A PNG is decoded here (8-bit, non-interlaced; any colour type); the ink is the opaque
+   because nothing said what the logo was. A PNG is decoded here (any bit depth, interlaced or not, any colour type; S31); the ink is the opaque
    pixels of a transparent file, or the pixels that differ from the file's own border colour when it is opaque. Answers
    {tone dark|light|colour, lum (relative luminance of the ink), fill (ink share of the file), opaque, field (luminance of an
    opaque file's own ground)} or null for anything it cannot read (JPEG, WebP, 16-bit, interlaced, very large). */
-/** An 8-bit, non-interlaced PNG decoded to its pixels: {W, H, at(i) -> [r, g, b, a]} for pixel i (row-major), or null for any
+/** A PNG (1, 2, 4, 8 or 16 bits, Adam7 or not; S31) decoded to its pixels: {W, H, at(i) -> [r, g, b, a]} for pixel i (row-major), or null for any
  *  other kind. Used to read a mark file's ink (stPngInk) and, since the release candidate (D3), the measured export itself. */
 async function stPngDecode(buf) {
   try {
@@ -3077,31 +3077,45 @@ async function stPngDecode(buf) {
       else if (type === 'PLTE') plte = d; else if (type === 'tRNS') trns = d; else if (type === 'IDAT') idat.push(d); else if (type === 'IEND') break;
       p += 12 + len;
     }
-    const bpp = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct];
-    if (!bpp || depth !== 8 || inter || !W || !H || W * H > 6e6 || !idat.length) return null;
+    // S31: every legal bit depth (1, 2, 4, 8 and 16) and Adam7 interlacing are read, so a client's mark file is measured by
+    // the worker whatever PNG options it was saved with; 16-bit samples keep their high byte, low-depth grey is scaled to 8 bits
+    const ch = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ct];
+    const legal = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] }[ct];
+    if (!ch || !legal || legal.indexOf(depth) < 0 || inter > 1 || !W || !H || W * H > 6e6 || !idat.length) return null;
+    const bitsPP = ch * depth; const fbpp = Math.max(1, bitsPP >> 3); const rowBytes = w => Math.ceil(w * bitsPP / 8);
+    const passes = inter ? [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] : [[0, 0, 1, 1]];
+    const dims = passes.map(([x0, y0, dx, dy]) => [Math.max(0, Math.ceil((W - x0) / dx)), Math.max(0, Math.ceil((H - y0) / dy))]);
+    const want = dims.reduce((a, [w, h]) => a + (w && h ? (rowBytes(w) + 1) * h : 0), 0);
     const total = idat.reduce((a, c) => a + c.length, 0); const z = new Uint8Array(total); let o = 0; idat.forEach(c => { z.set(c, o); o += c.length; });
-    // S29 (SEC-3): inflate into exactly the size the header states and stop the moment the stream would pass it, so a small file
-    // that inflates to hundreds of megabytes (a decompression bomb) is refused after one chunk instead of filling the isolate
-    const stride = W * bpp; const want = (stride + 1) * H; const raw = new Uint8Array(want); let got = 0;
+    // S29 (SEC-3): inflate into exactly the size the header states and stop the moment the stream would pass it (a bomb)
+    const raw = new Uint8Array(want); let got = 0;
     const reader = new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'))).body.getReader();
     for (;;) { const { done, value } = await reader.read(); if (done) break; if (got + value.length > want) { try { await reader.cancel(); } catch (e) {} return null; } raw.set(value, got); got += value.length; }
     if (got < want) return null;
-    const px = new Uint8Array(stride * H); const paeth = (a, b, c) => { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; };
-    for (let y = 0; y < H; y++) {
-      const f = raw[y * (stride + 1)]; const src = y * (stride + 1) + 1, dst = y * stride;
-      for (let x = 0; x < stride; x++) {
-        const r = raw[src + x], a = x >= bpp ? px[dst + x - bpp] : 0, b = y ? px[dst - stride + x] : 0, c = x >= bpp && y ? px[dst - stride + x - bpp] : 0;
-        px[dst + x] = (f === 0 ? r : f === 1 ? r + a : f === 2 ? r + b : f === 3 ? r + ((a + b) >> 1) : paeth(a, b, c) + r) & 255;
+    const paeth = (a, b, c) => { const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c); return pa <= pb && pa <= pc ? a : pb <= pc ? b : c; };
+    const rgba = new Uint8Array(W * H * 4); let off = 0;
+    const scale = depth < 8 && ct === 0 ? 255 / ((1 << depth) - 1) : 1;
+    passes.forEach(([x0, y0, dx, dy], pi) => {
+      const [pw, ph] = dims[pi]; if (!pw || !ph) return; const stride = rowBytes(pw); let prev = new Uint8Array(stride);
+      for (let y = 0; y < ph; y++) {
+        const f = raw[off]; const row = raw.subarray(off + 1, off + 1 + stride); const cur = new Uint8Array(stride); off += stride + 1;
+        for (let x = 0; x < stride; x++) { const r = row[x], a = x >= fbpp ? cur[x - fbpp] : 0, b = prev[x], c = x >= fbpp ? prev[x - fbpp] : 0;
+          cur[x] = (f === 0 ? r : f === 1 ? r + a : f === 2 ? r + b : f === 3 ? r + ((a + b) >> 1) : paeth(a, b, c) + r) & 255; }
+        const sample = (px, c) => { if (depth === 8) return cur[px * ch + c]; if (depth === 16) return cur[(px * ch + c) * 2]; const bit = (px * ch + c) * depth; return (cur[bit >> 3] >> (8 - depth - (bit & 7))) & ((1 << depth) - 1); };
+        const raw16 = (px, c) => depth === 16 ? ((cur[(px * ch + c) * 2] << 8) | cur[(px * ch + c) * 2 + 1]) : sample(px, c);
+        for (let x = 0; x < pw; x++) {
+          const X = x0 + x * dx, Y = y0 + y * dy; const k = (Y * W + X) * 4; let q;
+          if (ct === 6) q = [sample(x, 0), sample(x, 1), sample(x, 2), sample(x, 3)];
+          else if (ct === 4) { const g = sample(x, 0); q = [g, g, g, sample(x, 1)]; }
+          else if (ct === 2) { const tr = trns && trns.length >= 6 && raw16(x, 0) === ((trns[0] << 8) | trns[1]) && raw16(x, 1) === ((trns[2] << 8) | trns[3]) && raw16(x, 2) === ((trns[4] << 8) | trns[5]); q = [sample(x, 0), sample(x, 1), sample(x, 2), tr ? 0 : 255]; }
+          else if (ct === 0) { const v = sample(x, 0); const g = Math.round(v * scale); const tr = trns && trns.length >= 2 && raw16(x, 0) === ((trns[0] << 8) | trns[1]); q = [g, g, g, tr ? 0 : 255]; }
+          else { const ix = sample(x, 0); q = plte ? [plte[ix * 3] || 0, plte[ix * 3 + 1] || 0, plte[ix * 3 + 2] || 0, trns && ix < trns.length ? trns[ix] : 255] : [ix, ix, ix, 255]; }
+          rgba[k] = q[0]; rgba[k + 1] = q[1]; rgba[k + 2] = q[2]; rgba[k + 3] = q[3];
+        }
+        prev = cur;
       }
-    }
-    const at = i => { // [r, g, b, a] of pixel i
-      const k = i * bpp;
-      if (ct === 6) return [px[k], px[k + 1], px[k + 2], px[k + 3]];
-      if (ct === 2) return [px[k], px[k + 1], px[k + 2], trns && trns.length >= 6 && px[k] === trns[1] && px[k + 1] === trns[3] && px[k + 2] === trns[5] ? 0 : 255];
-      if (ct === 0) return [px[k], px[k], px[k], trns && trns.length >= 2 && px[k] === trns[1] ? 0 : 255];
-      if (ct === 4) return [px[k], px[k], px[k], px[k + 1]];
-      const ix = px[k]; return plte ? [plte[ix * 3] || 0, plte[ix * 3 + 1] || 0, plte[ix * 3 + 2] || 0, trns && ix < trns.length ? trns[ix] : 255] : [ix, ix, ix, 255];
-    };
+    });
+    const at = i => [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]];
     return { W, H, ct, at };
   } catch (e) { return null; }
 }
@@ -3214,10 +3228,46 @@ async function stImageBytesCheck(buf, want) {
   const sn = stImgSniff(u.buffer); if (!sn) return { ok: false, why: 'the bytes are not a PNG, JPEG or WebP image' };
   if (!sn.w || !sn.h) return { ok: false, why: 'the ' + sn.type.toUpperCase() + ' states no size' };
   if (sn.type === 'png') { const c = await stPngCheck(u.buffer, want || null); if (!c.ok) return { ok: false, why: c.why }; }
-  else if (sn.type === 'jpeg') { let end = false; for (let i = u.length - 2; i >= Math.max(0, u.length - 64); i--) if (u[i] === 0xff && u[i + 1] === 0xd9) { end = true; break; } if (!end) return { ok: false, why: 'the JPEG is cut short (no end-of-image marker)' }; }
-  else if (sn.type === 'webp') { const riff = (u[4] | (u[5] << 8) | (u[6] << 16) | (u[7] << 24)) >>> 0; if (riff + 8 !== u.length) return { ok: false, why: 'the WebP is ' + u.length + ' bytes, not the ' + (riff + 8) + ' it states' }; }
+  else if (sn.type === 'jpeg') { const js = stJpegWalk(u); if (!js.ok) return { ok: false, why: js.why }; let end = false; for (let i = u.length - 2; i >= Math.max(0, u.length - 64); i--) if (u[i] === 0xff && u[i + 1] === 0xd9) { end = true; break; } if (!end) return { ok: false, why: 'the JPEG is cut short (no end-of-image marker)' }; }
+  else if (sn.type === 'webp') { const riff = (u[4] | (u[5] << 8) | (u[6] << 16) | (u[7] << 24)) >>> 0; if (riff + 8 !== u.length) return { ok: false, why: 'the WebP is ' + u.length + ' bytes, not the ' + (riff + 8) + ' it states' }; const ws = stWebpWalk(u); if (!ws.ok) return { ok: false, why: ws.why }; }
   if (want && want.w && want.h && (sn.w !== want.w || sn.h !== want.h)) return { ok: false, why: 'it is ' + sn.w + 'x' + sn.h + ', not ' + want.w + 'x' + want.h };
   return { ok: true, type: sn.type, mime: sn.mime, w: sn.w, h: sn.h };
+}
+/* S31: a JPEG's structure, walked marker by marker from the start: every segment's length inside the file, a frame header
+ * (SOF, not DHT, JPG or DAC) with a real size and 1-4 components, Huffman tables (or a lossless or arithmetic frame), a scan
+ * header, and entropy-coded data after it. A Worker has no JPEG decoder; this is what can be checked without one, and it
+ * refuses a signature and an end marker around nothing. */
+function stJpegWalk(u) {
+  let i = 2, sof = null, dht = false, sos = false;
+  while (i + 4 <= u.length) {
+    if (u[i] !== 0xff) return { ok: false, why: 'the JPEG has data where a marker should be (byte ' + i + ')' };
+    let m = u[i + 1]; while (m === 0xff && i + 2 < u.length) { i++; m = u[i + 1]; }
+    if (m === 0xd9) break;
+    if (m >= 0xd0 && m <= 0xd7 || m === 0x01) { i += 2; continue; }
+    const len = (u[i + 2] << 8) | u[i + 3]; if (len < 2 || i + 2 + len > u.length) return { ok: false, why: 'a JPEG segment runs past the end of the file' };
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) { const h = (u[i + 5] << 8) | u[i + 6], w = (u[i + 7] << 8) | u[i + 8], nc = u[i + 9]; if (!w || !h || nc < 1 || nc > 4 || len !== 8 + 3 * nc) return { ok: false, why: 'the JPEG frame header is not a real image (' + w + 'x' + h + ', ' + nc + ' components)' }; sof = { m, w, h }; }
+    if (m === 0xc4) dht = true;
+    if (m === 0xda) { sos = true; let j = i + 2 + len, data = 0; while (j + 1 < u.length && !(u[j] === 0xff && u[j + 1] !== 0x00 && !(u[j + 1] >= 0xd0 && u[j + 1] <= 0xd7))) { j++; data++; } if (data < 2) return { ok: false, why: 'the JPEG scan carries no image data' }; i = j; continue; }
+    i += 2 + len;
+  }
+  if (!sof) return { ok: false, why: 'the JPEG has no frame header (no image in it)' };
+  if (!sos) return { ok: false, why: 'the JPEG has no scan (no image data)' };
+  if (!dht && sof.m !== 0xc3 && sof.m < 0xc9) return { ok: false, why: 'the JPEG has no Huffman tables for its scan' };
+  return { ok: true, w: sof.w, h: sof.h };
+}
+/* S31: a WebP's chunks, walked: each inside the file, and an image chunk that starts as one - VP8 (the key frame's start code
+ * 9d 01 2a and a size), VP8L (its signature byte 0x2f) or an animation; an extended (VP8X) file must carry one of them. */
+function stWebpWalk(u) {
+  let i = 12, img = false;
+  while (i + 8 <= u.length) {
+    const id = String.fromCharCode(u[i], u[i + 1], u[i + 2], u[i + 3]); const n = (u[i + 4] | (u[i + 5] << 8) | (u[i + 6] << 16) | (u[i + 7] << 24)) >>> 0; const d = i + 8;
+    if (d + n > u.length) return { ok: false, why: 'the WebP chunk ' + id.trim() + ' runs past the end of the file' };
+    if (id === 'VP8 ') { if (n < 10 || u[d + 3] !== 0x9d || u[d + 4] !== 0x01 || u[d + 5] !== 0x2a) return { ok: false, why: 'the WebP image chunk does not start a picture (no VP8 key frame)' }; const w = (u[d + 6] | (u[d + 7] << 8)) & 0x3fff, h = (u[d + 8] | (u[d + 9] << 8)) & 0x3fff; if (!w || !h) return { ok: false, why: 'the WebP picture states no size' }; img = true; }
+    if (id === 'VP8L') { if (n < 5 || u[d] !== 0x2f) return { ok: false, why: 'the WebP lossless chunk does not start a picture' }; img = true; }
+    if (id === 'ANMF' || id === 'ANIM') img = true;
+    i = d + n + (n & 1);
+  }
+  return img ? { ok: true } : { ok: false, why: 'the WebP holds no image chunk' };
 }
 async function stPngCheck(buf, want) {
   const u = new Uint8Array(buf instanceof ArrayBuffer ? buf : (buf && buf.buffer ? buf.buffer.slice(buf.byteOffset || 0, (buf.byteOffset || 0) + buf.byteLength) : new ArrayBuffer(0)));
@@ -3271,8 +3321,10 @@ function stExportKey(p, a, v, hash) { return 'studio/' + p.id + '/' + a.id + '/'
 async function stContentV(buf) { try { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return Date.now().toString(36); } }
 /* S30 (SEC-06): a brand mark or a catalogued artwork is stored with the type its bytes say, never the type the request
    declared - a page or a script uploaded as "image/png" is refused before it reaches R2 */
-function brImageType(buf, what) {
+async function brImageType(buf, what) {
   const t = stImgSniff(buf); if (!t || ['png', 'jpeg', 'webp'].indexOf(t.type) < 0) throw new Error(what + ' is not a PNG, JPEG or WebP image by its bytes (bad_image)');
+  // S31: whole, not only its signature: a PNG's every chunk and its data inflated to its stated size; a JPEG's or WebP's structure
+  const c = await stImageBytesCheck(buf); if (!c.ok) throw new Error(what + ' is not a whole image: ' + c.why + ' (bad_image)');
   return t.mime;
 }
 async function brandSave(env, ns, body, who) {
@@ -3301,7 +3353,7 @@ async function brandSave(env, ns, body, who) {
     if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
     const buf = bufFromB64(body.logoB64);
     if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
-    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = brImageType(buf, 'the logo');
+    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = await brImageType(buf, 'the logo');
     const variant = kitSlug(body.logoVariant); const lv = await stContentV(buf); const key = 'brand/' + ns + '/logo/' + variant + '/' + lv;
     await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
     const tone = ['light', 'dark', 'colour'].indexOf(body.logoTone) >= 0 ? body.logoTone : 'colour';
@@ -3318,7 +3370,7 @@ async function brandSave(env, ns, body, who) {
     if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
     const buf = bufFromB64(body.logoB64);
     if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
-    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = brImageType(buf, 'the logo');
+    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = await brImageType(buf, 'the logo');
     await env.MIND_DOCS.put('brand/' + ns + '/logo', buf, { httpMetadata: { contentType: mime } });
     // the same bytes under an immutable, versioned key: compositions reference the version they were made with
     kit.logoV = await stContentV(buf); await env.MIND_DOCS.put('brand/' + ns + '/logo@' + kit.logoV, buf, { httpMetadata: { contentType: mime } });
@@ -3337,7 +3389,7 @@ async function brandSave(env, ns, body, who) {
       if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('wordmark must be PNG, JPEG or WebP');
       const buf = bufFromB64(body.wordmarkB64);
       if (buf.byteLength > 2 * 1024 * 1024) throw new Error('wordmark larger than 2 MB');
-      if (buf.byteLength < 64) throw new Error('wordmark file is empty'); mime = brImageType(buf, 'the wordmark');
+      if (buf.byteLength < 64) throw new Error('wordmark file is empty'); mime = await brImageType(buf, 'the wordmark');
       const wv = await stContentV(buf); const variant = kitSlug(body.wordmarkVariant || '');
       if (variant) {
         // an approved colour variant of the campaign's wordmark, kept beside the others under an immutable key
@@ -3743,7 +3795,7 @@ async function engineArtwork(env, body, who) {
   if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('artwork must be PNG, JPEG or WebP');
   const buf = bufFromB64(body.imageB64);
   if (buf.byteLength > 6 * 1024 * 1024) throw new Error('artwork larger than 6 MB');
-  if (buf.byteLength < 64) throw new Error('artwork file is empty'); mime = brImageType(buf, 'the artwork');
+  if (buf.byteLength < 64) throw new Error('artwork file is empty'); mime = await brImageType(buf, 'the artwork');
   const id = engId('a');
   const title = String(body.title || 'Artwork').slice(0, 200);
   const meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
@@ -7328,7 +7380,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-09.studio-p47';
+const AXIOM_BUILD = '2026-11-04.studio-p48';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7500,6 +7552,7 @@ async function stProject(env, id) {
   const p = r ? stProjectRow(r) : null;
   // p44: in a guest's write a live project is not there (axGuestGuard refuses first; this holds whatever a route resolves later)
   if (p && env.__guestGate && !stIsTest(env, p)) { env.__guestGate.refused = p.id; return null; }
+  if (p && env.__scope && env.__scope.indexOf(axNsBase(p.ns)) < 0) return null;   // S31: a scoped link never resolves another client's project
   return p;
 }
 /** An asset with its project - the project's namespace is the only namespace that counts. */
@@ -13349,8 +13402,9 @@ const ST_VALIDATION_CONTRACT = 2;
  * words the ground has swallowed. For a mark drawn from a transparent file: the file's own strokes laid over the image as the
  * renderer contains them, each stroke pixel against the ground around it (where the mark draws nothing), and strokes painted
  * over by a later layer counted as lost. The judge takes the worker's figure when it is clearly worse than the browser's (or the
- * browser gave none); otherwise the browser's finer measure stands. Rotated, faded or cropped marks and non-hex text colours
- * are left to the browser and said so (server: 'skipped'). */
+ * browser gave none); otherwise the browser's finer measure stands. Since S31 rotated, faded and cropped marks are read too; an
+ * opaque mark file, an image treatment the worker does not draw and non-hex text colours are left to the browser and said so
+ * (server: {skipped, why}), and readiness lists them as checked in the browser only. */
 function stServerText(img, box, l) {
   // S29 (SEC-4): rotated words are read over the axis-aligned bounds of their turned box, and words with some transparency
   // (down to 60% opaque) by a tolerance that widens with it; only fainter words are left to the browser's figure
@@ -13373,26 +13427,50 @@ function stServerText(img, box, l) {
   return { contrast: cs[cs.length >> 1], contrastMin: cs[Math.floor(cs.length * 0.1)], nearShare: near / n };
 }
 function stServerMark(img, file, l, b) {
-  if (!img || !file || l.rotate || (l.opacity != null && +l.opacity < 1) || l.fit === 'cover' || !(b.aw > 0 && b.ah > 0)) return null;
+  // S31: the worker reads faded, turned and cropped marks too - the file is mapped through the same transform the renderer draws
+  // it with (contain or cover with its focus and zoom, the turn about the box centre, the layer's opacity composited over the
+  // ground) - so a mark is never "passed" on the browser's word alone. What it still cannot read answers { skip: why }, and the
+  // judge files it as checked in the browser only.
+  if (!img || !file || !(b.aw > 0 && b.ah > 0)) return null;
+  if (l.flipX || l.flipY || l.mask || (l.adjust && typeof l.adjust === 'object' && Object.keys(l.adjust).length) || l.blend || l.effects) return { skip: 'the mark is drawn with an image treatment (flip, mask, adjustment or effect) the worker does not reproduce' };
   // only a transparent file: an opaque one would need its field colour told apart from its ink
   let tr = 0, seen = 0; const n0 = file.W * file.H; const st0 = Math.max(1, Math.floor(n0 / 4000)); for (let i = 0; i < n0; i += st0) { seen++; if (file.at(i)[3] < 40) tr++; }
-  if (tr / Math.max(1, seen) < 0.05) return null;
-  const W = img.W, H = img.H; const s = Math.min(b.aw / file.W, b.ah / file.H); const dw = file.W * s, dh = file.H * s; const ox = b.ax + (b.aw - dw) / 2, oy = b.ay + (b.ah - dh) / 2;
-  const alphaAt = (X, Y) => { const fx = Math.floor((X + 0.5 - ox) / s), fy = Math.floor((Y + 0.5 - oy) / s); if (fx < 0 || fy < 0 || fx >= file.W || fy >= file.H) return 0; return file.at(fy * file.W + fx)[3]; };
-  const inkOf = (X, Y) => { const fx = Math.floor((X + 0.5 - ox) / s), fy = Math.floor((Y + 0.5 - oy) / s); return file.at(fy * file.W + fx); };
-  const x0 = Math.max(0, Math.floor(ox)), x1 = Math.min(W, Math.ceil(ox + dw)), y0 = Math.max(0, Math.floor(oy)), y1 = Math.min(H, Math.ceil(oy + dh));
+  if (tr / Math.max(1, seen) < 0.05) return { skip: 'the mark file has no transparent ground, so its field cannot be told apart from its ink' };
+  const alpha = l.opacity == null ? 1 : Math.max(0, Math.min(1, +l.opacity || 0)); if (alpha < 0.15) return { skip: 'the mark is drawn at under 15% opacity' };
+  const W = img.W, H = img.H; const cover = l.fit === 'cover';
+  const f = l.focus || {}; const zoom = Math.max(1, Math.min(3, +f.zoom || 1)); const fxp = f.x == null ? 50 : Math.max(0, Math.min(100, +f.x)), fyp = f.y == null ? 50 : Math.max(0, Math.min(100, +f.y));
+  const s = cover ? Math.max(b.aw / file.W, b.ah / file.H) * zoom : Math.min(b.aw / file.W, b.ah / file.H); const dw = file.W * s, dh = file.H * s;
+  const ox = cover ? b.ax - (dw - b.aw) * fxp / 100 : b.ax + (b.aw - dw) / 2, oy = cover ? b.ay - (dh - b.ah) * fyp / 100 : b.ay + (b.ah - dh) / 2;
+  const cx = b.ax + b.aw / 2, cy = b.ay + b.ah / 2; const rot = (Number(l.rotate) || 0) * Math.PI / 180; const cr = Math.cos(-rot), sr = Math.sin(-rot);
+  // a canvas pixel to the file's pixel (or null where the mark draws nothing)
+  const fileAt = (X, Y) => {
+    let ux = X + 0.5, uy = Y + 0.5; if (rot) { const dx = ux - cx, dy = uy - cy; ux = dx * cr - dy * sr + cx; uy = dx * sr + dy * cr + cy; }
+    if (cover && (ux < b.ax || uy < b.ay || ux >= b.ax + b.aw || uy >= b.ay + b.ah)) return null;
+    const fx = Math.floor((ux - ox) / s), fy = Math.floor((uy - oy) / s); if (fx < 0 || fy < 0 || fx >= file.W || fy >= file.H) return null; return file.at(fy * file.W + fx);
+  };
+  const alphaAt = (X, Y) => { const q = fileAt(X, Y); return q ? q[3] : 0; };
+  // the scan covers the turned box's axis-aligned bounds (the drawn file, clipped to the box for cover)
+  let bx0 = cover ? b.ax : ox, by0 = cover ? b.ay : oy, bw = cover ? b.aw : dw, bh = cover ? b.ah : dh;
+  if (rot) { const a = Math.abs(rot); const hw = (Math.abs(Math.cos(a)) * bw + Math.abs(Math.sin(a)) * bh) / 2, hh = (Math.abs(Math.sin(a)) * bw + Math.abs(Math.cos(a)) * bh) / 2; const mx = bx0 + bw / 2 - cx, my = by0 + bh / 2 - cy; const rcx = cx + mx * Math.cos(rot) - my * Math.sin(rot), rcy = cy + mx * Math.sin(rot) + my * Math.cos(rot); bx0 = rcx - hw; by0 = rcy - hh; bw = 2 * hw; bh = 2 * hh; }
+  const x0 = Math.max(0, Math.floor(bx0)), x1 = Math.min(W, Math.ceil(bx0 + bw)), y0 = Math.max(0, Math.floor(by0)), y1 = Math.min(H, Math.ceil(by0 + bh));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return { skip: 'the mark draws nothing inside the stage' };
   const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 12000)));
   const lostT = l.role === 'wordmark' ? 2 : 1.6, weakT = l.role === 'wordmark' ? 3 : 2.5; const cs = []; let covered = 0;
   for (let Y = y0; Y < y1; Y += step) for (let X = x0; X < x1; X += step) {
     if (alphaAt(X, Y) < 200 || alphaAt(X - 1, Y) < 200 || alphaAt(X + 1, Y) < 200 || alphaAt(X, Y - 1) < 200 || alphaAt(X, Y + 1) < 200) continue;   // well inside a stroke
-    const ink = inkOf(X, Y); const comp = img.at(Y * W + X);
-    if (Math.abs(comp[0] - ink[0]) + Math.abs(comp[1] - ink[1]) + Math.abs(comp[2] - ink[2]) > 90) { covered++; cs.push(1); continue; }   // painted over by a later layer
+    const ink = fileAt(X, Y); const comp = img.at(Y * W + X);
+    if (alpha >= 1 && Math.abs(comp[0] - ink[0]) + Math.abs(comp[1] - ink[1]) + Math.abs(comp[2] - ink[2]) > 90) { covered++; cs.push(1); continue; }   // painted over by a later layer
     let gl = [];
-    for (const r of [3, 6, 10]) { const sp = Math.max(1, r >> 1); for (let dy = -r; dy <= r; dy += sp) for (let dx = -r; dx <= r; dx += sp) { const XX = X + dx, YY = Y + dy; if (XX < 0 || YY < 0 || XX >= W || YY >= H || alphaAt(XX, YY) >= 40) continue; gl.push(stRelLum(img.at(YY * W + XX))); } if (gl.length >= 4) break; gl = []; }
+    for (const r of [3, 6, 10]) { const sp = Math.max(1, r >> 1); for (let dy = -r; dy <= r; dy += sp) for (let dx = -r; dx <= r; dx += sp) { const XX = X + dx, YY = Y + dy; if (XX < 0 || YY < 0 || XX >= W || YY >= H || alphaAt(XX, YY) >= 40) continue; gl.push(img.at(YY * W + XX)); } if (gl.length >= 4) break; gl = []; }
     if (!gl.length) continue;
-    gl.sort((a, c) => a - c); cs.push(stContrast(stRelLum(ink), gl[gl.length >> 1]));
+    gl.sort((a, c) => stRelLum(a) - stRelLum(c)); const g = gl[gl.length >> 1];
+    if (alpha >= 1) { cs.push(stContrast(stRelLum(ink), stRelLum(g))); continue; }
+    // a faded mark is its ink laid over the ground at the layer's opacity: that colour is what a reader sees
+    const seenInk = [0, 1, 2].map(k => ink[k] * alpha + g[k] * (1 - alpha));
+    if (Math.abs(comp[0] - seenInk[0]) + Math.abs(comp[1] - seenInk[1]) + Math.abs(comp[2] - seenInk[2]) > 90) { covered++; cs.push(1); continue; }
+    cs.push(stContrast(stRelLum(seenInk), stRelLum(g)));
   }
-  if (cs.length < 20) return null;
+  if (cs.length < 20) return { skip: 'too few strokes of the mark could be read at this size (' + cs.length + ')' };
   cs.sort((a, c) => a - c);
   return { inkLost: cs.filter(c => c < lostT).length / cs.length, inkWeak: cs.filter(c => c < weakT).length / cs.length, inkLocal: cs[Math.floor(cs.length * 0.1)], inkCovered: covered / cs.length, samples: cs.length };
 }
@@ -13459,11 +13537,12 @@ function stValidationJudge(a, v, rep, server) {
         if (b.asset === 'loaded') {
           if (num(rb.inkLost) && num(rb.inkLocal)) { b.inkLost = share(rb.inkLost); b.inkWeak = num(rb.inkWeak) ? share(rb.inkWeak) : 0; b.inkCovered = num(rb.inkCovered) ? share(rb.inkCovered) : 0; b.inkRun = num(rb.inkRun) ? share(rb.inkRun) : 0; b.inkLocal = Math.max(1, Math.min(21, Number(rb.inkLocal))); b.inkMean = num(rb.inkMean) ? Math.max(1, Math.min(21, Number(rb.inkMean))) : undefined; b.inkWhere = stStr(rb.inkWhere, 20); b.inkBoundary = !!rb.inkBoundary; b.inkN = num(rb.inkN) ? Math.round(rb.inkN) : undefined; if (Array.isArray(rb.inkGround)) b.inkGround = rb.inkGround.slice(0, 2).map(Number); }
           const sm = server && server.marks && server.marks[id] ? stServerMark(server.img, server.marks[id], l, b) : null;
-          if (sm) {
+          if (sm && sm.skip) b.server = { skipped: true, why: stStr(sm.skip, 200) };
+          else if (sm) {
             const r3 = x => Math.round(x * 1000) / 1000;
             b.server = { inkLost: r3(sm.inkLost), inkLocal: r3(sm.inkLocal), inkCovered: r3(sm.inkCovered), samples: sm.samples };
             if (!num(b.inkLost) || sm.inkLost > b.inkLost + 0.1) { b.inkLost = sm.inkLost; b.inkWeak = Math.max(num(b.inkWeak) ? b.inkWeak : 0, sm.inkWeak); b.inkLocal = num(b.inkLocal) ? Math.min(b.inkLocal, sm.inkLocal) : sm.inkLocal; b.inkCovered = Math.max(num(b.inkCovered) ? b.inkCovered : 0, sm.inkCovered); b.server.adopted = true; }
-          } else if (server) b.server = { skipped: true };
+          } else if (server && !b.server) b.server = { skipped: true, why: server.marks && server.marks[id] ? 'the worker could not read the mark against the image' : (server.markWhy && server.markWhy[id]) || 'the worker could not read the mark file' };
           if (!num(b.inkLost)) unmeasured.push(id);
         }
         if (rb.multicolour != null) b.multicolour = !!rb.multicolour;
@@ -13515,16 +13594,18 @@ async function stValidationSubmit(env, pair, body, who) {
       : { error: 'bad_png', status: 422, detail: 'The measured image is not a whole PNG: ' + pc.why + '. Nothing was recorded; measure again in the Studio.' };
     // RC (D3): the worker reads the image itself - the words against their ground, each mark's strokes from its own file - and
     // judges with its figure wherever the browser's is clearly better; an image it cannot decode leaves the pixels unresolved
-    const img = await stPngDecode(buf); const marks = {};
+    const img = await stPngDecode(buf); const marks = {}; const markWhy = {};
     for (const l of (v.layout.layers || [])) {
       if (!(l && l.type === 'img' && (l.role === 'logo' || l.role === 'wordmark') && !l.hidden && l.src)) continue;
       const ko = {}; let prob = null; try { prob = await stMarkSourceProblem(env, p, kit, l, { keyOut: ko }); } catch (e) { prob = { code: 'mark_source_invalid' }; }
-      if (prob || !ko.key) continue;
+      const mid = String(l.id);
+      if (prob || !ko.key) { markWhy[mid] = 'the mark is not one of this client\'s files on record, so the worker did not read it'; continue; }
       let o = null; try { o = await env.MIND_DOCS.get(ko.key); } catch (e) { o = null; } if (!o && l.role === 'logo') { try { o = await brandLogo(env, p.ns); } catch (e) { o = null; } }
-      if (o) { try { const mb = o.arrayBuffer ? await o.arrayBuffer() : (o.body ? await new Response(o.body).arrayBuffer() : null); const md = mb ? await stPngDecode(mb) : null; if (md) marks[String(l.id)] = md; } catch (e) {} }
+      if (!o) { markWhy[mid] = 'the mark file was not found in storage'; continue; }
+      try { const mb = o.arrayBuffer ? await o.arrayBuffer() : (o.body ? await new Response(o.body).arrayBuffer() : null); const md = mb ? await stPngDecode(mb) : null; if (md) marks[mid] = md; else markWhy[mid] = (mb && stImgSniff(mb) && stImgSniff(mb).type !== 'png') ? 'the mark file is a ' + stImgSniff(mb).type.toUpperCase() + ', which the worker does not decode' : 'the worker could not decode the mark file'; } catch (e) { markWhy[mid] = 'the worker could not decode the mark file'; }
     }
-    j = stValidationJudge(a, v, body.report, img ? { img, marks } : null);
-    if (!img) { j.issues.push({ code: 'pixels_unmeasured', severity: 'blocking', layers: [], detail: 'the worker could not read the measured PNG\'s pixels (an 8-bit, non-interlaced PNG is read); measure again in the Studio' }); j.ok = false; }
+    j = stValidationJudge(a, v, body.report, img ? { img, marks, markWhy } : null);
+    if (!img) { j.issues.push({ code: 'pixels_unmeasured', severity: 'blocking', layers: [], detail: 'the worker could not read the measured PNG\'s pixels; measure again in the Studio' }); j.ok = false; }
     exportHash = await stBufSha(buf); exportW = pc.w; exportH = pc.h; exportKey = stExportKey(p, a, v, exportHash);
     await env.MIND_DOCS.put(exportKey, buf, { httpMetadata: { contentType: 'image/png' } });
   }
@@ -13547,6 +13628,9 @@ async function stReadiness(env, p, a, v, kit) {
   // evidence follows the composition, not the version number: a caption-only version shows the same tile, so its measurement carries
   let row = null; if (!finished) { try { row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? AND sig=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, sig).first(); if (!row) row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? AND version=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id, v.id).first(); if (!row) row = await env.MIND_DB.prepare('SELECT * FROM studio_validations WHERE asset=? ORDER BY created DESC, id DESC LIMIT 1').bind(a.id).first(); } catch (e) {} }
   const issues = row ? pjs(row.issues, []) : [];
+  // S31: a mark the worker could not read from the measured PNG (an opaque file, a treatment it does not draw, a JPEG mark) was
+  // judged on the browser's figures alone: it is said so, never called passed by the worker; approval stays possible
+  const browserOnly = row ? (((pjs(row.report, {}) || {}).boxes) || []).filter(b => b && (b.role === 'logo' || b.role === 'wordmark') && b.server && b.server.skipped).map(b => ({ element: String(b.id), role: b.role, why: stStr(b.server.why || 'the worker could not read it', 200) })) : [];
   // a finished creative has no live layers to measure: the technical validation does not apply, the reading back of its words and marks does
   const technical = finished ? 'not_applicable' : !row ? 'not_validated' : row.sig !== sig ? 'stale' : row.ok ? 'passed' : 'failed';
   if (finished && !(v.image && v.image.key)) reasons.push('no bitmap yet: the finished creative has not been generated');
@@ -13573,7 +13657,7 @@ async function stReadiness(env, p, a, v, kit) {
     baked = { words: words.map(w => w.role), marks, verified: ok, markProblem, wordProblem, why: ok ? 'the inspection read every painted word' + (marks.length ? ' and the ' + marks.join(' and ') : '') + ' as approved' : !ins ? 'no inspection has read the painted ' + (finished ? 'words and marks' : 'words') + ' yet' : inspection.state === 'stale' ? 'the inspection is of an earlier ' + (finished ? 'bitmap' : 'composition') : 'the inspection could not confirm every painted ' + (finished ? 'word and mark' : 'word') + (ins.baked && ins.baked.missing && ins.baked.missing.length ? ' (not read: ' + ins.baked.missing.join(', ') + ')' : '') + (ins.words && ins.words.wrong && ins.words.wrong.length ? ' (unapproved: ' + ins.words.wrong.join(', ') + ')' : '') + markWhy };
     if (!ok) reasons.push('painted ' + (finished ? 'words and marks' : 'words') + ' not verified: ' + baked.why);
   }
-  return { sig, technical, finished, hybrid, mode: v.mode, markSources: markSources.length ? markSources : undefined, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '', exportHash: row.export_hash || '', measuredIn: 'browser' } : null, inspection, baked, production: finished ? !!(v.image && v.image.key && baked && baked.verified) : technical === 'passed' && (!baked || baked.verified), reasons };
+  return { sig, technical, finished, hybrid, mode: v.mode, markSources: markSources.length ? markSources : undefined, browserOnly: browserOnly.length && technical !== 'stale' ? browserOnly : undefined, validation: row ? { id: row.id, at: row.created, who: row.who, ok: !!row.ok, stale: technical === 'stale', blocking: issues.filter(i => i.severity === 'blocking'), warnings: issues.filter(i => i.severity === 'warning'), exportKey: row.export_key || '', exportHash: row.export_hash || '', measuredIn: 'browser' } : null, inspection, baked, production: finished ? !!(v.image && v.image.key && baked && baked.verified) : technical === 'passed' && (!baked || baked.verified), reasons };
 }
 const ST_INSPECT_SYS = 'You are the art director inspecting a rendered social tile for an Australian political communications agency. You see the image (the generated imagery, or the whole artwork when the words are part of it) and are told the words, the plan and the campaign identity. Judge the actual result, not the intention. Answer as strict JSON only: {"fidelity":1,"hierarchy":1,"readability":1,"relevance":1,"identity":1,"reasons":{"fidelity":"<=20 words: why this score, naming what you see in this image","hierarchy":"<=20 words","readability":"<=20 words","relevance":"<=20 words","identity":"<=20 words"},"words":{"present":["words you can read in the image"],"wrong":["words in the image that are not in the approved copy, misspelt, duplicated or garbled"],"missing":["approved words you cannot find or cannot read"]},"marks":{"present":["logo|wordmark: a mark you can see that matches its attached file"],"missing":["logo|wordmark: a mark that should appear and does not"],"wrong":["logo|wordmark: a mark that is distorted, recoloured, redrawn, cropped, badged or another organisation\'s"]},"issues":[{"text":"<=16 words","severity":"blocking|material|cosmetic","element":"the id or role of the one layer it is about, exactly as the inventory names it (image for the photograph), or none"}],"verdict":"ship|fix|redo","fix":{"kind":"design|render|edit|copy|none","element":"the id or role of the layer it changes, as the inventory names it (image for the photograph), or none","instruction":"<=45 words: one precise, bounded correction the team can apply as written","keeps":"<=14 words: what the correction leaves exactly as it is"},"note":"<=40 words for the team"}. Look for: words that overlap each other or a mark, words missing, duplicated, misspelt or illegible, poor hierarchy, cramped spacing and awkward line breaks, low contrast against what is actually behind the words or the mark, a mark that is wrong, obscured, distorted or badly placed, lettering, logos or badges the image model invented, an important subject obscured or awkwardly cropped, imagery off the message or from another campaign, and for a carousel frame, inconsistency with its siblings. Severity: blocking = it cannot go out like this (overlapping or illegible words, a wrong or missing mark, invented lettering); material = a real defect a designer must fix; cosmetic = taste. The verdict is ship only when nothing blocking or material remains; the deterministic checks you are given are measurements of this exact tile, so do not contradict them. Scores are 1 to 5, each with its reason under reasons, specific to this tile (what you see that earned the score); a score you cannot judge from what is shown is null with the reason why. fidelity = the image carries the concept; hierarchy = what reads first is what should; readability = the words (or the room left for them) are legible against the ground; relevance = the imagery belongs to the message and the client\'s world; identity = the campaign\'s colours, devices and mark are right and no other client\'s. fix.kind: design = change the composition or type (no new image); render = make the image again with a changed brief; edit = a targeted edit of this image (keep everything else); copy = the words; none when the verdict is ship. Australian English, no exclamation marks.';
 async function stInspectStage(env, job, p, log) {
@@ -13902,6 +13986,8 @@ function axRosterParse(raw, label, guest) {
     if (who.r !== 'read' && who.r !== 'full') return { roster: null, problem: 'entry ' + i + ' (' + String(who.n || 'unnamed').slice(0, 30) + ') has role ' + JSON.stringify(who.r === undefined ? null : who.r) + '; the role must be "read" or "full"' };
     // a guest entry may end on its own: "until" is a date (midnight UTC at its start) or a date and time
     if (guest && who.until !== undefined && !(typeof who.until === 'string' && isFinite(Date.parse(who.until)))) return { roster: null, problem: 'entry ' + i + ' has an "until" that is not a date like "2026-10-31"' };
+    // S31: a guest entry may name the clients it reads ("ns": "synthdemo" or ["mca", "synthdemo"]); none named reads every client (D2)
+    if (guest && who.ns !== undefined) { const l = Array.isArray(who.ns) ? who.ns : [who.ns]; if (!l.length || !l.every(x => typeof x === 'string' && /^[a-z][a-z0-9-]{1,30}$/.test(x))) return { roster: null, problem: 'entry ' + i + ' has an "ns" that is not a client id or a list of client ids like ["mca"]' }; }
   }
   return { roster: keys.length ? roster : null, problem: '' };
 }
@@ -13979,7 +14065,7 @@ function axAuth(req, env) {
       if (pub.role && !pub.ended) return { configured: true, ok: true, role: pub.role, name: 'public', public: true, keyExpired: true };
       return { configured: true, ok: false, role: null, name: '', expired: true };
     }
-    return { configured: true, ok: true, role: g.r, name: String(g.n || 'guest').slice(0, 40), guest: true };
+    return Object.assign({ configured: true, ok: true, role: g.r, name: String(g.n || 'guest').slice(0, 40), guest: true }, g.ns !== undefined ? { scope: (Array.isArray(g.ns) ? g.ns : [g.ns]).map(String) } : {});
   }
   return { configured: true, ok: false, role: null, name: '' };
 }
@@ -14019,6 +14105,39 @@ function axGuestRefusal(kind, detail) {
   return { status: 403, body: { ok: false, error: kind, detail: detail || words[kind] } };
 }
 const AX_CONFIDENTIAL_RX = /^\/(studio|brand|mind|engine|content|release|perf)\//;
+/* S31: a guest link scoped to named clients (AXIOM_GUEST_KEYS entry "ns") reads and writes those clients' Creative Studio work
+ * and nothing else: every request names the client it touches - its namespace, or a project, asset, job, file, artwork or row
+ * that belongs to one - and is refused when that client is outside the scope or cannot be worked out (deny by default). The
+ * rest of AXIOM (the newsroom, signals, narratives, the daily brief) is the agency's cross-client intelligence and is not
+ * open to a scoped link. A few answers name no client and are open: who am I, the Studio's status, budget and capabilities. */
+const AX_SCOPE_FREE = { '/': 1, '/archive/stats': 1, '/auth/me': 1, '/studio/status': 1, '/studio/budget': 1, '/studio/capabilities': 1, '/studio/models': 1, '/studio/feedback': 1 };
+const AX_SCOPE_BY_ID = Object.assign({ '/studio/job': 'studio_jobs', '/studio/compiled': 'studio_jobs' }, AX_GUEST_BY_ID);
+const axNsBase = ns => String(ns || '').toLowerCase().split('_')[0];
+async function axScopeGuard(env, req, path, url, scope) {
+  if (AX_SCOPE_FREE[path]) return null;
+  const deny = detail => ({ status: 403, body: { ok: false, error: 'guest_client_scope', detail: detail || 'This sign-in link is for ' + scope.join(', ') + ' only; it does not open other clients\' work or the rest of AXIOM.' } });
+  if (!/^\/(studio|brand|engine|mind)\//.test(path)) return deny();
+  let body = {}; if (req.method !== 'GET' && req.method !== 'HEAD') { try { const j = await req.clone().json(); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch (e) {} }
+  const q = n => url.searchParams.get(n);
+  const one = async (sql, ...a) => { try { return env.MIND_DB ? await env.MIND_DB.prepare(sql).bind(...a).first() : null; } catch (e) { return null; } };
+  const found = []; let unresolved = false;
+  const addNs = v => { if (v == null || v === '') return; String(v).split(',').map(x => x.trim()).filter(Boolean).forEach(x => found.push(axNsBase(x))); };
+  const addProject = async id => { if (!id) return; id = String(id); if (/^(rp|cs|ks):/.test(id)) { let lg = null; try { lg = await stLegacyGet(env, id.slice(0, 48)); } catch (e) {} if (lg && lg.ns) found.push(axNsBase(lg.ns)); else unresolved = true; return; } const r = await one('SELECT ns FROM studio_projects WHERE id=?', stClean(id, 24)); if (r) found.push(axNsBase(r.ns)); else unresolved = true; };
+  const addRow = async (tbl, id) => { if (!id) return; const r = await one('SELECT project FROM ' + tbl + ' WHERE id=?', stClean(id, 30)); if (r && r.project) await addProject(r.project); else unresolved = true; };
+  const addAsset = async id => addRow('studio_assets', id);
+  ['ns', 'namespace', 'client'].forEach(k => addNs(q(k))); ['ns', 'namespace', 'mindNs'].forEach(k => addNs(body[k]));
+  await addProject(q('project')); await addProject(body.project);
+  if (path === '/studio/get' || path === '/studio/project/update' || path === '/studio/project/archive') { await addProject(q('id')); await addProject(body.id); }
+  for (const a of [q('asset'), body.asset].concat(Array.isArray(body.assets) ? body.assets.slice(0, 60) : [])) await addAsset(a);
+  const tbl = AX_SCOPE_BY_ID[path]; if (tbl && tbl !== 'studio_projects') { await addRow(tbl, q('id') || q('job') || body.id); }
+  if (path === '/studio/compiled') await addRow('studio_jobs', q('job'));
+  if (path === '/studio/file') { const k = String(q('key') || ''); const m = /^studio\/([A-Za-z0-9_-]+)\//.exec(k) || null; const b = /^(?:brand|art)\/([a-z0-9_-]+)\//.exec(k); if (m) await addProject(m[1]); else if (b) addNs(b[1]); else unresolved = true; }
+  if (path === '/engine/art' || path === '/engine/artwork/describe') { const id = q('id') || body.id; if (id) { const r = await one('SELECT ns FROM engine_art WHERE id=?', String(id).replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (r) addNs(r.ns); else unresolved = true; } }
+  if (path === '/engine/fix/update' || path === '/engine/fix/delete') { const r = await one('SELECT ns, scope FROM engine_fixes WHERE id=?', String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 24)); if (r && r.scope !== 'all') addNs(r.ns); else unresolved = true; }
+  if (unresolved || !found.length) return deny('This sign-in link reads ' + scope.join(', ') + ' only, and this request does not say which client it is for.');
+  const out = found.filter(n => scope.indexOf(n) < 0);
+  return out.length ? deny() : null;
+}
 async function axGuestGuard(env, req, path, url) {
   const reads = req.method === 'GET' || req.method === 'HEAD';
   let body = {}; if (!reads) { try { const j = await req.clone().json(); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch (e) {} }
@@ -14802,7 +14921,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stServerMark, stServerText, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -14893,6 +15012,8 @@ const AXIOM_WORKER = {
       if (auth.public && AX_CONFIDENTIAL_RX.test(path) && String(env.STUDIO_PUBLIC_READ || '') !== '1' && !(String(env.STUDIO_PUBLIC_WRITE || '') === '1' && /^\/studio\//.test(path))) return jsonResp({ error: 'sign_in_required', detail: 'Client work is not part of open access. Sign in with your own link to see it.' }, 401);
     }
     { const sk = req.headers.get('X-Axiom-Key') || ''; auth.pid = sk && auth.ok && !auth.public ? (auth.guest ? 'g' : '') + await axPersonId(sk) : (auth.public ? 'public' : auth.dev ? 'dev' : ''); }
+    // S31: a guest link scoped to named clients touches those clients' Studio work only (reads included), whatever else holds
+    if (auth.guest && auth.scope) { const g = await axScopeGuard(env, req, path, reqUrl, auth.scope); if (g) return jsonResp(g.body, g.status); env = Object.create(env, { __scope: { value: auth.scope } }); }
     // S28, p44: a guest (a tester's sign-in link) writes only test work: test projects and the test namespaces. One guard, before
     // any route runs, reading the client each route writes to as that route does (axGuestGuard); reads are unchanged
     if ((auth.guest || auth.public) && policy === 'full') {   // S29 (SEC-6): open access writing the Studio (STUDIO_PUBLIC_WRITE=1) is held to the guest's walls too
@@ -14904,7 +15025,7 @@ const AXIOM_WORKER = {
     // S29 (FS1): who this key is, for the page to show only what the key may do (window.AX_ROLE); nothing else is said
     // S30 (SEC-02): the Studio and brand routes carry who is asking, so a model call they make outside a job meets that person's cap
     if (auth.pid && /^\/(studio|brand)\//.test(path)) env = Object.create(env, { __pid: { value: auth.pid } });
-    if (path === '/auth/me' && req.method === 'GET') return jsonResp({ ok: true, role: auth.role === 'full' ? 'full' : 'read', guest: !!auth.guest, open: !!auth.public });
+    if (path === '/auth/me' && req.method === 'GET') return jsonResp(Object.assign({ ok: true, role: auth.role === 'full' ? 'full' : 'read', guest: !!auth.guest, open: !!auth.public }, auth.scope ? { scope: auth.scope } : {}));
 
     if (path === '/studio/versions' && req.method === 'GET') {
       if (!env.MIND_DB) return jsonResp({ error: 'mind_unbound' }, 501);
@@ -15929,7 +16050,7 @@ const AXIOM_WORKER = {
         if (path === '/brand/teach' && req.method === 'POST') { const r = await brTeach(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit/restore' && req.method === 'POST') { const r = await brandRestore(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
-          const kit = await brandSave(env, ns2, rbody2, auth.name);
+          let kit; try { kit = await brandSave(env, ns2, rbody2, auth.name); } catch (e) { const m = String(e && e.message || e); if (/\(bad_image\)|file is empty/.test(m)) return jsonResp({ error: 'bad_image', detail: m.replace(/ \(bad_image\)$/, '') + '. Nothing was saved.' }, 422); throw e; }
           return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
         }
         if (path === '/release/pack' && req.method === 'POST') {
@@ -16157,7 +16278,7 @@ const AXIOM_WORKER = {
         const qf = k => reqUrl.searchParams.get(k) || '';
         const conflict = (row, want) => jsonResp({ ok: false, error: 'conflict', detail: 'This ' + (row.asset ? 'asset' : 'project') + ' changed since you read it (revision ' + row.revision + ', you sent ' + want + '). Reload and apply your change again; nothing was written.', revision: row.revision }, 409);
         if (req.method === 'GET') {
-          if (path === '/studio/status') return jsonResp(Object.assign(await stStatus(env), { role: auth.role, guest: !!auth.guest, you: auth.pid ? await stPersonUsage(env, auth.pid).catch(() => null) : null }));   // S29 (FS1): the page learns its role from the worker
+          if (path === '/studio/status') return jsonResp(Object.assign(await stStatus(env), { role: auth.role, guest: !!auth.guest, scope: auth.scope || undefined, you: auth.pid ? await stPersonUsage(env, auth.pid).catch(() => null) : null }));   // S29 (FS1): the page learns its role from the worker
           if (path === '/studio/list') return jsonResp(await stList(env, { ns: qf('ns'), status: qf('status'), q: qf('q'), archived: qf('archived') === '1', limit: qf('limit'), tests: qf('tests') }));
           if (path === '/studio/get') {
             const id = String(qf('id')).slice(0, 48);
@@ -16721,7 +16842,8 @@ const AXIOM_WORKER = {
             if (rd.technical !== 'passed' && rd.technical !== 'not_applicable') return jsonResp({ error: rd.technical === 'failed' ? 'validation_failed' : rd.technical === 'stale' ? 'validation_stale' : 'not_validated', detail: rd.reasons.join(' ') + ' Design approval waits for a passing technical validation of exactly this composition.', readiness: rd }, 409);
             if (rd.baked && !rd.baked.verified && !sb.acknowledgeInspection) return jsonResp({ error: 'baked_text_unverified', detail: 'The words are painted into this artwork and ' + rd.baked.why + '. Look at the tile, then approve with acknowledgeInspection if every word is right.', readiness: rd }, 409);
             if (rd.inspection.state === 'inconsistent' && !sb.acknowledgeInspection) return jsonResp({ error: 'inspection_inconsistent', detail: 'The art director answered ship while naming unresolved problems. Review the inspection, then approve with acknowledgeInspection if you accept it.', readiness: rd }, 409);
-            if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote = ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
+            if (rd.browserOnly && rd.browserOnly.length && decision === 'approve') ackNote += ' (the ' + rd.browserOnly.map(m => m.role).join(' and ') + ' checked in the browser only: the worker could not read ' + (rd.browserOnly.length === 1 ? 'it' : 'them') + ')';
+            if (sb.acknowledgeInspection && ((rd.baked && !rd.baked.verified) || rd.inspection.state === 'inconsistent')) ackNote += ' (approved after reviewing ' + (rd.baked && !rd.baked.verified ? 'unverified painted words' : 'an inconsistent inspection') + ')';
           }
           // S28: what a withdrawal takes back is the approval standing before it (its version may be an earlier one, carried)
           const before = decision === 'withdraw' ? await stStanding(env, pair.asset) : null;

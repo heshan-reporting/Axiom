@@ -129,5 +129,16 @@ def past_date():
     assert put() is None
 t('an end date that has started is refused', past_date)
 
+def scoped():
+    code, out = run('add', 'Tess', '--until', '2999-02-01', '--ns', 'mca'); assert code == 0, out
+    g = put(); v = [v for v in g.values() if v['n'] == 'Tess'][0]; assert v.get('ns') == ['mca'], 'S31: --ns names the clients: %r' % (v,)
+    code, out = run('renew', 'Tess', '--until', '2999-02-01', '--ns', 'synthdemo,mca'); assert code == 0, out
+    v = [v for v in put().values() if v['n'] == 'Tess'][0]; assert v.get('ns') == ['synthdemo', 'mca'], v
+    code, out = run('list'); assert 'clients: synthdemo, mca' in out and 'every client' in out, out
+    code, out = run('renew', 'Tess', '--until', '2999-02-01', '--ns', 'all'); assert code == 0, out
+    v = [v for v in put().values() if v['n'] == 'Tess'][0]; assert 'ns' not in v, 'all removes the limit: %r' % (v,)
+    code, out = run('add', 'Bad', '--until', '2999-02-01', '--ns', 'MCA!'); assert code != 0 and 'client ids' in out, out
+t('S31: --ns limits a link to named clients; renew changes it; all removes it; a bad id is refused', scoped)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

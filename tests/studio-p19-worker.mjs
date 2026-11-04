@@ -7,6 +7,7 @@
  * copy exactly or the split is undone; another campaign's artwork never reaches the prompt as identity guidance.
  * Run: node --experimental-sqlite tests/studio-p19-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -47,7 +48,7 @@ const layer = (L, id) => L.layers.find(l => l.id === id);
 
 console.log('studio-p19-worker harness (freeform everywhere)');
 const k1 = await req('POST', '/brand/kit', { ns: 'mca', name: 'MCA', palette: { primary: '#0E6A6E' }, campaigns: [{ id: 'national', name: 'Australian mining', logoPolicy: 'logo' }, { id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'none' }] });
-const k2 = await req('POST', '/brand/kit', { ns: 'mca', logoB64: Buffer.concat([Buffer.from(PNG, 'base64'), Buffer.alloc(80)]).toString('base64'), logoMime: 'image/png' });
+const k2 = await req('POST', '/brand/kit', { ns: 'mca', logoB64: pngB64(40, 20, { fill: 7, alpha: true }), logoMime: 'image/png' });
 if (k1.status !== 200 || k2.status !== 200) console.log('kit setup:', JSON.stringify(k1.d).slice(0, 200), JSON.stringify(k2.d).slice(0, 200));
 const P = (await req('POST', '/studio/project', { ns: 'mca', campaign: 'national', title: 'Freeform', brief: { objective: 'o', message: 'm', channels: ['instagram'], campaignConfirmed: true } })).d.id;
 let A;

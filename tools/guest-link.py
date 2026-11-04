@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """guest-link.py - give a tester their own AXIOM sign-in link, renew one, remove one, list them.
 
-Guest keys live in the worker secret AXIOM_GUEST_KEYS ({"<key>": {"n": name, "r": "full"|"read", "until": "YYYY-MM-DD"}}).
+Guest keys live in the worker secret AXIOM_GUEST_KEYS ({"<key>": {"n": name, "r": "full"|"read", "until": "YYYY-MM-DD",
+"ns": ["mca"]}}). "ns" (S31) names the clients a link may read and work in; without it a link reads every client (decision D2).
 Cloudflare cannot show a secret back, so this tool keeps the list in ~/.axiom-guests.json (mode 600) on this Mac and
 writes the whole list to the worker each time. Keys are made here and never leave this machine except as the link you
 send the person.
@@ -9,7 +10,9 @@ send the person.
   python3 tools/guest-link.py add Laura                  # her own read-only link, ending in 30 days
   python3 tools/guest-link.py add Ben --until 2026-12-31          # read-only (the default since S28)
   python3 tools/guest-link.py add Kai --days 14 --full             # full access: creates projects and spends model calls
+  python3 tools/guest-link.py add Tess --ns mca                    # reads MCA only: every other client's work is refused
   python3 tools/guest-link.py renew Kai --until 2026-12-31   # his old link works again; nothing new to send
+  python3 tools/guest-link.py renew Kai --ns synthdemo       # narrow an existing link to the synthetic client (--ns all widens)
   python3 tools/guest-link.py link Laura                 # print her link again
   python3 tools/guest-link.py remove Ben                 # his link stops working
   python3 tools/guest-link.py list                       # names, roles, end dates; never the keys
@@ -106,6 +109,7 @@ def main():
     p.add_argument('--days', type=int, default=30)
     p.add_argument('--read', action='store_true', help='read-only (the default for a new link; on renew, lowers a full link to read-only)')
     p.add_argument('--full', action='store_true', help='full access: creates projects and runs model calls (a guest\'s projects are test projects)')
+    p.add_argument('--ns', help='clients this link may see, comma separated (e.g. mca or synthdemo,mca); "all" removes the limit')
     p.add_argument('--worker', default='newsaus')
     p.add_argument('--site', default=SITE)
     p.add_argument('--view', default='studio', help='view the link opens (empty for the front page)')
@@ -117,13 +121,21 @@ def main():
         sys.exit('Name the person: guest-link.py %s <name>' % a.action)
     if a.name and not re.match(r"^[\w .'-]{1,40}$", a.name.strip()):
         sys.exit('Use a plain name of up to 40 characters.')
+    scope = None
+    if a.ns is not None:
+        if a.ns.strip().lower() == 'all':
+            scope = []
+        else:
+            scope = [x.strip().lower() for x in a.ns.split(',') if x.strip()]
+            if not scope or not all(re.match(r'^[a-z][a-z0-9-]{1,30}$', x) for x in scope):
+                sys.exit('--ns takes client ids such as mca or synthdemo,mca (or all).')
     g = {} if a.fresh else load(a.file, a.worker, a.dry_run)
 
     if a.action == 'list':
         if not g:
             print('No guest links on this Mac.')
         for v in sorted(g.values(), key=lambda v: str(v.get('n', '')).lower()):
-            print('%-24s %-5s %s' % (v.get('n', '?'), v.get('r', '?'), state(v)))
+            print('%-24s %-5s %-28s %s' % (v.get('n', '?'), v.get('r', '?'), state(v), 'clients: ' + ', '.join(v['ns']) if v.get('ns') else 'every client'))
         return
     hits = find(g, a.name)
     if a.action == 'link':
@@ -150,6 +162,11 @@ def main():
                 g[k]['r'] = 'read'
             elif a.full:
                 g[k]['r'] = 'full'
+            if scope is not None:
+                if scope:
+                    g[k]['ns'] = scope
+                else:
+                    g[k].pop('ns', None)
         save(g, a.file, a.worker, a.dry_run)
         print('%s\'s link works again until %s (midnight UTC at its start). Nothing new to send; they reload the page.'
               % (a.name, until))
@@ -159,6 +176,8 @@ def main():
                  '(guest-link.py link "%s").' % (a.name, a.name, a.name))
     k = secrets.token_urlsafe(24)
     g[k] = {'n': a.name.strip(), 'r': 'full' if a.full and not a.read else 'read', 'until': until}
+    if scope:
+        g[k]['ns'] = scope
     save(g, a.file, a.worker, a.dry_run)
     print('Send this to %s privately (it is their key; it ends %s, midnight UTC):\n%s' % (a.name.strip(), until, link(a, k)))
 

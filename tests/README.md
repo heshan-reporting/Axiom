@@ -267,6 +267,10 @@ server on a fixed port in the 8766-8776 range and kills it at the end.
   failure, keyboard and focus, narrow windows, Back between pieces, the library's stage names, ink above the line, right to
   left). `index-handlers-test.mjs` checks the legacy views' inline handlers; `asset-versions.mjs` (run by `run.mjs check`,
   `--write` after a bump) fails when a versioned page asset changes without a new `?v=`.
+- The p47 audit fixed (`CREATIVE-STUDIO.md` s.57): `studio-s31-worker.mjs` (guest keys scoped to named clients, brand
+  uploads checked whole, PNGs at every bit depth and interlaced, faded / turned / cropped marks read by the worker, a mark it
+  cannot read listed as checked in the browser only) and `studio-s31-browser.mjs` (a scoped guest's client list, the
+  browser-only note in Checks and on the approval).
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,

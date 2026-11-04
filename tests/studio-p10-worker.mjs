@@ -8,6 +8,7 @@
  * rules, facts, marks, models and assumptions behind a version, through later hand edits.
  * Run: node --experimental-sqlite tests/studio-p10-worker.mjs */
 import { D1Lite } from './d1lite.mjs';
+import { pngB64 } from './png.mjs';
 const WORKER = new URL('../axiomworkerv4.js', import.meta.url).href;
 process.on('warning', () => {});
 const kv = new Map(); const r2 = new Map();
@@ -20,7 +21,8 @@ const env = {
   AXIOM_KEYS: JSON.stringify({ 'full-key': { n: 'Hesh', r: 'full' }, 'read-key': { n: 'Steve', r: 'read' } }),
   ANTHROPIC_API_KEY: 'test', GEMINI_KEY: 'g',
 };
-const png = fill => { const b = Buffer.alloc(160, fill || 0); Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(b, 0); b[24] = 8; b[25] = 6; return b.toString('base64'); };
+// S31: a whole PNG (a brand mark is checked by its structure now, not its signature); each fill gives other bytes
+const png = fill => pngB64(16, 8, { fill: (fill || 0) * 9 + 3, alpha: true });
 const anth = { calls: [] };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
