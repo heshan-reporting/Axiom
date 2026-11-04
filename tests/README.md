@@ -260,6 +260,13 @@ server on a fixed port in the 8766-8776 range and kills it at the end.
   version) and `studio-s29-browser.mjs` (roles from the worker, the header, the library's stages, the light appearance, the
   selection toolbar, art direction, Fix layout off the stage, the review page on a phone). The fixture no longer injects
   `AX_ROLE`: the page learns its role from `GET /auth/me`, as in production.
+- The p46 audit fixed (`CREATIVE-STUDIO.md` s.56): `studio-s30-worker.mjs` (Content Desk rules and voice-pack documents kept to
+  their campaign, standalone background, job keys per project, the person's cap outside jobs, the lockout, guest archiving,
+  uploads by their bytes, picture layers that are not marks in disguise, line counts with combining marks) and
+  `studio-s30-browser.mjs` (copy drafts never saved over newer words, delivery from the current record, imagery after a
+  failure, keyboard and focus, narrow windows, Back between pieces, the library's stage names, ink above the line, right to
+  left). `index-handlers-test.mjs` checks the legacy views' inline handlers; `asset-versions.mjs` (run by `run.mjs check`,
+  `--write` after a bump) fails when a versioned page asset changes without a new `?v=`.
 - The rest: the modules named in each file's header.
 
 Confidential material never belongs here: fixtures are synthetic. A live,

@@ -84,7 +84,7 @@ Two briefs to paste (synthetic):
    the night boat's, bottom right.
 3. **The campaign question.** "no campaign chosen yet": analyse the note (paid, about 3 calls), compare two narratives and
    press Produce 2 as variants. Check: the Studio asks for the campaign and produces nothing; choose the campaign in the brief, then produce.
-4. **Guided project end to end** (paid, about 15 calls, no images): New project, Response creative, Harbourline, paste the
+4. **Guided project end to end** (paid, about 15 model requests - a retried request counts again - no images): New project, Response creative, Harbourline, paste the
    ambiguous brief. Check: the reading proposes campaign candidates, does not decide; the objective, message, strategy and a
    direction lead to copy.
 5. **Client review link.** In Review, share one approved tile (14 days by default, at most 30). Open the link on a phone, comment

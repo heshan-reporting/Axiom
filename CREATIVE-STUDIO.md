@@ -3646,7 +3646,7 @@ fail (`tests/studio-s29-worker.mjs` 0 of 16, `tests/studio-s29-browser.mjs` 0 of
 | SEC-4 | medium | The worker's own contrast reading skipped rotated or slightly transparent words | Opacity gate 0.6, the rotated box read as its bounds, the tolerance widened with transparency | `s29-worker` SEC-4 | fixed |
 | SEC-5 | high | `AXIOM_PUBLIC=read` published every client's Studio, brand, Mind and engine material | Keyless requests to `/studio/`, `/brand/`, `/mind/`, `/engine/`, `/content/`, `/release/`, `/perf/` answer `401 sign_in_required` (`AX_CONFIDENTIAL_RX`; `STUDIO_PUBLIC_READ=1` reopens them on purpose); the rest of AXIOM stays open | `s29-worker` SEC-5 | fixed |
 | SEC-6 | low | `STUDIO_PUBLIC_WRITE=1` opened `/brand` and `/engine` too, unguarded | It opens `/studio/` only (its reads and writes), and anonymous writes pass the guest guard (no live project, no client memory) | `s29-worker` SEC-6 | fixed |
-| SEC-7 | low | A guest could archive every test project of a client | `studio_projects.creator_pid`; a guest or public request archives only what it made | `s29-worker` SEC-7 | fixed |
+| SEC-7 | low | A guest could archive every test project of a client | `studio_projects.creator_pid`; a guest or public request archives only what it made | `s29-worker` SEC-7 | fixed in part; completed in S30 (SEC-05, s.56) |
 | FS1 | high | Nothing set `window.AX_ROLE` in production: a read key saw the full Studio (the harness injected it) | The page asks the worker (`GET /auth/me`; `/studio/status` carries `role`, `guest`); the fixture no longer injects a role | `s29-browser` FS1 | fixed |
 | FS2 | high | An approval was recorded on whatever version was current, not the one decided on | The page sends `version`; `/studio/approve` answers `409 version_moved` when it moved | `s29-worker` FS2 | fixed |
 | FS3 | high | A dropped answer to a job request could start a second paid job | The page retries with the same idempotency key and reuses it for the same request within ten minutes | (worker idempotency, `studio-worker`) | fixed |
@@ -3659,15 +3659,15 @@ fail (`tests/studio-s29-worker.mjs` 0 of 16, `tests/studio-s29-browser.mjs` 0 of
 | QA-2 | medium | A read key tried to run queued jobs and showed an error | A read key steps nothing | `s29-browser` FS1 (no write from a read key) | fixed |
 | QA-3 | medium | Fix layout could not bring words dragged off the stage back | `repair()` brings a movable text block back inside the safe area (narrowed if wider), words untouched | `s29-browser` QA-3 | fixed |
 | QA-4 | medium | Analyse ran (paid) when part of the material could not be added | The Studio asks first; Cancel keeps the material to fix | - | fixed |
-| QA-5 | low | One Retry of several failed renders said everything was in place | The notice names the pieces still without imagery and offers Generate imagery for them; the Board says their render failed | - | fixed |
+| QA-5 | low | One Retry of several failed renders said everything was in place | The notice names the pieces still without imagery and offers Generate imagery for them; the Board says their render failed | - | fixed in part; completed in S30 (QA3, s.56) |
 | QA-6 | low | A typed edge distance could throw a layer far off the stage | Distances keep part of the layer on the stage | - | fixed |
-| QA-7 | low | Message read "not started" with one step done; "Version saved" with no versions; Back restored the wrong piece | In progress; "Saved"; history entries carry the asset | - | fixed |
-| PR1 | high | National voice-pack copy and guides filed without a platform were relabelled client-wide and reached HOOF prompts | The campaign from the pack tag is kept and scoped to the campaign | `s29-worker` PR1 | fixed |
+| QA-7 | low | Message read "not started" with one step done; "Version saved" with no versions; Back restored the wrong piece | In progress; "Saved"; history entries carry the asset | - | fixed in part; completed in S30 (QA5, s.56) |
+| PR1 | high | National voice-pack copy and guides filed without a platform were relabelled client-wide and reached HOOF prompts | The campaign from the pack tag is kept and scoped to the campaign | `s29-worker` PR1 | fixed in part; completed in S30 (RM-2, s.56) |
 | PR2 | high | A guided project with no campaign decided reached paid directions | The strategy is confirmed with the campaign decision (`409 campaign_required` otherwise; `campaign: ''` records standalone); the directions gate refuses an undecided campaign; the Strategy step offers the kit's campaigns | `s29-worker` PR2 | fixed |
 | PR3 | medium | Understanding contradicted the campaign question; "Keep standalone" left it up | The reading says "undecided" when ambiguous; a decision clears the question; the classic view has Keep it standalone | - | fixed |
 | PR4 | medium | The reading never saw the project type or deliverable | Both are in CURRENT BRIEF | `s29-worker` PR10 + PR4 | fixed |
 | PR5 | medium | Knowledge in the reading was unlabelled or mislabelled by campaign | Passages labelled from their document record; decisions and earlier choices carry their project's campaign | `s29-worker` PR5 | fixed |
-| PR6 | medium | Finished mode with "No imagery" silently became editable | Refused before any spend (`finished_needs_imagery`); the Brief hides the option in finished mode | `s29-worker` PR6 | fixed |
+| PR6 | medium | Finished mode with "No imagery" silently became editable | Refused before any spend (`finished_needs_imagery`); the Brief hides the option in finished mode | `s29-worker` PR6 | fixed in part; completed in S30 (QA8, s.56) |
 | PR7 | medium | Brand items kept as a rule or preference never reached a model | `stContext` reads the active rule and preference items of the campaign and the client-wide ones | `s29-worker` PR7 | fixed |
 | PR8 | low | Look-alikes were matched by title; a replan could file a direction twice; classic cards hid `lookalike` | Matched by position; a repeated replacement keeps the original, marked; classic cards show it | `rc-creative-worker` (S29 line) | fixed |
 | PR9 | low | `/studio/remember` saved a campaign rule for any campaign | Only the project's own campaign | `s29-worker` PR9 | fixed |
@@ -3682,10 +3682,10 @@ fail (`tests/studio-s29-worker.mjs` 0 of 16, `tests/studio-s29-browser.mjs` 0 of
 | PM9 | low | No way back while a project opened slowly | All projects is offered while it opens | - | fixed |
 | UX1 | high | In the light appearance the colour picker, the Spacing box and the dock icons were close to invisible (1.2-2.3:1) | Theme tokens in place of hard-coded dark colours | `s29-browser` UX1 | fixed |
 | UX2 | medium-high | The selection toolbar hid Lock, order, Delete and More behind an invisible scroll | It wraps, and is kept inside the stage | `s29-browser` UX2 | fixed |
-| UX3 | medium | The header subline was cut mid-word; the read-only and mode chips never showed (U8) | Chips first; names give way with an ellipsis | `s29-browser` UX3 | fixed (U8) |
+| UX3 | medium | The header subline was cut mid-word; the read-only and mode chips never showed (U8) | Chips first; names give way with an ellipsis | `s29-browser` UX3 | fixed in part; completed in S30 (UX-8, s.56) |
 | UX4 | medium | A class clash laid "Compared with what Axiom knows" out as the version-compare grid | The compare grid is `.st-vcmp` | `s29-browser` UX4 | fixed |
 | UX5 | medium | Art direction ran out of its card; the resolution note was one word a line | Wraps inside the card | `s29-browser` UX5 | fixed |
-| UX6 | medium | The library used the old status words and the wrong next step | `/studio/list` carries each guided project's step (`stListPhase`), named as the header names it | `s29-browser` UX6 | fixed |
+| UX6 | medium | The library used the old status words and the wrong next step | `/studio/list` carries each guided project's step (`stListPhase`), named as the header names it | `s29-browser` UX6 | fixed in part; completed in S30 (QA6, s.56) |
 | UX7 | medium | The review page scrolled sideways on a phone with a long address | Columns shrink; long words break | `s29-browser` UX7 | fixed |
 | UX8 | low-medium | A locked step told a read key to act | It says a teammate with a full key completes it | `s29-browser` UX8 | fixed |
 | UX9 | low | On a phone the dock hid the views | The dock wraps | - | fixed |
@@ -3709,3 +3709,61 @@ fail (`tests/studio-s29-worker.mjs` 0 of 16, `tests/studio-s29-browser.mjs` 0 of
   on the roster counted toward the wrong-key lockout (the page's role check made it trip; `access-link-browser`), and a second
   Fix layout press that changed nothing dropped the first fix's Undo (`studio-editor-browser`).
 - Nothing was deployed: the worker ships from the Mac with `tools/deploy-worker.sh` once this is merged.
+
+## 56. S30 - the p46 audit's findings fixed, the Minerals Council first (build `2026-11-09.studio-p47`, page `?v=r31`)
+
+Asked for on 4 November 2026: "Okay let's fix everything and we should focus on minerals council but do not remove the seed
+client just in case." The audit of `263f043` (build p46, page r30; providers mocked, nothing live, no key sent to the worker)
+found two critical campaign-wall defects for MCA and HOOF, and that several S29 rows were fixed only in part (marked in s.55).
+Each fix below was reproduced by a failing test first: on `263f043` the new cases fail (`tests/studio-s30-worker.mjs` 0 of 11,
+`tests/studio-s30-browser.mjs` 0 of 15, the RM-8 case of `tests/studio-p22-worker.mjs`, `tests/index-handlers-test.mjs`), and
+pass with the fixes. The synthetic client (`synthdemo`) and the test kit are unchanged.
+
+### 56.1 Findings ledger
+
+| Id | Sev | Finding | Fix | Test | Status |
+| --- | --- | --- | --- | --- | --- |
+| RM-1 | critical | A standing rule the Content Desk learned on a HOOF set was saved client-wide and reached national and standalone prompts | `contentRevise` saves it as `content:<set>:campaign:<id>`; `ensureEngine` scopes the rules saved before once (idempotent); the Desk says "campaign X only" | `s30-worker` RM-1 (two cases) | fixed |
+| RM-2 | critical | Voice-pack documents with no campaign field (`pack:<ns>:<campaign>:<file>`) reached every campaign | `contentExemplars` reads the campaign from the tag; a platform segment is client-wide; a campaign the kit does not hold is used nowhere | `s30-worker` RM-2 | fixed |
+| RM-3 | high | Standalone work read one campaign's guide as background | `stContext` reads client-wide background only (`campaignOnly`) | `s30-worker` RM-3 | fixed |
+| SEC-01 | high | Job and project idempotency keys were global: a guest could take, in its own test project, the key a staff action on a live project would use | Keys are scoped `<project>|<key>` (jobs) and `<person>|<key>` (projects); reads accept the old form | `s30-worker` SEC-01 | fixed |
+| SEC-02 | high | The per-person daily cap did not hold for model calls made outside a job (brief suggestions, reference analysis) | `stClaude`'s direct path reserves against the person (`env.__pid` on Studio and brand routes) and refunds on refusal | `s30-worker` SEC-02 | fixed |
+| QA1 | high | A Copy draft restored after a reload, or typed in a second tab, was saved over a teammate's newer words | Drafts keep the words they were typed over; a move asks Keep mine / Take theirs; the queue checks before posting | `s30-browser` QA1 (two cases) | fixed |
+| QA2 | high | Deliver drew the package from the page's last copy of the project and ignored the worker's excluded list | It reloads first; a moved or excluded piece stops the bundle with its name | `s30-browser` QA2 | fixed |
+| SEC-03 | medium | Ended open access or an ended guest key cleared the wrong-key count | Only a matched roster key clears it | `s30-worker` SEC-03 | fixed |
+| SEC-04 | medium | Inline handlers in the legacy views put data (an outlet's name, a topic word) in single-quoted JS through HTML escaping only | `jsAttr()` escapes for JS then HTML; every such handler uses it | `index-handlers-test` | fixed |
+| RM-4 | medium | The measured text box ignored ink above and below the line (Arabic harakat, Thai tone marks), so collisions there went unseen | `layoutText` measures each line's ink (`actualBoundingBox*`) into the occupied box | `s30-browser` RM-4 | fixed |
+| RM-5 | medium | The worker's line plausibility counted combining marks as letters and could refuse a truthful report | Counts spacing characters | `s30-worker` RM-5 | fixed |
+| RM-6 | medium | A free picture layer could carry the client logo (past HOOF's mark policy), another client's logo or another project's file | Refused (`brand_mark_as_image`, `image_not_owned`); mark layers still go through the mark policy | `s30-worker` RM-6 | fixed |
+| UX-1 | medium | The wrapped selection toolbar rose under the canvas bar near the stage's top | Kept inside the stage top to bottom | `s30-browser` UX-2 + UX-1 | fixed |
+| UX-2 | medium | Enter on a toolbar or Style-panel button opened the words for typing | Enter and Space press the button | `s30-browser` UX-2 + UX-1 | fixed |
+| UX-3 | medium | The closed inspector drawer stayed in the Tab order; Escape lost the focus | Inert when closed; focus in when opened, back to its button on Escape | `s30-browser` UX-3 | fixed |
+| UX-4 | medium | A direction card said "words at the bottom" when the direction never said where | "placed by default (the direction does not say where)" | `s30-browser` UX-4 | fixed |
+| UX-5 | medium | The font picker and the wizard left the focus on the page; the wizard ignored Escape with the focus outside it | Focus returned to the opener; the wizard focuses its question and leaves on Escape | `s30-browser` UX-9 + UX-5, UX-5 | fixed |
+| QA3 | medium | Generate imagery after a failed render answered with the failed job and queued nothing | The next attempt is taken by itself | `s30-browser` QA3 | fixed |
+| QA4 | medium | The loading shimmer swallowed clicks | `pointer-events: none` | `s30-browser` QA6 + QA4 + QA9 | fixed |
+| SEC-05 | low | A guest could archive or rename a test project someone else made (the seeded walk-through) | Refused (`not_your_project`); working in it is still allowed | `s30-worker` SEC-05 | fixed |
+| SEC-06 | low | Logo, wordmark and artwork uploads trusted the declared type | Stored with the type the bytes say; anything else is `bad_image` | `s30-worker` SEC-06 | fixed |
+| RM-7 | low | Arabic was set left to right (the full stop at the wrong end) | The direction follows the first strong character | `s30-browser` RM-4 + RM-7 | fixed |
+| RM-8 | low | An inspection score of 0 (or 7) was moved onto the 1-5 scale | Not scored | `p22-worker` RM-8 | fixed |
+| UX-6 | low | A counted share read 100% while the job was still filing | Capped at 99 until done | `studio-progress-test` | fixed |
+| UX-7 | low | From 701 to 1100 px the other stages showed numbers only | Names kept, numbers aside | `s30-browser` UX-7 + UX-8 | fixed |
+| UX-8 | low | On a phone a read key saw no read-only cue | A short read-only marker in the header | `s30-browser` UX-7 + UX-8 | fixed |
+| UX-9 | low | A delete question started on Delete; Help did not close on Escape | Starts on Cancel; Escape closes Help | `s30-browser` UX-9 + UX-5 | fixed |
+| QA5 | low | Back did not return to the previous piece in Copy | A history entry per piece | `s30-browser` QA5 | fixed |
+| QA6 | low | The library showed a classic project's bare status word | Named as the header names the stage | `s30-browser` QA6 + QA4 + QA9 | fixed |
+| QA7 | low | A strategy confirm naming an unknown campaign confirmed the strategy, then answered 400 | Refused first; nothing confirmed | `s30-browser` QA7 | fixed |
+| QA8 | low | Full AI production on a "No imagery" brief was accepted | `finished_needs_imagery` before anything changes | `s30-browser` QA8 | fixed |
+| QA9 | low | The wrong-key lockout read as "the worker asked to slow down" and was retried | Named as the lockout; not retried | `studio-explain-test` | fixed |
+| AUD-1 | low | `ax-ui.js` changed without a new `?v=` | Bumped; `tests/asset-versions.mjs` (in `run.mjs check`) fails when bytes change and the query does not | `run.mjs check` | fixed |
+| PM6, U6, U7 | low | Two project reads per finished job; dotted boxes; tall stage heads | Not changed | - | open |
+
+### 56.2 Notes
+
+- RM-1's migration runs once per worker start inside `ensureEngine`; it only appends `:campaign:<id>` to `content:<set>` rules
+  whose set names a campaign, so it is safe to run again.
+- RM-4 makes the measurement stricter: a 3 px gap between blocks that the ink of tone marks or harakat reaches into is now a
+  collision. Latin text is unchanged (`studio-layout-browser` 211 of 211, `studio-marks-browser` 50 of 50).
+- Deploy order: the worker first (`tools/deploy-worker.sh`, then check the deploy token on the public `/`), then the page; the
+  page names a worker older than p47.
+

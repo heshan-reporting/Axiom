@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r28` since the concept C interface (3 November 2026).
+  with `?v=r31` since S30.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2928,6 +2928,23 @@ layout press that changes nothing keeps the Undo of the fix before it. UI: light
 and the dock; the selection toolbar wraps and stays on the stage; the header's state chips come first; the version compare grid
 is `.st-vcmp`; art direction stays in its card; the review page fits a phone. Harnesses: `tests/studio-s29-worker.mjs` (16),
 `tests/studio-s29-browser.mjs` (7). Open: PM6 (two project reads per finished job), U6, U7.
+
+**The p46 audit fixed, Minerals Council first (S30; build `2026-11-09.studio-p47`, page `?v=r31`; `CREATIVE-STUDIO.md`
+s.56).** Campaign walls: a standing rule the Content Desk learns on a campaign's set is that campaign's
+(`content:<set>:campaign:<id>`; rules saved before are scoped once by `ensureEngine`), voice-pack documents take their
+campaign from the `pack:<ns>:<campaign>:` tag (a platform segment is client-wide, a campaign the kit does not hold is used
+nowhere), and standalone work reads client-wide background only. Job idempotency keys are stored per project
+(`<project>|<key>`, project keys per person); the per-person daily cap holds for model calls outside a job (`env.__pid` on
+`/studio/` and `/brand/` requests); only a matched roster key clears the wrong-key count; a guest archives or renames only
+the test projects it made (`not_your_project`); logo, wordmark and artwork uploads are stored with the type their bytes say
+(`brImageType`, `bad_image`); an ordinary picture layer can never be a brand mark or another project's file
+(`brand_mark_as_image`, `image_not_owned`). Copy drafts keep the words they were typed over and ask Keep mine / Take theirs
+when the saved words moved; Deliver reloads before drawing and stops on a moved or excluded piece; Generate imagery after a
+failure takes the next attempt itself. The renderer's measured text box holds each line's ink and sets Arabic and Hebrew
+right to left; inspection scores off the 1-5 scale are not scored. The legacy views' inline handlers pass data through
+`jsAttr()` (`tests/index-handlers-test.mjs`), and `tests/asset-versions.mjs` (in `run.mjs check`; `--write` after a bump)
+fails when a versioned page asset changes without a new `?v=`. Harnesses: `tests/studio-s30-worker.mjs` (11),
+`tests/studio-s30-browser.mjs` (15).
 
 Phase 1, the ground:
 
