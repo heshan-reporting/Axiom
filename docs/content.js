@@ -136,7 +136,7 @@
         ${hist.map((h, i) => html`<div key=${i}>
           <div class="cd-msg user"><div class="b">${h.instruction}</div><div class="m">${h.n == null ? 'all pieces' : label(h.n)}${h.who ? ' - ' + h.who : ''} - ${ago(h.ts)} ago</div></div>
           <div class="cd-msg desk"><div class="b">${h.note}</div>
-            ${h.ruleId ? html`<button class="cd-remember" onClick=${onLearned} title="Open what the Engine has learned">Remembered for ${client.short || set.ns}: ${h.rule}</button>`
+            ${h.ruleId ? html`<button class="cd-remember" onClick=${onLearned} title="Open what the Engine has learned">Remembered for ${client.short || set.ns}${h.ruleCampaign ? ', campaign ' + h.ruleCampaign + ' only' : ''}: ${h.rule}</button>`
               : h.standing ? html`<div class="m">Sounded like a standing instruction but was not remembered (confidence ${Math.round((h.confidence || 0) * 100)}%). Pick "Always remember this" to keep it.</div>`
               : html`<div class="m">Applied to this set only.</div>`}
           </div>

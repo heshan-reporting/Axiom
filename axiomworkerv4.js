@@ -3567,6 +3567,9 @@ async function ensureEngine(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE engine_fixes ADD COLUMN origin TEXT').run(); } catch (e) {}
   // S28: the Mind document an outcome filed, and when the outcome was withdrawn (its document retracted with it)
   for (const c of ['doc TEXT', 'withdrawn INTEGER', 'retract TEXT', 'retract_err TEXT']) { try { await env.MIND_DB.prepare('ALTER TABLE engine_outcomes ADD COLUMN ' + c).run(); } catch (e) {} }
+  // S30 (RM-1): a standing rule the Content Desk saved before rules carried their set's campaign is scoped to it now, once
+  // (idempotent: a rule already scoped, or from a set with no campaign, is left as it is; the rule's words are not touched)
+  try { await env.MIND_DB.prepare("UPDATE engine_fixes SET source = source || ':campaign:' || (SELECT lower(c.campaign) FROM content_sets c WHERE c.id = substr(engine_fixes.source, 9)) WHERE source LIKE 'content:%' AND source NOT LIKE '%:campaign:%' AND EXISTS (SELECT 1 FROM content_sets c WHERE c.id = substr(engine_fixes.source, 9) AND COALESCE(c.campaign, '') <> '')").run(); } catch (e) {}
   ENGINE_READY = true;
   return true;
 }
@@ -3931,7 +3934,10 @@ function contentKitBlock(kit, campaignId, segmentId, platforms, opts) {
  * One labelled legacy rule keeps the voice packs working: a document filed by tools/engine-ingest.py from a pack carries the
  * source tag pack:<ns>:<campaign>:..., and the pack contract makes its copy approved captions; the campaign must equal the
  * tag's segment exactly, and such documents are reported as legacy until someone classifies them. */
-async function contentExemplars(env, ns, camp, platforms, brief, log) {
+async function contentExemplars(env, ns, camp, platforms, brief, log, opts) {
+  opts = opts || {};
+  // S30 (RM-2): the kit's campaign ids decide what a legacy pack tag's third segment is (pack:<ns>[:<campaign>][:<platform>]:<file>)
+  let campIds = []; try { campIds = (((await brandKit(env, ns)) || {}).campaigns || []).map(c => String(c.id || '')).filter(Boolean); } catch (e) {}
   let hits = [];
   try {
     const q = [(camp && camp.name) || '', (platforms || []).join(' '), 'approved caption post copy example', String(brief || '').slice(0, 300)].join(' ');
@@ -3947,9 +3953,13 @@ async function contentExemplars(env, ns, camp, platforms, brief, log) {
     const row = rows[id] || null; const own = h.ns === ns || h.ns === ns + '_creative';
     const kind = String((row && row.kind) || m.kind || '');
     let approval = row ? String(row.approval || '') : ''; let campaign = row ? String(row.campaign || '') : ''; let scope = row ? String(row.scope || '') : ''; let isLegacy = false;
-    if (!approval) { const tag = String((row && row.source) || m.source || '').split(':'); if (tag[0] === 'pack' && tag[1] === ns && (kind === 'copy' || kind === 'brief')) { approval = kind === 'copy' ? 'approved' : 'background'; campaign = campaign || (cid && tag[2] === cid ? cid : (tag.length > 4 && tag[2] ? tag[2] : '')); scope = campaign ? 'campaign' : (scope || 'client'); isLegacy = true; } }   // S29 (PR1): a recorded campaign is never overwritten by the tag; a tag without a platform is ambiguous and is not guessed
+    if (!approval) { const tag = String((row && row.source) || m.source || '').split(':'); if (tag[0] === 'pack' && tag[1] === ns && (kind === 'copy' || kind === 'brief')) { approval = kind === 'copy' ? 'approved' : 'background'; isLegacy = true;
+        // S30 (RM-2): the segment after the namespace is a campaign unless it is a platform list (or the file itself, when the pack
+        // named neither): a campaign the kit holds, or one it no longer holds, which then fits no project and is left out
+        if (!campaign && tag.length >= 4) { const seg = String(tag[2] || '').toLowerCase().trim(); const platformish = seg.split(/[, ]+/).filter(Boolean).every(x => !!CONTENT_PLATFORMS[x]); if (seg && !platformish && !/[./]/.test(seg)) campaign = campIds.indexOf(seg) >= 0 ? seg : 'unknown:' + seg; }
+        scope = campaign ? 'campaign' : (scope || 'client'); } }   // S29 (PR1): a recorded campaign is never overwritten by the tag; a tag without a platform is ambiguous and is not guessed
     const entry = { kind, title: String((row && row.title) || m.title || ''), snippet: String(m.snippet || '').slice(0, 700), campaign };
-    if (approval === 'background' || /^(brief|release|doc|slack|guide)$/.test(kind)) { if (own || h.ns === 'cmm') { if (!campaign || !cid || campaign === cid) G.background.push(entry); else otherCampaign++; } continue; }
+    if (approval === 'background' || /^(brief|release|doc|slack|guide)$/.test(kind)) { if (own || h.ns === 'cmm') { if (!campaign || (cid && campaign === cid) || (!cid && !opts.campaignOnly)) G.background.push(entry); else otherCampaign++; } continue; }   // S30 (RM-3): standalone Studio work reads client-wide background only
     if (!/^(copy|outcome)$/.test(kind)) continue;
     if (!own) continue;                                                   // the agency's namespace is never a client's example
     if (!approval) { unclassified++; continue; }                          // nobody said whether it was approved: not used, counted
@@ -4096,13 +4106,13 @@ async function contentRevise(env, id, body, who) {
     try {
       const k0 = changed[0]; const it0 = set.items.find(x => x.n === k0);
       fix = await engineAddFix(env, { ns: set.ns, task: 'copy', scope: 'client', wrong: k0 != null ? String(before[k0] || '').slice(0, 400) : '', right: it0 ? String(it0.body || '').slice(0, 400) : '',
-        why: instruction, rule: String(mem.rule || instruction).slice(0, 400), exemplar: it0 ? String(it0.body || '').slice(0, 300) : '', source: 'content:' + set.id }, who);
+        why: instruction, rule: String(mem.rule || instruction).slice(0, 400), exemplar: it0 ? String(it0.body || '').slice(0, 300) : '', source: 'content:' + set.id + (set.campaign ? ':campaign:' + kitSlug(set.campaign) : '') }, who);   // S30 (RM-1): a set's campaign scopes the rule it teaches
     } catch (e) { fix = null; }
   }
   const note = String(j.note || (changed.length ? 'Changed ' + changed.length + ' piece' + (changed.length === 1 ? '' : 's') + '.' : 'Nothing changed.')).slice(0, 300);
-  set.history = (set.history || []).concat([{ ts: Date.now(), who: String(who || '').slice(0, 40), n, instruction, note, changed, ruleId: fix ? fix.id : '', rule: fix ? fix.rule : '', standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0 }]);
+  set.history = (set.history || []).concat([{ ts: Date.now(), who: String(who || '').slice(0, 40), n, instruction, note, changed, ruleId: fix ? fix.id : '', rule: fix ? fix.rule : '', ruleCampaign: fix && set.campaign ? set.campaign : '', standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0 }]);
   await contentSave(env, set);
-  return { ok: true, set: contentView(set), changed, note, remembered: fix ? { id: fix.id, rule: fix.rule } : null, memory: { standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0, rule: String(mem.rule || '').slice(0, 400) } };
+  return { ok: true, set: contentView(set), changed, note, remembered: fix ? { id: fix.id, rule: fix.rule, campaign: set.campaign || '' } : null, memory: { standing: !!mem.standing, confidence: parseFloat(mem.confidence) || 0, rule: String(mem.rule || '').slice(0, 400) } };
 }
 async function contentUpdate(env, id, n, patch) {
   const set = await contentLoad(env, id);
@@ -7453,7 +7463,7 @@ function stOrderAssets(list) {
   return out;
 }
 function stProjectRow(r) {
-  return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false, allowance: r.allowance || '', test: !!r.test };
+  return { id: r.id, ns: r.ns, campaign: r.campaign || '', title: r.title || '', brief: pjs(r.brief, {}), status: r.status || 'brief', owner: r.owner || '', revision: r.revision || 0, legacy: r.legacy_id ? { kind: r.legacy_kind, id: r.legacy_id } : null, archived: !!r.archived, created: r.created, updated: r.updated, readOnly: false, allowance: r.allowance || '', test: !!r.test, creatorPid: r.creator_pid || '' };
 }
 /* Events that carry whole proposals (art directions with their layouts, alternatives, render proposals) are
    larger than a thread note; a truncated JSON document reads back as nothing, so those kinds get more room. */
@@ -7802,7 +7812,7 @@ async function stImport(env, legacyId, who) {
   return { id, existing: false };
 }
 // -- jobs: a row, a lease, one stage at a time -----------------------------------------------------
-function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: r.idem || '', progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '', textSent: Number(r.text_sent) || 0, imageSent: Number(r.image_sent) || 0, cancel: pjs(r.cancel, null), pid: r.pid || '' }; }
+function stJobRow(r) { return { id: r.id, project: r.project, asset: r.asset || '', stage: r.stage, input: pjs(r.input, {}), inputCorrupt: !jsonOk(r.input), inputVersion: r.input_version || '', state: r.state, attempts: r.attempts || 0, leaseUntil: r.lease_until || 0, idem: String(r.idem || '').indexOf(r.project + '|') === 0 ? String(r.idem).slice(String(r.project).length + 1) : (r.idem || ''), progress: pjs(r.progress, {}), cost: Number(r.cost) || 0, result: pjs(r.result, null), error: r.error || '', who: r.who || '', created: r.created, updated: r.updated, after: r.after || '', recipe: r.recipe || '', textSent: Number(r.text_sent) || 0, imageSent: Number(r.image_sent) || 0, cancel: pjs(r.cancel, null), pid: r.pid || '' }; }
 async function stJob(env, id) { const r = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE id=?').bind(stClean(id, 24)).first(); return r ? stJobRow(r) : null; }
 /* How long each stage has actually taken here (the last 40 finished attempts per stage, KV studio_dur_<stage>): the app says
  * "typically N s" from the median and is never a percentage invented from the clock. */
@@ -7834,8 +7844,11 @@ async function stJobCreate(env, body, who) {
   if (stage === 'copy' && !(Array.isArray(input0.channels) && input0.channels.some(c => ST_CHANNELS[String(c).toLowerCase()]))) return { error: 'channels_required', status: 400, detail: 'copy needs input.channels from ' + Object.keys(ST_CHANNELS).join(', ') + '.' };
   // S17: a guided project's steps cannot be skipped by any client: directions need the confirmed strategy, the copy a chosen direction
   if (['direct', 'copy', 'sequence', 'kit', 'strategy'].indexOf(stage) >= 0) { const g = await stWfGate(env, p, stage, input0); if (g) return g; }
-  const idem = body.idem ? stStr(body.idem, 80) : null;
-  if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
+  // S30 (SEC-01): a job's idempotency key belongs to its project. Keys are stored as <project>|<key>, so a key made in one project
+  // (a guest's test project, say) can never stand in for the same key in another; a row stored before S30 is found by project too
+  const idemRaw = body.idem ? stStr(body.idem, 80) : null; const idem = idemRaw ? p.id + '|' + idemRaw : null;
+  const idemHad = () => env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE project=? AND (idem=? OR idem=?) LIMIT 1').bind(p.id, idem, idemRaw).first();
+  if (idem) { const had = await idemHad(); if (had) return { job: stJobRow(had), existing: true }; }
   const id = stId('j'); const now = Date.now();
   const input = body.input && typeof body.input === 'object' ? body.input : {};
   try {
@@ -7844,7 +7857,7 @@ async function stJobCreate(env, body, who) {
     await env.MIND_DB.prepare('INSERT INTO studio_jobs(id,project,asset,stage,input,input_version,state,attempts,lease_until,idem,progress,cost,result,error,who,created,updated,after,recipe,pid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .bind(id, p.id, asset ? asset.id : '', stage, JSON.stringify(input), asset ? asset.current || '' : '', 'queued', 0, 0, idem, '{}', 0, null, '', stStr(who, 40), now, now, after || null, stStr(body.recipe, 40) || null, stClean(body.pid, 40) || null).run();
   } catch (e) {
-    if (idem) { const had = await env.MIND_DB.prepare('SELECT * FROM studio_jobs WHERE idem=?').bind(idem).first(); if (had) return { job: stJobRow(had), existing: true }; }
+    if (idem) { const had = await idemHad(); if (had) return { job: stJobRow(had), existing: true }; }
     throw e;
   }
   await stEvent(env, p.id, 'job', { text: 'Job ' + id + ' queued: ' + stage + (asset ? ' for ' + asset.title : ''), job: id, stage }, who);
@@ -8583,9 +8596,12 @@ async function stClaude(env, o) {
     if (o.log && typeof o.log.dispatch === 'function') ticket = await o.log.dispatch('text', { model: body.model, retry: isRetry });
     else {
       const alId = o.project && o.project.allowance ? String(o.project.allowance) : '';
-      if (alId) { const al = await stAllowanceCharge(env, alId, 'text'); if (!al.ok) throw new Error(al.error + ': ' + al.detail + ' (not retried)'); }
+      // S30 (SEC-02): a call made outside a job (brief suggestions, reference analysis) is the person's too: their daily cap first
+      const pidNow = String(o.pid || env.__pid || ''); let pres = null;
+      if (pidNow && pidNow !== 'public' && pidNow !== 'dev') { pres = await stPersonReserve(env, pidNow, 'text'); if (!pres.ok) throw new Error('person_budget_exhausted: you have used ' + pres.used + ' of your ' + pres.cap + ' Studio model calls today (a daily cap per person); the rest waits for tomorrow (not retried)'); }
+      if (alId) { const al = await stAllowanceCharge(env, alId, 'text'); if (!al.ok) { if (pres && pres.cap) await stPersonRefund(env, pidNow, 'text', pres.day); throw new Error(al.error + ': ' + al.detail + ' (not retried)'); } }
       const rv = await aiReserve(env, 'studio', { retry: isRetry });
-      if (!rv.ok) { if (alId) await stAllowanceRefund(env, alId, 'text'); throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)'); }
+      if (!rv.ok) { if (alId) await stAllowanceRefund(env, alId, 'text'); if (pres && pres.cap) await stPersonRefund(env, pidNow, 'text', pres.day); throw new Error('budget_exhausted: ' + rv.used + ' of ' + rv.cap + ' Studio model calls used today (STUDIO_DAILY_CALLS); the rest waits for tomorrow or a higher limit (not retried)'); }
     }
     const settle = async (okd, usage, outcome) => { await aiSettle(env, 'studio', okd, usage, { unknown: outcome === 'unknown' || outcome === 'abandoned' }); if (ticket && o.log && o.log.settle) await o.log.settle(ticket, outcome || (okd ? 'ok' : 'failed')); };
     const whyOutcome = w => w === 'fenced' ? 'abandoned' : 'stream_' + w;
@@ -8687,7 +8703,7 @@ async function stContext(env, p, opts) {
   try { rulesCopy = await engineRules(env, p.ns, 'copy', 0, { campaign: p.campaign }); rulesTiles = await engineRules(env, p.ns, 'tiles', 0, { campaign: p.campaign }); } catch (e) {}
   const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
   let ex = { text: '', count: 0 };
-  try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log); } catch (e) {}
+  try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log, { campaignOnly: true }); } catch (e) {}
   const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
   // S29 (PR7): brand items the team kept as a rule or a preference reach the models - this campaign's and the client-wide ones
   let kept = { text: '', ids: [] };
@@ -14829,7 +14845,8 @@ const AXIOM_WORKER = {
         if (fails >= 12) return jsonResp({ error: 'too_many_attempts', detail: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 429);
         // S29: a key that is on the roster but has ended (an old sign-in link) is not a guess, so it does not count toward the lockout
         if (!auth.ok && !auth.expired) { try { await kvPut(env.AXIOM_KV, fk, String(fails + 1), 600); } catch (e) {} }
-        else if (fails) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
+        // S30 (SEC-03): only a key that matched the roster clears the count - never open access with no key, nor an ended key
+        else if (fails && auth.ok && !auth.public) { try { await kvPut(env.AXIOM_KV, fk, '0', 60); } catch (e) {} }
       }
       if (!auth.ok && auth.expired) return jsonResp({ error: 'link_expired', detail: auth.publicEnded ? 'Open access to AXIOM has ended. Ask whoever sent the link for a sign-in link.' : 'This sign-in link has expired. Ask whoever sent it for a new one.' }, 401);
       if (!auth.ok) return jsonResp({ error: 'unauthorized', detail: 'This route is protected. Add your access key in AXIOM Settings.' }, 401);
@@ -14854,6 +14871,8 @@ const AXIOM_WORKER = {
       if (path.startsWith('/studio/') && !AX_GUEST_STUDIO_FREE[path] && String(env.STUDIO_GUEST_LIVE || '') !== '1') { const gate = { refused: '' }; AX_GUEST_GATES.set(req, gate); env = Object.create(env, { __guestGate: { value: gate } }); }
     }
     // S29 (FS1): who this key is, for the page to show only what the key may do (window.AX_ROLE); nothing else is said
+    // S30 (SEC-02): the Studio and brand routes carry who is asking, so a model call they make outside a job meets that person's cap
+    if (auth.pid && /^\/(studio|brand)\//.test(path)) env = Object.create(env, { __pid: { value: auth.pid } });
     if (path === '/auth/me' && req.method === 'GET') return jsonResp({ ok: true, role: auth.role === 'full' ? 'full' : 'read', guest: !!auth.guest, open: !!auth.public });
 
     if (path === '/studio/versions' && req.method === 'GET') {
@@ -16176,8 +16195,9 @@ const AXIOM_WORKER = {
         const who = auth.name || 'operator'; const now = Date.now();
         if (path === '/studio/project') {
           const ns = relNs(sb.ns); if (!sb.ns) return jsonResp({ error: 'missing_ns', detail: 'A project belongs to one client: give ns.' }, 400);
-          const idem = sb.idem ? stStr(sb.idem, 80) : null;
-          if (idem) { const had = await env.MIND_DB.prepare('SELECT id FROM studio_projects WHERE idem=?').bind(idem).first(); if (had) return jsonResp(Object.assign({ ok: true, existing: true }, await stGet(env, had.id, { light: true }))); }
+          // S30 (SEC-01): a project's idempotency key is the person's own (<pid>|<key>); one person's key never returns another's project
+          const idemRaw = sb.idem ? stStr(sb.idem, 80) : null; const idem = idemRaw ? (auth.pid || 'anon') + '|' + idemRaw : null;
+          if (idem) { const had = await env.MIND_DB.prepare("SELECT id FROM studio_projects WHERE idem=? OR (idem=? AND COALESCE(creator_pid,'')=?) LIMIT 1").bind(idem, idemRaw, auth.pid || '').first(); if (had) return jsonResp(Object.assign({ ok: true, existing: true }, await stGet(env, had.id, { light: true }))); }
           const id = stId('p');
           { const lim = jsonLimitProblem(sb.brief || {}, ST_BRIEF_MAX, ST_BRIEF_MAX, 'the brief'); if (lim) return jsonResp({ error: 'brief_too_large', detail: 'The project was not created: ' + lim + '. Put long material in a source instead.' }, 413); }
           // S24: a project made for a capped live test carries its allowance from the start, so nothing it runs can spend past it
@@ -16214,6 +16234,10 @@ const AXIOM_WORKER = {
         }
         if (path === '/studio/project/update' || path === '/studio/project/archive') {
           const p = await stProject(env, sb.id); if (!p) return jsonResp({ error: 'unknown_project' }, 404);
+          // S30 (SEC-05): a guest archives, restores or renames only the test projects it made itself (a seeded walk-through
+          // or another tester's project is shared work: a guest may work in it, not put it away or retitle it)
+          const notMine = (auth.guest || auth.public) && p.creatorPid !== (auth.pid || '-');
+          if (notMine && (path === '/studio/project/archive' || (sb.patch && sb.patch.title != null && String(sb.patch.title) !== p.title))) return jsonResp({ error: 'not_your_project', detail: 'This test project was made by someone else, so a guest link can work in it but not ' + (path === '/studio/project/archive' ? 'archive or restore it' : 'rename it') + '. Make your own project, or ask the agency.' }, 403);
           if (path === '/studio/project/archive') { await env.MIND_DB.prepare('UPDATE studio_projects SET archived=?, revision=revision+1, updated=? WHERE id=?').bind(sb.archived === false ? 0 : 1, now, p.id).run(); await stEvent(env, p.id, sb.archived === false ? 'unarchived' : 'archived', { text: sb.archived === false ? 'Project restored from the archive.' : 'Project archived. Nothing is deleted.' }, who); return jsonResp(Object.assign({ ok: true }, await stGet(env, p.id, { light: true }))); }
           if (sb.revision != null && Number(sb.revision) !== p.revision) return conflict(p, sb.revision);
           const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {};

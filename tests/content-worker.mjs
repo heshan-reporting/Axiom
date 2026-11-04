@@ -232,7 +232,7 @@ await t('POST /content/revise with a standing instruction edits all pieces and t
   ok(r.d.set.items.every(it => it.check.ok), 'the revised copy traces to the 30 per cent fact and carries no banned term');
   eq(r.d.set.history.length, 1); eq(r.d.set.history[0].n, null); ok(r.d.set.history[0].ruleId, 'history points at the rule');
   const fixes = env.MIND_DB.table('engine_fixes');
-  eq(fixes.length, 1); eq(fixes[0].ns, 'mca'); eq(fixes[0].task, 'copy'); eq(fixes[0].scope, 'client'); eq(fixes[0].source, 'content:' + setId); eq(fixes[0].active, 1);
+  eq(fixes.length, 1); eq(fixes[0].ns, 'mca'); eq(fixes[0].task, 'copy'); eq(fixes[0].scope, 'client'); eq(fixes[0].source, 'content:' + setId + ':campaign:hoof');   // S30 (RM-1): the set's campaign scopes the rule eq(fixes[0].active, 1);
   ok(/per cent/.test(fixes[0].rule), 'rule text kept from the model');
   const sys = claude.calls[claude.calls.length - 1].sys;
   ok(/You edit existing/.test(sys) && /CAMPAIGN - Hands Off Our Fuel/.test(sys), 'the revise prompt carries the same voice profile');
