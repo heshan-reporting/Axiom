@@ -27,7 +27,7 @@ async function openProject(title, viewport) {
 }
 async function openDesign(viewport) {
   await openProject('S24 U at design', viewport);
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(900);
 }
@@ -115,14 +115,14 @@ await T.t('U5. every stage head says whether its actions call a model (and how m
     await page.click(R + '.st-step:has(.st-step-l:text-matches("^' + step + '"))'); await sleep(600);
     const t = await page.textContent(R + '.st-stagehead .st-phase-line'); ok(re.test(t), step + ': ' + t.replace(/\s+/g, ' '));
   }
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await sleep(600);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await sleep(600);
   await page.click(R + '.st-dstep > summary'); ok(/AI\s*Canvas, layout variations and Fix layout: none/.test(await page.textContent(R + '.st-dstep-pop')), 'Design says it in its step popover');
 });
 
 await T.t('U7. Checks names its three judges: a measurement, an AI opinion and a person', async () => {
   await place(page, 'checks'); await page.waitForSelector(R + '.st-readydetail');
   const t = (await page.textContent(R + '.st-readydetail')).replace(/\s+/g, ' ');
-  ok(/Measured\s*Technical validation/.test(t) && /AI opinion\s*Creative Director/.test(t) && /Person\s*Approval/.test(t), t.slice(0, 400));
+  ok(/Measured\s*Technical validation/.test(t) && /AI opinion\s*Creative Partner/.test(t) && /Person\s*Approval/.test(t), t.slice(0, 400));
 });
 
 await T.t('U8. arranging from the one row: Arrange opens a menu, Align left moves the layer, a click elsewhere closes the menu', async () => {
@@ -155,7 +155,7 @@ await T.t('U9. at tablet width no step label is cut to an ellipsis; the other st
   await close(); await openDesign({ width: 834, height: 1194 });
   const bad = await cut('.st-step .st-step-l, .st-ptitle');
   eq(bad, [], 'no cut-off step label');
-  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'], 'every step keeps its name in the page');
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver'], 'every step keeps its name in the page');
   const m = await bar(); eq(m.out, [], 'the toolbar keeps every control inside its box at 834: ' + m.names.join(' | '));
   for (const n of ['Undo', 'Redo', 'Add', 'View']) ok(m.names.some(x => x.indexOf(n) >= 0), n + ' is reachable at 834: ' + m.names.join(' | '));
   // and on a wide laptop the step names and the current step's note are whole (the other notes fold into the step's name for screen readers)
@@ -234,7 +234,7 @@ await T.t('U10. with the main action in the bar, a selection still leaves one ro
     page = await fx2.open({ viewport: sz, quiet: true, onPage: pg => { pg.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text() + ' [' + ((m.location() || {}).url || '') + ']'); }); } }); page.on('dialog', d => d.accept());
     const row = R + '.st-lib tbody tr:has-text("S24 W at design"), ' + R + '.st-libcard:has-text("S24 W at design")';
     await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
-    await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+    await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
     const asset = page.locator(R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
     await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(900);
     if (sz.width === 1440) ok(await page.isVisible(R + '.st-canvasbar .st-primary'), 'the main action is in the bar (inspection on)');

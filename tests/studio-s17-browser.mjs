@@ -30,18 +30,21 @@ let page, pid;
 const stateOf = async label => (/^(Objectives|Strategy)$/.test(label) && !(await page.$(step(label)))) ? page.getAttribute(R + '.st-step[data-phase="message"]', 'data-state') : page.getAttribute(step(label), 'data-state');
 const onStep = async label => !!(await page.$(step(label, true)));
 
-await T.t('the wizard asks four things in order - the type of work, the client, the campaign context, the brief - and moves on only when each is answered; Back keeps the answers and Escape leaves', async () => {
+await T.t('the wizard asks three things in order - the client and the brief (the kind of work read from it, and corrected), the campaign context, the deliverables - and moves on only when each is answered; Back keeps the answers and Escape leaves', async () => {
   page = await fx.open({ viewport: { width: 1440, height: 900 } });
   page.on('dialog', d => d.accept(d.type() === 'prompt' ? 'not this week for this client' : undefined));
   await page.click(R + 'button:has-text("New project")'); await page.waitForSelector(R + '.st-wiz');
   const steps = await page.$$eval(R + '.st-wiz-steps li', x => x.map(e => e.textContent.replace(/^\d+/, '').trim()));
-  eq(steps, ['Project type', 'Client', 'Campaign', 'Brief'], 'four steps');
-  ok(await page.isDisabled(R + '.st-wiz-foot button:has-text("Next")'), 'Next waits for the type of work');
-  await page.click(R + '.st-type:has-text("Response Creative")'); ok(!(await page.isDisabled(R + '.st-wiz-foot button:has-text("Next")')));
-  await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  eq(steps, ['Brief', 'Campaign', 'Deliverables'], 'three steps, the brief first');
   await page.waitForSelector(R + '.st-client-card[aria-checked="true"]:has-text("Minerals Council")');
   await page.waitForFunction(() => /knowledge is ready/.test((document.querySelector('#studio-root .st-knowprep') || {}).textContent || ''), null, { timeout: 15000 });
-  ok(/approved fact|banned term|campaign|mark/i.test(await page.textContent(R + '.st-knowprep')), 'the client\'s knowledge is counted before the brief: ' + await page.textContent(R + '.st-knowprep'));
+  ok(/approved fact|banned term|campaign|mark/i.test(await page.textContent(R + '.st-knowprep')), 'the client\'s knowledge is counted beside the brief: ' + await page.textContent(R + '.st-knowprep'));
+  // the kind of work is Axiom's reading of the brief until the person chooses
+  await page.fill(R + '.st-compose-ta', 'A Senate crossbencher called the fuel tax credit a subsidy for miners; we need to respond this week.');
+  await page.waitForFunction(() => /Axiom reads this as\s*Response Creative/.test((document.querySelector('#studio-root .st-infer') || {}).textContent || ''), null, { timeout: 5000 });
+  eq(await page.getAttribute(R + '.st-type.mini[aria-checked="true"]', 'role'), 'radio', 'the inferred type is shown selected');
+  await page.click(R + '.st-type.mini:has-text("News Response")');
+  ok(/News Response\s*\(your choice\)/.test(await page.textContent(R + '.st-infer')), 'a correction is the person\'s choice: ' + await page.textContent(R + '.st-infer'));
   await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.waitForSelector(R + '.st-cmodes');
   ok(await page.isDisabled(R + '.st-wiz-foot button:has-text("Next")'), 'Next waits for a campaign context');
   await page.click(R + '.st-cmodes .st-type:has-text("Select existing campaign")');
@@ -49,10 +52,15 @@ await T.t('the wizard asks four things in order - the type of work, the client, 
   await page.click(R + '.st-camp:has-text("Hands Off Our Fuel")'); ok(!(await page.isDisabled(R + '.st-wiz-foot button:has-text("Next")')));
   // Back keeps what was chosen
   await page.click(R + '.st-wiz-foot button:has-text("Back")'); await page.waitForSelector(R + '.st-client-card[aria-checked="true"]');
+  ok(/crossbencher/.test(await page.inputValue(R + '.st-compose-ta')), 'the brief is kept');
   await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.waitForSelector(R + '.st-camp[aria-checked="true"]:has-text("Hands Off Our Fuel")');
-  await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.waitForSelector(R + '.st-compose-ta');
-  ok(await page.isDisabled(R + '.st-wiz-foot button:has-text("Create and analyse")'), 'nothing to analyse yet');
-  await page.fill(R + '.st-compose-ta', 'Too short'); ok(await page.isDisabled(R + '.st-wiz-foot button:has-text("Create and analyse")'), 'a few words are not a brief');
+  await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.waitForSelector(R + '.st-wiz-meta');
+  ok(/Hands Off Our Fuel/.test(await page.textContent(R + '.st-wiz-recap')) && /News Response/.test(await page.textContent(R + '.st-wiz-recap')), 'the recap says what will be made: ' + await page.textContent(R + '.st-wiz-recap'));
+  ok(!(await page.isDisabled(R + '.st-wiz-foot button:has-text("Create and analyse")')), 'a written brief can be analysed');
+  await page.click(R + '.st-wiz-foot button:has-text("Back")'); await page.click(R + '.st-wiz-foot button:has-text("Back")');
+  await page.fill(R + '.st-compose-ta', 'Too short');
+  await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.waitForSelector(R + '.st-wiz-meta');
+  ok(await page.isDisabled(R + '.st-wiz-foot button:has-text("Create and analyse")'), 'a few words are not a brief');
   await shot('wizard');
   await page.keyboard.press('Escape'); await page.waitForSelector(R + '.st-lib');
   eq(env.MIND_DB.db.prepare("SELECT COUNT(*) AS n FROM studio_projects").get().n, 0, 'leaving the wizard made nothing');
@@ -62,7 +70,7 @@ await T.t('a new project starts at the Brief: every later step is locked and say
   await wizardCreate(page, { type: 'Response Creative', campaign: 'Hands Off Our Fuel', title: 'Gate check', text: BRIEF, analyse: false });
   pid = latest('mca');
   ok(await onStep('Brief'), 'on the Brief');
-  for (const l of ['Objectives', 'Strategy', 'Directions', 'Copy', 'Design', 'Review']) ok(/locked|blocked/.test(await stateOf(l) || ''), l + ' is locked: ' + await stateOf(l));
+  for (const l of ['Objectives', 'Strategy', 'Directions', 'Copy', 'Create', 'Review']) ok(/locked|blocked/.test(await stateOf(l) || ''), l + ' is locked: ' + await stateOf(l));
   await page.click(step('Directions')); await page.waitForSelector(R + '.st-locked');
   const lk = await page.textContent(R + '.st-locked'); ok(/(Directions?|Explore) is locked/.test(lk) && /Go to/.test(lk), lk);
   eq(await page.$$eval(R + '.st-dcard', x => x.length), 0, 'a locked step shows what opens it, never the work');

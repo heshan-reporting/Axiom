@@ -69,7 +69,7 @@ await T.t('the composed tile is drawn, measured and read back from its pixels: t
   await page.click(R + '.st-lib tbody tr:has-text("S10 verification") .ov-link'); await page.waitForSelector(R + '.st-assetpick');
   await page.click(R + '.st-step:has(.st-step-l:text-is("Brief"))'); await page.waitForSelector(R + '#brief-objective'); await shot(page, 'brief');
   // the brief is an early step with no assets rail since S17: the composition is reached through Design
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.waitForSelector(R + '.st-assetpick'); await page.click(R + '.st-assetpick'); await page.waitForSelector(R + '.st-stage canvas');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await page.waitForSelector(R + '.st-assetpick'); await page.click(R + '.st-assetpick'); await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => { const c = document.querySelector('#studio-root .st-stage canvas'); return c && c.width > 300; });
   await page.waitForTimeout(1500);
   const comp = await page.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas'); return { png: c.toDataURL('image/png').split(',')[1], w: c.width, h: c.height }; });
@@ -116,7 +116,7 @@ await T.t('S9 + S8 + S5 in the page: an issue outlines its layer, the action sta
   ok(/held by the campaign rule/.test(le), 'the editor names the held mark: ' + le.slice(0, 300)); await shot(page, 'editor'); await page.click(R + '.st-le-wrap .btn:has-text("Cancel")').catch(() => {});
   await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review"))'); await page.waitForSelector(R + '.st-approvals'); await shot(page, 'review');
   await page.click(R + '.st-step:has(.st-step-l:text-is("Deliver"))'); await page.waitForTimeout(500); await shot(page, 'export');
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await openTool(page, 'Brand'); await page.waitForSelector(R + '.st-brand');
   await page.selectOption(R + 'select[aria-label="Campaign scope"]', 'hoof');
   await page.waitForFunction(() => { const el = document.querySelector('#studio-root section[aria-label="Knowledge inventory"]'); return el && !/Counting/.test(el.textContent); });
   const br = (await page.textContent(R + '.st-brand')).replace(/\s+/g, ' '); ok(/approved rule, held/.test(br) && /by the approved placement rule/.test(br), 'the Brand workspace shows the taught rule: ' + br.slice(0, 300)); await shot(page, 'brand');

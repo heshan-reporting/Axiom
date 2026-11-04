@@ -65,7 +65,7 @@ await T.t('U7: at 1366 x 768 every stage head is at most 180 px tall, with its f
   try {
     await openProject(page, 'S32 at design'); await sleep(800);
     const heights = {};
-    for (const st of ['Brief', 'Message', 'Direction', 'Copy', 'Review', 'Deliver']) {
+    for (const st of ['Brief', 'Plan', 'Direction', 'Copy', 'Review', 'Deliver']) {
       await page.click(R + '.st-step:has(.st-step-l:text-is("' + st + '"))'); await sleep(900);
       heights[st] = await page.evaluate(() => { const h = document.querySelector('#studio-root .st-stagehead'); if (!h) return null; const n = h.querySelector('.st-downstream'); const nh = n ? n.getBoundingClientRect().height : 0;
         return { head: Math.round(h.getBoundingClientRect().height - (n ? nh + 5 : 0)), note: Math.round(nh) }; });

@@ -11,7 +11,7 @@
    the typical-duration reading. Loads before studio.js; also usable in Node for its tests. */
 (function (root) {
   'use strict';
-  const names = { render: 'Image generation', copy: 'Words and composition', direct: 'Creative directions', strategy: 'Creative strategy', concepts: 'Design exploration', extract: 'Source analysis', analyse: 'Brief analysis', kit: 'Message kit', inspect: 'Creative Director review', revise: 'Design revision', sequence: 'Campaign sequence', export: 'Export', echo: 'Connection check' };
+  const names = { render: 'Image generation', copy: 'Words and composition', direct: 'Creative directions', strategy: 'Creative strategy', concepts: 'Design exploration', extract: 'Source analysis', analyse: 'Brief analysis', kit: 'Message kit', inspect: 'Creative Partner review', revise: 'Design revision', sequence: 'Campaign sequence', export: 'Export', echo: 'Connection check' };
   const active = j => !!j && (j.state === 'queued' || j.state === 'running');
   const percent = (done, total) => total > 0 ? Math.min(100, Math.max(0, Math.floor(done / total * 100))) : null;
   const thou = n => String(Math.max(0, Math.round(Number(n) || 0))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');

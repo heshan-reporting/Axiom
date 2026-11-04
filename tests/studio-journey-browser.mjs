@@ -34,7 +34,7 @@ const latest = async ns => env.MIND_DB.db.prepare('SELECT id, title FROM studio_
 async function settle(pid, ms = 90000) { const t0 = Date.now(); for (;;) { const d = await api('GET', '/studio/get?id=' + pid); if (!(d.jobs || []).some(j => j.state === 'queued' || j.state === 'running')) return d; if (Date.now() - t0 > ms) throw new Error('jobs did not settle: ' + JSON.stringify((d.jobs || []).map(j => j.stage + ':' + j.state))); await sleep(300); } }
 /* open one asset in Design and wait for its measurement to be filed and passing */
 async function validated(page, title) {
-  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) await goStep(page, 'Design');   // the canvas lives in Design (S13)
+  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Create"))'))) await goStep(page, 'Design');   // the canvas lives in Design (S13)
   await page.click(R + '.st-assetpick:has-text("' + title + '")');
   await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForFunction(() => /Technical validation\s*passed/.test((document.querySelector('#studio-root .st-ready') || {}).textContent || ''), null, { timeout: 30000 });
@@ -139,7 +139,7 @@ await T.t('2. save, reload and resume: the project reopens at the same stage and
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-notice.info', { timeout: 15000 });
   ok(/Resumed where you left off/.test(await page.textContent(R + '.st-notice')), 'the resume is said');
-  ok(/Design/.test(await page.textContent(R + '.st-notice')) && new RegExp(second.title).test(await page.textContent(R + '.st-notice')), await page.textContent(R + '.st-notice'));
+  ok(/Create/.test(await page.textContent(R + '.st-notice')) && new RegExp(second.title).test(await page.textContent(R + '.st-notice')), await page.textContent(R + '.st-notice'));
   ok(await page.$(R + '.st-assetpick.on:has-text("' + second.title + '")'), 'the same asset is open');
   // an unsaved brief edit survives a reload in this browser, and is offered back, not silently applied: the brief editor of a
   // project made before the guided workflow (a guided project's brief is set by its Objectives and Strategy steps)
@@ -180,8 +180,8 @@ await T.t('3. switching clients leaves nothing of the other client on screen, an
   ok(all.indexOf(mcaTitle) < 0 && !/Hands Off Our Fuel/.test(all), 'no MCA project, campaign or work on screen');
   ok(!(await page.$(R + '.st-rail')) && !(await page.$(R + '.st-inspector')), 'no rail, inspector or thread from the other client');
   await page.click(R + '.st-first-btn:has-text("A brief or one line")'); await page.waitForSelector(R + '.st-wiz');
-  await page.click(R + '.st-type:has-text("Campaign Creative")'); await page.click(R + '.st-wiz-foot button:has-text("Next")');
   await page.waitForSelector(R + '.st-client-card[aria-checked="true"]'); ok(/Australian Energy Producers/.test(await page.textContent(R + '.st-client-card[aria-checked="true"]')), 'the wizard starts on the client in the context bar');
+  await page.click(R + '.st-type.mini:has-text("Campaign Creative")');
   await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.click(R + '.st-cmodes .st-type:has-text("Select existing campaign")');
   await page.waitForSelector(R + '.st-camp'); const opts = await page.$$eval(R + '.st-camp', o => o.map(x => x.textContent));
   ok(opts.some(x => /Gas for the transition/.test(x)) && !opts.some(x => /Hands Off Our Fuel/.test(x)), 'only AEP\'s campaigns: ' + opts.join(', '));
@@ -336,14 +336,15 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   await page.focus(R + '.st-head select');
   const nb = await tabTo(f => /New project/.test(f.text)); ok(nb.outline !== 'none', 'focus is visible on New project');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-wiz');
-  // the wizard by keyboard: a type card, Next, the client (already the one in the context bar), Next, the campaign, Next, the brief
-  const tc = await tabTo(f => f.role === 'radio' && /Social Content/.test(f.text)); ok(tc.outline !== 'none', 'focus is visible on a type card');
+  // the wizard by keyboard (R2: the brief first): the client (already the one in the context bar), the brief, the type of work
+  // (Axiom's reading, corrected here), Next, the campaign, Next, the deliverables
+  await page.waitForSelector(R + '.st-client-card[aria-checked="true"]');
+  await tabTo(f => f.tag === 'TEXTAREA'); await page.keyboard.type('Write one post on the $74 billion figure: more company tax and royalties than any other industry.');
+  const tc = await tabTo(f => f.role === 'radio' && /Social Content/.test(f.text)); ok(tc.outline !== 'none', 'focus is visible on a type choice');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-type[aria-checked="true"]:has-text("Social Content")');
-  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-client-card[aria-checked="true"]');
   await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-cmodes');
   await tabTo(f => f.role === 'radio' && /Standalone/.test(f.text)); await page.keyboard.press('Enter');
-  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-compose-ta');
-  await tabTo(f => f.tag === 'TEXTAREA'); await page.keyboard.type('Write one post on the $74 billion figure: more company tax and royalties than any other industry.');
+  await tabTo(f => /^Next/.test(f.text)); await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-wiz-meta');
   const cb = await tabTo(f => /Create and analyse/.test(f.text)); ok(cb.outline !== 'none', 'focus is visible on Create and analyse');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-under', { timeout: 60000 });
   // to a composition (by mouse: the steps are covered above), then the keyboard again
@@ -358,7 +359,7 @@ await T.t('8. the essential workflow by keyboard: start a project in the wizard,
   await page.keyboard.press('Alt+1'); await page.waitForFunction(() => /Start with what happened/.test(document.activeElement.textContent) && document.activeElement.tagName === 'H2');
   await page.keyboard.press('Alt+6'); await page.waitForFunction(() => /^One final check, then approve\.$/.test(document.activeElement.textContent.trim()) && document.activeElement.tagName === 'H2');
   // the navigator itself by Tab and Enter
-  const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Design/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
+  const st = await tabTo(f => f.tag === 'BUTTON' && /^\s*\S*\s*Create/.test(f.text) && !/Continue/.test(f.text), 120, true); ok(st.outline !== 'none', 'focus visible on the navigator');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-instabs');
   // inspector tabs with the arrow keys
   await page.focus(R + '#st-tabbtn-properties'); await page.keyboard.press('ArrowRight');
@@ -439,7 +440,7 @@ await T.t('9. a tile with no imagery says why no layout can pass it and offers t
   const dj3 = await api('GET', '/studio/get?id=' + J1); const ins = dj3.thread.filter(e => e.kind === 'inspection' && e.asset === as.id).pop();
   eq([ins.version, ins.composed], [as2.current, true], 'the review judged this version as it exports');
   eq(JSON.stringify(dj3.assets.find(x => x.id === as.id).approvals || {}), appr0, 'no approval changed');
-  ok(await p2.$(R + '.st-instab.on:has-text("Creative Director")'), 'the tab is named for the role');
+  ok(await p2.$(R + '.st-instab.on:has-text("Creative Partner")'), 'the tab is named for the role');
   await shot(p2, 'art-director');
   ok(!p2.errors.length, p2.errors.join(' | '));
   await p2.ctxB.close();

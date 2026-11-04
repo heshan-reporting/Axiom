@@ -87,7 +87,7 @@ await T.t('accessibility: every control is named, every image has a name, headin
   await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))'); await check('Review');
   await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))'); await check('Export');
   await page.keyboard.press('Alt+4'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Copy"))'); await check('Copy (S13)');
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Create"))');
   // keyboard: from a stage button, Tab moves on to the next focusable control without a trap
   await page.focus(R + '.st-step.on'); await page.keyboard.press('Tab'); const active = await page.evaluate(() => { const el = document.activeElement; return el && el !== document.body ? (el.tagName + ' ' + (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30)) : ''; }); ok(active, 'focus moved on: ' + active);
   await page.click(R + '.st-head .ov-link:has-text("All projects")'); await page.waitForSelector(R + '.st-lib'); await check('Library');

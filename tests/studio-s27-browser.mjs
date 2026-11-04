@@ -72,7 +72,7 @@ await T.t('P2 the direction-change dialog takes the focus, keeps Tab inside, clo
 await T.t('P3 a paid action asks in the Studio\'s own dialog with its cost; Escape cancels and nothing is queued', async () => {
   // a listener that leaves the Studio's own question to the test and counts any browser dialog
   const page = await open('S27 at design'); let browserDialogs = 0; page.on('dialog', d => { if (!d.studio) { browserDialogs++; d.dismiss(); } });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); const chip = page.locator(R + '.st-pagechip').first(); if (await chip.count()) await chip.click();
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); const chip = page.locator(R + '.st-pagechip').first(); if (await chip.count()) await chip.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(800);
   const P = seeded.design; const jobs0 = (await api('GET', '/studio/get?id=' + P)).jobs.length;
   // a recipe that renders (built in: Release to a coordinated set) states its images and calls before anything runs

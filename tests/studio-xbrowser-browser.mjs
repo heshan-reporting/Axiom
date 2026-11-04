@@ -28,7 +28,7 @@ for (const [name, type, port] of ENGINES) {
     const all = page.locator(R + 'button:has-text("All projects")'); if (await all.count()) await all.first().click().catch(() => {});
     await page.waitForSelector(R + '.st-lib tbody tr:has-text("Engines ' + name + '")', { timeout: 30000 });
     await page.locator(R + '.st-lib tbody tr:has-text("Engines ' + name + '") button.st-lib-open').first().click(); await page.waitForSelector(R + '.st-step', { timeout: 20000 });
-    await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.click(R + '.st-assetpick:has-text("Engine tile")');
+    await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await page.click(R + '.st-assetpick:has-text("Engine tile")');
     await page.waitForSelector(R + '.st-stage canvas', { timeout: 20000 }); await page.waitForSelector(R + '.st-le-layer[data-id="chip"]', { timeout: 20000 }); await sleep(800);
     const drawn = await page.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4 * 61) if (d[i] > 0) n++; return n; });
     if (!(drawn > 50)) throw new Error('the composition is not drawn on the canvas (' + drawn + ')');

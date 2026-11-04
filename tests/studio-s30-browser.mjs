@@ -134,7 +134,7 @@ await T.t('QA8: Full AI production on a brief that says "No imagery" is refused,
 
 async function toDesign(page) {
   await openProject(page, 'S30 at design'); await sleep(700);
-  await page.locator(R + '.st-step:has(.st-step-l:text-is("Design"))').first().click();
+  await page.locator(R + '.st-step:has(.st-step-l:text-is("Create"))').first().click();
   await page.waitForSelector(R + '.st-canvasbar', { timeout: 20000 }); await sleep(1200);
 }
 async function selectHeadline(page) { await page.locator(R + '.st-le-layer[aria-label="Layer headline"]').first().click({ force: true }); await page.waitForSelector(R + '.st-fbar', { timeout: 10000 }); await sleep(400); }
@@ -239,14 +239,14 @@ await T.t('QA5: in Copy, Back returns to the piece chosen before', async () => {
   } finally { await page.ctxB.close(); }
 });
 
-await T.t('QA6 + QA4 + QA9: a classic project in production is named Design in the library; the shimmer lets clicks through; the lockout is named', async () => {
+await T.t('QA6 + QA4 + QA9: a classic project in production is named Create in the library; the shimmer lets clicks through; the lockout is named', async () => {
   const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'national', title: 'S30 classic production', brief: { objective: 'o', channels: ['facebook'] } });
   const P = (pr.project || pr).id; await fx.env.MIND_DB.prepare('UPDATE studio_projects SET status=? WHERE id=?').bind('production', P).run();
   const page = await fx.open({ quiet: true });
   try {
     const row = R + '.st-lib tbody tr:has-text("S30 classic production")'; await page.waitForSelector(row, { timeout: 15000 });
     const txt = (await page.textContent(row)).replace(/\s+/g, ' ');
-    ok(/Design/.test(txt) && !/\bproduction\b/.test(txt), 'the stage is named Design: ' + txt.slice(0, 200));
+    ok(/Create/.test(txt) && !/\bproduction\b/.test(txt), 'the stage is named Create: ' + txt.slice(0, 200));
     const pe = await page.evaluate(() => { const w = document.createElement('div'); w.setAttribute('aria-busy', 'true'); const e = document.createElement('div'); e.className = 'ov-empty'; e.textContent = 'x'; w.appendChild(e); document.querySelector('#studio-root .st').appendChild(w); const v = getComputedStyle(e, '::after').pointerEvents; w.remove(); return v; });
     eq(pe, 'none', 'the shimmer takes no clicks');
   } finally { await page.ctxB.close(); }

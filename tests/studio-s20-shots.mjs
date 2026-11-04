@@ -63,7 +63,7 @@ const openDesign = async page => {
   const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click().catch(() => {});
   await page.waitForSelector(R + '.st-stage canvas, ' + R + '.st-artboard canvas', { timeout: 15000 }).catch(() => {}); await wait(1200);
 };
-const cdOpen = async page => { const cd = page.locator(R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Director")'); if (!(await cd.count()) && await page.locator(R + '#st-inspector .st-cd').count() && await page.locator(R + '#st-inspector .st-cd').first().isVisible()) return true; if (await cd.count()) { const t = page.locator(R + '.st-insp-toggle'); if (await t.count() && await t.first().isVisible()) await t.first().click().catch(() => {}); await cd.first().click().catch(() => {}); await wait(600); return true; } return false; };
+const cdOpen = async page => { const cd = page.locator(R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Partner")'); if (!(await cd.count()) && await page.locator(R + '#st-inspector .st-cd').count() && await page.locator(R + '#st-inspector .st-cd').first().isVisible()) return true; if (await cd.count()) { const t = page.locator(R + '.st-insp-toggle'); if (await t.count() && await t.first().isVisible()) await t.first().click().catch(() => {}); await cd.first().click().catch(() => {}); await wait(600); return true; } return false; };
 for (const sz of sizes) {
   const page = await fx.open({ viewport: SZ[sz], quiet: true }); page.on('dialog', d => d.accept().catch(() => {}));
   await page.waitForSelector(R + '.st-lib, ' + R + '.st-libgrid', { timeout: 15000 }).catch(() => {});
@@ -84,7 +84,7 @@ for (const sz of sizes) {
   const fr = page.locator(R + 'button:has-text("Frame by dragging"), ' + R + 'button:has-text("Crop and position")'); if (await fr.count()) { await fr.first().scrollIntoViewIfNeeded().catch(() => {}); await fr.first().click().catch(() => {}); await wait(600); await shot(page, 'crop', sz); await page.keyboard.press('Escape').catch(() => {}); const done = page.locator(R + 'button:has-text("Done framing"), ' + R + 'button:has-text("Cancel crop"), ' + R + 'button:has-text("Frame by dragging")'); if (await done.count()) await done.first().click().catch(() => {}); await wait(300); }
   // a validation failure: the headline pushed off the stage (an unsaved edit, never saved)
   if (await hl.count()) { await hl.first().click().catch(() => {}); for (let i = 0; i < 14; i++) await page.keyboard.press('Shift+ArrowRight'); await wait(1500); await shot(page, 'invalid', sz); const dz = page.locator(R + '.st-le-foot .btn:has-text("Discard changes"), ' + R + 'button:has-text("Discard changes")'); if (await dz.count()) { await dz.first().click().catch(() => {}); await wait(500); } }
-  // the Creative Director in Design
+  // the Creative Partner in Design
   if (await cdOpen(page)) await shot(page, 'director', sz);
   // generation in progress: a review is asked for and held at the worker while the screenshot is taken
   const release = fx.hold(/^\/studio\/job\/step$/);

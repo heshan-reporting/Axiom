@@ -1,5 +1,5 @@
 /* S25 in real Chromium against the worker module, providers MOCKED (3 November 2026):
- *   R1 the Creative Director's review keeps three judgements apart - Measured, AI advice, Person - and shows the five scores, the
+ *   R1 the Creative Partner's review keeps three judgements apart - Measured, AI advice, Person - and shows the five scores, the
  *      verdict, the round and composed / imagery only exactly as the inspection returned them (unusual values here, so nothing
  *      hard-coded can pass), and says a score is never an approval;
  *   R2 a suggestion can be dismissed for this version and restored (since S26 the worker keeps it: one POST, nothing else);
@@ -32,10 +32,10 @@ async function openProject(title, viewport) {
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
 }
 async function toDirector() {
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(600);
-  const tab = page.locator(R + '.st-instab:has-text("Creative Director"), ' + R + 'button:has-text("Creative Director")').first(); if (await tab.count()) await tab.click();
+  const tab = page.locator(R + '.st-instab:has-text("Creative Partner"), ' + R + 'button:has-text("Creative Partner")').first(); if (await tab.count()) await tab.click();
   const rv = page.locator(R + '.st-cd-tabs button:has-text("Review"), ' + R + '[role="tab"]:has-text("Review")').first(); if (await rv.count()) await rv.click();
   await page.waitForSelector(R + '.st-cd-sources', { timeout: 10000 });
 }
@@ -61,7 +61,7 @@ await T.t('R1 the review keeps Measured, AI advice and Person apart, and shows t
 
 await T.t('R2 a suggestion is dismissed for this version and restored; the only write is the dismissal itself', async () => {
   await openProject('S25 at design'); await toDirector();
-  const ex = page.locator(R + '.st-cd-tabs button:has-text("Explore"), ' + R + '[role="tab"]:has-text("Explore")').first(); if (await ex.count()) await ex.click();
+  const ex = page.locator(R + '.st-cd-tabs button:has-text("Suggestions"), ' + R + '[role="tab"]:has-text("Explore")').first(); if (await ex.count()) await ex.click();
   const ask = page.locator(R + 'button:has-text("Suggest for this version")').first();
   if (await ask.count()) { await ask.click(); }
   await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
@@ -113,10 +113,10 @@ await T.t('R4 a brief field with nothing reliable on file says so, with the reas
 await T.t('R5 the measured, AI and person line of the review fits at 1440 x 900, 834 x 1194 and 390 x 844', async () => {
   for (const vp of [{ width: 1440, height: 900 }, { width: 834, height: 1194 }, { width: 390, height: 844 }]) {
     await openProject('S25 at design', vp);
-    await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+    await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
     const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click(); await sleep(800);
     const drawer = page.locator(R + '.st-insp-toggle').first(); if (await drawer.count() && await drawer.isVisible()) { await drawer.click(); await sleep(300); }
-    const tab = page.locator(R + '.st-instab:has-text("Creative Director"), ' + R + 'button:has-text("Creative Director")').first(); if (await tab.count() && await tab.isVisible()) await tab.click();
+    const tab = page.locator(R + '.st-instab:has-text("Creative Partner"), ' + R + 'button:has-text("Creative Partner")').first(); if (await tab.count() && await tab.isVisible()) await tab.click();
     await page.waitForSelector(R + '.st-cd-sources', { timeout: 10000 });
     const m = await page.evaluate(sel => { const el = document.querySelector(sel); const r = el.getBoundingClientRect(); const kids = Array.from(el.children).map(c => { const b = c.getBoundingClientRect(); return { w: b.width, clipped: c.scrollWidth > c.clientWidth + 1 }; }); return { side: document.documentElement.scrollWidth > window.innerWidth + 1, right: r.right, vw: window.innerWidth, kids }; }, R + '.st-cd-sources');
     ok(!m.side, vp.width + ': no sideways scroll'); ok(m.right <= m.vw + 1, vp.width + ': the line is inside the window (' + Math.round(m.right) + ' of ' + m.vw + ')');

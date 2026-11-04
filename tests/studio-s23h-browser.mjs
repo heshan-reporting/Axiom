@@ -57,7 +57,7 @@ const curOf = a => a.versions.find(v => v.id === a.current);
 const L = id => '.st-le-layer[data-id="' + id + '"]';
 async function openAsset(title) {
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Canvas check") button.st-lib-open');
-  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   await page.click(R + '.st-assetpick:has-text("' + title + '")'); await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForSelector(R + '.st-le-layer'); await sleep(500);
 }

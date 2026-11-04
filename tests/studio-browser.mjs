@@ -116,13 +116,13 @@ const R = '#studio-root ';
 /* S13: the guided steps - Brief, Direction, Copy, Design, Review, Export */
 const VIEW_STAGE = { Sources: 'Brief', References: 'Brief', Board: 'Design', Sequence: 'Copy', Recipes: 'Design', 'Recipes and usage': 'Design', 'All copy': 'Copy', Export: 'Deliver', Delivery: 'Deliver' };
 // concept C: seven stages - Directions is Direction; Export (Delivery) is its own stage, Deliver, with no tabs
-const goStep = (pg, name) => { const n = name === 'Directions' || name === 'Explore' ? 'Direction' : name === 'Export' || name === 'Delivery' ? 'Deliver' : name; return pg.click(R + '.st-step:has(.st-step-l:text-is("' + n + '"))'); };
+const goStep = (pg, name) => { const n = name === 'Directions' || name === 'Explore' ? 'Direction' : name === 'Export' || name === 'Delivery' ? 'Deliver' : name === 'Design' ? 'Create' : name === 'Message' ? 'Plan' : name; return pg.click(R + '.st-step:has(.st-step-l:text-is("' + n + '"))'); };
 const goView = async (pg, name) => { await goStep(pg, VIEW_STAGE[name]); if (VIEW_STAGE[name] === 'Deliver') return pg.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))'); await pg.click(R + '.st-subtab:has-text("' + name + '")'); };
 const itab = (pg, name) => place(pg, name);
 /* an asset on the canvas: the assets rail belongs to Copy, Design and Review (S17 keeps it out of the early steps), and a
    rail click inside Copy opens the words, so the canvas is reached through Design */
 const openAsset = async (pg, title) => {
-  if (!(await pg.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) { await goStep(pg, 'Design'); await pg.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))'); }
+  if (!(await pg.$(R + '.st-step.on:has(.st-step-l:text-is("Create"))'))) { await goStep(pg, 'Design'); await pg.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Create"))'); }
   await pg.click(R + '.st-assetpick:has-text("' + title + '")');
 };
 /* the project tools: in the rail once there is work, in the context panel's links during the early steps */
@@ -322,16 +322,16 @@ await t('art direction: "Come up with a better creative" proposes distinct cards
   await page.selectOption(R + '.st-size select', '2K');
 });
 await t('suggested next directions: design suggestions sit beside the creative partner and fill the composer as an editable instruction; photograph suggestions sit inside the re-render controls and fill its description; the proposed cards each draw differently; the export is the preview drawn at native size', async () => {
-  await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Explore")'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
+  await place(page, 'Creative Partner'); await page.click(R + '.st-cd-tab:has-text("Suggestions")'); await page.waitForSelector(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version (1 model call)")', { timeout: 20000 });
   ok(!(await page.$(R + '.st-partner .st-sugg.design .st-sugg-item')), 'nothing is suggested, and nothing spent, until the team asks');
   await page.click(R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")'); await page.waitForSelector(R + '.st-partner .st-sugg.design .st-sugg-item', { timeout: 20000 });
   const items = await texts(page, R + '.st-partner .st-sugg.design .st-sugg-item'); eq(items.length, 3); ok(/compact translucent panel in the upper left/.test(items[0]), items[0]); ok(/the artwork seen/.test(await page.textContent(R + '.st-partner .st-sugg-head')), 'the head says the model saw the artwork');
-  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item .ov-link:has-text("Edit instruction")'); await useBtns[1].click();
+  const useBtns = await page.$$(R + '.st-partner .st-sugg.design .st-sugg-item button:has-text("Use suggestion")'); await useBtns[1].click();
   eq(await page.inputValue(R + '.st-composer textarea'), SUGGEST.design[1].text, 'the suggestion is in the composer, editable, not sent');
   await page.fill(R + '.st-composer textarea', '');
   await tool(page, 'Images'); ok(/2 photograph suggestions inside/.test(await page.textContent(R + '.st-ad-quick')), await page.textContent(R + '.st-ad-quick'));
   await page.click(R + '.st-ad-quick > .ov-link'); await page.waitForSelector(R + '.st-ad-quick .st-sugg.image .st-sugg-item');
-  const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item .ov-link:has-text("Edit as the description")'); eq(img.length, 2); await img[0].click();
+  const img = await page.$$(R + '.st-ad-quick .st-sugg.image .st-sugg-item button:has-text("Use as the description")'); eq(img.length, 2); await img[0].click();
   eq(await page.inputValue(R + '[aria-label="Photograph description"]'), SUGGEST.image[0].text);
   await page.click(R + '.st-ad-quick button:has-text("Not now")');
   const urls = await page.$$eval(R + '.st-ad-card canvas', cs => cs.map(c => c.toDataURL('image/png'))); eq(urls.length, 3); eq(new Set(urls).size, 3, 'three visibly different compositions');
@@ -430,14 +430,14 @@ await t('a project made before the guided workflow from an open brief, copy only
   // S19: Copy lists the pieces itself (no second list in an assets rail)
   await goStep(page, 'Copy'); await page.waitForFunction(() => document.querySelectorAll('#studio-root .st-copy-pick').length === 3, null, { timeout: 30000 });
   // the thread sits beside the work outside the early steps and the Copy step: Review shows it
-  // S19: the Creative Director keeps the asset in scope outside Design too; its Conversation, whole project, holds the thread
+  // S19: the Creative Partner keeps the asset in scope outside Design too; its Conversation, whole project, holds the thread
   await goStep(page, 'Review'); { const c = await page.$(R + '.st-cd-tab:has-text("Conversation")'); if (c) await c.click(); } await page.waitForSelector(R + '.st-cd-conv'); { const w = await page.$(R + '.st-cd-convhead button:has-text("Whole project")'); if (w) await w.click(); }
   const th = await page.textContent(R + '.st-cd-conv');
   ok(/nothing is produced until you do/.test(th) && /Copy only: no render spent/.test(th), th.slice(0, 400)); eq(calls.gemini, g0, 'no render for copy-only work');
   eq(await texts(page, R + '.st-assetpick'), ['LinkedIn copy 1:1v1', 'Instagram copy 4:5v1', 'Facebook copy 1:1v1']);
   await goStep(page, 'Copy'); await page.waitForSelector(R + '.st-copy-title');
   ok(/from "The plain ask"/.test(await page.textContent(R + '.st-copy-title')));
-  ok(await page.$(R + '.st-step.skipped:has(.st-step-l:text-is("Design"))'), 'copy only: nothing to design, the step says so');
+  ok(await page.$(R + '.st-step.skipped:has(.st-step-l:text-is("Create"))'), 'copy only: nothing to design, the step says so');
 });
 await t('P12: a project made before the guided workflow on its strategy route drafts a creative strategy the team confirms, then directions with their medium, plan and diversity, then a campaign sequence planned in order and made with no image', async () => {
   const pr = await api('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'Answer the subsidy framing for regional voters', brief: v1Brief({ objective: 'Answer the subsidy framing for regional voters' }), idem: 'p12:1' });
@@ -491,10 +491,12 @@ await t('the Release Desk and Content Desk entry points open the project wizard 
   await page.waitForSelector(R + '.st-type[aria-checked="true"]:has-text("Social Content")', { timeout: 10000 });
   await page.evaluate(() => AXUI.goto('studio', { ns: 'mca', intake: 'brief', deliverable: 'set', text: 'BREAKING - fuel tax credits spiking', from: 'sentinel' }));
   await page.waitForSelector(R + '.st-type[aria-checked="true"]:has-text("Response Creative")', { timeout: 10000 });
-  // the alert's words wait in the brief step of the wizard
-  await page.click(R + '.st-wiz-foot button:has-text("Next")'); await page.click(R + '.st-client-card:has-text("Minerals Council")'); await page.click(R + '.st-wiz-foot button:has-text("Next")');
-  await page.click(R + '.st-cmodes .st-type:has-text("Standalone")'); await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  // the alert's words wait in the brief, on the wizard's first step beside the client (R2: the brief comes first)
+  await page.click(R + '.st-client-card:has-text("Minerals Council")');
   await page.waitForSelector(R + '.st-compose-ta'); eq(await page.inputValue(R + '.st-compose-ta'), 'BREAKING - fuel tax credits spiking');
+  await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  await page.click(R + '.st-cmodes .st-type:has-text("Standalone")'); await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  await page.waitForSelector(R + '.st-wiz-meta');
   eq(await page.$eval('.tabs-in', el => getComputedStyle(el).overflowX), 'auto', 'the mobile tab bar scrolls sideways');
   await page.click(R + '.st-wiz-top .ov-link:has-text("Cancel")'); await page.waitForSelector(R + '.st-lib');
 });
@@ -730,8 +732,8 @@ await t('P8: with two campaigns the wizard assumes none until the team chooses; 
   await pg.selectOption(R + '.st-head select', 'aep'); await pg.waitForFunction(() => /Australian Energy Producers/.test((document.querySelector('#studio-root .st-lib-head') || {}).textContent || ''));
   await pg.selectOption(R + '.st-head select', 'mca'); await pg.waitForSelector(R + '.st-lib tbody tr');
   await pg.click(R + '.st-lib-head .btn'); await pg.waitForSelector(R + '.st-wiz');
-  await pg.click(R + '.st-type:has-text("Campaign Creative")'); await pg.click(R + '.st-wiz-foot button:has-text("Next")');
-  await pg.waitForSelector(R + '.st-client-card[aria-checked="true"]'); await pg.click(R + '.st-wiz-foot button:has-text("Next")');
+  await pg.waitForSelector(R + '.st-client-card[aria-checked="true"]');
+  await pg.click(R + '.st-type.mini:has-text("Campaign Creative")'); await pg.click(R + '.st-wiz-foot button:has-text("Next")');
   await pg.waitForSelector(R + '.st-cmodes');
   ok(await pg.isDisabled(R + '.st-wiz-foot button:has-text("Next")'), 'no campaign context is assumed');
   await pg.click(R + '.st-cmodes .st-type:has-text("Select existing campaign")');

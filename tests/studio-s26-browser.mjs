@@ -26,14 +26,14 @@ async function openProject(title, o) {
   return page;
 }
 async function toExplore(page) {
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"], ' + R + 'canvas', { timeout: 15000 }); await sleep(1500);   // a read-only key has the composition, not the editor
-  // the inspector settles as the asset loads: open the Creative Director's Explore until its suggestions area is there
+  // the inspector settles as the asset loads: open the Creative Partner's Explore until its suggestions area is there
   for (let i = 0; i < 10; i++) {
     // a second click on an open tab folds it again: click only what is not open yet
-    if (!(await page.locator(R + '.st-cd-tabs:visible').count())) { const tab = page.locator(R + '.st-instab:has-text("Creative Director"), ' + R + 'button:has-text("Creative Director")').first(); if (await tab.count()) await tab.click(); await sleep(300); }
-    const ex = page.locator(R + '.st-cd-tabs:visible button:has-text("Explore")').first(); if (await ex.count() && (await ex.getAttribute('aria-selected')) !== 'true') await ex.click();
+    if (!(await page.locator(R + '.st-cd-tabs:visible').count())) { const tab = page.locator(R + '.st-instab:has-text("Creative Partner"), ' + R + 'button:has-text("Creative Partner")').first(); if (await tab.count()) await tab.click(); await sleep(300); }
+    const ex = page.locator(R + '.st-cd-tabs:visible button:has-text("Suggestions")').first(); if (await ex.count() && (await ex.getAttribute("aria-current")) !== "true") await ex.click();
     if (await page.locator(R + 'button:has-text("Suggest for this version"), ' + R + '.st-sugg-item, ' + R + '.st-sugg-dismissed').count()) break; await sleep(700);
   }
   try { await page.waitForSelector(R + 'button:has-text("Suggest for this version"), ' + R + '.st-sugg-item, ' + R + '.st-sugg-dismissed', { timeout: 15000 }); }
@@ -74,9 +74,9 @@ await T.t('B1 a dismissal in one browser is the whole team\'s: a fresh browser s
   await b.ctxB.close();
   // a read-only key is shown no suggestions (they need a full key), so there is nothing to dismiss or restore
   const c = await openProject('S26 at design', { role: 'read' });
-  await c.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await c.waitForSelector(R + 'canvas', { timeout: 15000 }); await sleep(1200);
-  if (!(await c.locator(R + '.st-cd-tabs:visible').count())) await c.locator(R + '.st-instab:has-text("Creative Director"), ' + R + 'button:has-text("Creative Director")').first().click();
-  await c.locator(R + '.st-cd-tabs:visible button:has-text("Explore")').first().click(); await sleep(400);
+  await c.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await c.waitForSelector(R + 'canvas', { timeout: 15000 }); await sleep(1200);
+  if (!(await c.locator(R + '.st-cd-tabs:visible').count())) await c.locator(R + '.st-instab:has-text("Creative Partner"), ' + R + 'button:has-text("Creative Partner")').first().click();
+  await c.locator(R + '.st-cd-tabs:visible button:has-text("Suggestions")').first().click(); await sleep(400);
   ok(/Suggestions need a full key/.test(await c.textContent(R + '.st-inspector')), 'the read-only key is told suggestions need a full key');
   eq(await c.locator(R + '.st-sugg-dismiss').count(), 0, 'and has no Dismiss or Restore');
   await c.ctxB.close();
@@ -120,7 +120,7 @@ await T.t('B3 classic project: a dialog names the pieces before a direction chan
   let g2; for (let i = 0; i < 40; i++) { g2 = await api('GET', '/studio/get?id=' + Pc); if (g2.directions.find(d => d.chosen).id === other.id && g2.assets.length > old.length) break; await sleep(250); }
   eq(g2.directions.find(d => d.chosen).id, other.id, 'the new direction is chosen'); ok(g2.assets.length > old.length, 'and produced as a new set');
   // Production > Needs attention lists the earlier pieces with the rewrite (paid) and Keep as written (free)
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await sleep(400);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await sleep(400);
   const rec = page.locator(R + '.st-designtabs button:has-text("Recipes"), ' + R + '.st-subtab:has-text("Recipes")').first(); await rec.click();
   await page.waitForSelector(R + '.st-prod table[aria-label="Impact"]', { timeout: 15000 });
   const rows = page.locator(R + '.st-prod table[aria-label="Impact"] tbody tr').filter({ hasText: 'the chosen direction is now' });

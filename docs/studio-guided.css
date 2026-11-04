@@ -184,9 +184,6 @@
 #studio-root .st .st-detect .st-ic{color:var(--sk-accent);vertical-align:-3px}
 #studio-root .st .st-detect.none{background:var(--sk-panel);border-color:var(--sk-line)}
 #studio-root .st .st-detect-acts{display:flex;gap:8px}
-#studio-root .st .st-briefdetails{border:1px solid var(--sk-line);border-radius:var(--sk-r-lg);background:var(--sk-panel);padding:12px 16px}
-#studio-root .st .st-briefdetails > summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
-#studio-root .st .st-briefdetails > summary::-webkit-details-marker{display:none}
 #studio-root .st .st-bd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px}
 #studio-root .st .st-bd-grid p{margin:4px 0 0;color:var(--sk-ink-2)}
 #studio-root .st .st-bd-chans{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
@@ -331,3 +328,20 @@
   #studio-root .st .st-proc::after, #studio-root .st .st-proc-spin, #studio-root .st .st-proc-item.now .st-proc-dot, #studio-root .st .st-knowprep-dot{animation:none}
   #studio-root .st .st-type:hover, #studio-root .st .st-client-card:hover, #studio-root .st .st-dcard:hover, #studio-root .st .st-strat:hover, #studio-root .st .st-pmode:hover, #studio-root .st .st-lib table.ov-table tr:hover{transform:none}
 }
+
+/* R2 (the redesign): the wizard starts with what the person needs - the client and the brief - and reads the kind of work from it */
+#studio-root .st .st-wiz-start{display:flex;flex-direction:column;gap:18px}
+#studio-root .st .st-wiz-start .st-clients{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+#studio-root .st .st-wiz-start .st-client-card{min-height:0;padding:10px 12px}
+#studio-root .st .st-wiz-start .st-client-act{display:none}
+#studio-root .st .st-wiz-what{display:flex;flex-direction:column;gap:8px}
+#studio-root .st .st-infer{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--sk-line);border-radius:var(--sk-r-md,10px);background:color-mix(in srgb,var(--sk-panel) 60%,transparent)}
+#studio-root .st .st-infer-read{font-size:13px;color:var(--sk-ink-2)}
+#studio-root .st .st-infer-read b{color:var(--sk-ink)}
+#studio-root .st .st-types.mini{display:flex;flex-wrap:wrap;gap:6px}
+#studio-root .st .st-type.mini{min-height:0;flex-direction:row;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:500;color:var(--sk-ink-2);transform:none}
+#studio-root .st .st-type.mini:hover:not(:disabled){transform:none;box-shadow:none;border-color:var(--sk-line-2);color:var(--sk-ink)}
+#studio-root .st .st-type.mini.on{background:var(--sk-accent);border-color:var(--sk-accent);color:var(--sk-accent-ink);box-shadow:none}
+#studio-root .st .st-wiz-recap{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;border-radius:var(--sk-r-md,10px);border:1px dashed var(--sk-line-2);font-size:12.5px;color:var(--sk-ink-2)}
+#studio-root .st .st-wiz-start .st-client-main{min-width:0}
+#studio-root .st .st-wiz-start .st-test-chip{white-space:normal;max-width:100%;line-height:1.3}

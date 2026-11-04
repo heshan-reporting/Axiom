@@ -28,7 +28,7 @@ const lum = c => { const m = String(c).match(/[\d.]+/g).map(Number); const f = v
 const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 async function toDesign(page) {
   await openProject(page, 'S29 at design'); await sleep(700);
-  await page.locator(R + '.st-step:has(.st-step-l:text-is("Design"))').first().click();
+  await page.locator(R + '.st-step:has(.st-step-l:text-is("Create"))').first().click();
   await page.waitForSelector(R + '.st-canvasbar', { timeout: 20000 }); await sleep(1200);
 }
 async function selectHeadline(page) { await page.locator(R + '.st-le-layer[aria-label="Layer headline"]').first().click({ force: true }); await page.waitForSelector(R + '.st-fbar', { timeout: 10000 }); await sleep(400); }
@@ -60,7 +60,7 @@ await T.t('UX6 + UX4 + UX11: the library names the stages as the header does; th
   try {
     await page.waitForSelector(R + '.st-lib tbody tr:has-text("S29 at strategy")', { timeout: 20000 });
     const stage = t => page.evaluate(t => { const tr = Array.from(document.querySelectorAll('#studio-root .st-lib tbody tr')).find(x => x.textContent.indexOf(t) >= 0); const s = tr && tr.querySelector('.st-status'); return s ? s.textContent.trim() : null; }, t);
-    eq(await stage('S29 at objectives'), 'Message'); eq(await stage('S29 at strategy'), 'Message'); eq(await stage('S29 at directions'), 'Direction'); eq(await stage('S29 at copy'), 'Copy');
+    eq(await stage('S29 at objectives'), 'Plan'); eq(await stage('S29 at strategy'), 'Plan'); eq(await stage('S29 at directions'), 'Direction'); eq(await stage('S29 at copy'), 'Copy');
     await openProject(page, 'S29 at objectives'); await sleep(900);
     await page.locator(R + '.st-step:has(.st-step-l:text-is("Brief"))').first().click(); await sleep(900);
     const d = await page.$(R + 'details.st-cmp');
@@ -68,7 +68,7 @@ await T.t('UX6 + UX4 + UX11: the library names the stages as the header does; th
     const cmp = await page.evaluate(() => { const d = document.querySelector('#studio-root details.st-cmp'); const s = d.querySelector('summary'); return { display: getComputedStyle(d).display, h: s.getBoundingClientRect().height }; });
     ok(cmp.display !== 'grid' && cmp.h <= 40, 'a plain disclosure with a one-line summary: ' + JSON.stringify(cmp));
     const steps = await page.$$eval(R + '.st-ctx-steps > li', l => l.map(x => x.querySelector('span').textContent));
-    if (steps.length) eq(steps, ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver']);
+    if (steps.length) eq(steps, ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver']);
   } finally { await page.ctxB.close(); }
 });
 

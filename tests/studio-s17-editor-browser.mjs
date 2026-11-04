@@ -32,7 +32,7 @@ const box = sel => page.$eval(R + sel, el => ({ left: el.style.left, top: el.sty
 const L = id => '.st-le-layer[aria-label="Layer ' + id + '"]';
 async function openAsset(title) {
   await page.waitForSelector(R + '.st-lib tbody tr'); await page.click(R + '.st-lib tbody tr:has-text("Editor check") button.st-lib-open');
-  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   await page.click(R + '.st-assetpick:has-text("' + title + '")'); await page.waitForSelector(R + '.st-stage canvas');
 }
 // every test starts from a closed editor (a failed test may have left it open) and works on a stage in view: the mouse can only
@@ -135,7 +135,7 @@ await T.t('an unsaved layout is autosaved as a draft for this person only and of
   const dr = await api('GET', '/studio/draft?asset=' + A); ok(dr.draft && dr.draft.layout, 'the draft is on the worker for this key');
   const rd = await api('GET', '/studio/draft?asset=' + A, null, 'read-key'); ok(!rd.draft, 'another person does not see it');
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
-  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))').catch(() => {});
   await page.waitForSelector(R + '.st-assetpick:has-text("Square tile")'); await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   // S19: in the same browser the working store brings the edit straight back - no question to answer
   await page.waitForSelector(R + L('cta')); await sleep(600); eq((await box(L('cta'))).top, moved.top, 'the CTA is back on its own after a reload (the working store)');
@@ -143,7 +143,7 @@ await T.t('an unsaved layout is autosaved as a draft for this person only and of
   // without the local copy (another browser or device) the server draft is offered back
   await page.evaluate(() => window.STWork.clear());
   await page.reload(); await page.waitForFunction(() => typeof go === 'function' && window.STRender); await page.evaluate(() => go('studio'));
-  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
+  await page.waitForSelector(R + '.st-step'); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))').catch(() => {});
   await page.waitForSelector(R + '.st-assetpick:has-text("Square tile")'); await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   await page.waitForSelector(R + '.st-le-layer'); await page.waitForSelector(R + '.st-le-restore', { timeout: 15000 });
   ok(/unsaved layout changes/.test(await page.textContent(R + '.st-le-restore')), await page.textContent(R + '.st-le-restore'));
@@ -187,7 +187,7 @@ await T.t('the keyboard, written down and kept: ? opens the shortcuts (a key pre
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a1', code: 'Digit1', altKey: true, bubbles: true })));
   await page.waitForFunction(() => /Brief/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '\u00a2', code: 'Digit5', altKey: true, bubbles: true })));
-  await page.waitForFunction(() => /Design/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
+  await page.waitForFunction(() => /Create/.test((document.querySelector('#studio-root .st-step.on .st-step-l') || {}).textContent || ''), null, { timeout: 5000 });
   await page.click(R + '.st-assetpick:has-text("Square tile")'); await page.waitForSelector(R + '.st-stage canvas');
   await shot('keys');
 });

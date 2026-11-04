@@ -30,7 +30,7 @@ async function openDesign(title, viewport) {
   const row = R + '.st-lib tbody tr:has-text("' + title + '"), ' + R + '.st-libcard:has-text("' + title + '")';
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(500);
 }
@@ -154,12 +154,12 @@ await T.t('C3. moving to another stage and back, or reloading the page, brings t
   const moved = await headTop(); ok(Math.abs(moved - t0) > 0.5, 'moved');
   let asked = 0; page.on('dialog', () => { asked++; });
   await page.click(R + '.st-step:has(.st-step-l:text-is("Copy"))'); await sleep(600);
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 10000 }); await sleep(600);
   ok(Math.abs(await headTop() - moved) < 0.2, 'back after a stage change');
   await page.reload({ waitUntil: 'domcontentloaded' }); await page.waitForFunction(() => typeof go === 'function' && typeof studioInit === 'function'); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Create"))'))) await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(800);
   ok(Math.abs(await headTop() - moved) < 0.2, 'back after a reload');
   eq(asked, 0, 'no dialog was needed: the work was recoverable all along');
@@ -224,7 +224,7 @@ await T.t('G. Copy is one list of the pieces: the assets rail of the other steps
   ok(!(await page.$(R + 'nav.st-rail')), 'no assets rail in Copy'); ok(!(await page.$(R + '.st-rail-open')), 'nor a button to open one');
 });
 
-await T.t('H. the Creative Director works in Copy on the piece on screen: its scope names the piece, the targets are only real ones, and with no asset chosen a direction waits rather than widening to the set', async () => {
+await T.t('H. the Creative Partner works in Copy on the piece on screen: its scope names the piece, the targets are only real ones, and with no asset chosen a direction waits rather than widening to the set', async () => {
   // continues on the Copy step of G
   await page.waitForSelector(R + '#st-inspector .st-cd', { timeout: 10000 });
   const first = (await assets(PE.copy))[0];
@@ -235,8 +235,8 @@ await T.t('H. the Creative Director works in Copy on the piece on screen: its sc
   ok(opts.some(t => /^The whole set \(\d+\)$/.test(t)), 'the set names its count');
   ok(!(await page.$(R + '.st-cd-asset option[value=""]')), 'Copy always has a piece on screen: no "no asset" choice there');
   const second = (await assets(PE.copy))[1];
-  if (second) { await page.selectOption(R + '.st-cd-asset', second.id); await sleep(300); ok(/ on/.test(' ' + await page.$eval(R + '.st-copy-pick:has-text("' + second.title + '")', el => el.className)), 'picking an asset in the Creative Director opens it in Copy'); }
-  // Review: the Creative Director can be set to no asset; a direction then waits for a target rather than widening
+  if (second) { await page.selectOption(R + '.st-cd-asset', second.id); await sleep(300); ok(/ on/.test(' ' + await page.$eval(R + '.st-copy-pick:has-text("' + second.title + '")', el => el.className)), 'picking an asset in the Creative Partner opens it in Copy'); }
+  // Review: the Creative Partner can be set to no asset; a direction then waits for a target rather than widening
   await page.click(R + '.st-step:has(.st-step-l:text-matches("^Review", "i"))'); await page.waitForSelector(R + '#st-inspector .st-cd-asset', { timeout: 10000 });
   await page.fill(R + '.st-composer textarea', 'Make the headline plainer');
   await page.selectOption(R + '.st-cd-asset', ''); await sleep(200);

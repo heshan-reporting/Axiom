@@ -1,6 +1,6 @@
 {
  "vendor/fonts/fonts.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "3c52d4a530d5e86f"
  },
  "ax-ui.js": {
@@ -12,67 +12,67 @@
   "sha": "4243dea1f75f7056"
  },
  "studio-progress.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "8d01608b6ee8af30"
  },
  "studio-flow.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "43c36dcb04928a65"
  },
  "studio-skin.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "1cb7db12879f2923"
  },
  "studio-guided.css": {
-  "v": "r34",
-  "sha": "474189ce084c063a"
+  "v": "r35",
+  "sha": "131dd8035a76f57d"
  },
  "studio-editor.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "12168fe43d470025"
  },
  "studio-shell.css": {
-  "v": "r34",
-  "sha": "14068e48c68f28cd"
+  "v": "r35",
+  "sha": "143566c239610e28"
  },
  "studio-polish.css": {
-  "v": "r34",
+  "v": "r35",
   "sha": "cf37af97729c5836"
  },
  "studio-render.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "c2a2d98000efb1e5"
  },
  "studio-progress.js": {
-  "v": "r34",
-  "sha": "13aad15279100978"
+  "v": "r35",
+  "sha": "8a53708d07bf2da4"
  },
  "studio-merge.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "09ca57ede41b3e5b"
  },
  "studio.js": {
-  "v": "r34",
-  "sha": "7ec66e59c7a010e6"
+  "v": "r35",
+  "sha": "f42c6aca624f1699"
  },
  "studio-guided.js": {
-  "v": "r34",
-  "sha": "fd7dc5aaba1ad746"
+  "v": "r35",
+  "sha": "af534af05c5fb09b"
  },
  "studio-editor.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "0d78d9e181ef3fe5"
  },
  "studio-canvas.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "5e533c406797a094"
  },
  "studio-style.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "0941cfccf9bc119f"
  },
  "studio-brandmem.js": {
-  "v": "r34",
+  "v": "r35",
   "sha": "c2fdd7cec9c075a4"
  }
 }

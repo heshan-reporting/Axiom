@@ -30,7 +30,7 @@ async function axe(page, where) {
   return v.map(x => where + ': ' + x.id + ' (' + x.impact + ') x' + x.n + ' at ' + x.where.join(' | '));
 }
 async function stage(page, name) { const s = page.locator(R + '.st-step:has(.st-step-l:text-is("' + name + '"))').first(); if (!(await s.count())) return false; await s.click(); await sleep(800); return true; }
-const STAGES = ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'];
+const STAGES = ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver'];
 
 for (const role of ['full', 'read']) {
   for (const [w, h] of [[390, 844], [1024, 768], [1440, 900]]) {
@@ -61,7 +61,7 @@ await T.t('1440, full key: the light appearance across the library and the seven
 await T.t('1440, full key: Design with a layer selected, each dock panel, the Style panel and its colour picker', async () => {
   const page = await open(undefined, 1440, 900); const bad = [];
   try {
-    await openProject(page, 'A11Y at design'); await stage(page, 'Design');
+    await openProject(page, 'A11Y at design'); await stage(page, 'Create');
     await page.waitForSelector(R + '.st-canvasbar', { timeout: 20000 }); await sleep(800);
     const hl = page.locator(R + '.st-le-layer[aria-label="Layer headline"]'); if (await hl.count()) { await hl.first().click({ force: true }); await sleep(300); }
     bad.push(...await axe(page, 'Design, headline selected (Style panel)'));

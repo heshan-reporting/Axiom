@@ -29,7 +29,7 @@ await T.t('seven steps in order: the wizard makes a guided project, the understa
   page = await fx.open({ viewport: { width: 1440, height: 900 } });
   const g0 = calls.gemini;
   await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', text: 'Write one Instagram tile on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
-  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'], 'concept C: seven stages over the seven steps and the delivery');
+  eq(await page.$$eval(R + '.st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver'], 'concept C: seven stages over the seven steps and the delivery');
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page);
   pid = (await latest('mca')).id; const d = await settle(pid);
   eq(d.brief.workflow, 2, 'a guided project');
@@ -79,7 +79,7 @@ await T.t('the copy partner offers headlines as options, each one model call, an
 });
 
 await T.t('Design: the production mode is chosen once the words are ready, its cost stated before anything is queued; one paid image lands on the composition; the dock reaches the words, the brand, the layers and the Art Director', async () => {
-  await page.click(R + '.st-stagehead button:has-text("Continue to Design")');
+  await page.click(R + '.st-stagehead button:has-text("Continue to Create")');
   await page.waitForSelector(R + '.st-pmodes', { timeout: 15000 });
   ok(/one render per planned image/.test(await page.textContent(R + '.st-pmode:has-text("Editable creative")')), 'each mode says what it spends');
   ok(await page.isDisabled(R + '.st-pmodes .st-stepbar button:has-text("Generate")'), 'nothing is generated until a mode is chosen');
@@ -95,7 +95,7 @@ await T.t('Design: the production mode is chosen once the words are ready, its c
   eq((d.brief.production || {}).mode, 'editable', 'the mode is recorded on the project');
   // the canvas and its dock
   await goStep(page, 'Design'); await page.waitForSelector(R + '.st-dock', { timeout: 15000 });
-  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Add elements', 'Design', 'Text', 'Images', 'Brand', 'Layers'], 'the six tools, Add elements first (concept C: the accent Add button at the top of the rail); the Creative Director is the right panel');
+  eq(await page.$$eval(R + '.st-dock .st-dock-btn', x => x.map(e => e.textContent.trim())), ['Add elements', 'Design', 'Text', 'Images', 'Brand', 'Layers'], 'the six tools, Add elements first (concept C: the accent Add button at the top of the rail); the Creative Partner is the right panel');
   ok(await page.$(R + '.st-dock .st-dock-btn.add'), 'Add is the rail\'s accent button');
   // S18: each tool opens its panel beside the canvas (the page does not scroll), and the canvas stays in view
   const y0 = await page.evaluate(() => document.querySelector('#studio-root .st-centre').scrollTop);

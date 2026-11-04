@@ -6,7 +6,7 @@
  *   G-B3 every stage head answers missing / accepted / main action / next from the record, and an earlier stage says what a change
  *        there would leave behind - then, once a choice changed, what is now built on the earlier one;
  *   G-B4 Explore is one set of direction cards side by side, each with its own sketch, and no strip of the same previews above;
- *   G-B5 the Creative Director offers Review / Explore / Conversation wherever an asset is in scope (Explore says where it works
+ *   G-B5 the Creative Partner offers Review / Explore / Conversation wherever an asset is in scope (Explore says where it works
  *        outside Design), starts a new part or asset at its beginning, and keeps ids and model names behind a disclosure;
  *   G-B6 at 1440 x 900 the fitted 4:5 artboard is at least 560 px tall with the inspector open; reframing says so in the tool row,
  *        never over the artwork; the readiness line is not cut off and names layers by name, not by id;
@@ -17,7 +17,7 @@ import { makeStudio, runner, eq, ok } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
 const fx = await makeStudio({ port: 8874, inspect: false });
 const R = '#studio-root ';
-const T = runner('studio-s23g-browser (the redesigned workspace: library, appearance, stage questions, Explore, Creative Director, Design geometry)');
+const T = runner('studio-s23g-browser (the redesigned workspace: library, appearance, stage questions, Explore, Creative Partner, Design geometry)');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const PFX = 'G23';
 const S = await seedStages(fx, { prefix: PFX, only: ['objectives', 'directions', 'copy', 'design'] });
@@ -35,7 +35,7 @@ const openProject = async (page, title) => {
   await page.locator(R + '.st-lib tbody tr:has-text("' + title + '") button.st-lib-open').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await sleep(500);
 };
-const phase = async (page, label, sub) => { await page.click(R + '.st-step:has(.st-step-l:text-matches("^' + label + '", "i"))'); await sleep(400); if (sub) { await page.click(R + '.st-substep:has-text("' + sub + '")'); await sleep(400); } };
+const phase = async (page, label, sub) => { await page.click(R + '.st-step:has(.st-step-l:text-matches("^' + ({ Design: 'Create', Message: 'Plan' }[label] || label) + '", "i"))'); await sleep(400); if (sub) { await page.click(R + '.st-substep:has-text("' + sub + '")'); await sleep(400); } };
 const openDesign = async (page, title, asset) => {
   await openProject(page, title); await phase(page, 'Design');
   const chip = page.locator(R + '.st-pagechip:has-text("' + asset + '"), ' + R + '.st-assetpick:has-text("' + asset + '")'); if (await chip.count()) await chip.first().click();
@@ -152,7 +152,7 @@ await T.t('G-B4 Explore is one set of direction cards side by side, each with it
   ok(!page.errors.length, 'no page errors: ' + page.errors.join(' | ')); await page.ctxB.close();
 });
 
-await T.t('G-B5 the Creative Director: three parts wherever an asset is in scope, a new part or asset starts at its beginning, diagnostics behind a disclosure', async () => {
+await T.t('G-B5 the Creative Partner: three parts wherever an asset is in scope, a new part or asset starts at its beginning, diagnostics behind a disclosure', async () => {
   const page = await fx.open({ viewport: { width: 1440, height: 900 } });
   await openDesign(page, PFX + ' at design', 'Instagram');
   // a review exists to read: ask for one (mocked; the inspect stage answers)
@@ -168,24 +168,26 @@ await T.t('G-B5 the Creative Director: three parts wherever an asset is in scope
   // a part that is scrolled, then another part, then back: each starts at its beginning
   const body = R + '.st-cd-body';
   await page.$eval(body, e => { e.scrollTop = 99999; }); const deep = await page.$eval(body, e => e.scrollTop);
-  await page.click(R + '.st-cd-tab:has-text("Explore")'); await sleep(250);
-  eq(await page.$eval(body, e => e.scrollTop), 0, 'Explore opens at its top (it was ' + deep + ' px down in Review)');
+  // the parts are stacked sections in one scroll: a tab brings its section to the top (or the foot when it is the last)
+  const atSec = k => page.$eval(body, (e, k) => { const s = e.querySelector('[data-sec="' + k + '"]'); const off = s.getBoundingClientRect().top - e.getBoundingClientRect().top; return Math.abs(off) <= 8 || e.scrollTop >= e.scrollHeight - e.clientHeight - 2; }, k);
+  await page.click(R + '.st-cd-tab:has-text("Suggestions")'); await sleep(250);
+  ok(await atSec('ideas'), 'Suggestions opens at its top (it was ' + deep + ' px down in Review)');
   await page.click(R + '.st-cd-tab:has-text("Review")'); await sleep(250);
-  eq(await page.$eval(body, e => e.scrollTop), 0, 'Review opens at its top');
+  ok(await atSec('review'), 'Review opens at its top');
   // someone reading an unchanged review keeps their place while the page refreshes around it
   await page.$eval(body, e => { e.scrollTop = 40; }); const kept = await page.$eval(body, e => e.scrollTop);
   await sleep(3200);   // the island's job poll and clock tick re-render the panel
   eq(await page.$eval(body, e => e.scrollTop), kept, 'an unchanged review keeps its scroll position');
   // another asset: back to the top of its review
   await page.locator(R + '.st-pagechip:has-text("Facebook")').first().click(); await sleep(900);
-  eq(await page.$eval(body, e => e.scrollTop), 0, 'another asset starts at the top of its review');
+  ok(await atSec('review'), 'another asset starts at the top of its review');
   // outside Design the same three parts; Explore says where its work happens and opens it
   await phase(page, 'Copy'); await sleep(500);
   const tabs = await page.$$eval(R + '.st-cd-tab', t => t.map(x => x.textContent.trim()));
-  eq(tabs, ['Review', 'Explore', 'Conversation'], 'the same three parts in Copy');
-  await page.click(R + '.st-cd-tab:has-text("Explore")');
+  eq(tabs, ['Latest review', 'Suggestions', 'Conversation'], 'the same three parts in Copy');
+  await page.click(R + '.st-cd-tab:has-text("Suggestions")');
   ok(/works on the composition/.test(await page.textContent(R + '.st-cd-elsewhere')), 'Explore says it works on the composition');
-  await page.click(R + '.st-cd-elsewhere button:has-text("in Design")'); await sleep(800);
+  await page.click(R + '.st-cd-elsewhere button:has-text("in Create")'); await sleep(800);
   ok(await page.$(R + '.st-step.on[data-phase="design"]') && await page.$(R + '.st-stage canvas'), 'and opens the piece in Design');
   ok(!page.errors.length, 'no page errors: ' + page.errors.join(' | ')); await page.ctxB.close();
 });

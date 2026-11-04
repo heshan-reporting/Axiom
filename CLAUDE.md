@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r34` since S32.
+  with `?v=r35` since the R2 redesign.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take

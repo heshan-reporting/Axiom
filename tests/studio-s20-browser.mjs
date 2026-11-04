@@ -24,7 +24,7 @@ async function openDesign(title) {
   const row = R + '.st-lib tbody tr:has-text("' + title + '"), ' + R + '.st-libcard:has-text("' + title + '")';
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(500);
 }
@@ -37,7 +37,7 @@ await T.t('A. applying a suggestion made for this asset sends exactly that asset
   const A = (await assets(PA))[0];
   await place(page, 'creative director');
   await page.selectOption(R + '.st-composer select[aria-label="Target of the direction"]', 'set'); await sleep(150);
-  await page.click(R + '.st-cd-tab:has-text("Ideas"), ' + R + '.st-cd-tab:has-text("Explore")');
+  await page.click(R + '.st-cd-tab:has-text("Ideas"), ' + R + '.st-cd-tab:has-text("Suggestions")');
   const ask = page.locator(R + 'button:has-text("Suggest for this version")'); if (await ask.count()) await ask.first().click();
   await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
   const n0 = jobsPosted().length;
@@ -89,7 +89,7 @@ await T.t('A2. the composer\'s own targets keep their scope: a family direction 
 
 await T.t('A3. a suggestion made for an earlier version is not applied to newer artwork: it says why and sends nothing', async () => {
   const A = (await assets(PA))[0];
-  await page.click(R + '.st-cd-tab:has-text("Ideas"), ' + R + '.st-cd-tab:has-text("Explore")');
+  await page.click(R + '.st-cd-tab:has-text("Ideas"), ' + R + '.st-cd-tab:has-text("Suggestions")');
   const ask = page.locator(R + 'button:has-text("Suggest for this version")'); if (await ask.count()) await ask.first().click();
   await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
   // the asset moves on (someone else's edit) while the suggestion is on screen
@@ -132,7 +132,7 @@ await T.t('B3. reloading the page while a save is out: once the version lands, t
   release(); await sleep(1500);
   await page.waitForFunction(() => typeof go === 'function' && typeof studioInit === 'function'); await page.evaluate(() => go('studio'));
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Design"))'))) await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  if (!(await page.$(R + '.st-step.on:has(.st-step-l:text-is("Create"))'))) await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(1000);
   const A1 = (await assets(PD))[0]; eq(cur(A1).copy.headline, 'Words A', 'A was saved');
   ok(/Words B/.test(await shownHeadline()), 'B is back on the canvas after the reload: ' + await shownHeadline());
@@ -168,11 +168,11 @@ await T.t('W1. at 1440 x 900 a fitted 4:5 artboard is at least 560px tall with t
 });
 
 await T.t('W2. seven stages in the header (concept C) - Brief, Message, Direction, Copy, Design, Review, Deliver - with Message\'s two steps in its head, Alt+1..7 between stages, one main action in Design', async () => {
-  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver']);
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver']);
   ok(!(await page.$(R + '.st > .st-steps')), 'no navigator bar of its own: the phases sit in the header');
   eq(await page.$$eval(R + '.st-canvasbar .btn.st-primary, ' + R + '.st-canvasbar .btn:not(.ghost):not(.sm.on)', x => x.filter(e => /Continue to Review/.test(e.textContent)).length), 1, 'Design has one main action');
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
-  await page.keyboard.press('Alt+2'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Message"))');
+  await page.keyboard.press('Alt+2'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Plan"))');
   const subs = await page.$$eval(R + '.st-phasesteps .st-substep', x => x.map(e => e.textContent.replace(/,.*$/, '').replace(/^\S*\d/, '').trim()));
   ok(subs.join('|').indexOf('Objectives') >= 0 && subs.join('|').indexOf('Strategy') >= 0, 'Message shows its steps: ' + subs.join(' | '));
   await page.click(R + '.st-substep:has-text("Strategy")'); await page.waitForSelector(R + '.st-substep.on:has-text("Strategy")');
@@ -180,15 +180,15 @@ await T.t('W2. seven stages in the header (concept C) - Brief, Message, Directio
   ok(!/Needs/.test(await page.textContent(R + '.st-stagehead')), 'the long account is behind help, not on the page');
   await page.keyboard.press('Alt+1'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Brief"))');
   await page.keyboard.press('Alt+3'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Direction"))');
-  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Design"))');
+  await page.keyboard.press('Alt+5'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Create"))');
   await page.keyboard.press('Alt+6'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Review"))');
   await page.keyboard.press('Alt+7'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))');
 });
 
-await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it needs a render, why and its basis; Edit instruction and Apply are two actions', async () => {
+await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it needs a render, why and its basis; Use suggestion and Apply are two actions', async () => {
   await page.ctxB.close(); await openDesign('S20 C at design');
   await place(page, 'creative director');
-  await page.click(R + '.st-cd-tab:has-text("Explore")');
+  await page.click(R + '.st-cd-tab:has-text("Suggestions")');
   const ask = page.locator(R + 'button:has-text("Suggest for this version")'); if (await ask.count()) await ask.first().click();
   await page.waitForSelector(R + '.st-sugg-item', { timeout: 15000 });
   const first = page.locator(R + '.st-sugg-item').first();
@@ -196,9 +196,9 @@ await T.t('W3. a suggestion states what it changes, keeps, its scope, whether it
   // S23: what it costs is two lines - the model call and the render - so "no render" never reads as "free"
   ['Changes', 'Keeps', 'Scope', 'Model call', 'Render', 'Basis'].forEach(k => ok(facts.indexOf(k) >= 0, k + ' stated: ' + facts.join(', ')));
   ok(/v\d+ only/.test(await first.locator('.st-sugg-facts').textContent()), 'the scope names the asset and version');
-  ok(await first.locator('button:has-text("Edit instruction")').count() === 1 && await first.locator('button:has-text("Apply")').count() === 1, 'two distinct actions');
-  const n0 = jobsPosted().length; await first.locator('button:has-text("Edit instruction")').click(); await sleep(400);
-  eq(jobsPosted().length, n0, 'Edit instruction sends nothing'); ok((await page.inputValue(R + '.st-composer textarea')).length > 5, 'it fills the composer');
+  ok(await first.locator('button:has-text("Use suggestion")').count() === 1 && await first.locator('button:has-text("Apply")').count() === 1, 'two distinct actions');
+  const n0 = jobsPosted().length; await first.locator('button:has-text("Use suggestion")').click(); await sleep(400);
+  eq(jobsPosted().length, n0, 'Use suggestion sends nothing'); ok((await page.inputValue(R + '.st-composer textarea')).length > 5, 'it fills the composer');
   ok(/selected|whole tile/.test(await page.textContent(R + '.st-cd-scope')), 'the scope line states the selection');
 });
 

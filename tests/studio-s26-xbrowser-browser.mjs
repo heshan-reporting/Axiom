@@ -1,7 +1,7 @@
 /* S26 in Chromium, Firefox and WebKit (4 November 2026), against the worker module in this process, providers MOCKED:
  *   - a classic project's direction change asks in the Studio's own dialog (no browser confirm in any engine): Cancel changes
  *     nothing, "keep them as written" chooses the direction;
- *   - a Creative Director suggestion dismissed in the page is kept by the worker (one write) and the page says so;
+ *   - a Creative Partner suggestion dismissed in the page is kept by the worker (one write) and the page says so;
  *   - at 1440 x 900 the fitted 4:5 artboard is at least 560 px tall with the inspector open, and the page does not scroll.
  * An engine that is not installed is skipped with the reason (CI installs all three; this sandbox ships Chromium only), never
  * counted as a pass. Run: node --experimental-sqlite tests/studio-s26-xbrowser-browser.mjs */
@@ -58,13 +58,13 @@ for (const [name, type, port] of ENGINES) {
     const A = (await api('POST', '/studio/asset', { project: pr.id, family: 'Set', channel: 'instagram', format: '4:5', title: 'Engine tile', copy: COPY, layout: LAYOUT(), mode: 'composition' })).asset;
     const sg = await api('POST', '/studio/suggest', { project: pr.id, asset: A.id }); if (!sg.ok || !(sg.design || []).length) throw new Error('no suggestions made: ' + JSON.stringify(sg).slice(0, 160));
     const p2 = await open('Engines design ' + name);
-    await p2.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await p2.click(R + '.st-assetpick:has-text("Engine tile"), ' + R + '.st-pagechip:has-text("Engine tile")');
+    await p2.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await p2.click(R + '.st-assetpick:has-text("Engine tile"), ' + R + '.st-pagechip:has-text("Engine tile")');
     await p2.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 20000 }); await sleep(1500);
     const m = await p2.evaluate(() => { const c = document.querySelector('#studio-root .st-stage canvas').getBoundingClientRect(); const ins = document.querySelector('#studio-root .st-inspector').getBoundingClientRect(); return { h: Math.round(c.height), w: Math.round(c.width), insW: Math.round(ins.width), scroll: document.scrollingElement.scrollHeight <= innerHeight + 1 }; });
     if (!(m.insW >= 280 && m.h >= 560 && Math.abs(m.w / m.h - 0.8) < 0.02 && m.scroll)) throw new Error('the 4:5 artboard with the inspector open: ' + JSON.stringify(m));
     for (let i = 0; i < 10; i++) {
-      if (!(await p2.locator(R + '.st-cd-tabs:visible').count())) { const tab = p2.locator(R + '.st-instab:has-text("Creative Director"), ' + R + 'button:has-text("Creative Director")').first(); if (await tab.count()) await tab.click(); await sleep(300); }
-      const ex = p2.locator(R + '.st-cd-tabs:visible button:has-text("Explore")').first(); if (await ex.count() && (await ex.getAttribute('aria-selected')) !== 'true') await ex.click();
+      if (!(await p2.locator(R + '.st-cd-tabs:visible').count())) { const tab = p2.locator(R + '.st-instab:has-text("Creative Partner"), ' + R + 'button:has-text("Creative Partner")').first(); if (await tab.count()) await tab.click(); await sleep(300); }
+      const ex = p2.locator(R + '.st-cd-tabs:visible button:has-text("Suggestions")').first(); if (await ex.count() && (await ex.getAttribute("aria-current")) !== "true") await ex.click();
       if (await p2.locator(R + '.st-sugg-item, ' + R + 'button:has-text("Suggest for this version")').count()) break; await sleep(700);
     }
     const ask = p2.locator(R + 'button:has-text("Suggest for this version")').first(); if (await ask.count() && !(await p2.locator(R + '.st-sugg-item').count())) await ask.click();

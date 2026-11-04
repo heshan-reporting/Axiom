@@ -51,7 +51,7 @@ let page;
 await T.t('the renderer: a full draw, measure() and validate() of 50 layers at 1080 x 1350', async () => {
   page = await fx.open({ viewport: { width: 1440, height: 900 }, quiet: true }); page.on('dialog', d => d.accept());
   await page.waitForSelector(R + '.st-lib tbody tr:has-text("S20 perf")'); await page.click(R + '.st-lib tbody tr:has-text("S20 perf") button.st-lib-open');
-  await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))').catch(() => {});
+  await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))').catch(() => {});
   const pick = page.locator(R + '.st-assetpick').first(); if (await pick.count()) await pick.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 20000 }); await sleep(1500);
   const r = await page.evaluate(async ({ L, copy }) => {

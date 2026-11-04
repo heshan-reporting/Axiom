@@ -36,7 +36,7 @@ export async function openProject(page, title) {
 const SUBSTEP = { Objectives: 1, Strategy: 1 };
 export async function goStep(page, label) {
   if (SUBSTEP[label]) {
-    if (!(await page.$(R + '.st-substep:has-text("' + label + '")'))) { await page.click(step('Message')); await page.waitForSelector(R + '.st-substep', { timeout: 15000 }); }
+    if (!(await page.$(R + '.st-substep:has-text("' + label + '")'))) { await page.click(step('Plan')); await page.waitForSelector(R + '.st-substep', { timeout: 15000 }); }
     await page.click(R + '.st-substep:has-text("' + label + '")');
   } else await page.click(step(label));
   await page.waitForSelector(step(label, true), { timeout: 15000 });
@@ -45,7 +45,8 @@ export async function goStep(page, label) {
     phase's "ready for design"). */
 export function step(label, on) {
   if (SUBSTEP[label]) return R + '.st-substep' + (on ? '.on' : '') + ':has-text("' + label + '")';
-  const l = label === 'Directions' || label === 'Explore' ? 'Direction' : label === 'Export' || label === 'Delivery' ? 'Deliver' : label;
+  // R2 (the redesign): Message is Plan and Design is Create; the older names still find them
+  const l = label === 'Directions' || label === 'Explore' ? 'Direction' : label === 'Export' || label === 'Delivery' ? 'Deliver' : label === 'Design' ? 'Create' : label === 'Message' ? 'Plan' : label;
   return R + '.st-step' + (on ? '.on' : '') + ':has(.st-step-l:text-is("' + l + '"))';
 }
 
@@ -58,11 +59,12 @@ export async function wizardCreate(page, o) {
   const nw = page.locator(R + 'button:has-text("New project")');
   if (!(await page.$(R + '.st-wiz'))) { await nw.first().click(); }
   await page.waitForSelector(R + '.st-wiz');
-  await page.click(R + '.st-type:has-text("' + (o.type || 'Response Creative') + '")');
-  await page.click(R + '.st-wiz-foot button:has-text("Next")');
+  // R2: the first step is the client and the brief; the kind of work is read from the brief and corrected here when asked
   await page.waitForSelector(R + '.st-client-card');
   await page.click(R + '.st-client-card:has-text("' + (o.client || 'Minerals Council') + '")');
   await page.waitForSelector(R + '.st-knowprep-dot.ok', { timeout: 15000 }).catch(() => null);
+  if (o.text) await page.fill(R + '.st-compose-ta', o.text);
+  await page.click(R + '.st-type.mini:has-text("' + (o.type || 'Response Creative') + '")');
   await page.click(R + '.st-wiz-foot button:has-text("Next")');
   await page.waitForSelector(R + '.st-cmodes');
   if (o.campaign === 'standalone') await page.click(R + '.st-cmodes .st-type:has-text("Standalone")');
@@ -75,7 +77,7 @@ export async function wizardCreate(page, o) {
     await c.first().waitFor({ state: 'visible' }); await c.first().click();
   }
   await page.click(R + '.st-wiz-foot button:has-text("Next")');
-  await page.waitForSelector(R + '.st-compose');
+  await page.waitForSelector(R + '.st-wiz-meta');
   if (o.title) await page.fill(R + 'input[aria-label="Project name"]', o.title);
   if (o.deliverable) await page.click(R + '.st-wiz-meta .st-segbtn:has-text("' + ({ set: 'Coordinated set', visual: 'One visual', copy: 'Copy only' })[o.deliverable] + '")');
   for (const ch of (o.channels || [])) {
@@ -86,7 +88,6 @@ export async function wizardCreate(page, o) {
     const b = page.locator(R + '.st-wiz-meta .st-segbtn:has-text("' + ch + '")').first();
     if ((await b.getAttribute('aria-pressed')) === 'true') await b.click();
   }
-  if (o.text) await page.fill(R + '.st-compose-ta', o.text);
   if (o.analyse === false) {
     await page.click(R + '.st-wiz-foot button:has-text("Create without analysing")');
     await page.waitForSelector(R + '.st-step.on', { timeout: 20000 });
@@ -134,10 +135,10 @@ export async function markCopyReady(page) {
   }
 }
 
-/** Continue to Design and choose how the pieces are produced: 'editable' (Editable creative) or 'finished' (the full AI
+/** Continue to Create and choose how the pieces are produced: 'editable' (Editable creative) or 'finished' (the full AI
     route). Resolves when production has landed on the assets. */
 export async function produce(page, mode) {
-  await page.click(R + '.st-stagehead button:has-text("Continue to Design")');
+  await page.click(R + '.st-stagehead button:has-text("Continue to Create")');
   await page.waitForSelector(R + '.st-pmodes', { timeout: 15000 });
   const card = mode === 'finished' ? page.locator(R + '.st-pmode').filter({ hasNotText: 'Editable creative' }).first() : page.locator(R + '.st-pmode:has-text("Editable creative")').first();
   await card.click();

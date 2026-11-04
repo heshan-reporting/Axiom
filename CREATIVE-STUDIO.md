@@ -3828,3 +3828,37 @@ The three items open since p45 (PM6, U6, U7), each measured first and reproduced
 | PM6 | Each finished job read the project twice | one inspect job: step, then `GET /studio/get` twice back to back (`runJob` reloads after its last step and nearly every caller reloads again) | `AXUI.writes()` counts every write sent through `call()`; `runJob` remembers the project its last step loaded, and the next `reload()` takes that snapshot instead of reading again - once, within 1.5 s, only when no write went out and no other read landed in between | one read per finished job |
 | U6 | Every movable layer showed a resize handle and a dotted box, selected or not | with nothing selected, 5 of 5 layers showed the corner handle and 4 dotted ink boxes; hovering anywhere on the artboard outlined every layer | the corner handle is drawn on the selection only; the dotted ink box shows for the selected layer or the one under the pointer; the artboard no longer outlines every layer on hover | no handle or box with nothing selected; the hovered layer alone outlined; a selected layer keeps its eight handles |
 | U7 | Stage heads took 208-306 px at 1366 x 768 | Brief 250, Message 250, Direction 225, Copy 306, Review 225, Deliver 210 | the four status answers sit on one row with Missing and Accepted wide and Main action and Next to one line (each cell's full words in its title and under the help toggle); the phase line no longer repeats "nothing waiting" or the decision when the cells say it; the head's top row does not wrap from 1100 px (the views scroll sideways if they must); the "Changing a choice here" note is one line | every head 163-180 px; the earlier-work note, when shown, one line (29 px) |
+
+## 59. R2 - the production redesign of the journey and the workspace (page `?v=r35`, worker unchanged at p48)
+
+Concept C, made the running product. No route, table, job, approval rule, validation, scope or export changed; the renderer is
+still the one renderer for preview and export.
+
+- **The journey names**: Brief, **Plan** (was Message: Objectives and Strategy), Direction, Copy, **Create** (was Design),
+  Review, Deliver (`PHASES`, `STAGES.design.label`); internal ids (`message`, `design`) are unchanged, so saved places,
+  `AXUI.goto` params and the worker's workflow steps still resolve. Alt+1..7 as before.
+- **The wizard is quick**: three steps - Brief (client, the material, and the type of work Axiom infers from it with
+  `inferType()`, shown as "Axiom reads this as ..." with chips to correct it; a correction sticks), Campaign, Deliverables
+  (title, channels and a recap of what will be created). Enter on a button or a select inside the wizard activates that control;
+  it no longer jumps to the next step (a keyboard user could not pick a type).
+- **The brief form** (`BriefFields`, exported on `STKit`): Objective, Audience, Message, Action, Deliverables (channels with a
+  format each, quantities as words in the existing `deliverables` field) and the design requirements bands (mandatory,
+  preferred, open). Every field takes free typing or a suggestion from `/studio/brief/suggest` with its source (approved fact,
+  previous brief, AI); AI-filled fields carry "AI suggestion" and "confirm". Only the changed keys are saved, through the
+  existing brief patch; nothing is written to client memory.
+- **The Creative Partner** (was the Creative Director, everywhere in the interface): one glass panel tinted by the client
+  accent (`--st-client-accent`; plain under `prefers-reduced-transparency`), an intro that says it advises and never approves,
+  and three stacked sections - Latest review, Suggestions, Conversation - with a section bar that scrolls to each (no nested
+  tabs). Scores, verdict, round and composed status come from the inspection as before. "Edit instruction" is now **Use
+  suggestion** (puts it in the composer to read and edit first; Apply still sends it as it stands). The composer stays at the
+  foot; on narrow screens the panel is the inspector drawer.
+- **Review** opens with **What the checks found** (`reviewIssues`, `ReviewIssues`): blocking, warnings and info from the
+  measured validation, the browser-only marks, the copy checks, alt text and a finished creative's painted words; each names
+  the piece and element, says why it matters, and offers the next action (measure, open the copy, show on the tile, open in
+  Create). These are measurements, kept apart from the Creative Partner's opinion. Deliver still lists what is in the package
+  and what is left out, with the reason.
+- Harnesses: every browser suite follows the new names (`tests/studio-flow.mjs` maps Design -> Create and Message -> Plan;
+  `place(page, 'creative partner')`); the wizard case in `tests/studio-s17-browser.mjs`; before / after captures with
+  `tests/studio-r2-shots.mjs <label> [1440,390]` into the ignored `tests/shots/r2/`.
+- Not done here: the art-direction action names ("Explore variations") are unchanged; deliverable quantities have no
+  structured field; Firefox and WebKit were not installed in this sandbox (the cross-browser harnesses skip them).

@@ -3,7 +3,7 @@
  *    now it asks like a guided one (409 affects_downstream, impact.classic). Update leaves the pieces listed in GET /studio/impact
  *    as direction_changed (a paid rewrite from the chosen direction, and a free keep beside it); keep keeps them as written in
  *    brief.keptDirection, which a new brief analysis does not reset. A rewrite records the chosen direction on its versions.
- *  - Dismissed Creative Director suggestions were kept in one browser; now they are the team's, per asset and version, with
+ *  - Dismissed Creative Partner suggestions were kept in one browser; now they are the team's, per asset and version, with
  *    who and when (POST /studio/suggest/dismiss, `dismissed` on POST /studio/suggest).
  *  - The public / told anyone the build and the git revision. Now it answers an opaque token stamped per upload (AXIOM_DEPLOY);
  *    the build and revision stay on the key-gated status routes.

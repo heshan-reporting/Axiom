@@ -1,6 +1,6 @@
 /* Matched screenshots of every Studio step (MOCKED providers; nothing is spent), the same seeded states before and after a
  * change, at four sizes, with a measurement per shot: how tall the document is against the window, where the artboard and
- * the Creative Director's composer sit, and whether they are inside the window.
+ * the Creative Partner's composer sit, and whether they are inside the window.
  *   node --experimental-sqlite tests/studio-s18-shots.mjs <label> [sizes]   -> tests/shots/s18/<label>-<step>-<size>.png
  *   sizes: comma list of 1440,1920,1024,390 (default all); the report goes to tests/shots/s18/<label>-report.json */
 import fs from 'node:fs';
@@ -68,7 +68,7 @@ for (const sz of sizes) {
   if (await asset.count()) { await asset.click().catch(() => {}); }
   await page.waitForSelector(R + '.st-stage canvas, ' + R + '.st-artboard canvas', { timeout: 15000 }).catch(() => {}); await wait(1200);
   await shot(page, 'design', sz);
-  const cd = page.locator(R + '#st-tabbtn-director, ' + R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Director")');
+  const cd = page.locator(R + '#st-tabbtn-director, ' + R + '#st-tabbtn-director, ' + R + '.st-insp-mode:has-text("Creative Partner")');
   if (await cd.count()) { await cd.first().click().catch(() => {}); await wait(600); await shot(page, 'director', sz); }
   await page.click(stepBtn('Review')).catch(() => {}); await wait(900);
   await shot(page, 'review', sz);

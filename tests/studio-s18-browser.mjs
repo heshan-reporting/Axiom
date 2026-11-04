@@ -1,10 +1,10 @@
-/* S18: the focused studio and the Creative Director, in real Chromium against the worker module in this process
+/* S18: the focused studio and the Creative Partner, in real Chromium against the worker module in this process
  * (studio-fixture.mjs; providers MOCKED, nothing spent). The five confirmed failures of the S17 build, each written to fail on
  * it first, then the investigations the redesign brief asked for:
  *   1. an instruction is kept until the worker accepts it; a refused request gives it back with Retry and Edit
  *   2. Enter and the Send button submit through one check: nothing while a request is in flight, nothing empty, nothing
  *      mid-composition (IME), and never twice
- *   3. the Creative Director's composer is inside the window at 1440 x 900 without scrolling the page
+ *   3. the Creative Partner's composer is inside the window at 1440 x 900 without scrolling the page
  *   4. the client accent reaches the interface (--st-client-accent) for more than one client, with a readable ink, and never
  *      reaches the artwork
  *   5. one current review: the correction offered by the latest inspection is shown once, not again in the conversation
@@ -29,12 +29,12 @@ async function openDesign(viewport) {
   const row = R + '.st-lib tbody tr:has-text("S18 at design"), ' + R + '.st-libcard:has-text("S18 at design")';
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-assetpick').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-stage canvas, ' + R + '.st-artboard canvas', { timeout: 15000 }); await sleep(600);
 }
 async function openDirector(sub) {
-  const b = page.locator(R + '.st-insp-mode:has-text("Creative Director"), ' + R + '#st-tabbtn-director, ' + R + '#st-tabbtn-director');
+  const b = page.locator(R + '.st-insp-mode:has-text("Creative Partner"), ' + R + '#st-tabbtn-director, ' + R + '#st-tabbtn-director');
   await b.first().click(); await page.waitForSelector(R + '.st-composer textarea', { timeout: 10000 });
   if (sub) { const s = page.locator(R + '.st-cd-tab:has-text("' + sub + '")'); if (await s.count()) await s.first().click(); }
   await sleep(300);
@@ -183,7 +183,7 @@ await T.t('11. a read-only key sees the canvas as it stands: no editing handles,
   page = await fx.open({ viewport: { width: 1440, height: 900 }, quiet: true, role: 'read' });
   const row = R + '.st-lib tbody tr:has-text("S18 at design"), ' + R + '.st-libcard:has-text("S18 at design")';
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 15000 }); await sleep(500);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await page.waitForSelector(R + '.st-stage canvas', { timeout: 15000 }); await sleep(500);
   eq(await page.$(R + '.st-le-layer'), null, 'no editing handles');
   eq(await page.$(R + '.st-head .st-save'), null, 'no save state to report');
   await page.click(R + '#st-tabbtn-director');

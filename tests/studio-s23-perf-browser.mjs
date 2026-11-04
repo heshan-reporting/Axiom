@@ -45,7 +45,7 @@ await T.t('cold interactive: navigation to the library listing its projects', as
 
 await T.t('stage transitions: a click on a phase to the phase drawn', async () => {
   await page.locator(R + '.st-lib tbody tr:has-text("Perf check") button.st-lib-open').first().click(); await page.waitForSelector(R + '.st-step'); await sleep(500);
-  const seq = ['Copy', 'Design', 'Review', 'Brief'];
+  const seq = ['Copy', 'Create', 'Review', 'Brief'];
   const times = [];
   for (let i = 0; i < 12; i++) {
     const name = seq[i % seq.length];
@@ -69,7 +69,7 @@ await T.t('growth across 200 actions: heap after collection, DOM nodes, listener
     return { heapMB: Math.round(g('JSHeapUsedSize') / 1e5) / 10, nodes: g('Nodes'), attached: await page.evaluate(() => document.getElementsByTagName('*').length), docs: g('Documents'), frames: g('Frames'), listeners: (await lis('window')) + (await lis('document')), urls: await page.evaluate(() => window.__liveUrls()) }; };
   const all = page.locator(R + 'button:has-text("All projects")'); if (await all.count()) await all.first().click().catch(() => {});
   await page.waitForSelector(R + '.st-lib tbody tr:has-text("Perf check")'); await page.locator(R + '.st-lib tbody tr:has-text("Perf check") button.st-lib-open').first().click(); await page.waitForSelector(R + '.st-step'); await sleep(400);
-  const step = async n => page.click(R + '.st-step:has(.st-step-l:' + (n === 'Review' ? 'text-matches("^Review")' : 'text-is("' + n + '")') + ')');
+  const step = async n => page.click(R + '.st-step:has(.st-step-l:' + (n === 'Review' ? 'text-matches("^Review")' : 'text-is("' + ({ Design: 'Create', Message: 'Plan' }[n] || n) + '")') + ')');
   await step('Design'); await page.click(R + '.st-assetpick:has-text("Tile one")'); await page.waitForSelector(R + '.st-le-layer'); await sleep(800);
   // warm up once so first-use caches (fonts, images, compiled code) are not counted as growth
   for (let i = 0; i < 20; i++) { await page.click(R + '.st-pagechip:has-text(' + (i % 2 ? '"Tile one"' : '"Tile two"') + ')'); await sleep(80); }

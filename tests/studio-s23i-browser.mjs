@@ -24,7 +24,7 @@ const T = runner('studio-s23i-browser (repair invariants, reference records and 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let page;
 const fresh = async o => { if (page) await page.ctxB.close().catch(() => {}); page = await fx.open(Object.assign({ viewport: { width: 1440, height: 1000 } }, o || {})); return page; };
-const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + name + '")') + ')');
+const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + ({ Design: 'Create', Message: 'Plan' }[name] || name) + '")') + ')');
 const openProject = async (pg, title) => {
   await pg.evaluate(() => { try { localStorage.removeItem('ax_studio_v1'); } catch (e) {} go('studio'); });
   const all = pg.locator(R + 'button:has-text("All projects")'); if (await all.count()) await all.first().click().catch(() => {});

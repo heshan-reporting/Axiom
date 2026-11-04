@@ -26,7 +26,7 @@ async function openDesign(viewport) {
   const row = R + '.st-lib tbody tr:has-text("SC at design"), ' + R + '.st-libcard:has-text("SC at design")';
   await page.waitForSelector(row, { timeout: 15000 }); await page.locator(row).first().locator('button.st-lib-open, .ov-link, button:has-text("Open")').first().click();
   await page.waitForSelector(R + '.st-step', { timeout: 15000 });
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
   const asset = page.locator(R + '.st-pagechip').first(); if (await asset.count()) await asset.click();
   await page.waitForSelector(R + '.st-le-layer[aria-label="Layer headline"]', { timeout: 15000 }); await sleep(900);
 }
@@ -34,12 +34,12 @@ const layerOf = async id => { const g = await api('GET', '/studio/get?id=' + see
 
 await T.t('C1. seven stages in the header; Deliver opens the package view', async () => {
   await openDesign();
-  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Message', 'Direction', 'Copy', 'Design', 'Review', 'Deliver'], 'the seven stages, in order');
+  eq(await page.$$eval(R + '.st-head .st-step .st-step-l', x => x.map(e => e.textContent)), ['Brief', 'Plan', 'Direction', 'Copy', 'Create', 'Review', 'Deliver'], 'the seven stages, in order');
   eq(await page.$eval(R + '.st-step.on .st-step-n', e => e.textContent.trim()), '05', 'Design is stage 05');
   await page.click(R + '.st-step:has(.st-step-l:text-is("Deliver"))'); await page.waitForSelector(R + '.st-step.on:has(.st-step-l:text-is("Deliver"))');
   ok(/Deliver exactly what was approved/.test(await page.textContent(R + '.st-stage-title')), 'Deliver has its own head');
   ok(!(await page.$(R + '.st-subtab:has-text("Delivery")')), 'no Delivery tab inside Review any more');
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Message"))'); await sleep(500);
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Plan"))'); await sleep(500);
   const subs = await page.$$eval(R + '.st-phasesteps .st-substep', x => x.map(e => e.textContent));
   ok(subs.some(t => /Objectives/.test(t)) && subs.some(t => /Strategy/.test(t)), 'Message holds Objectives and Strategy: ' + subs.join(' | '));
 });

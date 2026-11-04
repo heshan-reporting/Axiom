@@ -22,9 +22,9 @@ let page, pid, aid;
 await T.t('the production mode is chosen in Design once the words are ready: both explained before anything runs; Full AI creative paints one bitmap with the mark from its file, and the header names the mode', async () => {
   page = await fx.open(); page.on('dialog', d => d.accept());
   await wizardCreate(page, { type: 'Social Content', deliverable: 'visual', text: 'Write one Instagram tile on the $74 billion figure: mining paid more company tax and royalties than any other industry in 2023-24.' });
-  ok(/mode: chosen in Design/.test(await page.textContent(R + '.st-head')), 'the header says the mode is not decided yet');
+  ok(/mode: chosen in Create/.test(await page.textContent(R + '.st-head')), 'the header says the mode is not decided yet');
   await toDirections(page); await selectDirection(page, 0); await generateCopy(page); await markCopyReady(page);
-  await page.click(R + '.st-stagehead button:has-text("Continue to Design")'); await page.waitForSelector(R + '.st-pmodes');
+  await page.click(R + '.st-stagehead button:has-text("Continue to Create")'); await page.waitForSelector(R + '.st-pmodes');
   const ed = await page.textContent(R + '.st-pmode:has-text("Editable creative")'); ok(/live layers/.test(ed) && /editable/.test(ed), ed);
   const fa = await page.textContent(R + '.st-pmode:has-text("Full AI creative")'); ok(/paints the whole piece/.test(fa) && /not editable as layers/.test(fa), fa);
   await page.click(R + '.st-pmode:has-text("Full AI creative")');
@@ -36,7 +36,7 @@ await T.t('the production mode is chosen in Design once the words are ready: bot
   const rj = d.jobs.find(j => j.stage === 'render'); eq(rj.input.finished, true); eq(rj.input.marks.map(m => m.role), ['logo']);
 });
 await T.t('the asset view shows one bitmap labelled as such: no layout editor, no draggable layers, painted words read-only, caption editable, Regenerate and Switch to Editable offered', async () => {
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); { const a0 = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await a0.count()) await a0.click(); } await page.waitForSelector(R + '.st-finnote');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); { const a0 = page.locator(R + '.st-assetpick, ' + R + '.st-pagechip').first(); if (await a0.count()) await a0.click(); } await page.waitForSelector(R + '.st-finnote');
   const note = await page.textContent(R + '.st-finnote'); ok(/Finished creative/.test(note) && /One bitmap/.test(note) && /nothing on it can be dragged or retyped/.test(note), note);
   eq(await page.$(R + '.st-le-layer'), null, 'no editable layers on a bitmap'); ok(await page.isDisabled(R + '.st-dock-btn:has-text("Layers")'), 'and no Layers tool');
   const tag = await page.textContent(R + '.st-comp-tag'); ok(/finished creative: one bitmap/.test(tag) && /nothing composed over it/.test(tag), tag);
@@ -66,10 +66,10 @@ await T.t('Review waits for the painted words and the mark to be read back, and 
   ok(/read the painted words and the mark back/.test(await page.textContent(R + '.st-centre')), 'the page says what unlocks Review');
   const ap = await api('POST', '/studio/approve', { asset: aid, part: 'design', decision: 'approve', reason: 'looks right to us' });
   eq(ap._status, 409); ok(/baked_text_unverified/.test(ap.error || ''), 'the worker refuses the design approval: ' + JSON.stringify(ap).slice(0, 200));
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))');
 });
 await T.t('Regenerate opens a form for the painted words and a direction, states the cost, and queues one finished render; Switch to Editable derives a live-layer asset and leaves the original', async () => {
-  await page.click(R + '.st-step:has(.st-step-l:text-is("Design"))'); await page.waitForSelector(R + '.st-finished');
+  await page.click(R + '.st-step:has(.st-step-l:text-is("Create"))'); await page.waitForSelector(R + '.st-finished');
   await page.click(R + '.st-finished .btn:has-text("Regenerate (1 render)")'); await page.waitForSelector(R + '.st-regen');
   ok(await page.$(R + '.st-regen #st-rg-headline'), 'the painted headline is offered for regeneration');
   await page.fill(R + '.st-regen #st-rg-ins', 'warmer light');

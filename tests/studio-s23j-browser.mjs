@@ -1,5 +1,5 @@
 /* S23 slice J in real Chromium against the worker module in this process (studio-fixture.mjs; providers MOCKED, nothing spent):
- *   J-B1 a panel that throws stops alone: the Creative Director shows what stopped and Try again, the canvas keeps working;
+ *   J-B1 a panel that throws stops alone: the Creative Partner shows what stopped and Try again, the canvas keeps working;
  *   J-B2 offline: the page says so, keeps the edit in this browser, and reads the project again when the connection returns;
  *   J-B3 a read that meets a busy gateway (503) or a dropped connection is retried; a write is never retried behind the
  *        person's back;
@@ -44,7 +44,7 @@ const fresh = async o => {
   } }, o || {}));
   return page;
 };
-const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + name + '")') + ')');
+const goStep = (pg, name) => pg.click(R + '.st-step:has(.st-step-l:' + (name === 'Review' ? 'text-matches("^Review")' : 'text-is("' + ({ Design: 'Create', Message: 'Plan' }[name] || name) + '")') + ')');
 const openProject = async (pg, title) => {
   await pg.evaluate(() => { try { localStorage.removeItem('ax_studio_v1'); } catch (e) {} go('studio'); });
   const all = pg.locator(R + 'button:has-text("All projects")'); if (await all.count()) await all.first().click().catch(() => {});
@@ -68,13 +68,13 @@ const A1 = await mk('Steady tile'); const A2 = await mk('Random tile');
 const get = async () => api('GET', '/studio/get?id=' + pr.id);
 const curOf = a => a.versions.find(v => v.id === a.current);
 
-await T.t('J-B1 a panel that throws stops alone: the Creative Director says what stopped and offers Try again; the canvas keeps working', async () => {
+await T.t('J-B1 a panel that throws stops alone: the Creative Partner says what stopped and offers Try again; the canvas keeps working', async () => {
   await fresh(); await openProject(page, 'Reliability check'); await openTile(page, 'Steady tile');
   await page.evaluate(() => { window.__stCrashPanel = 'director'; });
   // re-render the director: open its tab
-  const tab = page.locator(R + '.st-instab:has-text("Creative Director")'); if (await tab.count()) await tab.first().click(); await page.click(R + '.st-assetpick:has-text("Random tile")'); await sleep(600);
+  const tab = page.locator(R + '.st-instab:has-text("Creative Partner")'); if (await tab.count()) await tab.first().click(); await page.click(R + '.st-assetpick:has-text("Random tile")'); await sleep(600);
   await page.waitForSelector(R + '.st-panelerr', { timeout: 10000 });
-  ok(/Creative Director panel stopped/.test(await page.textContent(R + '.st-panelerr')), await page.textContent(R + '.st-panelerr'));
+  ok(/Creative Partner panel stopped/.test(await page.textContent(R + '.st-panelerr')), await page.textContent(R + '.st-panelerr'));
   ok(await page.$(R + '.st-stage canvas'), 'the canvas is still there'); ok(await page.$(R + '.st-le-layer'), 'and editable');
   await page.evaluate(() => { window.__stCrashPanel = null; }); await page.click(R + '.st-panelerr button:has-text("Try again")'); await sleep(400);
   ok(!(await page.$(R + '.st-panelerr')), 'Try again brings the panel back');
@@ -170,7 +170,7 @@ await T.t('J-B5 a keyboard-only journey: search the library, open a project, mov
   let hops = 0; while (hops++ < 30) { await page.keyboard.press('Tab'); const t = await page.evaluate(() => { const e = document.activeElement; return e ? (e.className || '') + '|' + (e.textContent || '').trim().slice(0, 40) : ''; }); if (/st-lib-open/.test(t)) break; }
   ok(hops < 30, 'Tab reaches the project in a few steps (' + hops + ')');
   await page.keyboard.press('Enter'); await page.waitForSelector(R + '.st-step', { timeout: 15000 }); await sleep(400);
-  for (const [k, re] of [['Alt+5', /Design/], ['Alt+4', /Copy/], ['Alt+1', /Brief/]]) { await page.keyboard.press(k); await sleep(500); ok(re.test(await page.textContent(R + '.st-step.on')), k + ' opens ' + re); }
+  for (const [k, re] of [['Alt+5', /Create/], ['Alt+4', /Copy/], ['Alt+1', /Brief/]]) { await page.keyboard.press(k); await sleep(500); ok(re.test(await page.textContent(R + '.st-step.on')), k + ' opens ' + re); }
   await page.keyboard.press('Alt+5'); await sleep(400); await page.click(R + '.st-assetpick:has-text("Steady tile")'); await page.waitForSelector(R + '.st-le-layer');
   await page.focus(R + '.st-le-layer[data-id="chip"]'); await page.keyboard.press('Shift+Slash'); await page.waitForSelector(R + '.st-keys', { timeout: 5000 });
   await page.keyboard.press('Escape'); await page.waitForSelector(R + '.st-keys', { state: 'detached', timeout: 5000 });
@@ -214,7 +214,7 @@ await T.t('J-B7 a tablet with touch (820 x 1180): Design opens with the artwork 
 await T.t('J-B9 suggestions asked for while a new version lands are shown when they arrive, labelled as the worker reads them', async () => {
   await fresh(); await openProject(page, 'Reliability check');
   const ask = R + '.st-partner .st-sugg.design button:has-text("Suggest for this version")', items = R + '.st-partner .st-sugg.design .st-sugg-item';
-  const openAsk = async title => { await openTile(page, title); await place(page, 'Creative Director'); await page.click(R + '.st-cd-tab:has-text("Explore")'); await page.waitForSelector(ask, { timeout: 20000 }); };
+  const openAsk = async title => { await openTile(page, title); await place(page, 'Creative Partner'); await page.click(R + '.st-cd-tab:has-text("Suggestions")'); await page.waitForSelector(ask, { timeout: 20000 }); };
   const nudgeSave = async () => {
     await page.click(R + '.st-le-layer[data-id="chip"]', { force: true }); await page.keyboard.press('ArrowLeft'); await sleep(300);
     await page.click(R + '.st-le-foot .btn:has-text("Save layout as a version")');
