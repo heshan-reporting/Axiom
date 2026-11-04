@@ -28,6 +28,10 @@
   function FontPicker({ value, brand, onPick, onPreview, onClose }) {
     const [q, setQ] = useState(''); const [kind, setKind] = useState('');
     const ref = useRef(null);
+    // S30 (UX-5): the picker gives the focus back to the control that opened it when it closes (Escape, a pick, a click away),
+    // unless the person has already moved the focus somewhere else
+    const [opener] = useState(() => document.activeElement);   // read while rendering, before the search box takes the focus
+    useEffect(() => () => { setTimeout(() => { const ae = document.activeElement; if (opener && opener.isConnected && (!ae || ae === document.body || !ae.isConnected || (ae.closest && ae.closest('.st-fontpick')))) try { opener.focus(); } catch (e) {} }, 0); }, []);
     useEffect(() => { const h = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); }; const k = e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }; setTimeout(() => document.addEventListener('pointerdown', h), 0); document.addEventListener('keydown', k, true); return () => { document.removeEventListener('pointerdown', h); document.removeEventListener('keydown', k, true); }; }, []);
     const cat = (R && R.FONT_CATALOGUE) || [];
     const ql = q.trim().toLowerCase();
@@ -89,7 +93,12 @@
     // S29 (UX2): the bar is measured against the stage it sits on and kept inside it (it starts at the selection's left edge and
     // moves left as far as it must; it wraps when the stage is narrower than the bar)
     const barRef = useRef(null);
-    useEffect(() => { const el = barRef.current; const par = el && el.offsetParent; if (!el || !par || !bbox) return; const P = par.clientWidth; const w = el.offsetWidth; const want = Math.max(0, Math.min(100, bbox.x)) / 100 * P; el.style.left = Math.max(0, Math.min(want, P - w)) + 'px'; });
+    useEffect(() => { const el = barRef.current; const par = el && el.offsetParent; if (!el || !par || !bbox) return; const P = par.clientWidth; const w = el.offsetWidth; const want = Math.max(0, Math.min(100, bbox.x)) / 100 * P; el.style.left = Math.max(0, Math.min(want, P - w)) + 'px';
+      // S30 (UX-1): and kept inside it top to bottom - a bar that wrapped to two rows above a selection near the top used to rise
+      // above the stage, under the canvas bar; it goes below the selection then, and never past the stage's foot
+      const H = par.clientHeight; const h = el.offsetHeight; if (!H || !h) return;
+      const above = bbox.y / 100 * H - 40 - h; let y = above >= 0 ? above : (bbox.y + bbox.h) / 100 * H + 14; y = Math.max(0, Math.min(y, H - h));
+      el.style.bottom = 'auto'; el.style.top = y + 'px'; });
     if (!sel.length || !bbox || ro) return null;
     const one = sel.length === 1 ? sel[0] : null; const pal = palette || (layout && layout.palette) || {};
     // above the selection, clear of its rotation handle; below it when the selection is at the top of the stage

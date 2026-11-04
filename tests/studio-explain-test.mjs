@@ -38,4 +38,7 @@ ok(/can read but not change/.test(explain({ code: 'read_only', status: 403, mess
 ok(/That asset was not found/.test(explain({ code: 'unknown_asset', status: 404, message: 'unknown_asset' }).title), 'unknown_asset is said in words');
 const lk = explain({ code: 'locked', status: 409, message: 'The headline is locked.' }); ok(/element is locked/.test(lk.title), 'an element lock is still an element lock');
 ok(/Something failed on the worker/.test(explain({ code: 'internal_error', status: 500, message: 'internal_error', requestId: 'abc' }).title), 'an internal error keeps its request id path');
+// S30 (QA9): the wrong-key lockout is named as what it is, never "the worker asked to slow down"
+{ const x = explain({ code: 'too_many_attempts', status: 429, message: 'Too many failed access-key attempts from this address. Wait ten minutes and try again.' }, 'The project library did not load');
+  ok(/Too many wrong access keys/.test(x.title) && !/slow down/.test(x.title + x.text) && /ten minutes/.test(x.text), 'the wrong-key lockout is named: ' + x.title); }
 console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

@@ -54,7 +54,8 @@
       : queued ? (j.after ? 'Waiting for the step before it' : j.attempts ? 'Waiting to try again' : 'Queued, waiting to start') : 'Working';
     // the phase text is what the worker said it was doing, else its latest log line, else the state
     const phaseText = running && a.label ? a.label : running && last ? last : terminal && a.phase && a.phase !== 'done' && a.label && j.state !== 'done' ? a.label : label;
-    const pct = j.state === 'done' ? 100 : running && total ? percent(completed, total) : null;
+    // S30 (UX-6): a counted share never reads 100% while the job still runs (the last count lands before filing finishes)
+    const pct = j.state === 'done' ? 100 : running && total ? Math.min(99, percent(completed, total)) : null;
     // a streamed model call: what has arrived so far, and how long since the model last sent anything
     const thinking = Number(a.thinking) || 0, written = Number(a.written) || 0;
     const streaming = running && a.phase === 'model' && (thinking > 0 || written > 0 || Number(a.streamAt) > 0);

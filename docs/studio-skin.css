@@ -132,7 +132,7 @@
 #studio-root .st .st-empty-state span{color:var(--sk-sub);max-width:60ch}
 #studio-root .st .ov-empty{color:var(--sk-sub);padding:18px;border:1px dashed var(--sk-line);border-radius:var(--sk-r)}
 #studio-root .st [aria-busy=true] .ov-empty{position:relative;overflow:hidden;border-style:solid;background:var(--sk-panel)}
-#studio-root .st [aria-busy=true] .ov-empty::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.05) 50%,transparent 70%);background-size:200% 100%;animation:sk-shimmer 1.4s linear infinite}
+#studio-root .st [aria-busy=true] .ov-empty::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.05) 50%,transparent 70%);background-size:200% 100%;animation:sk-shimmer 1.4s linear infinite}
 
 /* ---------------------------------------------------------------------------------------------- generic panels */
 #studio-root .st .st-dir, #studio-root .st .st-copy-edit, #studio-root .st .st-copy-partner, #studio-root .st .st-copy-list,
