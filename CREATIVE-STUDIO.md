@@ -3767,3 +3767,21 @@ pass with the fixes. The synthetic client (`synthdemo`) and the test kit are unc
 - Deploy order: the worker first (`tools/deploy-worker.sh`, then check the deploy token on the public `/`), then the page; the
   page names a worker older than p47.
 
+### 56.3 After the release (page `?v=r32`, worker unchanged at p47)
+
+CI failed on the branch from the slice 4-5 commit, which the local gate did not show; the page was merged before CI was read.
+Three causes, each reproduced:
+
+- `studio-s24-browser` U9: from 701 to 1100 px the stage names (UX-7) squeezed the project block below its 210 px basis
+  (186 px at 834), and CI's font metrics cut the name. The other stages show their names from 1000 px only; the s30 case
+  checks the block keeps its room at 834.
+- `studio-journey-browser` 8 (the keyboard journey): the wizard moved the focus to each step's question on a 30 ms timer
+  (UX-5); on a slow machine it fired after the test had tabbed into the brief, the typing was lost, the figure was missing
+  from the source, the copy was flagged and "mark ready" asked a question the journey does not answer. Reproduced here by
+  stretching the timer to 400 ms (journey 8 fails exactly as in CI). The focus now moves at once and never off a field
+  inside the wizard.
+- `studio-editor-browser` (intermittent before S30 too, 1 in 3 here): not a drag defect and not timing in the test. While
+  the canvas reloaded its images and fonts, every layer's measured ink was cleared and the handles fell back to whole layer
+  boxes, so the headline's handle briefly covered its neighbour and the press picked the wrong layer (which moved the full
+  10%). The handles keep the last measurement of every unchanged layer while the reload runs.
+
