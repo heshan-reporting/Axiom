@@ -7,11 +7,16 @@
  *   SEC-02 the per-person daily cap holds for model calls made outside a job (brief suggestions, reference analysis)
  *   SEC-03 only a key that matched the roster clears the wrong-key count (never open access, never an ended key)
  *   SEC-05 a guest archives or renames only the test projects it made
+ *   SEC-06 a logo, wordmark or artwork whose bytes are not an image is refused, whatever type the request declared
+ *   RM-5 a truthful measurement of words with combining marks (Arabic harakat) is not refused as "too few lines"
+ *   RM-6 an ordinary picture layer is never the client logo, another client's logo or another project's file in disguise
  * Run: node --experimental-sqlite tests/studio-s30-worker.mjs */
 import { workerEnv, suite, eq, ok } from './worker-env.mjs';
 import { answerFor, RELEASE } from './studio-answers.mjs';
-import { pngB64 } from './png.mjs';
+import { pngB64, pngForVersion } from './png.mjs';
+import { stubReport } from './studio-measure-stub.mjs';
 
+const LAYOUT = { v: 4, stage: { w: 1080, h: 1080 }, noImagery: true, bg: '#0E6A6E', layers: [{ id: 'headline', type: 'text', role: 'headline', x: 6, y: 10, w: 80, h: 30, size: 6, weight: 700, color: '#FFFFFF' }] };
 const S = suite('S30: the p46 audit fixed (campaign walls, guests and spend, delivery, dead ends, measurement)');
 const KIT = { ns: 'mca', name: 'Minerals Council of Australia', palette: { primary: '#0E6A6E' }, voice: 'Plain.',
   campaigns: [{ id: 'national', name: 'Australian mining', url: 'minerals.org.au', logoPolicy: 'none' }, { id: 'hoof', name: 'Hands Off Our Fuel', url: 'handsoffourfuel.com.au', logoPolicy: 'none' }],
@@ -109,7 +114,6 @@ if (main) {
   });
 
   const GUESTS = { 'guest-key-full': { n: 'Tester', r: 'full', until: '2099-01-01' }, 'guest-b-key1': { n: 'Tester B', r: 'full', until: '2099-01-01' } };
-  const LAYOUT = { v: 4, stage: { w: 1080, h: 1080 }, noImagery: true, bg: '#0E6A6E', layers: [{ id: 'headline', type: 'text', role: 'headline', x: 6, y: 10, w: 80, h: 30, size: 6, weight: 700, color: '#FFFFFF' }] };
 
   await S.t('SEC-01: a guest who takes a live project\'s job keys in its own test project does not stop the staff action on the live one', async () => {
     const w = await workerEnv({ keys: { 'staff-key': { n: 'Jo', r: 'full' } }, env: { ANTHROPIC_API_KEY: 'test', AXIOM_GUEST_KEYS: JSON.stringify(GUESTS) } });
@@ -187,6 +191,51 @@ if (main) {
       eq((await w.call('POST', '/studio/project/archive', { id: aOwn }, 'guest-key-full')).status, 200, 'its own project archives');
       eq((await w.call('POST', '/studio/project/archive', { id: bOwn }, 'staff-key')).status, 200, 'the agency archives any');
     } finally { w.restore(); }
+  });
+
+  await S.t('RM-6: a free picture layer cannot carry the client logo, another client\'s logo or another project\'s file; a mark layer still goes through the mark policy', async () => {
+    const x = await s30env({ kit: false });
+    try {
+      await x.call('POST', '/brand/kit', { ns: 'mca', name: 'MCA', campaigns: [{ id: 'hoof', name: 'Hands Off Our Fuel', logoPolicy: 'wordmark' }] });
+      await x.call('POST', '/brand/kit', { ns: 'aep', name: 'AEP', campaigns: [{ id: 'gas', name: 'Gas' }] });
+      const PA = (await x.call('POST', '/studio/project', { ns: 'aep', campaign: 'gas', title: 'AEP', brief: { campaignConfirmed: true } })).body.id;
+      const P = (await x.call('POST', '/studio/project', { ns: 'mca', campaign: 'hoof', title: 'HOOF', brief: { campaignConfirmed: true } })).body.id;
+      const A = (await x.call('POST', '/studio/asset', { project: P, family: 'F', channel: 'instagram', format: '1:1', title: 'A', mode: 'composition', copy: { headline: 'h' }, layout: LAYOUT })).body.asset;
+      const v = A.versions.find(y => y.id === A.current);
+      const tryLayer = async l => { const L = JSON.parse(JSON.stringify(v.layout)); L.layers.push(l); return x.call('POST', '/studio/version', { asset: A.id, layout: L, note: 't' }); };
+      eq((await tryLayer({ id: 'lg', type: 'img', role: 'logo', x: 80, y: 85, w: 12, h: 8, src: '/brand/logo?ns=mca' })).body.error, 'mark_policy', 'HOOF never carries the MCA logo as a mark');
+      eq((await tryLayer({ id: 'im1', type: 'img', role: 'free', x: 80, y: 85, w: 12, h: 8, src: '/brand/logo?ns=mca' })).body.error, 'brand_mark_as_image', 'nor as a picture');
+      eq((await tryLayer({ id: 'im2', type: 'img', role: 'free', x: 80, y: 85, w: 12, h: 8, src: '/brand/logo?ns=aep' })).body.error, 'brand_mark_as_image', 'nor another client\'s logo');
+      eq((await tryLayer({ id: 'im3', type: 'img', role: 'free', x: 10, y: 10, w: 30, h: 30, src: '/studio/file?key=' + encodeURIComponent('studio/' + PA + '/a/v.png') })).body.error, 'image_not_owned', 'nor another project\'s file');
+      const own = await tryLayer({ id: 'im4', type: 'img', role: 'free', x: 10, y: 10, w: 30, h: 30, src: '/studio/file?key=' + encodeURIComponent('studio/' + P + '/uploads/u.png') }); eq(own.status, 200, 'its own upload is fine: ' + JSON.stringify(own.body).slice(0, 160));
+    } finally { x.w.restore(); }
+  });
+
+  await S.t('RM-5: a truthful two-line measurement of a headline with Arabic harakat is accepted (combining marks take no width)', async () => {
+    const x = await s30env();
+    try {
+      const P = await x.project('national', 'Arabic');
+      const hl = 'الْمَعَادِنُ تَبْنِي الْأُمَّةَ كُلَّ يَوْمٍ'; const hl2 = hl + ' ' + hl;   // 89 code units, 51 of them letters: the old count asked for three lines
+      const L = { v: 4, stage: { w: 1080, h: 1080 }, noImagery: true, bg: '#0E6A6E', layers: [{ id: 'headline', type: 'text', role: 'headline', x: 8, y: 30, w: 84, h: 40, size: 8, weight: 700, color: '#FFFFFF' }] };
+      const A = (await x.call('POST', '/studio/asset', { project: P, family: 'F', channel: 'instagram', format: '1:1', title: 'Ar', mode: 'composition', copy: { headline: hl2 }, layout: L })).body.asset;
+      const v = A.versions.find(y => y.id === A.current);
+      const rep = stubReport(v, A); const b = rep.boxes.find(y => y.id === 'headline'); b.lines = 2; b.contentH = 2 * b.px * 1.12; b.h = b.contentH; b.overflowH = false;
+      const r = await x.call('POST', '/studio/validation', { asset: A.id, version: v.id, report: rep, imageB64: pngForVersion(v, { fill: 3 }) });
+      eq(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+    } finally { x.w.restore(); }
+  });
+
+  await S.t('SEC-06: a logo, a wordmark or an artwork whose bytes are not an image is refused whatever type is declared; a real PNG is stored as PNG', async () => {
+    const x = await s30env();
+    try {
+      const page = Buffer.from('<!doctype html><script>alert(document.domain)</script>' + ' '.repeat(80)).toString('base64');
+      const lg = await x.call('POST', '/brand/kit', { ns: 'mca', logoB64: page, logoMime: 'image/png' }); ok(lg.status >= 400 && /bad_image/.test(JSON.stringify(lg.body)), 'logo: ' + JSON.stringify(lg.body).slice(0, 160));
+      const wm = await x.call('POST', '/brand/kit', { ns: 'mca', wordmarkCampaign: 'hoof', wordmarkB64: page, wordmarkMime: 'image/png' }); ok(wm.status >= 400 && /bad_image/.test(JSON.stringify(wm.body)), 'wordmark: ' + JSON.stringify(wm.body).slice(0, 160));
+      const ar = await x.call('POST', '/engine/artwork', { ns: 'mca', title: 't', imageB64: page, mime: 'image/png' }); ok(ar.status >= 400 && /bad_image/.test(JSON.stringify(ar.body)), 'artwork: ' + JSON.stringify(ar.body).slice(0, 160));
+      eq(Array.from(x.w.r2 ? x.w.r2.keys() : []).filter(k => /^brand\/mca\/(logo|wordmark)/.test(k)).length, 0, 'nothing stored');
+      const good = await x.call('POST', '/brand/kit', { ns: 'mca', logoB64: pngB64(64, 64), logoMime: 'image/webp' }); eq(good.status, 200, JSON.stringify(good.body).slice(0, 160));
+      const kit = (await x.call('GET', '/brand/kit?ns=mca')).body; eq((kit.kit || kit).logoMime, 'image/png', 'the type the bytes say');
+    } finally { x.w.restore(); }
   });
 
   const r = S.done(); process.exit(r.fail ? 1 : 0);

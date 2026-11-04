@@ -39,7 +39,7 @@
   const buildN = b => { const m = /studio-p(\d+)/.exec(String(b || '')); return m ? +m[1] : 0; };
   /* RC (R1): the worker build this page was written against. A worker answering an older build is named in a banner, so a stale
      deployment is seen, not guessed from refusals. Raise it with every page release that needs a new worker. */
-  const PAGE_NEEDS_BUILD = 46;
+  const PAGE_NEEDS_BUILD = 47;
   const STUDIO_RELEASE = (() => { try { const s = Array.from(document.scripts).map(x => x.src).find(u => /studio\.js\?v=/.test(u)); return s ? s.replace(/^.*\?v=/, '') : ''; } catch (e) { return ''; } })();
   const testClientsOf = s => {
     if (!s || !s.build) return null;

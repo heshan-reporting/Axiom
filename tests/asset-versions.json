@@ -1,0 +1,78 @@
+{
+ "vendor/fonts/fonts.css": {
+  "v": "r31",
+  "sha": "3c52d4a530d5e86f"
+ },
+ "ax-ui.js": {
+  "v": "r3",
+  "sha": "668b8e602ab31194"
+ },
+ "content.js": {
+  "v": "r2",
+  "sha": "4243dea1f75f7056"
+ },
+ "studio-progress.css": {
+  "v": "r31",
+  "sha": "8d01608b6ee8af30"
+ },
+ "studio-flow.css": {
+  "v": "r31",
+  "sha": "43c36dcb04928a65"
+ },
+ "studio-skin.css": {
+  "v": "r31",
+  "sha": "1cb7db12879f2923"
+ },
+ "studio-guided.css": {
+  "v": "r31",
+  "sha": "474189ce084c063a"
+ },
+ "studio-editor.css": {
+  "v": "r31",
+  "sha": "12168fe43d470025"
+ },
+ "studio-shell.css": {
+  "v": "r31",
+  "sha": "c3f0239afbb7ab96"
+ },
+ "studio-polish.css": {
+  "v": "r31",
+  "sha": "cf37af97729c5836"
+ },
+ "studio-render.js": {
+  "v": "r31",
+  "sha": "c2a2d98000efb1e5"
+ },
+ "studio-progress.js": {
+  "v": "r31",
+  "sha": "13aad15279100978"
+ },
+ "studio-merge.js": {
+  "v": "r31",
+  "sha": "09ca57ede41b3e5b"
+ },
+ "studio.js": {
+  "v": "r31",
+  "sha": "0900cd60d1b22bfb"
+ },
+ "studio-guided.js": {
+  "v": "r31",
+  "sha": "99cb2c4228ce79ef"
+ },
+ "studio-editor.js": {
+  "v": "r31",
+  "sha": "0d78d9e181ef3fe5"
+ },
+ "studio-canvas.js": {
+  "v": "r31",
+  "sha": "5e533c406797a094"
+ },
+ "studio-style.js": {
+  "v": "r31",
+  "sha": "0941cfccf9bc119f"
+ },
+ "studio-brandmem.js": {
+  "v": "r31",
+  "sha": "c2fdd7cec9c075a4"
+ }
+}

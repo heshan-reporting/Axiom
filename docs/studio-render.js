@@ -79,16 +79,26 @@
   }
   function wrap(ctx, text, maxW) { return wrapText(ctx, text, maxW).lines; }
   /** Lay out one text layer at W x H: the lines, the box, and the space it really occupies (padding, emphasis and rotation included). */
+  /* S30 (RM-7): the direction of the words by their first strong character - Arabic and Hebrew set right to left, so the full
+     stop and the other neutral marks land where a reader of the script expects them */
+  const RTL_RX = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  const STRONG_RX = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u0900-\u0DFF\u0E00-\u0E7F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/;
+  function dirOf(text) { const m = String(text || '').match(STRONG_RX); return m && RTL_RX.test(m[0]) ? 'rtl' : 'ltr'; }
   function layoutText(ctx, layout, l, copy, W, H) {
     let text = displayedText(layout, l, copy); if (!text) return null;
     text = applyCase(text, l);
+    const dir = dirOf(text); if ('direction' in ctx) ctx.direction = dir;
     const x = l.x / 100 * W, y = l.y / 100 * H, w = l.w / 100 * W, h = (l.h || 0) / 100 * H;
     const px = l.size / 100 * W; const font = (l.italic ? 'italic ' : '') + (l.weight || 600) + ' ' + px + 'px ' + fontFor(layout, l);
     ctx.font = font; if ('letterSpacing' in ctx) ctx.letterSpacing = l.letterSpacing ? (l.letterSpacing * px) + 'px' : '0px';
     const padX = l.bg ? px * 0.8 : 0, padY = l.bg ? px * 0.45 : 0;
     const avail = Math.max(10, w - padX * 2);
     const wr = wrapText(ctx, text, avail); const lines = wr.lines; const lh = px * (l.lineHeight || 1.12);
-    const widths = lines.map(s => ctx.measureText(s).width); const maxLineW = widths.length ? Math.max.apply(null, widths) : 0;
+    // S30 (RM-4): each line is measured for its ink as well as its advance - marks above and below the line (Arabic harakat, Thai
+    // and Vietnamese tone marks, stacked diacritics) reach past the line box, and what they touch is a collision too
+    ctx.textBaseline = 'top'; const prevAlign = ctx.textAlign; ctx.textAlign = 'left';
+    const mets = lines.map(s => ctx.measureText(s)); ctx.textAlign = prevAlign;
+    const widths = mets.map(m => m.width); const maxLineW = widths.length ? Math.max.apply(null, widths) : 0;
     // where each line sits inside the box: one line height apart, plus the paragraph gap before each new paragraph
     const gap = l.paraSpacing ? Math.max(0, Math.min(3, +l.paraSpacing || 0)) * px : 0;
     const lineY = lines.map((s0, i) => i * lh + (wr.paras[i] || 0) * gap);
@@ -98,14 +108,19 @@
     const bw = l.bg ? (align === 'center' || lines.length > 1 ? w : Math.min(w, maxLineW + padX * 2)) : 0;
     const bx = l.bg ? (align === 'center' ? x + (w - bw) / 2 : align === 'right' ? x + w - bw : x) : 0;
     let minX = Infinity, maxX = -Infinity, bottom = y + contentH;
-    widths.forEach(lw => { const lx = align === 'center' ? tx - lw / 2 : align === 'right' ? tx - lw : tx; minX = Math.min(minX, lx); maxX = Math.max(maxX, lx + lw); });
+    widths.forEach((lw, i) => { const lx = align === 'center' ? tx - lw / 2 : align === 'right' ? tx - lw : tx; const m = mets[i];
+      const il = m && isFinite(m.actualBoundingBoxLeft) ? lx - m.actualBoundingBoxLeft : lx, ir = m && isFinite(m.actualBoundingBoxRight) ? lx + m.actualBoundingBoxRight : lx + lw;
+      minX = Math.min(minX, lx, il); maxX = Math.max(maxX, lx + lw, ir); });
+    let inkTop = Infinity, inkBottom = -Infinity;
+    mets.forEach((m, i) => { if (!m || !isFinite(m.actualBoundingBoxAscent)) return; const by0 = y + padY + lineY[i]; inkTop = Math.min(inkTop, by0 - m.actualBoundingBoxAscent); inkBottom = Math.max(inkBottom, by0 + m.actualBoundingBoxDescent); });
+    if (isFinite(inkBottom)) bottom = Math.max(bottom, inkBottom);
     if (l.bg) { minX = Math.min(minX, bx); maxX = Math.max(maxX, bx + bw); }
     if (l.emphasis === 'highlight') { minX -= px * 0.15; maxX += px * 0.15; }
     if (l.emphasis === 'underline' && lines.length) bottom = Math.max(bottom, y + padY + lineY[lines.length - 1] + px * 1.02 + Math.max(1.5, px * 0.08));
     // an outline is ink: the words occupy their stroke too
     const sk = l.stroke && typeof l.stroke === 'object' && +l.stroke.width > 0 ? Math.min(px * 0.3, +l.stroke.width / 100 * W) : 0;
     if (sk) { minX -= sk; maxX += sk; bottom += sk; }
-    let top = y - (l.emphasis === 'highlight' ? px * 0.05 : 0) - sk;
+    let top = y - (l.emphasis === 'highlight' ? px * 0.05 : 0) - sk; if (isFinite(inkTop)) top = Math.min(top, inkTop - sk);
     if (l.emphasis === 'box') { const sw = Math.max(1.5, px * 0.08) / 2; const x0 = l.bg ? bx : x, x1 = l.bg ? bx + bw : x + w; minX = Math.min(minX, x0 - sw); maxX = Math.max(maxX, x1 + sw); top = Math.min(top, y - sw); bottom = Math.max(bottom, y + contentH + sw); }
     if (!isFinite(minX)) { minX = x; maxX = x; }
     let occ = { x: minX, y: top, w: maxX - minX, h: bottom - top };
@@ -115,7 +130,7 @@
       const pts = [[occ.x, occ.y], [occ.x + occ.w, occ.y], [occ.x, occ.y + occ.h], [occ.x + occ.w, occ.y + occ.h]].map(([px0, py0]) => [cx + (px0 - cx) * cs - (py0 - cy) * sn, cy + (px0 - cx) * sn + (py0 - cy) * cs]);
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); occ = { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), w: Math.max.apply(null, xs) - Math.min.apply(null, xs), h: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
     }
-    return { text, lines, widths, lineY, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
+    return { text, dir, lines, widths, lineY, px, lh, padX, padY, contentH, font, tx, bx, bw, align, occupied: occ, overflowH: !!(h && contentH > h + 0.5), overflowW: maxLineW > avail + 0.5, broken: wr.broken };
   }
   function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); ctx.closePath(); }
   /** Cover the box with the image. focus {x, y} (per cent of the image) is the point kept in view as the crop moves toward it,
@@ -341,7 +356,7 @@
       } else if (l.type === 'text') {
         const t = layoutText(ctx, layout, l, copy, W, H);
         if (!t) { ctx.restore(); return; }
-        ctx.textBaseline = 'top'; ctx.textAlign = t.align;
+        ctx.textBaseline = 'top'; ctx.textAlign = t.align; if ('direction' in ctx) ctx.direction = t.dir;
         if (t.overflowH) overflow.push(l.role || l.id);
         const ly = i => y + t.padY + t.lineY[i];
         if (l.blur > 0) ctx.filter = 'blur(' + (Math.min(20, +l.blur) / 100 * W) + 'px)';

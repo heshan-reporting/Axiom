@@ -13,6 +13,8 @@
  *        puts the focus on its question and leaves on Escape wherever the focus is
  *   UX-7 from 701 to 1100 px every stage keeps its name; UX-8 a read key sees "read-only" in the header on a phone
  *   UX-4 a direction card says the words are placed by default when the direction never said where they go
+ *   RM-4 the renderer's measured text box holds the ink of each line (Thai tone marks, Arabic harakat above the line box), so a
+ *        block set into that space collides; RM-7 Arabic is set right to left (the full stop at the reader's end of the line)
  *   QA4  the loading shimmer does not swallow clicks; QA5 Back returns to the previous piece in Copy; QA6 the library names a
  *        classic project's stage as the header does; QA9 the wrong-key lockout is named as such
  * Run: node --experimental-sqlite tests/studio-s30-browser.mjs   (S30_PORT picks the static server's port, default 8886) */
@@ -268,6 +270,29 @@ await T.t('UX-4: a direction card does not claim a placement the direction never
     const n0 = notes.find(x => x.h.trim() === d0.title.trim()); ok(n0, 'the card is there: ' + JSON.stringify(notes).slice(0, 300));
     ok(/placed by default/.test(n0.n) && !/words at the bottom/.test(n0.n), 'the unstated placement is said as a default: ' + n0.n);
     if (g.directions[1]) { const n1 = notes.find(x => x.h.trim() === g.directions[1].title.trim()); ok(n1 && /words at the top/.test(n1.n), 'a stated placement is named: ' + (n1 && n1.n)); }
+  } finally { await page.ctxB.close(); }
+});
+
+await T.t('RM-4 + RM-7: the measured box holds marks above the line, so the block above collides; Arabic is set right to left', async () => {
+  const page = await fx.open({ quiet: true });
+  try {
+    const r = await page.evaluate(() => {
+      const R = window.STRender; const c = document.createElement('canvas').getContext('2d');
+      const thai = 'ปู่ย่าตายาย น้ำมันเชื้อเพลิง';
+      const L = { v: 4, stage: { w: 1080, h: 1080 }, bg: '#0E6A6E', layers: [
+        { id: 'sp', type: 'text', role: 'support', x: 8, y: 30, w: 84, h: 8.6, size: 3, weight: 500, color: '#FFFFFF', lineHeight: 1.1 },
+        { id: 'hl', type: 'text', role: 'headline', x: 8, y: 39, w: 84, h: 20, size: 7, weight: 700, color: '#FFFFFF', lineHeight: 1.1 }] };
+      const t = R.layoutText(c, L, L.layers[1], { headline: thai, support: 'A plain line above' }, 1080, 1080);
+      const lat = R.layoutText(c, L, L.layers[1], { headline: 'Plain Latin words', support: 'x' }, 1080, 1080);
+      const ar = R.layoutText(c, L, L.layers[1], { headline: 'المعادن تبني الأمة.', support: 'x' }, 1080, 1080);
+      c.font = t.font; c.textBaseline = 'top'; c.textAlign = 'left'; const inkTop = 0.39 * 1080 + t.padY - Math.max.apply(null, t.lines.map(s0 => c.measureText(s0).actualBoundingBoxAscent));
+      return { thaiTop: t.occupied.y, inkTop, boxTop: 0.39 * 1080, latinTop: lat.occupied.y, arDir: ar.dir, latDir: lat.dir };
+    });
+    ok(r.thaiTop <= Math.min(r.boxTop, r.inkTop) + 0.5, 'the measured box reaches the highest ink of the Thai line: ' + JSON.stringify(r));
+    if (r.inkTop < r.boxTop - 2) ok(r.thaiTop < r.boxTop - 2, 'the tone marks above the line box are inside the measured box');
+    else console.log('       (this machine draws no Thai ink above the line box; the box was still checked against the ink drawn)');
+    ok(Math.abs(r.latinTop - r.boxTop) <= 2, 'plain Latin keeps its box: ' + JSON.stringify(r));
+    eq([r.arDir, r.latDir], ['rtl', 'ltr'], 'the direction follows the script');
   } finally { await page.ctxB.close(); }
 });
 

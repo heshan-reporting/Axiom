@@ -3269,6 +3269,12 @@ async function stBufSha(buf) { const d = await crypto.subtle.digest('SHA-256', b
 /** S28: the composed PNG a version's measurement filed: content-addressed, so it can never be replaced under the same name */
 function stExportKey(p, a, v, hash) { return 'studio/' + p.id + '/' + a.id + '/' + v.id + '-export-' + String(hash).slice(0, 16) + '.png'; }
 async function stContentV(buf) { try { const d = await crypto.subtle.digest('SHA-256', buf); return Array.from(new Uint8Array(d)).slice(0, 6).map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { return Date.now().toString(36); } }
+/* S30 (SEC-06): a brand mark or a catalogued artwork is stored with the type its bytes say, never the type the request
+   declared - a page or a script uploaded as "image/png" is refused before it reaches R2 */
+function brImageType(buf, what) {
+  const t = stImgSniff(buf); if (!t || ['png', 'jpeg', 'webp'].indexOf(t.type) < 0) throw new Error(what + ' is not a PNG, JPEG or WebP image by its bytes (bad_image)');
+  return t.mime;
+}
 async function brandSave(env, ns, body, who) {
   const cur = (await brandKit(env, ns)) || {};
   const pick = (v, n) => String(v == null ? '' : v).slice(0, n);
@@ -3291,11 +3297,11 @@ async function brandSave(env, ns, body, who) {
   (kit.campaigns || []).forEach(c => { delete c.wordmarkInk; (c.wordmarks || []).forEach(x => { delete x.ink; }); });
   if (body.logoB64 && kitSlug(body.logoVariant || '')) {
     if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo variant');
-    const mime = String(body.logoMime || 'image/png');
+    let mime = String(body.logoMime || 'image/png');
     if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
     const buf = bufFromB64(body.logoB64);
     if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
-    if (buf.byteLength < 64) throw new Error('logo file is empty');
+    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = brImageType(buf, 'the logo');
     const variant = kitSlug(body.logoVariant); const lv = await stContentV(buf); const key = 'brand/' + ns + '/logo/' + variant + '/' + lv;
     await env.MIND_DOCS.put(key, buf, { httpMetadata: { contentType: mime } });
     const tone = ['light', 'dark', 'colour'].indexOf(body.logoTone) >= 0 ? body.logoTone : 'colour';
@@ -3308,11 +3314,11 @@ async function brandSave(env, ns, body, who) {
     const variant = kitSlug(body.removeLogoVariant); kit.logoVariants = (kit.logoVariants || []).filter(x => x.variant !== variant); if (kit.logoDefault === variant) kit.logoDefault = undefined; if (!kit.logoVariants.length) kit.logoVariants = undefined;
   } else if (body.logoB64) {
     if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a logo');
-    const mime = String(body.logoMime || 'image/png');
+    let mime = String(body.logoMime || 'image/png');
     if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('logo must be PNG, JPEG or WebP');
     const buf = bufFromB64(body.logoB64);
     if (buf.byteLength > 2 * 1024 * 1024) throw new Error('logo larger than 2 MB');
-    if (buf.byteLength < 64) throw new Error('logo file is empty');
+    if (buf.byteLength < 64) throw new Error('logo file is empty'); mime = brImageType(buf, 'the logo');
     await env.MIND_DOCS.put('brand/' + ns + '/logo', buf, { httpMetadata: { contentType: mime } });
     // the same bytes under an immutable, versioned key: compositions reference the version they were made with
     kit.logoV = await stContentV(buf); await env.MIND_DOCS.put('brand/' + ns + '/logo@' + kit.logoV, buf, { httpMetadata: { contentType: mime } });
@@ -3327,11 +3333,11 @@ async function brandSave(env, ns, body, who) {
     if (!camp) throw new Error('unknown_campaign: name the campaign the wordmark belongs to (' + (kit.campaigns || []).map(c => c.id).join(', ') + ')');
     if (body.wordmarkB64) {
       if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store a wordmark');
-      const mime = String(body.wordmarkMime || 'image/png');
+      let mime = String(body.wordmarkMime || 'image/png');
       if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('wordmark must be PNG, JPEG or WebP');
       const buf = bufFromB64(body.wordmarkB64);
       if (buf.byteLength > 2 * 1024 * 1024) throw new Error('wordmark larger than 2 MB');
-      if (buf.byteLength < 64) throw new Error('wordmark file is empty');
+      if (buf.byteLength < 64) throw new Error('wordmark file is empty'); mime = brImageType(buf, 'the wordmark');
       const wv = await stContentV(buf); const variant = kitSlug(body.wordmarkVariant || '');
       if (variant) {
         // an approved colour variant of the campaign's wordmark, kept beside the others under an immutable key
@@ -3733,11 +3739,11 @@ async function engineArtwork(env, body, who) {
   await ensureEngine(env);
   const ns = relNs(body.ns);
   if (!env.MIND_DOCS) throw new Error('mind_not_configured: bind MIND_DOCS (R2) to store artwork');
-  const mime = String(body.mime || 'image/png');
+  let mime = String(body.mime || 'image/png');
   if (!/^image\/(png|jpeg|webp)$/.test(mime)) throw new Error('artwork must be PNG, JPEG or WebP');
   const buf = bufFromB64(body.imageB64);
   if (buf.byteLength > 6 * 1024 * 1024) throw new Error('artwork larger than 6 MB');
-  if (buf.byteLength < 64) throw new Error('artwork file is empty');
+  if (buf.byteLength < 64) throw new Error('artwork file is empty'); mime = brImageType(buf, 'the artwork');
   const id = engId('a');
   const title = String(body.title || 'Artwork').slice(0, 200);
   const meta = body.meta && typeof body.meta === 'object' ? body.meta : {};
@@ -7322,7 +7328,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-08.studio-p46';
+const AXIOM_BUILD = '2026-11-09.studio-p47';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7441,7 +7447,24 @@ async function stUserImageProblem(env, p, image, layout) {
   const layers = layout && typeof layout === 'object' && Array.isArray(layout.layers) ? layout.layers : [];
   for (const l of layers) if (l && l.src) urls.push(['layer ' + String(l.id || l.role || '').slice(0, 40), l.src]);
   for (const [what, u] of urls) if (!ST_OWN_URL_RX.test(String(u))) return bad('not_worker_url', 'The address for ' + what + ' is not one of the worker\'s own files; nothing was written.');
+  /* S30 (RM-6): an ordinary picture layer is never a brand mark in disguise (the campaign's mark policy - HOOF carries its own
+     wordmark and never the MCA logo - holds only for mark layers), and it never shows another project's file or another
+     client's catalogued artwork */
+  const owns = async k => { k = String(k || ''); if (!k || k.indexOf('studio/' + p.id + '/') === 0) return true;
+    const m = /^studio\/([A-Za-z0-9_-]+)\//.exec(k); if (!m) return true;   // not a project folder (an imported pack tile, a session image): judged by its own route
+    const had = await env.MIND_DB.prepare("SELECT 1 AS x FROM studio_versions WHERE project=? AND json_extract(image,'$.key')=? LIMIT 1").bind(p.id, k).first().catch(() => null); if (had) return true;
+    const other = await env.MIND_DB.prepare('SELECT 1 AS x FROM studio_projects WHERE id=? LIMIT 1').bind(m[1]).first().catch(() => null); return !other; };
+  const all = [];
+  if (image && typeof image === 'object' && image.url) all.push({ what: 'the image', u: String(image.url), mark: false });
+  for (const l of layers) if (l && l.src) all.push({ what: 'layer ' + String(l.id || l.role || '').slice(0, 40), u: String(l.src), mark: l.role === 'logo' || l.role === 'wordmark' });
+  for (const x of all) {
+    let q = null; try { q = new URL(x.u, 'https://studio.invalid'); } catch (e) { q = null; } if (!q) continue;
+    if (/^\/brand\/(logo|wordmark)$/.test(q.pathname) && !x.mark) return bad('brand_mark_as_image', 'The ' + what0(q.pathname) + ' is placed as a mark layer, where the campaign\'s mark policy applies, never as an ordinary picture (' + x.what + '); nothing was written.');
+    if (q.pathname === '/studio/file') { const k = q.searchParams.get('key') || ''; if (!(await owns(k))) return bad('image_not_owned', 'The file for ' + x.what + ' belongs to another project; nothing was written.'); }
+    if (q.pathname === '/engine/art') { const r = await env.MIND_DB.prepare('SELECT ns FROM engine_art WHERE id=?').bind(String(q.searchParams.get('id') || '')).first().catch(() => null); if (!r || String(r.ns || '') !== String(p.ns || '')) return bad('image_not_owned', 'The artwork for ' + x.what + ' is not catalogued for this client; nothing was written.'); }
+  }
   return null;
+  function what0(path) { return path === '/brand/logo' ? 'client logo' : 'campaign wordmark'; }
 }
 function stVersionRow(r) {
   return { id: r.id, asset: r.asset, project: r.project, parent: r.parent || null, kind: r.kind || 'text', note: r.note || '', copy: pjs(r.copy, {}), layout: pjs(r.layout, {}), image: pjs(r.image, null), mode: r.mode || 'composition', checks: pjs(r.checks, []), context: pjs(r.context, {}), restoredFrom: r.restored_from || null, who: r.who || '', created: r.created };
@@ -13399,7 +13422,7 @@ function stValidationJudge(a, v, rep, server) {
       if (!num(rb.px) || Math.abs(rb.px - px) > 0.6) problems.push('the ' + (l.role || 'text') + ' was measured at another type size');
       const lines = Math.max(1, Math.round(Number(rb.lines) || 0));
       // even a very narrow face needs this many lines; fewer means the measurement is not of this text at this size
-      const avail = Math.max(10, b.aw - (l.bg ? px * 1.6 : 0)); const minLines = Math.max(1, Math.ceil(text.length * px * 0.3 / avail));
+      const avail = Math.max(10, b.aw - (l.bg ? px * 1.6 : 0)); const spacing = Array.from(text.replace(/\p{M}/gu, '')).length; /* S30 (RM-5): combining marks (harakat, tone marks, virama) and the second half of a surrogate pair take no width of their own */ const minLines = Math.max(1, Math.ceil(spacing * px * 0.3 / avail));
       if (lines < minLines) problems.push('the ' + (l.role || 'text') + ' was reported on ' + lines + ' line' + (lines === 1 ? '' : 's') + '; at ' + l.size + '% of the width it cannot take fewer than ' + minLines);
       const contentH = Math.max(num(rb.contentH) ? rb.contentH : 0, lines * px * (l.lineHeight || 1.12));
       const ox = num(rb.x) ? rb.x : b.ax, ow = num(rb.w) ? rb.w : b.aw, oy = Math.min(num(rb.y) ? rb.y : b.ay, b.ay), oh = Math.max(num(rb.h) ? rb.h : 0, contentH + (b.ay - oy));
@@ -13604,7 +13627,7 @@ async function stInspectStage(env, job, p, log) {
   if (!j || !j.verdict) throw new Error('inspect_unparseable: "' + llmExcerpt(r.text).slice(0, 120) + '"');
   // a score the model did not give is not scored (null), never a quiet 3; each score keeps the model's reason for it
   const SC = ['fidelity', 'hierarchy', 'readability', 'relevance', 'identity'];
-  const sc = k => { const raw = j[k] && typeof j[k] === 'object' ? j[k].score : j[k]; const n = parseInt(raw, 10); return isFinite(n) ? Math.min(5, Math.max(1, n)) : null; };
+  const sc = k => { const raw = j[k] && typeof j[k] === 'object' ? j[k].score : j[k]; const n = parseInt(raw, 10); return isFinite(n) && n >= 1 && n <= 5 ? n : null; };   // S30 (RM-8): a score off the 1-5 scale (0, 7) is not scored, never moved onto it
   const scores = {}; const reasons = {}; SC.forEach(k => { scores[k] = sc(k); const why = (j.reasons && j.reasons[k]) || (j[k] && typeof j[k] === 'object' ? j[k].why || j[k].reason : ''); if (why) reasons[k] = stStr(why, 200); });
   const unscored = SC.filter(k => scores[k] == null);
   const words = { present: (Array.isArray(j.words && j.words.present) ? j.words.present : []).map(x => stStr(x, 80)).slice(0, 20), wrong: (Array.isArray(j.words && j.words.wrong) ? j.words.wrong : []).map(x => stStr(x, 80)).slice(0, 10) };

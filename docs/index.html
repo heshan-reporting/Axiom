@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Sans:wght@400..700&family=Spline+Sans+Mono:wght@400..600&display=swap" rel="stylesheet">
 <!-- the Studio's faces (DM Sans, Manrope) come with the page, not from Google: a blocked font host must not change the layout -->
-<link rel="stylesheet" href="vendor/fonts/fonts.css?v=r30">
+<link rel="stylesheet" href="vendor/fonts/fonts.css?v=r31">
 <link rel="stylesheet" href="axiom-ds.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/chart.js@4.4.6/dist/chart.umd.min.js';document.head.appendChild(s)"></script>
 <!-- GSAP — the single motion library; every transition below degrades to CSS if it fails to load -->
@@ -19,27 +19,27 @@
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
 <script src="vendor/htm.umd.js"></script>
-<script src="ax-ui.js?v=r2" defer></script>
+<script src="ax-ui.js?v=r3" defer></script>
 <script src="signals.js" defer></script>
 <script src="release.js" defer></script>
 <script src="topics.js" defer></script>
-<script src="content.js?v=r1" defer></script>
-<link rel="stylesheet" href="studio-progress.css?v=r30">
-<link rel="stylesheet" href="studio-flow.css?v=r30">
-<link rel="stylesheet" href="studio-skin.css?v=r30">
-<link rel="stylesheet" href="studio-guided.css?v=r30">
-<link rel="stylesheet" href="studio-editor.css?v=r30">
-<link rel="stylesheet" href="studio-shell.css?v=r30">
-<link rel="stylesheet" href="studio-polish.css?v=r30">
-<script src="studio-render.js?v=r30" defer></script>
-<script src="studio-progress.js?v=r30" defer></script>
-<script src="studio-merge.js?v=r30" defer></script>
-<script src="studio.js?v=r30" defer></script>
-<script src="studio-guided.js?v=r30" defer></script>
-<script src="studio-editor.js?v=r30" defer></script>
-<script src="studio-canvas.js?v=r30" defer></script>
-<script src="studio-style.js?v=r30" defer></script>
-<script src="studio-brandmem.js?v=r30" defer></script>
+<script src="content.js?v=r2" defer></script>
+<link rel="stylesheet" href="studio-progress.css?v=r31">
+<link rel="stylesheet" href="studio-flow.css?v=r31">
+<link rel="stylesheet" href="studio-skin.css?v=r31">
+<link rel="stylesheet" href="studio-guided.css?v=r31">
+<link rel="stylesheet" href="studio-editor.css?v=r31">
+<link rel="stylesheet" href="studio-shell.css?v=r31">
+<link rel="stylesheet" href="studio-polish.css?v=r31">
+<script src="studio-render.js?v=r31" defer></script>
+<script src="studio-progress.js?v=r31" defer></script>
+<script src="studio-merge.js?v=r31" defer></script>
+<script src="studio.js?v=r31" defer></script>
+<script src="studio-guided.js?v=r31" defer></script>
+<script src="studio-editor.js?v=r31" defer></script>
+<script src="studio-canvas.js?v=r31" defer></script>
+<script src="studio-style.js?v=r31" defer></script>
+<script src="studio-brandmem.js?v=r31" defer></script>
 <script src="sources.js" defer></script>
 <script src="sentiment.js" defer></script>
 <script src="narratives.js" defer></script>
@@ -3001,6 +3001,9 @@ const state={news:[],trends:[],social:[],tone:[],vol:[],tag:'auspol',net:'all',f
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* S30 (SEC-04): text placed inside a single-quoted JS string in an inline handler (onclick="f('...')"): the browser decodes the
+   attribute's entities before the JS engine reads it, so the quote and the backslash are escaped for JS first, then the whole for HTML */
+const jsAttr=s=>esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/[\r\n\u2028\u2029]/g,' '));
 function toast(msg,err){const o=document.querySelector('.toast');if(o)o.remove();const t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3200);}
 function ago(d){const s=(Date.now()-(Date.parse(d)||Date.now()))/1000;if(s<90)return 'now';if(s<3600)return Math.round(s/60)+'m';if(s<86400)return Math.round(s/3600)+'h';return Math.round(s/86400)+'d';}
 /* Upstream services sometimes answer with notices addressed to their own
@@ -3087,7 +3090,7 @@ const KM_ISSUES=[
 function kmIssueOf(text){for(const[id,cls,label,rx]of KM_ISSUES)if(rx.test(text||''))return{id,cls,label};return null;}
 function issueChip(text){
   const m=kmIssueOf(text);
-  return m?'<button class="ichip '+m.cls+'" onclick="event.preventDefault();event.stopPropagation();kmJump(\''+m.id+'\')" title="Connected on the knowledge map — open '+esc(m.label)+'">'+esc(m.label)+'</button>':'';
+  return m?'<button class="ichip '+m.cls+'" onclick="event.preventDefault();event.stopPropagation();kmJump(\''+jsAttr(m.id)+'\')" title="Connected on the knowledge map — open '+esc(m.label)+'">'+esc(m.label)+'</button>':'';
 }
 function kmJump(id){go('map');let n=0;const t=setInterval(()=>{if(km.ready){clearInterval(t);kmSelectId(id);}else if(++n>25)clearInterval(t);},120);}
 /* shared, throttled archive stats (permanent D1 store) — silent until deploy */
@@ -3176,7 +3179,7 @@ function renderIssueStrip(){
   if(!counts.length){el.style.display='none';return;}
   el.style.display='flex';
   el.innerHTML='<span class="klabel2" style="margin-right:2px">KNOWLEDGE-MAP HEAT</span>'+counts.map(([id,cls,label,n])=>
-    '<button class="ichip '+cls+'" onclick="kmJump(\''+id+'\')" title="'+n+' live signals feed this issue — open it on the map">'+esc(label)+' · '+n+'</button>').join('');
+    '<button class="ichip '+cls+'" onclick="kmJump(\''+jsAttr(id)+'\')" title="'+n+' live signals feed this issue — open it on the map">'+esc(label)+' · '+n+'</button>').join('');
 }
 /* ── briefing memory-bank line — what the archive holds going into the brief ── */
 function renderBriefMem(){
@@ -3276,7 +3279,7 @@ function renderSentinel(){
     if(a.acked)h+='<span class="done-tag"><b></b>Responded'+(a.ackedBy?' · '+esc(a.ackedBy):'')+' in '+senMin((a.acked-a.detected)/60000).join('')+'</span>';
     else if(!ro)h+='<button class="pri" onclick="senAck('+a.id+')">Acknowledge</button>';
     if(!ro)h+='<button onclick="senDraftIn('+a.id+')">Draft in Studio →</button>';
-    if(a.mapnode)h+='<button onclick="kmJump(\''+esc(a.mapnode)+'\')">See on the map</button>';
+    if(a.mapnode)h+='<button onclick="kmJump(\''+jsAttr(a.mapnode)+'\')">See on the map</button>';
     h+='<button onclick="senCoverage('+a.id+')">Open the coverage</button>';
     h+='</div></div>';
     return h;
@@ -3647,7 +3650,7 @@ function kmPanel(){
   if(rel.length){
     h+='<div class="km-p-h">Connected to</div><div class="km-chips">';
     rel.slice(0,18).forEach(r=>{
-      h+='<button class="km-chip" style="border-color:'+KM_C[r.g]+'55" onclick="kmSelectId(\''+r.id+'\')"><i style="background:'+KM_C[r.g]+'"></i>'+esc(r.l)+'</button>';
+      h+='<button class="km-chip" style="border-color:'+KM_C[r.g]+'55" onclick="kmSelectId(\''+jsAttr(r.id)+'\')"><i style="background:'+KM_C[r.g]+'"></i>'+esc(r.l)+'</button>';
     });
     if(rel.length>18)h+='<span class="km-more">+'+(rel.length-18)+' more</span>';
     h+='</div>';
@@ -3872,7 +3875,7 @@ function renderTopics(items,label){
   if(!tot){el.innerHTML='<div class="tc-none" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 72px;color:var(--t3);font-size:12.5px;line-height:1.6">No coverage on our issues yet. The wire is quiet where it matters to us.</div>';return;}
   el.innerHTML=mix.map((x,k)=>{
     const pct=(x.n/tot*100).toFixed(1);
-    return '<button class="tcall" style="'+TC_POS[k][0]+'" onclick="trackTopic(\''+esc(x.i.q)+'\')" title="'+x.n+' stor'+(x.n===1?'y':'ies')+' in '+esc(label)+' · '+esc(x.i.client)+' · track in Radar">'+
+    return '<button class="tcall" style="'+TC_POS[k][0]+'" onclick="trackTopic(\''+jsAttr(x.i.q)+'\')" title="'+x.n+' stor'+(x.n===1?'y':'ies')+' in '+esc(label)+' · '+esc(x.i.client)+' · track in Radar">'+
       '<span class="tc-i" style="background:'+TC_COL[k]+'29"><span style="background:'+TC_COL[k]+'"></span></span>'+
       '<span><span class="tc-n">'+pct+'<i>%</i></span><span class="tc-l" style="display:block">'+esc(x.i.label)+'</span></span></button>';
   }).join('');
@@ -4458,7 +4461,7 @@ function renderNarrative(){
   const tg=$('frames-tag');if(tg)tg.textContent=kw.length?'LIVE · 24H':'';
   if(!kw.length){el.innerHTML='<div class="empty" style="grid-column:1/-1">No live headlines yet.</div>';return;}
   el.innerHTML=kw.map(([w,n])=>
-    '<button class="frame-it" onclick="trackTopic(\''+esc(w)+'\')" title="Track in Radar — '+n+' headline mentions"><span class="c">›</span><b>'+esc(w)+'</b></button>').join('');
+    '<button class="frame-it" onclick="trackTopic(\''+jsAttr(w)+'\')" title="Track in Radar — '+n+' headline mentions"><span class="c">›</span><b>'+esc(w)+'</b></button>').join('');
 }
 function renderParties(){
   const counts=PARTIES.map(p=>Object.assign({},p,{n:state.news.filter(it=>p.re.test(it.title+' '+(it.desc||''))).length}));
@@ -4468,7 +4471,7 @@ function renderParties(){
   if(list)list.innerHTML=total?counts.filter(p=>p.n>0).sort((a,b)=>b.n-a.n).map(p=>{
     const pct=(p.n/total*100).toFixed(1);
     const sig=(state.spikes&&state.spikes[p.key])?' <span title="coverage spike" style="color:var(--amb)">⚡</span>':'';
-    return '<button class="xrow" onclick="openParty(\''+p.key+'\')" title="Open coverage profile — '+p.n+' mentions">'+
+    return '<button class="xrow" onclick="openParty(\''+jsAttr(p.key)+'\')" title="Open coverage profile — '+p.n+' mentions">'+
       '<span class="nm"><b style="background:'+p.color+'"></b>'+p.name+sig+'</span>'+
       '<span class="val">'+pct+'<i>%</i></span>'+
       '<span class="qmark" title="Share of all party-tagged mentions across the wire, last 72h">?</span></button>';
@@ -5008,7 +5011,7 @@ function renderNews(list){
   $('news-count').textContent=(NEWS_SEARCH?'"'+NEWS_SEARCH.q.toUpperCase()+'" · ':'')+Object.keys(srcs).length+' SOURCES · '+items.length+' STORIES · '+NEWS_WINDOW+'H';
   $('news-chips').innerHTML='<button class="chip on" onclick="filterSrc(null,this)">All</button>'+
     Object.entries(srcs).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([s,n])=>
-      '<button class="chip" onclick="filterSrc(\''+esc(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
+      '<button class="chip" onclick="filterSrc(\''+jsAttr(s)+'\',this)">'+esc(s)+' · '+n+'</button>').join('');
   $('news-list').innerHTML=items.length?items.slice(0,60).map((it,i)=>
     '<a class="wi" href="'+esc(it.link||'#')+'" target="_blank" rel="noopener"><span class="wi-src">'+esc(it.src||'')+'</span><span class="wi-body"><span class="wi-t">'+esc(it.title)+'</span>'+issueChip(it.title)+(it.desc?'<span class="wi-d">'+esc(it.desc)+'</span>':'')+'</span>'+rowSignal(it)+'<span class="wi-time">'+ago(it.date)+'</span>'+(it.link?'<span class="wi-read" role="button" tabindex="0" title="Read the article here, where the publisher makes the text public" onclick="newsRead(event,'+i+')" onkeydown="if(event.key===\'Enter\'||event.key===\' \')newsRead(event,'+i+')">Read</span>':'')+'</a>').join('')
     :'<div class="empty">Nothing in the last '+NEWS_WINDOW+' hours matched. Widen the window or search the full Google index above.</div>';
@@ -5403,7 +5406,7 @@ function renderReply(mb,txt,sources,usedWeb){
   let h=mdLite(clean);
   charts.forEach((c,i)=>{
     const card='<div class="chartcard">'+
-      '<button class="cexp" onclick="exportChatChart(\''+c.id+'\')" title="Save as PNG" aria-label="Save chart as PNG">⤓</button>'+
+      '<button class="cexp" onclick="exportChatChart(\''+jsAttr(c.id)+'\')" title="Save as PNG" aria-label="Save chart as PNG">⤓</button>'+
       (c.spec.title?'<div class="ct">'+esc(c.spec.title)+'</div>':'')+
       '<div class="cbox"><canvas id="'+c.id+'"></canvas></div></div>';
     h=h.replace('[[CH'+i+']]',card).replace(/<p>\s*<\/p>/g,'');
@@ -5754,7 +5757,7 @@ async function ccLogoUpload(file){if(!file)return;const d=await ccDownscale(file
 async function ccLibUpload(files){const bk=ccBK(CC_ACTIVE);for(const f of Array.from(files||[]).slice(0,8)){if(!/^image\//.test(f.type))continue;const d=await ccDownscale(f,900,.82);if(d)bk.library.push(d);}bk.library=bk.library.slice(0,8);ccBKSave(CC_ACTIVE,bk);ccRenderBrandKit();ccEngineNote();}
 function ccLibDel(i){const bk=ccBK(CC_ACTIVE);bk.library.splice(i,1);ccBKSave(CC_ACTIVE,bk);ccRenderBrandKit();ccEngineNote();}
 function ccRenderSwitch(){
-  $('cc-switch').innerHTML=CC_CLIENTS.map(c=>'<div class="cc-cli'+(c.id===CC_ACTIVE?' on':'')+'" onclick="ccSwitch(\''+c.id+'\')"><span class="cc-mono">'+esc((c.short||c.name).slice(0,3).toUpperCase())+'</span>'+esc(c.short||c.name)+'</div>').join('');
+  $('cc-switch').innerHTML=CC_CLIENTS.map(c=>'<div class="cc-cli'+(c.id===CC_ACTIVE?' on':'')+'" onclick="ccSwitch(\''+jsAttr(c.id)+'\')"><span class="cc-mono">'+esc((c.short||c.name).slice(0,3).toUpperCase())+'</span>'+esc(c.short||c.name)+'</div>').join('');
 }
 function ccSwitch(id){CC_ACTIVE=id;ccSave();ccState.signals=[];ccState.campaign=0;ccInit();$('content').scrollTop=0;}
 function ccRenderHero(){
@@ -7226,11 +7229,11 @@ function alCanvasRender(){
 function alLayerListRender(){
   const el=$('al-layerlist');if(!el)return;
   el.innerHTML=alState.layers.slice().reverse().map(l=>
-    '<div class="al-lrow'+(l.id===alState.sel?' on':'')+'" onclick="alState.sel=\''+l.id+'\';alCanvasRender()">'+
+    '<div class="al-lrow'+(l.id===alState.sel?' on':'')+'" onclick="alState.sel=\''+jsAttr(l.id)+'\';alCanvasRender()">'+
     '<span class="nm">'+esc(alLayerName(l))+'</span>'+
-    '<button onclick="event.stopPropagation();alLayerMove(\''+l.id+'\',1)" title="Bring forward" aria-label="Bring forward">▲</button>'+
-    '<button onclick="event.stopPropagation();alLayerMove(\''+l.id+'\',-1)" title="Send back" aria-label="Send back">▼</button>'+
-    '<button onclick="event.stopPropagation();alLayerDel(\''+l.id+'\')" title="Delete" aria-label="Delete">×</button></div>').join('')
+    '<button onclick="event.stopPropagation();alLayerMove(\''+jsAttr(l.id)+'\',1)" title="Bring forward" aria-label="Bring forward">▲</button>'+
+    '<button onclick="event.stopPropagation();alLayerMove(\''+jsAttr(l.id)+'\',-1)" title="Send back" aria-label="Send back">▼</button>'+
+    '<button onclick="event.stopPropagation();alLayerDel(\''+jsAttr(l.id)+'\')" title="Delete" aria-label="Delete">×</button></div>').join('')
     ||'<div class="note" style="margin:0">No layers yet — add text, your logo or a shape.</div>';
 }
 function alLayerMove(id,dir){
@@ -7255,8 +7258,8 @@ function alPropsRender(){
       '<label>Colour <input type="color" value="'+(l.color||'#ffffff')+'" oninput="alProp(\'color\',this.value)"></label>'+
       '<label>Plate <input type="color" value="'+(l.bg?l.bg:'#ffffff')+'" oninput="alProp(\'bg\',this.value)"></label>'+
       '<button class="pbtn'+(l.bg?'':' on')+'" onclick="alProp(\'bg\',\'\')">No plate</button>'+
-      ['display','body','mono'].map(f=>'<button class="pbtn'+(l.font===f?' on':'')+'" onclick="alProp(\'font\',\''+f+'\')">'+f+'</button>').join('')+
-      ['left','center','right'].map(a=>'<button class="pbtn'+(l.align===a?' on':'')+'" onclick="alProp(\'align\',\''+a+'\')">'+a[0].toUpperCase()+'</button>').join('')+
+      ['display','body','mono'].map(f=>'<button class="pbtn'+(l.font===f?' on':'')+'" onclick="alProp(\'font\',\''+jsAttr(f)+'\')">'+f+'</button>').join('')+
+      ['left','center','right'].map(a=>'<button class="pbtn'+(l.align===a?' on':'')+'" onclick="alProp(\'align\',\''+jsAttr(a)+'\')">'+a[0].toUpperCase()+'</button>').join('')+
       '<button class="pbtn'+(l.weight>=700?' on':'')+'" onclick="alProp(\'weight\','+(l.weight>=700?500:750)+')">Bold</button>'+op;
   }else if(l.type==='shape'){
     el.innerHTML='<label>Fill <input type="color" value="'+(/^#/.test(l.fill||'')?l.fill:'#ffffff')+'" oninput="alProp(\'fill\',this.value)"></label>'+op;

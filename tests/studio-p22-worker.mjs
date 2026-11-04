@@ -56,6 +56,12 @@ await t('each score keeps its reason; the score the model left out is "not score
   eq(ev.reasons.hierarchy, 'The support line competes with the headline at the same weight'); ok(!ev.reasons.identity, 'no reason invented');
   ok(/identity not scored/.test(ev.text) && /hierarchy 2/.test(ev.text), ev.text);
 });
+await t('S30 (RM-8): a score off the 1-5 scale (0, 7) is not scored, never moved onto the scale', async () => {
+  const keep = INSPECT; INSPECT = Object.assign({}, INSPECT, { fidelity: 0, hierarchy: 7 });
+  try { const j = await inspect(P, A); eq(j.state, 'done', j.error); const ev = await last(P); eq([ev.scores.fidelity, ev.scores.hierarchy], [null, null]); ok(ev.unscored.indexOf('fidelity') >= 0 && ev.unscored.indexOf('hierarchy') >= 0, JSON.stringify(ev.unscored)); }
+  finally { INSPECT = keep; }
+  await inspect(P, A);   // the next tests read the regular inspection again
+});
 await t('the inspection is bound to the version it saw - id, number and signature - and says it saw the imagery only when no export was composed', async () => {
   const g = await get(P); const a = g.assets.find(x => x.id === A); const ev = await last(P);
   eq([ev.version, ev.versionNumber, !!ev.sig, ev.round, ev.of], [a.current, a.versions.length, true, 1, 2]);
