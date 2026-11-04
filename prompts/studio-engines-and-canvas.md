@@ -67,8 +67,9 @@ Read that as four outcomes:
 
 - Run `node tests/run.mjs all`, `tests/studio-s27-sweep.mjs before` and `tests/studio-s19-perf-browser.mjs`, and keep the
   figures.
-- Take before screenshots of every step at 1440 x 900, 1920 x 1080, 1024 x 768 and 390 x 844 with
-  `tests/studio-r2-shots.mjs before`.
+- Take before screenshots of every step at 1440 x 900, 1920 x 1080 and 1366 x 768 with
+  `tests/studio-r2-shots.mjs before 1440`, adding the other two desktop sizes to the script. Phone and tablet layouts are
+  out of scope for this work (the owner's decision): do not spend on them, and do not make them worse.
 - Write `CREATIVE-STUDIO.md` s.61.0: the baseline, and a capability matrix for the Create step against the editor
   conventions in Phase 5. Mark each capability as built, partial or missing, with the file and function for what exists.
 
@@ -282,12 +283,13 @@ The design engine (model side):
 - **States.** Every panel has designed empty, loading (skeleton), error (explained, with Retry) and read-only states.
   Every paid action states its cost before running. Every long action shows the progress line.
 - **Typography and spacing.** One type scale (display, title, body, label, mono) and a 4 px spacing grid. Audit with a
-  screenshot sheet of every step at four widths, before and after.
+  screenshot sheet of every step at the three desktop sizes, before and after.
 - **Motion.** Purposeful only: panels, the selection and job progress. Turn it all off under `prefers-reduced-motion`.
-- **Accessibility.** `tests/studio-a11y-browser.mjs` passes with no serious or critical finding at every width, in both
+- **Accessibility.** `tests/studio-a11y-browser.mjs` passes with no serious or critical finding at the desktop widths, in both
   roles, with dialogs and panels open. Focus is always visible and contrast is AA on every token pair (test the pairs).
-- **Phone and tablet.** Brief, Plan, Direction, Copy and Review are usable at 390 px. At 390 px, Create shows the canvas
-  with a bottom sheet of tools rather than a squeezed desktop.
+- **Desktop first.** Design and test for desktop: 1366 x 768 upwards, with 1440 x 900 as the reference. Phone and tablet
+  layouts are out of scope for now (the owner's decision). Existing small-screen behaviour may stay as it is, but no change
+  may make it worse, and the existing harnesses that cover it must still pass.
 
 ## Deliverables at the end of each phase
 
