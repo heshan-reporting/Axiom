@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r36` since P49.
+  with `?v=r37` since P50.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -2977,6 +2977,24 @@ once more (`saveBriefPatch(patch, {quiet409})`). The wizard's "One visual" is on
 channels and formats only. D1's limit of 100 bound variables: `stList` and `sourceSweep` read in parts of 90, and
 `tests/d1lite.mjs` enforces the limit when `maxVars` is set. `stGet` builds the asset views six at a time, in order (P1).
 Harnesses: `tests/studio-p49-worker.mjs` (5), `tests/studio-r3-browser.mjs` (5).
+
+**The engines release, part 1 (P50; build `2026-11-05.studio-p50`, page `?v=r37`; `CREATIVE-STUDIO.md` s.61,
+`prompts/studio-engines-and-canvas.md`).** Desktop first (1366 x 768 up; phone and tablet out of scope by the owner's
+decision). `tools/deploy-verify.mjs reach` retries the post-upload check (6 x 5 s, said as it retries; 404 stops it) and
+`deploy-worker.sh` uses it. `AX_ERROR_DETAIL`: `jsonResp` gives words to any refusal sent without its own (a test fails on a
+bare code with no entry). Editors say what they started from: `/studio/direction/update {base}` (409 `direction_changed`) and
+`/brand/kit {ifUpdated}` (409 `kit_changed`). Every paid button states its cost (`studio-r4-browser` C1 walks every step).
+**One writing core**: `stWritingCore` builds the client block - kit text with the campaign's and client-wide facts (another
+campaign's never), banned terms, examples, learned copy corrections, kept brand items - for the Studio (`stContext`) and the
+Content Desk alike, marked `=== CLIENT WRITING CORE ===` (the Desk no longer quotes another campaign's facts). **Measured
+craft and voice** on every current version (`stCraft`, `stVoice`, attached by `stAssetView`; shown in Copy as Measured, never
+a gate): headline fit, reading grade, the feed fold, hashtags, the CTA against the brief's action, one message, sign-off and
+address; banned and preferred terms, sentence length, person, tense, exclamation marks, jargon - each with its source.
+Alternatives name their approach, carry their measures and a near-copy (`similar`). The canvas toolbar's **Rewrite** (Shorter,
+Plainer, More urgent, Fix to the facts, In the campaign's tone) is one revise call scoped to the layer (window event
+`st:rewrite`). The copy golden set: `tests/fixtures/copy-golden/` (synthetic client) and `tools/copy-eval.mjs` (live only with
+`--approve-calls N`). `tests/d1lite.mjs` enforces D1's 100 bound variables when `maxVars` is set. Harnesses:
+`tests/studio-p50-worker.mjs` (8), `tests/studio-r4-browser.mjs` (4).
 
 Phase 1, the ground:
 

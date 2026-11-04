@@ -4,7 +4,7 @@
  * The revision and the token are stamped into the uploaded copy only; the repository's file says 'dev' and ''. The live worker is a stub HTTP server
  * here that serves the old code, then the new. Nothing reaches Cloudflare. Run: node tests/deploy-verify-test.mjs */
 import fs from 'node:fs'; import http from 'node:http'; import os from 'node:os'; import path from 'node:path'; import { spawn, spawnSync } from 'node:child_process';
-import { stamp, readBuild, verify, newToken } from '../tools/deploy-verify.mjs';
+import { stamp, readBuild, verify, newToken, reach } from '../tools/deploy-verify.mjs';
 let pass = 0, fail = 0;
 const t = async (name, fn) => { try { await fn(); pass++; console.log('  ok   ' + name); } catch (e) { fail++; console.log('  FAIL ' + name + '\n       ' + String(e && e.message || e).slice(0, 400)); } };
 const ok = (v, m) => { if (!v) throw new Error(m || 'expected truthy'); };
@@ -87,5 +87,20 @@ await t('deploy-worker.sh uploads the stamped copy with a fresh token and refuse
   ok(/deploy-verify\.mjs" verify "\$URL" "\$DEPLOY_ID" --build "\$EXP_BUILD" --rev "\$EXP_REV"/.test(sh) && /\|\| die "the upload was accepted but the live worker is not answering with it/.test(sh), 'verify runs on the token and a failure stops the script');
   ok(!/new code is live: \/engine\/status answered/.test(sh), 'an HTTP status alone is not called live');
   ok(spawnSync('bash', ['-n', new URL('../tools/deploy-worker.sh', import.meta.url).pathname]).status === 0, 'the script parses');
+});
+
+await t('P50: the reach check retries while Cloudflare switches versions (500, 500, then 401 is an answer), says it is retrying, stops on a 404, and fails after its tries', async () => {
+  const stub = codes => new Promise(res => { let n = 0; const s = http.createServer((q, r) => { const c = codes[Math.min(n++, codes.length - 1)]; r.writeHead(c, { 'Content-Type': 'application/json' }); r.end(JSON.stringify({ error: c === 401 ? 'sign_in_required' : 'x' })); }); s.listen(0, '127.0.0.1', () => res({ s, url: 'http://127.0.0.1:' + s.address().port, count: () => n })); });
+  const lines = [];
+  const a = await stub([500, 500, 401]); const r = await reach(a.url, { tries: 6, interval: 10, log: m => lines.push(m) }); a.s.close();
+  ok(r.ok && r.status === 401 && r.tries === 3, JSON.stringify(r));
+  ok(lines.length === 2 && lines.every(l => /trying again/.test(l) && /HTTP 500/.test(l)), 'said it was retrying: ' + JSON.stringify(lines));
+  const b = await stub([404]); const r2 = await reach(b.url, { tries: 6, interval: 10 }); const n404 = b.count(); b.s.close();
+  ok(!r2.ok && r2.status === 404 && n404 === 1, 'a 404 is the old code, not a rollout: asked once ' + JSON.stringify(r2));
+  const c = await stub([502]); const r3 = await reach(c.url, { tries: 3, interval: 10 }); const n5 = c.count(); c.s.close();
+  ok(!r3.ok && n5 === 3 && /after 3 tries/.test(r3.why), JSON.stringify(r3));
+  // the script uses it, and keeps going past a non-zero exit only through its own case
+  const sh = fs.readFileSync(new URL('../tools/deploy-worker.sh', import.meta.url), 'utf8');
+  ok(/rc=0; node "\$REPO\/tools\/deploy-verify\.mjs" reach "\$URL" --tries 6 --interval 5000 \|\| rc=\$\?/.test(sh), 'deploy-worker.sh retries the check');
 });
 console.log('\n' + pass + ' passed, ' + fail + ' failed'); process.exit(fail ? 1 : 0);

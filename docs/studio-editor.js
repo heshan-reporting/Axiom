@@ -87,6 +87,15 @@
   /* ------------------------------------------------------------ the floating toolbar over the selection */
   /** What the selection can do, beside it on the canvas: type for words, fill for shapes, the image's own tools, and for every
       selection duplicate, delete, lock and paint order. "More" opens the Properties tab, where every control lives. */
+  /* P50 (Phase 2): rewrite in place - the Studio's own copy engine on the selected words, one revise call scoped to this layer,
+     landing as a new version with the checks recomputed (never applied silently, never approved) */
+  const REWRITES = [
+    ['shorter', 'Shorter', l => 'Rewrite the words of layer ' + l.id + (l.role ? ' (the ' + l.role + ')' : '') + ' shorter: the same claim and every figure, fewer words. Change only that layer\'s words.'],
+    ['plainer', 'Plainer', l => 'Rewrite the words of layer ' + l.id + (l.role ? ' (the ' + l.role + ')' : '') + ' in plainer words: shorter sentences, no jargon, the same claim and figures. Change only that layer\'s words.'],
+    ['urgent', 'More urgent', l => 'Rewrite the words of layer ' + l.id + (l.role ? ' (the ' + l.role + ')' : '') + ' to be more urgent, without exclamation marks or anything the facts do not support. Change only that layer\'s words.'],
+    ['facts', 'Fix to the facts', l => 'Rewrite the words of layer ' + l.id + (l.role ? ' (the ' + l.role + ')' : '') + ' so every figure and claim matches the approved facts or the source exactly; drop what neither supports. Change only that layer\'s words.'],
+    ['tone', 'In the campaign\'s tone', l => 'Rewrite the words of layer ' + l.id + (l.role ? ' (the ' + l.role + ')' : '') + ' in the campaign\'s own tone and wording, as its approved copy reads. Change only that layer\'s words.'],
+  ];
   function ContextToolbar({ sel, bbox, layout, ro, stageW: stageW0, locks, onPatch, onPatchEach, onDuplicate, onDelete, onLock, onOrder, onMore, onEditText, onReplace, onFontOpen, palette }) {
     const stageW = stageW0 || (layout && layout.stage && layout.stage.w) || 1080;
     const [pop, setPop] = useState('');
@@ -121,7 +130,8 @@
         ${tb('Italic', null, () => onPatchEach(l => ({ italic: !l.italic || undefined })), text && one.italic, false, 'Italic')}
         ${tb('Align', 'align', () => onPatchEach(l => ({ align: (l.align || 'left') === 'left' ? 'center' : (l.align || 'left') === 'center' ? 'right' : 'left' })), false, false, 'Alignment: ' + ((text && one.align) || 'left'))}
         <button class="st-fbar-swatch" style=${{ background: text ? one.color || '#fff' : '#fff' }} aria-label="Text colour" title="Text colour" onClick=${() => setPop(pop === 'color' ? '' : 'color')}></button>
-        ${text ? tb('Edit the words', 'pen', () => onEditText(one), false, wordsLocked, wordsLocked ? 'The ' + one.role + ' is locked on this asset' : 'Edit the words here (or double-click the text)') : null}` : null}
+        ${text ? tb('Edit the words', 'pen', () => onEditText(one), false, wordsLocked, wordsLocked ? 'The ' + one.role + ' is locked on this asset' : 'Edit the words here (or double-click the text)') : null}
+        ${text && !ro ? html`<button class=${'st-fbar-btn st-fbar-rw' + (pop === 'rewrite' ? ' on' : '')} aria-haspopup="menu" aria-expanded=${pop === 'rewrite'} disabled=${wordsLocked} title=${wordsLocked ? 'The ' + one.role + ' is locked on this asset' : 'Rewrite these words with the copy engine (each is one model call, landing as a new version)'} onClick=${() => setPop(pop === 'rewrite' ? '' : 'rewrite')}>Rewrite</button>` : null}` : null}
       ${shape && !locked ? html`<button class="st-fbar-swatch" style=${{ background: one.fill || '#000' }} aria-label="Fill" title="Fill" onClick=${() => setPop(pop === 'fill' ? '' : 'fill')}></button>
         <label class="st-fbar-range" title="Opacity">${Math.round((one.opacity == null ? 1 : one.opacity) * 100)}%<input type="range" min="0" max="100" value=${Math.round((one.opacity == null ? 1 : one.opacity) * 100)} aria-label="Opacity" onChange=${e => onPatch({ opacity: Math.round(+e.target.value) / 100 })} /></label>` : null}
       ${img && !locked ? html`${tb('Flip', 'flip', () => onPatch({ flipX: !one.flipX || undefined }), one.flipX, false, 'Flip horizontally')}${tb(one.fit === 'cover' ? 'Fit inside' : 'Fill the box', 'image', () => onPatch({ fit: one.fit === 'cover' ? 'contain' : 'cover' }), false, false)}${one.role === 'image' && onReplace ? tb('Replace image', 'upload', () => onReplace(one)) : null}` : null}
@@ -131,6 +141,7 @@
       ${tb('Bring forward', 'up', () => onOrder('forward'), false, locked)}${tb('Send backward', 'down', () => onOrder('backward'), false, locked)}
       ${!mark ? tb('Delete', 'trash', onDelete, false, locked, 'Delete (Delete key); the approved words are hidden, never deleted') : null}
       ${tb('More', 'dots', onMore, false, false, 'Every property of the selection, in the Properties tab')}
+      ${pop === 'rewrite' && text ? html`<div class="st-fbar-pop st-rw-menu" role="menu" aria-label="Rewrite these words">${REWRITES.map(([k, l, instr]) => html`<button key=${k} role="menuitem" class="st-rw-item" data-rewrite=${k} onClick=${() => { setPop(''); try { window.dispatchEvent(new CustomEvent('st:rewrite', { detail: { layer: one.id, role: one.role || '', label: l, instruction: instr(one) } })); } catch (e) {} }}>${l} <span class="ov-dim">1 model call</span></button>`)}</div>` : null}
       ${pop === 'color' && text ? html`<div class="st-fbar-pop"><${Swatches} value=${one.color} palette=${pal} label="Text colour" onPick=${c => { onPatchEach(() => ({ color: c })); setPop(''); }} /></div>` : null}
       ${pop === 'fill' && shape ? html`<div class="st-fbar-pop"><${Swatches} value=${one.fill} palette=${pal} label="Fill" onPick=${c => { onPatch({ fill: c }); setPop(''); }} /></div>` : null}
     </div>`;

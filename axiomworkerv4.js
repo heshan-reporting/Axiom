@@ -130,7 +130,73 @@ const FORUM_HEADERS = (referer = '') => ({
   ...(referer ? { 'Referer': referer } : {}),
 });
 
+/* P50: every refusal says what it means. A refusal sent with a code and no detail used to reach the page as the code alone; the
+ * words for it live here, once, and jsonResp adds them when a refusal carries none of its own. tests/studio-p50-worker.mjs
+ * fails on a bare refusal code that has no entry. */
+const AX_ERROR_DETAIL = {
+  unknown_job: 'No job with that id: it may have finished and been cleared, or belong to another project.',
+  unknown_asset: 'No asset with that id: it may have been archived, or belong to another project.',
+  unknown_project: 'No project with that id: it may have been archived, or belong to a client this key cannot see.',
+  unknown_item: 'No item with that id: it may have been removed.',
+  unknown_version: 'No version with that id on this asset.',
+  unknown_recipe: 'No recipe with that id.',
+  unknown_allowance: 'No allowance with that id.',
+  unknown_direction: 'No direction with that id: it may have been replaced.',
+  unknown_share: 'No review link with that id.',
+  unknown_reference: 'No reference with that id: it may have been removed.',
+  unknown_text: 'No text with that id in the message kit.',
+  unknown_objective: 'That objective is not one the reading proposed: choose one from the list.',
+  unknown_message: 'That message is not one the reading proposed: choose one from the list.',
+  unknown_strategy: 'That response strategy is not one the reading proposed: choose one from the list.',
+  unknown_artwork: 'No catalogued artwork with that id.',
+  unknown_pack: 'No release pack with that id.',
+  unknown_tile: 'No tile with that number in the pack.',
+  unknown_narrative: 'No narrative with that id.',
+  unknown_source: 'No source with that id.',
+  unknown_set: 'No content set with that id.',
+  unknown_topic: 'No topic with that id.',
+  unknown_document: 'No document with that id in the Mind.',
+  unknown_mind_route: 'There is no such Mind route.',
+  not_found: 'There is no such route or record.',
+  not_shared: 'That is not part of what this review link shares.',
+  not_available: 'That is not available through this review link.',
+  not_rendered: 'That tile has not been rendered yet.',
+  no_logo: 'This client has no logo on file. Upload it in the brand kit.',
+  no_wordmark: 'This campaign has no wordmark on file. Upload it in the brand kit.',
+  no_analysis: 'This project has no reading of its material yet: analyse the brief first.',
+  no_version: 'This asset has no version yet.',
+  no_name: 'Give it a name.',
+  no_prompt: 'Describe what to make.',
+  no_messages: 'Nothing to send: the conversation is empty.',
+  no_id: 'Say which record: an id is needed.',
+  no_namespace: 'Say which client: a namespace is needed.',
+  missing_ns: 'Say which client: a namespace is needed.',
+  missing_id: 'Say which record: an id is needed.',
+  missing_job: 'Say which job.',
+  missing_job_or_lines: 'Say which job and send its lines.',
+  missing_thread: 'Say which thread.',
+  missing_keyword: 'Give the keyword.',
+  missing_fields: 'Some required fields are missing.',
+  missing_assets: 'Name the assets this is for.',
+  missing_element: 'Name the element to lock or unlock.',
+  article_required: 'Give the article to read.',
+  post_required: 'This route takes a POST request.',
+  bad_json: 'The request body is not valid JSON.',
+  bad_key: 'That is not a valid key.',
+  bad_kind: 'That kind of material is not one the Studio reads.',
+  bad_verdict: 'A verdict is approve or reject.',
+  empty: 'Nothing to save: the text is empty.',
+  empty_note: 'The note is empty.',
+  empty_source: 'The material is empty: paste, link or upload something to read.',
+  cross_project: 'That belongs to another project: nothing was written.',
+  doc_too_large: 'The document is too large to file in one piece: split it.',
+  image_too_large: 'The image is too large: upload a smaller copy.',
+  q_required: 'Give the search words.',
+  url_required: 'Give the address.',
+  url_or_name_required: 'Give an address or a name.',
+};
 function jsonResp(data, status = 200) {
+  if (status >= 400 && data && typeof data === 'object' && !Array.isArray(data) && typeof data.error === 'string' && !data.detail && AX_ERROR_DETAIL[data.error]) data = Object.assign({}, data, { detail: AX_ERROR_DETAIL[data.error] });
   return new Response(JSON.stringify(data), { status, headers: CORS });
 }
 
@@ -4048,16 +4114,17 @@ async function contentCompose(env, set, opts, log) {
   const kit = (await brandKit(env, ns)) || {};
   const client = (CLIENT_ISSUES.find(ci => ci.ns === ns) || {}).client || kit.name || 'the client';
   const platforms = set.platforms;
-  const block = contentKitBlock(kit, set.campaign, set.segment, platforms);
+  // P50 (Phase 2): the same writing core as the Studio - the campaign's facts and the client-wide ones (another campaign's never),
+  // the examples, the learned copy corrections and the brand items the team kept
+  const core = await stWritingCore(env, { ns, campaign: set.campaign, segment: set.segment, channels: platforms, brief: set.brief, log });
+  const block = core.block;
   await log('out', 'voice profile: ' + (block.campaign ? 'campaign "' + block.campaign.name + '", ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms' + (block.segment ? ', audience ' + block.segment.name : ''));
-  const ex = await contentExemplars(env, ns, block.campaign, platforms, set.brief, log);
-  let learned = { text: '', count: 0 };
-  try { learned = await engineRules(env, ns, 'copy', 0, { campaign: set.campaign }); } catch (e) {}
+  const ex = core.ex; const learned = core.rulesCopy;
   if (learned.count) await log('info', 'applying ' + learned.count + ' learned correction' + (learned.count === 1 ? '' : 's') + ' for ' + ns);
   const n = Math.min(Math.max(parseInt(opts.n, 10) || 2, 1), 4);
   const specLines = platforms.map(p => { const s = CONTENT_PLATFORMS[p]; const own = (kit.platforms || {})[p] || {}; const mx = own.max || s.max; return '- ' + p + ' (' + s.label + '): ' + s.register + ' Body up to ' + mx + ' characters' + (s.title ? ', with a title' : '') + (s.script ? ', written as a script' : '') + '; ' + ((own.hashtags != null ? own.hashtags : s.hashtags) ? 'at most ' + (own.hashtags != null ? own.hashtags : s.hashtags) + ' hashtag(s)' : 'no hashtags') + '.'; }).join('\n');
   const sys = 'You are the senior copywriter of an Australian political communications agency, writing social and digital copy for the client ' + client + '. You write exactly as the client has approved before: same shape, same sign-offs, same source lines, same restraint. Return strict JSON only, no prose.'
-    + block.text + ex.text + learned.text
+    + core.text
     + '\n\nPLATFORMS - write exactly ' + n + ' piece' + (n === 1 ? '' : 's') + ' for each, every piece a different angle:\n' + specLines
     + '\n\nRULES. Australian English, sentence case, no exclamation marks, no emojis, hashtags only where a platform allows them. Every figure comes from the APPROVED FACTS or the SOURCE MATERIAL, quoted exactly, with its source line where the campaign uses one; never invent, round or update a number. Use only claims the client has made or the source supports. Paragraphs are separated by a blank line (\\n\\n). Do not favour a political party. The link goes to the campaign site, never a third-party article.'
     + '\n\nOUTPUT: {"items":[{"platform":"facebook","title":"only for platforms that take one","body":"the caption or script","cta":"the closing line or call to action, or empty","link":"URL or empty","hashtags":[],"alt":"<=140 chars image description for accessibility","visual":"<=160 chars art direction for the tile: subject, mood, no text instructions","factIds":["ids of APPROVED FACTS used"],"note":"<=80 chars: the angle"}]}';
@@ -7380,7 +7447,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-04.studio-p49';
+const AXIOM_BUILD = '2026-11-05.studio-p50';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7683,6 +7750,9 @@ async function stAssetView(env, a, opts) {
   const approvals = await stStanding(env, a);
   const project = opts.project || await stProject(env, a.project);
   let readiness = null; try { readiness = project ? await stReadiness(env, project, a, versions.find(x => x.id === curId) || null, opts.kit) : null; } catch (e) { readiness = { technical: 'unknown', error: String(e.message || e).slice(0, 120) }; }
+  // P50: the current version's channel craft and voice, measured from its words (no model; recomputed on every read)
+  const cv = versions.find(x => x.id === curId);
+  if (cv && cv.copy && project) { try { const kit = opts.kit || (await brandKit(env, project.ns)) || {}; const camp = (kit.campaigns || []).find(c => c.id === project.campaign) || null; cv.craft = stCraft(cv.copy, { format: a.format, channel: a.channel, brief: project.brief || {}, campaign: camp, url: stCampaignUrl(kit, project.campaign), kitPlatform: (kit.platforms || {})[a.channel] || null, mode: cv.mode }); cv.voice = stVoice(cv.copy, kit); } catch (e) {} }
   return Object.assign({}, a, { versions, versionsTotal: page.total, versionsFrom: versions.length ? versions[0].n : 0, approvals, readiness, current: curId, currentMissing: !!(a.current && !curId) });
 }
 /** The whole project as the workspace reads it. */
@@ -8776,25 +8846,40 @@ async function stClaude(env, o) {
   return { text, model, usage: res.d.usage || {} };
 }
 // -- what the Studio knows about the client: the kit, the rules, the shelf, the examples -----------------
-async function stContext(env, p, opts) {
-  opts = opts || {}; const log = opts.log || (async () => {});
-  const kit = (await brandKit(env, p.ns)) || {};
-  const channels = (opts.channels || []).filter(c => CONTENT_PLATFORMS[c]);
-  const block = contentKitBlock(kit, p.campaign, (p.brief || {}).segment || '', channels, { campaignOnly: true });
-  let rulesCopy = { text: '', count: 0, ids: [] }, rulesTiles = { text: '', count: 0, ids: [] };
-  try { rulesCopy = await engineRules(env, p.ns, 'copy', 0, { campaign: p.campaign }); rulesTiles = await engineRules(env, p.ns, 'tiles', 0, { campaign: p.campaign }); } catch (e) {}
-  const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
+/* P50 (Phase 2): one writing core. Every surface that writes for a client - the Studio's copy, revise, message-kit and
+ * sequence stages through stContext, and the Content Desk through contentCompose - puts the same block in front of the model
+ * for the same client and campaign: the voice and wording, the campaign's facts and the client-wide ones (another campaign's
+ * never), the banned terms, the approved examples, the learned copy corrections and the brand items the team kept. Each
+ * surface keeps its own output schema; the core is marked so a test can read it back. */
+async function stWritingCore(env, o) {
+  const ns = o.ns; const campaign = o.campaign || ''; const log = o.log || (async () => {});
+  const kit = (await brandKit(env, ns)) || {};
+  const channels = (o.channels || []).filter(c => CONTENT_PLATFORMS[c]);
+  const block = contentKitBlock(kit, campaign, o.segment || '', channels, { campaignOnly: true });
+  let rulesCopy = { text: '', count: 0, ids: [] };
+  try { rulesCopy = await engineRules(env, ns, 'copy', 0, { campaign }); } catch (e) {}
   let ex = { text: '', count: 0 };
-  try { ex = await contentExemplars(env, p.ns, block.campaign, channels.length ? channels : ['linkedin'], [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log, { campaignOnly: true }); } catch (e) {}
-  const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
+  try { ex = await contentExemplars(env, ns, block.campaign, channels.length ? channels : ['linkedin'], String(o.brief || ''), log, { campaignOnly: true }); } catch (e) {}
   // S29 (PR7): brand items the team kept as a rule or a preference reach the models - this campaign's and the client-wide ones
   let kept = { text: '', ids: [] };
   try {
     await ensureBrand(env);
-    const rows = (await env.MIND_DB.prepare("SELECT id, campaign, kind, authority, title, body FROM brand_items WHERE ns=? AND status='active' AND authority IN ('rule','preference') AND (COALESCE(campaign,'')='' OR campaign=?) ORDER BY CASE authority WHEN 'rule' THEN 0 ELSE 1 END, updated DESC LIMIT 24").bind(p.ns, String(p.campaign || '')).all()).results || [];
+    const rows = (await env.MIND_DB.prepare("SELECT id, campaign, kind, authority, title, body FROM brand_items WHERE ns=? AND status='active' AND authority IN ('rule','preference') AND (COALESCE(campaign,'')='' OR campaign=?) ORDER BY CASE authority WHEN 'rule' THEN 0 ELSE 1 END, updated DESC LIMIT 24").bind(ns, String(campaign || '')).all()).results || [];
     if (rows.length) kept = { ids: rows.map(r => r.id), text: '\n\nKEPT BY THE TEAM (brand ' + (rows.some(r => r.authority === 'rule') ? 'rules and preferences' : 'preferences') + ' a person reviewed; a rule is to be followed, a preference to be honoured where it fits):\n' + rows.map(r => '- [' + r.authority + (r.campaign ? ', campaign ' + r.campaign : ', client-wide') + '] ' + stStr(r.title, 140) + (r.body && r.body !== r.title ? ': ' + stStr(r.body, 400) : '')).join('\n') };
   } catch (e) {}
-  const text = block.text + ex.text + rulesCopy.text + kept.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
+  const text = '\n\n=== CLIENT WRITING CORE (the same for every writing surface) ===' + block.text + ex.text + rulesCopy.text + kept.text + '\n=== END OF THE CLIENT WRITING CORE ===';
+  return { kit, block, ex, rulesCopy, kept, text };
+}
+async function stContext(env, p, opts) {
+  opts = opts || {}; const log = opts.log || (async () => {});
+  const channels = (opts.channels || []).filter(c => CONTENT_PLATFORMS[c]);
+  const core = await stWritingCore(env, { ns: p.ns, campaign: p.campaign, segment: (p.brief || {}).segment || '', channels, brief: [(p.brief || {}).objective, (p.brief || {}).message].filter(Boolean).join(' '), log });
+  const kit = core.kit, block = core.block, ex = core.ex, rulesCopy = core.rulesCopy, kept = core.kept;
+  let rulesTiles = { text: '', count: 0, ids: [] };
+  try { rulesTiles = await engineRules(env, p.ns, 'tiles', 0, { campaign: p.campaign }); } catch (e) {}
+  const tilesOnly = rulesTiles.ids.filter(id => rulesCopy.ids.indexOf(id) < 0);
+  const client = (CLIENT_ISSUES.find(ci => ci.ns === p.ns) || {}).client || kit.name || p.ns;
+  const text = core.text + (tilesOnly.length ? rulesTiles.text.replace('LEARNED CORRECTIONS - taught by the team', 'LEARNED CORRECTIONS FOR TILES AND ARTWORK - taught by the team') : '');
   const snapshot = { build: AXIOM_BUILD, ns: p.ns, client, campaign: block.campaign ? block.campaign.id : '', kitName: kit.name || '', kitUpdated: kit.updated || 0, hasLogo: !!kit.hasLogo, facts: block.facts.length, banned: block.banned.length, rules: { copy: rulesCopy.ids, tiles: rulesTiles.ids }, brandItems: kept.ids, examples: ex.count, exampleSets: { approved: ex.approved || 0, avoid: ex.avoid || 0, background: ex.background || 0, unclassified: ex.unclassified || 0, otherCampaign: ex.otherCampaign || 0, legacy: ex.legacy || 0 }, models: { creative: stModel(env, 'creative'), extract: stModel(env, 'extract') }, at: Date.now() };
   await log('out', 'client context for ' + client + ': ' + (block.campaign ? 'campaign ' + block.campaign.name + ', ' : 'no campaign, ') + block.facts.length + ' approved facts, ' + block.banned.length + ' banned terms, ' + (rulesCopy.count + tilesOnly.length) + ' learned corrections, ' + ex.count + ' approved examples' + (kit.hasLogo ? ', logo on file' : ', no logo on file'));
   return { client, kit, block, text, snapshot, rules: { copy: rulesCopy, tiles: rulesTiles } };
@@ -9174,6 +9259,69 @@ function stChecks(copy, ledger, opts) {
   if (opts.layout && Array.isArray(opts.layout.incomplete)) opts.layout.incomplete.forEach(i => out.push({ state: 'mark_missing', text: i.mark, claim: null, note: i.text }));
   else if (copy.headline && opts.format && copy.headline.length > (ST_HEADLINE_FIT[opts.format] || 64)) out.push({ state: 'overflow', text: copy.headline.slice(0, 60), note: 'Headline is ' + copy.headline.length + ' characters; about ' + ST_HEADLINE_FIT[opts.format] + ' fit at ' + opts.format + ' before the type shrinks.' });
   return out;
+}
+/* P50 (Phase 2): channel craft and voice, measured. Deterministic: no model reads the words here. Each measure says what it
+ * measured, the target and where the target comes from (the format, the channel, the brief, the kit, the house). Shown beside
+ * the words as measurements; none of it is a check that blocks, and none of it is an approval. */
+const ST_FEED_FOLD = { facebook: 125, instagram: 125, linkedin: 210, x: 280, tiktok: 100, youtube: 100 };
+const ST_HOUSE_JARGON = ['leverage', 'synergy', 'stakeholders', 'utilise', 'utilize', 'going forward', 'paradigm', 'holistic', 'world-class', 'game-changer', 'best-in-class', 'deliverables', 'learnings', 'ecosystem', 'circle back'];
+function stSyllables(w) { w = String(w || '').toLowerCase().replace(/[^a-z]/g, ''); if (!w) return 0; if (w.length <= 3) return 1; w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '').replace(/^y/, ''); const m = w.match(/[aeiouy]{1,2}/g); return Math.max(1, m ? m.length : 1); }
+function stCraftSentences(t) { return String(t || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+(?=[A-Z0-9"'])/).map(x => x.trim()).filter(x => /[a-z]/i.test(x)); }
+function stReadingGrade(t) {
+  const sents = stCraftSentences(t); const words = String(t || '').match(/[A-Za-z][A-Za-z'-]*/g) || [];
+  if (words.length < 8 || !sents.length) return null;
+  const syl = words.reduce((n, w) => n + stSyllables(w), 0);
+  return Math.max(0, Math.round((0.39 * (words.length / sents.length) + 11.8 * (syl / words.length) - 15.59) * 10) / 10);
+}
+const stContentWords = t => (String(t || '').toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => ['this', 'that', 'with', 'from', 'your', 'have', 'will', 'they', 'their', 'what', 'about', 'more', 'than', 'into', 'just', 'here', 'there'].indexOf(w) < 0).map(w => w.replace(/(ing|ed|es|s)$/, ''));
+function stCraft(copy, o) {
+  o = o || {}; copy = copy || {}; const out = [];
+  const add = (key, label, value, target, okv, note, source) => out.push({ key, label, value, target, ok: okv, note, source });
+  const fmt = o.format || '1:1'; const fit = ST_HEADLINE_FIT[fmt] || 64; const hl = String(copy.headline || '');
+  if (hl) add('headline_fit', 'Headline length', hl.length + ' characters', 'at most ' + fit + ' for ' + fmt, hl.length <= fit, hl.length <= fit ? 'fits the ' + fmt + ' tile' : 'about ' + (hl.length - fit) + ' characters over what the ' + fmt + ' tile sets comfortably', 'format ' + fmt);
+  const cap = String(copy.caption || copy.body || ''); const prose = [copy.support, cap].filter(Boolean).join(' ');
+  const grade = stReadingGrade(prose);
+  if (grade != null) add('reading_grade', 'Reading grade', 'grade ' + grade, 'grade 9 or under', grade <= 9, grade <= 9 ? 'plain enough for a general reader' : 'harder than a general reader takes in a feed: shorter sentences and plainer words', 'Flesch-Kincaid grade (a formula, not a model)');
+  const fold = ST_FEED_FOLD[o.channel];
+  if (fold && cap) { const first = stCraftSentences(cap)[0] || cap; const shown = cap.slice(0, fold); add('feed_preview', 'Before "more"', JSON.stringify(shown.length < cap.length ? shown.replace(/\s+\S*$/, '') + '...' : shown), 'the first sentence within ' + fold + ' characters', first.length <= fold, first.length <= fold ? 'the opening line shows in full before the feed folds it' : 'the feed folds the opening line after about ' + fold + ' characters: put the point first', 'channel ' + o.channel + ' (about ' + fold + ' characters shown)'); }
+  const spec = CONTENT_PLATFORMS[o.channel];
+  if (spec) { const tags = (cap.match(/#\w+/g) || []).length; const max = o.kitPlatform && o.kitPlatform.hashtags != null ? o.kitPlatform.hashtags : spec.hashtags; add('hashtags', 'Hashtags', String(tags), 'at most ' + max, tags <= max, tags <= max ? 'within the policy' : 'more than the policy allows', o.kitPlatform && o.kitPlatform.hashtags != null ? 'the client\'s ' + spec.label + ' notes' : spec.label + ' policy'); }
+  const cta = String(copy.cta || ''); const act = String((o.brief || {}).action || '');
+  if (o.mode !== 'copy' || cta || act) {
+    if (!cta) add('cta', 'Call to action', 'none', act ? 'the brief\'s action: "' + stStr(act, 60) + '"' : 'a closing line', false, 'there is no call to action', act ? 'the brief\'s action' : 'house');
+    else if (act) { const aw = stContentWords(act), cw = stContentWords(cta + ' ' + cap); const shared = aw.filter(w => cw.indexOf(w) >= 0); add('cta', 'Call to action', JSON.stringify(stStr(cta, 60)), 'matches the brief\'s action: "' + stStr(act, 60) + '"', shared.length > 0, shared.length ? 'it carries the brief\'s action (' + shared.slice(0, 3).join(', ') + ')' : 'it does not say what the brief asks people to do', 'the brief\'s action'); }
+    else add('cta', 'Call to action', JSON.stringify(stStr(cta, 60)), 'present', true, 'present (the brief names no action to match)', 'house');
+  }
+  const figs = Array.from(new Set(stNumbers([hl, copy.support, cap].filter(Boolean).join(' ')).map(n => n.value + (n.unit || ''))));
+  add('one_message', 'One message', figs.length + ' figure' + (figs.length === 1 ? '' : 's'), 'one claim, at most two figures', figs.length <= 2, figs.length <= 2 ? 'one argument' : figs.length + ' different figures: check it is still one message, or split it', 'house (one message per piece)');
+  const camp = o.campaign || null;
+  if (camp && camp.signoff && cap) { const has = cap.toLowerCase().indexOf(String(camp.signoff).toLowerCase().slice(0, 40)) >= 0; add('signoff', 'Campaign sign-off', has ? 'present' : 'missing', JSON.stringify(stStr(camp.signoff, 60)), has, has ? 'the campaign\'s sign-off is there' : 'the campaign signs off with "' + stStr(camp.signoff, 60) + '"', 'campaign ' + (camp.name || camp.id)); }
+  if (o.url && o.url.host && cap) { const has = cap.toLowerCase().indexOf(o.url.host) >= 0; add('address', 'Campaign address', has ? o.url.host : 'missing', o.url.host, has, has ? 'the campaign\'s address is there' : 'the caption does not give the campaign\'s address (' + o.url.host + ')', 'campaign ' + (camp && (camp.name || camp.id) || '')); }
+  return out;
+}
+function stVoice(copy, kit) {
+  copy = copy || {}; kit = kit || {}; const sig = [];
+  const text = ['headline', 'support', 'cta', 'caption', 'body'].map(k => copy[k]).filter(Boolean).join(' \n ');
+  if (!text.trim()) return { score: null, signals: [] };
+  const rules = String(kit.rules || '') + ' ' + String(kit.voice || '');
+  const banned = contentBannedCheck(text, kit.banned || []);
+  sig.push({ key: 'banned', label: 'Banned terms', value: banned.length ? banned.join(', ') : 'none', ok: !banned.length, source: 'kit: never say (' + (kit.banned || []).length + ' terms)', penalty: 25 * banned.length });
+  const preferred = (kit.banned || []).map(b => b.use).filter(Boolean); const usedPref = preferred.filter(u => text.toLowerCase().indexOf(String(u).toLowerCase()) >= 0);
+  if (preferred.length) sig.push({ key: 'preferred', label: 'Preferred wording', value: usedPref.length ? usedPref.join(', ') : 'none used', ok: true, source: 'kit: say instead', penalty: 0 });
+  const sents = stCraftSentences(text); const words = (text.match(/[A-Za-z][A-Za-z'-]*/g) || []).length; const avg = sents.length ? Math.round(words / sents.length * 10) / 10 : 0;
+  const mlen = rules.match(/(\d{1,2})\s*words?\s*(?:a|per|in a)\s*sentence/i); const target = mlen ? Number(mlen[1]) : 20;
+  sig.push({ key: 'sentence_length', label: 'Sentence length', value: avg + ' words on average', ok: avg <= target, source: mlen ? 'kit rule: ' + mlen[0] : 'house: about 20 words a sentence', penalty: avg > target ? 10 : 0 });
+  const we = (text.match(/\b(we|our|us)\b/gi) || []).length, you = (text.match(/\b(you|your)\b/gi) || []).length;
+  const wantWe = /\b(first person|we say|in the first person|speak as we)\b/i.test(rules), wantYou = /\b(second person|speak to (the )?reader|address the reader|use you)\b/i.test(rules);
+  sig.push({ key: 'person', label: 'Person', value: we + ' first person, ' + you + ' second person', ok: !(wantWe && !we) && !(wantYou && !you), source: wantWe ? 'kit rule: first person' : wantYou ? 'kit rule: speak to the reader' : 'no rule in the kit (informational)', penalty: (wantWe && !we) || (wantYou && !you) ? 10 : 0 });
+  const fut = (text.match(/\bwill\b|\bgoing to\b/gi) || []).length; const wantPresent = /\bpresent tense\b/i.test(rules);
+  sig.push({ key: 'tense', label: 'Tense', value: fut ? fut + ' future-tense phrase' + (fut === 1 ? '' : 's') : 'present and past', ok: !(wantPresent && fut), source: wantPresent ? 'kit rule: present tense' : 'no rule in the kit (informational)', penalty: wantPresent && fut ? 5 : 0 });
+  const ex = (text.match(/!/g) || []).length; const exRule = /exclamation/i.test(rules);
+  sig.push({ key: 'exclamation', label: 'Exclamation marks', value: String(ex), ok: !ex, source: exRule ? 'kit rule: no exclamation marks' : 'house rule: no exclamation marks', penalty: 10 * ex });
+  const avoidList = (rules.match(/avoid(?: the words?)?[:\s]+([^.\n]{3,200})/i) || [])[1]; const jargon = ST_HOUSE_JARGON.concat(avoidList ? avoidList.split(/,|;| or /).map(x => x.trim().toLowerCase()).filter(x => x && x.length < 30) : []);
+  const jhits = Array.from(new Set(jargon.filter(j => new RegExp('\\b' + j.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text))));
+  sig.push({ key: 'jargon', label: 'Jargon', value: jhits.length ? jhits.join(', ') : 'none', ok: !jhits.length, source: avoidList ? 'kit rule: avoid list, and the house jargon list' : 'house jargon list', penalty: 10 * jhits.length });
+  return { score: Math.max(0, 100 - sig.reduce((n, x) => n + x.penalty, 0)), signals: sig.map(x => ({ key: x.key, label: x.label, value: x.value, ok: x.ok, source: x.source })) };
 }
 /** Recompute a version's checks from the project's ledger and the client's kit; stored on the version row. */
 async function stVersionChecks(env, project, asset, v) {
@@ -11162,7 +11310,7 @@ async function stReviseStage(env, job, p, log) {
     + '{"kind":"text|alternatives|render|adapt|layout|design|question",'
     + '"reply":"<=45 words to the team lead: what you did or propose and why, naming the assets",'
     + '"changes":[{"asset":"id","copy":{"headline":"...","support":"...","cta":"...","caption":"...","alt":"..."},"note":"<=12 words"}],'
-    + '"alternatives":{"asset":"id","field":"headline|support|cta|caption","options":["...","...","..."]},'
+    + '"alternatives":{"asset":"id","field":"headline|support|cta|caption","options":[{"text":"...","approach":"fact-led|question|contrast|voice-of-person|other"},{"text":"...","approach":"..."},{"text":"...","approach":"..."}]},'
     + '"render":{"assets":["id"],"visual":"<=160 characters of art direction for the new photograph, no text, no logos","steps":["<=12 words each: what changes, what is kept"]},'
     + '"adapt":{"from":"id","pieces":[{"channel":"instagram","format":"4:5|1:1|9:16|16:9","copy":{"headline":"...","support":"...","cta":"...","caption":"...","alt":"..."}}]},'
     + '"layout":{"assets":["id"],"headlineSize":"smaller|larger|same"},'
@@ -11285,10 +11433,17 @@ async function stReviseStage(env, job, p, log) {
   if (kind === 'alternatives') {
     const alt = j.alternatives || {}; const t = inScope(alt.asset) || targets[0];
     const field = ST_COPY_FIELDS.indexOf(alt.field) >= 0 ? alt.field : 'headline';
-    const options = (Array.isArray(alt.options) ? alt.options : []).map(o => stStr(o, field === 'caption' ? 1500 : 200).trim()).filter(Boolean).slice(0, 4);
+    // P50 (Phase 2): options may say their approach; each is measured on the checks and the channel craft, and one that reads
+    // almost the same as another is said to (content-word overlap 0.6 or more), never hidden
+    const raw0 = (Array.isArray(alt.options) ? alt.options : []).map(o => o && typeof o === 'object' ? { text: o.text, approach: o.approach } : { text: o });
+    const opts0 = raw0.map(o => ({ text: stStr(o.text, field === 'caption' ? 1500 : 200).trim(), approach: ['fact-led', 'question', 'contrast', 'voice-of-person', 'other'].indexOf(String(o.approach || '')) >= 0 ? String(o.approach) : '' })).filter(o => o.text).slice(0, 4);
+    const options = opts0.map(o => o.text); const approaches = opts0.map(o => o.approach);
     if (!options.length) throw new Error('alternatives_empty: the model offered no options - "' + llmExcerpt(r.text).slice(0, 120) + '"');
     const checks = options.map(o => stChecks(Object.assign({}, t.version ? t.version.copy : {}, { [field]: o }), led.claims, { allowed: led.text, banned: ctx.block.banned, facts: ctx.block.facts, channel: t.asset.channel, format: t.asset.format, layout: t.version ? t.version.layout : null }).filter(c => c.state !== 'matches' && c.state !== 'fact').map(c => c.state));
-    await stEvent(env, p.id, 'alternatives', Object.assign({}, base, { text: reply + ' Choose one and it becomes a text change on ' + t.asset.title + ', no render.', asset: t.asset.id, field, options, checks }), 'studio');
+    const craft = options.map(o => stCraft(Object.assign({}, t.version ? t.version.copy : {}, { [field]: o }), { format: t.asset.format, channel: t.asset.channel, brief: p.brief || {} }).filter(m => (field === 'headline' && m.key === 'headline_fit') || (field === 'caption' && (m.key === 'feed_preview' || m.key === 'reading_grade' || m.key === 'hashtags')) || (field === 'support' && m.key === 'reading_grade') || (field === 'cta' && m.key === 'cta')).map(m => ({ key: m.key, label: m.label, value: m.value, ok: m.ok })));
+    const words = options.map(o => new Set(stContentWords(o)));
+    const similar = options.map((o, i) => { let hit = -1; words.forEach((w2, j) => { if (j === i || hit >= 0) return; const a1 = words[i]; const inter = Array.from(a1).filter(x => w2.has(x)).length; const uni = new Set(Array.from(a1).concat(Array.from(w2))).size; if (uni && inter / uni >= 0.6) hit = j; }); return hit; });
+    await stEvent(env, p.id, 'alternatives', Object.assign({}, base, { text: reply + ' Choose one and it becomes a text change on ' + t.asset.title + ', no render.', asset: t.asset.id, field, options, approaches, checks, craft, similar }), 'studio');
     await log('out', options.length + ' alternative ' + field + 's offered for ' + t.asset.title + '; nothing applied');
     return { kind, eid, asset: t.asset.id, field, options };
   }
@@ -14933,7 +15088,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { sourceSweep, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { sourceSweep, stCraft, stVoice, stReadingGrade, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -16062,6 +16217,8 @@ const AXIOM_WORKER = {
         if (path === '/brand/teach' && req.method === 'POST') { const r = await brTeach(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit/restore' && req.method === 'POST') { const r = await brandRestore(env, ns2, rbody2, auth.name); return jsonResp(r, r.status || 200); }
         if (path === '/brand/kit' && req.method === 'POST') {
+          // P50: an editor that read the kit says when (ifUpdated); a kit saved by someone else since is not overwritten silently
+          if (rbody2.ifUpdated != null) { const cur0 = (await brandKit(env, ns2)) || {}; if (Number(cur0.updated || 0) !== Number(rbody2.ifUpdated || 0)) return jsonResp({ error: 'kit_changed', detail: 'The brand kit was saved' + (cur0.by ? ' by ' + cur0.by : '') + ' after you opened it. Nothing was saved: reload it, then make your change again.', updated: cur0.updated || 0, by: cur0.by || '' }, 409); }
           let kit; try { kit = await brandSave(env, ns2, rbody2, auth.name); } catch (e) { const m = String(e && e.message || e); if (/\(bad_image\)|file is empty/.test(m)) return jsonResp({ error: 'bad_image', detail: m.replace(/ \(bad_image\)$/, '') + '. Nothing was saved.' }, 422); throw e; }
           return jsonResp({ ok: true, ns: ns2, kit, hasLogo: !!kit.hasLogo, logoUrl: kit.hasLogo ? '/brand/logo?ns=' + ns2 + '&v=' + kit.updated : '' });
         }
@@ -16573,6 +16730,8 @@ const AXIOM_WORKER = {
             return jsonResp(Object.assign({ ok: true }, await stGet(env, pr.id, { light: true }), { direction: nid }));
           }
           const patch = sb.patch && typeof sb.patch === 'object' ? sb.patch : {}; const next = Object.assign({}, data); const changed = [];
+          // P50: the editor says what each field held when it began (base); a field someone else changed since is not overwritten
+          if (sb.base && typeof sb.base === 'object') { const moved = Object.keys(patch).filter(k => k in sb.base && String(data[k] == null ? '' : data[k]) !== String(sb.base[k] == null ? '' : sb.base[k])); if (moved.length) return jsonResp({ error: 'direction_changed', detail: 'Someone else changed ' + moved.join(', ') + ' of this direction since you opened it. Nothing was saved: look at the direction as it stands, then edit it again.', fields: moved }, 409); }
           ['title', 'idea', 'message', 'hook', 'headline', 'audience', 'tone', 'layout', 'why', 'visual', 'opening'].forEach(k => { if (patch[k] != null && stStr(patch[k], 400) !== (data[k] || '')) { next[k] = stStr(patch[k], k === 'title' ? 60 : 400); changed.push(k); } });
           if (patch.saved != null) { next.saved = !!patch.saved; changed.push(patch.saved ? 'saved' : 'unsaved'); }
           if (patch.archived != null) { next.archived = !!patch.archived; changed.push(patch.archived ? 'set aside' : 'restored'); }

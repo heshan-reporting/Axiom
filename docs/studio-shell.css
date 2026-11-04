@@ -943,3 +943,13 @@ body.in-studio #studio-root{height:100%}
 /* P49 (F4): a brief field someone else changed while it was being edited */
 #studio-root .st .st-bf-clash{border:1px solid var(--x-warn, #e3b341);border-radius:8px;padding:8px 12px;margin:8px 0;display:grid;gap:6px;font-size:13px}
 #studio-root .st .st-bf-clash .btn{margin-left:4px}
+/* P50 (Phase 2): the measured craft and voice panel in Copy */
+#studio-root .st .st-craft{border:1px solid var(--st-line, var(--line));border-radius:8px;padding:10px 12px;margin:10px 0;display:grid;gap:8px;font-size:13px}
+#studio-root .st .st-craft-head{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+#studio-root .st .st-craft-list{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+#studio-root .st .st-craft-row{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+#studio-root .st .st-craft-src{margin-left:auto;font-size:11px;color:var(--st-ink-3, var(--t2));font-family:var(--st-mono, ui-monospace, monospace)}
+#studio-root .st .st-craft-vh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px}
+#studio-root .st .st-craft-score{font-variant-numeric:tabular-nums;font-weight:700}
+/* P50: the cost a paid button states, quiet beside its words */
+#studio-root .st .st-cost{font-size:11px;font-weight:500;opacity:.78;margin-left:4px;white-space:nowrap}

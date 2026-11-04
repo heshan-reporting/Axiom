@@ -199,30 +199,32 @@ await t('POST /content/generate writes n pieces per platform in the campaign fra
   eq(s.status, 200); eq(s.d.set.status, 'written'); eq(s.d.set.items.length, 6); eq(s.d.set.campaign, 'hoof'); eq(s.d.set.segment, 's6');
   const it = s.d.set.items;
   eq(it.map(x => x.platform), ['facebook', 'facebook', 'linkedin', 'linkedin', 'instagram', 'instagram']);
-  ok(it[0].check.ok, 'the $74 billion piece traces to the approved fact: ' + JSON.stringify(it[0].check));
+  // P50 (the writing core, campaign walls): the $74 billion fact is the national campaign's, so a HOOF piece quoting it is flagged
+  ok(!it[0].check.ok && it[0].check.missing.indexOf('74') >= 0, 'another campaign\'s fact is not evidence for a HOOF piece: ' + JSON.stringify(it[0].check));
   ok(it[1].check.flags.indexOf('unverified_figure') >= 0 && it[1].check.missing.indexOf('99') >= 0, '$99 billion is flagged as not in facts or source');
   ok(it[2].check.flags.indexOf('banned_term') >= 0 && it[2].check.banned[0] === 'subsidy', '"a subsidy" is a banned term');
   ok(it[3].check.ok, '"not a subsidy" is a denial and passes: ' + JSON.stringify(it[3].check));
-  eq(it[4].hashtags, ['Australia']); ok(it[4].check.ok, 'one hashtag on instagram is within the limit');
+  eq(it[4].hashtags, ['Australia']); ok(it[4].check.flags.indexOf('too_many_hashtags') < 0, 'one hashtag on instagram is within the limit');
   ok(it[5].check.flags.indexOf('unverified_figure') >= 0, 'second instagram piece repeats the $99 billion variant and is flagged');
   const sys = claude.calls[claude.calls.length - 1].sys;
   ok(/CAMPAIGN - Hands Off Our Fuel/.test(sys) && /Sign-off \(close with it, spelled exactly\): "Hands Off Our Fuel."/.test(sys), 'the campaign frame is in the prompt');
   ok(/AUDIENCE - Segment 6/.test(sys), 'the audience is in the prompt');
-  ok(/\[tax74\]/.test(sys) && !/\$276 billion/.test(sys), 'approved facts are listed, pending ones held back');
+  ok(/\[tax30pc\]/.test(sys) && !/\[tax74\]/.test(sys) && !/\$276 billion/.test(sys), 'client-wide approved facts are listed; another campaign\'s (national) and pending ones held back');
+  ok(/=== CLIENT WRITING CORE/.test(sys), 'the Content Desk writes from the shared writing core');
   ok(/NEVER USE these words/.test(sys) && /"subsidy"/.test(sys), 'banned terms are in the prompt');
   ok(/APPROVED EXAMPLES/.test(sys) && /Hands Off Our Fuel - approved captions/.test(sys) && !/Some news/.test(sys), 'only copy/outcome/brief examples from the Mind are quoted');
   ok(/HOW THIS CLIENT USES LINKEDIN/.test(sys), 'platform notes from the kit are applied');
   ok(!/LEARNED CORRECTIONS/.test(sys), 'no corrections yet');
   const log = env.MIND_DB.table('bridge_log').filter(l => l.job === jobId).map(l => l.text);
-  ok(log.some(l => /voice profile: campaign "Hands Off Our Fuel", 2 approved facts, 2 banned terms, audience Segment 6/.test(l)), 'console narrates the profile: ' + log.join(' | '));
+  ok(log.some(l => /voice profile: campaign "Hands Off Our Fuel", 1 approved facts, 2 banned terms, audience Segment 6/.test(l)), 'console narrates the profile: ' + log.join(' | '));
   // S23: the narration says what each document is - approved to learn from, to avoid, background - and how it was classified
   ok(log.some(l => /Mind for mca \/ hoof: 1 approved example, 0 to avoid, 0 background, 1 classified by their voice-pack tag/.test(l)), 'console narrates the examples: ' + log.filter(l => /Mind/.test(l)).join(' | '));
-  ok(log.some(l => /6 pieces: facebook x2, linkedin x2, instagram x2 - 3 flagged/.test(l)), 'console narrates the result: ' + log.join(' | '));
+  ok(log.some(l => /6 pieces: facebook x2, linkedin x2, instagram x2 - 5 flagged/.test(l)), 'console narrates the result: ' + log.join(' | '));
   const job = env.MIND_DB.table('bridge_jobs').find(j => j.id === jobId); eq(job.status, 'done'); eq(job.source, 'content');
 });
 await t('GET /content/list summarises the set', async () => {
   const r = await req('GET', '/content/list?ns=mca', null, 'read-key');
-  eq(r.d.sets.length, 1); eq(r.d.sets[0].pieces, 6); eq(r.d.sets[0].flagged, 3); eq(r.d.sets[0].platforms, ['facebook', 'linkedin', 'instagram']); eq(r.d.sets[0].campaign, 'hoof');
+  eq(r.d.sets.length, 1); eq(r.d.sets[0].pieces, 6); eq(r.d.sets[0].flagged, 5); eq(r.d.sets[0].platforms, ['facebook', 'linkedin', 'instagram']); eq(r.d.sets[0].campaign, 'hoof');
   const other = await req('GET', '/content/list?ns=aep', null, 'read-key'); eq(other.d.sets, [], 'namespaces stay walls');
 });
 await t('POST /content/revise with a standing instruction edits all pieces and the Engine learns a rule for this client only', async () => {

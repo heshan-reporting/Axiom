@@ -86,6 +86,25 @@ export async function verify(url, token, o) {
   return { ok: false, why, last, tries };
 }
 
+/* P50: is the worker answering at all, right after an upload? Cloudflare can answer 500 for a few seconds while it switches
+ * versions (4 November 2026: the first check met one and the owner deployed twice). 200 or 401 is an answer; 404 is the old
+ * code serving (no /engine/status), which waiting does not change; anything else is retried, said as such, before failing. */
+export async function reach(url, o) {
+  o = o || {}; const f = o.fetch || fetch; const tries = o.tries || 6; const interval = o.interval != null ? o.interval : 5000; const log = o.log || (() => {});
+  const base = String(url).replace(/\/+$/, ''); let last = null;
+  for (let i = 0; i < tries; i++) {
+    if (i) { log('the worker answered ' + (last.status ? 'HTTP ' + last.status : last.error) + ' (it may still be switching to the new version): trying again in ' + Math.round(interval / 1000) + ' s (' + (i + 1) + ' of ' + tries + ')'); await new Promise(r => setTimeout(r, interval)); }
+    try {
+      const r = await f(base + '/engine/status?ns=cmm', { headers: Object.assign({ 'Cache-Control': 'no-cache' }, o.key ? { 'X-Axiom-Key': o.key } : {}) });
+      const body = await r.text().catch(() => '');
+      last = { status: r.status, body };
+      if (r.status === 200 || r.status === 401) return { ok: true, status: r.status, body, tries: i + 1 };
+      if (r.status === 404) return { ok: false, status: 404, body, tries: i + 1, why: 'the worker still answers 404 on /engine/status - the old code is serving' };
+    } catch (e) { last = { error: String(e && e.message || e) }; }
+  }
+  return { ok: false, status: last && last.status, tries, why: 'the worker did not answer 200 or 401 after ' + tries + ' tries (' + (last && last.status ? 'last HTTP ' + last.status : (last && last.error) || 'no answer') + ')' };
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
 if (isMain) {
   const [cmd, ...a] = process.argv.slice(2);
@@ -99,6 +118,10 @@ if (isMain) {
       const r = await verify(a[0], a[1], { tries: Number(opt('--tries')) || undefined, interval: opt('--interval') != null ? Number(opt('--interval')) : undefined, key, build, rev });
       if (r.ok) console.log('verified: the live worker answers this upload\'s deploy token' + (r.gated ? ', and /engine/status answers build ' + r.build + ', revision ' + r.rev : (build || rev) ? ' (set AXIOM_KEY to check the build and revision on /engine/status too)' : '') + ' (after ' + r.tries + ' read' + (r.tries === 1 ? '' : 's') + ')');
       else { console.error('NOT VERIFIED after ' + r.tries + ' reads: ' + r.why + '.'); process.exit(1); }
-    } else { console.error('usage: deploy-verify.mjs expect <src> | token | stamp <src> <out> <rev> <token> | verify <url> <token> [--build B --rev R] [--tries N] [--interval MS]'); process.exit(2); }
+    } else if (cmd === 'reach') {
+      const r = await reach(a[0], { tries: Number(opt('--tries')) || undefined, interval: opt('--interval') != null ? Number(opt('--interval')) : undefined, key: process.env.AXIOM_KEY || '', log: m => console.log(m) });
+      if (r.ok) { console.log('/engine/status answered ' + r.status + (r.tries > 1 ? ' (after ' + r.tries + ' tries)' : '')); console.log(process.env.AXIOM_KEY ? r.body.slice(0, 240) : '(export AXIOM_KEY to read the Engine status itself)'); }
+      else { console.error(r.why + '.'); process.exit(r.status === 404 ? 3 : 1); }
+    } else { console.error('usage: deploy-verify.mjs expect <src> | token | stamp <src> <out> <rev> <token> | verify <url> <token> [--build B --rev R] [--tries N] [--interval MS] | reach <url> [--tries N] [--interval MS]'); process.exit(2); }
   } catch (e) { console.error(String(e && e.message || e)); process.exit(1); }
 }

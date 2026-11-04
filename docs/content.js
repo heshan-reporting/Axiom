@@ -173,7 +173,7 @@
     const save = async () => {
       setBusy(true); setErr('');
       try {
-        const d = await call('/brand/kit', { ns, voice: f.voice, rules: f.rules, campaigns: f.campaigns.filter(x => x.name || x.id), facts: f.facts.filter(x => x.text), banned: f.banned.filter(x => x.term) });
+        const d = await call('/brand/kit', { ns, ifUpdated: k.updated || 0, voice: f.voice, rules: f.rules, campaigns: f.campaigns.filter(x => x.name || x.id), facts: f.facts.filter(x => x.text), banned: f.banned.filter(x => x.term) });
         toastMsg('Voice profile saved'); onSaved(d);
       } catch (e) { setErr(e.message); }
       setBusy(false);

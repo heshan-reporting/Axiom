@@ -3885,3 +3885,81 @@ D1 queries and the project-open path. The Claude Code prompt that states these f
 `tests/d1lite.mjs` takes `maxVars` (D1 refuses a statement with more than 100 bound variables) so a harness can hold the
 fixture to that limit. U8 (the subline without an ellipsis) was found already fixed. Not done: the evaluation of live model
 quality, which needs an owner-approved allowance (the prompt states the plan to write).
+
+## 61. P50 - the engines release (build `2026-11-05.studio-p50`, page `?v=r37`; `prompts/studio-engines-and-canvas.md`)
+
+The owner asked for the open issues closed, each engine (copywriting, client knowledge, client relevance, client memory,
+design) measurably better with evidence, a Create step that works like a first-class design editor (held to the standard of
+Canva's editor, matching its public conventions and copying nothing of its own), and a production-quality visual interface.
+Desktop first (1366 x 768 upwards, 1440 x 900 the reference); phone and tablet are out of scope by the owner's decision.
+Providers MOCKED throughout; nothing live was called.
+
+### 61.0 Baseline (commit `4587190`, no edits)
+
+- `node tests/run.mjs all`: **174 of 174** (the Firefox and WebKit parts of the two cross-browser harnesses skipped: not
+  installed in this sandbox).
+- `tests/studio-s27-sweep.mjs before` (in a worktree of `4587190`): 102 view / width / role combinations, **0 problems** (no
+  horizontal scroll, no serious or critical axe finding, no page error).
+- `tests/studio-s19-perf-browser.mjs` (a 50-layer composition): drag frames p50 16.7 ms, p95 16.7 ms, worst 33.3 ms, no long
+  tasks; pointer-to-frame p50 9.7 ms, p95 18.5 ms; keyboard nudge input-to-paint p95 40 ms; renderer draw 3.8 ms, measure
+  0.5 ms, validate 28.7 ms (medians).
+- Before screenshots of every step at 1440 x 900, 1920 x 1080 and 1366 x 768: `tests/shots/r2/before50-*.png` (ignored by
+  git; `tests/studio-r2-shots.mjs` gained the two desktop sizes).
+
+**The Create step against the editor conventions (Phase 5), before this release:**
+
+| capability | state | where |
+|---|---|---|
+| Object panel to click or drag from (layouts, typography, shapes, lines, frames, brand colours, marks, media, icons) | built | `studio-canvas.js` `ElementsPanel` |
+| Desktop drop and clipboard (image files and plain text only) | built | `studio-canvas.js` `readTransfer` |
+| Floating contextual toolbar | built | `studio-editor.js` `ContextToolbar` |
+| Font picker with brand faces first, recent, catalogue | built | `studio-editor.js` `FontPicker` |
+| Effects (shadow, outline, glow, blend, blur, opacity) | built; no named presets | `studio-editor.js` `EffectsPanel` |
+| Text effect presets (lift, hollow, neon, splice...) | missing | - |
+| Curved text | missing | - |
+| Bulleted and numbered lists | missing | - |
+| Auto-fit words to the box | built (bounded) | `studio-canvas.js` `fitText` |
+| Tables, charts | missing | - |
+| Image frames (rect, circle, rounded) | built | `studio-canvas.js` `FRAMES` |
+| Photo grids | missing | - |
+| Stickers and illustrations | missing | - |
+| Image adjustments, flip, crop and framing | built | `studio-editor.js` `ImagePanel`, framing (S4) |
+| Background removal | partial: area edits exist (`stAreaPrompt` remove), no one-click cut-out | worker `stAreaPrompt` |
+| Replace image | built | `ImagePanel` `onReplace` |
+| Align, distribute, order, group, lock | built | `LayoutEditor` Arrange menu |
+| Position panel with px size and aspect lock | built in the Style panel (Spacing, Size) | `studio-style.js` |
+| Tidy-up spacing | partial: distribute evenly | `LayoutEditor` |
+| Snapping, spacing hints, rulers, guides | built | `snapMove`, `spacingHints`, `Rulers` |
+| Resize to other formats | built; no preview grid before creating | `studio-editor.js` `ResizePanel` |
+| Templates library | missing (layout and style variations exist) | `STRender.variants` / `styles` |
+| Pages: add, duplicate, reorder, grid | partial: the page strip and families; no reorder or duplicate page | `studio.js` page strip |
+| Brand colours, fonts and marks first in pickers | built | `Swatches`, `FontPicker`, `ElementsPanel` |
+| Brand-control warnings for off-kit colour or font | missing | - |
+| Internal comments pinned on the canvas | missing (client review pins exist) | - |
+| Presence (who else is editing) | missing | - |
+| Shortcuts sheet | built | `STEditor.ShortcutsSheet` |
+| Undo with a named history | built | `HistoryList` |
+
+### 61.1 Phase 1 - what was open
+
+| id | severity | what | fix | test | status |
+|---|---|---|---|---|---|
+| P1-1 | medium | `tools/deploy-worker.sh` gave up on the first non-200/401 from `/engine/status`, which a rollout can answer for seconds (4 November: the owner deployed twice) | `deploy-verify.mjs reach`: 6 tries 5 s apart, says it is retrying, stops on a 404 (the old code); the script uses it | `deploy-verify-test` P50 | fixed |
+| P1-2c | medium | 60 refusal codes were sent without words, so the page showed a code | `AX_ERROR_DETAIL`: `jsonResp` adds the words to any refusal sent without its own; the page's 404 explanation keeps its reload advice | `studio-p50-worker` E1 | fixed |
+| P1-2b | info | D1 queries per route | opening a project: 9 + 10 an asset, independent of versions and notes (measured: 2 assets 29, 8 assets 89); `/studio/list` 9, `/studio/status` 13, `/studio/budget` 5; `/studio/workflow` reads the whole project (89 for 8 assets) - correct, wasteful, left | `studio-p50-worker` Q1 (bounded) | measured |
+| P1-2d | medium | editors saving without what they started from: direction edits (silent overwrite of the same field) and brand-kit saves (last write wins) | `/studio/direction/update {base}` refuses a field changed since (409 `direction_changed`); `/brand/kit {ifUpdated}` refuses a kit saved since (409 `kit_changed`); the page sends both | `studio-p50-worker` D1, K1 | fixed |
+| P1-2f | medium | paid buttons that did not state their cost: Analyse brief, Draft the strategy | the cost on the button and in its title | `studio-r4-browser` C1 (every paid button in every step) | fixed |
+| P1-2a | - | the live evaluation plan | `tools/copy-eval.mjs` (Phase 2) and the relevance scorer (Phase 4) run on the mocked engine in CI; the live runs are the owner's (61.9) | - | planned |
+| P1-2e | - | the accessibility gate | `tests/studio-a11y-browser.mjs` in the gate, passing | gate | holds |
+| P1-3 | - | earlier open items | per-key guest scope: built in S31; PM6, U6, U7: S32; U8: found fixed (P49); P1 (project open): P49 F9; Q2 (a guest in the browser): S31 SC; S7 (`innerHTML` in the legacy page, 154 sinks): hostile archive rows rendered by Command, Newsroom, Sentinel, Signals, Narratives and the Studio run no script (`studio-r4-browser` S7) - closed by test, not by inventory; 53.3 (overflow modes, picker opacity, estimate history): design decisions, stand; live model quality: open (the owner's allowance) | - | closed / stated |
+
+### 61.2 Phase 2 - the copywriting engine
+
+| id | what | measured before | after | test |
+|---|---|---|---|---|
+| W | one writing core | the Studio and the Content Desk built different client blocks (the Desk quoted every approved fact, another campaign's included, and never the brand items the team kept) | `stWritingCore` is the one builder for the copy, revise, kit and sequence stages (through `stContext`) and the Content Desk; marked `=== CLIENT WRITING CORE ===`; another campaign's facts reach neither | `studio-p50-worker` W1 (the two cores equal word for word); `content-worker` (the HOOF set no longer treats the national campaign's fact as evidence) |
+| M | channel craft, measured | headline fit and limits only, inside the checks | `stCraft`: headline fit per format, reading grade (Flesch-Kincaid), the first characters before the feed folds them, hashtag policy (the kit's own platform notes first), the call to action against the brief's action, one message (figures), the campaign sign-off and address - each with its target and source; shown in Copy as **Measured**, said to block nothing | `studio-p50-worker` M1; `studio-r4-browser` P2a |
+| V | voice adherence | none | `stVoice`: banned and preferred terms (the kit), sentence length (a kit rule or the house 20), person and tense (kit rules, else informational), exclamation marks, jargon (the house list and the kit's avoid list); a score with each signal's source | M1, P2a |
+| O | options, then a choice | three headlines, unmeasured | each option names its approach (fact-led, question, contrast, voice-of-person), carries its measures, and a near-copy (content-word overlap 0.6 or more) is named "close to option N" | `studio-p50-worker` A1 |
+| R | rewrite in place | the Creative Partner only | the canvas toolbar's **Rewrite** on a text layer: Shorter, Plainer, More urgent, Fix to the facts, In the campaign's tone - each one revise call scoped to that layer, landing as a version with the checks recomputed | `studio-r4-browser` P2b |
+| G | golden set | none | `tests/fixtures/copy-golden/cases.json` (synthetic client only) and `tools/copy-eval.mjs` (facts, banned terms, the call to action, limits, sign-off, exclamation; a score per piece and case); CI runs it through the copy stage on the mocked engine; live with `--approve-calls N` only | `studio-p50-worker` G1 |

@@ -1,13 +1,13 @@
 /* R2 (the production redesign): matched screenshots of every stage, the library and the wizard at desktop (1440 x 900) and phone
  * (390 x 844) sizes, providers MOCKED and nothing spent. It finds its way through either navigator (Message or Plan, Design or
  * Create), so the "before" set can be taken from a worktree of the commit before the redesign.
- *   node --experimental-sqlite tests/studio-r2-shots.mjs <label> [1440,390]  -> tests/shots/r2/<label>-<state>-<size>.png
+ *   node --experimental-sqlite tests/studio-r2-shots.mjs <label> [1440,1920,1366,390]  -> tests/shots/r2/<label>-<state>-<size>.png
  * The folder is ignored by git: the captures are evidence for the owner, not repository content. */
 import fs from 'node:fs';
 import { makeStudio } from './studio-fixture.mjs';
 import { seedStages } from './studio-s18-seed.mjs';
 const label = process.argv[2] || 'after';
-const SZ = { 1440: { width: 1440, height: 900 }, 390: { width: 390, height: 844 } };
+const SZ = { 1440: { width: 1440, height: 900 }, 1920: { width: 1920, height: 1080 }, 1366: { width: 1366, height: 768 }, 390: { width: 390, height: 844 } };
 const sizes = (process.argv[3] || '1440,390').split(',').filter(s => SZ[s]);
 const OUT = process.env.SHOTS_OUT || new URL('./shots/r2/', import.meta.url).pathname; fs.mkdirSync(OUT, { recursive: true });
 const fx = await makeStudio({ port: Number(process.env.SHOTS_PORT) || 8911, inspect: false });

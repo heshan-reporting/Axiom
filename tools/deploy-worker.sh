@@ -243,17 +243,12 @@ step "checking the live worker"
 sleep 3
 PUB="$(curl -sS -m 20 "$URL/archive/stats" || true)"
 echo "/archive/stats: ${PUB:0:160}"
-if [ -n "${AXIOM_KEY:-}" ]; then
-  code="$(curl -sS -m 20 -o "$WORK/check.json" -w '%{http_code}' -H "X-Axiom-Key: $AXIOM_KEY" "$URL/engine/status?ns=cmm" || echo 000)"
-  body="$(head -c 240 "$WORK/check.json" 2>/dev/null || true)"
-else
-  code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$URL/engine/status?ns=cmm" || echo 000)"
-  body="(export AXIOM_KEY to read the Engine status itself)"
-fi
-case "$code" in
-  200|401) echo "/engine/status answered $code"; echo "$body" ;;
-  404) die "the worker still answers 404 on /engine/status - the old code is serving. Check the upload output above." ;;
-  *) die "could not reach $URL (HTTP $code)" ;;
+# P50: Cloudflare can answer 500 for a few seconds while it switches versions; the check retries (6 x 5 s) and says so
+rc=0; node "$REPO/tools/deploy-verify.mjs" reach "$URL" --tries 6 --interval 5000 || rc=$?
+case "$rc" in
+  0) ;;
+  3) die "the worker still answers 404 on /engine/status - the old code is serving. Check the upload output above." ;;
+  *) die "could not reach $URL: it did not answer 200 or 401 within 30 s. The upload was accepted; run this script again in a minute." ;;
 esac
 # an answer is not proof: the old code answers too. The deploy is proven only when the public / answers this upload's own token
 # (asked for up to a minute while Cloudflare propagates) and, with AXIOM_KEY exported, /engine/status answers the build and

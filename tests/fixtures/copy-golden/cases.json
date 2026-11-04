@@ -1,0 +1,23 @@
+{
+  "about": "The copy golden set (P50): briefs for the SYNTHETIC demo client 'synthdemo' (Harbourline Ferries, an invented ferry operator) only - no client material. Each case says what a first draft must carry, deterministically: the approved facts it is about, the banned terms it must not use, a call to action that carries the brief's action, and the platform limits. tools/copy-eval.mjs scores drafts against it; tests/copy-eval-test.mjs runs it on the mocked engine.",
+  "ns": "synthdemo",
+  "kit": {
+    "name": "Harbourline Ferries - SYNTHETIC DEMO CLIENT",
+    "voice": "Plain, warm and local. Short sentences. No exclamation marks.",
+    "rules": "No exclamation marks. Avoid: world-class, stakeholders.",
+    "campaigns": [{ "id": "nightrun", "name": "Night Run", "url": "harbourline.example/nightrun", "signoff": "Home by the water.", "active": true }],
+    "facts": [
+      { "id": "f12min", "text": "The night ferry crosses the harbour in 12 minutes.", "source": "Harbourline timetable", "status": "approved", "campaign": "nightrun" },
+      { "id": "f40pc", "text": "Late services carry 40 per cent more passengers than last year.", "source": "Harbourline annual report", "status": "approved" }
+    ],
+    "banned": [{ "term": "cheap", "use": "good value", "why": "the fare is not the story" }]
+  },
+  "cases": [
+    { "id": "night-crossing", "campaign": "nightrun", "channels": ["facebook", "instagram"],
+      "brief": { "objective": "Get late workers to try the night ferry", "audience": "Hospitality and health workers who finish after 10 pm", "message": "The night ferry gets you home in 12 minutes", "action": "Check the night timetable" },
+      "expect": { "figures": ["12"], "banned": ["cheap"], "actionWords": ["timetable"], "signoff": "Home by the water.", "noExclamation": true } },
+    { "id": "late-growth", "campaign": "nightrun", "channels": ["linkedin"],
+      "brief": { "objective": "Show councils the late services are working", "audience": "Local councillors and planners", "message": "Late services carry 40 per cent more passengers than last year", "action": "Read the patronage summary" },
+      "expect": { "figures": ["40"], "banned": ["cheap"], "actionWords": ["summary", "read"], "noExclamation": true } }
+  ]
+}
