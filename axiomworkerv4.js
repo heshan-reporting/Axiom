@@ -7501,7 +7501,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-05.studio-p51';
+const AXIOM_BUILD = '2026-11-05.studio-p52';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -7562,7 +7562,10 @@ async function ensureStudio(env) {
   try { await env.MIND_DB.prepare('ALTER TABLE studio_assets ADD COLUMN archived INTEGER').run(); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_assets ADD COLUMN guides TEXT').run(); } catch (e) {}
   try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN rev TEXT').run(); } catch (e) {}   // S20: which working snapshot a draft holds
-  try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN seq INTEGER').run(); } catch (e) {}   // S20: the order the browser wrote drafts in
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN seq INTEGER').run(); } catch (e) {}
+  // P52 (Phase 5): the team's own thread on an asset, pinned to the tile; and the display name on a draft, for presence
+  try { await env.MIND_DB.prepare('ALTER TABLE studio_drafts ADD COLUMN name TEXT').run(); } catch (e) {}
+  try { await env.MIND_DB.prepare('CREATE TABLE IF NOT EXISTS studio_comments(id TEXT PRIMARY KEY, project TEXT, asset TEXT, version TEXT, who TEXT, pid TEXT, text TEXT, pin TEXT, mentions TEXT, resolved INTEGER, resolved_by TEXT, created INTEGER)').run(); await env.MIND_DB.prepare('CREATE INDEX IF NOT EXISTS studio_comments_asset ON studio_comments(asset, created)').run(); } catch (e) {}   // S20: the order the browser wrote drafts in
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN file TEXT').run(); } catch (e) {}   // S16: an uploaded image or PDF the analysis reads
   try { await env.MIND_DB.prepare('ALTER TABLE studio_sources ADD COLUMN extract TEXT').run(); } catch (e) {}   // Phase 2: what the extraction found and with which model
   try { await env.MIND_DB.prepare('ALTER TABLE studio_references ADD COLUMN analysis TEXT').run(); } catch (e) {}   // art direction: what the vision pass saw in a reference
@@ -10512,6 +10515,152 @@ function stKeepLocked(newL, srcL) {
   });
   return kept;
 }
+/* P52 (Phase 5): templates and plans are one vocabulary. A template is an original plan (ST_PLAN_SCHEMA): its elements take the
+ * piece's own words (headline, support, cta) and the campaign's colours from the kit, and the campaign's mark by its policy
+ * (mark: 'campaign'), so stPlanNormalise lays it out exactly as it lays out a model's plan - and a model's plan may say
+ * {"template":"stat_card", ...changes} to start from one. Applying a template is a layout version, no render. None of these
+ * shapes or words is borrowed from another product: the set was drawn for the Studio. */
+const ST_LIB_TEMPLATES = [
+  { id: 'myth_fact', name: 'Myth and fact', medium: 'typographic', use: 'correct a claim with the approved fact', tags: ['myth', 'fact', 'rebuttal', 'correction'] },
+  { id: 'stat_card', name: 'Stat card', medium: 'infographic', use: 'one figure, large, with what it means', tags: ['stat', 'figure', 'number', 'data'] },
+  { id: 'quote', name: 'Quote', medium: 'editorial', use: 'a person\'s words, attributed', tags: ['quote', 'voice', 'person', 'spokesperson'] },
+  { id: 'announcement', name: 'Announcement', medium: 'typographic', use: 'news the client is making', tags: ['news', 'announce', 'launch', 'update'] },
+  { id: 'carousel_opener', name: 'Carousel opener', medium: 'editorial', use: 'the first frame that earns the swipe', tags: ['carousel', 'opener', 'swipe', 'series'] },
+  { id: 'event', name: 'Event', medium: 'typographic', use: 'a date, a place, a call to come', tags: ['event', 'date', 'invite', 'rsvp'] },
+  { id: 'petition', name: 'Petition', medium: 'typographic', use: 'ask people to sign', tags: ['petition', 'sign', 'action', 'campaign'] },
+  { id: 'explainer', name: 'Explainer', medium: 'diagram', use: 'three steps or reasons, numbered', tags: ['explainer', 'steps', 'how', 'why', 'reasons'] },
+];
+const ST_LIB_IDS = ST_LIB_TEMPLATES.map(t => t.id);
+function stTplColours(kit, campaign) {
+  const pal = (kit && kit.palette) || {}; const camp = ((kit && kit.campaigns) || []).find(c => c.id === campaign) || {};
+  return { primary: stColour(camp.accent || pal.primary, '#0B4F6C'), secondary: stColour(pal.secondary, '#F2A541'), paper: stColour(pal.bg, '#F7F4EE'), ink: stColour(pal.text, '#13232F'), white: '#FFFFFF' };
+}
+function stTplFigure(copy) { const m = /(?:\$|A\$)?\d[\d,.]*\s*(?:per cent|percent|%|billion|million|thousand|bn|m\b|k\b)?/i.exec(String((copy && copy.headline) || '') + ' ' + String((copy && copy.support) || '')); return m ? m[0].trim() : ''; }
+function stTplSentences(t, n) { return String(t || '').split(/(?<=[.!?])\s+/).map(x => x.trim()).filter(Boolean).slice(0, n); }
+/** The plan of one template for one format, filled from the piece's copy and coloured from the kit. */
+function stTemplatePlan(id, format, kit, campaign, copy, hasImage) {
+  const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const k = Math.min(1, f.h / f.w); const tall = f.h / f.w >= 1.5; const wide = f.w / f.h >= 1.5;
+  const c = stTplColours(kit, campaign); copy = copy || {};
+  const top = tall ? 16 : 7, bottom = tall ? 74 : 90, L = wide ? 5 : 7, W = 100 - 2 * L;
+  const sz = v => Math.round(v * k * 100) / 100;
+  const T = (id2, role, o) => Object.assign({ id: id2, type: 'text', role, x: L, w: W, align: 'left', font: role === 'headline' || role === 'myth' || role === 'fact' ? 'display' : 'body', weight: role === 'headline' ? 800 : 500, color: c.white }, o);
+  const pill = (y, fill) => ({ id: 'ctabg', type: 'shape', shape: 'pill', x: L, y, w: wide ? 30 : 46, h: tall ? 5 : 8, fill, opacity: 1 });
+  const cta = (y, color) => T('cta', 'cta', { y: y + (tall ? 1 : 1.8), h: tall ? 3.2 : 5, w: wide ? 26 : 40, x: L + 2.5, size: sz(3.1), weight: 700, color, align: 'left', overlaps: ['ctabg'] });
+  const P = { template: id, medium: 'typographic', approach: 'editable', mark: 'campaign', bg: c.primary, regions: [], elements: [] };
+  const photo = () => { if (hasImage) P.regions = [{ id: 'bg', role: 'background', x: 0, y: 0, w: 100, h: 100, fit: 'cover', prompt: 'keep the current image' }]; };
+  if (id === 'myth_fact') {
+    P.elements = [
+      T('kick', 'label', { text: 'MYTH VS FACT', y: top, h: 4, size: sz(2.6), weight: 800, color: c.secondary, emphasis: 'caps', letterSpacing: 0.12 }),
+      T('headline', 'headline', { y: top + 8, h: tall ? 22 : 30, size: sz(7.2) }),
+      { id: 'rule1', type: 'shape', shape: 'rule', x: L, y: tall ? top + 33 : top + 41, w: 18, h: 0.8, fill: c.secondary, opacity: 1 },
+      T('factlbl', 'label', { text: 'THE FACT', y: tall ? top + 36 : top + 45, h: 4, size: sz(2.4), weight: 800, color: c.secondary, emphasis: 'caps', letterSpacing: 0.1 }),
+      T('support', 'support', { y: tall ? top + 41 : top + 51, h: tall ? 16 : 20, size: sz(3.6) }),
+      pill(bottom - 9, c.secondary), cta(bottom - 9, c.ink)];
+  } else if (id === 'stat_card') {
+    const fig = stTplFigure(copy); P.medium = 'infographic'; P.bg = c.paper;
+    P.elements = (fig ? [T('stat', 'label', { text: fig, y: top + 2, h: tall ? 14 : 22, size: sz(fig.length > 8 ? 12 : 16), weight: 900, color: c.primary, font: 'display' })] : [])
+      .concat([T('headline', 'headline', { y: fig ? (tall ? top + 18 : top + 28) : top + 4, h: tall ? 18 : 24, size: sz(fig ? 5.2 : 7.4), color: c.ink }),
+        T('support', 'support', { y: fig ? (tall ? top + 38 : top + 54) : top + 32, h: 14, size: sz(3.2), color: c.ink }),
+        { id: 'band', type: 'shape', shape: 'rect', x: 0, y: bottom - 2, w: 100, h: 100 - bottom + 2, fill: c.primary, opacity: 1 },
+        T('cta', 'cta', { y: bottom + 1, h: 5, size: sz(3), weight: 700, color: c.white, overlaps: ['band'] })]);
+  } else if (id === 'quote') {
+    P.medium = 'editorial'; photo();
+    if (hasImage) P.elements.push({ id: 'shade', type: 'shape', shape: 'rect', x: 0, y: 0, w: 100, h: 100, fill: '#000000', opacity: 0.55, gradient: true, dir: 'up' });
+    P.elements = P.elements.concat([
+      T('mark', 'label', { text: '"', y: top - 2, h: 12, size: sz(14), weight: 900, color: c.secondary, font: 'display', overlaps: hasImage ? ['shade'] : [] }),
+      T('headline', 'headline', { y: top + 12, h: tall ? 26 : 36, size: sz(6.4), weight: 700, overlaps: hasImage ? ['shade'] : [] }),
+      { id: 'rule1', type: 'shape', shape: 'rule', x: L, y: tall ? top + 41 : top + 52, w: 10, h: 0.7, fill: c.secondary, opacity: 1 },
+      T('support', 'support', { y: tall ? top + 44 : top + 56, h: 10, size: sz(3), color: c.white, overlaps: hasImage ? ['shade'] : [] }),
+      T('cta', 'cta', { y: bottom - 6, h: 5, size: sz(2.8), weight: 700, color: c.secondary, overlaps: hasImage ? ['shade'] : [] })]);
+  } else if (id === 'announcement') {
+    P.elements = [
+      T('kick', 'kicker', { text: String(((kit && kit.campaigns) || []).find(x => x.id === campaign) ? ((kit.campaigns.find(x => x.id === campaign).name) || 'News') : 'News').toUpperCase(), y: top, h: 4, size: sz(2.4), weight: 800, color: c.secondary, emphasis: 'caps', letterSpacing: 0.14 }),
+      T('headline', 'headline', { y: top + 7, h: tall ? 30 : 40, size: sz(9), weight: 900 }),
+      T('support', 'support', { y: tall ? top + 40 : top + 50, h: 16, size: sz(3.6) }),
+      pill(bottom - 9, c.white), cta(bottom - 9, c.primary)];
+  } else if (id === 'carousel_opener') {
+    P.medium = 'editorial'; photo(); if (!hasImage) P.bg = { from: c.primary, to: c.ink, dir: 'down' };
+    if (hasImage) P.elements.push({ id: 'shade', type: 'shape', shape: 'rect', x: 0, y: 0, w: 100, h: 100, fill: '#000000', opacity: 0.6, gradient: true, dir: 'up' });
+    const ov = hasImage ? ['shade'] : [];
+    P.elements = P.elements.concat([
+      T('headline', 'headline', { y: tall ? 34 : 30, h: tall ? 24 : 32, size: sz(8.2), weight: 900, align: 'center', overlaps: ov }),
+      T('support', 'support', { y: tall ? 60 : 64, h: 10, size: sz(3.4), align: 'center', overlaps: ov }),
+      T('swipe', 'label', { text: 'Swipe to read on ->', y: bottom - 5, h: 4, size: sz(2.4), weight: 700, color: c.secondary, align: 'center', overlaps: ov })]);
+  } else if (id === 'event') {
+    P.bg = c.paper;
+    P.elements = [
+      { id: 'band', type: 'shape', shape: 'rect', x: 0, y: 0, w: 100, h: tall ? 30 : 34, fill: c.primary, opacity: 1 },
+      T('kick', 'kicker', { text: 'COME ALONG', y: tall ? 18 : 9, h: 4, size: sz(2.4), weight: 800, color: c.secondary, emphasis: 'caps', letterSpacing: 0.14, overlaps: ['band'] }),
+      T('headline', 'headline', { y: tall ? 34 : 40, h: tall ? 20 : 26, size: sz(7), weight: 900, color: c.ink }),
+      T('support', 'support', { y: tall ? 56 : 68, h: 10, size: sz(3.4), color: c.ink }),
+      pill(bottom - 9, c.primary), cta(bottom - 9, c.white)];
+  } else if (id === 'petition') {
+    P.elements = [
+      T('kick', 'kicker', { text: 'ADD YOUR NAME', y: top, h: 4, size: sz(2.4), weight: 800, color: c.secondary, emphasis: 'caps', letterSpacing: 0.14 }),
+      T('headline', 'headline', { y: top + 7, h: tall ? 28 : 36, size: sz(8), weight: 900 }),
+      T('support', 'support', { y: tall ? top + 38 : top + 46, h: 14, size: sz(3.4) }),
+      { id: 'track', type: 'shape', shape: 'pill', x: L, y: bottom - 16, w: W, h: 1.6, fill: '#FFFFFF', opacity: 0.25 },
+      { id: 'fill', type: 'shape', shape: 'pill', x: L, y: bottom - 16, w: W * 0.62, h: 1.6, fill: c.secondary, opacity: 1, overlaps: ['track'] },
+      pill(bottom - 9, c.secondary), cta(bottom - 9, c.ink)];
+    P.elements[4].overlaps = ['track'];
+  } else if (id === 'explainer') {
+    P.medium = 'diagram'; P.bg = c.paper;
+    const steps = stTplSentences(copy.support, 3); while (steps.length < 3) steps.push(['', 'Second point', 'Third point'][steps.length] || 'Point');
+    P.elements = [T('headline', 'headline', { y: top, h: tall ? 16 : 22, size: sz(6.4), weight: 900, color: c.ink })];
+    const y0 = tall ? top + 20 : top + 28, step = tall ? 14 : 18;
+    steps.forEach((t, i) => {
+      P.elements.push({ id: 'n' + (i + 1), type: 'shape', shape: 'circle', x: L, y: y0 + i * step, w: wide ? 5 : 9, h: wide ? 9 : 9 * f.w / f.h, fill: c.primary, opacity: 1 });
+      P.elements.push(T('nl' + (i + 1), 'label', { text: String(i + 1), x: L, w: wide ? 5 : 9, y: y0 + i * step + (tall ? 1.2 : 2), h: 5, size: sz(3.2), weight: 900, color: c.white, align: 'center', overlaps: ['n' + (i + 1)] }));
+      P.elements.push(T('st' + (i + 1), 'caption', { text: t || ' ', x: L + (wide ? 8 : 13), w: W - (wide ? 8 : 13), y: y0 + i * step + (tall ? 0.8 : 1.6), h: step - 4, size: sz(3), color: c.ink }));
+    });
+    P.elements.push(T('cta', 'cta', { y: bottom - 5, h: 5, size: sz(3), weight: 700, color: c.primary }));
+  } else return null;
+  return P;
+}
+/** A plan that starts from a template: the template's plan, then the plan's own fields and elements (by id) over it. */
+function stPlanExpandTemplate(plan, format, kit, campaign, copy, hasImage) {
+  if (!plan || typeof plan !== 'object' || ST_LIB_IDS.indexOf(plan.template) < 0) return plan;
+  const base = stTemplatePlan(plan.template, format, kit, campaign, copy, hasImage); if (!base) return plan;
+  const out = Object.assign({}, base, plan, { template: plan.template });
+  const byId = {}; (base.elements || []).forEach(e => { byId[e.id] = e; });
+  const changes = Array.isArray(plan.elements) ? plan.elements : [];
+  out.elements = (base.elements || []).map(e => { const ch = changes.find(x => x && x.id === e.id); return ch ? (ch.remove ? null : Object.assign({}, e, ch)) : e; }).filter(Boolean)
+    .concat(changes.filter(x => x && x.id && !byId[x.id] && !x.remove));
+  if (!Array.isArray(plan.regions)) out.regions = base.regions;
+  return out;
+}
+/** The library for one piece: each template laid out for its format with its own words, kit colours and marks; nothing written. */
+async function stTemplates(env, p, a, q) {
+  const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 400 };
+  if (src.mode === 'copy') return { error: 'copy_only', status: 409, detail: 'A copy-only piece has no composition to lay out.' };
+  if (src.mode === 'finished' || src.mode === 'artwork') return { error: 'not_reflowable', status: 409, detail: 'This creative is one painted bitmap; make an editable copy first (free) to use a template.' };
+  const kit = (await brandKit(env, p.ns)) || {}; const copy = Object.assign({}, src.copy); const hasImage = !!(src.image && src.image.key);
+  const qq = String((q && q.q) || '').toLowerCase().trim();
+  const list = ST_LIB_TEMPLATES.filter(t => !qq || (t.name + ' ' + t.use + ' ' + t.tags.join(' ')).toLowerCase().indexOf(qq) >= 0).map(t => {
+    const plan = stTemplatePlan(t.id, a.format, kit, p.campaign, copy, hasImage);
+    const layout = stPlanNormalise(plan, a.format, { keepStyle: true, project: p.id, kit, ns: p.ns, campaign: p.campaign, copy, regionSrc: stRegionSrc(src.layout || {}) });
+    layout.template = t.id; layout.templateName = t.name; if (!(plan.regions || []).length) layout.noImagery = true;   // a type-led template draws its own ground; the photograph stays on file
+    return { id: t.id, name: t.name, medium: t.medium, use: t.use, tags: t.tags, layout, unsupported: layout.unsupported || [] };
+  });
+  return { ok: true, asset: a.id, format: a.format, version: src.id, templates: list, note: 'Each template laid out for ' + a.format + ' with this piece\'s words, the campaign\'s colours and its mark by policy. Applying one is a layout version; nothing is generated.' };
+}
+async function stTemplateApply(env, p, a, sb, who) {
+  const id = String(sb.template || ''); if (ST_LIB_IDS.indexOf(id) < 0) return { error: 'unknown_template', status: 400, detail: 'Templates: ' + ST_LIB_IDS.join(', ') + '.' };
+  const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 400 };
+  if (sb.base && sb.base !== src.id) return { error: 'version_moved', status: 409, detail: 'The piece has a newer version than the one the template was previewed on; preview again.' };
+  if (src.mode === 'copy' || src.mode === 'finished' || src.mode === 'artwork') return { error: src.mode === 'copy' ? 'copy_only' : 'not_reflowable', status: 409, detail: src.mode === 'copy' ? 'A copy-only piece has no composition.' : 'A painted bitmap cannot take a template; make an editable copy first.' };
+  if ((a.locks || {}).layout) return { error: 'locked', status: 409, element: 'layout', detail: 'The layout is locked; unlock it to apply a template.' };
+  const kit = (await brandKit(env, p.ns)) || {}; const copy = Object.assign({}, src.copy); const hasImage = !!(src.image && src.image.key);
+  const t = ST_LIB_TEMPLATES.find(x => x.id === id);
+  const tplan = stTemplatePlan(id, a.format, kit, p.campaign, copy, hasImage);
+  const layout = stPlanNormalise(tplan, a.format, { keepStyle: true, project: p.id, kit, ns: p.ns, campaign: p.campaign, copy, regionSrc: stRegionSrc(src.layout || {}) });
+  layout.template = id; layout.templateName = t.name; if (!(tplan.regions || []).length) layout.noImagery = true;
+  if (src.layout && src.layout.imageFocus) layout.imageFocus = src.layout.imageFocus;
+  const kept = src.layout ? stKeepLocked(layout, src.layout) : [];
+  const v = await stAppendVersion(env, a, { kind: 'layout', note: 'template: ' + t.name + ' (no render)' + (kept.length ? '; locked ' + kept.join(', ') + ' kept' : ''), copy, layout, image: src.image, mode: src.mode || 'composition', context: Object.assign({}, src.context || {}, { template: id, how: 'template' }) }, who);
+  await stVersionChecks(env, p, a, v);
+  return { ok: true, asset: a.id, version: v.id, template: id };
+}
 async function stResize(env, p, a, sb, who) {
   const src = await stCurrent(env, a); if (!src) return { error: 'no_version', status: 400 };
   if (src.mode === 'copy') return { error: 'copy_only', status: 409, detail: 'A copy-only piece has no composition to resize.' };
@@ -10531,6 +10680,7 @@ async function stResize(env, p, a, sb, who) {
     if (src.layout.v !== 5) { layout.template = src.layout.template || layout.template; layout.templateName = (src.layout.templateName || 'composition') + ', resized for ' + format; }
     (layout.regions || []).forEach(x => { if (x.role === 'background') x.prompt = 'keep the current image'; });
     if (src.layout.imageFocus) layout.imageFocus = src.layout.imageFocus;
+    if (sb.preview) { made.push({ format, channel, label: w.label || ST_FORMATS[format].label, preset: w.preset || '', layout, copy, image: src.image ? { key: src.image.key } : null }); continue; }
     const kept = stKeepLocked(layout, src.layout);
     const aid = stId('a'); const title = stStr(a.title + ' - ' + (w.label || ST_FORMATS[format].label), 80);
     await env.MIND_DB.prepare('INSERT INTO studio_assets(id,project,family,channel,format,title,current,locks,revision,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(aid, p.id, a.family, channel, format, title, '', JSON.stringify(a.locks || {}), 1, now, now).run();
@@ -10539,6 +10689,7 @@ async function stResize(env, p, a, sb, who) {
     await stVersionChecks(env, p, na, v);
     made.push({ asset: aid, format, channel, title, preset: w.preset || '' });
   }
+  if (sb.preview) return { ok: true, preview: made, skipped, note: 'Laid out for each format and returned for measuring; nothing was created.' };
   if (made.length) await stEvent(env, p.id, 'resized', { asset: a.id, text: 'Resized ' + a.title + ' to ' + made.map(m => m.title.replace(a.title + ' - ', '')).join(', ') + ': the same words, styling and image, re-laid for each format. Nothing generated; each new composition is measured before it is approved.' + (skipped.length ? ' Not made: ' + skipped.map(x => x.format + ' (' + x.why + ')').join('; ') + '.' : '') }, who);
   return { ok: true, made, skipped };
 }
@@ -11693,7 +11844,7 @@ const ST_EMPHASIS = ['none', 'highlight', 'underline', 'strike', 'box', 'caps'];
 const ST_PLAN_SCHEMA = '{"medium":"' + ST_MEDIA.join('|') + '","approach":"editable|artwork","story":"<=40 words: the communication idea and the visual story","focal":"<=20 words: focal point and negative space","typography":"<=30 words: hierarchy and emphasis","devices":"<=30 words: shapes, overlays, layering","mark":"logo|wordmark|both|none|campaign","bg":null,'
   + '"regions":[{"id":"bg","role":"background|cutout|inset","x":0,"y":0,"w":100,"h":100,"fit":"cover|contain","prompt":"<=140 words: the image to make for this region - subject, framing, lens, lighting, treatment, colour relationships, where it stays quiet and why","refs":[{"id":"reference id","role":"<=12 words: what to take from it"}]}],'
   + '"elements":[{"id":"short unique id","type":"text|shape|rule","role":"' + ST_ROLES.join('|') + '","text":"free text only (kicker, label, myth, fact, caption)","x":6,"y":50,"w":74,"h":12,"size":6.2,"weight":750,"color":"#FFFFFF","bg":null,"align":"left|center|right","font":"display|body|mono","emphasis":"' + ST_EMPHASIS.join('|') + '","fill":"#hex or rgba() for shapes","opacity":1,"shape":"rect|pill|circle|rule","gradient":false,"dir":"up|down|left|right","radius":0,"rotate":0,"letterSpacing":0,"overlaps":["ids of elements this one crosses on purpose"]}],'
-  + '"frames":[{"name":"Frame 1: the myth","copy":{"headline":"","support":"","cta":""},"regions":[],"elements":[]}]}';
+  + '"frames":[{"name":"Frame 1: the myth","copy":{"headline":"","support":"","cta":""},"regions":[],"elements":[]}]' + ',"template":"optional: one of ' + ST_LIB_TEMPLATES.map(t => t.id).join('|') + ' to start from (its elements by id can then be changed, or removed by giving the id with remove true)"}';
 const ST_PLAN_RULES = 'PLAN. Coordinates are per cent of the stage (x, y, w, h), type sizes per cent of the stage width (2.4 is the smallest readable in a feed; a headline that leads is 6 to 11). The approach "editable" means the image model makes only the imagery of each region and the renderer composes the words, shapes and marks as live layers (the finish must come from typography, hierarchy and layering); "artwork" means the image model paints the whole designed piece including stylised words - use it when the idea needs lettering that is part of the picture, and then the words are a bitmap, not editable, so give them exactly. Text elements with the roles headline, support and cta take the asset\'s copy; kicker, label, myth, fact, caption and free carry their own text. A region is where an image goes; regions with role cutout or inset sit over the background (set bg to a colour or gradient when there is no background region). Marks: "campaign" follows the campaign\'s logo policy (the right choice unless the brief says otherwise); never draw a logo or a wordmark as text. Frames make a carousel: each frame is a complete composition for the same stage; the first frame opens, the next answers. Vary the composition, the medium, the hierarchy and the devices; a different photograph behind the same panel is not a different concept. Elements must not overlap by accident: a strike-through or an underline on words is the text\'s own emphasis (strike, underline, highlight), not a shape; a device that crosses words on purpose (a crossing-out bar, a stamp) names their ids in "overlaps", stays thin or translucent so the words still read, and every word stays inside the stage.';
 function stNum(v, lo, hi, dflt) { const n = Number(v); return isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 10) / 10)) : dflt; }
 function stColour(v, dflt) { v = String(v == null ? '' : v).trim(); return /^#[0-9a-fA-F]{3,8}$/.test(v) || /^rgba?\((\s*[\d.]+\s*,){2,3}\s*[\d.]+\s*\)$/.test(v) ? v : dflt; }
@@ -12084,6 +12235,7 @@ function stApplyLayerOps(L, ops, opts) {
 /** A plan as the models wrote it becomes a layout the renderer can draw; everything it cannot draw is named in `unsupported`. */
 function stPlanNormalise(plan, format, opts) {
   opts = opts || {}; plan = plan && typeof plan === 'object' ? plan : {}; const kit = opts.kit || {};
+  if (plan.template && ST_LIB_IDS.indexOf(plan.template) >= 0 && !plan.__expanded) plan = Object.assign(stPlanExpandTemplate(plan, format, kit, opts.campaign, opts.copy, !!opts.regionSrc), { __expanded: true });   // P52: a plan may start from a template
   const f = ST_FORMATS[format] || ST_FORMATS['1:1']; const unsupported = [];
   const medium = ST_MEDIA.indexOf(plan.medium) >= 0 ? plan.medium : (Array.isArray(plan.frames) && plan.frames.length > 1 ? 'carousel' : 'photo-documentary');
   if (plan.medium && ST_MEDIA.indexOf(plan.medium) < 0) unsupported.push('medium "' + stStr(plan.medium, 40) + '" is not one the renderer knows; treated as ' + medium);
@@ -12198,7 +12350,7 @@ function stPlanNormalise(plan, format, opts) {
   let partsL = { layers }; if (layers.some(l => l.part != null)) { const pr = stPartsReconcile({ layers }, opts.copy || {}); partsL = pr.layout; pr.collapsed.forEach(role => unsupported.push('the ' + role + ' was split across layers in words that do not reproduce the approved ' + role + ' exactly; kept as one block (the copy is never rewritten by a layout)')); }
   const finalLayers = partsL.layers;
   const frames = Array.isArray(plan.frames) && plan.frames.length > 1 ? plan.frames.slice(0, 8).map((fr, i) => { const sub = stPlanNormalise(Object.assign({}, plan, { frames: [], medium: medium === 'carousel' ? 'editorial' : medium }, fr || {}), format, Object.assign({}, opts, { copy: Object.assign({}, opts.copy || {}, stCopy((fr || {}).copy || {})) })); return { name: stStr((fr || {}).name, 60) || 'Frame ' + (i + 1), copy: stCopy((fr || {}).copy || {}), layout: sub }; }) : null;
-  return { v: 5, format, stage: { w: f.w, h: f.h }, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: stFocus(plan.imageFocus), layers: finalLayers, frames: frames || undefined, intended: intended.length ? intended : undefined, unsupported };
+  return { v: 5, format, stage: { w: f.w, h: f.h }, fromTemplate: ST_LIB_IDS.indexOf(plan.template) >= 0 ? plan.template : undefined, medium, mediumName: ST_MEDIA_WORDS[medium], approach, story: stStr(plan.story, 400), focal: stStr(plan.focal, 200), typography: stStr(plan.typography, 300), devices: stStr(plan.devices, 300), bg, image: bgRegion && !(bgRegion.x === 0 && bgRegion.y === 0 && bgRegion.w === 100 && bgRegion.h === 100) ? { x: bgRegion.x, y: bgRegion.y, w: bgRegion.w, h: bgRegion.h } : null, regions, template: 'plan', templateName: ST_MEDIA_WORDS[medium] + (approach === 'artwork' ? ', full artwork' : ''), style: 'plan', placement: '', design: null, marks: { policy: marks.policy, campaign: marks.campaign ? marks.campaign.id : '' }, markPlacement: marks.placement, markOverridden: marks.overridden || undefined, incomplete: marks.incomplete, palette: Object.assign({ primary: (kit.palette && kit.palette.primary) || '#0E6A6E' }, kit.palette || {}), fonts: { display: (kit.fonts && kit.fonts.display) || 'Bricolage Grotesque', body: (kit.fonts && kit.fonts.body) || 'Instrument Sans' }, imageFocus: stFocus(plan.imageFocus), layers: finalLayers, frames: frames || undefined, intended: intended.length ? intended : undefined, unsupported };
 }
 /** Where the words and the images sit, as a coarse grid, plus the medium and approach: two plans that share it are the same design in other clothes. */
 function stPlanSignature(L) {
@@ -15314,7 +15466,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -16709,6 +16861,9 @@ const AXIOM_WORKER = {
           if (path === '/studio/review') { const p = await stProject(env, qf('project')); if (!p) return jsonResp({ error: 'unknown_project' }, 404); await ensureReview(env); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_review WHERE project=? ORDER BY created').bind(p.id).all()).results || []; return jsonResp({ ok: true, review: rows.map(stReviewRow) }); }
           if (path === '/studio/actions') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (qf('version') && (!v || v.asset !== pair.asset.id)) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stActions(env, pair.project, pair.asset, v)); }
           if (path === '/studio/suggest') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); return jsonResp(await stSuggestPeek(env, pair.project, pair.asset)); }
+          if (path === '/studio/comments') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const rows = (await env.MIND_DB.prepare('SELECT * FROM studio_comments WHERE asset=? ORDER BY created LIMIT 400').bind(pair.asset.id).all()).results || []; return jsonResp({ ok: true, asset: pair.asset.id, comments: rows.map(r => ({ id: r.id, version: r.version, who: r.who, text: r.text, pin: pjs(r.pin, null), mentions: pjs(r.mentions, []), resolved: !!r.resolved, resolvedBy: r.resolved_by || '', created: r.created, mine: !!(auth.pid && r.pid === auth.pid) })), open: rows.filter(r => !r.resolved).length }); }
+          if (path === '/studio/presence') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const since = Date.now() - 10 * 60000; const rows = (await env.MIND_DB.prepare('SELECT who, name, at, version FROM studio_drafts WHERE asset=? AND at>?').bind(pair.asset.id, since).all()).results || []; const me = auth.pid || stStr(auth.name, 60); return jsonResp({ ok: true, asset: pair.asset.id, editing: rows.filter(r => r.who !== me).map(r => ({ name: r.name || 'someone', at: r.at, version: r.version })), note: 'From unsaved drafts in the last ten minutes: someone working on this asset now.' }); }
+          if (path === '/studio/templates') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const r = await stTemplates(env, pair.project, pair.asset, { q: qf('q') }); return jsonResp(Object.assign({ ok: !r.error }, r), r.status || 200); }
           if (path === '/studio/used') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (!v || v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(await stUsed(env, pair.project, pair.asset, v)); }
           if (path === '/studio/readiness') { const pair = await stAsset(env, qf('asset')); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404); const v = qf('version') ? await stVersion(env, qf('version')) : await stCurrent(env, pair.asset); if (v && v.asset !== pair.asset.id) return jsonResp({ error: 'unknown_version' }, 404); return jsonResp(Object.assign({ ok: true, asset: pair.asset.id, version: v ? v.id : '' }, await stReadiness(env, pair.project, pair.asset, v))); }
           // P8: what the brief settles, assumes and leaves open; sourced suggestions for its fields; the campaign identity audit
@@ -16992,10 +17147,27 @@ const AXIOM_WORKER = {
         // S17: the editor - resize to platform formats (no model call, no render), an image placed on the canvas, the autosaved draft
         if (path === '/studio/resize') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          if (sb.preview) { const r = await stResize(env, pair.project, pair.asset, Object.assign({}, sb, { preview: true }), who); return jsonResp(Object.assign({ ok: !r.error }, r), r.status || 200); }   // P52: measured before anything is made
           const r = await stResize(env, pair.project, pair.asset, sb, who); if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
           await stBump(env, pair.project.id); return jsonResp(Object.assign({}, r, await stGet(env, pair.project.id)));
         }
         // S23: pages as ordered assets, and the editor's guides kept on the asset (neither is a version)
+        if (path === '/studio/comment' || path === '/studio/comment/resolve') {
+          if (path === '/studio/comment/resolve') { const c = await env.MIND_DB.prepare('SELECT * FROM studio_comments WHERE id=?').bind(stClean(sb.id, 24)).first(); if (!c) return jsonResp({ error: 'unknown_comment', detail: 'No such team note; it may have been removed. Reload the asset.' }, 404); const pair0 = await stAsset(env, c.asset); if (!pair0) return jsonResp({ error: 'unknown_asset' }, 404);
+            await env.MIND_DB.prepare('UPDATE studio_comments SET resolved=?, resolved_by=? WHERE id=?').bind(sb.reopen ? 0 : 1, sb.reopen ? '' : stStr(who, 60), c.id).run(); return jsonResp({ ok: true, id: c.id, resolved: !sb.reopen }); }
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const text = stStr(sb.text, 2000).trim(); if (!text) return jsonResp({ error: 'empty', detail: 'Say something.' }, 400);
+          const pin = sb.pin && typeof sb.pin === 'object' ? { x: stNum(sb.pin.x, 0, 100, 50), y: stNum(sb.pin.y, 0, 100, 50), layer: stStr(sb.pin.layer, 40) || undefined } : null;
+          const mentions = Array.from(new Set((text.match(/@([A-Za-z][A-Za-z'-]{1,30})/g) || []).map(m => m.slice(1)))).slice(0, 10);
+          const id = stId('cm'); await env.MIND_DB.prepare('INSERT INTO studio_comments(id,project,asset,version,who,pid,text,pin,mentions,resolved,resolved_by,created) VALUES(?,?,?,?,?,?,?,?,?,0,?,?)').bind(id, pair.project.id, pair.asset.id, stClean(sb.version, 24) || pair.asset.current, stStr(who, 60), auth.pid || '', text, pin ? JSON.stringify(pin) : null, JSON.stringify(mentions), '', Date.now()).run();
+          await stEvent(env, pair.project.id, 'team_comment', { asset: pair.asset.id, comment: id, text: stStr(who, 40) + ' on ' + pair.asset.title + ': ' + stStr(text, 300) + (mentions.length ? ' (for ' + mentions.join(', ') + ')' : '') }, who);
+          return jsonResp({ ok: true, id, mentions });
+        }
+        if (path === '/studio/template/apply') {
+          const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
+          const r = await stTemplateApply(env, pair.project, pair.asset, sb, who); if (r.error) return jsonResp(Object.assign({ ok: false }, r), r.status || 400);
+          await stBump(env, pair.project.id); return jsonResp(Object.assign({}, r, await stGet(env, pair.project.id)));
+        }
         if (path === '/studio/page') {
           const pair = await stAsset(env, sb.asset); if (!pair) return jsonResp({ error: 'unknown_asset' }, 404);
           if (sb.project && stClean(sb.project, 24) !== pair.project.id) return jsonResp({ error: 'cross_project', detail: 'The page belongs to another project; nothing was changed.' }, 403);
@@ -17057,6 +17229,7 @@ const AXIOM_WORKER = {
           const seq = Number(sb.seq) > 0 ? Math.floor(Number(sb.seq)) : now;
           const w = await env.MIND_DB.prepare('INSERT INTO studio_drafts(asset, who, project, version, layout, copy, at, rev, seq) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(asset, who) DO UPDATE SET project=excluded.project, version=excluded.version, layout=excluded.layout, copy=excluded.copy, at=excluded.at, rev=excluded.rev, seq=excluded.seq WHERE COALESCE(studio_drafts.seq, 0) <= excluded.seq')
             .bind(pair.asset.id, me, pair.project.id, v.id, JSON.stringify(sb.layout), JSON.stringify(sb.copy && typeof sb.copy === 'object' ? stCopy(sb.copy) : {}), now, sb.rev ? stStr(sb.rev, 80) : null, seq).run();
+          try { await env.MIND_DB.prepare('UPDATE studio_drafts SET name=? WHERE asset=? AND who=?').bind(stStr(who, 60), pair.asset.id, me).run(); } catch (e) {}   // P52: presence names the person
           const landed = !!(w && w.meta && w.meta.changes);
           return jsonResp({ ok: true, at: now, version: v.id, stale: !landed || undefined });
         }

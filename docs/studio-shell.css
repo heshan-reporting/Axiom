@@ -968,3 +968,19 @@ body.in-studio #studio-root{height:100%}
 #studio-root .st-rel-counts { margin: 4px 0 8px; }
 #studio-root .st-mem-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 8px 0; }
 #studio-root .st-mem-conf, #studio-root .st-mem-review { margin: 8px 0 12px; }
+
+/* P52: templates, the resize preview, the measured design score, brand control */
+#studio-root .st-tpl-search { width: 100%; margin: 8px 0; }
+#studio-root .st-resize-prev { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 8px 0; }
+#studio-root .st-dscore, #studio-root .st-brandctl { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--st-line, #262c30); }
+#studio-root .st-dscore-n { font-variant-numeric: tabular-nums; font-family: var(--st-mono, ui-monospace, monospace); min-width: 2.5em; text-align: right; }
+#studio-root .st-team { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--st-line, #262c30); }
+#studio-root .st-team-list li.resolved { opacity: .6; }
+#studio-root .st-team-new { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+#studio-root .st-team-new textarea { flex: 1; }
+#studio-root .st-presence { margin-left: auto; font-size: 12px; color: var(--st-warn, #e0b341); }
+#studio-root .st-dscore-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+#studio-root .st-dscore-row { display: grid; grid-template-columns: 10px 9em 3em 1fr; gap: 8px; align-items: baseline; font-size: 12px; }
+#studio-root .st-dscore-row .st-qsum-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-ok, #6fd39a); }
+#studio-root .st-dscore-row.fair .st-qsum-dot { background: var(--st-warn, #f5c27a); }
+#studio-root .st-dscore-row.poor .st-qsum-dot { background: var(--st-bad, #f5a08a); }

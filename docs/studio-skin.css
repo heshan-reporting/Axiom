@@ -401,3 +401,9 @@
 @media (prefers-reduced-motion:reduce){#studio-root .st .st-kit-item{animation:none}#studio-root .st .st-opt{transition:none}}
 #studio-root .st .st-an-narr > .ov-link{align-self:flex-start}
 #studio-root .st .st-an-narr .st-nd-row{align-items:center}
+
+/* P52 (Phase 6): the canvas chrome's colours as tokens - handles, guides, snap marks, the transparency checkerboard, the hue
+   spectrum of the colour picker and the plate behind a client logo - so no Studio stylesheet carries a colour of its own */
+#studio-root .st{--st-handle:#ffffff;--st-guide:#00b7ff;--st-guide-ink:#00131b;--st-snap:#ff3d8b;--st-snap-eq:#2fd3a0;--st-snap-eq-ink:#05261c;--st-check-a:#2a303a;--st-check-b:#1d222a;--st-logo-plate:#ffffff;--st-spectrum:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+/* the radius scale: every corner in the Studio is one of these */
+#studio-root .st{--sk-r-md:10px;--st-r-hair:2px;--st-r-xs:4px;--st-r-s:6px;--st-r-m:8px;--st-r-l:10px;--st-r-xl:12px;--st-r-2xl:16px;--st-r-3xl:20px;--st-r-pill:999px}

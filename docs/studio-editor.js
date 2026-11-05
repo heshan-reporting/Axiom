@@ -11,7 +11,7 @@
   const K = window.STKit; if (!K || !window.React) return;
   const { html, Icon, call, toastMsg } = K;
   const R = window.STRender;
-  const { useState, useEffect, useRef } = React;
+  const { useState, useEffect, useRef, useMemo } = React;
   const r1 = x => Math.round(x * 10) / 10;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
@@ -268,11 +268,29 @@
   }
   function Toggle({ on, label, onChange }) { return html`<label class="st-check"><input type="checkbox" checked=${!!on} onChange=${e => onChange(e.target.checked)} /> ${label}</label>`; }
   const BLEND_WORD = { '': 'normal', multiply: 'multiply', screen: 'screen', overlay: 'overlay', 'soft-light': 'soft light', 'hard-light': 'hard light', darken: 'darken', lighten: 'lighten', 'color-dodge': 'colour dodge', 'color-burn': 'colour burn', difference: 'difference', exclusion: 'exclusion', hue: 'hue', saturation: 'saturation', color: 'colour', luminosity: 'luminosity' };
+  /* P52: text effect presets - each a combination of the effects the renderer already draws (shadow, outline, glow, a plate),
+     applied as one patch (one undo step); None clears them. Names and recipes are the Studio's own. */
+  const FX_CLEAR = { shadow: undefined, stroke: undefined, glow: undefined, bg: undefined };
+  const TEXT_PRESETS = [
+    ['none', 'None', () => FX_CLEAR],
+    ['shadow', 'Shadow', () => Object.assign({}, FX_CLEAR, { shadow: { x: 0.3, y: 0.5, blur: 1.2, color: 'rgba(0,0,0,0.5)' } })],
+    ['lift', 'Lift', () => Object.assign({}, FX_CLEAR, { shadow: { x: 0, y: 1.4, blur: 4, color: 'rgba(0,0,0,0.35)' } })],
+    ['hollow', 'Hollow', (l, pal) => Object.assign({}, FX_CLEAR, { stroke: { width: 0.3, color: l.color || '#FFFFFF' }, color: 'rgba(0,0,0,0)' })],
+    ['outline', 'Outline', (l, pal) => Object.assign({}, FX_CLEAR, { stroke: { width: 0.25, color: (pal && pal.text) || '#000000' } })],
+    ['neon', 'Neon', (l, pal) => Object.assign({}, FX_CLEAR, { glow: { blur: 3, color: (pal && pal.secondary) || '#5DD4E5' } })],
+    ['plate', 'Plate', (l, pal) => Object.assign({}, FX_CLEAR, { bg: (pal && pal.primary) || '#000000' })],
+    ['splice', 'Splice', (l, pal) => Object.assign({}, FX_CLEAR, { shadow: { x: 0.6, y: 0.6, blur: 0, color: (pal && pal.secondary) || '#F2A541' } })],
+  ];
+  function TextPresets({ l, palette, onPatch }) {
+    if (!l || l.type !== 'text') return null;
+    return html`<div class="st-le-presets" role="group" aria-label="Text effect presets"><span class="st-lbl">Presets</span>${TEXT_PRESETS.map(([k, name, fn]) => html`<button key=${k} class="st-segbtn" data-preset=${k} title=${'Apply ' + name + ': one change, undoable'} onClick=${() => onPatch(fn(l, palette))}>${name}</button>`)}<span class="ov-dim">measured like any edit: a preset that hurts contrast is named in Checks</span></div>`;
+  }
   function EffectsPanel({ l, palette, onPatch }) {
     const sh = l.shadow || null, st = l.stroke || null, gl = l.glow || null; const text = l.type === 'text';
     const set = (k, base, patch) => onPatch({ [k]: Object.assign({}, base || {}, patch) });
     return html`<div class="st-le-type st-le-effects" aria-label="Effects">
       <span class="st-lbl">Effects</span>
+      <${TextPresets} l=${l} palette=${palette} onPatch=${onPatch} />
       <label class="st-le-slider">Opacity <input type="range" min="0" max="100" value=${Math.round((l.opacity == null ? 1 : l.opacity) * 100)} aria-label="Opacity" onChange=${e => onPatch({ opacity: Math.round(+e.target.value) / 100 })} /><span>${Math.round((l.opacity == null ? 1 : l.opacity) * 100)}%</span></label>
       <label>Blend <select class="st-sel" value=${l.blend || ''} aria-label="Blend mode" onChange=${e => onPatch({ blend: e.target.value || undefined })}>${Object.keys(BLEND_WORD).map(k => html`<option key=${k || 'n'} value=${k}>${BLEND_WORD[k]}</option>`)}</select></label>
       <div class="st-le-fx"><${Toggle} on=${!!sh} label="Shadow" onChange=${on => onPatch({ shadow: on ? { x: 0, y: 0.8, blur: 2, color: 'rgba(0,0,0,0.45)' } : undefined })} />
@@ -332,12 +350,81 @@
     </section>`;
   }
 
+  /* P52: images for a layout laid out elsewhere (a template, another format): its marks and its photograph take the images already
+     loaded for the current composition, matched by the file, so the measurement reads the same pixels the canvas has */
+  function imagesFor(layout, cur, imgs) {
+    const out = {}; const byId = {}; ((cur && cur.layers) || []).forEach(l => { byId[l.id] = l; });
+    ((layout && layout.layers) || []).forEach(l => { if (l.type !== 'img') return; const same = ((cur && cur.layers) || []).find(c => c.type === 'img' && c.src && c.src === l.src); if (same && imgs[same.id]) out[l.id] = imgs[same.id]; });
+    ((layout && layout.regions) || []).forEach(r => { if (imgs[r.id]) out[r.id] = imgs[r.id]; else if (imgs.bg) out[r.id] = imgs.bg; });
+    Object.keys(imgs || {}).forEach(k => { if (!(k in out) && !byId[k]) out[k] = imgs[k]; });
+    return out;
+  }
+  function measureAt(layout, copy, imgs, comp, a) { try { const val = R.validate(layout, copy, imgs, { fonts: comp.fonts, format: a.format, channel: a.channel }); return { ok: val.ok, blocking: val.issues.filter(i => i.severity === 'blocking').map(i => i.code.replace(/_/g, ' ')), score: R.designScore ? R.designScore(val, layout) : null }; } catch (e) { return { ok: false, blocking: ['not measured'], score: null }; } }
+
+  /* ------------------------------------------------------------ templates (P52): original layouts filled with this piece's words */
+  /** The template library for the asset on screen: each template laid out by the worker for this format with the piece's own words,
+      the campaign's colours and its mark by policy, then measured here as it would export; Use this template is a layout
+      version, no render. Search narrows by name, use and tags. */
+  function TemplatesPanel({ a, v, ns, comp, ro, onApply }) {
+    const [open, setOpen] = useState(false); const [q, setQ] = useState(''); const [list, setList] = useState(null); const [err, setErr] = useState(''); const [using, setUsing] = useState('');
+    useEffect(() => { if (!open) return; let live = true; setList(null); setErr(''); const t = setTimeout(() => { call('/studio/templates?asset=' + encodeURIComponent(a.id) + (q.trim() ? '&q=' + encodeURIComponent(q.trim()) : '')).then(d => { if (live) setList(d.templates || []); }).catch(e => { if (live) { setErr(e.message || 'not read'); setList([]); } }); }, q ? 250 : 0); return () => { live = false; clearTimeout(t); }; }, [open, q, a.id, v && v.id]);
+    const measured = useMemo(() => (list || []).map(t => Object.assign({}, t, { m: comp.ready && v ? measureAt(t.layout, v.copy, imagesFor(t.layout, v.layout, comp.imgs || {}), comp, a) : null })), [list, comp.ready, comp.key]);
+    if ((a.locks || {}).layout || !v || v.mode === 'copy' || v.mode === 'finished' || v.mode === 'artwork') return null;
+    const use = async t => { setUsing(t.id); try { await onApply(t); } finally { setUsing(''); } };
+    return html`<section class="st-vars st-templates" aria-label="Templates">
+      <div class="st-vars-head"><b>Templates</b> <span class="ov-dim">eight original layouts - myth and fact, stat card, quote, announcement, carousel opener, event, petition, explainer - with this piece's words, the campaign's colours and its mark. Free, no generation.</span> <button class="ov-link" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'hide' : 'show'}</button></div>
+      ${open ? html`<input class="st-in st-tpl-search" type="search" value=${q} onInput=${e => setQ(e.target.value)} placeholder="Search templates (stat, quote, petition...)" aria-label="Search templates" />
+        ${err ? html`<div class="ov-dim" role="alert">Not read: ${err}</div>` : null}
+        ${list === null ? html`<div class="ov-dim st-pad" role="status">Laying out each template for ${a.format}...</div>` : !measured.length ? html`<div class="ov-dim st-pad">No template matches "${q}".</div>` : html`<div class="st-vars-grid">${measured.map(t => html`<div key=${t.id} class="st-var" data-template=${t.id}>
+          <${K.Composition} v=${Object.assign({}, v, { layout: t.layout })} a=${a} ns=${ns} size="card" />
+          <div class="st-var-name">${t.name}</div><div class="ov-dim st-var-why">${t.use}</div>
+          <div class="st-var-state">${!t.m ? html`<span class="ov-dim">measuring...</span>` : t.m.ok ? html`<${K.Chip} kind="ok">passes</${K.Chip}>` : html`<${K.Chip} kind="bad" title=${t.m.blocking.join('; ')}>${t.m.blocking.length} to fix</${K.Chip}>`}${t.m && t.m.score ? html` <span class="ov-dim" title="measured design quality">design ${t.m.score.score}</span>` : null}</div>
+          ${!ro ? html`<button class="btn sm ghost" disabled=${!!using} onClick=${() => use(t)}>${using === t.id ? 'Saving...' : 'Use this template'}</button>` : null}</div>`)}</div>`}` : null}
+    </section>`;
+  }
+
+  /* P52: brand control - a colour or a typeface on the composition that the kit does not hold is named, with the layer, and never
+     blocks: the campaign's palette (and its accent), white, black and their transparent forms are the kit's; the kit's display and
+     body faces are its type. A person decides whether the departure is on purpose. */
+  function hexOf(c) { const m = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(c || '').trim()); if (m) { const h = m[1].length === 3 ? m[1].split('').map(x => x + x).join('') : m[1]; return '#' + h.toUpperCase(); } const r = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(String(c || '')); return r ? '#' + [r[1], r[2], r[3]].map(x => (+x).toString(16).padStart(2, '0')).join('').toUpperCase() : ''; }
+  function brandOff(layout, kit, campaign) {
+    if (!layout || !kit) return [];
+    const pal = kit.palette || {}; const camp = (kit.campaigns || []).find(c => c.id === campaign) || {};
+    const ok = new Set(['#FFFFFF', '#000000'].concat([pal.primary, pal.secondary, pal.bg, pal.text, camp.accent].map(hexOf).filter(Boolean)));
+    const near = h => { if (ok.has(h)) return true; const n = x => parseInt(x, 16); const [r, g, b] = [h.slice(1, 3), h.slice(3, 5), h.slice(5, 7)].map(n); return Array.from(ok).some(k => Math.abs(n(k.slice(1, 3)) - r) + Math.abs(n(k.slice(3, 5)) - g) + Math.abs(n(k.slice(5, 7)) - b) <= 24); };
+    const fonts = [(kit.fonts || {}).display, (kit.fonts || {}).body].filter(Boolean).map(f => String(f).toLowerCase());
+    const out = [];
+    (layout.layers || []).forEach(l => {
+      if (l.hidden || (l.type === 'img')) return; const name = l.name || l.role || l.id;
+      [['color', 'text colour'], ['fill', 'fill'], ['bg', 'plate']].forEach(([k, w]) => { const h = hexOf(l[k]); if (h && !near(h)) out.push({ layer: l.id, kind: 'colour', text: name + ' ' + w + ' ' + h }); });
+      const fam = String(l.family || '').toLowerCase(); if (l.type === 'text' && fam && fonts.length && fonts.indexOf(fam) < 0) out.push({ layer: l.id, kind: 'font', text: name + ' set in ' + l.family });
+    });
+    const bg = typeof layout.bg === 'string' ? hexOf(layout.bg) : ''; if (bg && !near(bg)) out.push({ layer: '', kind: 'colour', text: 'the ground ' + bg });
+    return out;
+  }
+  function BrandControl({ layout, kit, campaign, onShow }) {
+    if (!kit || !kit.palette) return null; const off = brandOff(layout, kit, campaign);
+    return html`<section class="st-brandctl" aria-label="Brand control" data-off=${off.length}><div class="st-qsum-h"><span class="st-lbl">Brand control</span>${off.length ? html`<b>${off.length} off the kit</b>` : html`<span class="ov-dim">every colour and typeface is the kit's</span>`}<span class="ov-dim">a warning, never a block: a departure may be on purpose</span></div>
+      ${off.length ? html`<ul class="st-ul">${off.map((o, i) => html`<li key=${i} data-kind=${o.kind}>${o.text}${o.layer && onShow ? html` <button class="ov-link" onClick=${() => onShow([o.layer])}>show on the tile</button>` : null}</li>`)}</ul>` : null}</section>`;
+  }
+
+  /* P52: the design-quality score the renderer measured, beside the Creative Partner's opinion, never in its place */
+  function DesignScore({ val, layout }) {
+    const d = val && R.designScore ? R.designScore(val, layout) : null; if (!d) return null;
+    return html`<section class="st-dscore" aria-label="Design quality, measured" data-score=${d.score}>
+      <div class="st-qsum-h"><span class="st-lbl">Design quality, measured</span><b>${d.score} / 100</b><span class="ov-dim">${d.note}</span></div>
+      <ul class="st-dscore-list">${d.measures.map(m => html`<li key=${m.key} class=${'st-dscore-row ' + (m.score >= 75 ? 'good' : m.score >= 45 ? 'fair' : 'poor')} data-measure=${m.key}><span class="st-qsum-dot" aria-hidden="true"></span><b>${m.label}</b><span class="st-dscore-n">${m.score}</span><span class="ov-dim" title=${m.why}>${m.value}</span></li>`)}</ul>
+    </section>`;
+  }
+
   /* ------------------------------------------------------------ resize to platform formats */
   const PRESETS = [['meta-square', 'Meta square', '1:1'], ['meta-portrait', 'Meta portrait', '4:5'], ['story', 'Story or reel', '9:16'], ['linkedin', 'LinkedIn link', '1.91:1'], ['linkedin-square', 'LinkedIn square', '1:1'], ['x', 'X landscape', '16:9'], ['display', 'Display (medium rectangle)', '6:5'], ['youtube', 'YouTube thumbnail', '16:9']];
   /** The composition re-laid for other platforms: one new asset per format in the same family, from the composition as it
       stands (its words, styling, placed images and photograph), measured like any other. No generation. */
-  function ResizePanel({ a, v, ro, busy, onResize, onOpen, made }) {
-    const [pick, setPick] = useState([]); const [open, setOpen] = useState(false);
+  function ResizePanel({ a, v, ro, busy, onResize, onOpen, made, comp, ns }) {
+    const [pick, setPick] = useState([]); const [open, setOpen] = useState(false); const [prev, setPrev] = useState(null);
+    useEffect(() => { setPrev(null); }, [pick.join(','), v && v.id]);
+    const preview = async () => { setPrev('loading'); try { const d = await call('/studio/resize', { asset: a.id, presets: pick, preview: true }); setPrev((d.preview || []).map(x => Object.assign({}, x, { m: comp && comp.ready ? measureAt(x.layout, x.copy || v.copy, imagesFor(x.layout, v.layout, comp.imgs || {}), comp, Object.assign({}, a, { format: x.format, channel: x.channel })) : null }))); } catch (e) { setPrev({ error: e.message || 'not laid out' }); } };
     if (ro || !v || v.mode === 'copy') return null;
     const painted = v.mode === 'finished' || v.mode === 'artwork';
     const togg = k => setPick(pick.indexOf(k) >= 0 ? pick.filter(x => x !== k) : pick.concat([k]));
@@ -345,7 +432,8 @@
       <div class="st-vars-head"><b>Resize to other formats</b> <span class="ov-dim">the same words, styling and image, re-laid for each platform as a new asset in ${a.family}; nothing generated, each measured before it is approved</span> <button class="ov-link" aria-expanded=${open} onClick=${() => setOpen(!open)}>${open ? 'hide' : 'choose formats'}</button></div>
       ${open ? html`${painted ? html`<div class="st-warnbar" role="note"><span>This creative is one painted bitmap: its words cannot be re-laid. Make an editable copy first (free), or regenerate it in the other format.</span></div>` : html`
         <div class="st-resize-grid" role="group" aria-label="Formats">${PRESETS.map(([k, l, f]) => { const same = f === a.format; return html`<label key=${k} class=${'st-resize-opt' + (pick.indexOf(k) >= 0 ? ' on' : '') + (same ? ' same' : '')}><input type="checkbox" checked=${pick.indexOf(k) >= 0} onChange=${() => togg(k)} /><span class=${'st-resize-ar'} style=${{ aspectRatio: f.replace(':', ' / ') }}></span><span><b>${l}</b><span class="ov-dim">${f}${same ? ' (this format)' : ''}</span></span></label>`; })}</div>
-        <div class="st-nd-row"><button class="btn sm" disabled=${!pick.length || !!busy} onClick=${() => { onResize(pick); setPick([]); }}>Make ${pick.length || ''} resized version${pick.length === 1 ? '' : 's'}</button><span class="ov-dim">free: no model call, no render</span></div>`}
+        ${Array.isArray(prev) && prev.length ? html`<div class="st-resize-prev" role="group" aria-label="Each format, measured before it is made">${prev.map(x => html`<div key=${x.format + x.preset} class="st-var" data-format=${x.format}><${K.Composition} v=${Object.assign({}, v, { layout: x.layout, copy: x.copy || v.copy })} a=${Object.assign({}, a, { format: x.format })} ns=${ns} size="card" /><div class="st-var-name">${x.label} <span class="ov-dim">${x.format}</span></div><div class="st-var-state">${!x.m ? html`<span class="ov-dim">not measured</span>` : x.m.ok ? html`<${K.Chip} kind="ok">passes</${K.Chip}>` : html`<${K.Chip} kind="bad" title=${x.m.blocking.join('; ')}>${x.m.blocking.length} to fix</${K.Chip}>`}</div></div>`)}</div>` : prev === 'loading' ? html`<div class="ov-dim" role="status">Laying out each format...</div>` : prev && prev.error ? html`<div class="ov-dim" role="alert">Not laid out: ${prev.error}</div>` : null}
+        <div class="st-nd-row"><button class="btn sm ghost" disabled=${!pick.length || prev === 'loading'} onClick=${preview}>Preview ${pick.length || ''} format${pick.length === 1 ? '' : 's'} first</button><button class="btn sm" disabled=${!pick.length || !!busy} onClick=${() => { onResize(pick); setPick([]); }}>Make ${pick.length || ''} resized version${pick.length === 1 ? '' : 's'}</button><span class="ov-dim">free: no model call, no render</span></div>`}
         ${made && made.length ? html`<div class="st-resize-made"><span class="st-lbl">Made</span>${made.map(m => html`<button key=${m.asset} class="st-chipbtn" onClick=${() => onOpen(m.asset)}>${m.title.replace(a.title + ' - ', '')} (${m.format})</button>`)}</div>` : null}` : null}
     </section>`;
   }
@@ -418,5 +506,5 @@
       </div></div>`;
   }
 
-  window.STEditor = { StyleVariations, ResizePanel, QualitySummary, FontPicker, Swatches, ContextToolbar, TextEditor, AddMenu, ShortcutsSheet, SHORTCUTS, newLayer, cloneLayers, snapMove, resizeLocal, angleTo, TypeExtras, EffectsPanel, ImagePanel, uploadImage, recentFonts, pushRecent, COPY_ROLES, isMark };
+  window.STEditor = { TEXT_PRESETS, TemplatesPanel, DesignScore, BrandControl, brandOff, StyleVariations, ResizePanel, QualitySummary, FontPicker, Swatches, ContextToolbar, TextEditor, AddMenu, ShortcutsSheet, SHORTCUTS, newLayer, cloneLayers, snapMove, resizeLocal, angleTo, TypeExtras, EffectsPanel, ImagePanel, uploadImage, recentFonts, pushRecent, COPY_ROLES, isMark };
 })();

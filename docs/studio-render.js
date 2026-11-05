@@ -912,6 +912,53 @@
     const issues = layoutRules(boxes, { W, H, format: opts.format || layout.format, channel: opts.channel, production: opts.production !== false, fonts: opts.fonts, imageryMissing: missing, unresolved, subjects: subj });
     return { renderer: RENDERER, contract: CONTRACT, W, H, ok: !issues.some(i => i.severity === 'blocking'), issues, boxes, fonts: opts.fonts || null, contrast: contrasted, unresolved: unresolved.length ? unresolved : undefined, subjects: subj.length ? subj : undefined, imageryMissing: missing, production: opts.production !== false, at: Date.now() };
   }
+  /* P52 (Phase 5): a measured design-quality score, read from the boxes validate() measured - never a model's opinion and never
+     an approval. Seven measures, each 0-100 with its value and why: alignment to shared edges, consistent margins, the type scale,
+     contrast, hierarchy (the headline against the support), whitespace balance, and the mark against its rule. A measure that
+     does not apply (no support, no rule) is left out, not guessed. */
+  function designScore(val, layout) {
+    if (!val || !Array.isArray(val.boxes)) return null;
+    const W = val.W, H = val.H; const L = (layout && layout.layers) || [];
+    const vis = val.boxes.filter(b => b.valid && !b.hidden && !b.empty && b.w > 0 && b.h > 0 && b.type !== 'shape' && !(b.type === 'img' && !b.mark));
+    const texts = vis.filter(b => b.type === 'text'); const out = [];
+    const add = (key, label, score, value, why) => out.push({ key, label, score: Math.max(0, Math.min(100, Math.round(score))), value, why });
+    if (vis.length >= 2) {
+      const tol = 0.012 * W; const edges = b => [b.x, b.x + b.w / 2, b.x + b.w];
+      const aligned = vis.filter(b => vis.some(o => o !== b && edges(b).some(e => edges(o).some(f => Math.abs(e - f) <= tol)))).length;
+      add('alignment', 'Alignment', aligned / vis.length * 100, aligned + ' of ' + vis.length + ' elements share an edge or centre', 'elements that line up with another read as one design; a stray one reads as a mistake');
+    }
+    const leftTexts = texts.filter(b => !b.align || b.align === 'left');
+    if (texts.length >= 2) {
+      const lm = texts.map(b => b.x), rm = texts.map(b => W - b.x - b.w); const minL = Math.min.apply(null, lm), minR = Math.min.apply(null, rm);
+      const lefts = (leftTexts.length >= 2 ? leftTexts : texts).map(b => b.x); const spread = Math.max.apply(null, lefts) - Math.min.apply(null, lefts);
+      const sym = Math.max(minL, minR) > 0 ? Math.min(minL, minR) / Math.max(minL, minR) : 1;
+      add('margins', 'Margins', (Math.max(0, 1 - spread / (0.08 * W)) * 0.6 + sym * 0.4) * 100, 'left ' + Math.round(minL / W * 100) + '%, right ' + Math.round(minR / W * 100) + '%; text starts within ' + Math.round(spread / W * 100) + '% of each other', 'one margin held by every block, and the same breathing room on both sides');
+    }
+    const sizes = Array.from(new Set(texts.map(b => Math.round((b.px || 0) * 10) / 10).filter(x => x > 0))).sort((a, b) => b - a);
+    if (sizes.length >= 2) {
+      const ratios = sizes.slice(1).map((s2, i) => sizes[i] / s2); const good = ratios.filter(r => r >= 1.15 && r <= 2.6).length;
+      add('type_scale', 'Type scale', good / ratios.length * 100, sizes.length + ' sizes, steps ' + ratios.map(r => r.toFixed(2)).join(', '), 'each step between sizes clear enough to read as a level (1.15 to 2.6 times), none so close that two levels blur');
+    }
+    const withC = texts.filter(b => typeof b.contrast === 'number');
+    if (withC.length) { const ok45 = withC.filter(b => b.contrast >= (b.px >= 24 ? 3 : 4.5)).length; add('contrast', 'Contrast', ok45 / withC.length * 100, ok45 + ' of ' + withC.length + ' text blocks meet WCAG AA (worst ' + Math.min.apply(null, withC.map(b => b.contrast)).toFixed(1) + ':1)', 'measured against the ground behind each block'); }
+    const hl = texts.find(b => b.role === 'headline'); const sp = texts.find(b => b.role === 'support');
+    if (hl && sp && hl.px && sp.px) { const r = hl.px / sp.px; add('hierarchy', 'Hierarchy', r >= 1.6 ? 100 : r >= 1.3 ? 70 : r >= 1.1 ? 40 : 10, 'headline ' + r.toFixed(1) + ' times the support', 'the headline is read first when it is clearly larger than what follows'); }
+    if (vis.length) {
+      const area = vis.reduce((n, b) => n + Math.min(b.w, W) * Math.min(b.h, H), 0) / (W * H);
+      let cx = 0, cy = 0, wsum = 0; vis.forEach(b => { const a = b.w * b.h; cx += (b.x + b.w / 2) * a; cy += (b.y + b.h / 2) * a; wsum += a; });
+      const off = wsum ? Math.hypot(cx / wsum / W - 0.5, cy / wsum / H - 0.5) : 0;
+      const fill = area < 0.08 ? area / 0.08 : area > 0.65 ? Math.max(0, 1 - (area - 0.65) / 0.35) : 1; const bal = Math.max(0, 1 - Math.max(0, off - 0.18) / 0.35);
+      add('whitespace', 'Whitespace', (fill * 0.6 + bal * 0.4) * 100, Math.round(area * 100) + '% of the stage carries words and marks; weight ' + Math.round(off * 100) + '% off centre', 'room around the message, and the weight placed on purpose rather than piled in one corner');
+    }
+    const marks = vis.filter(b => b.mark);
+    const ruled = marks.map(b => ({ b, l: L.find(x => String(x.id) === b.id) })).filter(x => x.l && x.l.rule && x.l.rule.corner);
+    if (ruled.length) {
+      const inCorner = x => { const c = x.l.rule.corner; const midx = x.b.x + x.b.w / 2, midy = x.b.y + x.b.h / 2; return (c[0] === 't' ? midy < H / 2 : midy >= H / 2) && (c[1] === 'l' ? midx < W / 2 : midx >= W / 2); };
+      const okN = ruled.filter(inCorner).length; add('mark_rule', 'Mark placement', okN / ruled.length * 100, okN + ' of ' + ruled.length + ' marks where the campaign rule puts them', 'the rule is the client\'s, not a taste');
+    }
+    if (!out.length) return null;
+    return { score: Math.round(out.reduce((n, m) => n + m.score, 0) / out.length), measures: out, note: 'Measured from the composition as drawn: not a model\'s opinion, and never an approval.' };
+  }
   /** The state of a validation in four words a designer can act on, with the technical, assessment and approval parts kept apart:
    *  blocked (required corrections remain), review (warnings or unmeasured checks remain), passed (every applicable check passed).
    *  Approval is a person's and is added by the page from the asset's record, never here. */
@@ -1466,5 +1513,5 @@
   function report(v, val) {
     return { renderer: val.renderer, contract: val.contract || CONTRACT, W: val.W, H: val.H, production: val.production, imageryMissing: val.imageryMissing, unresolved: val.unresolved, subjects: val.subjects ? val.subjects.map(s => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h, covered: s.covered, cropped: s.cropped, by: s.by, confidence: s.confidence })) : undefined, fonts: val.fonts, boxes: val.boxes.map(b => { const o = {}; ['id', 'role', 'type', 'hidden', 'empty', 'dup', 'valid', 'overlaps', 'x', 'y', 'w', 'h', 'ax', 'ay', 'aw', 'ah', 'vx', 'vy', 'vw', 'vh', 'lines', 'chars', 'px', 'contentH', 'overflowH', 'overflowW', 'broken', 'mark', 'asset', 'src', 'contrast', 'contrastMin', 'rotate', 'opacity', 'alpha', 'occluded', 'occludedBy', 'groundLum', 'markFill', 'multicolour', 'inkN', 'inkLost', 'inkWeak', 'inkCovered', 'inkLocal', 'inkMean', 'inkRun', 'inkWhere', 'inkBoundary', 'inkGround', 'inkUnresolved', 'bg', 'emphasis'].forEach(k => { if (b[k] !== undefined) o[k] = typeof b[k] === 'number' ? Math.round(b[k] * 1000) / 1000 : b[k]; }); return o; }), clientIssues: val.issues.map(i => i.code + ':' + i.layers.join(',')) };
   }
-  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, repair, markVariants, variants, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
+  window.STRender = { RENDERER, CONTRACT, draw, render, toBlob, loadImage, stageSize, wrap, wrapText, layoutText, displayedText, ensureFonts, familyAvailable, measure, layoutRules, markConstraints, safeArea: safeAreaOf, validate, qualityOf, designScore, repair, markVariants, variants, styles, variantsAsync, stylesAsync, styleLayout, STYLES, preloadStyles, FONT_CATALOGUE, fontEntry, fontWeight, loadFace, ICONS, report, zip, colourRGBA, regionStats, markStats, markReadability, markRegion, occlusionOf, contrastOf, coverTransform, imageToCanvas, canvasToImage, panFocus, subjects, subjectCoverage, frameSuggest };
 })();

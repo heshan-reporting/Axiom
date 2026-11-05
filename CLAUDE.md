@@ -758,7 +758,7 @@ the view holding it) - answered in tables, not cards.
   intake:'brief', deliverable:'set', text, from:'overview'})`, the Sentinel's
   contract, which the wizard opens as a response to a situation; nothing is made
   until the project is created; hidden for read-only keys. Studio scripts load
-  with `?v=r38` since P51.
+  with `?v=r39` since P52.
 - **Drill-down.** `AXUI.goto(view, params)` opens a view and hands it
   params; an island adopts them with `AXUI.useGoto(view, apply)` (at mount
   through `consume`, later through the `ax:goto` event). Narratives take
@@ -3018,6 +3018,26 @@ learned. `informed.memory` names the examples (example / avoid / background) and
 the latest decision per asset and part is read, and the log entry it supersedes is marked `withdrawn:`. `stIsolationAudit` also
 reads each version's `informed` for another campaign's facts, corrections and examples. Harnesses: `tests/studio-p51-worker.mjs`
 (13), `tests/studio-r5-browser.mjs` (4), `tests/engine-ingest-test.py` (23).
+
+**The engines release, part 3: the design engine and the visible UI (P52; build `2026-11-05.studio-p52`, page `?v=r39`;
+`CREATIVE-STUDIO.md` s.61.5-61.6).** **Templates**: `ST_LIB_TEMPLATES` (myth and fact, stat card, quote, announcement, carousel
+opener, event, petition, explainer), original plans (`stTemplatePlan`) filled from the piece's words, coloured from the kit
+(campaign accent first), carrying the campaign's mark by policy, laid out by `stPlanNormalise`; a type-led template sets
+`noImagery`. `GET /studio/templates?asset=&q=` (read, writes nothing), `POST /studio/template/apply {asset, template, base}` (a
+layout version, no render). A plan may say `{"template": id, "elements": [changes or {id, remove: true}]}`
+(`stPlanExpandTemplate`; `layout.fromTemplate`); the plan schema lists the templates. **Measured design quality**:
+`STRender.designScore(val, layout)` - alignment, margins, type scale, contrast, hierarchy, whitespace, mark against its rule -
+shown in Checks beside the Creative Partner, never as an approval; **Brand control** names colours and typefaces off the kit
+(`STEditor.brandOff`), warning only. `POST /studio/resize {preview: true}` lays out the formats and creates nothing (the Resize
+panel previews and measures them first). Text effect presets (`STEditor.TEXT_PRESETS`: None, Shadow, Lift, Hollow, Outline,
+Neon, Plate, Splice) are one patch of the effects the renderer draws. **Team notes**: `studio_comments` (`POST
+/studio/comment {asset, version, text, pin}`, `@Name` mentions, `/studio/comment/resolve`, `GET /studio/comments`), and `GET
+/studio/presence?asset=` from drafts (which carry `name`); both in History. **Design system**: canvas-chrome colour tokens and
+the radius scale (`--st-r-hair` .. `--st-r-pill`) in `studio-skin.css`; `tests/studio-tokens-test.mjs` fails on a hex colour or a
+pixel radius outside the token files or a token declaration, on a text/surface token pair under AA (dark and light), and on an
+animating stylesheet without a reduced-motion rule. Not yet built: curved text, lists, tables, charts, photo grids, stickers,
+one-click background removal (each needs the RULES block and the validation contract). Harnesses: `tests/studio-p52-worker.mjs`
+(6), `tests/studio-r6-browser.mjs` (6), `tests/studio-tokens-test.mjs` (4).
 
 Phase 1, the ground:
 

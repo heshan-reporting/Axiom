@@ -3985,3 +3985,34 @@ Providers MOCKED throughout; nothing live was called.
 | MI | what informed this creative | facts, corrections and an example count | `informed.memory {examples [{id, title, kind, campaign, use example/avoid/background}], kept [{id, title, authority, campaign}]}`; facts carry their campaign; the panel lists each memory item by id | ME3 |
 | MX | retraction stays exact (defect) | a withdrawn approval still reached the reading twice: the `approve` row stayed in `studio_approvals` and its `approved` entry stayed in `studio_intel_log`, so it was read back as a recorded decision and an earlier choice | only the latest decision per asset and part is read (`NOT EXISTS` a later row); a withdrawal or a new decision marks the earlier log entry `withdrawn:`, which the readers leave out; entries are now keyed by part and asset | ME4 (failed on P50: "[H1] approved ... KEEPSAKE-REASON") |
 | IS | isolation in CI | the audit read rules, references and marks | `stIsolationAudit` also reads each version's `informed`: a fact, correction or example of another campaign, or a context compiled for another client, is a violation; IS1 produces for HOOF, national and the synthetic client and requires every audit clean, and catches a planted leak of each kind | IS1 |
+
+### 61.5 Phase 5 - the design engine and the Create workspace (build `studio-p52`, page `?v=r39`)
+
+What the editor already had is in the 61.0 matrix; this release adds what was missing or partial, each a layer property or a
+layout the renderer draws, validates and exports - no overlay that only the editor sees. Nothing of another product was copied:
+the templates, presets and names are the Studio's own.
+
+| id | what | before | after | test |
+|---|---|---|---|---|
+| TP | templates | missing (layout and style variations only) | `ST_LIB_TEMPLATES` - myth and fact, stat card, quote, announcement, carousel opener, event, petition, explainer - each an original plan (`stTemplatePlan`) on `ST_PLAN_SCHEMA`: filled from the piece's words (the stat card takes the figure from them, the explainer its steps from the support), coloured from the kit (the campaign accent first), carrying the campaign's mark by policy (HOOF its wordmark, never the MCA logo), laid out by `stPlanNormalise` like any plan; a type-led template draws its own ground (`noImagery`, the photograph stays on file). `GET /studio/templates?asset=&q=` (read; searchable; nothing written), `POST /studio/template/apply {asset, template, base}` (a layout version "template: <name> (no render)"; `version_moved`, `locked`, a painted bitmap refused). In the Design tool: **Templates**, each card drawn by the renderer with the piece's words and measured (passes / to fix, the design score) | `studio-p52-worker` TP1, TP2; `studio-r6-browser` DE1 |
+| TV | templates and plans one vocabulary | - | a plan may say `{"template": "stat_card", "elements": [{id, ...changes}, {id, remove: true}]}`; `stPlanExpandTemplate` builds it from the template and the changes by id; the layout records `fromTemplate`; the schema the planner reads lists the templates | TP3 |
+| DS | a measured design-quality score | none | `STRender.designScore(val, layout)`: alignment (elements sharing an edge or centre), margins (one left edge, both sides alike), the type scale (each step 1.15 to 2.6 times), contrast (AA per block, worst named), hierarchy (headline against support), whitespace (coverage and the weight's distance from centre), the mark against its rule - each 0-100 with its value and why, a measure that does not apply left out; shown in Checks as **Design quality, measured** beside the Creative Partner, "not a model's opinion, and never an approval" | DE2 |
+| RZ | resize with a preview | "no preview grid before creating" | `POST /studio/resize {preview: true}` lays out every chosen format and returns it, creating nothing; the Resize panel's **Preview N formats first** draws each with the renderer and measures it before **Make** | TP4, DE3 |
+| BC | brand control | missing | **Brand control** in Checks names every colour (text, fill, plate, ground) and typeface off the kit, layer by layer, near-matches allowed; a warning, never a block | DE2 |
+| TX | text effect presets | none (effects only one by one) | None, Shadow, Lift, Hollow, Outline, Neon, Plate, Splice - each one patch of the shadow, outline, glow and plate the renderer already draws (one undo step), measured like any edit | DE4 |
+| CO | internal comments and presence | missing (client review pins only) | `studio_comments`: `POST /studio/comment {asset, version, text, pin}` (mentions as plain `@Name`), `/studio/comment/resolve {id, reopen}`, `GET /studio/comments?asset=` (read); a `team_comment` event on the thread; `GET /studio/presence?asset=` names who else has unsaved work on the asset in the last ten minutes (from drafts, which now carry the display name). In History: **Team notes** (pinned to the selected layer) and "<name> is editing this too" | CO1, PR1, DE5 |
+| PG | pages | the 61.0 row said "no reorder or duplicate page": wrong - add, duplicate, move, delete (archive) and restore exist since S23 (`/studio/page`); there was no drag | a page is dragged to its place in its own set on the page strip: the same `move` action (page numbers renumbered as layout versions; a renumber that drops a design approval is asked about first) | DE6 |
+
+Not built in this release (named, not hidden): curved text, bulleted and numbered lists, tables, charts, photo grids, stickers,
+one-click background removal and tidy-up spacing beyond distribute. Each needs a new layer property the renderer, the RULES
+block and the worker's judge must all accept (the judge re-derives displayed characters, so a list marker or a chart label the
+worker does not know would be refused as `report_mismatch`); that is a change to the shared RULES block and the validation
+contract, scoped for the next release rather than done halfway.
+
+### 61.6 Phase 6 - the visible UI
+
+| id | what | before | after | test |
+|---|---|---|---|---|
+| TK | one design system | 68 hex colours and 98 pixel radii in Studio stylesheets outside the token files | the canvas chrome's colours (handles, guides, snap marks, checkerboard, hue spectrum, logo plate) and a radius scale (`--st-r-hair` 2 to `--st-r-pill`) are tokens in `studio-skin.css`; every other Studio stylesheet reads them (radii mapped to the nearest step, a pixel at most); `--sk-r-md`, which was never defined and lived on a fallback, is defined | `studio-tokens-test` TK1, TK2 |
+| CP | contrast on every token pair | untested | every text token on every surface token at AA in the dark theme and the light one (quiet ink 3:1), the status inks on the panel | TK3 |
+| RM | motion off under reduced motion | per file, unchecked | every Studio stylesheet that animates carries the reduced-motion rule | TK4 |
