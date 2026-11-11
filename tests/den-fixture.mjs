@@ -57,6 +57,7 @@ export const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) th
 export const txt = (page, sel) => page.$eval(sel, e => e.textContent.replace(/\s+/g, ' ').trim());
 export const all = (page, sel) => page.$$eval(sel, els => els.map(e => (e.tagName === 'TR' ? Array.from(e.children).map(c => c.textContent.replace(/\s+/g, ' ').trim()).join(' | ') : e.textContent.replace(/\s+/g, ' ').trim())));
 export const tab = async (page, name) => { await page.click('#den-tab-' + name); await page.waitForFunction(n => document.querySelector('#den-tab-' + n).getAttribute('aria-selected') === 'true', name); };
+export const desk = async (page, id) => { await page.click('.den-deskcard'); await page.click('.den-deskitem[data-desk="' + id + '"]'); };
 export const toast = page => page.evaluate(() => (document.querySelector('.toast, #toast') || {}).textContent || '');
 export const shot = async (page, n) => { if (SHOT) await page.screenshot({ path: SHOTS + n + '.png', fullPage: true, scale: 'css' }); };
 export const panel = (page, title) => page.locator('section.den-panel[aria-label="' + title + '"]');

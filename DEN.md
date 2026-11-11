@@ -697,7 +697,7 @@ against her own report for the same day. That comparison is the acceptance test 
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
 
-## 8. The interface, redesigned (12 November 2026; page `?v=r45`, worker unchanged)
+## 8. The interface, redesigned (12 November 2026; page `?v=r45` to `?v=r47`, worker `studio-p59` for one additive field)
 
 **The decision.** The owner, of release 6's page: "The current UI looks primitive and boring ... a total UI upgrade to
 look professional, production grade and reliable", and then, with a reference image of a light analytics dashboard:
@@ -741,10 +741,39 @@ check` 26. No test was changed. Screenshots of every tab were retaken with `test
   the dark theme survives a reload and passes axe on all five tabs; the menu by keyboard, the channel tiles, and no
   sideways scroll at 1024). No earlier case was changed.
 
-**Not built yet**: the brief's editors are still text boxes (citation ids are typed marks in the text, with chips
-under each section), and there is no evidence panel beside the page; Watch proposals are still table rows; Options is
-still one form with its Save button; the desk is still a native select; History and Compare are not side sheets; the
-job console is not docked; the styleguide has no Den section.
+**Third pass (page `?v=r47`, `ax-ui.js?v=r5`, worker build `2026-11-12.studio-p59`).**
+- **Sheets beside the page** (`Sheet` in `docs/den.js`): never a modal. From 1280 px the workspace gives an open
+  sheet its room, so no action is covered; below that the sheet lies over the page and Close or Escape puts it away.
+  The brief's History and Compare open in sheets (the same panels inside), and "Show beside the page" under a
+  section opens **the evidence**: every row the draft was given, by its mark, the cited one first in view, each
+  with its source link. A citation chip still opens its source directly.
+- **Ratings are one press**: each rating and its trend is a radio group of the desk's own words (press the chosen
+  word again to leave it unrated). The save path is unchanged.
+- **The desk menu**: the card at the top of the side menu is a button that opens the desks (`role="menu"`,
+  `menuitemradio`; Escape or a click outside closes it). The native select in the header is gone.
+- **Collection**: each tile carries seven days as bars. `GET /den/collection` gained `delivered.days` (seven counts,
+  oldest first, that add up to `d7`) - additive, no other field changed. The job console is docked under the
+  workspace (state held by the shell), so it stays while the areas change; Hide the console puts it away, and a job
+  that finishes later does not bring a hidden console back. The console keeps its own dark ground in both themes
+  (in the light theme it had been dark-theme ink on a grey box, which the new axe case found), and its log can be
+  reached and scrolled by keyboard (`docs/ax-ui.js`: `tabIndex`, `role="log"`).
+- **Watch**: proposals are drawn as review cards (the same table rows, so the same actions and tests), and Preview
+  shows what a term would add as bars by channel above its sample.
+- **Options**: an index of its sections that moves focus into the one chosen, switches in place of tick boxes, and
+  the Save bar stays in view at the foot. Section order is by the Up and Down buttons, which a keyboard reaches.
+- **The styleguide** has a Den section with the components in both themes.
+- Tests: `tests/den-browser.mjs` is 31 (two new cases: the evidence sheet, ratings and Escape; the desk menu by
+  keyboard, the docked console across areas, and axe on Watch, Options and Collection). `tests/den-worker.mjs` DK15
+  also holds the seven-day series. **Tests changed because the markup did** (each only in how it finds the control):
+  choosing a desk (`desk(page, id)` in the fixture, in place of `selectOption` on the header select - three places,
+  the list of desks, the chosen desk, and two "the header survives" checks) and reading a rating (the checked radio
+  in place of a select's value). No assertion was weakened.
+
+**Decided against, and why.** The brief's editors stay text boxes: the working copy, save on leaving a field, the
+conflict flow and the sixty failure cases all rest on them, and a rich editor that could not promise the same was
+not worth an analyst's lost words; so citation ids stay typed marks in the text. Preview stays inside its proposal
+(it reads beside the reason it was proposed) rather than in a sheet. The export actions stay four visible buttons
+under "Get it out" rather than a menu: each is one press. Section order has no drag handle: Up and Down do it.
 
 **Not verifiable here.** The page was seen only on the fixture's invented rows. `:has()` carries the theme switch:
 it needs a browser from 2023 or later (Chrome 105, Safari 15.4, Firefox 121); an older one shows the Den's cards

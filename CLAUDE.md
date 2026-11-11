@@ -280,7 +280,7 @@ verifies each, and what was asked for and not built.
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
 
-- **The Den's interface, redesigned (12 November 2026, page `?v=r45` then `?v=r46`, worker unchanged; `DEN.md` s.8,
+- **The Den's interface, redesigned (12 November 2026, pages `?v=r45` to `?v=r47`; `DEN.md` s.8,
   `prompts/annes-den-ui.md`).** At the owner's request and to a reference they supplied, the Den alone leaves the
   Phase 5 shell rules: while it is open the whole page takes light tokens (`body:has(#v-den.on)` in `docs/den.css`,
   which also hides the scope bar), with a side menu (the five areas as a vertical tablist), one white workspace card,
@@ -289,7 +289,12 @@ verifies each, and what was asked for and not built.
   tokens; chart series are `--den-s1..7` in a fixed channel order. The harnesses' selectors are unchanged.
   Second pass (page `?v=r46`): a dark theme by choice (`#den-root[data-theme]`, localStorage `ax_den_theme`), a
   Cards / Table switch on Today (`ax_den_view`; both carry `.den-row`), channel tiles above Collection's table,
-  skeletons and citation tips; `tests/den-browser.mjs` is 29. What is left is listed in `DEN.md` s.8.
+  skeletons and citation tips. Third pass (page `?v=r47`, `ax-ui.js?v=r5`, build `2026-11-12.studio-p59`): `Sheet`
+  (History, Compare and the brief's evidence beside the page, never a modal), ratings as radio groups, the desk menu
+  on the side card (the header select is gone; tests use `desk(page, id)` from the fixture), `delivered.days` on
+  `/den/collection` for the tiles' seven-day bars, the job console docked in the shell and dark in both themes,
+  proposals drawn as cards, an index and switches in Options, and a Den section in `docs/styleguide.html`.
+  `tests/den-browser.mjs` is 31. `DEN.md` s.8 lists what was decided against and why.
 
 ## The research agent
 

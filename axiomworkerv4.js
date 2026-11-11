@@ -7801,7 +7801,7 @@ async function denCollection(env, deskId) {
   const desk = await deskGet(env, deskId); if (!desk) return DESK_UNKNOWN; await ensureArchive(env); const now = Date.now(); const mine = desk.issues.map(i => i.id);
   const reach = await reachView(env); const act = await denActive(env, desk.ns); const rp = s => (reach.platforms || []).find(x => x.source === s) || null;
   const got = {}; const wIds = new Set(act.filter(r => r.kind === 'account').map(r => r.id));
-  (((await env.MIND_DB.prepare('SELECT kind, ts, meta FROM arc_items WHERE ts>? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT 6000').bind(now - 7 * 86400000, ...DEN_BOARD_KINDS).all()).results) || []).forEach(r => { const m = denJ(r.meta, {}); if (!((Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) || (m.watch && wIds.has(m.watch)))) return; const ch = platformOf(r.kind, m); const g = got[ch] = got[ch] || { d1: 0, d7: 0, last: 0, layers: {} }; g.d7++; if (r.ts > now - 86400000) g.d1++; if (r.ts > g.last) g.last = r.ts; (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : [])).forEach(l => { g.layers[l] = 1; }); });
+  (((await env.MIND_DB.prepare('SELECT kind, ts, meta FROM arc_items WHERE ts>? AND kind IN (' + DEN_BOARD_KINDS.map(() => '?').join(',') + ') ORDER BY ts DESC LIMIT 6000').bind(now - 7 * 86400000, ...DEN_BOARD_KINDS).all()).results) || []).forEach(r => { const m = denJ(r.meta, {}); if (!((Array.isArray(m.issues) ? m.issues : []).some(i => mine.indexOf(i) >= 0) || (m.watch && wIds.has(m.watch)))) return; const ch = platformOf(r.kind, m); const g = got[ch] = got[ch] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] }; g.d7++; g.days[Math.max(0, 6 - Math.floor((now - r.ts) / 86400000))]++; if (r.ts > now - 86400000) g.d1++; if (r.ts > g.last) g.last = r.ts; (Array.isArray(m.layers) ? m.layers : (m.via === 'reach' ? [2] : [])).forEach(l => { g.layers[l] = 1; }); });
   const n = p => act.filter(r => r.kind === 'account' && r.platform === p).length; const st = (src) => { const x = rp(src); return x ? { source: src, offered: x.offered, off: x.off, challenge: x.challenge } : null; };
   const CH = [
     { id: 'news', label: 'News and official sources', how: 'Layer 3: the Source Registry, every tick. Subscriber outlets: layer 2, on the Mac, once cleared.', collect: 'sources', collector: null, worker: true },
@@ -7811,7 +7811,7 @@ async function denCollection(env, deskId) {
     { id: 'youtube', label: 'YouTube', how: 'Layer 2: keyword search on the Mac. Layer 3: registered channels\' feeds, comments and captions from the worker.', collect: 'ytsearch', collector: st('ytsearch'), accounts: n('youtube'), worker: true },
     { id: 'reddit', label: 'Reddit', how: 'Layer 2 on the Mac (Reddit refuses cloud networks), or the worker with app credentials.', collect: 'reddit', collector: st('reddit'), worker: !!(env.REDDIT_CLIENT_ID && env.REDDIT_CLIENT_SECRET) },
     { id: 'bluesky', label: 'Bluesky', how: 'Layer 3: public search from the worker.', collect: 'bluesky', collector: null, worker: true },
-  ].map(c => Object.assign(c, { delivered: got[c.id] || { d1: 0, d7: 0, last: 0, layers: {} } })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
+  ].map(c => Object.assign(c, { delivered: got[c.id] || { d1: 0, d7: 0, last: 0, layers: {}, days: [0, 0, 0, 0, 0, 0, 0] } })).map(c => Object.assign(c, { delivered: Object.assign({}, c.delivered, { layers: Object.keys(c.delivered.layers).map(Number).sort() }) }));
   let gated = []; try { await ensureSources(env); await ensureGated(env); gated = (((await env.MIND_DB.prepare('SELECT id, name, tier, access, cleared_by, cleared_at FROM sources ORDER BY name LIMIT 1000').all()).results) || []).map(s => ({ id: s.id, name: s.name, access: sourceAccessOf(s), cleared: Number(s.cleared_at) > 0, cleared_by: s.cleared_by || '', cleared_at: Number(s.cleared_at) || 0 })).filter(s => GATED_NEEDS_CLEARANCE.indexOf(s.access) >= 0).slice(0, 80); } catch (e) { gated = []; }
   let backtest = null; try { backtest = JSON.parse((await kvGet(env.AXIOM_KV, 'den_backtest_' + desk.id)) || 'null'); } catch (e) { backtest = null; }
   return { ok: true, desk: desk.id, channels: CH, reach: { off: reach.off, agents: reach.agents, challenges: reach.challenges }, hashtags: await igHashtagLedger(env), gated, backtest, notBuilt: ['TikTok, Threads and LinkedIn are not collected: no usable route, and no link to any of them in the reports read.', 'Today\'s reads against each platform\'s cap are counted on the Mac (its settings file), not here.'] };
@@ -9149,7 +9149,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p58';
+const AXIOM_BUILD = '2026-11-12.studio-p59';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';

@@ -4,8 +4,8 @@
   "sha": "3c52d4a530d5e86f"
  },
  "ax-ui.js": {
-  "v": "r4",
-  "sha": "06f2aab5bc7c7f9c"
+  "v": "r5",
+  "sha": "6860962f3607ec3e"
  },
  "content.js": {
   "v": "r3",
@@ -40,8 +40,8 @@
   "sha": "37ba84a9f394526b"
  },
  "den.css": {
-  "v": "r46",
-  "sha": "da68a409fde41be3"
+  "v": "r47",
+  "sha": "147524ffb21adbb0"
  },
  "studio-render.js": {
   "v": "r44",
@@ -80,7 +80,7 @@
   "sha": "c2fdd7cec9c075a4"
  },
  "den.js": {
-  "v": "r46",
-  "sha": "4463275d4d56271b"
+  "v": "r47",
+  "sha": "bd55bc66b55002fe"
  }
 }

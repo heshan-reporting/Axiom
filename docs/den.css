@@ -310,3 +310,58 @@ a.den-cite{cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .den-sec{max-width:880px;margin:0 auto}
 @media(max-width:1100px){.den-mcard{grid-template-columns:36px minmax(0,1fr)}.den-mc-a{grid-column:2;text-align:left}}
 @media(prefers-reduced-motion:reduce){.den-sk{animation:none}}
+
+/* ---- third pass: sheets, the evidence, rating controls, the desk menu, review cards, the dock, switches ---- */
+.den-sheet{position:fixed;top:0;right:0;bottom:0;z-index:55;width:min(540px,94vw);display:flex;flex-direction:column;background:var(--den-card);border-left:1px solid var(--den-line);box-shadow:var(--den-sh3);color:var(--den-ink1);font-family:var(--den-font);font-size:13.5px}
+.den-sheet>header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--den-line)}
+.den-sheet>header h3{margin:0;font-family:var(--den-num);font-size:16px;font-weight:700;color:var(--den-ink)}
+.den-sheet-b{flex:1;overflow:auto;padding:14px 16px}
+.den-sheet .den-sec{max-width:none}
+.den-evrow{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:10px;border:1px solid var(--den-line);border-radius:var(--den-r);margin:0 0 8px}
+.den-evrow.on{border-color:var(--den-ac);background:var(--den-ac-bg)}
+.den-evrow .den-t{display:block}
+.den-seg .den-tab[aria-checked="true"]{color:var(--den-ink);background:var(--den-card);box-shadow:var(--den-sh1);font-weight:600}
+.den-seg .den-tab:disabled{cursor:not-allowed}
+button.den-cite{font-family:var(--den-font);cursor:pointer}
+button.den-cite:hover{border-color:var(--den-ac);color:var(--den-ac)}
+.den-deskwrap{position:relative}
+button.den-deskcard{width:100%;text-align:left;font-family:var(--den-font);cursor:pointer;color:inherit}
+button.den-deskcard:hover{border-color:var(--den-line2)}
+button.den-deskcard:focus-visible,.den-deskitem:focus-visible{outline:2px solid var(--den-ac);outline-offset:1px}
+.den-chev{flex:none;width:16px;height:16px;margin-left:auto;color:var(--den-ink2)}
+.den-deskmenu{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:20;display:flex;flex-direction:column;gap:2px;background:var(--den-card);border:1px solid var(--den-line);border-radius:var(--den-r);box-shadow:var(--den-sh3);padding:5px}
+.den-deskmenu[hidden]{display:none}
+.den-deskitem{display:block;text-align:left;font-family:var(--den-font);background:none;border:0;border-radius:var(--den-r-sm);padding:7px 9px;cursor:pointer;color:var(--den-ink1)}
+.den-deskitem:hover{background:var(--den-hover)}
+.den-deskitem[aria-checked="true"]{background:var(--den-ac-bg)}
+.den-deskitem b{display:block;font-weight:600;font-size:13.5px;color:var(--den-ink)}
+.den-deskitem span{display:block;font-size:12px;color:var(--den-ink2)}
+.den-review,.den-review tbody{display:block}
+.den-review thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.den-review tbody{padding:12px 14px 4px}
+.den-review tr.den-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:6px 14px;align-items:start;border:1px solid var(--den-line);border-radius:var(--den-r);box-shadow:var(--den-sh1);padding:12px 14px;margin:0 0 10px;background:var(--den-card)}
+.den-review tr.den-row td{display:block;padding:0;border:0;background:none}
+.den-review tr.den-row:hover td{background:none}
+.den-review tr.den-row:hover{border-color:var(--den-line2)}
+.den-review .den-t{font-size:15px;font-weight:600}
+.den-dock{position:sticky;bottom:0;z-index:8;margin:12px -16px 0;padding:10px 16px;background:var(--den-card);border-top:1px solid var(--den-line2);border-radius:0 0 var(--den-r-lg) var(--den-r-lg);box-shadow:0 -8px 24px rgba(15,23,42,.08)}
+.den-dock .den-mini{margin-top:8px}
+.den-spark{display:inline-flex;align-items:flex-end;gap:2px;height:20px;margin-left:auto;float:right}
+.den-spark i{display:block;width:5px;border-radius:var(--den-r-xs) var(--den-r-xs) 0 0;background:var(--den-s1)}
+.den-spark i.z{background:var(--den-line2)}
+.den-optnav{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 14px;font-size:13px}
+.den-optbar{position:sticky;bottom:0;z-index:7;background:var(--den-card);border-top:1px solid var(--den-line);border-radius:0;margin:0 -16px;padding:10px 16px}
+#den-root input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:34px;height:20px;border-radius:var(--den-r-pill);background:var(--den-line2);border:0;position:relative;cursor:pointer;vertical-align:middle;transition:background .12s;min-height:0;padding:0;box-shadow:none}
+#den-root input[type="checkbox"]::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:var(--den-r-pill);background:var(--den-card);box-shadow:var(--den-sh1);transition:left .12s}
+#den-root input[type="checkbox"]:checked{background:var(--den-pos)}
+#den-root input[type="checkbox"]:checked::after{left:16px}
+#den-root input[type="checkbox"]:disabled{opacity:.55;cursor:not-allowed}
+#den-root input[type="checkbox"]:focus-visible{outline:2px solid var(--den-ac);outline-offset:2px}
+@media(max-width:1100px){.den-deskwrap{flex:1 1 100%}.den-review tr.den-row{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){#den-root input[type="checkbox"],#den-root input[type="checkbox"]::after{transition:none}}
+/* an open sheet sits beside the page, not over it: the workspace gives it room where there is room to give */
+@media(min-width:1280px){.den-sheet{width:480px}#den-app:has(.den-sheet) .den-main{margin-right:468px}#den-app:has(.den-sheet) .den-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}#den-app:has(.den-sheet) .den-grid3,#den-app:has(.den-sheet) .den-grid2{grid-template-columns:1fr}}
+/* the job console is a terminal: it keeps its own dark ground and inks in both themes */
+#den-root .sig-con{--den-con:#0E121B; --ln:#2A3344; --t0:#F2F5FA; --t1:#C9D0DB; --t2:#9AA4B3; --t3:#8791A0; --x-ac-hi:#8FB9FF; --x-neg:#F08A86; --x-pos:#6FCF9C; --x-warn:#E5A662; --x-ink0:#F2F5FA; --x-ink1:#C9D0DB; --x-ink2:#9AA4B3; --x-ink3:#8791A0; background:var(--den-con);color:var(--t1)}
+.den-deskcard>span:nth-child(2){min-width:0;flex:1}
+.den-optbar{box-shadow:0 -6px 16px rgba(15,23,42,.06)}

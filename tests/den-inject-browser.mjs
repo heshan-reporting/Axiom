@@ -29,7 +29,7 @@ for (const [name, rx, where] of READS) for (const mode of Object.keys(MODES)) {
       if (mode === 'slow') { await page.waitForSelector('#den-root ' + healthy[where] + ':visible', { timeout: 20000 }); ok(await alive(page)); eq(errs, []); return; }
       await sleep(900); ok(await alive(page), 'the page is blank'); const msg = await said(page);
       ok(/could not be loaded|could not be refreshed|stopped working|connection to AXIOM dropped|not with what this page asked for|Something failed on the worker/.test(msg), 'nothing on the page says what failed: [' + msg.slice(0, 200) + ']');
-      if (name !== 'the desks') ok(await page.$('.den-head select[aria-label="Desk"]'), 'the header is gone');
+      if (name !== 'the desks') ok(await page.$('button.den-deskcard'), 'the header is gone');
       eq(errs, [], 'an uncaught error reached the page');
       on = false; const again = page.locator('#den-root button:has-text("Try again")').first();
       if (await again.count()) await again.click(); else await page.locator('#den-root button:has-text("Refresh")').click();

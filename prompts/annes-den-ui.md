@@ -1,4 +1,4 @@
-# Claude Code prompt: Anne's Den - a total interface upgrade (two passes built: page `?v=r46`; worker unchanged at `studio-p58`)
+# Claude Code prompt: Anne's Den - a total interface upgrade (built: page `?v=r47`, worker `studio-p59`)
 
 Paste everything below the line into Claude Code, opened at the root of the `Axiom` repository.
 
@@ -119,25 +119,22 @@ A dark theme by choice; a Cards / Table switch on Today; channel tiles above Col
 tips in the brief; a score meter in Watch; five new browser cases (`tests/den-browser.mjs` is 29). `DEN.md` s.8 has
 the detail.
 
-## What is left to build, in this order
+## Built in the third pass (page `?v=r47`)
 
-Work to 1366 x 768 first, then 1440, 1920 and a usable 1024. Keep every rule under "What must not change".
+Sheets beside the page (History, Compare, the brief's evidence); ratings as radio groups; the desk menu; seven-day
+bars a channel (one additive worker field); the docked console; proposals as review cards; the Options index and
+switches; the styleguide section. `tests/den-browser.mjs` is 31. `DEN.md` s.8 has the detail and what was decided
+against.
 
-1. **Brief as a document.** Ratings as segmented controls, citation ids as numbered chips inside the text that open
-   the cited row in a panel beside the page, the two checks as inline marks with the reason in the margin, History and
-   Compare in a side sheet, one "Get it out" menu. If the editors move off plain textareas, the working copy, save on
-   blur, the conflict flow and every existing case still hold; if that cannot be guaranteed, keep textareas.
-2. **Watch.** Proposals as review cards with their evidence; Preview in a side sheet with counts by channel.
-3. **Options.** A settings page with a section index, switches, a keyboard-operable order for the report's sections
-   and a Save bar that appears only when something changed.
-4. **Collection.** A seven-day sparkline a channel (needs a daily series from the worker: add it to
-   `/den/collection`, additively, with a worker case); the job console as a docked drawer.
-5. **Controls.** A desk menu in place of the native select (keep a labelled select for the harness, or change the
-   harness and say so) and a tooltip component.
-6. **The styleguide.** A Den section in `docs/styleguide.html` showing every component in both themes.
+## What is left
 
-After each item run the Den harnesses and retake that area with `node --experimental-sqlite tests/den-shots.mjs`.
-Bump the `?v=` of `den.js` and `den.css` in `docs/index.html` on every page release and run
+Nothing on the list this prompt began with. What remains is proof on the live system, which a sandbox cannot give:
+deploy the worker and the page, open the Den on a real desk, and look at every area with real rows - long headlines,
+a desk with a busy day, a real draft from the model, the console on a real collection job, a paste of "Copy for the
+document" into a real Google Doc. Fix what that shows. If a rich editor for the brief is wanted later, it has to keep
+the working copy, save on leaving a field, the conflict flow and every case in `tests/den-inject-browser.mjs`.
+
+Bump the `?v=` of any changed script or stylesheet in `docs/index.html` on every page release and run
 `node tests/asset-versions.mjs --write`.
 
 ## Proving it

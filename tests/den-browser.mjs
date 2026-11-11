@@ -7,14 +7,14 @@
  *   connection mid-draft, and a reload with unsaved edits.
  * Run: node --experimental-sqlite tests/den-browser.mjs   (SHOT=1 saves screenshots to tests/shots/den/) */
 import fs from 'node:fs';
-import { world, open, browser, t, ok, eq, txt, all, tab, toast, shot, panel, finish, H, D, NOW } from './den-fixture.mjs';
+import { world, open, browser, t, ok, eq, txt, all, tab, desk, toast, shot, panel, finish, H, D, NOW } from './den-fixture.mjs';
 
 console.log('den-browser harness');
 const w = await world(); let page = await open(w);
 
 await t('the Den opens from the navigation on a desk, in Australian Eastern time, with nothing spent', async () => {
   ok(await page.$('.rbtn[data-v="den"][aria-current="page"]'), 'the navigation button is current'); eq(await page.title() !== '', true); ok(/Anne's Den/.test(await txt(page, '#vtitle')));
-  eq(await all(page, '.den-head select[aria-label="Desk"] option'), ['AEP national', 'AEP Victoria', 'Firearms', 'MCA national', 'MCA Victoria']);
+  eq(await all(page, '.den-deskitem b'), ['AEP national', 'AEP Victoria', 'Firearms', 'MCA national', 'MCA Victoria']);
   ok(/daily, the last 24 hours - Australian Eastern time/.test(await txt(page, '.den-win'))); ok(/model calls today: 0 of 20/.test(await txt(page, '.den-head')) && !(await page.$('.den-head .den-chip.warn')));
   eq(await all(page, '.den-tabs[aria-label="Anne\'s Den"] .den-tab'), ['Today', 'Brief', 'Watch', 'Collection', 'Options']); eq(w.calls.length, 0);
 });
@@ -69,7 +69,7 @@ await t('a draft states its cost first, is one call, and comes back checked agai
   ok(/^Coverage of the gas taxation debate/.test(await page.inputValue('.den-sec[data-section="summary"] textarea'))); ok(/drafted/.test(await txt(page, '.den-sec[data-section="summary"] h4')));
   ok(/No evidence behind: A campaigner named Sam Private is behind it\./.test(await txt(page, '.den-sec[data-section="summary"] .den-flags')), 'the sentence that rested on an invented row is marked'); ok(/1 without evidence/.test(await txt(page, '.den-bar[role="status"]')));
   ok((await page.inputValue('.den-sec[data-section="summary"] textarea')).indexOf('M:999999') < 0, 'and the invented citation is gone'); eq(await page.$$eval('.den-sec[data-section="summary"] .den-cites a', a => a.map(x => /^https:/.test(x.href))), [true, true]);
-  eq(await page.inputValue('#den-tabpanel .den-bar select >> nth=0'), 'Moderate'); eq(await page.inputValue('#den-tabpanel .den-bar select[aria-label="Momentum trend"]'), 'Stable'); ok(/Draft/.test(await txt(page, 'section.den-panel header .den-chip.warn')) && /revision 1/.test(await txt(page, 'section.den-panel header')));
+  eq(await txt(page, '#den-tabpanel [role="radiogroup"] >> nth=0 >> [aria-checked="true"]'), 'Moderate'); eq(await txt(page, '#den-tabpanel [role="radiogroup"][aria-label="Momentum trend"] [aria-checked="true"]'), 'Stable'); ok(/Draft/.test(await txt(page, 'section.den-panel header .den-chip.warn')) && /revision 1/.test(await txt(page, 'section.den-panel header')));
   ok(/Traditional media.*pointpost - Harbour levy divides the Senate/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')) && /built from the citations/.test(await txt(page, '.den-sec:has(h4:has-text("Source List"))')));
   await page.waitForFunction(() => /model calls today: 1 of 20/.test(document.querySelector('.den-head').textContent)); await shot(page, '03-brief-draft');
 });
@@ -158,8 +158,8 @@ await t('Options are the desk\'s own, saved with a revision, and the page follow
   await page.waitForSelector('.den-notice.bad'); ok(/Someone else changed this desk's options/.test(await txt(page, '.den-notice.bad'))); await page.getByRole('button', { name: 'Load theirs' }).click(); await page.waitForFunction(() => /the last 72 hours/.test(document.querySelector('.den-win').textContent));
   await page.getByRole('button', { name: 'Remove the mute on noisy.example.com' }).click(); await page.waitForFunction(() => /Nothing is muted/.test(document.querySelector('section.den-panel[aria-label="Mutes"]').textContent));
   ok(await page.getByRole('button', { name: 'Add the desk' }).isDisabled(), 'a desk needs a name'); await page.fill('input[aria-label="The new desk\'s name"]', 'AEP Queensland'); await page.selectOption('select[aria-label="The new desk\'s region"]', 'qld'); await page.getByRole('button', { name: 'Add the desk' }).click();
-  await page.waitForFunction(() => /AEP Queensland - daily.*QLD only/.test(document.querySelector('.den-win').textContent)); eq(await page.inputValue('.den-head select[aria-label="Desk"]'), 'aep_aep_queensland'); eq((await w.F('GET', '/den/desks')).body.desks.find(x => x.id === 'aep_aep_queensland').sections[1].id, 'media', 'the new desk takes the sections of the desk it was made from');
-  await page.selectOption('.den-head select[aria-label="Desk"]', 'aep_au'); await page.waitForFunction(() => /AEP national/.test(document.querySelector('.den-win').textContent));
+  await page.waitForFunction(() => /AEP Queensland - daily.*QLD only/.test(document.querySelector('.den-win').textContent)); eq(await page.getAttribute('.den-deskitem[aria-checked="true"]', 'data-desk'), 'aep_aep_queensland'); eq((await w.F('GET', '/den/desks')).body.desks.find(x => x.id === 'aep_aep_queensland').sections[1].id, 'media', 'the new desk takes the sections of the desk it was made from');
+  await desk(page, 'aep_au'); await page.waitForFunction(() => /AEP national/.test(document.querySelector('.den-win').textContent));
 });
 await t('every control in the Den has a name, the tabs are tabs, and nothing overflows at 1366, 1440 and 1920', async () => {
   for (const name of ['today', 'brief', 'watch', 'collection', 'options']) { await tab(page, name); await page.waitForTimeout(250);
@@ -190,7 +190,7 @@ await t('a read-only key sees everything and no control that writes', async () =
   eq(p.served.filter(s => /^POST \/den\//.test(s)), [], 'and it sent no write'); await p.context().close();
 });
 await t('a desk with nothing collected says so in every panel, with the one place to look', async () => {
-  const p = await open(w); await p.selectOption('.den-head select[aria-label="Desk"]', 'guns_au'); await p.waitForFunction(() => /Firearms/.test(document.querySelector('.den-win').textContent)); await p.waitForFunction(() => document.querySelectorAll('#den-tabpanel section.den-panel').length >= 5 && !/Loading/.test(document.querySelector('#den-tabpanel').textContent));
+  const p = await open(w); await desk(p, 'guns_au'); await p.waitForFunction(() => /Firearms/.test(document.querySelector('.den-win').textContent)); await p.waitForFunction(() => document.querySelectorAll('#den-tabpanel section.den-panel').length >= 5 && !/Loading/.test(document.querySelector('#den-tabpanel').textContent));
   ok(/News delivered nothing in this window/.test(await txt(p, '.den-strip')) && /before reading it as a quiet day/.test(await txt(p, '.den-strip')), 'the strip does not read an empty desk as a quiet day');
   for (const [title, why] of [['Traditional media', /No story on this desk's issues was filed in this window\. See what was collected, and why not/], ['Social', /No post on this desk's terms or from its registered accounts was collected/], ['Influencer and political', /No registered organisation, official or MP posted/], ['Upcoming', /No row in this window names a day and a month/]]) ok(why.test(await txt(p, 'section.den-panel[aria-label="' + title + '"]')), title);
   await p.locator('section.den-panel[aria-label="Social"] button.den-link').click(); ok(await p.$('#den-tab-collection[aria-selected="true"]')); await tab(p, 'brief'); await p.waitForSelector('#den-tabpanel .den-state');
@@ -203,7 +203,7 @@ await t('a failed read says what failed and tries again; a broken panel does not
   const p = await open(w); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Today's evidence could not be loaded\. Something failed on the worker/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li'), 'the strip is still there');
   failBoard = 0; await p.getByRole('button', { name: 'Try again' }).click(); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row');
   let breakIt = true; w.hooks.push(async (route, r, path) => { if (/^\/den\/collection/.test(path) && breakIt) { await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, channels: [null], reach: {} }) }); return true; } return false; });   // the right shape with something in it no panel can draw
-  p.removeAllListeners('pageerror'); await tab(p, 'collection'); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Collection stopped working\. The rest of the page is unaffected/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li') && await p.$('.den-head select'), 'the header and the strip survive');
+  p.removeAllListeners('pageerror'); await tab(p, 'collection'); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Collection stopped working\. The rest of the page is unaffected/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li') && await p.$('button.den-deskcard'), 'the header and the strip survive');
   breakIt = false; await tab(p, 'today'); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row'); w.hooks.length = 0; await p.context().close();
 });
 await t('a paused platform is said in the strip and in Collection, and nothing retries it', async () => {
@@ -240,7 +240,7 @@ await t('the figures are counts of the rows on the board, each tile opens its ta
   eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1366'); await p.context().close();
 });
 await t('a desk with nothing collected draws no chart and no zero that reads as a quiet day', async () => {
-  const w5 = await world(); const p = await open(w5); await p.selectOption('.den-head select[aria-label="Desk"]', 'mca_vic'); await p.waitForFunction(() => /MCA/.test(document.querySelector('.den-win').textContent)); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
+  const w5 = await world(); const p = await open(w5); await desk(p, 'mca_vic'); await p.waitForFunction(() => /MCA/.test(document.querySelector('.den-win').textContent)); await tab(p, 'today'); await p.waitForSelector('.den-kpis');
   eq(await p.locator('.den-col').count(), 0); ok(/not the same as a quiet day/.test(await txt(p, '.den-card[aria-label="Volume through the window"]'))); eq(await txt(p, '.den-kpi:nth-child(3) .v'), '-'); await p.context().close();
 });
 await t('cards and the table hold the same rows in the same order, with the same actions and keys; the choice is kept', async () => {
@@ -268,6 +268,28 @@ await t('the side menu is a tablist a keyboard can use, and Collection shows eve
   eq(await p.locator('.den-health .den-hc').count(), await panel(p, 'Channels').locator('tr.den-row').count()); eq(await p.getByRole('button', { name: 'Collect now' }).count() > 0, true);
   eq(await p.getAttribute('.den-menu', 'aria-orientation'), 'vertical'); await p.focus('#den-tab-watch'); await p.keyboard.press('Enter'); await p.waitForSelector('#den-tab-watch[aria-selected="true"]');
   eq(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll at 1024'); await p.context().close();
+});
+
+await t('the brief: evidence opens beside the page without covering its actions, ratings are one press, Escape closes', async () => {
+  const w9 = await world(); await w9.F('POST', '/den/brief', { desk: 'aep_au' }); const p = await open(w9, 'full-key', { width: 1366, height: 768 }); await tab(p, 'brief'); await p.waitForSelector('.den-sec[data-section="summary"] textarea');
+  await p.locator('.den-sec[data-section="summary"]').getByRole('button', { name: /Show the evidence/ }).click(); await p.waitForSelector('.den-sheet .den-evrow.on'); ok((await p.locator('.den-sheet .den-evrow').count()) > 1, 'every evidence row is listed');
+  eq(await p.$$eval('.den-sheet .den-evrow a', a => a.every(x => /^https?:/.test(x.href))), true); await p.getByRole('button', { name: 'Mark as filed' }).click({ trial: true });
+  await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); eq(await axeBad(p), [], 'the brief with a sheet open passes axe');
+  await p.keyboard.press('Escape'); await p.waitForSelector('.den-sheet', { state: 'detached' });
+  const g = p.locator('#den-tabpanel [role="radiogroup"]').first(); const off = g.locator('[role="radio"][aria-checked="false"]').first(); const word = (await off.textContent()).trim(); await off.click(); eq((await g.locator('[aria-checked="true"]').textContent()).trim(), word); ok(/Unsaved/.test(await txt(p, '.den-save')));
+  await p.getByRole('button', { name: 'Save changes' }).click(); await p.waitForFunction(() => /Saved/.test(document.querySelector('.den-save').textContent)); eq((await w9.F('GET', '/den/brief?desk=aep_au')).body.brief.ratings[Object.keys((await w9.F('GET', '/den/brief?desk=aep_au')).body.brief.ratings)[0]].level, word, 'the rating reached the worker');
+  await p.context().close();
+});
+await t('the desk menu works by keyboard, the console stays docked across areas, and options and proposals pass axe', async () => {
+  const w10 = await world(); await w10.F('POST', '/den/discover', { ns: 'aep' }); const p = await open(w10); await p.waitForSelector('button.den-deskcard');
+  await p.focus('button.den-deskcard'); await p.keyboard.press('Enter'); await p.waitForSelector('.den-deskmenu:not([hidden])'); await p.keyboard.press('Escape'); await p.waitForSelector('.den-deskmenu', { state: 'hidden' });
+  await desk(p, 'aep_vic'); await p.waitForFunction(() => /AEP Victoria/.test(document.querySelector('.den-win').textContent)); eq(await p.getAttribute('.den-deskitem[aria-checked="true"]', 'data-desk'), 'aep_vic'); await desk(p, 'aep_au'); await p.waitForFunction(() => /AEP national/.test(document.querySelector('.den-win').textContent));
+  await tab(p, 'collection'); await panel(p, 'Channels').locator('tr.den-row', { hasText: 'Bluesky' }).getByRole('button', { name: 'Collect now' }).click(); await p.waitForSelector('.den-dock .sig-con', { timeout: 15000 }); await w10.settle();
+  await tab(p, 'today'); ok(await p.$('.den-dock .sig-con'), 'the console is still there on Today'); await p.getByRole('button', { name: 'Hide the console' }).click(); eq(await p.locator('.den-dock').count(), 0);
+  await p.evaluate(s => { const e = document.createElement('script'); e.textContent = s; document.head.appendChild(e); }, AXE_SRC); const bad = [];
+  for (const name of ['watch', 'options', 'collection']) { await tab(p, name); (await axeBad(p)).forEach(x => bad.push(name + ': ' + x)); } eq(bad, []);
+  await tab(p, 'options'); await p.getByRole('button', { name: 'Mutes', exact: true }).click(); ok(await p.evaluate(() => !!document.activeElement.closest('#den-tabpanel')), 'the index moves into the page');
+  await p.context().close();
 });
 
 await finish();

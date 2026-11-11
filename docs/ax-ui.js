@@ -70,7 +70,7 @@
         <span class="sig-where">${(job.lines || []).length} lines</span>
         ${running && canWrite && onCancel ? html`<button class="btn sm ghost" style=${{ marginLeft: 'auto' }} onClick=${onCancel}>Stop</button>` : null}
       </div>
-      <div class="sig-conbox" ref=${boxRef}>
+      <div class="sig-conbox" ref=${boxRef} tabIndex="0" role="log" aria-label="The job, line by line">
         ${!(job.lines || []).length ? html`<div class="sig-line info">waiting for the first line...</div>`
           : job.lines.map(l => html`<div key=${l.id} class=${'sig-line ' + l.kind}><span class="t">${clock(l.ts)}</span><span class="k">${l.kind === 'cmd' ? '$' : l.kind === 'err' ? '!' : l.kind === 'done' ? '=' : '>'}</span><span class="x">${l.text}</span></div>`)}
       </div>
