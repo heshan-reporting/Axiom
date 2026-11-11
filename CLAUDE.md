@@ -307,7 +307,18 @@ verifies each, and what was asked for and not built.
     and nothing removed an unserved one. `topicMpPosts()` is the stand-in for the MP accounts: posts already held
     with `meta.mp` (the keyless timeline reader) that carry the keyword, returned by `topicResults` under `x` with
     `held: true` and `xNote`. Nothing new is fetched.
-  - Harnesses: `tests/reach-agent-test.py` (26), `tests/reach-channels-test.py` (80), `tests/den-reach-worker.mjs`
+  - **After the deploy, same day (tools only; `DEN.md` s.3.2).** Seen on the owner's Mac and the live worker: the
+    agent offers `reddit, render`, says once that X is not offered and claims no X job. twitter-cli is pipx-installed
+    at 0.8.5 / xclienttransaction 1.0.3, and the unreleased 0.8.6 did not fix X search: **no fix exists upstream.**
+    The collector runs from its own environment (`~/.axiom-reach/venv/bin/python`; Homebrew's Python refuses pip).
+    `x_versions()` / `x_remedy()` in `tools/reach-x.py` say which case a machine is in ("Nothing to do on this Mac"
+    on the newest; the pipx or uv command when behind). `--install-launchd` uses the Python that runs it
+    (`launchd_command`). **Decision D7 amended (the owner, 11 November 2026): YouTube keyword search reads through
+    yt-dlp directly** (`backend()`, `run_ytsearch()`, `ytdlp_ready()` in `reach_social.py`: public search, no sign-in,
+    no cookies; a bot check is a challenge; names never carried; switched on once with `--login youtube`, status
+    `not_switched_on` until then). Its field names are unproven until the first dry run on the Mac. **Platforms
+    switched on so far: none recorded.**
+  - Harnesses: `tests/reach-agent-test.py` (37), `tests/reach-channels-test.py` (96), `tests/den-reach-worker.mjs`
     (9), `tests/topics-worker.mjs` (4).
 
 ## The research agent

@@ -111,7 +111,7 @@ def x_check(clock=time.time):
     if not have('twitter'):
         X_DOWN.clear(); return False
     if rx.transaction_generator_broken():
-        x_mark_down(rx.X_UNAVAILABLE, clock); return False
+        x_mark_down(rx.x_unavailable(), clock); return False
     X_DOWN.clear(); return True
 
 
@@ -517,9 +517,16 @@ def plist_path():
     return os.path.expanduser('~/Library/LaunchAgents/%s.plist' % LABEL)
 
 
+def launchd_command(repo, python=None):
+    q = lambda x: "'" + str(x).replace("'", "'\\''") + "'"
+    return 'cd %s && %s tools/reach-agent.py --quiet' % (q(repo), q(python or sys.executable or 'python3'))
+
+
 def install_launchd(repo):
     log = os.path.expanduser('~/Library/Logs/axiom-reach-agent.log')
-    cmd = 'cd %s && python3 tools/reach-agent.py --quiet' % repo.replace("'", "'\\''")
+    # the Python that installs it is the Python that runs it: installed from the collector's own environment
+    # (~/.axiom-reach/venv/bin/python), the background agent sees Playwright and yt-dlp there; plain `python3` did not
+    cmd = launchd_command(repo)
     xml = '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -585,7 +592,7 @@ def main(argv=None):
         return 0 if rs.login(a.login.strip().lower()) else 1
     if a.channels:
         print('reddit     %s' % ('usable' if have('rdt') else 'rdt is not installed'))
-        print('x          %s' % ('twitter is not installed' if not have('twitter') else 'usable' if x_check() else 'search is unavailable  - ' + rx.X_REMEDY))
+        print('x          %s' % ('twitter is not installed' if not have('twitter') else 'usable' if x_check() else 'search is unavailable  - ' + rx.x_remedy()))
         print('render     %s' % ('usable' if have_playwright() else 'Playwright is not installed'))
         print('gated      %s' % (('usable for: ' + ', '.join(gated_profiles())) if (have_playwright() and gated_profiles()) else 'no publisher is signed in on this machine (--login news:<source id>)'))
         for c in rs.CHANNELS:
@@ -609,7 +616,7 @@ def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True
     """Stay connected: offer what this machine can read, take a job when there is one, look again at what can be read
     every ten minutes. `rounds`, `sleep` and `clock` exist so the loop can be driven by a test."""
     if have('twitter') and (not fixed or 'x' in fixed) and not x_check(clock):
-        say('  twitter-cli is installed but X search cannot work on this machine: not offering X. ' + rx.X_REMEDY)
+        say('  twitter-cli is installed but X search cannot work on this machine: not offering X. ' + rx.x_remedy())
     sources = offering(fixed, clock); checked = clock()
     if not sources and not down():
         sys.exit('no collectors installed on this machine. Reddit needs `rdt` (pipx install "git+https://github.com/public-clis/rdt-cli.git"); X needs `twitter` (uv tool install twitter-cli). Install one, sign in, and run this again.')
@@ -633,7 +640,7 @@ def serve(worker, key, agent, fixed, poll=15.0, once=False, say=print, echo=True
             if X_DOWN and 'x' in sources:
                 # the job just run learned that X search cannot work here: one failure, not one per queued job
                 sources = [s for s in sources if s != 'x']; X_DOWN['at'] = clock()
-                say('  ' + X_STOPPED + rx.X_REMEDY)
+                say('  ' + X_STOPPED + rx.x_remedy())
             if r is not None and once: return 0
             if r is None:
                 if once: say('no job waiting'); return 0
