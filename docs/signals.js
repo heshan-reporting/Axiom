@@ -243,8 +243,8 @@
       </div>
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       ${d && !list.length ? html`<div class="aud-notice" style=${{ margin: '6px 0 14px' }}><b>No petitions on file for this scope.</b> The cron reads the parliaments' e-petition pages once a day. ${canWrite ? 'Press the button to read them now.' : 'Ask a full-access user to read them now.'}</div>` : null}
-      ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Where</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
-        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${p.self_reported ? 'Campaign page' : siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}${p.self_reported ? html`<div class="m" title="The campaign prints this number on its own page. Nobody has audited it.">self-reported by the campaign</div>` : null}</td><td class="num" style=${{ color: p.growth24 > 0 ? 'var(--x-pos)' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
+      ${list.length ? html`<table class="src-probe pet-table"><thead><tr><th>Petition</th><th>Parliament</th><th class="num">Signatures</th><th class="num">24h</th><th class="num">7d</th><th>Closes</th><th>Issues</th></tr></thead><tbody>
+        ${list.map(p => html`<tr key=${p.url}><td><a href=${p.url} target="_blank" rel="noopener">${p.title}</a>${p.excerpt ? html`<div class="m">${p.excerpt.slice(0, 160)}</div>` : null}</td><td>${siteName(p.site)}</td><td class="num">${fmtN(p.signatures)}</td><td class="num" style=${{ color: p.growth24 > 0 ? 'var(--x-pos)' : undefined }}>${growth(p.growth24)}</td><td class="num">${growth(p.growth7)}</td><td>${p.closes || '-'}</td><td><${IssueChips} ids=${p.issues} /></td></tr>`)}
       </tbody></table>` : null}
     </div>`;
   }

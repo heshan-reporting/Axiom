@@ -51,12 +51,6 @@ def canon_permalink(platform, url):
         i = seg.index('status') if 'status' in seg else -1
         pid = seg[i + 1] if i >= 0 and i + 1 < len(seg) else ''
         return 'https://x.com/i/web/status/' + pid if _num(pid) else ''
-    if platform == 'bluesky':
-        if host != 'bsky.app':
-            return ''
-        ok = (len(seg) >= 4 and seg[0] == 'profile' and seg[2] == 'post'
-              and re.match(r'^(did:[a-z0-9:.-]+|[a-z0-9.-]{3,120})$', seg[1], re.I) and re.match(r'^[a-z0-9]{6,20}$', seg[3], re.I))
-        return 'https://bsky.app/profile/' + seg[1].lower() + '/post/' + seg[3] if ok else ''
     if platform == 'instagram':
         if host != 'instagram.com':
             return ''

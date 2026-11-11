@@ -136,8 +136,8 @@ verifies each, and what was asked for and not built.
     `facebook_public` row is gone). Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23).
 - **Release 3, the signed-in layer (build `2026-11-11.studio-p55`, page `?v=r42`). Decision D7, 11 November 2026, at
   the owner's request: the Mac collector may read Facebook, Instagram and YouTube keyword search through a person's
-  signed-in session, with agent-reach as the backend. Platforms switched on so far: Facebook
-  (the owner's Mac, user heshhomefolder, 11 November 2026, through opencli) - add each here with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
+  signed-in session, with agent-reach as the backend. Platforms switched on so far: none recorded - add each here
+  with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
   TikTok and Threads are not collected.
   - `tools/reach_social.py` (`CHANNELS`: facebook -> keyword search, instagram -> registered accounts' posts,
     youtube -> keyword search, bridge source `ytsearch`). `status()` / `assert_ready()` check, not assume; `sweep()`
@@ -279,36 +279,6 @@ verifies each, and what was asked for and not built.
     recall cases in `tests/den-tools-test.py` (63); `tests/studio-tokens-test.mjs` covers `den.css`. The browser
     fixture is `tests/den-fixture.mjs` (`w.hooks` makes a route misbehave); `tests/den-shots.mjs` saves each tab at
     1366 x 768 and 1920 x 1080 into the ignored `tests/shots/den/`.
-- **Release 7, public-record routes (build `2026-11-11.studio-p60`, page `den.js?v=r47`; `DEN.md` s.8 is the hand-over).**
-  Keyless public routes only; no signed-in route added, no decision changed, no model call.
-  - **The public reader, `pubFetch(env, url)`**: every new route fetches through it, and it is where the rules live -
-    robots.txt obeyed (`robotsAllows`, cached a day in KV `pub_robots_<host>`), an honest user agent (`pubUA`:
-    `AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), `PUB_PACE_MS` = ten seconds between requests to one host (not a
-    setting; kept per isolate), and a refusal (401, 403, 407, 429, a challenge page) recorded in KV
-    `pub_refused_<host>` and not asked again for a day (`refused`, then `refused_backoff`); a sign-in page is
-    `login_required`. Never a retry, a proxy or a solved challenge. Do not fetch a new public source any other way.
-  - **Source methods `public` and `process`** (`urls.public`, `urls.process` + `ptype` + `house`; seed key `b`).
-    `public` files a headline and a link, never a body. `sourceRun` counts a method that answers `quiet` as a success
-    with no items; a refused source is not due again for a day.
-  - **The process calendar**, D1 `den_process(id, juris, house, type bill|inquiry|motion|disallowance|regulation|
-    decision, title, stage, url, issues, next_date, next_what, dates, submissions, src, seen, updated)`:
-    `processParse` (labelled status and dates only; a date with no year is not read), `processNotices` (a notice on a
-    client issue; the agency's own `cmm` issues do not count), `srcProcess` (first sight and each stage change file one
-    `news` row with `meta.process`). `GET /den/process?ns=|desk=` (read), `POST /den/process/add` (full).
-    `denBoard` puts `processUpcoming()` first in Upcoming, marked `recorded`. Submitters' names are never read.
-  - **`hansardSweep`** (kind `hansard`, once a Sydney day a client, needs `OPENAUSTRALIA_KEY`; the speaker named only
-    from the MP register), **`petitionCountersSweep`** (campaign pages' own counts, `meta.self_reported`, a daily
-    snapshot; a count not found is `<host>_parse_failed`, never zero; `GET/POST /social/petitions/counters`),
-    **`claimOf`** (`meta.claim {kind, sponsor, pollster, n}` on registry rows, "sponsor not stated" otherwise),
-    **`bskyActorSweep`** (register accounts on Bluesky marked as public actors, own posts only, through
-    `signalsIngest`; `bluesky` joined `DEN_INGEST_PLATFORMS` and `canonPermalink`), and **`POST /den/watch/seed`**
-    (full; proposes campaign names as terms - nothing is proposed unasked). Job sources `hansard`, `blueskyaccounts`.
-  - In Anne's Den, Collection (`PublicRecord` in `docs/den.js`): the desk's watched parliament pages (`pages` on
-    `GET /den/process`: stage, next date, the last read or its failure) with Watch this page and Stop (`POST
-    /den/process/remove`), the desk's petition counters with Add and Remove, and Propose campaign names. The pace is
-    also shared across isolates through KV `pub_next_<host>`.
-  - Every seed address and every parser is unverified until a live sweep: the fixtures in `tests/fixtures/public/`
-    are invented stand-ins. Harness: `tests/den-public-worker.mjs` (12).
 
 - **The first live run of the Mac collector (build `2026-11-11.studio-p59`, page `?v=r45`; `DEN.md` s.3.1).**
   - **Agent Reach v1.5.0 has no `facebook`, `instagram`, `youtube` or `login` command** (its commands: setup, install,
@@ -343,22 +313,12 @@ verifies each, and what was asked for and not built.
     The collector runs from its own environment (`~/.axiom-reach/venv/bin/python`; Homebrew's Python refuses pip).
     `x_versions()` / `x_remedy()` in `tools/reach-x.py` say which case a machine is in ("Nothing to do on this Mac"
     on the newest; the pipx or uv command when behind). `--install-launchd` uses the Python that runs it
-    (`launchd_command`). YouTube through yt-dlp was built twice that evening;
-    the two were merged and the version below is the one kept.
-  - **The backend the owner chose (11 November 2026; `DEN.md` s.3.2): the tools agent-reach installs, called directly.**
-    When agent-reach has no command for a channel and the tool is on the machine (`NATIVE`, `use_native`), `reach_social.py`
-    runs it itself: YouTube search is `yt-dlp "ytsearchN:<term>" --flat-playlist --dump-json ... --no-cookies` (no
-    account; usable once installed; it was `ytsearchdateN:`, which yt-dlp 2026.10.26 refuses - the plain form is proven
-    on the owner's Mac, and its results carry no publish date), Facebook search is `opencli facebook search` and Instagram's registered accounts are
-    `opencli instagram user`, both in the Chrome a person signed in to. opencli can also write (like, follow, post):
-    `OPENCLI_READS` is the whole list of commands this collector may run and anything else raises before a process
-    starts. Facebook and Instagram stay `needs_login` until a person runs `--login <platform>` (the warning, the
-    question, `opencli <site> login`, then `whoami` must report someone); each job asks `whoami` first and never logs
-    the name. A Facebook result's `title` is never read (it can be a person's name) and only post addresses are kept;
-    this route gives Facebook no counts or dates. Instagram posts with no address fail as `instagram_no_address`. A
-    refusal is read from the error stream, never from a post's own words. Every opencli answer in the tests is a stand-in: unverified
-    until the first sweep on the Mac. yt-dlp's search answer is the real one (`tests/fixtures/den/yt-dlp-search-*.jsonl`).
-  - Harnesses: `tests/reach-agent-test.py` (41), `tests/reach-channels-test.py` (141), `tests/den-reach-worker.mjs`
+    (`launchd_command`). **Decision D7 amended (the owner, 11 November 2026): YouTube keyword search reads through
+    yt-dlp directly** (`backend()`, `run_ytsearch()`, `ytdlp_ready()` in `reach_social.py`: public search, no sign-in,
+    no cookies; a bot check is a challenge; names never carried; switched on once with `--login youtube`, status
+    `not_switched_on` until then). Its field names are unproven until the first dry run on the Mac. **Platforms
+    switched on so far: none recorded.**
+  - Harnesses: `tests/reach-agent-test.py` (37), `tests/reach-channels-test.py` (96), `tests/den-reach-worker.mjs`
     (9), `tests/topics-worker.mjs` (4).
 
 ## The research agent

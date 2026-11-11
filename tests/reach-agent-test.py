@@ -23,21 +23,6 @@ def t(name, cond, detail=''):
 
 COMMAND = 'uv tool upgrade twitter-cli'
 
-# ---- the check itself: the warning is not proof; one real search settles it -----------------------------------------
-class _P:
-    def __init__(self, out='', err=''): self.stdout, self.stderr, self.returncode = out, err, 0
-def _fake(status_err, search_out):
-    calls = []
-    def run(args, **kw):
-        calls.append(args[1]); return _P('{"ok": true, "data": {}}', status_err) if args[1] == 'status' else _P(search_out, status_err)
-    return run, calls
-real_run = rx.subprocess.run; WARN = 'WARNING Failed to init ClientTransaction: NoneType'
-rx.subprocess.run, calls = _fake('', ''); t('no warning: X is usable and no search is spent on the check', rx.transaction_generator_broken() is False and calls == ['status'], calls)
-rx.subprocess.run, calls = _fake(WARN, '{"ok": false, "error": {"code": "not_found", "message": "HTTP 404"}}'); t('the warning and a search that 404s: X search is unavailable', rx.transaction_generator_broken() is True and calls == ['status', 'search'], calls)
-rx.subprocess.run, calls = _fake(WARN, '{"ok": true, "data": [{"id": "1"}]}'); t('the warning but the search answers: X is usable', rx.transaction_generator_broken() is False, calls)
-rx.subprocess.run, calls = _fake(WARN, 'Traceback (most recent call last)'); t('the warning and an unreadable search answer: unavailable, never assumed to work', rx.transaction_generator_broken() is True)
-rx.subprocess.run = real_run
-
 # ---- B, D: the message --------------------------------------------------------------------------------------------
 broken = {'v': True}
 rx.transaction_generator_broken = lambda: broken['v']

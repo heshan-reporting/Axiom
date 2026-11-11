@@ -29,10 +29,6 @@
     {"platform": "news", "in": "https://Example.com.au/story/ferry-fares/?utm_source=chatgpt.com&fbclid=zz#top", "out": "https://example.com.au/story/ferry-fares"},
     {"platform": "news", "in": "https://example.com.au/story?id=42&utm_medium=social", "out": "https://example.com.au/story?id=42"},
     {"platform": "facebook", "in": "javascript:alert(1)", "out": ""},
-    {"platform": "instagram", "in": "", "out": ""},
-    {"platform": "bluesky", "in": "https://bsky.app/profile/HarbourWatch.example.org/post/3mabc123xyz?ref=share", "out": "https://bsky.app/profile/harbourwatch.example.org/post/3mabc123xyz"},
-    {"platform": "bluesky", "in": "https://bsky.app/profile/did:plc:abc123xyz/post/3mabc123xyz", "out": "https://bsky.app/profile/did:plc:abc123xyz/post/3mabc123xyz"},
-    {"platform": "bluesky", "in": "https://bsky.app/profile/harbourwatch.example.org", "out": ""},
-    {"platform": "bluesky", "in": "https://example.org/profile/a.b/post/3mabc123xyz", "out": ""}
+    {"platform": "instagram", "in": "", "out": ""}
   ]
 }

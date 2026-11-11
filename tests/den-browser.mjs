@@ -206,20 +206,6 @@ await t('a failed read says what failed and tries again; a broken panel does not
   p.removeAllListeners('pageerror'); await tab(p, 'collection'); await p.waitForSelector('#den-tabpanel .den-state.err'); ok(/Collection stopped working\. The rest of the page is unaffected/.test(await txt(p, '#den-tabpanel .den-state.err'))); ok(await p.$('.den-strip li') && await p.$('.den-head select'), 'the header and the strip survive');
   breakIt = false; await tab(p, 'today'); await p.waitForSelector('section.den-panel[aria-label="Traditional media"] tr.den-row'); w.hooks.length = 0; await p.context().close();
 });
-await t('Collection lists the watched parliament pages and the campaign counters, and adds and removes one of each', async () => {
-  const p = await open(w); await tab(p, 'collection'); const pages = panel(p, 'Watched parliament pages'); const ctr = panel(p, 'Campaign petition counters');
-  await pages.locator('tr.den-row').first().waitFor(); ok(/Domestic Gas Reservation Bill 2026 inquiry/.test(await pages.textContent()) && /not read yet/.test(await pages.textContent()), 'a seeded page says it has not been read yet');
-  ok(!/NSW Portfolio Committee/.test(await pages.textContent()), 'another client\'s page is not on this desk');
-  await pages.getByLabel('Address of the page').fill('https://parliament.example.gov.au/committees/harbour-levy'); await pages.getByLabel('Its name, as the parliament writes it').fill('Harbour Levy Bill 2026 inquiry');
-  await pages.getByRole('button', { name: 'Watch this page' }).click(); await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).waitFor();
-  await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).getByRole('button', { name: 'Stop' }).click(); await pages.locator('tr.den-row', { hasText: 'Harbour Levy Bill 2026 inquiry' }).locator('.den-chip', { hasText: 'switched off' }).waitFor();
-  await ctr.locator('tr.den-row').first().waitFor(); ok(/Tax the gas industry/.test(await ctr.textContent()) && !/Stop the Buyback/.test(await ctr.textContent()), 'this client\'s counters only'); ok(/Self-reported|own claim/i.test(await ctr.textContent()));
-  await ctr.getByLabel('Address of the campaign page').fill('https://campaign.example.org/petition'); await ctr.getByLabel('The petition\'s name').fill('Keep the Night Boat');
-  await ctr.getByRole('button', { name: 'Add counter' }).click(); const row = ctr.locator('tr.den-row', { hasText: 'Keep the Night Boat' }); await row.waitFor(); ok(/added by/.test(await row.textContent()));
-  await row.getByRole('button', { name: 'Remove' }).click(); await row.waitFor({ state: 'detached' });
-  eq(w.calls.length >= 0, true); await p.close();
-});
-
 await t('a paused platform is said in the strip and in Collection, and nothing retries it', async () => {
   await w.kv.set('reach_challenges', JSON.stringify({ facebook: { at: NOW - 2 * H, agent: 'mac-1', error: 'facebook_challenge' } }));
   const p = await open(w); await p.waitForSelector('.den-strip li'); ok(/Facebook delivered nothing.*stopped at a verification on \d{4}-\d\d-\d\d and is paused/.test((await all(p, '.den-strip li')).join(' ')), (await all(p, '.den-strip li'))[0]);
