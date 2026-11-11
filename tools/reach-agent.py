@@ -17,6 +17,15 @@ Usage (on the Mac, from the repo):
   python3 tools/reach-agent.py --key $AXIOM_KEY --once     # take one job and exit
   python3 tools/reach-agent.py --install-launchd           # keep it running in the background
   python3 tools/reach-agent.py --uninstall-launchd
+  python3 tools/reach-agent.py --channels                  # what this machine can collect right now, and why not
+  python3 tools/reach-agent.py --login facebook            # a person signs in to a platform for collection (also instagram, youtube)
+
+Facebook, Instagram and YouTube keyword search are read through agent-reach
+(tools/reach_social.py) when it is installed and a person has signed in. Read
+what --login prints before you do: collection with a signed-in account is
+against those platforms' terms, and a profile that administers client assets
+must never be used. The agent offers a platform only while it is usable, stops
+at once on a verification and pauses that platform for 24 hours.
 
 Needs: rdt (Reddit) and/or twitter (X) on PATH, signed in. With Playwright
 installed (pip install playwright && playwright install chromium) it also takes
@@ -39,6 +48,7 @@ def _load(name, filename):
 
 rr = _load('reach_reddit', 'reach-reddit.py')
 rx = _load('reach_x', 'reach-x.py')
+rs = _load('reach_social', 'reach_social.py')   # Facebook, Instagram and YouTube through agent-reach (layer 2)
 WORKER = rr.WORKER
 
 
@@ -52,7 +62,7 @@ class Stream:
         self.flush_every, self.flush_after = flush_every, flush_after
 
     def __call__(self, kind, text):
-        text = str(text)
+        text = rs.scrub(str(text))          # nothing shaped like a cookie, a token or a password is printed or sent
         if self.echo:
             print(('  ' if kind == 'out' else '') + text, flush=True)
         self.buf.append({'k': kind, 't': text[:1200]})
@@ -88,6 +98,12 @@ def collectors():
     if have('rdt'): out.append('reddit')
     if have('twitter'): out.append('x')
     if have_playwright(): out.append('render')
+    # Facebook, Instagram and YouTube search: only when agent-reach is installed, the channel is signed in to and
+    # usable, it is not paused after a verification, and it is not switched off on this machine
+    try:
+        out += [s for s in rs.offered() if s not in out]
+    except Exception:
+        pass
     return out
 
 
@@ -282,7 +298,14 @@ def job_render(worker, key, params, log):
             'filed': (filed or {}).get('id', 0), 'text': text[:2000]}
 
 
-JOBS = {'reddit': job_reddit, 'x': job_x, 'render': job_render}
+def job_social(channel):
+    def run(worker, key, params, log):
+        return rs.collect(channel, worker, key, params, log)
+    return run
+
+
+JOBS = {'reddit': job_reddit, 'x': job_x, 'render': job_render,
+        'facebook': job_social('facebook'), 'instagram': job_social('instagram'), 'ytsearch': job_social('youtube')}
 
 
 def run_job(worker, key, job, echo=True):
@@ -302,8 +325,22 @@ def run_job(worker, key, job, echo=True):
         result = {'ok': False, 'error': 'x_unavailable', 'detail': str(e)[:400]}
         log('err', str(e)[:400])
         ok = False
+    except rs.Challenge as e:
+        # The platform asked for a verification. The collector has already stopped and paused that platform here for
+        # 24 hours; the worker tells the team once. A person clears it by hand. Nothing retries.
+        result = {'ok': False, 'error': rs.CHANNELS[e.channel]['platform'] + '_challenge', 'detail': rs.scrub(str(e))[:400]}
+        log('err', result['detail'])
+        ok = False
+    except rs.Unavailable as e:
+        result = {'ok': False, 'error': rs.CHANNELS[e.channel]['platform'] + '_unavailable', 'why': e.why, 'detail': rs.scrub(str(e))[:400]}
+        log('err', result['detail'])
+        ok = False
+    except rs.ParseFailed as e:
+        result = {'ok': False, 'error': rs.CHANNELS[e.channel]['platform'] + '_parse_failed', 'detail': rs.scrub(str(e))[:400]}
+        log('err', result['detail'])
+        ok = False
     except Exception as e:
-        result = {'ok': False, 'error': 'collector_failed', 'detail': str(e)[:300]}
+        result = {'ok': False, 'error': 'collector_failed', 'detail': rs.scrub(str(e))[:300]}
         log('err', str(e)[:300])
         ok = False
     log.flush()
@@ -383,14 +420,27 @@ def main(argv=None):
     ap.add_argument('--once', action='store_true', help='take at most one job, then exit')
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--install-launchd', action='store_true')
+    ap.add_argument('--login', metavar='PLATFORM', help='sign in to facebook, instagram or youtube for collection (a person does this, by hand)')
+    ap.add_argument('--channels', action='store_true', help='what this machine can collect right now, and why not where it cannot')
     ap.add_argument('--uninstall-launchd', action='store_true')
     a = ap.parse_args(argv)
     repo = os.path.dirname(HERE)
     if a.install_launchd: install_launchd(repo); return 0
     if a.uninstall_launchd: uninstall_launchd(); return 0
+    if a.login:
+        return 0 if rs.login(a.login.strip().lower()) else 1
+    if a.channels:
+        print('reddit     %s' % ('usable' if have('rdt') else 'rdt is not installed'))
+        print('x          %s' % ('usable' if have('twitter') else 'twitter is not installed'))
+        print('render     %s' % ('usable' if have_playwright() else 'Playwright is not installed'))
+        for c in rs.CHANNELS:
+            st = rs.status(c)
+            print('%-10s %s%s' % (c, 'usable, %d of %d reads today' % (st['reads_today'], st['per_day']) if st['usable'] else (st['status'] or 'not installed'), ('  - ' + st['why']) if st.get('why') else ''))
+        return 0
     if not a.key: sys.exit('need --key or AXIOM_KEY (export it in ~/.zshrc so the background agent can find it)')
     say = (lambda *x: None) if a.quiet else print
-    sources = [s.strip() for s in a.sources.split(',') if s.strip()] or collectors()
+    fixed = [s.strip() for s in a.sources.split(',') if s.strip()]
+    sources = fixed or collectors(); checked = time.time()
     if not sources:
         sys.exit('no collectors installed on this machine. Reddit needs `rdt` (pipx install "git+https://github.com/public-clis/rdt-cli.git"); X needs `twitter` (uv tool install twitter-cli). Install one, sign in, and run this again.')
     say('%s  agent "%s" connected to %s, offering: %s' % (
@@ -398,8 +448,13 @@ def main(argv=None):
     if 'reddit' not in sources: say('  (rdt not installed: Reddit jobs will wait for another machine)')
     if 'x' not in sources: say('  (twitter not installed: X jobs will wait for another machine)')
     if 'render' not in sources: say('  (Playwright not installed: render jobs will wait for another machine - pip install playwright && playwright install chromium)')
+    if not any(s in sources for s in ('facebook', 'instagram', 'ytsearch')): say('  (no social channel through agent-reach is usable here: python3 tools/reach-agent.py --channels says why)')
     while True:
         try:
+            if not fixed and time.time() - checked > 600:
+                # a platform signed in to, paused or switched off since the agent started is offered, or not, from now on
+                now_have = collectors(); checked = time.time()
+                if sorted(now_have) != sorted(sources): say('  now offering: %s' % ', '.join(now_have)); sources = now_have
             r = poll_once(a.worker, a.key, a.agent, sources, echo=not a.quiet)
             if r is not None and a.once: return 0
             if r is None:

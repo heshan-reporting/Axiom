@@ -264,7 +264,8 @@
       ${err ? html`<div class="rd-res err">${err}</div>` : null}
       ${list.length ? html`<table class="src-probe cov-table"><thead><tr><th>Platform</th><th>How it is read</th><th>Needs</th><th>State</th><th class="num">24h posts / comments</th><th>Last run</th><th>Probe</th></tr></thead><tbody>
         ${list.map(p => html`<tr key=${p.id} class=${p.configured ? '' : 'skip'}>
-          <td><b>${p.label}</b><div class="m">${p.where === 'none' ? 'not reachable' : p.where === 'mac' ? 'runs on the Mac' : p.where === 'both' ? 'worker and Mac' : 'runs in the worker'}</div></td>
+          <td><b>${p.label}</b><div class="m">${p.where === 'none' ? 'not reachable' : p.where === 'mac' ? 'runs on the Mac' : p.where === 'both' ? 'worker and Mac' : 'runs in the worker'}</div>
+            ${p.collector && (p.collector.off || p.collector.challenge || p.collector.offered) ? html`<div class="m cov-reach">${p.collector.off ? html`<span style=${{ color: 'var(--x-warn)' }}>signed-in collection switched off</span>` : p.collector.offered ? 'a signed-in collector offers this' : ''}${p.collector.challenge ? html`<span style=${{ color: 'var(--x-neg)' }} title=${p.collector.challenge.detail || ''}>${(p.collector.off || p.collector.offered) ? ' - ' : ''}asked for a verification ${ago(p.collector.challenge.at)} ago; paused on the Mac for 24 hours</span>` : null}</div>` : null}</td>
           <td class="det">${p.method}${p.reach ? html`<div class="m">Reaches: ${p.reach}</div>` : null}${p.unreachable ? html`<div class="m cov-no">Cannot: ${p.unreachable}</div>` : null}</td>
           <td class="det">${p.keys}</td>
           <td>${chip(p.configured, p.configured ? (p.id === 'youtube' && !p.apiKey ? 'on, no key' : 'on') : 'not set up')}</td>

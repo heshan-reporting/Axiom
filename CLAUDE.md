@@ -126,6 +126,29 @@ repo), the gap list, which collection layer can reach what, and the decisions in
     (saved answers to an ingest payload, `--push`). Unproven until the licence has the two sources.
   - Signals has Facebook and Instagram tabs; the coverage rows are `facebook` and `instagram` (the old
     `facebook_public` row is gone). Harnesses: `tests/den-collect-worker.mjs` (18), `tests/den-tools-test.py` (23).
+- **Release 3, the signed-in layer (build `2026-11-11.studio-p55`, page `?v=r42`). Decision D7, 11 November 2026, at
+  the owner's request: the Mac collector may read Facebook, Instagram and YouTube keyword search through a person's
+  signed-in session, with agent-reach as the backend. Platforms switched on so far: none recorded - add each here
+  with who and when.** LinkedIn is unchanged: the clients' own pages through LinkedIn's API, no scraping path.
+  TikTok and Threads are not collected.
+  - `tools/reach_social.py` (`CHANNELS`: facebook -> keyword search, instagram -> registered accounts' posts,
+    youtube -> keyword search, bridge source `ytsearch`). `status()` / `assert_ready()` check, not assume; `sweep()`
+    keeps the pace (ten seconds at least, not a setting) and the caps in `~/.axiom-reach/reach.json`; `collect()`
+    reads each desk's `GET /den/plan` and files through `POST /signals/ingest` as layer 2; `login()` shows the
+    warning and asks the client-admin question. Rules it keeps: public content only; a person signs in by hand; a
+    verification stops the sweep at once and pauses the platform 24 hours (`<platform>_challenge`); never a captcha
+    solved, a proxy, a second account or a retry past a refusal; an unreadable answer is `<platform>_parse_failed`,
+    never an empty success; `author` is never read; logs are scrubbed of anything shaped like a session.
+  - `tools/reach-agent.py`: offers a social channel only while it is usable (rechecked every ten minutes), `--channels`,
+    `--login PLATFORM`, and reports each stop to the worker under its own code.
+  - Worker: `jobRoute()` sends Facebook and Instagram to the official route when granted, else to a live collector
+    that offers it, else runs here and fails at once with what to set; `no_collector` after three minutes in the queue
+    with nobody to serve it; `GET/POST /den/reach` (KV `reach_off`, the kill switch; KV `reach_challenges`);
+    `reachChallenge()` tells Slack once a day a platform; `denReachCron()` queues the morning's jobs for the platforms
+    a live collector offers (no model call, never gated); `xSyndSweep` reads the registers' X accounts.
+  - **Comment text on Facebook and Instagram is collected by no layer**, and a Facebook page's own timeline only by
+    the official route. `DEN.md` s.3 says what was assumed and what agent-reach actually offers.
+  - Harnesses: `tests/reach-channels-test.py` (52), `tests/den-reach-worker.mjs` (7).
 
 ## The research agent
 

@@ -273,3 +273,77 @@ For the owner, to switch a route on:
 - **Facebook from the worker**: Page Public Content Access (an app review), then the var `META_PUBLIC_PAGES=1`.
 - A register is empty until someone adds to it: `POST /den/watch/add {ns, kind, platform, value, name, actor_kind}`
   for now; the Den's Watch tab (release 6) is the place for it.
+
+## 3. Release 3 - the signed-in layer for Facebook, Instagram and YouTube (build `2026-11-11.studio-p55`, page `?v=r42`)
+
+Decision D7, as the owner asked on 11 November 2026: the Mac collector reads social platforms through a person's
+signed-in session. **Nothing is switched on by this release.** A platform collects only after a person signs in to it
+on the Mac, having read the warning. Platforms the owner has switched on so far: none recorded.
+
+**What agent-reach can do, and so what this layer can do.** Read from its documentation and channel source on
+11 November 2026 (`agent-reach <channel> <action>`, one line of JSON, `NEED_LOGIN` / `PLATFORM_BLOCKED` /
+`RATE_LIMITED` as named errors):
+
+| Channel | Reads | Does not |
+|---|---|---|
+| Facebook | posts found by keyword search | a page's timeline, comments, groups |
+| Instagram | a named account's recent posts | comments, post search, hashtags |
+| YouTube | videos found by keyword search | comments (the worker reads those afterwards, and captions) |
+
+That is narrower than the prompt assumed, and it is said rather than worked around: **comment text on Facebook and
+Instagram is collected by no layer**, and a registered Facebook page's own timeline arrives only through the official
+route (Page Public Content Access) or when a post of it matches a search term. TikTok and Threads have no agent-reach
+channel and no link in any report read; LinkedIn's channel reads job listings. None of the three is built.
+
+**On the Mac** (`tools/reach_social.py`, wired into `tools/reach-agent.py`):
+- `--channels` says what the machine can collect and why not; `--login facebook|instagram|youtube` shows the warning
+  (the terms, the account risk, and never a profile that administers a client's ad account, Page or Business asset),
+  asks that question for Facebook and Instagram, asks for the platform's name, then opens agent-reach's own sign-in
+  window. The tool never sees a password and never reads a cookie.
+- A channel is offered to the worker only while it is usable: installed, signed in, not paused, not switched off.
+  That is rechecked every ten minutes.
+- Pace: one read at a time, never under ten seconds apart on a platform (agent-reach's own floor; not a setting).
+  Caps a run and a day per platform in `~/.axiom-reach/reach.json` (defaults: Facebook 30 / 120, Instagram 40 / 150,
+  YouTube 40 / 200); what a cap held back is reported.
+- What stops a sweep, each under its own name: a login wall (`<platform>_unavailable`), a verification
+  (`<platform>_challenge`: stops at once, pauses the platform on that Mac for 24 hours, never retries, never solves
+  anything), a slow-down (the run ends), an answer that cannot be read (`<platform>_parse_failed`; three in a row pause
+  the platform). A read that returned items with nothing readable is a failure, never a quiet day.
+- Posts go to `POST /signals/ingest` as layer 2, so relevance, the Australian gate, one row a post and naming are the
+  worker's. The `author` agent-reach returns is never read. Log lines are scrubbed of anything shaped like a cookie, a
+  token or a password before they are printed or sent.
+
+**In the worker.**
+- A Facebook or Instagram job goes to the official route when Meta has granted it, else to a live collector that
+  offers the platform, else it runs in the worker and fails at once with what to set. `ytsearch` (YouTube keyword
+  search) is the collector's.
+- A job waiting three minutes for a collector that is not connected fails as `no_collector`, with the command.
+- `GET /den/reach` (read) shows the collectors, what is switched off and the last verification per platform; `POST
+  /den/reach {off: [...], clear}` (full) is the kill switch. A platform switched off is not queued, and a job queued
+  earlier is not handed out.
+- A verification reported by a collector is posted to Slack (`_default`) once a day a platform, kept for the coverage
+  table, and nothing is retried.
+- `denReachCron()` queues the morning's jobs (05:00 to 10:00 Sydney, once a day): a Facebook and a YouTube keyword
+  pass for each desk, Instagram where an account is registered, one X keyword pass - only for platforms a live
+  collector offers and that are not switched off. No model call. A plan job nobody served in twelve hours is cancelled.
+- The registers' X accounts join the keyless timeline sweep (`xSyndSweep`); a registered public actor is named.
+- A YouTube video found by search carries its video id, so `youtubeEnrich` reads its comments and captions.
+
+Harnesses: `tests/reach-channels-test.py` (52, a stand-in agent-reach), `tests/den-reach-worker.mjs` (7), and the
+collector's state in `tests/signals-browser.mjs`.
+
+**Not verifiable here, and the most likely thing to need adjusting on the Mac.** No platform was contacted and
+nothing was signed in to. The tests prove the collector's behaviour against agent-reach *as documented*: the command
+form, the `items` list, the error codes. They do not prove agent-reach's real answers - above all **which fields carry
+the interaction counts**, which its documentation does not list (the collector looks for them under several common
+names in each item and its `raw`). The first real run is the test:
+
+```
+uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip && agent-reach setup
+python3 tools/reach-agent.py --channels
+python3 tools/reach-agent.py --login youtube        # the lowest risk: start here
+python3 tools/reach_social.py youtube --ns aep --key $AXIOM_KEY --dry-run --out /tmp/yt.json
+```
+
+Read `/tmp/yt.json`: every row should have an address, words and counts. If the counts are missing, the field names
+in `_ALIASES` need the ones agent-reach uses. Then Facebook and Instagram, each with `--login` first.

@@ -2318,8 +2318,11 @@ async function socialBsky(tag) {
 // the app tails the same log, so the operator watches the collection happen.
 // ==============================================================================
 let BRIDGE_READY = false;
-const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
-const BRIDGE_DESKTOP_ONLY = ['x'];      // no server-side path exists for these
+const BRIDGE_SOURCES = ['reddit', 'x', 'linkedin', 'meta', 'topic', 'sources', 'render', 'bluesky', 'mastodon', 'youtube', 'petitions', 'sentiment', 'narratives', 'instagram', 'facebook', 'ytsearch'];   // topic: keyword research; sources: a registry sweep; render: a page through a real browser
+const BRIDGE_DESKTOP_ONLY = ['x', 'ytsearch'];      // no server-side path exists for these (ytsearch: YouTube keyword search through a collector)
+/* The signed-in layer (DEN.md, layer 2): what a Mac collector may be asked to read, and the switch that stops it. */
+const REACH_SOURCES = ['facebook', 'instagram', 'ytsearch', 'x', 'reddit'];
+const REACH_LABEL = { facebook: 'Facebook', instagram: 'Instagram', ytsearch: 'YouTube search', x: 'X', reddit: 'Reddit' };
 const BRIDGE_LOG_KEEP = 400;            // lines kept per job
 async function ensureBridge(env) {
   if (!env.MIND_DB) return false;
@@ -2367,6 +2370,12 @@ async function jobRoute(env, source, where) {
   if (source === 'reddit' && !redditAuthed(env)) {
     const agents = await agentsSeen(env);
     if (agents.some(a => a.live && (a.sources || []).indexOf('reddit') >= 0)) return 'desktop';
+  }
+  // Facebook and Instagram: the official route when Meta has granted it, else a signed-in collector when one offers it.
+  // With neither, the job runs here and fails at once with what to set - it never waits in a queue nobody serves.
+  if (source === 'facebook' || source === 'instagram') {
+    const official = source === 'facebook' ? !!(env.META_TOKEN && String(env.META_PUBLIC_PAGES || '') === '1') : igConfigured(env);
+    if (!official && (await agentsSeen(env)).some(a => a.live && (a.sources || []).indexOf(source) >= 0)) return 'desktop';
   }
   return 'worker';
 }
@@ -2424,6 +2433,51 @@ async function jobClaim(env, agent, sources) {
   }
   return { id: row.id, source: row.source, params };
 }
+const REACH_WAIT_MS = 180000;
+/** The platforms a full key has switched off for the signed-in layer (KV reach_off). */
+async function reachOff(env) { try { const v = JSON.parse((await kvGet(env.AXIOM_KV, 'reach_off')) || '[]'); return Array.isArray(v) ? v.filter(x => REACH_SOURCES.indexOf(x) >= 0) : []; } catch (e) { return []; } }
+async function reachChallenges(env) { try { return JSON.parse((await kvGet(env.AXIOM_KV, 'reach_challenges')) || '{}') || {}; } catch (e) { return {}; } }
+/** A collector reported that a platform asked for a verification. It has already stopped and paused that platform on its
+ *  machine. Here: remember it for the coverage table, and tell the team once a day a platform - never more, and never a
+ *  retry. A person clears it by hand in the browser. */
+async function reachChallenge(env, source, detail, agent) {
+  const all = await reachChallenges(env); const now = Date.now();
+  all[source] = { at: now, detail: String(detail || '').slice(0, 300), agent: String(agent || '').slice(0, 40) };
+  await kvPut(env.AXIOM_KV, 'reach_challenges', jsonFit(all, 3000), 30 * 86400);
+  if (await kvGet(env.AXIOM_KV, 'reach_chal_' + source)) return { told: false };
+  await kvPut(env.AXIOM_KV, 'reach_chal_' + source, String(now), 86400);
+  const told = await slackPost(env, '_default', ':warning: *' + (REACH_LABEL[source] || source) + ' asked the collector for a verification.* It stopped at once and has paused ' + (REACH_LABEL[source] || source) + ' on ' + (agent || 'the Mac') + ' for 24 hours. Nothing will retry. Someone signs in by hand to clear it: `python3 tools/reach-agent.py --login ' + (source === 'ytsearch' ? 'youtube' : source) + '`');
+  return { told: !!told };
+}
+async function reachView(env) {
+  const off = await reachOff(env); const ch = await reachChallenges(env); const agents = await agentsSeen(env);
+  return { ok: true, off, challenges: ch, agents: agents.map(a => ({ agent: a.agent, live: a.live, last: a.last, sources: a.sources })),
+    platforms: REACH_SOURCES.map(sc => ({ source: sc, label: REACH_LABEL[sc], off: off.indexOf(sc) >= 0, offered: agents.some(a => a.live && (a.sources || []).indexOf(sc) >= 0), challenge: ch[sc] || null })) };
+}
+/** Once a Sydney day, before the working morning: one job a desk for each social platform a live collector offers, so
+ *  the evidence is there when the analyst opens the Den. No model call. A queued job nobody served by evening is cancelled. */
+async function denReachCron(env, now) {
+  if (!env.MIND_DB || !env.AXIOM_KV) return { ok: false };
+  now = now || Date.now(); const day = auDayKey(now); const hour = new Date(now + auOffsetMs(now)).getUTCHours();
+  await ensureBridge(env);
+  try { await env.MIND_DB.prepare("UPDATE bridge_jobs SET status='cancelled', finished=? WHERE status='queued' AND who='plan' AND created<?").bind(now, now - 12 * 3600000).run(); } catch (e) {}
+  if (hour < 5 || hour >= 10) return { ok: true, skipped: 'outside the morning' };
+  if ((await kvGet(env.AXIOM_KV, 'reach_plan_day')) === day) return { ok: true, skipped: 'done today' };
+  const agents = (await agentsSeen(env)).filter(a => a.live); const off = await reachOff(env);
+  const offered = sc => off.indexOf(sc) < 0 && agents.some(a => (a.sources || []).indexOf(sc) >= 0);
+  if (!agents.length) return { ok: true, skipped: 'no collector connected' };
+  await ensureDen(env);
+  const desks = (((await env.MIND_DB.prepare("SELECT ns, SUM(kind='account' AND platform='instagram') ig, COUNT(*) n FROM den_watch WHERE status='active' GROUP BY ns").all()).results) || []);
+  const nsAll = Array.from(new Set(CLIENT_ISSUES.map(ci => ci.ns).concat(desks.map(d => d.ns))));
+  const out = { ok: true, day, jobs: [] };
+  for (const ns of nsAll) {
+    for (const sc of ['facebook', 'ytsearch']) if (offered(sc) && (denNsIssues(ns).length || desks.some(d => d.ns === ns))) { const j = await jobCreate(env, sc, { ns, where: 'desktop' }, 'plan'); out.jobs.push({ id: j.id, source: sc, ns }); }
+    if (offered('instagram') && desks.some(d => d.ns === ns && d.ig > 0)) { const j = await jobCreate(env, 'instagram', { ns, where: 'desktop' }, 'plan'); out.jobs.push({ id: j.id, source: 'instagram', ns }); }
+  }
+  if (offered('x')) { const j = await jobCreate(env, 'x', { time: 'day', where: 'desktop' }, 'plan'); out.jobs.push({ id: j.id, source: 'x', ns: '' }); }
+  await kvPut(env.AXIOM_KV, 'reach_plan_day', day, 2 * 86400);
+  return out;
+}
 async function jobTail(env, id, after) {
   await ensureBridge(env);
   const job = await env.MIND_DB.prepare('SELECT id,source,status,agent,who,created,claimed,finished,ok,result FROM bridge_jobs WHERE id=?').bind(id).first();
@@ -2440,6 +2494,15 @@ async function jobTail(env, id, after) {
       job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'worker_stopped', detail });
     }
   }
+  if (job.status === 'queued' && Date.now() - (job.created || 0) > REACH_WAIT_MS) {
+    // a job waiting for a collector that is not there: say so instead of spinning
+    const agents = await agentsSeen(env);
+    if (!agents.some(a => a.live && (a.sources || []).indexOf(job.source) >= 0)) {
+      const detail = 'No collector that can read ' + (REACH_LABEL[job.source] || job.source) + ' is connected, so this job was never going to run. On the Mac: python3 tools/reach-agent.py --channels says what that machine can read and why not; python3 tools/reach-agent.py --key $AXIOM_KEY connects it.';
+      await jobLog(env, id, [{ k: 'err', t: detail }]);
+      if (await jobFinish(env, id, false, { ok: false, error: 'no_collector', detail })) { job.status = 'failed'; job.ok = 0; job.finished = Date.now(); job.result = JSON.stringify({ ok: false, error: 'no_collector', detail }); }
+    }
+  }
   const rows = await env.MIND_DB.prepare('SELECT id,ts,kind,text FROM bridge_log WHERE job=? AND id>? ORDER BY id LIMIT 200').bind(id, Number(after) || 0).all();
   const lines = rows.results || [];
   let result = null; try { result = job.result ? JSON.parse(job.result) : null; } catch (e) {}
@@ -2454,7 +2517,7 @@ async function jobTail(env, id, after) {
 async function agentBeat(env, agent, sources) {
   if (!env.AXIOM_KV || !agent) return;
   await kvPut(env.AXIOM_KV, 'bridge_agent_' + String(agent).replace(/[^\w-]/g, '').slice(0, 40),
-    JSON.stringify({ ts: Date.now(), sources: (sources || []).slice(0, 8) }), 3 * 86400);
+    JSON.stringify({ ts: Date.now(), sources: (sources || []).slice(0, 16) }), 3 * 86400);
 }
 async function agentsSeen(env) {
   if (!env.AXIOM_KV || !env.AXIOM_KV.list) return [];
@@ -5847,8 +5910,11 @@ async function xSyndSweep(env, opts) {
   const max = Math.min(Math.max(parseInt(opts.max, 10) || 30, 1), 200);
   const watch = await xWatchList(env);
   let mps = []; try { mps = opts.mps === false ? [] : await mpsList(env, { withX: true, limit: 600 }); } catch (e) { mps = []; }
-  const all = watch.map(w => ({ handle: w.handle, name: w.name, ns: w.ns, mp: null }))
-    .concat(mps.map(m => ({ handle: String(m.x || '').replace(/^@/, ''), name: m.name, ns: '', mp: { name: m.name, party: m.party || '', house: m.house || '' } })))
+  // the desks' registered X accounts are read beside the watch list and the MPs; a registered public actor is named
+  let den = []; try { if (await ensureDen(env)) den = ((await env.MIND_DB.prepare("SELECT id, ns, value, name, actor_kind FROM den_watch WHERE kind='account' AND platform='x' AND status='active' ORDER BY score DESC LIMIT 300").all()).results) || []; } catch (e) { den = []; }
+  const all = den.map(d => ({ handle: d.value, name: d.name, ns: d.ns, mp: null, den: d }))
+    .concat(watch.filter(w => !den.some(d => d.value === String(w.handle).toLowerCase())).map(w => ({ handle: w.handle, name: w.name, ns: w.ns, mp: null })))
+    .concat(mps.filter(m => !den.some(d => d.value === String(m.x || '').replace(/^@/, '').toLowerCase())).map(m => ({ handle: String(m.x || '').replace(/^@/, ''), name: m.name, ns: '', mp: { name: m.name, party: m.party || '', house: m.house || '' } })))
     .filter(a => /^[A-Za-z0-9_]{1,15}$/.test(a.handle));
   let accounts = all;
   if (Array.isArray(opts.handles) && opts.handles.length) {
@@ -5859,7 +5925,7 @@ async function xSyndSweep(env, opts) {
     accounts = all.slice(cur, cur + max).concat(cur + max > all.length ? all.slice(0, cur + max - all.length) : []);
     await kvPut(env.AXIOM_KV, 'x_synd_cursor', String((cur + max) % all.length), 7 * 86400);
   }
-  const out = { ok: true, platform: 'x', mode: 'timelines', accounts: accounts.length, watched: watch.length, mps: mps.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
+  const out = { ok: true, platform: 'x', mode: 'timelines', accounts: accounts.length, watched: watch.length, registered: den.length, mps: mps.length, threads: 0, comments: 0, threadRows: 0, commentRows: 0, hostile: 0, errors: [] };
   const since = Date.now() - days * 86400000; const trows = [];
   await log('info', 'X: ' + accounts.length + ' account timelines through the embed service (' + watch.length + ' watched, ' + mps.length + ' MPs on file), last ' + days + ' days');
   for (const a of accounts) {
@@ -5872,6 +5938,7 @@ async function xSyndSweep(env, opts) {
       const th = { platform: 'x', id: t.id, title: t.text.split('\n')[0].slice(0, 200) || 'Post', body: t.text, page: a.handle, page_name: a.name || a.handle, score: t.likes + t.reposts, comments: t.replies, url: 'https://x.com/i/web/status/' + t.id, ts: t.ts, ns: a.ns, via: 'worker' };
       const row = engRow(sigThreadRow(th), t); row.meta.synd = 1;
       if (a.mp) row.meta.mp = a.mp;
+      if (a.den) { row.meta.watch = a.den.id; row.meta.layer = 3; row.meta.layers = [3]; if (a.den.actor_kind) row.meta.actor = { id: a.den.id, name: a.den.name || a.den.value, kind: a.den.actor_kind }; }
       if (t.replyTo) row.meta.reply_to = t.replyTo; if (t.quoted) row.meta.quoted = t.quoted;
       trows.push(row); n++;
     });
@@ -6249,6 +6316,8 @@ async function socialCoverage(env, probe) {
     { id: 'substack', label: 'Substack', method: 'publication feed plus the comments API, as Source Registry sources (urls.substack)', keys: 'none', configured: true, where: 'worker', reach: 'posts and comment threads of any listed publication; discovery through /social/substack/search', unreachable: '' },
   ];
   P.forEach(p => { p.counts = counts[p.id] || { threads24: 0, threads7: 0, comments24: 0, comments7: 0, newest: 0 }; p.last = last[p.id] || null; });
+  { const off = await reachOff(env); const ch = await reachChallenges(env); const src = { facebook: 'facebook', instagram: 'instagram', youtube: 'ytsearch', x: 'x', reddit: 'reddit' };
+    P.forEach(p => { const sc = src[p.id]; if (sc) p.collector = { source: sc, off: off.indexOf(sc) >= 0, offered: agents.some(a => a.live && (a.sources || []).indexOf(sc) >= 0), challenge: ch[sc] || null }; }); }
   if (probe) {
     const t = async (fn) => { const t0 = Date.now(); try { const r = await fn(); return Object.assign({ ms: Date.now() - t0 }, r); } catch (e) { return { ok: false, ms: Date.now() - t0, detail: String((e && e.message) || e).slice(0, 120) }; } };
     const probes = {
@@ -6594,6 +6663,7 @@ async function signalsIngest(env, body, who) {
       link: String(r.link || '').slice(0, 300), issues: tags, issue: own[0] || tags[0] || '', q, ns, via, layer, layers: [layer], eng, eng_at: engAt };
     if (tag) meta.hashtag = tag;
     if (term) meta.term = term.value;
+    if (platform === 'youtube') { meta.video = url.split('v=')[1]; meta.id = meta.video; }
     if (w) { meta.watch = w.id; delivered.add(w.id); if (w.actor_kind) meta.actor = { id: w.id, name: w.name || w.value, kind: w.actor_kind }; }
     const prev = kept.get(url);
     if (!prev || engAt >= prev.meta.eng_at) kept.set(url, { src: platform, title: text.split('\n')[0].slice(0, 200) || (platform + ' post'), body: text, url, author: '', tone: commentTone(text), ts, meta });
@@ -8049,7 +8119,7 @@ async function briefCron(env) {
 // ==============================================================================
 // S20: a locked layer may change only these without an explicit unlock: its name in the layers list (what the artwork shows is not touched)
 const ST_LOCK_FREE = ['name', 'renamed', 'locked'];
-const AXIOM_BUILD = '2026-11-11.studio-p54';
+const AXIOM_BUILD = '2026-11-11.studio-p55';
 // the source revision this module was uploaded from: tools/deploy-worker.sh writes the git revision here in the copy it uploads
 // (the file in the repository always says 'dev'). Reported on the key-gated status routes only.
 const AXIOM_REV = 'dev';
@@ -16030,7 +16100,7 @@ async function integrityReport(env, limit) {
   out.ok = !out.findings.length && !out.errors.length;
   return out;
 }
-export const __test = { issueTag, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
+export const __test = { issueTag, auRelevant, CLIENT_ISSUES, canonPermalink, denValue, signalsIngest, denReachCron, jobRoute, xSyndSweep, igDiscoverySweep, igHashtagSweep, fbPublicSweep, instagramSweep, metaAdLibrary, socialCoverage, socialCron, stPlanNormalise, stTemplatePlan, ST_PLAN_SCHEMA, stIsolationAudit, stRuleTextConflicts, stRankKnowledge, stRankDecisions, sourceSweep, stCraft, stVoice, stReadingGrade, stRelevancePrepass, stTopicEvidence, stRelevanceAudit, stServerMark, stServerText, stPngDecode, stJpegWalk, stWebpWalk, mindDropRetracted, stFinishedBitmapCheck, stImageBytesCheck, studioCron, stImagePolicy, stPolicy, stPlacementEvidence, stReferencePack, stPromptFit, stImageAttach, stImageInputLimit, stTransient, stSseRead, stStreamMachine, contentExemplars, stDraftScan, stPlanNormalise, stPlanForFormat, stLayoutToPlan, stPngInk, stMarkInkText, stGroundAt, aiAutomationGate, aiAutomationStatus, aiAutomationMode, stMarkPlacement, stCornerMentions, stRefLine, stValidationJudge, layoutRules, safeAreaOf, stSafeInset, axRedact, jsonFit, jsonLimitProblem, jsonOk, axUrlProblem, axRoutePolicy, axAuth, stBriefPatch, mindIngestDoc, mindIndexResume, mindChunks, stClaude, claudeMsg, aiUsage, aiReserve };
 // the Studio job runner is exported by name so the committed harness can drive the tick without the whole schedule
 export { studioCron as __studioCron };
 
@@ -17021,6 +17091,8 @@ const AXIOM_WORKER = {
           const source = sigSource(bbody.source);
           if (!source) return jsonResp({ error: 'unknown_source', detail: 'source must be one of ' + BRIDGE_SOURCES.join(', ') + '.' }, 400);
           const params = (bbody.params && typeof bbody.params === 'object') ? bbody.params : {};
+          if ((await jobRoute(env, source, String(bbody.where || 'auto'))) === 'desktop' && (await reachOff(env)).indexOf(source) >= 0)
+            return jsonResp({ ok: false, error: 'reach_off', detail: 'Signed-in collection of ' + (REACH_LABEL[source] || source) + ' is switched off for every collector. A full key switches it back on in the Den\'s Collection tab (POST /den/reach).' }, 409);
           let job;
           try { job = await jobCreate(env, source, Object.assign({}, params, { where: bbody.where || 'auto' }), auth.name); }
           catch (e) { if (e.code === 'params_too_large') return jsonResp({ error: 'params_too_large', detail: String(e.message).replace(/^params_too_large:\s*/, '') + '. Nothing was queued.' }, 413); throw e; }
@@ -17048,7 +17120,9 @@ const AXIOM_WORKER = {
           const agent = String(reqUrl.searchParams.get('agent') || 'agent').slice(0, 40);
           const sources = String(reqUrl.searchParams.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);
           await agentBeat(env, agent, sources.length ? sources : BRIDGE_SOURCES);
-          const job = await jobClaim(env, agent, sources);
+          // a platform switched off is not handed to any collector, even a job queued before the switch
+          const off = await reachOff(env); const may = (sources.length ? sources : BRIDGE_SOURCES).filter(x => off.indexOf(x) < 0);
+          const job = may.length ? await jobClaim(env, agent, may) : null;
           return jsonResp({ ok: true, job: job, lexicon: job ? { issues: CLIENT_ISSUES.map(ci => ({ id: ci.id, ns: ci.ns, wide: (ci.wide || ci.rx).source, q: ci.q || [] })), subs: REDDIT_POLITICS } : null });
         }
         if (path === '/bridge/log' && req.method === 'POST') {
@@ -17062,6 +17136,10 @@ const AXIOM_WORKER = {
           const id = String(bbody.job || '').replace(/[^a-z0-9]/gi, '').slice(0, 24);
           if (!id) return jsonResp({ error: 'missing_job' }, 400);
           const took = await jobFinish(env, id, bbody.ok !== false, bbody.result || {}, bbody.agent || '');
+          if (took && bbody.ok === false) {
+            const m = /^([a-z]+)_challenge$/.exec(String((bbody.result || {}).error || ''));
+            if (m) { try { const j = await env.MIND_DB.prepare('SELECT source, agent FROM bridge_jobs WHERE id=?').bind(id).first(); await reachChallenge(env, (j && j.source) || m[1], (bbody.result || {}).detail, (j && j.agent) || bbody.agent || ''); } catch (e) {} }
+          }
           return took ? jsonResp({ ok: true }) : jsonResp({ ok: false, ignored: true, error: 'job_ended', detail: 'The job had already ended or was cancelled; this report was not filed.' }, 409);
         }
         if (path === '/bridge/cancel' && req.method === 'POST') {
@@ -18450,6 +18528,8 @@ const AXIOM_WORKER = {
     // The monitoring desk (DEN.md): the watch register, the day's collection plan, and the one way in for collected posts.
     //    GET  /den/watch?ns=&kind=&platform=&status=     one client's register (read)
     //    GET  /den/plan?ns=&platform=                    what to read today, inside each platform's caps (read)
+    //    GET  /den/reach                                 the signed-in layer: collectors, what is switched off, the last verification (read)
+    //    POST /den/reach {off: [platform], clear}        switch signed-in collection of a platform off or on (full)
     //    POST /den/watch/add|propose|decide|update|delete    (full)
     //    POST /signals/ingest {ns, layer, via, rows, comments, fb}   posts from any collector on any layer (full)
     if (path.startsWith('/den/') || path === '/signals/ingest') {
@@ -18459,6 +18539,13 @@ const AXIOM_WORKER = {
       try {
         if (path === '/den/watch' && req.method === 'GET') return send(await denWatchList(env, { ns: sp.get('ns'), kind: sp.get('kind'), platform: sp.get('platform'), status: sp.get('status') }));
         if (path === '/den/plan' && req.method === 'GET') return send(await denPlan(env, sp.get('ns'), String(sp.get('platform') || '').toLowerCase()));
+        if (path === '/den/reach' && req.method === 'GET') return send(await reachView(env));
+        if (path === '/den/reach' && req.method === 'POST') {
+          const off = (Array.isArray(ob.off) ? ob.off : []).map(x => String(x).toLowerCase()).filter(x => REACH_SOURCES.indexOf(x) >= 0);
+          await kvPut(env.AXIOM_KV, 'reach_off', JSON.stringify(Array.from(new Set(off))), 3650 * 86400);
+          if (ob.clear) { const ch = await reachChallenges(env); delete ch[String(ob.clear)]; await kvPut(env.AXIOM_KV, 'reach_challenges', jsonFit(ch, 3000), 30 * 86400); }
+          return send(await reachView(env));
+        }
         if (req.method === 'POST') {
           if (path === '/den/watch/add') return send(await denWatchAdd(env, ob, auth.name));
           if (path === '/den/watch/propose') return send(await denWatchPropose(env, ob, auth.name));
@@ -20623,6 +20710,8 @@ async function handleScheduled(env) {
   try { await signalsCron(env); } catch (e) {}
   // Social capture: Bluesky, Mastodon, X timelines, YouTube comments and captions, petitions (two-hourly).
   try { await socialCron(env); } catch (e) { console.log('social cron failed', String(e).slice(0, 120)); }
+  // the signed-in layer's morning plan: jobs for the collectors that are connected; no model call, never gated
+  try { await denReachCron(env); } catch (e) { console.log('reach plan failed', String(e).slice(0, 120)); }
   // Sentiment: the newest rows that mention an entity get their verdicts, within the day's budget (a model call per batch:
   // held outside the day's window).
   if (ai.run) { try { const sn = await sentimentCron(env); if (sn && sn.classified) console.log('Sentiment:', sn.classified, 'rows,', sn.mentions, 'stances'); } catch (e) { console.log('sentiment cron failed', String(e).slice(0, 120)); } }
