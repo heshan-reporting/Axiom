@@ -696,3 +696,78 @@ against her own report for the same day. That comparison is the acceptance test 
   small and separable; each is named where it would have been.
 - **Re-tagging rows collected before a term was approved.** A term tags from its approval onwards.
 
+
+## 8. Release 7 - public-record routes (build `2026-11-11.studio-p59`, page `den.js?v=r45`)
+
+Keyless public routes that a research pass on 11 November 2026 found productive. No signed-in route was added and no
+decision in 7.3 changed. The research report itself is client intelligence and is not in the repository.
+
+### 8.1 What exists
+
+| Route | What it is | Where |
+|---|---|---|
+| The public reader | `pubFetch()`: robots.txt obeyed (RFC 9309: this reader's group, else `*`; longest rule; Allow wins a tie), a user agent that says what it is (`AxiomPublicRecord/1.0`, or the var `PUBLIC_UA`), ten seconds between requests to one host, and a refusal (401, 403, 407, 429, a challenge page) recorded for the host in KV `pub_refused_<host>` and not asked again for a day. A sign-in page is `login_required`. No retry, no proxy, no challenge solved | worker |
+| Source method `public` | A listing page read through the public reader: a headline and a link, never a body, paywall or not. A refused source's `last_error` says so and its `next_due` is a day away | Source Registry |
+| The process calendar | Source method `process` and D1 `den_process`: a bill or inquiry page as one record (stage, referral, hearings, submissions closing, report date, number of submissions); a notice paper or disallowance list as one record a notice on a client issue. First sight and each stage change file one news row (`meta.process`); an unchanged page is a success that files nothing. `GET /den/process?ns=|desk=` (read), `POST /den/process/add {url, type, juris, house, title, issues}` (full) | worker |
+| Upcoming | `denBoard` puts recorded dates first, marked `recorded`, with the parliament's page as the link; the page shows a "recorded" chip | worker, `docs/den.js` |
+| Hansard | `hansardSweep()`: once a Sydney day a client, the first search term of each of its issues plus its approved terms (twelve at most) through OpenAustralia; kind `hansard`; the speaker named only when the MP register holds them. Needs the secret `OPENAUSTRALIA_KEY` | worker, `socialCron` |
+| Petition counters | `petitionCountersSweep()` inside the daily petitions sweep: the count a campaign prints on its own page, stored with `meta.self_reported` and a daily snapshot; a count that cannot be found is `<host>_parse_failed` and files nothing. `GET/POST /social/petitions/counters {add:{url,name,ns} | remove}` | worker; Signals shows "self-reported by the campaign" |
+| Sponsor on polls and estimates | `claimOf()` in `sourceRows`: `meta.claim {kind, sponsor, pollster, n}` by rules, "sponsor not stated" otherwise; the brief's evidence line carries it | worker |
+| Registered actors on Bluesky | `bskyActorSweep()`: register accounts on Bluesky marked as public actors, their own posts (no reposts) through the public AppView, filed through `signalsIngest` as layer 3 so the name comes from the register. `canonPermalink` knows Bluesky (mirrored in `tools/den_permalink.py`) | worker, `socialCron` |
+| Campaign names for the Ad Library | `POST /den/watch/seed` (full) proposes three campaign names as terms. Nothing is proposed unasked and nothing searches a proposal until a person approves it | worker |
+| Seeds | 30 sources (release wire, court lists, Treasury's FOI log, APO, NOPSEMA decisions, campaign and member pages of both sides, trade and community press), 5 watched parliament pages, 6 petition counters, 9 organisations in the entity register | worker |
+
+`GET /den/collection` lists Parliamentary record, Hansard and Campaign petition counters with what each delivered;
+`GET /social/coverage` lists Parliamentary record and Hansard. Harness: `tests/den-public-worker.mjs` (12).
+
+### 8.2 Step 0 as it was done, and what it could not do
+
+The prompt asked for `GET /sources` first. This session had no network route to the live worker and no key, so the
+check was made against the seed list in the worker source instead. Already seeded, and so not added again: the
+Parliamentary Budget Office, Australian Energy Producers (news), SSAA national, SIFA, Shooters Union, Sporting Shooter,
+the Environmental Defenders Office, Beef Central, Gun Control Australia, the Alannah & Madeline Foundation. **What the
+live registry shows (edited rows, failing addresses) was not seen**: read `/sources?status=unverified` after deploy.
+
+### 8.3 Where this differs from the prompt
+
+- **No archive kind `process`.** The record is the table; a stage change is a `news` row carrying `meta.process`, so it
+  appears in the desk's media and the brief's evidence without a new kind in every reader.
+- **Three of the five pages named for seeding are not seeded**: the Mount Pleasant Mine Bill, the Tasmanian firearms
+  bill and the ACT firearms bill. The research had no page address for them. Add each with `POST /den/process/add` or
+  in Sources once its address is known. Seeded: the gas reservation inquiry and bill, the NSW firearms inquiry, the NSW
+  disallowance alerts, the Victorian firearms bill.
+- **"Once a sitting day" is once a Sydney day.** There is no sitting calendar in the worker; on a non-sitting day the
+  sweep finds nothing new and files nothing.
+- **Campaign names are proposed by a step a person presses**, not by the release itself: proposing them automatically
+  gave three desks a register of their own accord, which changed when keyword discovery runs.
+- **The stricter rules apply to the new routes only.** Sources that were already seeded keep their existing methods
+  (`html`, `rss`, `gnews`) and the existing fetch. Moving one to the public reader is a change of its `urls.public`.
+- **No page was built for adding a watched bill or a counter.** Both are routes; the Sources drawer shows the sources.
+- **The ten-second pace is kept per worker isolate**, the only memory a Worker has between requests without a write
+  to KV on every fetch. Two isolates could each make a request to one host inside ten seconds. Each source also runs
+  on its own schedule (a watched parliament page every six hours), which is the wider spacing.
+
+### 8.4 Not verified here, and what verifies each
+
+| Not verified | Why | What verifies it |
+|---|---|---|
+| Every address in the new seeds | No egress; the addresses came from search results, none was opened | The first sweep: Sources, filter Untried, Sweep. A page that has moved fails in words on its source |
+| The parsers against real pages (`processParse`, `processNotices`, `counterCount`) | The fixtures in `tests/fixtures/public/` are invented stand-ins shaped like such pages, because nothing could be saved from a real one | `GET /sources/probe?id=proc_gasres_inquiry`, then `GET /den/process?ns=aep`: the stage and dates against the page itself. Each counter: its number in Signals, Petitions, against the campaign's page |
+| What each site's robots.txt allows this reader | Not read | The source's `last_error` after the first sweep (`robots.txt ... disallows this page`) |
+| Hansard rows on real speeches | No key, no egress | Set `OPENAUSTRALIA_KEY`; `POST /social/sweep {platform:'hansard'}` and the job log |
+| The Bluesky author feed's field names | The public AppView was not contacted | Add one organisation's Bluesky account as a public actor; `POST /social/sweep {platform:'blueskyaccounts'}` |
+| The Ad Library on the campaign names | Needs `META_USER_TOKEN` and a person's approval of each term | `POST /den/watch/seed`, approve in Watch, `/meta/status?probe=1` |
+| Recall against the filed reports, before and after | The reports are outside the repository and the worker was not contacted | `tools/den-backtest.py <folder> --desk aep_au --key --save` before deploy and a week after. **That number is the measure of this release, and it has not been taken** |
+| The page in Firefox and WebKit | Not installed here | CI |
+
+### 8.5 The owner's steps for this release
+
+```
+tools/deploy-worker.sh                                   # then the page from main
+npx wrangler secret put OPENAUSTRALIA_KEY --name newsaus # free, openaustralia.org.au/api; Hansard stays off without it
+# optional: a contact in the reader's user agent, e.g. "AxiomPublicRecord/1.0 (+https://<a page that says who runs it>)"
+#   set the var PUBLIC_UA in the Cloudflare dashboard
+```
+
+Then: Sources, Untried, Sweep (the 30 sources and 5 parliament pages); `POST /den/watch/seed` and approve what is
+wanted in Watch; add the three missing bills once their addresses are known.
