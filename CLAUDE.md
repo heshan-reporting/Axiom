@@ -180,6 +180,35 @@ repo), the gap list, which collection layer can reach what, and the decisions in
   - `/sifa/results` no longer fails on a database that has never run a job.
   - Harnesses: `tests/den-gated-worker.mjs` (9), the publisher cases in `tests/reach-channels-test.py`, the
     importer cases in `tests/den-tools-test.py` (30), the clearance case in `tests/sources-browser.mjs` (15).
+- **Release 5, keyword discovery (build `2026-11-11.studio-p57`; no page change).** A desk's lexicon grows by
+  proposal, and a person decides.
+  - `denDiscover(env, ns, {days, dry})` (`POST /den/discover`, full; no model call; `denDiscoverCron` runs one desk
+    a tick, each desk once a Sydney day, only a desk that has a register) reads up to 6,000 rows of the window and
+    proposes, each with a reason line, up to five evidence rows and a score: **terms** (phrases of one to three
+    words in the desk's rows at `DISC_LIFT` = 3 times their rate in everything else held, at least `DISC_MIN` = 4
+    rows from two sources; what the lexicon matches is struck out of the text first, the two-word core stands for the
+    longer phrase, a single word has to earn it), **comment phrases** (the audience's words under the desk's posts),
+    **hashtags**, **accounts and public groups** named or linked in registered accounts' own posts, **outlets** linked
+    that the Source Registry does not hold, and the **terms of live narratives** on the desk's issues. Accounts that
+    recur in search results are not proposed: an unregistered account is never recorded (D1). A decision on a phrase
+    stands for the words inside it, so dismissing one does not bring back its parts.
+  - `GET /den/preview?ns=&term=&days=` (read): what a term would have caught in what is already held - rows already
+    on the desk, rows it would add by channel, how many say something Australian, a sample of twenty. Writes nothing.
+  - **An approved term widens collection and tagging only.** `deskLexiconLoad(env)` (module cache `DESK_LEX`, five
+    minutes an isolate, reloaded on a decision, loaded for the collecting routes and at the top of the tick) gives
+    `issueTag()`, `issueQueries()` and `GET /reddit/issues` (`deskPublished()`: each issue's `q` and `wide` with the
+    desk's terms merged, `added` naming them) one view, so no collector drifts. A term tags only when it names an
+    issue its own client owns (`decide {issue}`); without one it is searched for and tags nothing. **It never
+    changes a tight `rx`.** The page's `AX_ISSUES` and the Mac's fallback stay the hand-written lexicon.
+  - Guards: `DESK_TERMS_MAX` = 60 active terms a desk (`409 term_cap`), `generic` when a term does not name
+    Australia, off per term, and `GET /den/lexicon?ns=&review=1` marks terms approved thirty days ago that have
+    matched nothing since (KV `den_review_<ns>`, a day).
+  - One optional model step: `POST /den/themes {ns}` (full; one call on the narratives budget) groups what waits
+    into themes with a line each and changes no status; `GET /den/themes?ns=` reads the last one.
+  - `tools/den-mine-reports.py <folder> --ns aep [--key --apply]`: accounts, groups, hashtags, outlets and
+    capitalised names that recur across exported reports, proposed as source `reports` with the count only - no
+    sentence of a report leaves the Mac; a folder inside the repository is refused; dry by default.
+  - Harnesses: `tests/den-discover-worker.mjs` (12), the report cases in `tests/den-tools-test.py` (41).
 
 ## The research agent
 

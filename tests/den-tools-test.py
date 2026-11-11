@@ -112,5 +112,45 @@ except SystemExit as e:
     stopped = 'source_not_cleared' in str(e)
 t('a refusal from the worker stops the import and says why', stopped)
 
+
+# ---- what past reports name, proposed to the register ----
+mr = load('den_mine', 'den-mine-reports.py')
+rep = tempfile.mkdtemp()
+PAD = 'This invented report is padded so that it is long enough to count as a report that was read. ' * 4
+def report(name, body): open(os.path.join(rep, name), 'w').write(PAD + '\n' + body)
+report('one.txt', 'Key Narratives\nHarbour Watch renewed its call at Kingsbay Reef. See https://x.com/harbourwatch/status/190001 and https://straitwatch.example.org/brief/1 #SaveTheStrait\nA windfall tax on gas was raised by Jo Citizen.')
+report('two.md', 'Social Media Activity\nThe Kingsbay Reef decision drew posts from https://www.facebook.com/harbourwatchpage/posts/pfbid0abc and the group https://www.facebook.com/groups/straitfriends/ #savethestrait\nhttps://straitwatch.example.org/brief/2 and https://x.com/harbourwatch\nWindfall Tax debate continues.')
+open(os.path.join(rep, 'three.html'), 'w').write('<html><body><p>' + PAD + '</p><h2>Source List</h2><p>Kingsbay Reef again, with <a href="https://www.instagram.com/harbourwatch_au/">their Instagram</a>, <a href="https://www.youtube.com/@harbourwatchtv">YouTube</a>, <a href="https://x.com/i/web/status/190002">a post</a> and <a href="https://www.facebook.com/groups/straitfriends/posts/55">the group</a>. Windfall Tax.</p><script>var x="https://evil.example.net/a"</script></body></html>')
+import zipfile
+with zipfile.ZipFile(os.path.join(rep, 'four.docx'), 'w') as z:
+    z.writestr('word/document.xml', '<w:document><w:body><w:p><w:r><w:t>' + PAD + '</w:t></w:r></w:p><w:p><w:r><w:t>Kingsbay Reef and the Harbour Watch campaign. #SaveTheStrait</w:t></w:r></w:p></w:body></w:document>')
+    z.writestr('word/_rels/document.xml.rels', '<Relationships><Relationship Id="r1" Target="https://www.instagram.com/harbourwatch_au/p/Cabc/"/><Relationship Id="r2" Target="https://straitwatch.example.org/brief/4"/></Relationships>')
+open(os.path.join(rep, 'empty.txt'), 'w').write('too short')
+got = mr.mine(rep, 2)
+has = lambda k, v: next((c['reports'] for c in got['candidates'] if c['kind'] == k and c['value'] == v), 0)
+t('every kind of report is read, and one too short to be a report is named', got['reports'] == 4 and got['unread'] == ['empty.txt'], got)
+t('an account is counted once a report, from a profile link or a post that names it', has('account', 'harbourwatch') == 2 and has('account', 'harbourwatch_au') == 2, got['candidates'])
+t('a post address that names no profile proposes nobody', not any(c['value'] in ('i', 'web', 'p', 'groups', 'posts') for c in got['candidates']))
+t('a public group, a hashtag whatever its capitals, and an outlet', has('group', 'straitfriends') == 2 and has('hashtag', 'savethestrait') == 3 and has('source', 'straitwatch.example.org') == 3, got['candidates'])
+t('a platform is not an outlet, and a link inside a script is not a citation', not any(c['kind'] == 'source' and ('facebook' in c['value'] or 'x.com' == c['value'] or 'evil' in c['value']) for c in got['candidates']))
+t('a name written with capitals that recurs is a term; a section heading is not', has('term', 'kingsbay reef') == 4 and not any(c['value'] in ('key narratives', 'social media activity', 'source list') for c in got['candidates']), [c for c in got['candidates'] if c['kind'] == 'term'])
+t('what one report alone names is not proposed', has('account', 'harbourwatchpage') == 0 and has('account', '@harbourwatchtv') == 0)
+lex = [{'ns': 'aep', 'wide': r'windfall (profits? )?tax|gas export tax', 'rx': 'x'}]
+t('a term the desk already matches is left out when the lexicon is known', has('term', 'windfall tax') >= 2 and not any(c['value'] == 'windfall tax' for c in mr.mine(rep, 2, lex)['candidates']))
+sent = []; said = []
+r = mr.run(rep, 'aep', 'https://worker.test', '', False, send=lambda *a: sent.append(a) or {}, out=said.append)
+t('without --apply nothing is sent, and it says so', sent == [] and r['sent'] == 0 and r['found'] == len(got['candidates']) and 'Nothing was sent' in said[-1] and 'lexicon was not read' in said[0])
+def worker(url, key, body=None):
+    sent.append((url, body))
+    return {'ok': True, 'issues': lex} if url.endswith('/reddit/issues') else {'ok': True, 'proposed': len(body['items']) - 1, 'known': 1, 'refused': []}
+r = mr.run(rep, 'aep', 'https://worker.test/', 'k', True, send=worker, out=said.append)
+props = [b for u, b in sent if u.endswith('/den/watch/propose')]
+t('with --apply the candidates are proposed as source reports, with the count and no sentence of any report', len(props) == 1 and props[0]['ns'] == 'aep' and props[0]['source'] == 'reports' and all(set(i) == {'kind', 'platform', 'value', 'score', 'reason'} and i['reason'].startswith('Named in ') for i in props[0]['items']) and 'padded' not in json.dumps(props) and r['known'] == 1 and 'already in its register' in said[-1], props[:1])
+try:
+    mr.run(os.path.join(TOOLS, '..', 'tests'), 'aep', 'https://worker.test', '', False, send=worker, out=lambda *_: None); refused = False
+except SystemExit as e:
+    refused = 'inside the AXIOM repository' in str(e)
+t('a folder inside the repository is refused', refused)
+
 print('\n%d passed, %d failed' % (passed, failed))
 sys.exit(1 if failed else 0)

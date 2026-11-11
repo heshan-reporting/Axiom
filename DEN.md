@@ -417,3 +417,66 @@ sign-in flow and each publisher's page shape (whether `extract_article` finds th
 subscription, and whether a real paywall page comes back short enough to be recognised as a wall) are proven only
 against stand-ins. The first real read on the Mac is the test; read the job log for `subscription_wall`.
 
+## 5. Release 5 - keyword discovery (build `2026-11-11.studio-p57`, no page change)
+
+The owner asked for collection to be widened "regarding her keywords" and for "new relevant keywords" to be found.
+Release 1 put her keywords in the lexicon by hand. This release is how the lexicon keeps growing without a developer:
+the system proposes, with evidence, and a person approves or dismisses. **Nothing proposed is read by any collector
+or tagger until a person approves it.**
+
+**Where proposals come from** (`POST /den/discover {ns, days}`; once a day for each desk that has a register; no
+model call, nothing collected, only a reading of what the archive already holds):
+
+| Proposer | What it reads | When it proposes |
+|---|---|---|
+| Terms | phrases of one to three words in rows filed under the desk's issues | in at least 4 rows from 2 sources, and 3 times as common as in everything else held |
+| The comments | two- and three-word phrases in comments under the desk's posts | in at least 5 comments across 3 threads, twice as common as in other comments |
+| Hashtags | the desk's rows and registered accounts' own posts | on 3 posts |
+| Accounts and public groups | handles named and profiles linked in registered accounts' own posts | on 3 posts |
+| Outlets | sites linked from the desk's rows | on 3 rows, and not in the Source Registry |
+| Narratives | the words live narratives on the desk's issues keep using | used in two fifths of a narrative's rows and matched by nothing in the lexicon |
+| Her reports | `tools/den-mine-reports.py` on a folder of exported reports | named in at least 2 reports |
+
+Each proposal carries a line that says why ("In 14 of 212 rows on this desk in 14 days, from 6 sources; 6.2 times as
+common as in everything else held"), up to five rows as evidence, and a score. A proposal a person dismissed (with a
+reason) is never proposed again, and neither are the words inside it.
+
+**Preview before deciding** (`GET /den/preview?ns=&term=`): the rows of the last seven days that carry the term - how
+many are already on the desk, how many it would add, by channel, how many of those say something Australian, and
+twenty of them to read. A term that would mostly add foreign rows says so before anyone approves it. It is a reading
+of what was collected: a term nobody has searched for is rarely held, and the preview says that too.
+
+**What approval does.** The term joins the search terms and the wide matcher of the issue it is filed under, for
+every collector on every layer, through the one published lexicon (`GET /reddit/issues`). New rows that carry it are
+filed under that issue from then on. It does **not** change what counts as a spike: the Sentinel's triggers stay
+hand-written. Rows collected before the approval are not re-tagged.
+
+**Guards.** Sixty active terms a desk at most. A term that does not name Australia is marked, because what it finds
+on Reddit, X and Bluesky must then say something Australian to be kept. Any term can be switched off. A term approved
+thirty days ago that has matched nothing since is marked for review.
+
+**One optional model step** (`POST /den/themes`, one call, behind a button that states it): groups the waiting
+proposals into themes with a line on why each might matter, and a "Probably noise" group. It changes no status.
+
+**Differences from the prompt, and why.**
+- The prompt measured a term against "the same desk's fourteen-day background". It is measured against everything
+  else the archive holds for the window instead: a desk-only background proposes nothing on a new desk and can never
+  find vocabulary the desk has used steadily but the lexicon never had (which is most of what her reports show).
+- "Accounts whose posts recur in search results for the desk's terms" is not built: an unregistered account is never
+  recorded (decision D1), so there is nothing to count. Accounts are proposed only from registered public actors'
+  own posts and from her reports.
+- The report miner sends the candidate and the number of reports that named it, never a sentence of a report.
+- The page's copy of the lexicon (`AX_ISSUES`) and the Mac collector's offline fallback do not carry approved terms;
+  rows are tagged by the worker, and the Mac reads the live lexicon before every sweep.
+
+**Limits to know.** The term proposer is counting, not understanding: it will propose phrases that are distinctive
+and useless (a reporter's turn of phrase, a place name in one story's coverage). That is what Preview and Dismiss are
+for. Its thresholds (`DISC_MIN`, `DISC_LIFT`) are first values chosen on invented data; they should be tuned against
+the first weeks of real proposals - how many were approved, how many dismissed.
+
+Harnesses: `tests/den-discover-worker.mjs` (12), `tests/den-tools-test.py` (41).
+
+**Not verifiable here.** No live archive was read, so nothing is known about the quality of the proposals on real
+rows. The first real run is the test: `POST /den/discover {ns: 'aep', dry: true}` after deploy shows what it would
+propose without filing anything.
+
